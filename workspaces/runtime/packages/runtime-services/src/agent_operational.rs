@@ -542,6 +542,7 @@ mod owner_matrix_tests {
             ("running", json!({}), true),
             ("approval", json!({}), true),
             ("completed", json!({}), false),
+            ("idle", json!({}), false),
             ("completed", json!({"inFlight":true}), true),
             ("waiting", json!({}), false),
             ("waiting_on_monitor", json!({}), false),
@@ -576,6 +577,169 @@ mod owner_matrix_tests {
             "unsupported receipts cannot create an actionable proof"
         );
         assert_eq!(summary["markUnread"], "unsupported");
+    }
+    #[test]
+    fn v5_wait_detail_retirement_matrix() {
+        use studio_runtime_schema::task_record::{NonnegativeNumber, TaskRecord, TaskType};
+        let count = |context: &Context| context.wait.as_ref().map_or(0, |wait| wait.facts().agents);
+        for kind in ["command", "monitor", "tool"] {
+            for process_status in ["starting", "running", "approval"] {
+                for (status, extra, live) in [
+                    ("waiting", json!({}), true),
+                    ("waiting_on_monitor", json!({}), true),
+                    ("paused", json!({"autoWake":false}), false),
+                    ("failed", json!({}), false),
+                    ("interrupted", json!({}), false),
+                    ("completed", json!({}), false),
+                    ("idle", json!({}), false),
+                    ("waiting", json!({"archived":true}), false),
+                    ("waiting", json!({"autoWake":false}), false),
+                    ("waiting", json!({"source":"local"}), false),
+                ] {
+                    let db = studio_runtime_store::test_canvas();
+                    put(&db, "root", None, "waiting", json!({}));
+                    put(&db, "child", Some("root"), status, extra.clone());
+                    if kind == "monitor" {
+                        let monitor = crate::monitor_policy::complete_test_monitor(
+                            json!({"id":"work","agent":"child","status":process_status,"epoch":999}),
+                        );
+                        db.execute(
+                            "INSERT INTO runtime_monitors(id,record) VALUES('work',?1)",
+                            [monitor.to_string()],
+                        )
+                        .expect("monitor");
+                    } else {
+                        let mut task = TaskRecord::new(
+                            "child".into(),
+                            "work".into(),
+                            "turn".into(),
+                            NonnegativeNumber::from_f64(0.0).expect("time"),
+                            if kind == "command" {
+                                TaskType::CommandExecution
+                            } else {
+                                TaskType::DynamicToolCall
+                            },
+                            String::new(),
+                        );
+                        task.set_status(
+                            studio_json::from_str(&format!("\"{process_status}\""))
+                                .expect("status"),
+                        );
+                        studio_runtime_store::TaskRepository::put(&db, &task).expect("task");
+                    }
+                    let contexts = load(&db, &["root".into()]).expect("facts");
+                    assert_eq!(
+                        count(&contexts["root"]),
+                        u32::from(live && kind != "tool"),
+                        "{kind} {process_status} {status} {extra}"
+                    );
+                }
+            }
+        }
+        for (status, extra, live) in [
+            ("parked", json!({"parkedEvent":"ready"}), true),
+            ("parked", json!({"parkedEvent":null}), false),
+            ("parked", json!({"parkedEvent":""}), false),
+            ("waiting", json!({"parkedEvent":"ready"}), false),
+            ("paused", json!({"parkedEvent":"ready"}), false),
+            ("failed", json!({"parkedEvent":"ready"}), false),
+            ("interrupted", json!({"parkedEvent":"ready"}), false),
+            (
+                "parked",
+                json!({"parkedEvent":"ready","archived":true}),
+                false,
+            ),
+        ] {
+            let db = studio_runtime_store::test_canvas();
+            put(&db, "root", None, "waiting", json!({}));
+            let mut fields = json!({"autoWake":false});
+            fields
+                .as_object_mut()
+                .expect("fields")
+                .extend(extra.as_object().expect("extra").clone());
+            put(&db, "child", Some("root"), status, fields);
+            let monitor = crate::monitor_policy::complete_test_monitor(
+                json!({"id":"watch","agent":"child","status":"running","epoch":1}),
+            );
+            db.execute(
+                "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
+                [monitor.to_string()],
+            )
+            .expect("monitor");
+            let contexts = load(&db, &["root".into()]).expect("facts");
+            assert_eq!(
+                count(&contexts["root"]),
+                u32::from(live),
+                "{status} {extra}"
+            );
+            if live {
+                assert_eq!(
+                    contexts["child"]
+                        .wait
+                        .as_ref()
+                        .expect("event")
+                        .facts()
+                        .event
+                        .as_deref(),
+                    Some("ready")
+                );
+            }
+        }
+        let db = studio_runtime_store::test_canvas();
+        put(&db, "root", None, "waiting", json!({}));
+        put(&db, "middle", Some("root"), "waiting", json!({}));
+        put(&db, "child", Some("middle"), "waiting", json!({}));
+        let monitor = crate::monitor_policy::complete_test_monitor(
+            json!({"id":"watch","agent":"child","status":"running","epoch":1}),
+        );
+        db.execute(
+            "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
+            [monitor.to_string()],
+        )
+        .expect("monitor");
+        for (parent, status, extra, live) in [
+            ("root", "waiting", json!({}), true),
+            ("root", "paused", json!({"autoWake":false}), false),
+            ("root", "failed", json!({}), false),
+            ("root", "waiting", json!({"archived":true}), false),
+            ("root", "waiting", json!({"autoWake":false}), false),
+            ("root", "waiting", json!({"source":"local"}), false),
+            ("other-root", "waiting", json!({}), false),
+        ] {
+            put(&db, "middle", Some(parent), status, extra.clone());
+            let contexts = load(&db, &["root".into()]).expect("facts");
+            assert_eq!(
+                count(&contexts["root"]),
+                u32::from(live),
+                "{parent} {status} {extra}"
+            );
+        }
+        put(&db, "middle", Some("child"), "waiting", json!({}));
+        let contexts = load(&db, &["middle".into()]).expect("cycle terminates");
+        assert_eq!(
+            count(&contexts["middle"]),
+            1,
+            "a parent cycle never counts the requesting agent itself"
+        );
+        db.execute("DELETE FROM runtime_monitors", [])
+            .expect("clear");
+        put(&db, "middle", Some("root"), "waiting", json!({}));
+        put(&db, "sibling", Some("root"), "waiting", json!({}));
+        let monitor = crate::monitor_policy::complete_test_monitor(
+            json!({"id":"watch","agent":"sibling","status":"running","epoch":1}),
+        );
+        db.execute(
+            "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
+            [monitor.to_string()],
+        )
+        .expect("monitor");
+        let contexts = load(&db, &["root".into()]).expect("facts");
+        assert_eq!(
+            count(&contexts["middle"]),
+            0,
+            "sibling activity stays outside the branch"
+        );
+        assert_eq!(count(&contexts["root"]), 1);
     }
     #[test]
     fn v5_wide_roster_1024_uses_one_batch() {

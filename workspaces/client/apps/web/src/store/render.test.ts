@@ -1,3 +1,4 @@
+import { ChatRowActionsContext } from "../components/chat-row/actions.ts";
 // @vitest-environment happy-dom
 import { act, createElement, StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
@@ -122,20 +123,17 @@ it.each([false, true])(
       const value = f.store.state().current;
       if (value.status !== "live" && value.status !== "stale") return null;
       return f.model.rows.map((row) =>
-        createElement(SidebarRow, {
-          key: row.id,
-          row,
-          selected: false,
-          serverAlias: "Server",
-          showServer: false,
-          renaming: false,
-          organizing: false,
-          name: "",
-          compact: false,
-          markingRead: false,
-          bindings,
-          actions,
-        }),
+        createElement(ChatRowActionsContext.Provider, { value: () => (actions), key: row.id }, createElement(SidebarRow, {key: row.id,
+row,
+selected: false,
+serverAlias: "Server",
+showServer: false,
+renaming: false,
+organizing: false,
+name: "",
+compact: false,
+markingRead: false,
+bindings})),
       );
     });
     const children = createElement(

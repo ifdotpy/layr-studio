@@ -105,7 +105,20 @@ describe("project locations", () => {
         { id: "/registered", path: "/registered", name: "Registered" },
       ],
     });
-    const navigation = navigationSnapshot(data, null, "");
+    const navigation = navigationSnapshot(
+      data,
+      null,
+      "",
+      [],
+      [],
+      undefined,
+      new Set(),
+      data.runtime.projects.map((value) => ({
+        collection: "project" as const,
+        id: value.id,
+        value,
+      })),
+    );
     // Older navigation rows may omit IDs; the sidebar projection retains registration.
     for (const project of navigation.projects) delete project.id;
     const groups = logicalProjects({ local: navigation });

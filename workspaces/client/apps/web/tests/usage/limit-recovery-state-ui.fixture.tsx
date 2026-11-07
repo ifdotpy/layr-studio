@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import type { Agent, Message } from "../../src/types.ts";
@@ -104,25 +105,27 @@ function Fixture() {
   });
   return (
     <MantineProvider>
-      <main data-case={snapshot.label}>
-        <section id="current">
-          {currentAgent.error && (
-            <NativeError
-              key={snapshot.mountKey}
-              agent={currentAgent}
-              recovery={recovery}
-              openLimits={action}
-            />
-          )}
-        </section>
-        <section id="history">
-          <NativeNotice item={item} />
-        </section>
-        <section style={{ position: "fixed", bottom: 20, right: 20 }}>
-          <Usage key={snapshot.mountKey} {...usageProps} />
-        </section>
-        <output id="saved-error">{JSON.stringify(agent.error)}</output>
-      </main>
+      <AgentModelsFixture agents={[currentAgent]}>
+        <main data-case={snapshot.label}>
+          <section id="current">
+            {currentAgent.error && (
+              <NativeError
+                key={snapshot.mountKey}
+                agent={currentAgent}
+                recovery={recovery}
+                openLimits={action}
+              />
+            )}
+          </section>
+          <section id="history">
+            <NativeNotice item={item} />
+          </section>
+          <section style={{ position: "fixed", bottom: 20, right: 20 }}>
+            <Usage key={snapshot.mountKey} {...usageProps} />
+          </section>
+          <output id="saved-error">{JSON.stringify(agent.error)}</output>
+        </main>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

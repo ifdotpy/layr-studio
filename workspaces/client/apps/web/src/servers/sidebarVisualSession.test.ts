@@ -5,12 +5,12 @@ import {
   localSidebarBackend,
   type SidebarBackend,
 } from "../components/sidebar/services";
-import { mergeSidebar, type SidebarSource } from "./mergedSidebar";
+import { mergeSidebar } from "./mergedSidebar";
 import { mergedSidebarPreferences } from "./mergedSidebarPreferences";
 import { createSidebarVisualSession } from "./sidebarVisualSession";
 
 const scope = "/same/state";
-function source(id: string): SidebarSource {
+function source(id: string) {
   const path = `/${id}`;
   return withSidebarCollections({
     id,

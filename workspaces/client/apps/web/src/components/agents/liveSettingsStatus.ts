@@ -27,13 +27,14 @@ export function observeSettingsChange(
     | "pendingSettings"
     | "pendingSettingsAccountKey"
   >,
+  detail: Pick<Agent, "pendingSettingsAccountKey"> = agent,
 ): SettingsChange {
   if (change.phase === "failed" || change.phase === "saved") return change;
   if (
     agent.id !== change.agentId ||
     (agent.accountKey || "default") !== change.accountKey ||
-    (agent.pendingSettingsAccountKey &&
-      agent.pendingSettingsAccountKey !== change.accountKey)
+    (detail.pendingSettingsAccountKey &&
+      detail.pendingSettingsAccountKey !== change.accountKey)
   )
     return {
       ...change,

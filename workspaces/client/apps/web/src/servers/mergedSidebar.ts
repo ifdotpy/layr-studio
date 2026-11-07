@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../deepReadonly.ts";
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
 import type { PeerTeam, Project, Room, Snapshot } from "../types";
 import {
@@ -12,17 +13,21 @@ import {
   type SidebarChatView,
 } from "../components/sidebar/viewModel.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
-import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
+import {
+  sidebarCollectionView,
+  type ServerSidebarView,
+  type ServerSidebarSnapshot,
+} from "./sidebarSnapshot";
 
 export type SidebarSource = {
   id: string;
   online: boolean;
-  sidebar: ServerSidebarSnapshot;
+  sidebar: ServerSidebarView;
   collections: StateCollections;
   view: ReturnType<typeof createSidebarViewModel>;
 };
 export type SidebarReference = { owner: string; id: string; path?: string };
-type ProjectMember = { source: SidebarSource; project: Project };
+type ProjectMember = { source: SidebarSource; project: DeepReadonly<Project> };
 export type SidebarProjectGroup = {
   key: string;
   owner: string;
@@ -131,7 +136,7 @@ export function mergeSidebar(
     folderReferences.set(renderKey, { owner, id, path });
     return renderKey;
   };
-  const projects: Project[] = [];
+  const projects: DeepReadonly<Project>[] = [];
   for (const group of groups.values()) {
     const home = group.home;
     projectReferences.set(group.key, {
@@ -276,7 +281,7 @@ export function mergeSidebar(
     }
     return chatKey(owner, value);
   };
-  const peerTeams: PeerTeam[] = [];
+  const peerTeams: DeepReadonly<PeerTeam>[] = [];
   const rooms: Room[] = [];
   for (const source of sources) {
     for (const nativeRow of source.view.rows) {
@@ -300,7 +305,7 @@ export function mergeSidebar(
         });
       }
     }
-    const teams = new Map<string, PeerTeam>();
+    const teams = new Map<string, DeepReadonly<PeerTeam>>();
     for (const team of source.sidebar.peerTeams) teams.set(team.id, team);
     for (const project of source.sidebar.projects)
       for (const team of project.peerTeams || [])
@@ -350,23 +355,27 @@ export function mergeSidebar(
     for (const team of peerTeams) teamKey(single.id, team.id);
     for (const room of rooms) chatKey(single.id, room.id);
   } else {
-    const teamsByPath = new Map<string, PeerTeam[]>();
+    const teamsByPath = new Map<string, DeepReadonly<PeerTeam>[]>();
     for (const team of peerTeams) {
       const path = team.projectPath || "";
       const rows = teamsByPath.get(path) || [];
       rows.push(team);
       teamsByPath.set(path, rows);
     }
-    for (const project of projects)
-      project.peerTeams = (teamsByPath.get(project.path || "") || []).map(
-        (team) => ({
+    for (const [index, project] of projects.entries()) {
+      projects[index] = {
+        ...project,
+        peerTeams: (teamsByPath.get(project.path || "") || []).map((team) => ({
           id: team.id,
           name: team.name || "Team",
           members: team.members || [],
-        }),
-      );
+        })),
+      };
+    }
   }
-  const mergeOrder = (orders: ReadonlyMap<string, SidebarOrder>) => {
+  const mergeOrder = (
+    orders: ReadonlyMap<string, DeepReadonly<SidebarOrder>>,
+  ) => {
     const merged: SidebarOrder = {};
     const overlays = new Map<string, string[]>();
     // Home source fragments precede remote fragments for shared projects.
@@ -386,7 +395,7 @@ export function mergeSidebar(
                 parts[1],
                 parts[0] === "combined-sidebar-ranks"
                   ? decodeSidebarRanks(items)
-                  : items,
+                  : [...items],
               );
             continue;
           }
@@ -549,7 +558,16 @@ export function mergeSidebar(
     }
     return requireReference(projectReferences, parts[1]).owner;
   };
-  const data: Snapshot = {
+  const data: Omit<Snapshot, "runtime"> & {
+    runtime: Omit<
+      Snapshot["runtime"],
+      "projects" | "peerTeams" | "sidebarOrder"
+    > & {
+      projects: DeepReadonly<Project>[];
+      peerTeams: DeepReadonly<PeerTeam>[];
+      sidebarOrder: DeepReadonly<Snapshot["runtime"]["sidebarOrder"]>;
+    };
+  } = {
     token: "",
     stateDir: scope,
     threads: [],
@@ -647,7 +665,7 @@ export function createSidebarSourceStore() {
   const snapshots = new Map<
     string,
     {
-      sidebar: ServerSidebarSnapshot;
+      sidebar: ServerSidebarView;
       mirror: ReturnType<typeof createStateMirror>;
       view: ReturnType<typeof createSidebarViewModel>;
     }
@@ -664,7 +682,11 @@ export function createSidebarSourceStore() {
           () => membershipInputs,
         );
       mirror.apply(sidebar.entities);
-      snapshots.set(id, { sidebar, mirror, view });
+      snapshots.set(id, {
+        sidebar: sidebarCollectionView(sidebar, mirror.current),
+        mirror,
+        view,
+      });
     },
     forget(id: string) {
       snapshots.delete(id);

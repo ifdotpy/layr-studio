@@ -1,3 +1,6 @@
+import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
+const injectedStore = observableFixture();
 import { observer } from "mobx-react-lite";
 import { peerTeamRowFixtures } from "./peer-teams-rows.fixture.ts";
 import { createStateMirror } from "../../src/generated/observableResources.ts";
@@ -129,25 +132,32 @@ const Fixture = observer(function Fixture() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <div style={{ width: 320, maxWidth: "100vw" }}>
-        <Sidebar
-          data={data}
-          opened={opened}
-          open={open}
-          newChat={() => {}}
-          addProject={() => {}}
-          changeProject={() => {}}
-          projectAccount={() => {}}
-          creating={false}
-          rename={async () => {}}
-          remove={() => {}}
-          mobile={true}
-          onSearch={() => {}}
-          close={() => {}}
-          refresh={refresh}
-          collections={sidebar.current}
-          markUnread={() => {}}
-          markingRead={new Set()}
-        />
+        <injectedStore.Provider>
+          <SidebarCommandsProvider
+            value={{
+              open: open,
+              newChat: () => {},
+              addProject: () => {},
+              changeProject: () => {},
+              projectAccount: () => {},
+              rename: async () => {},
+              remove: () => {},
+              onSearch: () => {},
+              refresh: refresh,
+              markUnread: () => {},
+            }}
+          >
+            <Sidebar
+              data={data}
+              opened={opened}
+              creating={false}
+              mobile={true}
+              close={() => {}}
+              collections={sidebar.current}
+              markingRead={new Set()}
+            />
+          </SidebarCommandsProvider>
+        </injectedStore.Provider>
       </div>
       <TeamChats
         data={data}

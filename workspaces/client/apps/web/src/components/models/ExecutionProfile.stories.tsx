@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../observableFixture.tsx";
 import {
   ProviderKind as GeneratedApiProviderKind,
   AgentSource as GeneratedApiAgentSource,
@@ -9,7 +10,7 @@ import { useState, type ContextType } from "react";
 import { Paper, Stack } from "@mantine/core";
 import { AgentSetupPicker, type SetupRole } from "../agents/AgentSetupPicker";
 import { ExecutionSummaryTrigger } from "../agents/ExecutionSummaryTrigger";
-import { ExecutionSettings } from "../agents/ExecutionSettings";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../observableFixture.tsx";
 import {
   ModelCatalogReader,
   type WorkerModelInfo,
@@ -261,31 +262,38 @@ const previewAgent = {
 function InlineSettings({ worker = false }: { worker?: boolean }) {
   return (
     <ModelCatalogReader.Provider value={previewReader}>
-      <Stack
-        className="chat-execution-settings"
-        gap="xs"
-        maw="var(--studio-form-max)"
-        mx="auto"
+      <AgentModelsFixture
+        agents={[
+          previewAgent,
+          { ...previewAgent, id: "worker-preview", isLead: false },
+        ]}
       >
-        <ExecutionSettings
-          presentation="panel"
-          settingsRow
-          initialRole="worker"
-          agent={
-            worker
-              ? { ...previewAgent, id: "worker-preview", isLead: false }
-              : previewAgent
-          }
-          lead={worker ? previewAgent : undefined}
-          catalog={{
-            models: previewCatalog,
-            loading: false,
-            error: "",
-            retry: () => {},
-          }}
-          refresh={async () => {}}
-        />
-      </Stack>
+        <Stack
+          className="chat-execution-settings"
+          gap="xs"
+          maw="var(--studio-form-max)"
+          mx="auto"
+        >
+          <ExecutionSettings
+            presentation="panel"
+            settingsRow
+            initialRole="worker"
+            agent={
+              worker
+                ? { ...previewAgent, id: "worker-preview", isLead: false }
+                : previewAgent
+            }
+            lead={worker ? previewAgent : undefined}
+            catalog={{
+              models: previewCatalog,
+              loading: false,
+              error: "",
+              retry: () => {},
+            }}
+            refresh={async () => {}}
+          />
+        </Stack>
+      </AgentModelsFixture>
     </ModelCatalogReader.Provider>
   );
 }
@@ -330,27 +338,45 @@ export const WorkerChatSettings: Story = {
 export const ComposerRolePopover: Story = {
   render: () => (
     <ModelCatalogReader.Provider value={previewReader}>
-      <div style={{ padding: "var(--mantine-spacing-md)" }}>
-        <ExecutionSettings
-          agent={previewAgent}
-          catalog={{
-            models: previewCatalog,
-            loading: false,
-            error: "",
-            retry: () => {},
-          }}
-          refresh={async () => {}}
-          renderTrigger={({ agent, opened, ref, onClick }) => (
-            <ExecutionSummaryTrigger
-              ref={ref}
-              agent={agent}
-              team={[]}
-              aria-expanded={opened}
-              onOpen={onClick}
-            />
-          )}
-        />
-      </div>
+      <AgentModelsFixture
+        agents={[
+          previewAgent,
+          { ...previewAgent, id: "worker-preview", isLead: false },
+        ]}
+      >
+        <div style={{ padding: "var(--mantine-spacing-md)" }}>
+          <ExecutionSettings
+            agent={previewAgent}
+            catalog={{
+              models: previewCatalog,
+              loading: false,
+              error: "",
+              retry: () => {},
+            }}
+            refresh={async () => {}}
+            renderTrigger={({
+              agent,
+              detail,
+              workerDetail,
+              reviewDetail,
+              opened,
+              ref,
+              onClick,
+            }) => (
+              <ExecutionSummaryTrigger
+                ref={ref}
+                agent={agent}
+                detail={detail}
+                workerDetail={workerDetail}
+                reviewDetail={reviewDetail}
+                team={[]}
+                aria-expanded={opened}
+                onOpen={onClick}
+              />
+            )}
+          />
+        </div>
+      </AgentModelsFixture>
     </ModelCatalogReader.Provider>
   ),
   play: async ({ canvasElement, userEvent }) => {

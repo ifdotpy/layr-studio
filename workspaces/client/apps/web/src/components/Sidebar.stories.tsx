@@ -1,3 +1,8 @@
+import {
+  SidebarCommandsProvider,
+  type SidebarCommands,
+} from "./sidebar/commands.ts";
+import { observableFixture } from "./observableFixture.tsx";
 import type { components } from "../generated/api.ts";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
@@ -108,7 +113,7 @@ const services = createSidebarServices(
 );
 services.alias = (target) =>
   target.kind === "chat" && target.id === "atlas-api-1" ? "BLD" : "MAC";
-const args: SidebarProps = {
+const args: SidebarProps & SidebarCommands = {
   services,
   data,
   collections: storyCollections(summaries),
@@ -132,26 +137,41 @@ const args: SidebarProps = {
 function FleetFixture({
   scheme,
   ...props
-}: SidebarProps & { scheme: "light" | "dark" }) {
+}: SidebarProps & SidebarCommands & { scheme: "light" | "dark" }) {
   const [opened, open] = useState(props.opened);
   const { setColorScheme } = useMantineColorScheme();
   useEffect(() => setColorScheme(scheme), [scheme, setColorScheme]);
   return (
-    <div id="root" className="fleet-story">
-      <Sidebar
-        {...props}
-        opened={opened}
-        open={(id) => {
+    <SidebarCommandsProvider
+      value={{
+        ...props,
+        open: (id) => {
           open(id);
           props.open(id);
-        }}
-      />
-    </div>
+        },
+      }}
+    >
+      <div id="root" className="fleet-story">
+        <Sidebar {...props} opened={opened} />
+      </div>
+    </SidebarCommandsProvider>
   );
 }
-const meta = {
+const meta: Meta<SidebarProps & SidebarCommands> = {
   title: "Sidebar/Fleet board",
   component: Sidebar,
+  decorators: [
+    (Story) => {
+      const [fixture] = useState(() => observableFixture());
+      return (
+        <fixture.Provider>
+          <SidebarCommandsProvider value={args}>
+            <Story />
+          </SidebarCommandsProvider>
+        </fixture.Provider>
+      );
+    },
+  ],
   args,
   parameters: { layout: "fullscreen" },
   beforeEach: () => {
@@ -160,7 +180,7 @@ const meta = {
     publishServerAliases({ local: "MAC" });
     return () => publishServerAliases(previous);
   },
-} satisfies Meta<typeof Sidebar>;
+};
 export default meta;
 type Story = StoryObj<typeof meta>;
 export const Dark: Story = {

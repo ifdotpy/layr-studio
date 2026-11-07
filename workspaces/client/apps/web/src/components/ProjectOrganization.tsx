@@ -2,13 +2,18 @@ import { randomUUID } from "../uuid";
 import { Button, NativeSelect, TextInput } from "@mantine/core";
 import { useId, useRef, useState } from "react";
 import { useProjectSave } from "./useProjectSave";
-import type { Agent, Snapshot } from "../types";
+import type { Agent, Snapshot, DeepReadonly } from "../types";
 import { SettingsRow } from "./ui/primitives";
 
-export type Project = NonNullable<Snapshot["runtime"]>["projects"][number];
+export type Project = DeepReadonly<
+  NonNullable<Snapshot["runtime"]>["projects"][number]
+>;
 export type ProjectFolder = NonNullable<Project["folders"]>[number];
 
-export function folderLabel(folders: ProjectFolder[], id: string): string {
+export function folderLabel(
+  folders: readonly ProjectFolder[],
+  id: string,
+): string {
   const names: string[] = [];
   const seen = new Set<string>();
   let folder = folders.find((item) => item.id === id);

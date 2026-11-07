@@ -1,7 +1,27 @@
 import { AgentSource, AgentStatus, ProviderKind } from "../../generated/api";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within } from "storybook/test";
-import AgentPhase from "./AgentPhase";
+import AgentPhaseView from "./AgentPhase";
+import { observableFixture } from "../observableFixture.tsx";
+import { useMemo } from "react";
+import type { MessageConnection } from "../../hooks/messageConnection.ts";
+function AgentPhase({
+  agent,
+  connection,
+}: {
+  agent: Agent;
+  connection: MessageConnection | null;
+}) {
+  const fixture = useMemo(() => observableFixture([agent]), [agent]);
+  return (
+    <fixture.Provider>
+      <AgentPhaseView
+        agent={fixture.mirror.current.agents.get(agent.id)!}
+        connection={connection}
+      />
+    </fixture.Provider>
+  );
+}
 import type { Agent } from "../../types";
 import { selectMessageConnection } from "../../hooks/messageConnection";
 
@@ -24,6 +44,7 @@ const thinkingAgent = {
   created: 1,
   activity: { phase: "thinking" },
   inFlight: true,
+  operationalStatus: { reason: "working" },
 } as Agent;
 
 export const Thinking: Story = {
@@ -38,10 +59,11 @@ export const WaitingForAnswer: Story = {
   args: {
     agent: {
       ...thinkingAgent,
-      status: "approval",
+      status: AgentStatus["approval"],
+      operationalStatus: { reason: "needs_input", wait: null },
       activity: undefined,
       inFlight: false,
-      provider: "claude",
+      provider: ProviderKind["claude"],
       model: "claude-sonnet",
     },
   },

@@ -2,17 +2,14 @@ import { required } from "../components/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 import { theme } from "../theme";
+import { ChatIndicatorKind } from "../status/operationalStatus.ts";
 
 const read = (path: string) =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 const stateSource = read("./state.css");
 const surfaceSource = read("../studio-theme.css");
-const kindDeclaration = read(
-  "../components/chat-status/chatStatusModel.ts",
-).match(/export type ChatIndicatorKind =([\s\S]*?);/)![1];
-
-const kinds = [...required(kindDeclaration).matchAll(/"(\w+)"/g)].map(
-  (match) => match[1],
+const kinds = Object.values(ChatIndicatorKind).filter(
+  (kind) => kind !== "loading",
 );
 
 function variables(scheme: "light" | "dark") {

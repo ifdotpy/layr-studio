@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./agents/state.ts";
 import { LimitColor, RunwayColor } from "../generated/api";
 import { PassiveUsage } from "../hooks/BottomInsetBand";
 import { useSubscription } from "../sync/subscriptions";
@@ -99,7 +101,7 @@ const dollars = (value: unknown) =>
         maximumFractionDigits: 2,
       }).format(value)
     : "Unavailable";
-export default function Usage({
+function Usage({
   agent,
   stateDir,
   limits: reportedLimits,
@@ -122,6 +124,7 @@ export default function Usage({
   accounts?: UsageAccount[] | undefined;
   visible?: boolean;
 }) {
+  const detail = useAgentDetail(agent);
   const { subscribeStateProjection } = useServerSync();
   const { post } = useServerApi();
 
@@ -357,7 +360,7 @@ export default function Usage({
       stop();
     };
   }, [stateDir, accountKey, subscribeStateProjection, sendCostInterest]);
-  const contextUsage = jsonObject(agent.contextUsage);
+  const contextUsage = jsonObject(detail?.contextUsage);
   const contextTokens = contextUsage?.tokens;
   const contextWindow = contextUsage?.window;
   const known =
@@ -374,8 +377,8 @@ export default function Usage({
           ? `${contextTokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percent}%).`
           : "No context data yet."}
       </p>
-      {agent.compactions !== undefined && (
-        <small>Compacted {agent.compactions} times.</small>
+      {detail?.compactions !== undefined && (
+        <small>Compacted {detail?.compactions} times.</small>
       )}
       <Button
         variant="subtle"
@@ -995,7 +998,7 @@ export default function Usage({
           aria-label="Account weekly allowance"
         >
           {/* One dot per role (Lead, Workers, Review), not one per account. */}
-          {roleAccounts(agent, usageAccounts).map(
+          {roleAccounts(agent, usageAccounts, detail || {}).map(
             ({ role, account: item, automatic }) => {
               const projection = item.runway?.current;
               const current = role === "Lead";
@@ -1148,3 +1151,5 @@ export default function Usage({
     </div>
   );
 }
+
+export default observer(Usage);

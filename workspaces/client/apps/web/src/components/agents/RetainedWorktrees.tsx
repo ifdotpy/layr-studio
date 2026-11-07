@@ -8,16 +8,23 @@ import {
   useServerSync,
 } from "../../servers/ServerServicesContext";
 import "./retained-worktrees.css";
+import { observer } from "mobx-react-lite";
 
 type RetainedItem =
   GetResult<"/api/retained-worktrees">["retainedWorktrees"][number];
 
 /** The folder that cleanup kept for one worker, with its reason and path. */
-export function RetainedWorktree({ agent }: { agent: Agent }) {
+export const RetainedWorktree = observer(function RetainedWorktree({
+  agent,
+  remoteWorker = agent.remoteWorker,
+}: {
+  agent: Agent;
+  remoteWorker?: Agent["remoteWorker"];
+}) {
   const { canRevealPath, revealPath } = useServerFileDialogs();
   const [error, setError] = useState("");
   const cleanup = agent.workspaceCleanupIntent;
-  const canOpen = !agent.remoteWorker && canRevealPath();
+  const canOpen = !remoteWorker && canRevealPath();
   if (!cleanup || !["not_sent", "unknown"].includes(cleanup.phase)) return null;
   return (
     <section className="retained-worktree" aria-label="Retained worktree">
@@ -53,19 +60,18 @@ export function RetainedWorktree({ agent }: { agent: Agent }) {
       {error && <p role="alert">{error}</p>}
     </section>
   );
-}
+});
 
 /**
  * The retained folders of deleted workers of this team. Cleanup can end after a worker left
  * the live team list; their source-published entities survive until cleanup settles.
  */
 export function useRetainedWorktrees(
-  lead: Agent | undefined,
+  leadId: string | undefined,
   members: Agent[],
 ): RetainedItem[] {
   const { subscribeStateProjection } = useServerSync();
   const [items, setItems] = useState<RetainedItem[]>([]);
-  const leadId = lead?.rootId || lead?.id;
   useEffect(() => {
     setItems([]);
     if (!leadId) return;

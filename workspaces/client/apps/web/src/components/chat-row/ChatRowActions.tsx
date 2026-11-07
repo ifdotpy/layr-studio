@@ -9,7 +9,7 @@ import { ActionIcon, Button, Menu, TextInput } from "@mantine/core";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
 
-import type { ChatRowActions } from "./actions.ts";
+import { useChatRowActions } from "./actions.ts";
 
 const RowActionTarget = observer(
   forwardRef<
@@ -38,7 +38,7 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
   organizing,
   compact,
   markingRead,
-  actions,
+  priority = false,
 }: {
   row: SidebarChatView;
   pinned?: boolean | undefined;
@@ -48,8 +48,9 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
   organizing: boolean;
   compact: boolean;
   markingRead: boolean;
-  actions: ChatRowActions;
+  priority?: boolean;
 }) {
+  const actions = useChatRowActions(row, priority);
   return renaming ? (
     <form className="inline-rename" onSubmit={(e) => actions.rename(e)}>
       <TextInput
@@ -81,29 +82,18 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
           Rename
         </Menu.Item>
         <Menu.Divider />
-        <UnreadAction
-          row={row}
-          disabled={disabled}
-          markingRead={markingRead}
-          actions={actions}
-        />
+        <UnreadAction row={row} disabled={disabled} markingRead={markingRead} />
         <PinAction
           row={row}
           pinned={pinned}
           disabled={disabled}
           organizing={organizing}
-          actions={actions}
         />
         <Menu.Divider />
-        <MoveAction row={row} disabled={disabled} actions={actions} />
-        <ProjectAction
-          row={row}
-          disabled={disabled}
-          compact={compact}
-          actions={actions}
-        />
+        <MoveAction row={row} disabled={disabled} />
+        <ProjectAction row={row} disabled={disabled} compact={compact} />
         <Menu.Divider />
-        <ArchiveAction row={row} disabled={disabled} actions={actions} />
+        <ArchiveAction row={row} disabled={disabled} />
         <Menu.Divider />
         <Menu.Item
           disabled={disabled}

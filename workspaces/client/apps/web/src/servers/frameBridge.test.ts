@@ -145,7 +145,7 @@ function mount(
   accounts: ServerAccount[] = [],
 ) {
   const run = vi.fn();
-  useServerFrame(data, "lead", "", run, new Set(["lead"]), accounts);
+  useServerFrame(data, "lead", "", run, new Map(), accounts);
   for (const effect of hooks.effects) {
     const stop = effect();
     if (stop) cleanup.push(stop);
@@ -275,7 +275,11 @@ it("republishes saved order and tree changes from scoped or materialized storage
     navigationMessages().at(-1)?.[0].navigation.sidebar?.savedOrder,
   ).toEqual({ projects: ["/work"] });
   expect(
-    navigationMessages().at(-1)?.[0].navigation.sidebar?.sidebarOrder,
+    navigationMessages()
+      .at(-1)?.[0]
+      .navigation.sidebar?.entities.find(
+        (entity) => entity.collection === "workspace",
+      )?.value,
   ).toBeUndefined();
   preferenceMemory.setItem(
     ":server:remote:codex-project-tree:/same/state",

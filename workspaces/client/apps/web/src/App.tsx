@@ -1,4 +1,9 @@
-import { agentIndicators } from "./status/operationalStatus.ts";
+import { NativeModelActions } from "./components/conversation/NativeModelActions.tsx";
+import { observer, Observer } from "mobx-react-lite";
+import { useAgentCatalog, useAgentDetail } from "./components/agents/state.ts";
+import { SidebarCommandsProvider } from "./components/sidebar/commands.ts";
+import { MarkChatUnreadItem } from "./components/ChatReadActions.tsx";
+import { ConversationProvider } from "./components/conversation/navigation.ts";
 import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
@@ -7,7 +12,6 @@ import {
   WorkspaceMode as GeneratedApiWorkspaceMode,
 } from "./generated/api.ts";
 import { useSubscription } from "./sync/subscriptions";
-import { isDeferred, isPending } from "./approvals";
 import { ProviderKind } from "./generated/providerKind.ts";
 import { submitRename, watchRenameResult } from "./renameRequest";
 import { randomUUID } from "./uuid";
@@ -34,7 +38,7 @@ import SidebarWarnings from "./components/SidebarWarnings";
 import { ModelWhitelistSettings } from "./components/models/ModelWhitelistSettings";
 import Disclosure from "./components/ui/Disclosure";
 import { ChatSettingsDialog } from "./components/agents/ChatSettingsDialog";
-import { useRetainedWorktrees } from "./components/agents/RetainedWorktrees";
+
 import { DeliveryMoment } from "./generated/deliveryMoment";
 import { useScreenEnvironment } from "./servers/ScreenContext";
 import {
@@ -76,7 +80,7 @@ import { MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
 import SearchOverlay from "./components/shell/SearchOverlay";
 import { SettingsRow } from "./components/ui/primitives";
 import { modalSizes } from "./theme";
-import { menuActions, renameCommand, studioCommand } from "./nativeCommands";
+import { renameCommand, studioCommand } from "./nativeCommands";
 import { useDesktopNotifications } from "./hooks/desktopNotifications";
 import { useNativeAction } from "./useNativeAction";
 import { useChatPrefetch } from "./hooks/chatPrefetch";
@@ -90,7 +94,6 @@ import {
   focusSelectedComposer,
 } from "./hooks/mobileViewport";
 import { roomLeadIds, messageAttentionCount } from "./chatScope";
-import { nativeThreadError } from "./nativeErrors";
 
 import {
   ActionIcon,
@@ -114,13 +117,10 @@ import {
   BookOpen,
   Clock3,
   FileDiff,
-  Minimize2,
   MoreHorizontal,
-  ShieldCheck,
   Settings,
   Square,
   MessageSquare,
-  Mail,
   PanelLeft,
   Search,
   Settings2,
@@ -130,7 +130,6 @@ import {
   useCallback,
   useMemo,
   useEffect,
-  useLayoutEffect,
   lazy,
   useRef,
   useState,
@@ -164,10 +163,7 @@ import {
 import { type OutgoingMessage } from "./sync/send";
 import { mergeOutgoing } from "./components/message-delivery/messageDelivery";
 import { useServerDrafts as useSyncedDrafts } from "./servers/ServerServicesContext";
-import {
-  ChatWaitSource,
-  createConversationDataSelector,
-} from "./hooks/conversationData";
+
 import { reportPromptComposerRender } from "./components/prompt-composer/renderProbe";
 import { busy, type Agent, type Json } from "./types";
 
@@ -195,22 +191,12 @@ function isLeadCreateRequest(value: Json): value is LeadCreateRequest {
   );
 }
 import Sidebar from "./components/Sidebar";
-import {
-  createAppCatalogSelector,
-  mostRecentActivity,
-} from "./components/sidebar/catalog";
-const emptyAgents: Agent[] = [];
-import {
-  unreadResult,
-  backgroundActivities,
-  chatActivities,
-  hasCompletedResult,
-} from "./components/chat-status/chatStatusModel";
+import { mostRecentActivity } from "./components/sidebar/catalog";
 import { useChatReadState } from "./components/useChatReadState";
 import UIErrorBoundary from "./components/UIErrorBoundary";
 import ProjectAccount from "./components/ProjectAccount";
 import ProjectFolderDialog from "./components/ProjectFolderDialog";
-import SessionActivity from "./components/agents/SessionActivity";
+import { LiveSessionActivity } from "./components/agents/SessionActivity";
 import { useWorkerModels } from "./components/agents/WorkerModelPicker";
 import { FederationSettings } from "./components/FederationSettings";
 import { LayrWorktreesSettings } from "./components/LayrWorktreesSettings";
@@ -227,7 +213,7 @@ import {
   useOfflineSendFeedback,
   connectionFailureText,
 } from "./components/message-delivery/useOfflineSendFeedback";
-import Conversation from "./components/Conversation";
+import { LiveConversation as Conversation } from "./components/Conversation";
 const SelectedConversation = memo(Conversation);
 import type { UsageAccount } from "./components/Usage";
 import RadioChat from "./components/RadioChat";
@@ -246,15 +232,20 @@ import {
 import "./desktop";
 import "./components/team-navigation.css";
 import "./hooks/viewport-surface.css";
-import TeamPanel from "./components/agents/TeamPanel";
+import { TeamPanelView as TeamPanel } from "./components/agents/TeamPanel";
+import {
+  TeamProvider,
+  useTeamArea,
+  TeamPresence,
+  TeamCount,
+} from "./components/agents/TeamPanelContext.tsx";
 import FilePreview, { type PreviewTarget } from "./components/FilePreview";
-import { awaitingAnswerIds } from "./components/agents/WorkerOverview";
 const TerminalDock = lazy(() => import("./components/TerminalDock"));
 import Workspace from "./components/shell/DeferredWorkspace";
 const BackgroundTasks = lazy(
   () => import("./components/shell/BackgroundTasks"),
 );
-export default function App({ active = true }: { active?: boolean }) {
+export default observer(function App({ active = true }: { active?: boolean }) {
   const activeScreen = useRef(active);
   activeScreen.current = active;
   const {
@@ -828,11 +819,11 @@ export default function App({ active = true }: { active?: boolean }) {
     });
     return response;
   };
-  const appCatalogSelector = useMemo(createAppCatalogSelector, []);
-  const agents = data?.threads || emptyAgents;
-  const catalog = appCatalogSelector(agents);
+  const catalog = useAgentCatalog();
+  const agents = catalog.agents;
   const leads = catalog.leads;
-  const agent = catalog.byId.get(opened || "");
+  const agent = catalog.get(opened || "");
+  const agentDetail = useAgentDetail(agent);
   useSubscription(
     active &&
       agent &&
@@ -848,7 +839,7 @@ export default function App({ active = true }: { active?: boolean }) {
   const roomRoots = room ? roomLeadIds(room) : [];
   const lead = room?.radio
     ? undefined
-    : catalog.byId.get(
+    : catalog.get(
         agent?.rootId ||
           (agent?.isLead ? agent.id : undefined) ||
           (roomContext && roomRoots.includes(roomContext)
@@ -856,11 +847,22 @@ export default function App({ active = true }: { active?: boolean }) {
             : roomRoots[0]) ||
           "",
       );
-  const team = (lead && catalog.team(lead.id)) || emptyAgents;
-  const workers = (lead && catalog.workers(lead.id)) || emptyAgents;
+  const readState = useChatReadState(
+    data,
+    opened,
+    notify,
+    refresh,
+    workspaceId,
+  );
+  const teamArea = useTeamArea(
+    lead?.id,
+    workerQuery,
+    workerFilter,
+    readState.pendingReadTargets,
+  );
+  const team = teamArea.view.members;
+  const workers = teamArea.view.workers;
   // Deleted workers whose worktree cleanup kept the folder.
-  const retainedWorktrees = useRetainedWorktrees(lead, workers);
-  const hasTeam = workers.length > 0 || retainedWorktrees.length > 0;
   useTeamTokenRateStream(
     lead?.id,
     Boolean(
@@ -869,24 +871,6 @@ export default function App({ active = true }: { active?: boolean }) {
       !team.some((member) => projectDeleteScope.has(member.id)) &&
       (narrowTeam ? teamOpen : wideTeamOpen),
     ),
-  );
-  const readState = useChatReadState(
-    data,
-    opened,
-    notify,
-    refresh,
-    workspaceId,
-  );
-  const activities = useMemo(
-    () => (data ? chatActivities(data) : new Map()),
-    [data?.threads, data?.runtime?.tasks, data?.runtime?.monitors],
-  );
-  const indicators = useMemo(
-    () =>
-      data
-        ? agentIndicators(data.threads, readState.pendingReadTargets)
-        : new Map(),
-    [data?.threads, readState.pendingReadTargets, readState.readStateFor],
   );
   useEffect(() => {
     setWorkerQuery("");
@@ -945,13 +929,6 @@ export default function App({ active = true }: { active?: boolean }) {
   const readableLeadId =
     lead?.id && !projectDeleteScope.has(lead.id) ? lead.id : undefined;
   const chatData = useChatSnapshot(data, readableLeadId);
-  const scopedConversationData = useChatSnapshot(data, readableLeadId, true);
-  // The conversation reads a narrow projection, so a worker's progress does not
-  // render it; its wait state arrives through a source that filters unchanged waits.
-  const conversationSnapshot =
-    agent?.source === GeneratedApiAgentSource.managed && !room
-      ? scopedConversationData
-      : data;
   // An open managed chat shows the connection state in its activity row
   // (useMessages), so the workspace notice does not repeat it.
   const workspaceError =
@@ -961,11 +938,6 @@ export default function App({ active = true }: { active?: boolean }) {
     !(mobileClient && sidebar)
       ? ""
       : error;
-  const conversationSelector = useMemo(createConversationDataSelector, []);
-  const conversationData = conversationSelector(conversationSnapshot);
-  const chatWaitSource = useMemo(() => new ChatWaitSource(), []);
-  chatWaitSource.set(conversationSnapshot);
-  useLayoutEffect(() => chatWaitSource.publish(), [conversationSnapshot]);
   const attentionCount = messageAttentionCount(chatData);
   const taskCount =
     useSubscription(
@@ -2075,11 +2047,7 @@ export default function App({ active = true }: { active?: boolean }) {
       }
       return undefined;
     },
-    new Set(
-      agents
-        .filter((agent) => unreadResult(agent, readState.readStateFor(agent)))
-        .map((agent) => agent.id),
-    ),
+    readState.pendingReadTargets,
     publicAccounts,
     creating,
   );
@@ -2112,39 +2080,7 @@ export default function App({ active = true }: { active?: boolean }) {
       </main>
     );
   const title = agent?.name || room?.name || legacy?.name || "New conversation";
-  const projectName =
-    data.runtime?.projects?.find((item) => item.path === agent?.projectPath)
-      ?.name || agent?.projectPath?.split("/").filter(Boolean).at(-1);
-  const answerIds = awaitingAnswerIds(chatData?.runtime?.requests || []);
-  const deferredIds = new Set<string>(
-    (chatData?.runtime?.requests || [])
-      .filter((request) => isPending(request) && isDeferred(request))
-      .map((request) => request.agent),
-  );
-  const teamPanel = (
-    <TeamPanel
-      lead={lead}
-      workers={workers}
-      retainedWorktrees={retainedWorktrees}
-      accounts={accounts.data.accounts}
-      opened={opened}
-      answerIds={answerIds}
-      deferredIds={deferredIds}
-      indicators={indicators}
-      workerQuery={workerQuery}
-      setWorkerQuery={setWorkerQuery}
-      workerFilter={workerFilter}
-      setWorkerFilter={setWorkerFilter}
-      completedOpen={completedOpen}
-      setCompletedOpen={setCompletedOpen}
-      setTeamOpen={setTeamOpen}
-      setWideTeamOpen={setWideTeamOpen}
-      saveClosed={() => save("codex-team-open", false)}
-      open={open}
-      previewResult={setFilePreview}
-      remove={(id) => remove(id, false, true)}
-    />
-  );
+  const teamPanel = <TeamPanel />;
   const toggleTeam = () => {
     if (narrowTeam) setTeamOpen(!teamOpen);
     else {
@@ -2156,29 +2092,18 @@ export default function App({ active = true }: { active?: boolean }) {
     rowLayout.shortTouchLandscape && !railGeometry && !room?.radio;
   const menuHeaderTools = !!railGeometry || compactHeader;
   const sessionActivity = agent ? (
-    <SessionActivity
+    <LiveSessionActivity
       key={`${data.stateDir}:${agent.id}`}
       compact={compactHeader}
-      activities={backgroundActivities(activities.get(agent.id) || [])}
-      onOpen={(activity) => {
-        if (activity.kind === "agent") open(activity.agentId);
-        else if (lead) {
-          setTaskFocus({
-            id: activity.id,
-            leadId: lead.id,
-            requestId: randomUUID(),
-          });
-          setTasksOpen(true);
-        }
-      }}
+      agentId={agent.id}
     />
   ) : null;
   const conversationTitle = (
     <ConversationTitle
       passive={menuHeaderTools}
-      projectName={railGeometry ? projectName : undefined}
-      title={title}
-      agent={agent}
+      showProject={!!railGeometry}
+      title={agent ? undefined : title}
+      agentId={agent?.id}
       serverAlias={
         agent
           ? sidebarServices.alias?.({ kind: "chat", id: agent.id }) ||
@@ -2200,16 +2125,6 @@ export default function App({ active = true }: { active?: boolean }) {
               }) ?? true
             )
           : false
-      }
-      onBack={
-        // Only a worker chat links back; the lead and team rooms do not.
-        !menuHeaderTools &&
-        lead &&
-        agent &&
-        !agent.isLead &&
-        agent.id !== lead.id
-          ? () => open(lead.id)
-          : undefined
       }
     />
   );
@@ -2300,56 +2215,46 @@ export default function App({ active = true }: { active?: boolean }) {
       >
         Chat settings
       </Menu.Item>
-      {hasTeam && (
+      <TeamPresence>
         <Menu.Item
           id="chat-actions-team"
           aria-label="Team"
           leftSection={<Users size={14} />}
           onClick={toggleTeam}
         >
-          Team{" "}
-          {lead?.teamCounts &&
-            `${lead.teamCounts.working}/${lead.teamCounts.total}`}
+          Team <TeamCount />
         </Menu.Item>
-      )}
+      </TeamPresence>
       {agent?.source === GeneratedApiAgentSource.managed && (
-        <Menu.Item
-          id="mark-unread"
-          aria-label="Mark chat unread"
-          leftSection={<Mail size={14} />}
-          disabled={
-            !agent.readStateSupported ||
-            !hasCompletedResult(agent) ||
-            readState.marking.has(agent.id)
-          }
-          onClick={() => void readState.markUnread(agent)}
-        >
-          Mark as unread
-        </Menu.Item>
+        <MarkChatUnreadItem agentId={agent.id} />
       )}
       {agent?.source === GeneratedApiAgentSource.managed && (
         <>
-          {(!!agent.inFlight ||
-            team.some(
-              (member) =>
-                (member.status != null && busy.has(member.status)) ||
-                member.status === GeneratedApiAgentStatus.queued ||
-                member.inFlight,
-            )) && (
-            <Menu.Item
-              data-action="stop-team"
-              color="red"
-              leftSection={<Square size={14} />}
-              onClick={() => {
-                void run(() =>
-                  serverCommand.stop(agent.rootId ?? agent.id, true),
-                );
-              }}
-            >
-              Stop team
-            </Menu.Item>
-          )}
-          {agent.workspaceMode === GeneratedApiWorkspaceMode.worktree &&
+          <Observer>
+            {() =>
+              (!!agent.inFlight ||
+                team.some(
+                  (member) =>
+                    (member.status != null && busy.has(member.status)) ||
+                    member.status === GeneratedApiAgentStatus.queued ||
+                    member.inFlight,
+                )) && (
+                <Menu.Item
+                  data-action="stop-team"
+                  color="red"
+                  leftSection={<Square size={14} />}
+                  onClick={() => {
+                    void run(() =>
+                      serverCommand.stop(agent.rootId ?? agent.id, true),
+                    );
+                  }}
+                >
+                  Stop team
+                </Menu.Item>
+              )
+            }
+          </Observer>
+          {agentDetail?.workspaceMode === GeneratedApiWorkspaceMode.worktree &&
             (agent.isLead ||
               agent.role === GeneratedApiAgentRole.implementer) && (
               <Menu.Item
@@ -2375,1207 +2280,1222 @@ export default function App({ active = true }: { active?: boolean }) {
             )}
           <Menu.Divider />
           <Menu.Label>Model actions</Menu.Label>
-          {(
-            [
-              ["compact", "Compact", Minimize2],
-              ["review", "Review", ShieldCheck],
-            ] as const
-          )
-            .filter(([action]) =>
-              menuActions(agent.provider ?? undefined).includes(action),
-            )
-            .map(([action, label, Icon]) => (
-              <Menu.Item
-                key={action}
-                aria-label={label}
-                data-action={action}
-                leftSection={<Icon size={14} />}
-                disabled={
-                  busy.has(agent.status ?? "") ||
-                  !!agent.inFlight ||
-                  !!nativeThreadError(agent) ||
-                  !agent.threadId
-                }
-                onClick={() => {
-                  void run(() => submitNativeAction(agent, action));
-                }}
-              >
-                {label}
-                {(!agent.threadId ||
-                  agent.inFlight ||
-                  busy.has(agent.status ?? "") ||
-                  !!nativeThreadError(agent)) && (
-                  <small className="menu-action-help">
-                    {!agent.threadId
-                      ? "Available after the chat starts."
-                      : "Wait until the chat is ready."}
-                  </small>
-                )}
-              </Menu.Item>
-            ))}
+          <NativeModelActions agent={agent} />
         </>
       )}
     </>
   );
   return (
-    <StudioErrorsScope value={studioErrors}>
-      {active && (
-        <SidebarWarnings
-          visible={!(mobileClient && sidebar)}
-          data={data}
-          agent={agent}
-          opened={opened}
-          accountKey={accountKey}
-          syncWorkspaceId={workspaceId}
-          open={open}
-        />
-      )}
-      {(!isServerView || isClassicServerView) && (
-        <Sidebar
-          services={sidebarServices}
-          data={data}
-          opened={opened}
-          open={open}
-          prepareChat={prepareChat}
-          newChat={(path, folder) => void newChat(path, folder)}
-          newSharedChat={(path) => {
-            setSidebar(false);
-            setSharedCreate({ path });
-          }}
-          addProject={openAddProject}
-          remoteProjects={
-            isServerView ? undefined : data.runtime.remoteProjects
+    <ConversationProvider
+      value={{
+        open,
+        read: readState,
+        nativeAction: (agent, action) => {
+          void run(() => submitNativeAction(agent, action));
+        },
+        openActivity(activity) {
+          if (activity.kind === "agent") open(activity.agentId);
+          else if (lead) {
+            setTaskFocus({
+              id: activity.id,
+              leadId: lead.id,
+              requestId: randomUUID(),
+            });
+            setTasksOpen(true);
           }
-          changeProject={(id) => {
-            const agent = catalog.byId.get(id);
-            if (agent) folders(agent);
-          }}
-          projectFolders={(path) => openProjectFolders(path)}
-          deleteProject={projectDeletion.open}
-          projectAccount={openSidebarProjectAccount}
-          creating={creating}
-          refresh={refresh}
-          notify={notify}
-          markUnread={(id, target) =>
-            void readState.markSidebarUnread(id, target)
-          }
-          markingRead={readState.marking}
-          pendingReadTargets={readState.pendingReadTargets}
-          hideOldChatsThreshold={studioPreferences.hideOldChatsThreshold}
-          rename={rename}
-          remove={remove}
-          mobile={sidebar}
-          collapsed={sidebarCollapsed}
-          onCompactChange={setSidebarCompact}
-          onSearch={() => {
-            if (isServerView) {
-              postToShell({ kind: "studio-server-search" }, serverParentOrigin);
-              return;
-            }
-            setSidebar(false);
-            setSearchOpen(true);
-          }}
-          settings={() => setStudioSettingsOpen(true)}
-          close={() => {
-            if (isServerView)
-              delete document.documentElement.dataset.serverProjects;
-            if (sidebarCompact) setSidebar(false);
-            else {
-              setSidebarCollapsed(true);
-              save("codex-sidebar-collapsed", true);
-            }
-          }}
-        />
-      )}
-      <EdgeRail
-        geometry={railGeometry}
-        sidebar={{
-          id: "sidebar-toggle",
-          label: sidebarCompact ? "Back to chats" : "Toggle conversations",
-          expanded: sidebarCompact ? sidebar : !sidebarCollapsed,
-          onClick: toggleSidebar,
+        },
+      }}
+    >
+      <TeamProvider
+        value={{
+          ...teamArea,
+          open,
+          previewResult: setFilePreview,
+          remove: (id) => remove(id, false, true),
+          opened,
+          workerQuery,
+          setWorkerQuery,
+          workerFilter,
+          setWorkerFilter,
+          completedOpen,
+          setCompletedOpen,
+          setTeamOpen,
+          setWideTeamOpen,
         }}
-        messages={{
-          count: attentionCount,
-          disabled: !lead,
-          onClick: () => {
-            setWorkspaceSection("messages");
-            setWorkspaceFocus(undefined);
-            setWorkspaceOpen(true);
-          },
-        }}
-        menu={chatActionsMenu}
-        menuButtonRef={chatActionsButton}
-      />
-      <div
-        className="workspace-frame workspace-layout-row"
-        ref={rowLayout.rowRef}
       >
-        <main
-          className="workspace"
-          data-edge-rail={railGeometry ? "true" : undefined}
-          data-show-message-avatars={studioPreferences.showMessageAvatars}
-        >
-          <SupervisorRecoveryNotice />
-          {!railGeometry && (
-            <header
-              className="workspace-header simple-workspace-header"
-              data-compact-landscape={compactHeader || undefined}
-            >
-              {sidebarCompact ? (
-                <Button
-                  id="sidebar-toggle"
-                  variant="subtle"
-                  size="compact-xs"
-                  aria-label="Back to chats"
-                  aria-expanded={sidebar}
-                  onClick={toggleSidebar}
-                  leftSection={<ArrowLeft size={18} />}
-                >
-                  Chats
-                </Button>
-              ) : (
-                <ActionIcon
-                  id="sidebar-toggle"
-                  aria-label="Toggle conversations"
-                  aria-expanded={sidebarCompact ? sidebar : !sidebarCollapsed}
-                  onClick={toggleSidebar}
-                >
-                  <PanelLeft size={18} />
-                </ActionIcon>
-              )}
-              {conversationTitle}
-              {compactHeader && sessionActivity}
-              <div id="conversation-header-tools" />
-              {!compactHeader && !room?.radio && (
-                <ActionIcon
-                  id="chat-settings-toggle"
-                  aria-label="Chat settings"
-                  title="Chat settings"
-                  onClick={() => setSettingsOpen(true)}
-                >
-                  <Settings2 size={18} />
-                </ActionIcon>
-              )}
-              {!compactHeader && hasTeam && (
-                <Button
-                  variant="subtle"
-                  leftSection={<Users size={16} />}
-                  id="team-toggle"
-                  aria-label="Team"
-                  aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
-                  onClick={toggleTeam}
-                >
-                  Team
-                  {lead?.teamCounts && lead.teamCounts.total > 0 && (
-                    <span className="team-button-count">
-                      {lead.teamCounts.working}/{lead.teamCounts.total}
-                    </span>
-                  )}
-                </Button>
-              )}
-              {!room?.radio && (!compactHeader || attentionCount > 0) && (
-                <Button
-                  variant="subtle"
-                  id="messages-toggle"
-                  aria-label="Messages"
-                  title={
-                    attentionCount > 0
-                      ? `Messages, ${attentionCount} need you`
-                      : "Messages"
+        <StudioErrorsScope value={studioErrors}>
+          {active && (
+            <SidebarWarnings
+              visible={!(mobileClient && sidebar)}
+              data={data}
+              agent={agent}
+              opened={opened}
+              accountKey={accountKey}
+              syncWorkspaceId={workspaceId}
+              open={open}
+            />
+          )}
+          {(!isServerView || isClassicServerView) && (
+            <SidebarCommandsProvider
+              value={{
+                open: open,
+                prepareChat: prepareChat,
+                newChat: (path, folder) => void newChat(path, folder),
+                newSharedChat: (path) => {
+                  setSidebar(false);
+                  setSharedCreate({ path });
+                },
+                addProject: openAddProject,
+                changeProject: (id) => {
+                  const agent = catalog.get(id);
+                  if (agent) folders(agent);
+                },
+                projectFolders: (path) => openProjectFolders(path),
+                deleteProject: projectDeletion.open,
+                projectAccount: openSidebarProjectAccount,
+                refresh: refresh,
+                notify: notify,
+                markUnread: (id, target) =>
+                  void readState.markSidebarUnread(id, target),
+                rename: rename,
+                remove: remove,
+                onSearch: () => {
+                  if (isServerView) {
+                    postToShell(
+                      { kind: "studio-server-search" },
+                      serverParentOrigin,
+                    );
+                    return;
                   }
-                  leftSection={<MessageSquare size={16} />}
-                  disabled={!lead}
-                  onClick={() => {
-                    setWorkspaceSection("messages");
-                    setWorkspaceFocus(undefined);
-                    setWorkspaceOpen(true);
-                  }}
-                >
-                  <span className="messages-toggle-label">Messages</span>{" "}
-                  {attentionCount > 0 && (
-                    <span className="attention-count">{attentionCount}</span>
-                  )}
-                </Button>
-              )}
-              {!railGeometry && !room?.radio && (
-                <Menu
-                  position="bottom-end"
-                  withinPortal
-                  withInitialFocusPlaceholder={!compactHeader}
-                >
-                  <Menu.Target>
-                    <ActionIcon
-                      ref={chatActionsButton}
-                      aria-label="Chat actions"
-                      title="Chat actions"
-                    >
-                      <MoreHorizontal size={18} />
-                    </ActionIcon>
-                  </Menu.Target>
-                  <Menu.Dropdown className="chat-actions-menu">
-                    {chatActionsMenu}
-                  </Menu.Dropdown>
-                </Menu>
-              )}
-            </header>
-          )}
-          {agent && nativeActions.pending(agent.id) && (
-            <div
-              role="status"
-              className="native-action-pending"
-              style={{ padding: "8px 16px" }}
+                  setSidebar(false);
+                  setSearchOpen(true);
+                },
+                settings: () => setStudioSettingsOpen(true),
+              }}
             >
-              <span>
-                The {nativeActions.pending(agent.id)!.action} request has no
-                confirmed reply.{" "}
-              </span>
-              <Button
-                size="compact-sm"
-                loading={nativeActions.active}
-                onClick={() =>
-                  void run(() =>
-                    submitNativeAction(
-                      agent,
-                      nativeActions.pending(agent.id)!.action,
-                    ),
-                  )
+              <Sidebar
+                services={sidebarServices}
+                data={data}
+                opened={opened}
+                remoteProjects={
+                  isServerView ? undefined : data.runtime.remoteProjects
                 }
-              >
-                Check action request
-              </Button>
-            </div>
+                creating={creating}
+                markingRead={readState.marking}
+                pendingReadTargets={readState.pendingReadTargets}
+                hideOldChatsThreshold={studioPreferences.hideOldChatsThreshold}
+                mobile={sidebar}
+                collapsed={sidebarCollapsed}
+                onCompactChange={setSidebarCompact}
+                close={() => {
+                  if (isServerView)
+                    delete document.documentElement.dataset.serverProjects;
+                  if (sidebarCompact) setSidebar(false);
+                  else {
+                    setSidebarCollapsed(true);
+                    save("codex-sidebar-collapsed", true);
+                  }
+                }}
+              />
+            </SidebarCommandsProvider>
           )}
-          {!compactHeader && sessionActivity}
-          {claudeLoginKey &&
-            (accounts.data.accounts.some(
-              (item) => item.id === claudeLoginKey,
-            ) ||
-              accounts.data.archivedAccounts?.some(
-                (item) => item.id === claudeLoginKey,
-              )) && (
-              <ClaudeSignIn
-                key={claudeLoginKey}
-                account={
-                  accounts.data.accounts.find(
-                    (item) => item.id === claudeLoginKey,
-                  ) ||
-                  accounts.data.archivedAccounts!.find(
-                    (item) => item.id === claudeLoginKey,
-                  )!
-                }
-                scope={data.stateDir}
-                onClose={() => setClaudeLoginKey("")}
-                onReady={accounts.refresh}
-              />
-            )}
-          {codexLoginKey &&
-            accounts.data.accounts.some(
-              (item) => item.id === codexLoginKey,
-            ) && (
-              <CodexSignIn
-                account={accounts.data.accounts.find(
-                  (item) => item.id === codexLoginKey,
-                )!}
-                state={accounts}
-                onClose={() => setCodexLoginKey("")}
-              />
-            )}
-          {/* Transient notices float under the header over the transcript, so
-              their arrival and dismissal never move the conversation. */}
-          <div className="workspace-notices">
-            <div className="workspace-notices-stack">
-              {[
-                ...accounts.data.accounts,
-                ...(accounts.data.archivedAccounts || []),
-              ]
-                .filter(
-                  (account) =>
-                    account.id === accountKey ||
-                    agents.some(
-                      (item) =>
-                        item.rootId === lead?.id &&
-                        !item.deletedAt &&
-                        (item.accountKey || "default") === account.id &&
-                        item.status === GeneratedApiAgentStatus.failed,
-                    ),
-                )
-                .map((account) => (
-                  <AccountSignInNotice
-                    key={account.id}
-                    account={account}
-                    errors={agents
-                      .filter(
-                        (item) =>
-                          (item.id === agent?.id || item.rootId === lead?.id) &&
-                          (item.accountKey || "default") === account.id,
-                      )
-                      .flatMap((item) => {
-                        const nativeStatus = item.nativeStatus;
-                        const nativeError =
-                          nativeStatus &&
-                          typeof nativeStatus === "object" &&
-                          "error" in nativeStatus
-                            ? nativeStatus.error
-                            : undefined;
-                        return [item.error, nativeError];
-                      })
-                      .filter(
-                        (value): value is string => typeof value === "string",
+          <EdgeRail
+            geometry={railGeometry}
+            sidebar={{
+              id: "sidebar-toggle",
+              label: sidebarCompact ? "Back to chats" : "Toggle conversations",
+              expanded: sidebarCompact ? sidebar : !sidebarCollapsed,
+              onClick: toggleSidebar,
+            }}
+            messages={{
+              count: attentionCount,
+              disabled: !lead,
+              onClick: () => {
+                setWorkspaceSection("messages");
+                setWorkspaceFocus(undefined);
+                setWorkspaceOpen(true);
+              },
+            }}
+            menu={chatActionsMenu}
+            menuButtonRef={chatActionsButton}
+          />
+          <div
+            className="workspace-frame workspace-layout-row"
+            ref={rowLayout.rowRef}
+          >
+            <main
+              className="workspace"
+              data-edge-rail={railGeometry ? "true" : undefined}
+              data-show-message-avatars={studioPreferences.showMessageAvatars}
+            >
+              <SupervisorRecoveryNotice />
+              {!railGeometry && (
+                <header
+                  className="workspace-header simple-workspace-header"
+                  data-compact-landscape={compactHeader || undefined}
+                >
+                  {sidebarCompact ? (
+                    <Button
+                      id="sidebar-toggle"
+                      variant="subtle"
+                      size="compact-xs"
+                      aria-label="Back to chats"
+                      aria-expanded={sidebar}
+                      onClick={toggleSidebar}
+                      leftSection={<ArrowLeft size={18} />}
+                    >
+                      Chats
+                    </Button>
+                  ) : (
+                    <ActionIcon
+                      id="sidebar-toggle"
+                      aria-label="Toggle conversations"
+                      aria-expanded={
+                        sidebarCompact ? sidebar : !sidebarCollapsed
+                      }
+                      onClick={toggleSidebar}
+                    >
+                      <PanelLeft size={18} />
+                    </ActionIcon>
+                  )}
+                  {conversationTitle}
+                  {compactHeader && sessionActivity}
+                  <div id="conversation-header-tools" />
+                  {!compactHeader && !room?.radio && (
+                    <ActionIcon
+                      id="chat-settings-toggle"
+                      aria-label="Chat settings"
+                      title="Chat settings"
+                      onClick={() => setSettingsOpen(true)}
+                    >
+                      <Settings2 size={18} />
+                    </ActionIcon>
+                  )}
+                  {!compactHeader && (
+                    <TeamPresence>
+                      <Button
+                        variant="subtle"
+                        leftSection={<Users size={16} />}
+                        id="team-toggle"
+                        aria-label="Team"
+                        aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
+                        onClick={toggleTeam}
+                      >
+                        Team
+                        <TeamCount className="team-button-count" />
+                      </Button>
+                    </TeamPresence>
+                  )}
+                  {!room?.radio && (!compactHeader || attentionCount > 0) && (
+                    <Button
+                      variant="subtle"
+                      id="messages-toggle"
+                      aria-label="Messages"
+                      title={
+                        attentionCount > 0
+                          ? `Messages, ${attentionCount} need you`
+                          : "Messages"
+                      }
+                      leftSection={<MessageSquare size={16} />}
+                      disabled={!lead}
+                      onClick={() => {
+                        setWorkspaceSection("messages");
+                        setWorkspaceFocus(undefined);
+                        setWorkspaceOpen(true);
+                      }}
+                    >
+                      <span className="messages-toggle-label">Messages</span>{" "}
+                      {attentionCount > 0 && (
+                        <span className="attention-count">
+                          {attentionCount}
+                        </span>
                       )}
-                    onSignIn={
-                      (
-                        {
-                          [ProviderKind.Codex]: setCodexLoginKey,
-                          [ProviderKind.Claude]: setClaudeLoginKey,
-                        } satisfies Record<ProviderKind, (key: string) => void>
-                      )[account.provider]
+                    </Button>
+                  )}
+                  {!railGeometry && !room?.radio && (
+                    <Menu
+                      position="bottom-end"
+                      withinPortal
+                      withInitialFocusPlaceholder={!compactHeader}
+                    >
+                      <Menu.Target>
+                        <ActionIcon
+                          ref={chatActionsButton}
+                          aria-label="Chat actions"
+                          title="Chat actions"
+                        >
+                          <MoreHorizontal size={18} />
+                        </ActionIcon>
+                      </Menu.Target>
+                      <Menu.Dropdown className="chat-actions-menu">
+                        {chatActionsMenu}
+                      </Menu.Dropdown>
+                    </Menu>
+                  )}
+                </header>
+              )}
+              {agent && nativeActions.pending(agent.id) && (
+                <div
+                  role="status"
+                  className="native-action-pending"
+                  style={{ padding: "8px 16px" }}
+                >
+                  <span>
+                    The {nativeActions.pending(agent.id)!.action} request has no
+                    confirmed reply.{" "}
+                  </span>
+                  <Button
+                    size="compact-sm"
+                    loading={nativeActions.active}
+                    onClick={() =>
+                      void run(() =>
+                        submitNativeAction(
+                          agent,
+                          nativeActions.pending(agent.id)!.action,
+                        ),
+                      )
                     }
-                  />
-                ))}
-              {workspaceError && !offlineSendFeedback.owns(workspaceError) && (
-                <div id="error" role="alert">
-                  {workspaceError}
+                  >
+                    Check action request
+                  </Button>
                 </div>
               )}
-              <div className="sync-notices">
-                {!creating &&
-                  pendingCreations
-                    .filter(isLeadCreateRequest)
-                    .map((request) => (
-                      <div className="sync-status" key={request.id}>
-                        <p>
-                          Studio lost confirmation for this chat request in{" "}
-                          {request.cwd || "default project"}
-                          {request.project_folder
-                            ? ` (${request.project_folder})`
-                            : ""}
-                          . Retrying uses the saved request ID to check whether
-                          the chat was created. Dismissing stops checking; a
-                          chat this request created still appears in the chat
-                          list.
-                        </p>
-                        <Button
-                          onClick={() =>
-                            void newChat(
-                              request.cwd,
-                              request.project_folder,
-                              request.id,
-                            )
-                          }
-                        >
-                          Retry chat request
-                        </Button>
-                        <Button
-                          onClick={() => {
-                            try {
-                              dismissChatCreation(creationKey, request.id);
-                              if (creation.current?.id === request.id)
-                                creation.current = null;
-                              setPendingCreations(
-                                pendingChatCreations(creationKey),
-                              );
-                            } catch (error) {
-                              notify(
-                                "Cannot dismiss the saved chat request: " +
-                                  errorText(error),
-                              );
-                            }
-                          }}
-                        >
-                          Dismiss
-                        </Button>
-                      </div>
-                    ))}
-                {draftError && !offlineSendFeedback.owns(draftError) && (
-                  <p
-                    className="sync-status"
-                    role="status"
-                    data-draft-sync-status
-                  >
-                    {draftError}
-                  </p>
-                )}
-                {outbox.error && !offlineSendFeedback.owns(outbox.error) && (
-                  <p className="sync-status" role="alert">
-                    {outbox.error}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-          <UIErrorBoundary label="this conversation" resetKey={opened}>
-            {opened && projectDeleteScope.has(opened) ? (
-              <div className="chat-empty-state" role="status">
-                Project deletion in progress or unconfirmed.
-              </div>
-            ) : opened && pendingConversationDelete.has(opened) ? (
-              <div className="chat-empty-state" role="status">
-                Deleting chat…
-              </div>
-            ) : room?.radio ? (
-              <RadioChat
-                visible={!(mobileClient && sidebar)}
-                key={room.id}
-                room={room}
-                data={data}
-                getDraft={getDraft}
-                subscribeDraft={subscribeDraft}
-                setDraft={setDraft}
-                refresh={refresh}
-                notify={notify}
-              />
-            ) : (
-              <SelectedConversation
-                headerToolsInMenu={menuHeaderTools}
-                onRailToolsChange={railTools.publish}
-                transcriptHeading={railGeometry ? conversationTitle : undefined}
-                visible={!(mobileClient && sidebar)}
-                projectName={projectName}
-                recentChats={
-                  agent?.empty
-                    ? data.threads
-                        .filter(
-                          (chat) =>
-                            chat.id !== agent.id &&
-                            chat.isLead &&
-                            !chat.archived &&
-                            !chat.empty &&
-                            chat.projectPath === agent.projectPath,
-                        )
-                        .sort(
-                          (a, b) =>
-                            (b.updated || b.created || 0) -
-                            (a.updated || a.created || 0),
-                        )
-                        .slice(0, 5)
-                        .map((chat) => ({
-                          id: chat.id,
-                          title: chat.name || "Conversation",
-                          indicator: indicators.get(chat.id),
-                        }))
-                    : undefined
-                }
-                accountsState={accounts}
-                syncWorkspaceId={workspaceId}
-                id={opened}
-                agent={agent}
-                lead={lead || undefined}
-                room={room}
-                legacy={legacy}
-                data={conversationData!}
-                waitSource={chatWaitSource}
-                getDraft={getDraft}
-                subscribeDraft={subscribeDraft}
-                setDraft={setDraft}
-                draftConflicts={conversationDraftConflicts}
-                dismissDraft={dismissDraft}
-                send={sendToConversation}
-                sending={sending}
-                schemaMismatch={schemaMismatch}
-                outgoing={conversationOutgoing}
-                offlineSendPending={offlineSendFeedback.pending}
-                offlineSendDetails={offlineSendFeedback.details}
-                onObserved={observeSends}
-                onReadResult={readState.observeRead}
-                onOutgoingEdit={editSend}
-                refresh={refresh}
-                notify={notify}
-                limits={visibleLimits}
-                limitsAccounts={usageAccounts}
-                limitsLoading={!!limitsLoading[accountKey]}
-                jumpTarget={
-                  jumpTarget?.chatId === opened ? jumpTarget : undefined
-                }
-                limitsAccountLabel={
-                  selectedAccount?.email || selectedAccount?.label
-                }
-                reloadLimits={forceReloadLimits}
-                onSelect={open}
-                onBranchCreated={branchCreated}
-                onNewChat={newConversation}
-                onChooseChat={chooseConversation}
-              />
-            )}
-          </UIErrorBoundary>
-        </main>
-        <div
-          id="workspace-panel-slot"
-          className="workspace-panel-slot"
-          ref={setWorkspacePanelSlot}
-        />
-        {hasTeam &&
-          (narrowTeam ? (
-            <Drawer
-              opened={teamOpen}
-              onClose={() => setTeamOpen(false)}
-              position="right"
-              size="var(--studio-team-size)"
-              padding={0}
-              withCloseButton={false}
-              title="Team"
-              classNames={{ header: "sr-only" }}
-            >
-              {teamPanel}
-            </Drawer>
-          ) : wideTeamOpen ? (
-            teamPanel
-          ) : null)}
-      </div>
-      {!mobileClient && studioPreferences.showTerminals && (
-        <Suspense fallback={null}>
-          <TerminalDock data={data} agent={agent || lead} notify={notify} />
-        </Suspense>
-      )}
-      <SearchOverlay
-        opened={searchOpen}
-        onClose={() => setSearchOpen(false)}
-        data={chatData!}
-        onSelect={open}
-        navigate={(section, id) => {
-          if (id) open(id);
-          setSearchOpen(false);
-          setWorkspaceSection(section);
-          setWorkspaceOpen(true);
-        }}
-      />
-      {(workspaceRendered || workspaceOpen) && (
-        <Suspense fallback={null}>
-          <Workspace
-            allRequests={data.runtime?.requests || []}
-            key={`workspace:${lead?.id || "none"}`}
-            initialSection={workspaceSection}
-            initialFocus={workspaceFocus}
-            inlineTarget={workspacePanelSlot}
-            panelLayout={rowLayout.panelLayout}
-            onPanelWidthChange={setPreferredPanelWidthRem}
-            resizeScope={workspaceId || data?.stateDir || "pending"}
-            opened={workspaceOpen}
-            onClose={() => setWorkspaceOpen(false)}
-            agent={agent || lead}
-            data={chatData!}
-            onSelect={open}
-            refresh={refresh}
-            notify={notify}
-          />
-        </Suspense>
-      )}
-      {(tasksRendered || tasksOpen) && (
-        <Suspense fallback={null}>
-          <BackgroundTasks
-            key={`background:${lead?.id || "none"}`}
-            opened={tasksOpen}
-            initialFocus={taskFocus}
-            close={() => setTasksOpen(false)}
-            afterClose={() =>
-              requestAnimationFrame(() => {
-                const source =
-                  taskFocus && taskFocus.leadId === lead?.id
-                    ? document.querySelector<HTMLButtonElement>(
-                        `[data-activity-id="${CSS.escape(taskFocus.id)}"]`,
-                      )
-                    : null;
-                (source || chatActionsButton.current)?.focus();
-              })
-            }
-            leadId={lead?.id}
-            openAgent={open}
-            refresh={refresh}
-            notify={notify}
-          />
-        </Suspense>
-      )}
-      <Accounts
-        managerOnly
-        dialogsOnly
-        onModalOpenChange={updateAccountModalOpen}
-        state={accounts}
-        onError={notify}
-        externalCommand={serverAccountCommand}
-        onExternalCommandHandled={() => setServerAccountCommand(null)}
-      />
-      <Modal
-        opened={studioSettingsOpen && !accountModalOpen}
-        transitionProps={{ duration: 0 }}
-        closeOnEscape={!accountModalOpen}
-        closeOnClickOutside={!accountModalOpen}
-        onClose={() => {
-          setStudioSettingsOpen(false);
-        }}
-        size={modalSizes.settings}
-        title="Studio settings"
-        classNames={{ body: "studio-settings-body" }}
-      >
-        <div className="studio-settings-panel" data-testid="studio-settings">
-          <StudioSettingsLayout
-            value={studioSettingsTab}
-            onChange={activateSettingsTab}
-          >
-            <Tabs.Panel value="accounts" pt="md">
-              <section className="settings-group" aria-label="Studio accounts">
-                <ServerAccountsPanel
-                  servers={[accountServer]}
-                  accountsByServer={{ [accountServer.id]: publicAccounts }}
-                  statuses={{ [accountServer.id]: "live" }}
-                  startAccount={(_id, command) =>
-                    setServerAccountCommand(command)
-                  }
-                  accountAction={(_id, command) =>
-                    setServerAccountCommand(command)
-                  }
-                  onDiscover={() => {
-                    void post("/api/accounts/discover", {})
-                      .then(accounts.setData)
-                      .catch((failure: unknown) => notify(errorText(failure)));
-                  }}
-                />
-              </section>
-            </Tabs.Panel>
-            <Tabs.Panel value="servers" pt="md" keepMounted={false}>
-              {serverSettings?.panel || (
-                <ServerAccessSettings active={studioSettingsOpen} />
-              )}
-            </Tabs.Panel>
-            <Tabs.Panel
-              value="models"
-              className="model-whitelist-panel"
-              pt="md"
-              keepMounted={false}
-            >
-              <ModelWhitelistSettings />
-            </Tabs.Panel>
-            <Tabs.Panel value="appearance" pt="md">
-              <div className="studio-appearance-groups">
-                <SettingsRow label="Theme">
-                  <div
-                    className="studio-appearance-segments"
-                    role="radiogroup"
-                    aria-label="Studio theme"
-                  >
-                    {(
-                      [
-                        ["auto", "System"],
-                        ["light", "Light"],
-                        ["dark", "Dark"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <label key={value}>
-                        <input
-                          type="radio"
-                          name="studio-theme"
-                          value={value}
-                          checked={studioPreferences.theme === value}
-                          onChange={() =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              theme: value,
-                            })
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </SettingsRow>
-                <ProviderUpdateSettings
-                  checked={studioPreferences.checkProviderUpdates}
-                  onChange={(checked) =>
-                    updateStudioPreferences({
-                      ...studioPreferences,
-                      checkProviderUpdates: checked,
-                    })
-                  }
-                />
-                <SettingsRow label="Show terminals">
-                  <Switch
-                    aria-label="Show terminals"
-                    checked={studioPreferences.showTerminals}
-                    onChange={(event) =>
-                      updateStudioPreferences({
-                        ...studioPreferences,
-                        showTerminals: event.currentTarget.checked,
-                      })
+              {!compactHeader && sessionActivity}
+              {claudeLoginKey &&
+                (accounts.data.accounts.some(
+                  (item) => item.id === claudeLoginKey,
+                ) ||
+                  accounts.data.archivedAccounts?.some(
+                    (item) => item.id === claudeLoginKey,
+                  )) && (
+                  <ClaudeSignIn
+                    key={claudeLoginKey}
+                    account={
+                      accounts.data.accounts.find(
+                        (item) => item.id === claudeLoginKey,
+                      ) ||
+                      accounts.data.archivedAccounts!.find(
+                        (item) => item.id === claudeLoginKey,
+                      )!
                     }
+                    scope={data.stateDir}
+                    onClose={() => setClaudeLoginKey("")}
+                    onReady={accounts.refresh}
                   />
-                </SettingsRow>
-                <SettingsRow label="Text size">
-                  <div
-                    className="studio-appearance-segments"
-                    role="radiogroup"
-                    aria-label="Studio text size"
-                  >
-                    {(
-                      [
-                        [12, "S"],
-                        [14, "M"],
-                        [16, "L"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <label key={value}>
-                        <input
-                          type="radio"
-                          name="studio-text-size"
-                          value={value}
-                          checked={
-                            studioPreferences.typography === "custom" &&
-                            studioPreferences.sidebarFontSize === value &&
-                            studioPreferences.mainFontSize === value
-                          }
-                          onChange={() =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              typography: "custom",
-                              sidebarFontSize: value,
-                              mainFontSize: value,
-                            })
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </SettingsRow>
-                <SettingsRow label="Chat width">
-                  <div
-                    className="studio-appearance-segments"
-                    role="radiogroup"
-                    aria-label="Studio chat width"
-                  >
-                    {(
-                      [
-                        [60, "Narrow"],
-                        [80, "Wide"],
-                        [100, "Full"],
-                      ] as const
-                    ).map(([value, label]) => (
-                      <label key={value}>
-                        <input
-                          type="radio"
-                          name="studio-chat-width"
-                          value={value}
-                          checked={
-                            studioPreferences.contentLayout === "custom" &&
-                            studioPreferences.contentWidth === value
-                          }
-                          onChange={() =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              contentLayout: "custom",
-                              contentWidth: value,
-                            })
-                          }
-                        />
-                        <span>{label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </SettingsRow>
-                <SettingsRow
-                  label="Hide old chats"
-                  help="Projects with fewer chats always show all of them."
-                >
-                  <TextInput
-                    aria-label="Hide old chats"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={hideOldChatsThresholdDraft}
-                    onChange={(event) =>
-                      setHideOldChatsThresholdDraft(event.currentTarget.value)
-                    }
-                    onBlur={() => {
-                      const value = Number(hideOldChatsThresholdDraft);
-                      if (
-                        /^\d+$/.test(hideOldChatsThresholdDraft) &&
-                        Number.isInteger(value) &&
-                        value >= MIN_HIDE_OLD_CHATS_THRESHOLD &&
-                        value <= MAX_HIDE_OLD_CHATS_THRESHOLD
-                      ) {
-                        updateStudioPreferences({
-                          ...studioPreferences,
-                          hideOldChatsThreshold: value,
-                        });
-                        setHideOldChatsThresholdDraft(String(value));
-                      } else {
-                        setHideOldChatsThresholdDraft(
-                          String(studioPreferences.hideOldChatsThreshold),
-                        );
-                      }
-                    }}
+                )}
+              {codexLoginKey &&
+                accounts.data.accounts.some(
+                  (item) => item.id === codexLoginKey,
+                ) && (
+                  <CodexSignIn
+                    account={accounts.data.accounts.find(
+                      (item) => item.id === codexLoginKey,
+                    )!}
+                    state={accounts}
+                    onClose={() => setCodexLoginKey("")}
                   />
-                </SettingsRow>
-                <Disclosure className="studio-appearance-more" summary="More">
-                  <div className="studio-appearance-more-content">
-                    <section className="settings-group" aria-label="Fonts">
-                      <h2>Fonts</h2>
-                      <SettingsRow label="Text style">
-                        <NativeSelect
-                          aria-label="Studio text style"
-                          value={studioPreferences.typography}
-                          data={[
+                )}
+              {/* Transient notices float under the header over the transcript, so
+              their arrival and dismissal never move the conversation. */}
+              <div className="workspace-notices">
+                <div className="workspace-notices-stack">
+                  {[
+                    ...accounts.data.accounts,
+                    ...(accounts.data.archivedAccounts || []),
+                  ]
+                    .filter(
+                      (account) =>
+                        account.id === accountKey ||
+                        agents.some(
+                          (item) =>
+                            item.rootId === lead?.id &&
+                            (item.accountKey || "default") === account.id &&
+                            item.status === GeneratedApiAgentStatus.failed,
+                        ),
+                    )
+                    .map((account) => (
+                      <AccountSignInNotice
+                        key={account.id}
+                        account={account}
+                        errors={catalog.errors(account.id, agent?.id, lead?.id)}
+                        onSignIn={
+                          (
                             {
-                              value: "original",
-                              label: "Default text",
-                            },
-                            { value: "custom", label: "Custom text" },
-                          ]}
-                          onChange={(event) =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              typography: event.currentTarget
-                                .value as StudioPreferences["typography"],
-                            })
-                          }
-                        />
-                        <small>
-                          Select Custom text to change the font and text sizes.
-                        </small>
-                      </SettingsRow>
-                      <SettingsRow label="Font family">
-                        <NativeSelect
-                          aria-label="Studio font family"
-                          disabled={studioPreferences.typography === "original"}
-                          value={studioPreferences.fontFamily}
-                          data={Object.entries(fontFamilies).map(
-                            ([value, font]) => ({ value, label: font.label }),
-                          )}
-                          onChange={(event) =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              fontFamily: event.currentTarget
-                                .value as StudioPreferences["fontFamily"],
-                            })
-                          }
-                        />
-                      </SettingsRow>
-                      <SettingsRow
-                        label={
-                          <span className="studio-range-label">
-                            Sidebar text{" "}
-                            <output>
-                              {studioPreferences.sidebarFontSize}px
-                            </output>
-                          </span>
+                              [ProviderKind.Codex]: setCodexLoginKey,
+                              [ProviderKind.Claude]: setClaudeLoginKey,
+                            } satisfies Record<
+                              ProviderKind,
+                              (key: string) => void
+                            >
+                          )[account.provider]
                         }
-                      >
-                        <div className="studio-range-field">
-                          <Slider
-                            thumbLabel="Sidebar font size"
-                            disabled={
-                              studioPreferences.typography === "original"
-                            }
-                            min={12}
-                            max={24}
-                            step={1}
-                            value={studioPreferences.sidebarFontSize}
-                            onChange={(value) =>
-                              updateStudioPreferences({
-                                ...studioPreferences,
-                                sidebarFontSize: value,
-                              })
-                            }
-                          />
-                        </div>
-                      </SettingsRow>
-                      <SettingsRow
-                        label={
-                          <span className="studio-range-label">
-                            Main text{" "}
-                            <output>{studioPreferences.mainFontSize}px</output>
-                          </span>
-                        }
-                      >
-                        <div className="studio-range-field">
-                          <Slider
-                            thumbLabel="Main font size"
-                            disabled={
-                              studioPreferences.typography === "original"
-                            }
-                            min={12}
-                            max={24}
-                            step={1}
-                            value={studioPreferences.mainFontSize}
-                            onChange={(value) =>
-                              updateStudioPreferences({
-                                ...studioPreferences,
-                                mainFontSize: value,
-                              })
-                            }
-                          />
-                        </div>
-                      </SettingsRow>
-                    </section>
-                    <section
-                      className="settings-group"
-                      aria-label="Chat layout"
-                    >
-                      <h2>Chat layout</h2>
-                      <SettingsRow label="Width">
-                        <NativeSelect
-                          aria-label="Chat width layout"
-                          value={studioPreferences.contentLayout}
-                          data={[
-                            { value: "original", label: "Default width" },
-                            { value: "custom", label: "Custom width" },
-                          ]}
-                          onChange={(event) =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              contentLayout: event.currentTarget
-                                .value as StudioPreferences["contentLayout"],
-                            })
-                          }
-                        />
-                        <small>
-                          Select Custom width to change the chat width.
-                        </small>
-                      </SettingsRow>
-                      <SettingsRow
-                        label={
-                          <span className="studio-range-label">
-                            Custom width{" "}
-                            <output>{studioPreferences.contentWidth}%</output>
-                          </span>
-                        }
-                      >
-                        <div className="studio-range-field">
-                          <Slider
-                            thumbLabel="Transcript width"
-                            disabled={
-                              studioPreferences.contentLayout === "original"
-                            }
-                            min={60}
-                            max={100}
-                            step={1}
-                            value={studioPreferences.contentWidth}
-                            onChange={(value) =>
-                              updateStudioPreferences({
-                                ...studioPreferences,
-                                contentWidth: value,
-                              })
-                            }
-                          />
-                          <small>
-                            Sets the reading width of messages. The composer
-                            keeps its width. Narrow screens use the full width.
-                          </small>
-                        </div>
-                      </SettingsRow>
-                    </section>
-                    <section className="settings-group" aria-label="Messages">
-                      <h2>Messages</h2>
-                      <label className="settings-field studio-preference-toggle">
-                        <span className="settings-label">
-                          Show message avatars
-                        </span>
-                        <input
-                          aria-label="Show message avatars"
-                          type="checkbox"
-                          checked={studioPreferences.showMessageAvatars}
-                          onChange={(event) =>
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              showMessageAvatars: event.currentTarget.checked,
-                            })
-                          }
-                        />
-                      </label>
-                    </section>
-                    <section
-                      className="settings-group"
-                      aria-label="Maintenance"
-                    >
-                      <h2>Maintenance</h2>
-                      <Button
-                        loading={removingAllSending}
-                        onClick={async () => {
-                          if (removingAllSending) return;
-                          setRemovingAllSending(true);
-                          try {
-                            const count = await removeAllSendingMessages(
-                              { stateDir: data.stateDir, workspaceId },
-                              data,
-                              outgoingMessages,
-                            );
-                            notify(
-                              `Removed ${count} sending messages from this device. Work already sent continues.`,
-                            );
-                          } catch (error) {
-                            notify(errorText(error));
-                          } finally {
-                            setRemovingAllSending(false);
-                          }
-                        }}
-                      >
-                        Remove all sending messages
-                      </Button>
-                    </section>
-                  </div>
-                </Disclosure>
-              </div>
-            </Tabs.Panel>
-            <Tabs.Panel value="federation" pt="md">
-              {lead?.isLead && (
-                <FederationSettings
-                  active={studioSettingsOpen}
-                  leadId={lead.id}
-                  agents={data?.runtime?.agents || []}
-                  refresh={refresh}
-                  notify={notify}
-                />
-              )}
-            </Tabs.Panel>
-            <Tabs.Panel value="agents" pt="md">
-              <OrchestrationSettings
-                active={studioSettingsOpen && studioSettingsTab === "agents"}
-              />
-            </Tabs.Panel>
-            <Tabs.Panel value="layr-worktrees" pt="md">
-              <LayrWorktreesSettings active={studioSettingsOpen} />
-            </Tabs.Panel>
-            <Tabs.Panel value="phone-alerts" pt="md" keepMounted={false}>
-              <SignInPushSettings active={studioSettingsOpen} />
-            </Tabs.Panel>
-            <Tabs.Panel value="hotkeys" pt="md">
-              <section className="settings-group" aria-label="Sidebar shortcut">
-                <h2>Keyboard shortcut</h2>
-                <SettingsRow label="Toggle sidebar">
-                  <div className="studio-shortcut-control">
-                    <TextInput
-                      className="studio-shortcut-input"
-                      aria-describedby="studio-shortcut-hint"
-                      aria-label="Toggle sidebar shortcut"
-                      readOnly
-                      value={formatSidebarShortcut(
-                        studioPreferences.sidebarShortcut,
-                      )}
-                      onKeyDown={(event) => {
-                        if (event.key === "Tab" || event.key === "Escape") {
-                          setSidebarShortcutError("");
-                          return;
-                        }
-                        if (
-                          ["Control", "Meta", "Alt", "Shift"].includes(
-                            event.key,
-                          )
-                        )
-                          return;
-                        if (event.ctrlKey || event.metaKey)
-                          event.stopPropagation();
-                        event.preventDefault();
-                        const mods = [
-                          event.metaKey ? "Meta" : "",
-                          event.ctrlKey ? "Control" : "",
-                          event.altKey ? "Alt" : "",
-                          event.shiftKey ? "Shift" : "",
-                        ].filter(Boolean);
-                        const candidate = [...mods, event.key].join("+");
-                        if (!parseSidebarShortcut(candidate)) {
-                          setSidebarShortcutError(
-                            "Choose a letter or number with Ctrl or ⌘. Browser-reserved shortcuts cannot be used.",
-                          );
-                          return;
-                        }
-                        setSidebarShortcutError("");
-                        updateStudioPreferences({
-                          ...studioPreferences,
-                          sidebarShortcut: candidate,
-                        });
-                      }}
-                      onFocus={() =>
-                        setSidebarShortcutError(
-                          "Press a modifier and a letter or number to set the shortcut.",
-                        )
-                      }
-                      onBlur={() => setSidebarShortcutError("")}
-                    />
-                    <div className="studio-shortcut-tokens" aria-hidden="true">
-                      {formatSidebarShortcut(studioPreferences.sidebarShortcut)
-                        .split("+")
-                        .map((key, index) => (
-                          <kbd key={`${key}:${index}`}>{key}</kbd>
+                      />
+                    ))}
+                  {workspaceError &&
+                    !offlineSendFeedback.owns(workspaceError) && (
+                      <div id="error" role="alert">
+                        {workspaceError}
+                      </div>
+                    )}
+                  <div className="sync-notices">
+                    {!creating &&
+                      pendingCreations
+                        .filter(isLeadCreateRequest)
+                        .map((request) => (
+                          <div className="sync-status" key={request.id}>
+                            <p>
+                              Studio lost confirmation for this chat request in{" "}
+                              {request.cwd || "default project"}
+                              {request.project_folder
+                                ? ` (${request.project_folder})`
+                                : ""}
+                              . Retrying uses the saved request ID to check
+                              whether the chat was created. Dismissing stops
+                              checking; a chat this request created still
+                              appears in the chat list.
+                            </p>
+                            <Button
+                              onClick={() =>
+                                void newChat(
+                                  request.cwd,
+                                  request.project_folder,
+                                  request.id,
+                                )
+                              }
+                            >
+                              Retry chat request
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                try {
+                                  dismissChatCreation(creationKey, request.id);
+                                  if (creation.current?.id === request.id)
+                                    creation.current = null;
+                                  setPendingCreations(
+                                    pendingChatCreations(creationKey),
+                                  );
+                                } catch (error) {
+                                  notify(
+                                    "Cannot dismiss the saved chat request: " +
+                                      errorText(error),
+                                  );
+                                }
+                              }}
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
                         ))}
-                    </div>
+                    {draftError && !offlineSendFeedback.owns(draftError) && (
+                      <p
+                        className="sync-status"
+                        role="status"
+                        data-draft-sync-status
+                      >
+                        {draftError}
+                      </p>
+                    )}
+                    {outbox.error &&
+                      !offlineSendFeedback.owns(outbox.error) && (
+                        <p className="sync-status" role="alert">
+                          {outbox.error}
+                        </p>
+                      )}
                   </div>
-                  <small id="studio-shortcut-hint">
-                    Select the field. Press a modifier and a letter or number.
-                  </small>
-                  {sidebarShortcutError && (
-                    <small role="status">{sidebarShortcutError}</small>
-                  )}
-                </SettingsRow>
-              </section>
-            </Tabs.Panel>
-          </StudioSettingsLayout>
-          {studioPreferencesError && (
-            <p className="studio-preferences-error" role="alert">
-              {studioPreferencesError}
-            </p>
+                </div>
+              </div>
+              <UIErrorBoundary label="this conversation" resetKey={opened}>
+                {opened && projectDeleteScope.has(opened) ? (
+                  <div className="chat-empty-state" role="status">
+                    Project deletion in progress or unconfirmed.
+                  </div>
+                ) : opened && pendingConversationDelete.has(opened) ? (
+                  <div className="chat-empty-state" role="status">
+                    Deleting chat…
+                  </div>
+                ) : room?.radio ? (
+                  <RadioChat
+                    visible={!(mobileClient && sidebar)}
+                    key={room.id}
+                    room={room}
+                    data={data}
+                    getDraft={getDraft}
+                    subscribeDraft={subscribeDraft}
+                    setDraft={setDraft}
+                    refresh={refresh}
+                    notify={notify}
+                  />
+                ) : (
+                  <SelectedConversation
+                    headerToolsInMenu={menuHeaderTools}
+                    onRailToolsChange={railTools.publish}
+                    transcriptHeading={
+                      railGeometry ? conversationTitle : undefined
+                    }
+                    visible={!(mobileClient && sidebar)}
+                    accountsState={accounts}
+                    syncWorkspaceId={workspaceId}
+                    id={opened}
+                    agent={agent}
+                    lead={lead || undefined}
+                    room={room}
+                    legacy={legacy}
+                    snapshot={data}
+                    getDraft={getDraft}
+                    subscribeDraft={subscribeDraft}
+                    setDraft={setDraft}
+                    draftConflicts={conversationDraftConflicts}
+                    dismissDraft={dismissDraft}
+                    send={sendToConversation}
+                    sending={sending}
+                    schemaMismatch={schemaMismatch}
+                    outgoing={conversationOutgoing}
+                    offlineSendPending={offlineSendFeedback.pending}
+                    offlineSendDetails={offlineSendFeedback.details}
+                    onObserved={observeSends}
+                    onReadResult={readState.observeRead}
+                    onOutgoingEdit={editSend}
+                    refresh={refresh}
+                    notify={notify}
+                    limits={visibleLimits}
+                    limitsAccounts={usageAccounts}
+                    limitsLoading={!!limitsLoading[accountKey]}
+                    jumpTarget={
+                      jumpTarget?.chatId === opened ? jumpTarget : undefined
+                    }
+                    limitsAccountLabel={
+                      selectedAccount?.email || selectedAccount?.label
+                    }
+                    reloadLimits={forceReloadLimits}
+                    onSelect={open}
+                    onBranchCreated={branchCreated}
+                    onNewChat={newConversation}
+                    onChooseChat={chooseConversation}
+                  />
+                )}
+              </UIErrorBoundary>
+            </main>
+            <div
+              id="workspace-panel-slot"
+              className="workspace-panel-slot"
+              ref={setWorkspacePanelSlot}
+            />
+            <TeamPresence>
+              {narrowTeam ? (
+                <Drawer
+                  opened={teamOpen}
+                  onClose={() => setTeamOpen(false)}
+                  position="right"
+                  size="var(--studio-team-size)"
+                  padding={0}
+                  withCloseButton={false}
+                  title="Team"
+                  classNames={{ header: "sr-only" }}
+                >
+                  {teamPanel}
+                </Drawer>
+              ) : wideTeamOpen ? (
+                teamPanel
+              ) : null}
+            </TeamPresence>
+          </div>
+          {!mobileClient && studioPreferences.showTerminals && (
+            <Suspense fallback={null}>
+              <TerminalDock data={data} agent={agent || lead} notify={notify} />
+            </Suspense>
           )}
-        </div>
-      </Modal>
-      <ChatSettingsDialog
-        settingsOpen={settingsOpen}
-        accountModalOpen={accountModalOpen}
-        setSettingsOpen={setSettingsOpen}
-        agent={agent}
-        lead={lead}
-        accounts={accounts}
-        notify={notify}
-        agentModels={agentModels}
-        data={data}
-        refresh={refresh}
-        workspaceId={workspaceId}
-        creating={creating}
-        newChat={newChat}
-        project={project}
-        selectedAccount={selectedAccount}
-        setClaudeLoginKey={setClaudeLoginKey}
-      />
-      <ProjectDeleteDialog {...projectDeletion.dialog} />
-      <Modal
-        opened={!!modal}
-        {...(modal?.title === "New chat"
-          ? { padding: "var(--studio-model-dialog-padding)" }
-          : {})}
-        closeOnEscape={modal?.title !== "New chat"}
-        onClose={() => setModal(null)}
-        {...(modal ? { title: modal.title } : {})}
-        {...(modal?.title === "Project settings"
-          ? { size: modalSizes.settings }
-          : modal?.title === "New chat"
-            ? { size: "var(--studio-model-dialog-size)" }
-            : {})}
-      >
-        <div className={modal?.title === "New chat" ? undefined : "picker"}>
-          {modal?.body}
-        </div>
-      </Modal>
-      <Modal
-        opened={!!sharedCreate}
-        onClose={() => setSharedCreate(null)}
-        title="New shared chat"
-        size="md"
-      >
-        {sharedCreate && (
-          <SharedChatCreate
-            data={data}
-            accounts={accounts.data}
-            initialPath={sharedCreate.path}
-            refresh={refresh}
-            created={(id) => {
-              setSharedCreate(null);
-              open(id);
+          <SearchOverlay
+            opened={searchOpen}
+            onClose={() => setSearchOpen(false)}
+            onSelect={open}
+            navigate={(section, id) => {
+              if (id) open(id);
+              setSearchOpen(false);
+              setWorkspaceSection(section);
+              setWorkspaceOpen(true);
             }}
           />
-        )}
-      </Modal>
-      {schemaMismatch && schemaMismatchDialog}
-      {toast && !offlineSendFeedback.owns(toast) && (
-        <div id="toast" role="status">
-          {toast}
-        </div>
-      )}
-      <FilePreview target={filePreview} onClose={() => setFilePreview(null)} />
-    </StudioErrorsScope>
+          {(workspaceRendered || workspaceOpen) && (
+            <Suspense fallback={null}>
+              <Workspace
+                allRequests={data.runtime?.requests || []}
+                key={`workspace:${lead?.id || "none"}`}
+                initialSection={workspaceSection}
+                initialFocus={workspaceFocus}
+                inlineTarget={workspacePanelSlot}
+                panelLayout={rowLayout.panelLayout}
+                onPanelWidthChange={setPreferredPanelWidthRem}
+                resizeScope={workspaceId || data?.stateDir || "pending"}
+                opened={workspaceOpen}
+                onClose={() => setWorkspaceOpen(false)}
+                agent={agent || lead}
+                data={chatData!}
+                onSelect={open}
+                refresh={refresh}
+                notify={notify}
+              />
+            </Suspense>
+          )}
+          {(tasksRendered || tasksOpen) && (
+            <Suspense fallback={null}>
+              <BackgroundTasks
+                key={`background:${lead?.id || "none"}`}
+                opened={tasksOpen}
+                initialFocus={taskFocus}
+                close={() => setTasksOpen(false)}
+                afterClose={() =>
+                  requestAnimationFrame(() => {
+                    const source =
+                      taskFocus && taskFocus.leadId === lead?.id
+                        ? document.querySelector<HTMLButtonElement>(
+                            `[data-activity-id="${CSS.escape(taskFocus.id)}"]`,
+                          )
+                        : null;
+                    (source || chatActionsButton.current)?.focus();
+                  })
+                }
+                leadId={lead?.id}
+                openAgent={open}
+                refresh={refresh}
+                notify={notify}
+              />
+            </Suspense>
+          )}
+          <Accounts
+            managerOnly
+            dialogsOnly
+            onModalOpenChange={updateAccountModalOpen}
+            state={accounts}
+            onError={notify}
+            externalCommand={serverAccountCommand}
+            onExternalCommandHandled={() => setServerAccountCommand(null)}
+          />
+          <Modal
+            opened={studioSettingsOpen && !accountModalOpen}
+            transitionProps={{ duration: 0 }}
+            closeOnEscape={!accountModalOpen}
+            closeOnClickOutside={!accountModalOpen}
+            onClose={() => {
+              setStudioSettingsOpen(false);
+            }}
+            size={modalSizes.settings}
+            title="Studio settings"
+            classNames={{ body: "studio-settings-body" }}
+          >
+            <div
+              className="studio-settings-panel"
+              data-testid="studio-settings"
+            >
+              <StudioSettingsLayout
+                value={studioSettingsTab}
+                onChange={activateSettingsTab}
+              >
+                <Tabs.Panel value="accounts" pt="md">
+                  <section
+                    className="settings-group"
+                    aria-label="Studio accounts"
+                  >
+                    <ServerAccountsPanel
+                      servers={[accountServer]}
+                      accountsByServer={{ [accountServer.id]: publicAccounts }}
+                      statuses={{ [accountServer.id]: "live" }}
+                      startAccount={(_id, command) =>
+                        setServerAccountCommand(command)
+                      }
+                      accountAction={(_id, command) =>
+                        setServerAccountCommand(command)
+                      }
+                      onDiscover={() => {
+                        void post("/api/accounts/discover", {})
+                          .then(accounts.setData)
+                          .catch((failure: unknown) =>
+                            notify(errorText(failure)),
+                          );
+                      }}
+                    />
+                  </section>
+                </Tabs.Panel>
+                <Tabs.Panel value="servers" pt="md" keepMounted={false}>
+                  {serverSettings?.panel || (
+                    <ServerAccessSettings active={studioSettingsOpen} />
+                  )}
+                </Tabs.Panel>
+                <Tabs.Panel
+                  value="models"
+                  className="model-whitelist-panel"
+                  pt="md"
+                  keepMounted={false}
+                >
+                  <ModelWhitelistSettings />
+                </Tabs.Panel>
+                <Tabs.Panel value="appearance" pt="md">
+                  <div className="studio-appearance-groups">
+                    <SettingsRow label="Theme">
+                      <div
+                        className="studio-appearance-segments"
+                        role="radiogroup"
+                        aria-label="Studio theme"
+                      >
+                        {(
+                          [
+                            ["auto", "System"],
+                            ["light", "Light"],
+                            ["dark", "Dark"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <label key={value}>
+                            <input
+                              type="radio"
+                              name="studio-theme"
+                              value={value}
+                              checked={studioPreferences.theme === value}
+                              onChange={() =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  theme: value,
+                                })
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </SettingsRow>
+                    <ProviderUpdateSettings
+                      checked={studioPreferences.checkProviderUpdates}
+                      onChange={(checked) =>
+                        updateStudioPreferences({
+                          ...studioPreferences,
+                          checkProviderUpdates: checked,
+                        })
+                      }
+                    />
+                    <SettingsRow label="Show terminals">
+                      <Switch
+                        aria-label="Show terminals"
+                        checked={studioPreferences.showTerminals}
+                        onChange={(event) =>
+                          updateStudioPreferences({
+                            ...studioPreferences,
+                            showTerminals: event.currentTarget.checked,
+                          })
+                        }
+                      />
+                    </SettingsRow>
+                    <SettingsRow label="Text size">
+                      <div
+                        className="studio-appearance-segments"
+                        role="radiogroup"
+                        aria-label="Studio text size"
+                      >
+                        {(
+                          [
+                            [12, "S"],
+                            [14, "M"],
+                            [16, "L"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <label key={value}>
+                            <input
+                              type="radio"
+                              name="studio-text-size"
+                              value={value}
+                              checked={
+                                studioPreferences.typography === "custom" &&
+                                studioPreferences.sidebarFontSize === value &&
+                                studioPreferences.mainFontSize === value
+                              }
+                              onChange={() =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  typography: "custom",
+                                  sidebarFontSize: value,
+                                  mainFontSize: value,
+                                })
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </SettingsRow>
+                    <SettingsRow label="Chat width">
+                      <div
+                        className="studio-appearance-segments"
+                        role="radiogroup"
+                        aria-label="Studio chat width"
+                      >
+                        {(
+                          [
+                            [60, "Narrow"],
+                            [80, "Wide"],
+                            [100, "Full"],
+                          ] as const
+                        ).map(([value, label]) => (
+                          <label key={value}>
+                            <input
+                              type="radio"
+                              name="studio-chat-width"
+                              value={value}
+                              checked={
+                                studioPreferences.contentLayout === "custom" &&
+                                studioPreferences.contentWidth === value
+                              }
+                              onChange={() =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  contentLayout: "custom",
+                                  contentWidth: value,
+                                })
+                              }
+                            />
+                            <span>{label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </SettingsRow>
+                    <SettingsRow
+                      label="Hide old chats"
+                      help="Projects with fewer chats always show all of them."
+                    >
+                      <TextInput
+                        aria-label="Hide old chats"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        value={hideOldChatsThresholdDraft}
+                        onChange={(event) =>
+                          setHideOldChatsThresholdDraft(
+                            event.currentTarget.value,
+                          )
+                        }
+                        onBlur={() => {
+                          const value = Number(hideOldChatsThresholdDraft);
+                          if (
+                            /^\d+$/.test(hideOldChatsThresholdDraft) &&
+                            Number.isInteger(value) &&
+                            value >= MIN_HIDE_OLD_CHATS_THRESHOLD &&
+                            value <= MAX_HIDE_OLD_CHATS_THRESHOLD
+                          ) {
+                            updateStudioPreferences({
+                              ...studioPreferences,
+                              hideOldChatsThreshold: value,
+                            });
+                            setHideOldChatsThresholdDraft(String(value));
+                          } else {
+                            setHideOldChatsThresholdDraft(
+                              String(studioPreferences.hideOldChatsThreshold),
+                            );
+                          }
+                        }}
+                      />
+                    </SettingsRow>
+                    <Disclosure
+                      className="studio-appearance-more"
+                      summary="More"
+                    >
+                      <div className="studio-appearance-more-content">
+                        <section className="settings-group" aria-label="Fonts">
+                          <h2>Fonts</h2>
+                          <SettingsRow label="Text style">
+                            <NativeSelect
+                              aria-label="Studio text style"
+                              value={studioPreferences.typography}
+                              data={[
+                                {
+                                  value: "original",
+                                  label: "Default text",
+                                },
+                                { value: "custom", label: "Custom text" },
+                              ]}
+                              onChange={(event) =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  typography: event.currentTarget
+                                    .value as StudioPreferences["typography"],
+                                })
+                              }
+                            />
+                            <small>
+                              Select Custom text to change the font and text
+                              sizes.
+                            </small>
+                          </SettingsRow>
+                          <SettingsRow label="Font family">
+                            <NativeSelect
+                              aria-label="Studio font family"
+                              disabled={
+                                studioPreferences.typography === "original"
+                              }
+                              value={studioPreferences.fontFamily}
+                              data={Object.entries(fontFamilies).map(
+                                ([value, font]) => ({
+                                  value,
+                                  label: font.label,
+                                }),
+                              )}
+                              onChange={(event) =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  fontFamily: event.currentTarget
+                                    .value as StudioPreferences["fontFamily"],
+                                })
+                              }
+                            />
+                          </SettingsRow>
+                          <SettingsRow
+                            label={
+                              <span className="studio-range-label">
+                                Sidebar text{" "}
+                                <output>
+                                  {studioPreferences.sidebarFontSize}px
+                                </output>
+                              </span>
+                            }
+                          >
+                            <div className="studio-range-field">
+                              <Slider
+                                thumbLabel="Sidebar font size"
+                                disabled={
+                                  studioPreferences.typography === "original"
+                                }
+                                min={12}
+                                max={24}
+                                step={1}
+                                value={studioPreferences.sidebarFontSize}
+                                onChange={(value) =>
+                                  updateStudioPreferences({
+                                    ...studioPreferences,
+                                    sidebarFontSize: value,
+                                  })
+                                }
+                              />
+                            </div>
+                          </SettingsRow>
+                          <SettingsRow
+                            label={
+                              <span className="studio-range-label">
+                                Main text{" "}
+                                <output>
+                                  {studioPreferences.mainFontSize}px
+                                </output>
+                              </span>
+                            }
+                          >
+                            <div className="studio-range-field">
+                              <Slider
+                                thumbLabel="Main font size"
+                                disabled={
+                                  studioPreferences.typography === "original"
+                                }
+                                min={12}
+                                max={24}
+                                step={1}
+                                value={studioPreferences.mainFontSize}
+                                onChange={(value) =>
+                                  updateStudioPreferences({
+                                    ...studioPreferences,
+                                    mainFontSize: value,
+                                  })
+                                }
+                              />
+                            </div>
+                          </SettingsRow>
+                        </section>
+                        <section
+                          className="settings-group"
+                          aria-label="Chat layout"
+                        >
+                          <h2>Chat layout</h2>
+                          <SettingsRow label="Width">
+                            <NativeSelect
+                              aria-label="Chat width layout"
+                              value={studioPreferences.contentLayout}
+                              data={[
+                                { value: "original", label: "Default width" },
+                                { value: "custom", label: "Custom width" },
+                              ]}
+                              onChange={(event) =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  contentLayout: event.currentTarget
+                                    .value as StudioPreferences["contentLayout"],
+                                })
+                              }
+                            />
+                            <small>
+                              Select Custom width to change the chat width.
+                            </small>
+                          </SettingsRow>
+                          <SettingsRow
+                            label={
+                              <span className="studio-range-label">
+                                Custom width{" "}
+                                <output>
+                                  {studioPreferences.contentWidth}%
+                                </output>
+                              </span>
+                            }
+                          >
+                            <div className="studio-range-field">
+                              <Slider
+                                thumbLabel="Transcript width"
+                                disabled={
+                                  studioPreferences.contentLayout === "original"
+                                }
+                                min={60}
+                                max={100}
+                                step={1}
+                                value={studioPreferences.contentWidth}
+                                onChange={(value) =>
+                                  updateStudioPreferences({
+                                    ...studioPreferences,
+                                    contentWidth: value,
+                                  })
+                                }
+                              />
+                              <small>
+                                Sets the reading width of messages. The composer
+                                keeps its width. Narrow screens use the full
+                                width.
+                              </small>
+                            </div>
+                          </SettingsRow>
+                        </section>
+                        <section
+                          className="settings-group"
+                          aria-label="Messages"
+                        >
+                          <h2>Messages</h2>
+                          <label className="settings-field studio-preference-toggle">
+                            <span className="settings-label">
+                              Show message avatars
+                            </span>
+                            <input
+                              aria-label="Show message avatars"
+                              type="checkbox"
+                              checked={studioPreferences.showMessageAvatars}
+                              onChange={(event) =>
+                                updateStudioPreferences({
+                                  ...studioPreferences,
+                                  showMessageAvatars:
+                                    event.currentTarget.checked,
+                                })
+                              }
+                            />
+                          </label>
+                        </section>
+                        <section
+                          className="settings-group"
+                          aria-label="Maintenance"
+                        >
+                          <h2>Maintenance</h2>
+                          <Button
+                            loading={removingAllSending}
+                            onClick={async () => {
+                              if (removingAllSending) return;
+                              setRemovingAllSending(true);
+                              try {
+                                const count = await removeAllSendingMessages(
+                                  { stateDir: data.stateDir, workspaceId },
+                                  data,
+                                  outgoingMessages,
+                                );
+                                notify(
+                                  `Removed ${count} sending messages from this device. Work already sent continues.`,
+                                );
+                              } catch (error) {
+                                notify(errorText(error));
+                              } finally {
+                                setRemovingAllSending(false);
+                              }
+                            }}
+                          >
+                            Remove all sending messages
+                          </Button>
+                        </section>
+                      </div>
+                    </Disclosure>
+                  </div>
+                </Tabs.Panel>
+                <Tabs.Panel value="federation" pt="md">
+                  {lead?.isLead && (
+                    <FederationSettings
+                      active={studioSettingsOpen}
+                      leadId={lead.id}
+                      agents={data?.runtime?.agents || []}
+                      refresh={refresh}
+                      notify={notify}
+                    />
+                  )}
+                </Tabs.Panel>
+                <Tabs.Panel value="agents" pt="md">
+                  <OrchestrationSettings
+                    active={
+                      studioSettingsOpen && studioSettingsTab === "agents"
+                    }
+                  />
+                </Tabs.Panel>
+                <Tabs.Panel value="layr-worktrees" pt="md">
+                  <LayrWorktreesSettings active={studioSettingsOpen} />
+                </Tabs.Panel>
+                <Tabs.Panel value="phone-alerts" pt="md" keepMounted={false}>
+                  <SignInPushSettings active={studioSettingsOpen} />
+                </Tabs.Panel>
+                <Tabs.Panel value="hotkeys" pt="md">
+                  <section
+                    className="settings-group"
+                    aria-label="Sidebar shortcut"
+                  >
+                    <h2>Keyboard shortcut</h2>
+                    <SettingsRow label="Toggle sidebar">
+                      <div className="studio-shortcut-control">
+                        <TextInput
+                          className="studio-shortcut-input"
+                          aria-describedby="studio-shortcut-hint"
+                          aria-label="Toggle sidebar shortcut"
+                          readOnly
+                          value={formatSidebarShortcut(
+                            studioPreferences.sidebarShortcut,
+                          )}
+                          onKeyDown={(event) => {
+                            if (event.key === "Tab" || event.key === "Escape") {
+                              setSidebarShortcutError("");
+                              return;
+                            }
+                            if (
+                              ["Control", "Meta", "Alt", "Shift"].includes(
+                                event.key,
+                              )
+                            )
+                              return;
+                            if (event.ctrlKey || event.metaKey)
+                              event.stopPropagation();
+                            event.preventDefault();
+                            const mods = [
+                              event.metaKey ? "Meta" : "",
+                              event.ctrlKey ? "Control" : "",
+                              event.altKey ? "Alt" : "",
+                              event.shiftKey ? "Shift" : "",
+                            ].filter(Boolean);
+                            const candidate = [...mods, event.key].join("+");
+                            if (!parseSidebarShortcut(candidate)) {
+                              setSidebarShortcutError(
+                                "Choose a letter or number with Ctrl or ⌘. Browser-reserved shortcuts cannot be used.",
+                              );
+                              return;
+                            }
+                            setSidebarShortcutError("");
+                            updateStudioPreferences({
+                              ...studioPreferences,
+                              sidebarShortcut: candidate,
+                            });
+                          }}
+                          onFocus={() =>
+                            setSidebarShortcutError(
+                              "Press a modifier and a letter or number to set the shortcut.",
+                            )
+                          }
+                          onBlur={() => setSidebarShortcutError("")}
+                        />
+                        <div
+                          className="studio-shortcut-tokens"
+                          aria-hidden="true"
+                        >
+                          {formatSidebarShortcut(
+                            studioPreferences.sidebarShortcut,
+                          )
+                            .split("+")
+                            .map((key, index) => (
+                              <kbd key={`${key}:${index}`}>{key}</kbd>
+                            ))}
+                        </div>
+                      </div>
+                      <small id="studio-shortcut-hint">
+                        Select the field. Press a modifier and a letter or
+                        number.
+                      </small>
+                      {sidebarShortcutError && (
+                        <small role="status">{sidebarShortcutError}</small>
+                      )}
+                    </SettingsRow>
+                  </section>
+                </Tabs.Panel>
+              </StudioSettingsLayout>
+              {studioPreferencesError && (
+                <p className="studio-preferences-error" role="alert">
+                  {studioPreferencesError}
+                </p>
+              )}
+            </div>
+          </Modal>
+          <ChatSettingsDialog
+            settingsOpen={settingsOpen}
+            accountModalOpen={accountModalOpen}
+            setSettingsOpen={setSettingsOpen}
+            agent={agent}
+            lead={lead}
+            accounts={accounts}
+            notify={notify}
+            agentModels={agentModels}
+            data={data}
+            refresh={refresh}
+            workspaceId={workspaceId}
+            creating={creating}
+            newChat={newChat}
+            project={project}
+            selectedAccount={selectedAccount}
+            setClaudeLoginKey={setClaudeLoginKey}
+          />
+          <ProjectDeleteDialog {...projectDeletion.dialog} />
+          <Modal
+            opened={!!modal}
+            {...(modal?.title === "New chat"
+              ? { padding: "var(--studio-model-dialog-padding)" }
+              : {})}
+            closeOnEscape={modal?.title !== "New chat"}
+            onClose={() => setModal(null)}
+            {...(modal ? { title: modal.title } : {})}
+            {...(modal?.title === "Project settings"
+              ? { size: modalSizes.settings }
+              : modal?.title === "New chat"
+                ? { size: "var(--studio-model-dialog-size)" }
+                : {})}
+          >
+            <div className={modal?.title === "New chat" ? undefined : "picker"}>
+              {modal?.body}
+            </div>
+          </Modal>
+          <Modal
+            opened={!!sharedCreate}
+            onClose={() => setSharedCreate(null)}
+            title="New shared chat"
+            size="md"
+          >
+            {sharedCreate && (
+              <SharedChatCreate
+                data={data}
+                accounts={accounts.data}
+                initialPath={sharedCreate.path}
+                refresh={refresh}
+                created={(id) => {
+                  setSharedCreate(null);
+                  open(id);
+                }}
+              />
+            )}
+          </Modal>
+          {schemaMismatch && schemaMismatchDialog}
+          {toast && !offlineSendFeedback.owns(toast) && (
+            <div id="toast" role="status">
+              {toast}
+            </div>
+          )}
+          <FilePreview
+            target={filePreview}
+            onClose={() => setFilePreview(null)}
+          />
+        </StudioErrorsScope>
+      </TeamProvider>
+    </ConversationProvider>
   );
-}
+});

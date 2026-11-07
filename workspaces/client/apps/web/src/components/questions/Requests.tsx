@@ -1,3 +1,6 @@
+import type { ComponentProps } from "react";
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "../agents/state.ts";
 import { useUnsentText } from "../../unsent/useUnsentText";
 import { reportUnsentFailure, unsentStore } from "../../unsent/store";
 import { serverViewId } from "../../servers/environment";
@@ -328,6 +331,7 @@ export function AnswerForm({
 
 export function RequestCard({
   request: r,
+  ownerDetail,
   messageId,
   onAnswerOpen,
   onAnswerPosition,
@@ -339,6 +343,7 @@ export function RequestCard({
 }: Omit<Props, "requests" | "allRequests"> & {
   request: RequestDto;
   messageId?: string;
+  ownerDetail?: ReturnType<typeof useAgentDetail> | null;
 }) {
   const { post: apiPost, command: commands } = useServerApi();
   const services = useServerServices();
@@ -346,13 +351,15 @@ export function RequestCard({
 
   const draftKey = answerKey(scope, r);
   const owner = agents.find((a) => a.id === r.agent);
+  const unavailable = !!owner && ownerDetail === null;
   const params = approvalParams(r);
   const approvalDetails = requestApprovalDetails(r);
   const browserOpen = browserOpenDetails(r);
   const kind = r.request.kind;
   const requestThread = approvalThreadId(r);
   const blocked =
-    !!nativeThreadError(owner) && requestThread === owner?.threadId;
+    !!nativeThreadError(owner, ownerDetail || owner) &&
+    requestThread === owner?.threadId;
   const [requestError, setRequestError] = useState("");
   const [open, setOpen] = useState(false),
     [sending, setSending] = useState(false);
@@ -406,6 +413,10 @@ export function RequestCard({
   };
   /** Send one answer; true when the server accepted it. */
   const post = async (body: Json, submitted?: string): Promise<boolean> => {
+    if (unavailable) {
+      notify("Chat details are not available yet.");
+      return false;
+    }
     if (blocked) {
       notify("This chat stopped as a precaution. Open another chat.");
       return false;
@@ -535,7 +546,7 @@ export function RequestCard({
               new Map(agents.map((agent) => [agent.id, agent.name || ""]))
             }
             serverName={services?.owner.alias || services?.owner.label}
-            sending={sending}
+            sending={sending || unavailable}
             error={requestError}
             post={post}
             notify={notify}
@@ -643,7 +654,7 @@ export function RequestCard({
             <Button
               variant="subtle"
               className="request-delete"
-              disabled={sending}
+              disabled={sending || unavailable}
               onClick={() => void defer(true)}
             >
               Delete question
@@ -658,7 +669,7 @@ export function RequestCard({
               {!open && (
                 <Button
                   variant="subtle"
-                  disabled={sending}
+                  disabled={sending || unavailable}
                   aria-label={isDeferred(r) ? "Restore" : "Defer"}
                   onClick={() => void defer()}
                 >
@@ -670,7 +681,7 @@ export function RequestCard({
                 data-answer={r.id}
                 variant={open ? "subtle" : "filled"}
                 {...(open ? { color: "gray" } : {})}
-                disabled={sending}
+                disabled={sending || unavailable}
                 aria-expanded={open}
                 aria-controls={`answer-${r.id}`}
                 onClick={() => {
@@ -684,7 +695,7 @@ export function RequestCard({
           ) : approval ? (
             <>
               <Button
-                disabled={sending}
+                disabled={sending || unavailable}
                 onClick={() =>
                   void post({
                     decision: QuestionDecision.decline,
@@ -695,7 +706,7 @@ export function RequestCard({
               </Button>
               <Button
                 variant="filled"
-                disabled={sending}
+                disabled={sending || unavailable}
                 onClick={() =>
                   void post({
                     decision: QuestionDecision.accept,
@@ -722,7 +733,7 @@ export function RequestCard({
           <AnswerForm
             request={r}
             draftKey={draftKey}
-            sending={sending}
+            sending={sending || unavailable}
             post={post}
             close={close}
             notify={notify}
@@ -770,7 +781,7 @@ export default function Requests({
         {items
           .filter((r) => !isDeferred(r))
           .map((r) => (
-            <RequestCard
+            <LiveRequestCard
               key={answerKey(props.scope, r)}
               request={r}
               {...props}
@@ -782,7 +793,7 @@ export default function Requests({
               Later <span>{deferred.length}</span>
             </summary>
             {deferred.map((r) => (
-              <RequestCard
+              <LiveRequestCard
                 key={answerKey(props.scope, r)}
                 request={r}
                 {...props}
@@ -812,3 +823,17 @@ export default function Requests({
     </div>
   );
 }
+
+const ObservedRequestCard = observer(RequestCard);
+export const LiveRequestCard = observer(function LiveRequestCard(
+  props: ComponentProps<typeof RequestCard>,
+) {
+  const owner = props.agents.find((agent) => agent.id === props.request.agent);
+  const detail = useAgentDetail(owner);
+  return (
+    <ObservedRequestCard
+      {...props}
+      ownerDetail={owner ? (detail ?? null) : undefined}
+    />
+  );
+});

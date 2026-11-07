@@ -1,56 +1,96 @@
-import { AgentRole, AgentSource, AgentStatus } from "../../generated/api";
+import { AgentSource, AgentStatus, AgentRole } from "../../generated/api.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
+import { useMemo } from "react";
 import { expect, fn, userEvent, within } from "storybook/test";
 import WorkerCard from "./WorkerCard";
+import { observableFixture } from "../observableFixture.tsx";
+import { TeamProvider } from "./TeamPanelContext.tsx";
+import { useTeamView } from "./state.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import type { Agent } from "../../types";
 
-const agent = {
+const agent: Agent = {
   id: "worker-1",
+  rootId: "lead",
+  parentId: "lead",
   name: "Transcript worker",
-  source: AgentSource.managed,
-  status: AgentStatus.running,
+  source: AgentSource["managed"],
+  status: AgentStatus["running"],
+  operationalStatus: { reason: "working" },
   model: "gpt-6",
   created: 1,
-  role: AgentRole.worker,
+  role: AgentRole["worker"],
+  inFlight: true,
   overview: {
     task: "Extract reusable transcript presentation components.",
     result: "The story renders the same typed card used by the team panel.",
   },
-} satisfies Agent;
-
-const meta = {
-  title: "Agents/Worker card",
-  component: WorkerCard,
-} satisfies Meta<typeof WorkerCard>;
-
+};
+const actions = { open: fn(), previewResult: fn(), remove: fn() };
+const noop = () => {};
+function Card({ agent, selected }: { agent: SidebarAgent; selected: boolean }) {
+  const view = useTeamView("lead");
+  return (
+    <TeamProvider
+      value={{
+        ...actions,
+        view,
+        retainedWorktrees: [],
+        hasTeam: () => true,
+        opened: selected ? agent.id : null,
+        workerQuery: "",
+        workerFilter: "all",
+        completedOpen: false,
+        setWorkerQuery: noop,
+        setWorkerFilter: noop,
+        setCompletedOpen: noop,
+        setTeamOpen: noop,
+        setWideTeamOpen: noop,
+      }}
+    >
+      <WorkerCard agent={agent} />
+    </TeamProvider>
+  );
+}
+function Fixture({
+  selected = false,
+  needsAnswer = false,
+}: {
+  selected?: boolean;
+  needsAnswer?: boolean;
+}) {
+  const fixture = useMemo(
+    () =>
+      observableFixture([
+        {
+          ...agent,
+          operationalStatus: needsAnswer
+            ? { reason: "needs_input", wait: null }
+            : { reason: "working" },
+        },
+      ]),
+    [needsAnswer],
+  );
+  const model = fixture.mirror.current.agents.get(agent.id)!;
+  return (
+    <fixture.Provider>
+      <Card agent={model} selected={selected} />
+    </fixture.Provider>
+  );
+}
+const meta = { title: "Agents/Worker card", component: Fixture } satisfies Meta<
+  typeof Fixture
+>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-
 export const Working: Story = {
-  args: {
-    agent,
-    selected: false,
-    awaitingAnswer: false,
-    deferred: false,
-    open: fn(),
-    previewResult: fn(),
-  },
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     await userEvent.click(
       within(canvasElement).getByRole("button", { name: /Transcript worker/ }),
     );
-    await expect(args.open).toHaveBeenCalledOnce();
+    await expect(actions.open).toHaveBeenCalledOnce();
   },
 };
-
 export const SelectedNeedsAnswer: Story = {
-  args: {
-    agent,
-    selected: true,
-    awaitingAnswer: true,
-    deferred: false,
-    open: fn(),
-    previewResult: fn(),
-    remove: fn(),
-  },
+  args: { selected: true, needsAnswer: true },
 };

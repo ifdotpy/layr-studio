@@ -1,4 +1,10 @@
 import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../observableFixture.tsx";
+import { ConversationProvider } from "../conversation/navigation.ts";
+import { useMemo } from "react";
+import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
 } from "../../generated/api.ts";
@@ -14,9 +20,33 @@ const lead = {
   status: GeneratedApiAgentStatus.running,
 } as Agent;
 
+const navigation = conversationActionsFixture(fn());
 const meta = {
   title: "Shell/Conversation title",
   component: ConversationTitle,
+  decorators: [
+    (Story, context) => {
+      const fixture = useMemo(
+        () =>
+          observableFixture([
+            {
+              ...lead,
+              name: context.args.title,
+              isLead: context.name !== "Agent Conversation",
+              rootId: "parent",
+            },
+          ]),
+        [context.args.title, context.name],
+      );
+      return (
+        <fixture.Provider>
+          <ConversationProvider value={navigation}>
+            <Story />
+          </ConversationProvider>
+        </fixture.Provider>
+      );
+    },
+  ],
 } satisfies Meta<typeof ConversationTitle>;
 
 export default meta;
@@ -25,7 +55,7 @@ type Story = StoryObj<typeof meta>;
 export const ActiveConversation: Story = {
   args: {
     title: "Refactor the conversation view",
-    agent: lead,
+    agentId: lead.id,
     serverAlias: "MAC",
   },
   play: async ({ canvasElement }) => {
@@ -42,13 +72,12 @@ export const AgentConversation: Story = {
   args: {
     ...ActiveConversation.args,
     title: "Build transcript components",
-    onBack: fn(),
   },
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     await userEvent.click(
       within(canvasElement).getByRole("button", { name: "Back to main agent" }),
     );
-    await expect(args.onBack).toHaveBeenCalledOnce();
+    await expect(navigation.open).toHaveBeenCalledOnce();
   },
 };
 
@@ -71,12 +100,6 @@ export const OfflineServer: Story = {
 export const WaitingConversation: Story = {
   args: {
     ...ActiveConversation.args,
-    agent: {
-      ...lead,
-      status: "waiting",
-      inFlight: false,
-      parkedEvent: "monitor_exit",
-    },
   },
   play: async ({ canvasElement }) => {
     await expect(canvasElement).not.toHaveTextContent(

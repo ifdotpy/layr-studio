@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "./observableFixture.tsx";
 import {
   ProviderKind as GeneratedApiProviderKind,
   AccountStatus as GeneratedApiAccountStatus,
@@ -16,6 +17,13 @@ import { accountLimits } from "../usage/accountUsage";
 import { theme } from "../theme";
 
 import { accountLimitFixtures } from "./AccountLimits.fixtures";
+
+const usageAgent = {
+  id: "fixture",
+  accountKey: "codex-main",
+  provider: GeneratedApiProviderKind.codex,
+  contextUsage: { tokens: 12000, window: 128000 },
+} as Agent;
 
 function AccountLimitsFixture({
   settings = false,
@@ -46,92 +54,87 @@ function AccountLimitsFixture({
   return (
     <MantineProvider theme={theme} forceColorScheme={light ? "light" : "dark"}>
       <ServerServicesProvider services={services}>
-        {settings ? (
-          <Accordion
-            keepMounted={false}
-            transitionDuration={0}
-            chevronPosition="left"
-            className="accounts-grid"
-            style={{ maxWidth: "var(--studio-form-max)" }}
-          >
-            {accountLimitFixtures.map((item) => (
-              <Accordion.Item
-                className="account-row"
-                key={item.key}
-                value={item.key}
-              >
-                <div className="account-card-heading">
-                  <Accordion.Control
-                    aria-label={`Limit details for ${item.email || item.label}`}
-                  >
-                    <span className="account-identity">
-                      <span
-                        role="img"
-                        aria-label={
-                          item.provider === GeneratedApiProviderKind.claude
-                            ? "Claude"
-                            : "Codex"
-                        }
-                      >
-                        <ProviderMark provider={item.provider || "codex"} />
+        <AgentModelsFixture agents={[usageAgent]}>
+          {settings ? (
+            <Accordion
+              keepMounted={false}
+              transitionDuration={0}
+              chevronPosition="left"
+              className="accounts-grid"
+              style={{ maxWidth: "var(--studio-form-max)" }}
+            >
+              {accountLimitFixtures.map((item) => (
+                <Accordion.Item
+                  className="account-row"
+                  key={item.key}
+                  value={item.key}
+                >
+                  <div className="account-card-heading">
+                    <Accordion.Control
+                      aria-label={`Limit details for ${item.email || item.label}`}
+                    >
+                      <span className="account-identity">
+                        <span
+                          role="img"
+                          aria-label={
+                            item.provider === GeneratedApiProviderKind.claude
+                              ? "Claude"
+                              : "Codex"
+                          }
+                        >
+                          <ProviderMark provider={item.provider || "codex"} />
+                        </span>
+                        <strong>{item.label}</strong>
                       </span>
-                      <strong>{item.label}</strong>
+                    </Accordion.Control>
+                    <span className="account-plan">
+                      {item.provider === GeneratedApiProviderKind.claude
+                        ? "Max"
+                        : "Pro"}
                     </span>
-                  </Accordion.Control>
-                  <span className="account-plan">
-                    {item.provider === GeneratedApiProviderKind.claude
-                      ? "Max"
-                      : "Pro"}
-                  </span>
-                </div>
-                <AccountCapacityView
-                  card
-                  account={{
-                    status: GeneratedApiAccountStatus.ready,
-                    label: item.label,
-                    email: item.email,
-                  }}
-                  view={accountLimitView(
-                    {
-                      id: item.key,
-                      accountId: item.accountId,
+                  </div>
+                  <AccountCapacityView
+                    card
+                    account={{
                       status: GeneratedApiAccountStatus.ready,
-                    },
-                    accountLimits(item.limits, item.key, item.accountId),
-                  )}
-                  extraDetails={<small>{item.email}</small>}
-                />
-              </Accordion.Item>
-            ))}
-          </Accordion>
-        ) : (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "end",
-              containerName: "conversation-footer",
-              containerType: "inline-size",
-              height: "calc(100dvh - var(--mantine-spacing-xl))",
-            }}
-          >
-            <Usage
-              agent={
-                {
-                  id: "fixture",
-                  accountKey: "codex-main",
-                  provider: GeneratedApiProviderKind.codex,
-                  contextUsage: { tokens: 12000, window: 128000 },
-                } as Agent
-              }
-              stateDir="limits-fixture"
-              limits={firstAccountFixture.limits}
-              accounts={accountLimitFixtures}
-              reload={() => {}}
-              opened
-              onChange={() => {}}
-            />
-          </div>
-        )}
+                      label: item.label,
+                      email: item.email,
+                    }}
+                    view={accountLimitView(
+                      {
+                        id: item.key,
+                        accountId: item.accountId,
+                        status: GeneratedApiAccountStatus.ready,
+                      },
+                      accountLimits(item.limits, item.key, item.accountId),
+                    )}
+                    extraDetails={<small>{item.email}</small>}
+                  />
+                </Accordion.Item>
+              ))}
+            </Accordion>
+          ) : (
+            <div
+              style={{
+                display: "flex",
+                alignItems: "end",
+                containerName: "conversation-footer",
+                containerType: "inline-size",
+                height: "calc(100dvh - var(--mantine-spacing-xl))",
+              }}
+            >
+              <Usage
+                agent={usageAgent}
+                stateDir="limits-fixture"
+                limits={firstAccountFixture.limits}
+                accounts={accountLimitFixtures}
+                reload={() => {}}
+                opened
+                onChange={() => {}}
+              />
+            </div>
+          )}
+        </AgentModelsFixture>
       </ServerServicesProvider>
     </MantineProvider>
   );

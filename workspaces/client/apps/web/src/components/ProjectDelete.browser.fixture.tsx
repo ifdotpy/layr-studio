@@ -1,3 +1,7 @@
+import { SidebarCommandsProvider } from "./sidebar/commands.ts";
+import { CombinedSidebarServicesProvider } from "../servers/combinedSidebarServices.ts";
+import { observableFixture } from "./observableFixture.tsx";
+const injectedStore = observableFixture();
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import {
   createMergedSidebarSelector,
@@ -209,60 +213,82 @@ function Fixture() {
     React.Fragment,
     null,
     logical
-      ? React.createElement(CombinedServerSidebar, {
-          model,
-          backends: new Map([["owner", backend]]),
-          online: () => true,
-          refreshOwner: async () => {
-            throw new Error("Unexpected refresh");
-          },
-          executeCommand: async () => {
-            throw new Error("Unexpected command");
-          },
-          aliases: {},
-          current: "owner",
-          navigation: {},
-          send: (owner, command) => {
-            window.owner = owner;
-            if (command.action === "delete-project")
-              deletion.open(command.projectId);
-          },
-          applyNavigation: () => {},
-          mobile: true,
-          hidden: false,
-          close: () => {},
-          settings: () => {},
-          search: () => {},
-          notify: (message) => {
-            window.notice = message;
-          },
-          notice: "",
-          hideOldChatsThreshold: 20,
-        })
-      : React.createElement(Sidebar, {
-          services,
-          data,
-          opened: "lead",
-          collections,
-          markingRead: new Set<string>(),
-          creating: false,
-          mobile: true,
-          settings: () => {},
-          onSearch: () => {},
-          close: () => {},
-          open: () => {},
-          newChat: () => {},
-          addProject: () => {},
-          changeProject: () => {},
-          projectAccount: () => {},
-          rename: async () => {},
-          remove: () => {},
-          markUnread: () => {},
-          deleteProject: (path: string) => deletion.open(path),
-          refresh: async () => {
-            throw new Error("Unexpected refresh");
-          },
-        }),
+      ? React.createElement(
+          injectedStore.Provider,
+          {},
+          React.createElement(
+            CombinedSidebarServicesProvider,
+            {
+              value: {
+                backends: new Map([["owner", backend]]),
+                online: () => true,
+                refreshOwner: async () => {
+                  throw new Error("Unexpected refresh");
+                },
+                executeCommand: async () => {
+                  throw new Error("Unexpected command");
+                },
+                aliases: {},
+                send: (owner, command) => {
+                  window.owner = owner;
+                  if (command.action === "delete-project")
+                    deletion.open(command.projectId);
+                },
+                applyNavigation: () => {},
+                settings: () => {},
+                search: () => {},
+                notify: (message) => {
+                  window.notice = message;
+                },
+              },
+            },
+            React.createElement(CombinedServerSidebar, {
+              model,
+              current: "owner",
+              navigation: {},
+              mobile: true,
+              hidden: false,
+              close: () => {},
+              notice: "",
+              hideOldChatsThreshold: 20,
+            }),
+          ),
+        )
+      : React.createElement(
+          injectedStore.Provider,
+          {},
+          React.createElement(
+            SidebarCommandsProvider,
+            {
+              value: {
+                settings: () => {},
+                onSearch: () => {},
+                open: () => {},
+                newChat: () => {},
+                addProject: () => {},
+                changeProject: () => {},
+                projectAccount: () => {},
+                rename: async () => {},
+                remove: () => {},
+                markUnread: () => {},
+                deleteProject: (path: string) => deletion.open(path),
+                refresh: async () => {
+                  throw new Error("Unexpected refresh");
+                },
+              },
+            },
+            React.createElement(Sidebar, {
+              services,
+              data,
+              opened: "lead",
+              collections,
+              markingRead: new Set<string>(),
+              creating: false,
+              mobile: true,
+              close: () => {},
+            }),
+          ),
+        ),
     React.createElement(ProjectDeleteDialog, deletion.dialog),
   );
 }

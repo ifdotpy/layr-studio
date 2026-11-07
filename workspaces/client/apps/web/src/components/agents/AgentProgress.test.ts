@@ -7,7 +7,7 @@ import {
   progressElapsed,
   commandWaitLabel,
 } from "./AgentProgress";
-import { workerState } from "./WorkerOverview";
+import { teamDispatchGroups } from "./teamModel.ts";
 
 describe("agent-list progress", () => {
   it("renders all command stages, elapsed times and last output without a chat", () => {
@@ -58,14 +58,17 @@ describe("agent-list progress", () => {
     );
     expect(html).toContain("Waiting for lead · task task-14 not submitted");
     expect(
-      workerState(
-        { id: "worker", status: AgentStatus.completed, stall },
-        new Set(),
-      ),
-    ).toBe("stalled");
+      teamDispatchGroups(
+        [{ id: "worker", status: AgentStatus.completed, stall }],
+        new Map(),
+      ).groups.flatMap((group) => group.workers).length,
+    ).toBe(1);
     expect(
-      workerState({ id: "worker", status: AgentStatus.completed }, new Set()),
-    ).toBe("completed");
+      teamDispatchGroups(
+        [{ id: "worker", status: AgentStatus.completed }],
+        new Map(),
+      ).completed.length,
+    ).toBe(1);
     expect(
       renderToStaticMarkup(createElement(AgentProgress, { agent: {} })),
     ).toBe("");

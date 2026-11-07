@@ -1,10 +1,19 @@
+import { observableFixture } from "../observableFixture.tsx";
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+vi.mock("./state.ts", async (original) => ({
+  ...(await original<typeof import("./state.ts")>()),
+  useAgentDetail: <T>(agent: T) => agent,
+}));
 import {
   AccountStatus,
   AgentSource,
   AgentStatus,
   ProviderKind,
 } from "../../generated/api";
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { beforeEach, expect, test, vi } from "vitest";
@@ -14,6 +23,16 @@ import { INHERITED_MODEL } from "../models/modelOption";
 import type { AgentSetupPickerProps } from "./AgentSetupPicker";
 import type { Agent } from "../../types";
 
+const generatedFixtures: ReturnType<typeof observableFixture>[] = [];
+function settingsInput(agent: Agent) {
+  const f = observableFixture([agent]);
+  generatedFixtures.push(f);
+  return {
+    kind: "agent" as const,
+    summary: f.mirror.current.agents.get(agent.id)!,
+    detail: f.details.get(agent.id)!.current,
+  };
+}
 const choices = vi.hoisted(() => ({
   pickers: [] as AgentSetupPickerProps[],
   states: [] as unknown[],
@@ -43,7 +62,7 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
         createElement(ExecutionSettings, {
           presentation: "panel",
           initialRole: "review",
-          agent,
+          input: settingsInput(agent),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
           refresh: async () => {},
         }),
@@ -84,7 +103,7 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
         createElement(ExecutionSettings, {
           settingsRow: true,
           initialRole: "review",
-          agent,
+          input: settingsInput(agent),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
           refresh: async () => {},
         }),
@@ -105,14 +124,14 @@ test("worker settings retain the same-as-main model option", () => {
       createElement(ExecutionSettings, {
         presentation: "panel",
         initialRole: "worker",
-        agent: {
+        input: settingsInput({
           id: "worker-picker",
           isLead: true,
           provider: ProviderKind.codex,
           source: AgentSource.managed,
           model: "gpt-6.1-sol",
           status: AgentStatus.idle,
-        },
+        }),
         catalog: { models: [], loading: false, error: "", retry: () => {} },
         refresh: async () => {},
       }),
@@ -134,7 +153,7 @@ test("shows the server reason alongside an unavailable account", () => {
       createElement(ExecutionSettings, {
         presentation: "panel",
         initialRole: "orchestrator",
-        agent: {
+        input: settingsInput({
           id: "lead",
           isLead: true,
           source: AgentSource.managed,
@@ -150,7 +169,7 @@ test("shows the server reason alongside an unavailable account", () => {
               },
             },
           ],
-        },
+        }),
         accounts: [
           {
             id: "target",
@@ -178,14 +197,14 @@ test("the agent settings chooser shows exclusions even without transfer destinat
       createElement(ExecutionSettings, {
         presentation: "panel",
         initialRole: "orchestrator",
-        agent: {
+        input: settingsInput({
           id: "lead",
           isLead: true,
           source: AgentSource.managed,
           status: AgentStatus.idle,
           provider: ProviderKind.codex,
           accountKey: "lead",
-        },
+        }),
         accounts: [
           {
             id: "lead",
@@ -230,14 +249,14 @@ test.each(["worker", "review"] as const)(
         createElement(ExecutionSettings, {
           presentation: "panel",
           initialRole: role,
-          agent: {
+          input: settingsInput({
             id: "lead",
             isLead: true,
             source: AgentSource.managed,
             status: AgentStatus.idle,
             provider: ProviderKind.codex,
             accountKey: "lead",
-          },
+          }),
           accounts: [],
           workerExcludedAccountKeys: ["worker-only"],
           reviewerExcludedAccountKeys: ["review-only"],
@@ -339,6 +358,7 @@ vi.mock("../../servers/ServerServicesContext", async (load) => ({
 }));
 
 beforeEach(() => {
+  for (const f of generatedFixtures.splice(0)) f.store.dispose();
   choices.pickers.length = 0;
   choices.states.length = 0;
   choices.terminal = undefined;
@@ -371,7 +391,7 @@ for (const initialRole of ["orchestrator", "worker", "review"] as const) {
           createElement(ExecutionSettings, {
             presentation: "panel",
             initialRole,
-            agent,
+            input: settingsInput(agent),
             catalog: {
               models: [
                 {
@@ -406,14 +426,14 @@ for (const isLead of [true, false]) {
         createElement(ExecutionSettings, {
           presentation: "panel",
           settingsRow: true,
-          agent: {
+          input: settingsInput({
             id: "picker-test",
             name: "Test",
             isLead,
             source: AgentSource.managed,
             model: "gpt-6-astra",
             status: AgentStatus.idle,
-          },
+          }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
           refresh: async () => {},
         }),
@@ -435,14 +455,14 @@ for (const initialRole of ["orchestrator", "review"] as const) {
         createElement(ExecutionSettings, {
           presentation: "panel",
           initialRole,
-          agent: {
+          input: settingsInput({
             id: "worker",
             name: "Worker",
             isLead: false,
             source: AgentSource.managed,
             model: "gpt-6-luna",
             status: AgentStatus.idle,
-          },
+          }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
           refresh: async () => {},
         }),
@@ -506,7 +526,7 @@ function futureWorkerChoice() {
       daybreakEnabled: false,
       delegationDepth: 1,
     },
-  } satisfies ComponentProps<typeof ExecutionSettings>["agent"];
+  } satisfies Agent;
   const children = [
     { id: "existing-child", rootId: agent.id, accountKey: "old-codex" },
   ];
@@ -532,7 +552,7 @@ function futureWorkerChoice() {
         presentation: "panel",
         initialRole: "worker",
         settingsRow: true,
-        agent,
+        input: settingsInput(agent),
         team: children,
         accounts: [
           {
@@ -644,7 +664,7 @@ for (const provider of ["claude", "future"] as const) {
         createElement(ExecutionSettings, {
           presentation: "panel",
           initialRole: "orchestrator",
-          agent: {
+          input: settingsInput({
             id: "capability-gate",
             name: "Lead",
             isLead: true,
@@ -653,7 +673,7 @@ for (const provider of ["claude", "future"] as const) {
             source: AgentSource.managed,
             model: "gpt-6-astra",
             status: AgentStatus.idle,
-          },
+          }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
           refresh: async () => {},
         }),

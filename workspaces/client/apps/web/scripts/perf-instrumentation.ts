@@ -53,8 +53,8 @@ export function perfInstrumentation(apiOnly = false): Plugin {
           source;
         return replace(
           source,
-          "{isServerView ? <App /> : <MultiServerApp />}",
-          "{isServerView ? <><PerformanceReporting api={serverViewApi} /><App /></> : <MultiServerApp />}",
+          "<ServerViewStoreProvider>",
+          "<ServerViewStoreProvider><PerformanceReporting api={serverViewApi} />",
           id,
         );
       }

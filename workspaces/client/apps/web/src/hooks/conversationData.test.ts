@@ -1,14 +1,18 @@
+import { autorun, computed } from "mobx";
+
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
+import { createWaitingChildren } from "../components/agents/waitDetails.ts";
 import { AgentSource, AgentStatus } from "../generated/api";
-import { describe, expect, it } from "vitest";
-import {
-  ChatWaitSource,
-  createConversationDataSelector,
-} from "./conversationData";
+import { afterEach, describe, expect, it } from "vitest";
+import { observableFixture } from "../components/observableFixture.tsx";
+import { createAgentCatalog } from "../components/agents/state.ts";
 import { createChatSnapshotSelector } from "./snapshotSelection";
 import { snapshotProjectionStatusReducer } from "./snapshotProjectionStatus";
 import type { Agent, Snapshot } from "../types";
 
 const WORKERS = 512;
+const stops: Array<() => void> = [];
+afterEach(() => stops.splice(0).forEach((stop) => stop()));
 
 function fixture(workerCount = WORKERS): Snapshot {
   const lead: Agent = {
@@ -74,14 +78,39 @@ function changeWorker(
 // Exercise the selectors used by App; identity changes are not React render counts.
 function pipeline() {
   const chat = createChatSnapshotSelector(true);
-  const conversation = createConversationDataSelector();
-  const source = new ChatWaitSource();
+  const generated = observableFixture();
+  const mirror = generated.mirror;
+  const catalog = createAgentCatalog(generated.store);
+  const conversation = {
+    get threads() {
+      return catalog.agents;
+    },
+  };
+  stops.push(() => generated.store.dispose());
+  stops.push(autorun(() => conversation.threads));
+  const children = createWaitingChildren(
+    () => mirror.current.agents.values(),
+    "lead",
+  );
+  const wait = computed(() => ({ agents: children.agents }));
+  stops.push(autorun(() => wait.get()));
   return (data: Snapshot) => {
     const chosen = chat(data, "lead")!;
-    source.set(chosen);
+    mirror.apply(
+      chosen.threads.map((agent) => ({
+        collection: "agentSummary" as const,
+        id: agent.id,
+        value: {
+          ...agentSummaryFixture(agent.id),
+          ...agent,
+          inFlight: agent.inFlight === true,
+          projectServerId: agent.projectServerId ?? null,
+        },
+      })),
+    );
     return {
-      conversationData: conversation(chosen),
-      wait: source.wait(chosen.threads.find((row) => row.id === "lead")),
+      conversationData: conversation,
+      wait: wait.get(),
     };
   };
 }
@@ -130,16 +159,17 @@ describe("worker-only snapshot changes", () => {
     }
   });
 
-  it("changes conversation identity for a team member name or error", () => {
+  it("retains model identity while team member names change", () => {
     const run = pipeline();
     const data = fixture();
     const first = run(data).conversationData;
-    expect(
-      run(changeWorker(data, 3, { name: "Renamed" })).conversationData,
-    ).not.toBe(first);
-    expect(
-      run(changeWorker(data, 3, { error: "Failed" })).conversationData,
-    ).not.toBe(first);
+    const worker = first.threads.find((agent) => agent.id === "worker-3");
+    const next = run(
+      changeWorker(data, 3, { name: "Renamed" }),
+    ).conversationData;
+    expect(next).toBe(first);
+    expect(next.threads.find((agent) => agent.id === "worker-3")).toBe(worker);
+    expect(worker?.name).toBe("Renamed");
   });
 
   it("keep a repeated projection report from scheduling a render", () => {

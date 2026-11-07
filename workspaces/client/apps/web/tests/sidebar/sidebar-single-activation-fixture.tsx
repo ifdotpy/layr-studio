@@ -1,3 +1,8 @@
+import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
+import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { CombinedSidebarServicesProvider } from "../../src/servers/combinedSidebarServices.ts";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
+const injectedStore = observableFixture();
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
@@ -13,7 +18,7 @@ declare global {
     prepared: string;
   }
 }
-import React, { useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -122,6 +127,22 @@ groupMirror.apply([
     value,
   })),
 ]);
+for (const [target, snapshot] of [
+  [mirror, data],
+  [groupMirror, groupData],
+] as const) {
+  target.apply([
+    ...sidebarEntities(target.current),
+    {
+      collection: "workspace",
+      id: "fixture",
+      value: {
+        stateDir: snapshot.stateDir,
+        sidebarOrder: snapshot.runtime.sidebarOrder,
+      },
+    },
+  ]);
+}
 const source = withSidebarCollections({
   id: "local",
   online: true,
@@ -152,53 +173,67 @@ function Fixture() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       {scenario === "combined" ? (
-        <CombinedServerSidebar
-          model={model}
-          backends={backends}
-          online={online}
-          refreshOwner={async () => fixtureNavigation({})}
-          executeCommand={async () => {}}
-          aliases={{ local: "Fixture" }}
-          current="local"
-          navigation={{ local: fixtureNavigation({ opened: null }) }}
-          send={noop}
-          applyNavigation={noop}
-          mobile={true}
-          hidden={false}
-          close={noop}
-          settings={noop}
-          search={noop}
-          notify={noop}
-          notice=""
-          hideOldChatsThreshold={2}
-        />
+        <injectedStore.Provider>
+          <CombinedSidebarServicesProvider
+            value={{
+              backends: backends,
+              online: online,
+              refreshOwner: async () => fixtureNavigation({}),
+              executeCommand: async () => {},
+              aliases: { local: "Fixture" },
+              send: noop,
+              applyNavigation: noop,
+              settings: noop,
+              search: noop,
+              notify: noop,
+            }}
+          >
+            <CombinedServerSidebar
+              model={model}
+              current="local"
+              navigation={{ local: fixtureNavigation({ opened: null }) }}
+              mobile={true}
+              hidden={false}
+              close={noop}
+              notice=""
+              hideOldChatsThreshold={2}
+            />
+          </CombinedSidebarServicesProvider>
+        </injectedStore.Provider>
       ) : (
-        <Sidebar
-          data={scenario ? groupData : data}
-          opened={opened}
-          open={(id) => {
-            setOpened(id);
-            setOpens((old) => [...old, id]);
-          }}
-          prepareChat={(id) => {
-            window.prepared = id;
-          }}
-          newChat={noop}
-          addProject={noop}
-          changeProject={noop}
-          projectAccount={noop}
-          deleteProject={noop}
-          creating={false}
-          rename={async () => {}}
-          remove={noop}
-          mobile={true}
-          onSearch={noop}
-          close={noop}
-          collections={scenario ? groupMirror.current : mirror.current}
-          markingRead={new Set()}
-          markUnread={noop}
-          hideOldChatsThreshold={scenario ? 2 : 100}
-        />
+        <injectedStore.Provider>
+          <SidebarCommandsProvider
+            value={{
+              open: (id) => {
+                setOpened(id);
+                setOpens((old) => [...old, id]);
+              },
+              prepareChat: (id) => {
+                window.prepared = id;
+              },
+              newChat: noop,
+              addProject: noop,
+              changeProject: noop,
+              projectAccount: noop,
+              deleteProject: noop,
+              rename: async () => {},
+              remove: noop,
+              onSearch: noop,
+              markUnread: noop,
+            }}
+          >
+            <Sidebar
+              data={scenario ? groupData : data}
+              opened={opened}
+              creating={false}
+              mobile={true}
+              close={noop}
+              collections={scenario ? groupMirror.current : mirror.current}
+              markingRead={new Set()}
+              hideOldChatsThreshold={scenario ? 2 : 100}
+            />
+          </SidebarCommandsProvider>
+        </injectedStore.Provider>
       )}
       <output aria-label="Opened chats">{JSON.stringify(opens)}</output>
     </MantineProvider>

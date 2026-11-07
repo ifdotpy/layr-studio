@@ -1,3 +1,16 @@
+import { observableFixture } from "../observableFixture.tsx";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+vi.mock("./state.ts", async (original) => ({
+  ...(await original<typeof import("./state.ts")>()),
+  useAgentDetail: (agent?: Agent) =>
+    agent
+      ? generatedAgents.get(agent.id)?.details.get(agent.id)?.current
+      : undefined,
+}));
 import { AgentPermissionMode } from "../../generated/api";
 import { AgentSource, AgentStatus, ProviderKind } from "../../generated/api";
 import { Button, NativeSelect, Switch, Textarea } from "@mantine/core";
@@ -39,6 +52,34 @@ type SelectFixtureProps = Omit<
     >;
   }): void;
 };
+const generatedAgents = new Map<string, ReturnType<typeof observableFixture>>();
+function settingsInput(agent: Agent) {
+  let f = generatedAgents.get(agent.id);
+  if (!f) {
+    f = observableFixture([agent]);
+    generatedAgents.set(agent.id, f);
+  } else {
+    f.details.get(agent.id)!.apply(agent);
+    f.apply([
+      {
+        collection: "agentSummary",
+        id: agent.id,
+        value: {
+          ...agentSummaryFixture(agent.id),
+          ...agent,
+          inFlight: !!agent.inFlight,
+          isLead: !!agent.isLead,
+          projectServerId: agent.projectServerId ?? null,
+        },
+      },
+    ]);
+  }
+  return {
+    kind: "agent" as const,
+    summary: required(f.mirror.current.agents.get(agent.id)),
+    detail: required(f.details.get(agent.id)).current,
+  };
+}
 const h = vi.hoisted(() => ({
   cells: new Map<string, ComponentHookCell[]>(),
   storage: new Map<string, unknown>(),
@@ -214,7 +255,9 @@ function render(
 } {
   const controller = invoke(
     createElement(permissions ? ExecutionPermissions : ExecutionSettings, {
-      agent,
+      input: onDraftChange
+        ? { kind: "draft", draft: agent }
+        : settingsInput(agent),
       catalog: {
         models: ["gpt-6-astra", "gpt-6-luna"].map((model) => ({
           model,
@@ -233,6 +276,9 @@ function render(
       renderTrigger: (trigger) =>
         createElement(ExecutionSummaryTrigger, {
           agent: trigger.agent,
+          detail: trigger.detail,
+          workerDetail: trigger.workerDetail,
+          reviewDetail: trigger.reviewDetail,
           team: [],
           onOpen: trigger.onClick,
         }),
@@ -290,6 +336,8 @@ function render(
   };
 }
 afterEach(() => {
+  for (const fixture of generatedAgents.values()) fixture.store.dispose();
+  generatedAgents.clear();
   for (const cells of h.cells.values())
     for (const cell of cells) cell.cleanup?.();
   h.cells.clear();
@@ -333,7 +381,9 @@ test("transfer actions retry the same request and await streamed progress", asyn
     action: "retry",
     request_id: progress.id,
   });
-  expect(transfer().transfer).toBe(progress);
+  expect(transfer().transfer).toBe(
+    settingsInput(agent).summary.accountTransferProgress,
+  );
   expect(h.refresh).not.toHaveBeenCalled();
 });
 
@@ -382,9 +432,11 @@ for (const provider of ["Future Provider", "codex", "claude"]) {
       // @ts-expect-error Future identities may arrive at the display boundary.
       provider,
     };
+    const input = settingsInput(agent);
     const trigger = invoke(
       createElement(ExecutionSummaryTrigger, {
-        agent,
+        agent: input.summary,
+        detail: input.detail,
         team: [],
         onOpen: () => {},
       }),
@@ -705,7 +757,11 @@ for (const role of ["implementer", "reviewer"] as const) {
     expect(required(required(h.post.mock.calls[0])[1])).not.toHaveProperty(
       "yolo_mode",
     );
-    expect(render(agent).triggerAgent.permissionMode).toBe("default");
+    render(agent);
+    expect(
+      generatedAgents.get(agent.id)?.details.get(agent.id)?.current
+        .permissionMode,
+    ).toBe("default");
     expect(render(agent).model).toBe("Luna 6");
     expect(render(agent).label).toContain("Agent Luna 6 High");
   });
@@ -920,6 +976,8 @@ test("a rejected save is logged even after the controller unmounts", async () =>
     nextTurnSettingsSupported: true,
   };
   render(agent).picker.onModel("gpt-6-luna");
+  for (const fixture of generatedAgents.values()) fixture.store.dispose();
+  generatedAgents.clear();
   for (const cells of h.cells.values())
     for (const cell of cells) cell.cleanup?.();
   rejectSave(new ApiError("Save refused", 400));
@@ -1177,7 +1235,9 @@ for (const changed of [
 }
 
 test("unchanged settings retain the trigger agent identity", async () => {
-  expect(render().triggerAgent).toBe(initial);
+  expect(render().triggerAgent).toBe(
+    generatedAgents.get(initial.id)?.mirror.current.agents.get(initial.id),
+  );
   h.post.mockResolvedValue({ ...initial, model: "gpt-6-luna" });
   render().picker.onModel("gpt-6-luna");
   await Promise.resolve();

@@ -1,129 +1,45 @@
+import { useServerApi } from "../../servers/ServerServicesContext.tsx";
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./state.ts";
+import { useTeam } from "./TeamPanelContext.tsx";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { TeamRetainedWorktrees } from "./RetainedWorktrees";
 import { ActionIcon, Button, TextInput } from "@mantine/core";
 import { ArrowLeft, Search, X } from "lucide-react";
-import type { Agent } from "../../types";
-import { useMemo, type ComponentProps } from "react";
-import { useSubscription } from "../../sync/subscriptions";
-import type { Account } from "../Accounts";
-import type { ChatIndicator } from "../chat-status/chatStatusModel";
-import type { PreviewTarget } from "../FilePreview";
 import UIErrorBoundary from "../UIErrorBoundary";
 import WorkerCard from "./WorkerCard";
 import Disclosure from "../ui/Disclosure";
-import {
-  TeamModels,
-  TeamSummary,
-  workerState,
-  teamDispatchGroups,
-  workerDepth,
-  orderWorkerHierarchy,
-  TeamGroupLabel,
-  filterTeamWorkers,
-} from "./WorkerOverview";
+import { TeamModels, TeamSummary, TeamGroupLabel } from "./WorkerOverview";
 
-type Props = {
-  lead?: Agent | null | undefined;
-  workers: Agent[];
-  retainedWorktrees?: Parameters<typeof TeamRetainedWorktrees>[0]["items"];
-  accounts: Account[];
-  opened: string | null;
-  answerIds: Set<string>;
-  deferredIds: Set<string>;
-  indicators: Map<string, ChatIndicator>;
-  workerQuery: string;
-  setWorkerQuery: (query: string) => void;
-  workerFilter: string;
-  setWorkerFilter: (filter: string) => void;
-  completedOpen: boolean;
-  setCompletedOpen: (open: boolean) => void;
-  setTeamOpen: (open: boolean) => void;
-  setWideTeamOpen: (open: boolean) => void;
-  saveClosed: () => void;
-  open: (id: string) => void;
-  previewResult: (target: PreviewTarget) => void;
-  remove: (id: string) => void;
-};
-
-/** Only mounted roster rows retain detailed progress and result subscriptions. */
-function LiveWorkerCard(props: ComponentProps<typeof WorkerCard>) {
-  const detail = useSubscription({
-    kind: "agentDetail",
-    agentId: props.agent.id,
-  });
-  const agent = useMemo(
-    () => (detail.data ? { ...detail.data, ...props.agent } : props.agent),
-    [detail.data, props.agent],
-  );
-  return <WorkerCard {...props} agent={agent} />;
-}
-
-export default function TeamPanel({
-  lead,
-  workers,
-  retainedWorktrees = [],
-  accounts,
-  opened,
-  answerIds,
-  deferredIds,
-  indicators,
-  workerQuery,
-  setWorkerQuery,
-  workerFilter,
-  setWorkerFilter,
-  completedOpen,
-  setCompletedOpen,
-  setTeamOpen,
-  setWideTeamOpen,
-  saveClosed,
-  open,
-  previewResult,
-  remove,
-}: Props) {
-  const byId = new Map(
-    [...(lead ? [lead] : []), ...workers].map((a) => [a.id, a]),
-  );
-  const worker = (a: Agent) => (
-    <UIErrorBoundary key={a.id} label="this subagent" resetKey={a.id}>
-      <LiveWorkerCard
-        agent={a}
-        depth={workerDepth(a, byId, lead?.id)}
-        accounts={accounts}
-        selected={opened === a.id}
-        awaitingAnswer={workerState(a, answerIds, deferredIds) === "answer"}
-        deferred={deferredIds.has(a.id)}
-        indicator={indicators.get(a.id)}
-        open={() => open(a.id)}
-        previewResult={() =>
-          previewResult({
-            agent: a.id,
-            path: a.overview?.resultFile ?? undefined,
-          })
-        }
-        remove={() => {
-          setTeamOpen(false);
-          remove(a.id);
-        }}
-      />
+export const TeamPanelView = observer(function TeamPanelView() {
+  const {
+    view,
+    open,
+    retainedWorktrees,
+    opened,
+    workerQuery,
+    setWorkerQuery,
+    completedOpen,
+    setCompletedOpen,
+    setTeamOpen,
+    setWideTeamOpen,
+  } = useTeam();
+  const { save } = useServerApi();
+  const lead = view.lead;
+  const query = view.query;
+  const shown = view.shown;
+  const { groups, completed } = view.dispatch;
+  const worker = (agent: SidebarAgent) => (
+    <UIErrorBoundary key={agent.id} label="this subagent" resetKey={agent.id}>
+      <WorkerCard agent={agent} />
     </UIErrorBoundary>
   );
-  const query = workerQuery.trim().toLowerCase();
-  const ordered = orderWorkerHierarchy(workers);
-  const shown = query
-    ? ordered.filter((a) =>
-        `${a.name} ${a.status} ${a.role || ""} ${a.overview?.task || ""} ${a.overview?.result || ""}`
-          .toLowerCase()
-          .includes(query),
-      )
-    : filterTeamWorkers(ordered, indicators, workerFilter);
-  const { groups, completed } = teamDispatchGroups(shown, indicators);
-  const smallTeam = workers.length <= 3;
-  const showTeamFilters = !smallTeam || !!workerQuery || workerFilter !== "all";
   return (
-    <TeamModels accountKey={lead?.accountKey || "default"}>
+    <TeamModels>
       <aside
         id="team"
         aria-label="Team"
-        className={`team-dispatch ${smallTeam ? "team-compact" : ""}`}
+        className={`team-dispatch ${view.smallTeam ? "team-compact" : ""}`}
       >
         <div className="team-heading">
           <h2>Team</h2>
@@ -133,57 +49,15 @@ export default function TeamPanel({
             onClick={() => {
               setTeamOpen(false);
               setWideTeamOpen(false);
-              saveClosed();
+              save("codex-team-open", false);
             }}
           >
             <X size={16} />
           </ActionIcon>
         </div>
-        {lead && (lead.overview?.result || lead.overview?.resultFile) && (
-          <Disclosure
-            className="team-lead-report"
-            summary="Main agent report"
-            chevron
-          >
-            {lead.overview.result && <p>{lead.overview.result}</p>}
-            {lead.overview.resultTruncated && (
-              <Button
-                variant="subtle"
-                size="compact-xs"
-                onClick={() => open(lead.id)}
-              >
-                Continue in main chat
-              </Button>
-            )}
-            {lead.overview.resultFile && (
-              <Button
-                component="a"
-                href={lead.overview.resultFile}
-                variant="subtle"
-                size="compact-xs"
-                onClick={(event) => {
-                  event.preventDefault();
-                  previewResult({
-                    agent: lead.id,
-                    path: lead.overview?.resultFile ?? undefined,
-                  });
-                }}
-              >
-                Open main agent submitted result
-              </Button>
-            )}
-          </Disclosure>
-        )}
+        {lead && <LeadReport agent={lead} />}
         <TeamRetainedWorktrees items={retainedWorktrees} />
-        <TeamSummary
-          workers={workers}
-          indicators={indicators}
-          selected={workerFilter}
-          onFilter={(value) => {
-            setWorkerFilter(value);
-            if (value === "completed") setCompletedOpen(true);
-          }}
-        />
+        <TeamSummary />
         {/* The lead link is only useful from a worker chat. */}
         {lead && opened !== lead.id && (
           <Button
@@ -197,7 +71,7 @@ export default function TeamPanel({
             Back to main agent
           </Button>
         )}
-        {showTeamFilters && (
+        {view.showFilters && (
           <>
             <TextInput
               leftSection={<Search size={14} />}
@@ -268,4 +142,55 @@ export default function TeamPanel({
       </aside>
     </TeamModels>
   );
-}
+});
+
+const LeadReport = observer(function LeadReport({
+  agent,
+}: {
+  agent: SidebarAgent;
+}) {
+  const detail = useAgentDetail(agent);
+  const { open, previewResult } = useTeam();
+  const lead = agent;
+  return (
+    <>
+      {detail && (detail.overview?.result || detail.overview?.resultFile) && (
+        <Disclosure
+          className="team-lead-report"
+          summary="Main agent report"
+          chevron
+        >
+          {detail.overview.result && <p>{detail.overview.result}</p>}
+          {detail.overview.resultTruncated && (
+            <Button
+              variant="subtle"
+              size="compact-xs"
+              onClick={() => open(lead.id)}
+            >
+              Continue in main chat
+            </Button>
+          )}
+          {detail.overview.resultFile && (
+            <Button
+              component="a"
+              href={detail.overview.resultFile}
+              variant="subtle"
+              size="compact-xs"
+              onClick={(event) => {
+                event.preventDefault();
+                previewResult({
+                  agent: lead.id,
+                  path: detail.overview?.resultFile ?? undefined,
+                });
+              }}
+            >
+              Open main agent submitted result
+            </Button>
+          )}
+        </Disclosure>
+      )}
+    </>
+  );
+});
+
+export default TeamPanelView;

@@ -1,5 +1,6 @@
-import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
-import { AgentStatus } from "../../generated/api";
+import { AgentSource, AgentStatus } from "../../generated/api.ts";
+import { observableFixture } from "../observableFixture.tsx";
+
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -16,8 +17,7 @@ vi.mock("../../servers/ServerServicesContext", async (importOriginal) => ({
     revealPath: vi.fn(),
   }),
 }));
-import TeamPanel from "./TeamPanel";
-import type { ChatIndicator } from "../chat-status/chatStatusModel";
+import TeamPanel from "./TeamFixture.tsx";
 
 function renderTeam(
   deferred = false,
@@ -25,51 +25,45 @@ function renderTeam(
   missingSummary = false,
 ) {
   const noop = () => {};
+  const agents: import("../../types.ts").Agent[] = [
+    { id: "lead", isLead: true, source: AgentSource["managed"] },
+    {
+      id: "approval",
+      rootId: "lead",
+      parentId: "lead",
+      name: "Approval worker",
+      status: AgentStatus["approval"],
+      source: AgentSource["managed"],
+      operationalStatus: deferred
+        ? { reason: "question_deferred" }
+        : { reason: "needs_input", wait: null },
+    },
+    {
+      id: "finished",
+      rootId: "lead",
+      parentId: "lead",
+      name: "Finished worker",
+      status: AgentStatus["completed"],
+      source: AgentSource["managed"],
+      operationalStatus: { reason: "read_result" },
+    },
+  ];
+  const fixture = observableFixture(
+    agents.filter((agent) => !missingSummary || agent.id !== "approval"),
+  );
   return renderToStaticMarkup(
     createElement(
-      MantineProvider,
+      fixture.Provider,
       {},
-      createElement(TeamPanel, {
-        workers: [
-          {
-            id: "approval",
-            name: "Approval worker",
-            status: AgentStatus.approval,
-          },
-          {
-            id: "finished",
-            name: "Finished worker",
-            status: AgentStatus.completed,
-          },
-        ],
-        accounts: [],
-        opened: null,
-        answerIds: new Set<string>(),
-        deferredIds: new Set(deferred ? ["approval"] : []),
-        indicators: new Map<string, ChatIndicator>([
-          [
-            "approval",
-            missingSummary
-              ? { kind: "loading", label: "" }
-              : deferred
-                ? { kind: "paused", label: "Question deferred" }
-                : { kind: "answer", label: "Needs your answer" },
-          ],
-          ["finished", { kind: ChatOperationalKind["none"], label: "Read" }],
-        ]),
-        workerQuery: "",
-        setWorkerQuery: noop,
-        workerFilter,
-        setWorkerFilter: noop,
-        completedOpen: false,
-        setCompletedOpen: noop,
-        setTeamOpen: noop,
-        setWideTeamOpen: noop,
-        saveClosed: noop,
-        open: noop,
-        previewResult: noop,
-        remove: noop,
-      }),
+      createElement(
+        MantineProvider,
+        {},
+        createElement(TeamPanel, {
+          leadId: "lead",
+          workerFilter,
+          setWorkerQuery: noop,
+        }),
+      ),
     ),
   );
 }

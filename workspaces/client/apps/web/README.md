@@ -78,6 +78,18 @@ records the generated store boundary.
 7. Capture server proofs by value before asynchronous work: `{ ...target }` keeps
    the clicked CAS target stable while generated models continue updating.
 
+### Model and action ownership
+
+Read every available server fact from the generated store. Pass its observable
+model reference to a list item; pass an ID only at a root that has no reference
+yet. Keep derived presentation in MobX computed views, and dereference it in the
+smallest observer leaf. Do not pass snapshots, copied fields or parent-built
+status objects. Each area provides its commands through context, with the same
+server owner as its models. Provide the store explicitly at the application
+root and in isolated tests and stories. Layout, geometry, children and
+parent-owned ephemeral controls remain props; optimistic pins, pending-read
+proofs, rename drafts and confirmed-creation overlays remain local.
+
 ## Generated state and screen facades
 
 Use `store.state().current` from the owning server services context. Narrow its

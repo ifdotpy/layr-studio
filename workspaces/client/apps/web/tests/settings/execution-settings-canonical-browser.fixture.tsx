@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { GetOptions } from "../../src/api.ts";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
@@ -77,7 +78,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettings } from "../../src/components/agents/ExecutionSettings.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
 import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
 import { get } from "../../src/api.ts";
 const fixtureModelRead = (
@@ -296,56 +297,39 @@ function Fixture() {
   };
   return (
     <MantineProvider>
-      <ModelCatalogReader.Provider value={catalogSource}>
-        <ExecutionSettings
-          key={mount}
-          settingsRow={defaults}
-          initialRole={defaults ? "worker" : "orchestrator"}
-          agent={agent}
-          accounts={[
-            fixtureAccount({
-              id: "default",
-              label: "",
-              email: "first@example.com",
-              status: "ready",
-            }),
-            fixtureAccount({
-              id: "second",
-              label: "",
-              email: "second@example.com",
-              status: "ready",
-            }),
-            fixtureAccount({
-              id: "claude",
-              label: "Claude",
-              provider: "claude",
-              status: "ready",
-            }),
-            fixtureAccount({
-              id: "offline",
-              label: "Offline",
-              status: "error",
-            }),
-          ]}
-          team={team}
-          catalog={{ models, loading: false, error: "", retry: () => {} }}
-          refresh={async () => {
-            window.refreshCount++;
-            if (window.refreshHold)
-              await new Promise<void>(
-                (resolve) => (window.canonicalRefreshRelease = resolve),
-              );
-            if (window.refreshFailure) throw new Error("Snapshot unavailable");
-            if (window.pendingTransferProjection) {
-              window.setAgent!(window.pendingTransferProjection);
-              window.pendingTransferProjection = null;
-            }
-          }}
-        />
-        {!defaults && (
+      <AgentModelsFixture agents={[agent]}>
+        <ModelCatalogReader.Provider value={catalogSource}>
           <ExecutionSettings
-            key={"permissions:" + mount}
+            key={mount}
+            settingsRow={defaults}
+            initialRole={defaults ? "worker" : "orchestrator"}
             agent={agent}
+            accounts={[
+              fixtureAccount({
+                id: "default",
+                label: "",
+                email: "first@example.com",
+                status: "ready",
+              }),
+              fixtureAccount({
+                id: "second",
+                label: "",
+                email: "second@example.com",
+                status: "ready",
+              }),
+              fixtureAccount({
+                id: "claude",
+                label: "Claude",
+                provider: "claude",
+                status: "ready",
+              }),
+              fixtureAccount({
+                id: "offline",
+                label: "Offline",
+                status: "error",
+              }),
+            ]}
+            team={team}
             catalog={{ models, loading: false, error: "", retry: () => {} }}
             refresh={async () => {
               window.refreshCount++;
@@ -361,8 +345,28 @@ function Fixture() {
               }
             }}
           />
-        )}
-      </ModelCatalogReader.Provider>
+          {!defaults && (
+            <ExecutionSettings
+              key={"permissions:" + mount}
+              agent={agent}
+              catalog={{ models, loading: false, error: "", retry: () => {} }}
+              refresh={async () => {
+                window.refreshCount++;
+                if (window.refreshHold)
+                  await new Promise<void>(
+                    (resolve) => (window.canonicalRefreshRelease = resolve),
+                  );
+                if (window.refreshFailure)
+                  throw new Error("Snapshot unavailable");
+                if (window.pendingTransferProjection) {
+                  window.setAgent!(window.pendingTransferProjection);
+                  window.pendingTransferProjection = null;
+                }
+              }}
+            />
+          )}
+        </ModelCatalogReader.Provider>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

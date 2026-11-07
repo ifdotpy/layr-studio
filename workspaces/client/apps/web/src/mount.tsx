@@ -1,3 +1,4 @@
+import { ServerViewStoreProvider } from "./servers/ServerServicesContext.tsx";
 import { BottomInsetBand } from "./hooks/BottomInsetBand";
 import "./browser-reset.css";
 import { NativeServerCredentials } from "./native/serverCredentials";
@@ -58,7 +59,13 @@ async function mount() {
         <MantineProvider theme={theme} defaultColorScheme="auto">
           <BottomInsetBand>
             <SidebarWarningsProvider>
-              {isServerView ? <App /> : <MultiServerApp />}
+              {isServerView ? (
+                <ServerViewStoreProvider>
+                  <App />
+                </ServerViewStoreProvider>
+              ) : (
+                <MultiServerApp />
+              )}
             </SidebarWarningsProvider>
           </BottomInsetBand>
         </MantineProvider>

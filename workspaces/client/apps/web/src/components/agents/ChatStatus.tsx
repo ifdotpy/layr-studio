@@ -2,31 +2,44 @@ import { CircleAlert } from "lucide-react";
 import { providerLabel } from "../../generated/providerKind.ts";
 import { observer } from "mobx-react-lite";
 import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
-import type { ChatIndicator } from "../../status/operationalStatus.ts";
 import { displayedIndicator } from "../chat-row/indicator.ts";
+import {
+  formatAgentStatus,
+  formatOperationalStatus,
+} from "../../status/operationalStatus.ts";
 import "./chat-status.css";
 import "./provider-activity.css";
 import { useVisualActivityRef } from "../../hooks/useVisualActivity";
 
 type Props =
+  | { agent: SidebarAgent; pendingRead?: SidebarAgent["markRead"] | undefined }
   | {
       row: SidebarChatView;
       pendingRead?: SidebarAgent["markRead"] | undefined;
     }
-  | {
-      status?: ChatIndicator | undefined;
-      provider?: string | undefined;
-      model?: string | undefined;
-    };
+  | { room: { readonly unread: boolean } };
 
 export default observer(function ChatStatus(props: Props) {
   const status =
-    "row" in props
-      ? displayedIndicator(props.row, props.pendingRead)
-      : props.status;
-  const provider = "row" in props ? props.row.agent.provider : props.provider;
+    "agent" in props
+      ? formatAgentStatus(props.agent, props.pendingRead)
+      : "row" in props
+        ? displayedIndicator(props.row, props.pendingRead)
+        : props.room.unread
+          ? formatOperationalStatus({ reason: "unread_result" })
+          : undefined;
+  const provider =
+    "agent" in props
+      ? props.agent.provider
+      : "row" in props
+        ? props.row.agent.provider
+        : undefined;
   const model =
-    "row" in props ? (props.row.agent.model ?? undefined) : props.model;
+    "agent" in props
+      ? props.agent.model
+      : "row" in props
+        ? (props.row.agent.model ?? undefined)
+        : undefined;
   const visualRef = useVisualActivityRef<HTMLSpanElement>();
   if (!status) return null;
   const kind = status.kind;

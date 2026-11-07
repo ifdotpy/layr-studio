@@ -4,7 +4,7 @@ import { UnstyledButton } from "@mantine/core";
 import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
 import { displayedIndicator } from "./indicator.ts";
 import { offlineServerDescription } from "./ChatServerLine.tsx";
-import type { ChatRowActions } from "./actions.ts";
+import { useChatRowActions } from "./actions.ts";
 
 export const ChatRowShell = observer(function ChatRowShell({
   row,
@@ -35,8 +35,6 @@ export const ChatRowButton = observer(function ChatRowButton({
   serverOffline,
   serverAlias,
   bindings,
-  events,
-  actions,
   children,
 }: {
   row: SidebarChatView;
@@ -45,14 +43,12 @@ export const ChatRowButton = observer(function ChatRowButton({
   serverOffline: boolean;
   serverAlias: string;
   bindings: HTMLAttributes<HTMLElement>;
-  events: HTMLAttributes<HTMLElement>;
-  actions: ChatRowActions;
   children: ReactNode;
 }) {
+  const actions = useChatRowActions(row);
   return (
     <UnstyledButton
       {...bindings}
-      {...events}
       title={row.agent.name ?? undefined}
       aria-description={[
         "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",

@@ -1,3 +1,6 @@
+import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
+const injectedStore = observableFixture();
 declare global {
   interface Window {
     // fixture stores scroll handlers in tests/performance/scroll-restart.fixture.tsx.
@@ -100,26 +103,33 @@ function Fixture() {
   };
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      <Sidebar
-        data={data}
-        opened={opened}
-        open={open}
-        newChat={() => (window.ordinary = true)}
-        newSharedChat={(path) => setShow({ path })}
-        addProject={() => {}}
-        changeProject={() => {}}
-        projectAccount={() => {}}
-        creating={false}
-        rename={async () => {}}
-        remove={() => {}}
-        mobile={false}
-        onSearch={() => {}}
-        close={() => {}}
-        refresh={refresh}
-        rows={[]}
-        markUnread={() => {}}
-        markingRead={new Set()}
-      />
+      <injectedStore.Provider>
+        <SidebarCommandsProvider
+          value={{
+            open: open,
+            newChat: () => (window.ordinary = true),
+            newSharedChat: (path) => setShow({ path }),
+            addProject: () => {},
+            changeProject: () => {},
+            projectAccount: () => {},
+            rename: async () => {},
+            remove: () => {},
+            onSearch: () => {},
+            refresh: refresh,
+            markUnread: () => {},
+          }}
+        >
+          <Sidebar
+            data={data}
+            opened={opened}
+            creating={false}
+            mobile={false}
+            close={() => {}}
+            rows={[]}
+            markingRead={new Set()}
+          />
+        </SidebarCommandsProvider>
+      </injectedStore.Provider>
       <Modal
         opened={!!show}
         title="New shared chat"

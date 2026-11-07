@@ -1,9 +1,13 @@
+vi.mock("../../agents/state.ts", async (original) => ({
+  ...(await original<typeof import("../../agents/state.ts")>()),
+  useAgentDetail: <T>(agent: T) => agent,
+}));
 import { AgentStatus as GeneratedApiAgentStatus } from "../../../generated/api.ts";
 import { approval, question as questionField } from "../../../approvalFixtures";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import type { Agent, Message } from "../../../types";
 import TurnHistory from "./TurnHistory";
 import {

@@ -1,3 +1,6 @@
+import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
+const injectedStore = observableFixture();
 import React, { memo, useLayoutEffect, useReducer } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -34,24 +37,31 @@ function Harness() {
   }, []);
   return (
     <MantineProvider>
-      <Sidebar
-        {...value.view()}
-        opened={null}
-        open={noop}
-        newChat={noop}
-        addProject={noop}
-        changeProject={noop}
-        projectAccount={noop}
-        creating={false}
-        rename={async () => {}}
-        remove={noop}
-        mobile={false}
-        onSearch={noop}
-        close={noop}
-        markUnread={noop}
-        markingRead={new Set()}
-        hideOldChatsThreshold={100}
-      />
+      <injectedStore.Provider>
+        <SidebarCommandsProvider
+          value={{
+            open: noop,
+            newChat: noop,
+            addProject: noop,
+            changeProject: noop,
+            projectAccount: noop,
+            rename: async () => {},
+            remove: noop,
+            onSearch: noop,
+            markUnread: noop,
+          }}
+        >
+          <Sidebar
+            {...value.view()}
+            opened={null}
+            creating={false}
+            mobile={false}
+            close={noop}
+            markingRead={new Set()}
+            hideOldChatsThreshold={100}
+          />
+        </SidebarCommandsProvider>
+      </injectedStore.Provider>
       <ConversationGuard />
     </MantineProvider>
   );

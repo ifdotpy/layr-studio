@@ -1,3 +1,7 @@
+vi.mock("../agents/state.ts", async (original) => ({
+  ...(await original<typeof import("../agents/state.ts")>()),
+  useAgentDetail: <T>(agent: T) => agent,
+}));
 import { approval, browserOpen } from "../../approvalFixtures";
 import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";

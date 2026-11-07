@@ -47,7 +47,10 @@ test("composer model summary wraps on phones and opens the role settings", async
           name: /^Execution settings:/,
         });
         await expect(trigger).toBeVisible();
-        await expect(trigger).toHaveAccessibleName(/Review uses caller’s model/);
+        // 9c5ebefc2 requires an explicit review model per chat.
+        await expect(trigger).toHaveAccessibleName(
+          /Review: Select a review model/,
+        );
         const filename = `composer-${width}-${scenario.replaceAll(/[^a-z]/g, "") || "normal"}.png`;
         await page.screenshot({
           path: screenshots
@@ -110,7 +113,7 @@ test("composer model summary wraps on phones and opens the role settings", async
             /^(Default subagent|Subagent) model$/,
             scenario.includes("worker=1") ? "opus" : "sol",
           ],
-          ["Review", "Default review model", "__model_default__"],
+          ["Review", "Review model", ""],
         ] as const) {
           await roles.getByText(role, { exact: true }).click();
           const models = page.getByRole("listbox", {
@@ -118,9 +121,17 @@ test("composer model summary wraps on phones and opens the role settings", async
             exact: true,
           });
           await expect(models).toBeVisible();
-          await expect(
-            models.locator(`[role="option"][data-value="${selected}"]`),
-          ).toHaveAttribute("aria-selected", "true");
+          if (role === "Review") {
+            // 9c5ebefc2 removed the inherited caller-model choice.
+            await expect(models).toHaveAttribute("data-value", "");
+            await expect(
+              models.getByRole("option", { selected: true }),
+            ).toHaveCount(0);
+          } else {
+            await expect(
+              models.locator(`[role="option"][data-value="${selected}"]`),
+            ).toHaveAttribute("aria-selected", "true");
+          }
         }
         // Reload closes either the mobile sheet or desktop popover for the next case.
       }

@@ -2,19 +2,18 @@ import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { FolderOpen } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
-import type { ChatRowActions } from "./actions.ts";
+import { useChatRowActions } from "./actions.ts";
 
 export const ProjectAction = observer(function ProjectAction({
   row,
   disabled,
   compact,
-  actions,
 }: {
   row: SidebarChatView;
   disabled: boolean;
   compact: boolean;
-  actions: ChatRowActions;
 }) {
+  const actions = useChatRowActions(row);
   const a = row;
   return (
     !compact && (

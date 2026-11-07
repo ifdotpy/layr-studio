@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { busy, type Agent } from "../../types";
 import { useVisualActivity } from "../../hooks/useVisualActivity";
+import { observer } from "mobx-react-lite";
 
 /** Renderer clock refresh interval, in milliseconds, for managed-command elapsed time. */
 const PROGRESS_CLOCK_INTERVAL_MS = 1000;
@@ -16,7 +17,7 @@ export function commandWaitLabel(agent: Pick<Agent, "commandProgress">) {
 }
 
 /** Visible in agent lists; uses the generated HTTP entity contract. */
-export function AgentProgress({
+export const AgentProgress = observer(function AgentProgress({
   agent,
 }: {
   agent: Pick<Agent, "commandProgress" | "stall">;
@@ -66,10 +67,16 @@ export function AgentProgress({
       ))}
     </>
   );
-}
+});
 
 /** Age of the current activity; terminal rows freeze at the last server update. */
-export function AgentElapsed({ agent }: { agent: Agent }) {
+export const AgentElapsed = observer(function AgentElapsed({
+  agent,
+  detail = agent,
+}: {
+  agent: Agent;
+  detail?: Agent | undefined;
+}) {
   const [visualRef, visible] = useVisualActivity<HTMLSpanElement>();
   const [now, setNow] = useState(() => Date.now() / 1000);
   const active = busy.has(agent.status || "");
@@ -83,8 +90,8 @@ export function AgentElapsed({ agent }: { agent: Agent }) {
     return () => window.clearInterval(timer);
   }, [ticking]);
   const started =
-    agent.commandProgress?.[0]?.startedAt ||
-    agent.activity?.at ||
+    detail.commandProgress?.[0]?.startedAt ||
+    detail.activity?.at ||
     agent.created;
   if (started == null) return null;
   return (
@@ -97,4 +104,4 @@ export function AgentElapsed({ agent }: { agent: Agent }) {
       {progressElapsed(started, active ? now : agent.updated || now)}
     </span>
   );
-}
+});

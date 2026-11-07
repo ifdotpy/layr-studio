@@ -1,5 +1,5 @@
 import type { Agent } from "../../src/types.ts";
-import React from "react";
+
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -25,7 +25,7 @@ const lead: Agent = {
   isLead: true,
 };
 function Team() {
-  const items = useRetainedWorktrees(lead, [worker]);
+  const items = useRetainedWorktrees(lead?.rootId || lead?.id, [worker]);
   return (
     <>
       <TeamRetainedWorktrees items={items} />

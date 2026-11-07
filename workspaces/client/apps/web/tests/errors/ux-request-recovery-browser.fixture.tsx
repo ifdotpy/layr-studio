@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent, Project } from "../../src/types.ts";
 import type { GetResult } from "../../src/apiTypes.ts";
 declare global {
@@ -141,5 +142,7 @@ let body =
     />
   );
 createRoot(document.getElementById("root")!).render(
-  <MantineProvider>{body}</MantineProvider>,
+  <MantineProvider>
+    <AgentModelsFixture agents={[agent]}>{body}</AgentModelsFixture>
+  </MantineProvider>,
 );

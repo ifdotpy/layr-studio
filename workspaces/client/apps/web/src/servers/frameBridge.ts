@@ -1,3 +1,5 @@
+import { formatAgentStatus } from "../status/operationalStatus.ts";
+import type { ReadState } from "../status/operationalStatus.ts";
 import type { ScreenSearchResultsMessage } from "./screenChannel";
 import { useScreenChannel } from "./ScreenContext";
 import {
@@ -35,7 +37,7 @@ export function useServerFrame(
   opened: string | null,
   error: string,
   run: (command: ServerCommand) => void | Promise<void>,
-  unread: Set<string>,
+  pendingReads: ReadonlyMap<string, ReadState>,
   accounts: ServerAccount[],
   creating = false,
 ) {
@@ -61,7 +63,7 @@ export function useServerFrame(
     data: Snapshot | null,
     opened: string | null,
     error: string,
-    unread: ReadonlySet<string>,
+    pendingReads: ReadonlyMap<string, ReadState>,
     now?: number,
   ) => {
     const current = store.state().current;
@@ -73,7 +75,17 @@ export function useServerFrame(
       available ? view.rows : [],
       data ? desktopAlerts(data, now) : [],
       saved,
-      unread,
+      new Set(
+        available
+          ? [...current.data.agents.values()]
+              .filter(
+                (agent) =>
+                  formatAgentStatus(agent, pendingReads.get(agent.id)).kind ===
+                  "unread",
+              )
+              .map((agent) => agent.id)
+          : [],
+      ),
       available ? sidebarEntities(current.data) : [],
     );
   };
@@ -82,8 +94,8 @@ export function useServerFrame(
   const now = useAlertClock(data);
   const handler = useRef(run);
   handler.current = run;
-  const latest = useRef({ data, opened, error, unread, creating });
-  latest.current = { data, opened, error, unread, creating };
+  const latest = useRef({ data, opened, error, pendingReads, creating });
+  latest.current = { data, opened, error, pendingReads, creating };
   useEffect(() => {
     if (!screen) return;
     const unbind = screen.bind(async (command) => {
@@ -121,7 +133,7 @@ export function useServerFrame(
       () => ({
         kind: "studio-server-navigation" as const,
         navigation: {
-          ...projectNavigation(data, opened, error, unread, now),
+          ...projectNavigation(data, opened, error, pendingReads, now),
           creating,
         },
       }),
@@ -137,7 +149,7 @@ export function useServerFrame(
     creating,
     saved,
     now,
-    [...unread].join(":"),
+    [...pendingReads].join(":"),
   ]);
   useEffect(() => {
     const safeAccounts = readServerAccounts(accounts);
@@ -189,7 +201,7 @@ export function useServerFrame(
                 value.data,
                 value.opened,
                 value.error,
-                value.unread,
+                value.pendingReads,
               ),
               creating: value.creating,
             };
@@ -297,7 +309,7 @@ export function useServerFrame(
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const navigation = () => ({
-      ...projectNavigation(data, opened, error, unread, now),
+      ...projectNavigation(data, opened, error, pendingReads, now),
       creating,
     });
     const publish = () =>
@@ -345,7 +357,7 @@ export function useServerFrame(
       window.removeEventListener(preferenceEvent, preferencesChanged);
       window.removeEventListener("storage", preferencesChanged);
     };
-  }, [data, opened, error, [...unread].join(":"), creating, now, store]);
+  }, [data, opened, error, [...pendingReads].join(":"), creating, now, store]);
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const safeAccounts = readServerAccounts(accounts);

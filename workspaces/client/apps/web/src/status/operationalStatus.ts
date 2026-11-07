@@ -18,6 +18,16 @@ export type ChatIndicator = {
   readonly kind: ChatIndicatorKind;
   readonly label: string;
 };
+/** Operator urgency, most urgent first, shared by fleet and team navigation. */
+export const CHAT_INDICATOR_URGENCY: readonly ChatIndicatorKind[] = [
+  "answer",
+  "error",
+  "working",
+  "unread",
+  "paused",
+  "none",
+  "loading",
+];
 export type OperationalStatus = components["schemas"]["AgentOperationalStatus"];
 type WaitReasons = components["schemas"]["AgentWaitReasons"];
 
@@ -34,7 +44,7 @@ export function waitLabel(wait: WaitReasons): string {
   return `Waiting for ${parts.reduce((text, part, index) => (index === 0 ? part : `${text}${index === parts.length - 1 ? " and " : ", "}${part}`), "")}`;
 }
 
-type ReadState = DeepReadonly<components["schemas"]["ReadStateDto"]>;
+export type ReadState = DeepReadonly<components["schemas"]["ReadStateDto"]>;
 type IndicatorAgent = DeepReadonly<
   Partial<
     Pick<

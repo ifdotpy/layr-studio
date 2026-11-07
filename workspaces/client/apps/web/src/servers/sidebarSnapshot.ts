@@ -2,7 +2,7 @@ import { saved } from "../api";
 import type { StateCollections } from "../generated/observableResources.ts";
 import type { components } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
-import { toJS } from "mobx";
+import { computed, toJS } from "mobx";
 
 export type SidebarEntity = DeepReadonly<
   Extract<
@@ -50,19 +50,13 @@ export function sidebarEntities(
     })),
   ];
 }
-import type { PeerTeam, Project, Room, Snapshot } from "../types";
+import type { Room, Snapshot } from "../types";
 import { readPreferenceFields } from "../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../sync/uiPreferenceMerge";
 
 export type ServerSidebarSnapshot = {
-  stateDir: string;
   entities: readonly SidebarEntity[];
-  projects: Project[];
   rooms: Room[];
-  peerTeams: PeerTeam[];
-  peerTeamsVersion: Snapshot["runtime"]["peerTeamsVersion"];
-  projectOrganizationVersion: Snapshot["runtime"]["projectOrganizationVersion"];
-  sidebarOrder: Snapshot["runtime"]["sidebarOrder"];
   savedOrder: Record<string, string[]>;
   compact: Record<string, boolean>;
   collapsed: Record<string, boolean>;
@@ -110,30 +104,7 @@ export function sidebarSnapshot(
 ): ServerSidebarSnapshot {
   const runtime = data.runtime;
   return {
-    stateDir: data.stateDir,
     entities,
-    projects: (runtime?.projects || []).map((project) =>
-      pick(project, [
-        "id",
-        "path",
-        "name",
-        "folders",
-        "organizationRevision",
-        "peerTeams",
-        "peerTeamsRevision",
-        "homeServerId",
-        "locations",
-        "locationsRevision",
-        "projectAliases",
-        "accountKey",
-        "accountKeys",
-        "accountRevision",
-        "accountGroups",
-        "accountGroupsRevision",
-        "created",
-        "updated",
-      ]),
-    ),
     rooms: (runtime?.rooms || []).map((room) =>
       pick(room, [
         "id",
@@ -151,13 +122,7 @@ export function sidebarSnapshot(
         "updated",
       ]),
     ),
-    peerTeams: (runtime?.peerTeams || []).map((team) =>
-      pick(team, ["id", "name", "projectPath", "members", "revision"]),
-    ),
     studioErrors: runtime?.studioErrors || [],
-    peerTeamsVersion: runtime?.peerTeamsVersion,
-    projectOrganizationVersion: runtime?.projectOrganizationVersion,
-    sidebarOrder: runtime?.sidebarOrder,
     savedOrder: saved<Record<string, string[]>>(
       `codex-sidebar-order:${data.stateDir}`,
       {},
@@ -173,3 +138,35 @@ export function sidebarSnapshot(
     visualFields: sidebarVisualFields(data.stateDir),
   };
 }
+
+/** Receiver-only computed facade; entity facts never travel twice in the envelope. */
+export function sidebarCollectionView(
+  sidebar: ServerSidebarSnapshot,
+  collections: StateCollections,
+) {
+  const projects = computed(() => [...collections.projects.values()]);
+  const peerTeams = computed(() => [...collections.peerTeams.values()]);
+  const workspace = () => collections.workspaces.values().next().value;
+  return {
+    ...sidebar,
+    get projects() {
+      return projects.get();
+    },
+    get peerTeams() {
+      return peerTeams.get();
+    },
+    get stateDir() {
+      return workspace()?.stateDir || "";
+    },
+    get peerTeamsVersion() {
+      return workspace()?.peerTeamsVersion;
+    },
+    get projectOrganizationVersion() {
+      return workspace()?.projectOrganizationVersion;
+    },
+    get sidebarOrder() {
+      return workspace()?.sidebarOrder;
+    },
+  };
+}
+export type ServerSidebarView = ReturnType<typeof sidebarCollectionView>;

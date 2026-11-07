@@ -15,6 +15,12 @@ describe("read-state entity reconciliation", () => {
       lastCompletedTurn: proof.turnId,
       lastCompletedTurnStatus: "completed",
       readStateSupported: true,
+      markRead: {
+        threadId: proof.threadId,
+        turnId: proof.turnId,
+        read: true,
+        revision: 3,
+      },
       readState: {
         threadId: proof.threadId,
         turnId: proof.turnId,

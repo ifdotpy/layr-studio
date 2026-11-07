@@ -173,61 +173,6 @@ export const nativeReleaseLabel = (agent: Agent) => {
     ? "Tool reset waits for Codex to close the native session"
     : "Native thread released";
 };
-export function statusLabel(
-  status: Agent["status"],
-  phase?: string,
-  parkedEvent?: string,
-): string {
-  switch (status) {
-    case null:
-    case undefined:
-      return "";
-    case AgentStatus.running:
-      switch (phase) {
-        case "thinking":
-          return "Thinking";
-        case "writing":
-          return "Writing";
-        case "tool":
-          return "Using tools";
-        case "retrying":
-          return "Codex is retrying";
-        case "auth":
-          return "Restoring sign-in";
-        case "error":
-          return "Codex reported an error";
-      }
-      return "Working";
-    case AgentStatus.idle:
-      return "Ready";
-    case AgentStatus.starting:
-      return "Starting";
-    case AgentStatus.queued:
-      return "Queued";
-    case AgentStatus.waiting:
-      return "Turn ended";
-    case AgentStatus.parked:
-      return parkedEvent ? `Waiting for event ${parkedEvent}` : "Turn ended";
-    case AgentStatus.waiting_on_monitor:
-      return "Waiting on command";
-    case AgentStatus.completed:
-      return "Complete";
-    case AgentStatus.failed:
-      return "Failed";
-    case AgentStatus.paused:
-      return "Stopped";
-    case AgentStatus.approval:
-      return "Needs an answer";
-    case AgentStatus.interrupted:
-      return "Interrupted";
-    case AgentStatus.unknown:
-    case AgentStatus.blocked:
-    case AgentStatus.abandoned:
-    case AgentStatus["capacity-retry"]:
-      return status;
-  }
-  return status satisfies never;
-}
 export const complaintLabel = (status: string) =>
   ({
     open: "Awaiting response",
@@ -237,25 +182,25 @@ export const complaintLabel = (status: string) =>
   })[status] || status;
 
 // A stored turn failure is not the current health of the account connection.
-export function agentErrorLabel(agent: Agent): string {
+export function agentErrorLabel(agent: Agent, error = agent.error): string {
   if (
-    agent.error === "Codex app-server is offline" &&
+    error === "Codex app-server is offline" &&
     typeof agent.status === "string" &&
     ["failed", "interrupted", "paused"].includes(agent.status) &&
     !agent.inFlight
   )
     return "The previous attempt stopped because Codex was offline.";
-  return nativeErrorView(agent.error).message;
+  return nativeErrorView(error).message;
 }
 
-export function agentStopReason(agent: Agent): string {
+export function agentStopReason(agent: Agent, error = agent.error): string {
   if (
     agent.status !== AgentStatus.paused ||
     agent.autoWake !== false ||
-    typeof agent.error !== "string"
+    typeof error !== "string"
   )
     return "";
-  const reason = agent.error;
+  const reason = error;
   return reason === "Stopped by user" ||
     (reason.startsWith("Stopped by agent ") &&
       reason.slice("Stopped by agent ".length).trim())

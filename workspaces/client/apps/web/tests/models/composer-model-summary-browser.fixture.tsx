@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
 const rootElement = document.getElementById("root")!;
@@ -13,7 +14,7 @@ import "../../src/components/conversation/conversation-chrome.css";
 import "../../src/components/conversation/empty-chat-settings.css";
 import { theme } from "../../src/theme.ts";
 import { ExecutionSummaryTrigger } from "../../src/components/agents/ExecutionSummaryTrigger.tsx";
-import { ExecutionSettings } from "../../src/components/agents/ExecutionSettings.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
 import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
 const query = new URLSearchParams(location.search);
 const name =
@@ -33,6 +34,14 @@ const models = [
   {
     model: "sol",
     displayName: "Sol 6.1",
+    provider: "codex",
+    supportedReasoningEfforts: [],
+    serviceTiers: [],
+  },
+  {
+    // 9c5ebefc2 only offers explicit GPT models for review.
+    model: "gpt-6.1-sol",
+    displayName: "Sol 6.1 review",
     provider: "codex",
     supportedReasoningEfforts: [],
     serviceTiers: [],
@@ -85,77 +94,81 @@ function Fixture() {
       theme={theme}
       forceColorScheme={(query.get("theme") || "dark") as "light" | "dark"}
     >
-      <ModelCatalogReader.Provider value={reader}>
-        <main
-          style={{
-            padding: 8,
-            width: "100%",
-            maxWidth: 1200,
-            margin: "auto",
-            alignSelf: "end",
-          }}
-        >
-          <form id="composer" onSubmit={(e) => e.preventDefault()}>
-            <Textarea
-              id="message"
-              aria-label="Message"
-              placeholder="What should we work on?"
-            />
-            <div className="composer-bar">
-              <div className="composer-tools">
-                <ActionIcon aria-label="Attach files">
-                  <Paperclip />
-                </ActionIcon>
-                <div
-                  className="empty-chat-settings composer-context-row"
-                  aria-label="Agent settings"
-                >
-                  <ExecutionSettings
-                    agent={agent}
-                    lead={lead}
-                    catalog={{
-                      models,
-                      loading: false,
-                      error: "",
-                      retry: () => {},
-                    }}
-                    refresh={async () => {}}
-                    renderTrigger={({ agent, opened, ref, onClick }) => (
-                      <ExecutionSummaryTrigger
-                        agent={agent}
-                        lead={lead}
-                        team={[lead, agent]}
-                        ref={ref}
-                        aria-expanded={opened}
-                        onOpen={onClick}
-                      />
-                    )}
-                  />
+      <AgentModelsFixture
+        agents={agent.id === lead.id ? [lead] : [lead, agent]}
+      >
+        <ModelCatalogReader.Provider value={reader}>
+          <main
+            style={{
+              padding: 8,
+              width: "100%",
+              maxWidth: 1200,
+              margin: "auto",
+              alignSelf: "end",
+            }}
+          >
+            <form id="composer" onSubmit={(e) => e.preventDefault()}>
+              <Textarea
+                id="message"
+                aria-label="Message"
+                placeholder="What should we work on?"
+              />
+              <div className="composer-bar">
+                <div className="composer-tools">
+                  <ActionIcon aria-label="Attach files">
+                    <Paperclip />
+                  </ActionIcon>
+                  <div
+                    className="empty-chat-settings composer-context-row"
+                    aria-label="Agent settings"
+                  >
+                    <ExecutionSettings
+                      agent={agent}
+                      lead={lead}
+                      catalog={{
+                        models,
+                        loading: false,
+                        error: "",
+                        retry: () => {},
+                      }}
+                      refresh={async () => {}}
+                      renderTrigger={({ agent, opened, ref, onClick }) => (
+                        <ExecutionSummaryTrigger
+                          agent={agent}
+                          lead={lead}
+                          team={[lead, agent]}
+                          ref={ref}
+                          aria-expanded={opened}
+                          onOpen={onClick}
+                        />
+                      )}
+                    />
+                  </div>
+                </div>
+                <div className="composer-submit-actions">
+                  <ActionIcon aria-label="Dictate">
+                    <Mic />
+                  </ActionIcon>
+                  <ActionIcon
+                    className="composer-queue-primary"
+                    aria-label="Queue for next turn"
+                  >
+                    <ListEnd />
+                  </ActionIcon>
+                  {query.has("active") && (
+                    <ActionIcon id="stop" aria-label="Stop">
+                      <Square />
+                    </ActionIcon>
+                  )}
+                  <ActionIcon id="send" aria-label="Send message">
+                    <ArrowUp />
+                  </ActionIcon>
                 </div>
               </div>
-              <div className="composer-submit-actions">
-                <ActionIcon aria-label="Dictate">
-                  <Mic />
-                </ActionIcon>
-                <ActionIcon
-                  className="composer-queue-primary"
-                  aria-label="Queue for next turn"
-                >
-                  <ListEnd />
-                </ActionIcon>
-                {query.has("active") && (
-                  <ActionIcon id="stop" aria-label="Stop">
-                    <Square />
-                  </ActionIcon>
-                )}
-                <ActionIcon id="send" aria-label="Send message">
-                  <ArrowUp />
-                </ActionIcon>
-              </div>
-            </div>
-          </form>
-        </main>
-      </ModelCatalogReader.Provider>
+            </form>
+          </main>
+        </ModelCatalogReader.Provider>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

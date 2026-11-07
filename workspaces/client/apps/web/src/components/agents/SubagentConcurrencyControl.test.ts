@@ -1,3 +1,11 @@
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+vi.mock("./state.ts", async (original) => ({
+  ...(await original<typeof import("./state.ts")>()),
+  useAgentDetail: <T>(agent: T) => agent,
+}));
 import { expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { initialConfirmedLead } from "../../../tests/teams/concurrency-fixture-data";

@@ -1,6 +1,5 @@
 import { AgentSource as GeneratedApiAgentSource } from "../../generated/api.ts";
 import type { Agent } from "../../types";
-import { retainArray } from "../../hooks/snapshotSelection";
 
 export type SidebarModelWork =
   | "catalog-row"
@@ -75,60 +74,4 @@ export function countProjectChats(
 }
 export function itemGroup(path: string, parent: string | null = null) {
   return JSON.stringify(["items", path, parent]);
-}
-export function createAppCatalogSelector() {
-  let source: Agent[] | undefined;
-  let byId = new Map<string, Agent>();
-  let leads: Agent[] = [];
-  let version = 0;
-  const selected = new Map<
-    string,
-    { version: number; team: Agent[]; workers: Agent[] }
-  >();
-  const teamFor = (root: string) => {
-    let cached = selected.get(root);
-    if (cached?.version !== version) {
-      const team = retainArray(
-        cached?.team || [],
-        (source || []).filter((row) => row.id === root || row.rootId === root),
-      );
-      const workers =
-        team === cached?.team
-          ? cached.workers
-          : retainArray(
-              cached?.workers || [],
-              team.filter((row) => !row.isLead),
-            );
-      cached = { version, team, workers };
-      selected.set(root, cached);
-    }
-    return cached!;
-  };
-  return (next: Agent[]) => {
-    if (source !== next) {
-      version++;
-      reportSidebarModelWork("app-index", next.length);
-      const nextById = new Map<string, Agent>();
-      const nextLeads: Agent[] = [];
-      for (const row of next) {
-        nextById.set(row.id, row);
-        if (
-          row.source === GeneratedApiAgentSource.managed &&
-          row.isLead &&
-          !row.sharedRoomId
-        )
-          nextLeads.push(row);
-      }
-      byId = nextById;
-      leads = retainArray(leads, nextLeads);
-      source = next;
-      for (const id of selected.keys()) if (!byId.has(id)) selected.delete(id);
-    }
-    return {
-      byId,
-      leads,
-      team: (root: string) => teamFor(root).team,
-      workers: (root: string) => teamFor(root).workers,
-    };
-  };
 }

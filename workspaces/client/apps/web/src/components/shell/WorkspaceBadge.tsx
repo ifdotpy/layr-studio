@@ -1,12 +1,18 @@
 import { AgentRole as GeneratedApiAgentRole } from "../../generated/api.ts";
 import type { Agent } from "../../types";
+import { observer } from "mobx-react-lite";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
+import { useAgentDetail } from "../agents/state.ts";
 
 export type WorkspaceBadgeInfo = {
   label: "Layr" | "Unavailable" | "WT" | "SHARED";
   title: string;
 };
 
-export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
+export function workspaceBadgeInfo(
+  agent?: Agent,
+  detail = agent,
+): WorkspaceBadgeInfo | null {
   if (!agent) return null;
   if (agent.legacyVmWorkspace) {
     const title = "Legacy workspace unavailable";
@@ -15,16 +21,16 @@ export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
       title: !agent.isLead && agent.cwd ? `${title} · ${agent.cwd}` : title,
     };
   }
-  if (agent.remoteWorker && (!agent.cwd || !agent.workspaceMode)) return null;
+  if (agent.remoteWorker && (!agent.cwd || !detail?.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =
-    (agent.workspaceMode as string | null | undefined) ??
+    (detail?.workspaceMode as string | null | undefined) ??
     (agent.isLead
       ? undefined
-      : agent.worktree === true
+      : detail?.worktree === true
         ? "worktree"
         : agent.role === GeneratedApiAgentRole.reviewer ||
-            agent.worktree === false
+            detail?.worktree === false
           ? "shared"
           : undefined);
   // A chat lead never shows the shared mode of its own folder.
@@ -66,3 +72,24 @@ export default function WorkspaceBadge({
     </span>
   );
 }
+
+export const AgentWorkspaceBadge = observer(function AgentWorkspaceBadge({
+  agent,
+  passive,
+}: {
+  agent: SidebarAgent;
+  passive: boolean;
+}) {
+  const detail = useAgentDetail(agent);
+  const info = workspaceBadgeInfo(agent, detail);
+  return info ? (
+    <span
+      className="workspace-mode-badge"
+      title={info.title}
+      aria-label={info.title}
+      tabIndex={passive ? undefined : 0}
+    >
+      {info.label}
+    </span>
+  ) : null;
+});

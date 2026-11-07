@@ -1,63 +1,46 @@
-import { AgentStatus } from "../../generated/api";
-import { needsAnswer } from "../../approvals";
+import { useAccounts, type Account } from "../Accounts.tsx";
+import { useWorkspace } from "./state.ts";
 import { createContext, type ReactNode } from "react";
 import { useWorkerModels, type WorkerModelInfo } from "./WorkerModelPicker";
 
 export const TeamModelCatalog = createContext<WorkerModelInfo[]>([]);
 
-export function TeamModels({
-  accountKey,
+export const TeamAccountCatalog = createContext<Account[]>([]);
+export const TeamModels = observer(function TeamModels({
   children,
 }: {
-  accountKey: string;
   children: ReactNode;
 }) {
-  const catalog = useWorkerModels(accountKey, true, true);
+  const { view } = useTeam();
+  const catalog = useWorkerModels(
+    view.lead?.accountKey || "default",
+    true,
+    true,
+  );
+  const accounts = useAccounts(useWorkspace()?.stateDir ?? undefined);
   return (
     <TeamModelCatalog.Provider value={catalog.models}>
-      {children}
+      <TeamAccountCatalog.Provider value={accounts.data.accounts}>
+        {children}
+      </TeamAccountCatalog.Provider>
     </TeamModelCatalog.Provider>
   );
-}
+});
 
-import type { Agent, Snapshot } from "../../types";
-import { Users } from "lucide-react";
+import { observer } from "mobx-react-lite";
+import { useTeam } from "./TeamPanelContext.tsx";
 import { TeamStateIcon } from "./TeamFacts";
-import { diskFullHold } from "../../capacityRetry";
-import {
-  CHAT_INDICATOR_URGENCY,
-  type ChatIndicator,
-  type ChatIndicatorKind,
-} from "../chat-status/chatStatusModel";
+import { Users } from "lucide-react";
+import type { ChatIndicatorKind } from "../../status/operationalStatus.ts";
+import { teamFilterValue } from "./teamModel.ts";
+export {
+  teamFilterValue,
+  filterTeamWorkers,
+  workerDepth,
+  teamDispatchGroups,
+  orderWorkerHierarchy,
+} from "./teamModel.ts";
 
-type Request = NonNullable<Snapshot["runtime"]>["requests"][number];
-
-export function awaitingAnswerIds(requests: Request[]) {
-  return new Set(requests.filter(needsAnswer).map((request) => request.agent));
-}
-
-export function workerState(
-  agent: Agent,
-  answers: Set<string>,
-  deferred?: Set<string>,
-) {
-  const status = agent.status ?? "";
-  if (agent.stall) return "stalled";
-  if (answers.has(agent.id)) return "answer";
-  if (status === "approval")
-    return deferred?.has(agent.id) ? "waiting" : "answer";
-  if (["failed", "interrupted"].includes(status))
-    return diskFullHold(agent) ? "waiting" : "attention";
-  if (["running", "starting"].includes(status)) return "working";
-  if (status === "parked") return "waiting";
-  if (status === "completed") return "completed";
-  // A paused worker was stopped. It does not wait for input or delivery.
-  if (status === "paused") return "stopped";
-  return "waiting";
-}
-
-export const teamFilterValue = (state: string) =>
-  state === "working" ? "active" : state === "error" ? "attention" : state;
 export function TeamGroupLabel({
   kind,
   label,
@@ -75,27 +58,18 @@ export function TeamGroupLabel({
     </span>
   );
 }
-export function TeamSummary({
-  workers,
-  indicators,
-  selected,
-  onFilter,
-}: {
-  workers: Agent[];
-  indicators: Map<string, ChatIndicator>;
-  selected: string;
-  onFilter: (value: string) => void;
-}) {
-  const { groups, completed } = teamDispatchGroups(workers, indicators);
-  const counts = [
-    { state: "all", label: "All", count: workers.length },
-    ...groups.map((group) => ({
-      state: group.kind,
-      label: group.name,
-      count: group.workers.length,
-    })),
-    { state: "completed", label: "Finished", count: completed.length },
-  ];
+export const TeamSummary = observer(function TeamSummary() {
+  const {
+    view,
+    workerFilter: selected,
+    setWorkerFilter,
+    setCompletedOpen,
+  } = useTeam();
+  const counts = view.counts;
+  const onFilter = (value: string) => {
+    setWorkerFilter(value);
+    if (value === "completed") setCompletedOpen(true);
+  };
   return (
     <div className="team-overview" aria-label="Team status summary">
       <div
@@ -136,93 +110,4 @@ export function TeamSummary({
       </div>
     </div>
   );
-}
-
-export function filterTeamWorkers(
-  workers: Agent[],
-  indicators: Map<string, ChatIndicator>,
-  filter: string,
-) {
-  if (filter === "all") return workers;
-  const { groups, completed } = teamDispatchGroups(workers, indicators);
-  return filter === "completed"
-    ? completed
-    : groups.find((group) => teamFilterValue(group.kind) === filter)?.workers ||
-        [];
-}
-
-/** Indentation follows the server-owned parent relation, including filtered parents. */
-export function workerDepth(
-  agent: Agent,
-  agents: Map<string, Agent>,
-  implicitRootId?: string,
-) {
-  const seen = new Set([agent.id]);
-  let parentId = agent.parentId;
-  let depth = 0;
-  while (parentId && parentId !== implicitRootId && !seen.has(parentId)) {
-    seen.add(parentId);
-    depth++;
-    parentId = agents.get(parentId)?.parentId;
-  }
-  return depth;
-}
-
-const teamIndicatorLabels: Record<ChatIndicatorKind, string> = {
-  loading: "",
-  answer: "Needs you",
-  error: "Failed",
-  working: "Working",
-  unread: "New results",
-  paused: "Stopped",
-  none: "Waiting",
-};
-/** Display groups consume the same state owner as each rail. Completed results
- * remain in the native Finished disclosure unless they need operator action. */
-export function teamDispatchGroups(
-  workers: Agent[],
-  indicators: Map<string, ChatIndicator>,
-) {
-  const kindOf = (agent: Agent) => indicators.get(agent.id)?.kind || "none";
-  const finished = (agent: Agent) =>
-    agent.status === AgentStatus.completed &&
-    !agent.stall &&
-    !["answer", "error", "working"].includes(kindOf(agent));
-  return {
-    groups: CHAT_INDICATOR_URGENCY.map((kind) => ({
-      kind,
-      name: teamIndicatorLabels[kind],
-      workers: workers.filter(
-        (agent) => !finished(agent) && kindOf(agent) === kind,
-      ),
-    })),
-    completed: workers.filter(finished),
-  };
-}
-
-/** Keep parents before descendants within each urgency lane. */
-export function orderWorkerHierarchy(workers: Agent[]) {
-  const ids = new Set(workers.map((agent) => agent.id));
-  const children = new Map<string, Agent[]>();
-  for (const agent of workers) {
-    if (!agent.parentId || !ids.has(agent.parentId)) continue;
-    const siblings = children.get(agent.parentId) || [];
-    siblings.push(agent);
-    children.set(agent.parentId, siblings);
-  }
-  const ordered: Agent[] = [];
-  const seen = new Set<string>();
-  const visit = (roots: Agent[]) => {
-    const pending = roots.slice().reverse();
-    while (pending.length) {
-      const agent = pending.pop()!;
-      if (seen.has(agent.id)) continue;
-      seen.add(agent.id);
-      ordered.push(agent);
-      pending.push(...(children.get(agent.id) || []).slice().reverse());
-    }
-  };
-  visit(workers.filter((agent) => !agent.parentId || !ids.has(agent.parentId)));
-  visit(workers); // Broken parent cycles remain visible and cannot loop the renderer.
-  return ordered;
-}
+});

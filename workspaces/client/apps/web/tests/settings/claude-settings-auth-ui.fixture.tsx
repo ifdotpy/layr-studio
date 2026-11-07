@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { Account } from "../../src/components/Accounts.tsx";
 import { fixtureAccount } from "./fixture-helpers.ts";
@@ -33,27 +34,29 @@ function Fixture() {
   const [login, setLogin] = useState(false);
   return (
     <MantineProvider>
-      <ClaudeSettings
-        agent={agent}
-        account={account}
-        onSignIn={(key) => {
-          window.signInAccount = key;
-          setLogin(true);
-        }}
-      />
-      {login && (
-        <ClaudeSignIn
+      <AgentModelsFixture agents={[agent]}>
+        <ClaudeSettings
+          agent={agent}
           account={account}
-          scope="settings-fixture"
-          onClose={() => setLogin(false)}
-          onReady={() => {
-            // Authored account fixture view preserves the base shallow update.
-            const ready = { ...account, status: "ready" } as Account;
-            setAccount(ready);
-            setLogin(false);
+          onSignIn={(key) => {
+            window.signInAccount = key;
+            setLogin(true);
           }}
         />
-      )}
+        {login && (
+          <ClaudeSignIn
+            account={account}
+            scope="settings-fixture"
+            onClose={() => setLogin(false)}
+            onReady={() => {
+              // Authored account fixture view preserves the base shallow update.
+              const ready = { ...account, status: "ready" } as Account;
+              setAccount(ready);
+              setLogin(false);
+            }}
+          />
+        )}
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

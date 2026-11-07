@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../deepReadonly.ts";
 import {
   ApiError,
   type ApiPostPath,
@@ -39,7 +40,7 @@ export function sidebarProject(
   model: MergedSidebar,
   owner: string,
   path: string,
-): Project {
+): DeepReadonly<Project> {
   const source = model.groups
     .get(path)
     ?.members.find((member) => member.source.id === owner);

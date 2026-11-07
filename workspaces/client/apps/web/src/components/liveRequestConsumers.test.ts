@@ -83,7 +83,7 @@ afterEach(() => {
 
 it("retained folders follow source entity changes without cost-triggered HTTP reads", () => {
   const lead = { id: "lead" };
-  const read = () => useRetainedWorktrees(lead, []);
+  const read = () => useRetainedWorktrees(lead.id, []);
   render(read);
   expect(h.get).not.toHaveBeenCalled();
   expect(h.projections.size).toBe(1);

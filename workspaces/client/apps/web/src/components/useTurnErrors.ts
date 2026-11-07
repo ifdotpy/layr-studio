@@ -1,3 +1,4 @@
+import { useAgentDetail } from "./agents/state.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
@@ -33,6 +34,7 @@ export function failedTurnsNeedingLookup(
 // Old servers saved terminal errors in analytics without transcript notices.
 // The compact view also works with their full analytics response.
 export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
+  const detail = useAgentDetail(agent);
   const { get } = useServerApi();
 
   const scope = `${workspace}:${agent?.id}:${agent?.threadId}`;
@@ -59,15 +61,15 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
       if (item.turnErrorResolved && item.turnId) resolved.add(item.turnId);
       if (item.turnError && item.turnId) errors[item.turnId] = item.turnError;
     }
-    const latest = agent?.nativeTurnError;
+    const latest = detail?.nativeTurnError;
     if (latest?.turnId && latest.error) errors[latest.turnId] = latest.error;
     else if (
       agent?.status === GeneratedApiAgentStatus.failed &&
       !agent.turnId &&
       agent.lastCompletedTurn &&
-      agent.error
+      detail?.error
     )
-      errors[agent.lastCompletedTurn] = agent.error;
+      errors[agent.lastCompletedTurn] = detail?.error;
     const existing = new Set(
       items.flatMap((item) =>
         item.nativeNotice === "error" && typeof item.turnId === "string"
@@ -81,11 +83,11 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     items,
     cached,
     current.errors,
-    agent?.nativeTurnError,
+    detail?.nativeTurnError,
     agent?.status,
     agent?.turnId,
     agent?.lastCompletedTurn,
-    agent?.error,
+    detail?.error,
   ]);
   const pending = turns
     .filter(

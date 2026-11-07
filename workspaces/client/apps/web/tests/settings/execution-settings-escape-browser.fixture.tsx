@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { fixtureAccount } from "./fixture-helpers.ts";
 const fixtureRoot = document.getElementById("root");
@@ -5,7 +6,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettings } from "../../src/components/agents/ExecutionSettings.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
 const agent: Agent = {
   id: "escape",
   accountKey: "first",
@@ -41,33 +42,39 @@ function Fixture() {
 
   return (
     <MantineProvider>
-      <Modal
-        opened={parent}
-        title="Chat settings"
-        onClose={() => setParent(false)}
-        closeOnEscape={!opened && !account}
-      >
-        <ExecutionSettings
-          agent={agent}
-          catalog={{ models, loading: false, error: "", retry: () => {} }}
-          accounts={[
-            fixtureAccount({ id: "first", label: "First", status: "ready" }),
-            fixtureAccount({ id: "second", label: "Second", status: "ready" }),
-          ]}
-          onAccountChange={() => setAccount(true)}
-          onOpenChange={setOpened}
-          accountModalOpen={account}
-          refresh={async () => {}}
-        />
-      </Modal>
-      <Modal
-        opened={account}
-        onClose={() => setAccount(false)}
-        title="Change account"
-        zIndex={350}
-      >
-        <Button>Confirm account</Button>
-      </Modal>
+      <AgentModelsFixture agents={[agent]}>
+        <Modal
+          opened={parent}
+          title="Chat settings"
+          onClose={() => setParent(false)}
+          closeOnEscape={!opened && !account}
+        >
+          <ExecutionSettings
+            agent={agent}
+            catalog={{ models, loading: false, error: "", retry: () => {} }}
+            accounts={[
+              fixtureAccount({ id: "first", label: "First", status: "ready" }),
+              fixtureAccount({
+                id: "second",
+                label: "Second",
+                status: "ready",
+              }),
+            ]}
+            onAccountChange={() => setAccount(true)}
+            onOpenChange={setOpened}
+            accountModalOpen={account}
+            refresh={async () => {}}
+          />
+        </Modal>
+        <Modal
+          opened={account}
+          onClose={() => setAccount(false)}
+          title="Change account"
+          zIndex={350}
+        >
+          <Button>Confirm account</Button>
+        </Modal>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

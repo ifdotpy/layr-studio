@@ -1,3 +1,5 @@
+import { busy, type Agent } from "./types.ts";
+import { nativeThreadError } from "./nativeErrors.ts";
 import {
   ProviderKind,
   isProviderKind,
@@ -35,4 +37,17 @@ export function menuActions(provider: string | undefined): NativeAction[] {
   if (providerSupports(provider, "compaction")) actions.push("compact");
   if (REVIEW_PROVIDERS.has(provider)) actions.push("review");
   return actions;
+}
+
+export function nativeActionDisabled(
+  agent: Agent,
+  detail: Pick<Agent, "nativeThreadBlock" | "error"> | undefined,
+) {
+  return (
+    !detail ||
+    busy.has(agent.status || "") ||
+    !!agent.inFlight ||
+    !agent.threadId ||
+    !!nativeThreadError(agent, detail)
+  );
 }

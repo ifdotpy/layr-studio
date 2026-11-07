@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./agents/state.ts";
 import { clearSettingsRequest, settingsRequestId } from "./settingsRequestId";
 import ClaudeFileBackups from "./ClaudeFileBackups";
 import { useServerApi } from "../servers/ServerServicesContext";
@@ -94,7 +96,7 @@ function isClaudeCommandsResponse(
 
 const valuesFrom = (
   value: Pick<ClaudeSessionState, "settings">,
-  agent: Agent,
+  agent: Pick<Agent, "permissionMode">,
 ): ClaudeValues => ({
   permissionMode:
     value.settings?.permissionMode ||
@@ -106,7 +108,7 @@ const valuesFrom = (
     : {}),
 });
 
-export function ClaudeSettings({
+export const ClaudeSettingsView = function ClaudeSettings({
   agent,
   account,
   onSignIn,
@@ -121,6 +123,7 @@ export function ClaudeSettings({
     mode: ClaudeValues["permissionMode"] | null,
   ) => void;
 }) {
+  const detail = useAgentDetail(agent);
   const { post, saved, save } = useServerApi();
 
   const permissionsTarget = permissionsTargetId
@@ -141,7 +144,7 @@ export function ClaudeSettings({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [commands, setCommands] = useState<ClaudeCommandsResponse>([]);
   const [values, setValues] = useState<ClaudeValues>(() =>
-    valuesFrom({}, agent),
+    valuesFrom({}, detail || {}),
   );
   const valuesRef = useRef(values);
   const savedRef = useRef(values);
@@ -187,7 +190,7 @@ export function ClaudeSettings({
     if (!isClaudeSessionState(result))
       throw new Error("Claude session state response is invalid.");
     const value = result;
-    const next = valuesFrom(value, agent);
+    const next = valuesFrom(value, detail || {});
     setState(value);
     valuesRef.current = next;
     savedRef.current = next;
@@ -206,7 +209,7 @@ export function ClaudeSettings({
         if (!isClaudeSessionState(result))
           throw new Error("Claude session state response is invalid.");
         const value = result;
-        const next = valuesFrom(value, agent);
+        const next = valuesFrom(value, detail || {});
         setState(value);
         valuesRef.current = next;
         savedRef.current = next;
@@ -303,12 +306,13 @@ export function ClaudeSettings({
     (typeof agent.status === "string" && busy.has(agent.status)) ||
     busyAction ||
     !!savingField;
+  const nativeStatus = detail?.nativeStatus;
   const nativeStatusError =
-    agent.nativeStatus &&
-    typeof agent.nativeStatus === "object" &&
-    "error" in agent.nativeStatus &&
-    typeof agent.nativeStatus.error === "string"
-      ? agent.nativeStatus.error
+    nativeStatus &&
+    typeof nativeStatus === "object" &&
+    "error" in nativeStatus &&
+    typeof nativeStatus.error === "string"
+      ? nativeStatus.error
       : undefined;
 
   const fieldStatus = (field: string) => (
@@ -552,7 +556,7 @@ export function ClaudeSettings({
           account={account}
           errors={[
             error,
-            typeof agent.error === "string" ? agent.error : undefined,
+            typeof detail?.error === "string" ? detail?.error : undefined,
             nativeStatusError,
           ]}
           onSignIn={onSignIn}
@@ -565,4 +569,6 @@ export function ClaudeSettings({
       )}
     </section>
   );
-}
+};
+
+export const ClaudeSettings = observer(ClaudeSettingsView);

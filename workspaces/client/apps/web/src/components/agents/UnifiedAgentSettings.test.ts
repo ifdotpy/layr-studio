@@ -1,6 +1,11 @@
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+vi.mock("./state.ts", () => ({ useAgentDetail: () => undefined }));
 import { beforeEach, expect, test, vi } from "vitest";
 import type { ComponentProps } from "react";
-import { UnifiedAgentSettings } from "./UnifiedAgentSettings";
+import { UnifiedAgentSettingsView as UnifiedAgentSettings } from "./UnifiedAgentSettings";
 
 const harness = vi.hoisted(() => ({
   states: [false, false],

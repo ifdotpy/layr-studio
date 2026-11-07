@@ -1,4 +1,9 @@
-import { useServerApi, useServerSync } from "../servers/ServerServicesContext";
+import { MarkUnreadEligibility } from "../generated/api.ts";
+import {
+  useServerApi,
+  useServerSync,
+  useServerStore,
+} from "../servers/ServerServicesContext";
 import {
   useCallback,
   useMemo,
@@ -14,14 +19,14 @@ import type { Agent, Message, Snapshot } from "../types";
 
 export type ChatReadState = NonNullable<Agent["readState"]>;
 export type ChatReadProof = { id: string; threadId: string; turnId: string };
-const completed = (agent: Agent): ChatReadProof | null =>
-  agent.threadId &&
-  agent.lastCompletedTurn &&
-  agent.lastCompletedTurnStatus === "completed"
+export const completed = (
+  agent: Pick<Agent, "id" | "markRead">,
+): ChatReadProof | null =>
+  agent.markRead
     ? {
         id: agent.id,
-        threadId: agent.threadId,
-        turnId: agent.lastCompletedTurn,
+        threadId: agent.markRead.threadId,
+        turnId: agent.markRead.turnId,
       }
     : null;
 const sameResult = (a: ChatReadProof, b: ChatReadProof) =>
@@ -60,6 +65,13 @@ export function useChatReadState(
   workspaceId?: string,
 ) {
   const { post } = useServerApi();
+  const store = useServerStore();
+  const summary = (id: string) => {
+    const current = store.state().current;
+    return current.status === "live" || current.status === "stale"
+      ? current.data.agents.get(id)
+      : undefined;
+  };
   const { refreshProjection } = useServerSync();
 
   const [readVersion, redraw] = useState(0);
@@ -127,16 +139,11 @@ export function useChatReadState(
       if (!valid()) return;
       return write(proof, read, target);
     }
-    const agent = latest.current.data?.threads.find(
-      (value) => value.id === proof.id,
-    );
+    const agent = summary(proof.id);
     const result = agent && completed(agent);
     if (
       !target &&
-      (!agent ||
-        agent.readStateSupported !== true ||
-        !result ||
-        !sameResult(result, proof))
+      (!agent || !agent.markRead || !result || !sameResult(result, proof))
     )
       return;
     if (
@@ -237,7 +244,8 @@ export function useChatReadState(
             if (!valid()) return;
             const canonical =
               snapshot.stateDir === latest.current.data?.stateDir
-                ? matchingCompletedAgent(snapshot.threads, proof)
+                ? summary(proof.id) &&
+                  matchingCompletedAgent([summary(proof.id)!], proof)
                 : null;
             if (canonical) {
               const state = canonical.readState ?? null;
@@ -270,13 +278,15 @@ export function useChatReadState(
   useEffect(() => {
     if (!opened || selected.current !== opened) return;
     selected.current = null;
-    const agent = latest.current.data?.threads.find((row) => row.id === opened);
+    const agent = summary(opened);
     const proof = agent && completed(agent);
     if (proof) void writeCurrent.current(proof, true);
   }, [opened]);
   const markUnread = useCallback(async (agent: Agent) => {
-    const proof = completed(agent);
-    if (!proof || agent.readStateSupported !== true) return;
+    const model = summary(agent.id);
+    const proof = model && completed(model);
+    if (!proof || model?.markUnread !== MarkUnreadEligibility["allowed"])
+      return;
     if (latest.current.opened === agent.id)
       scope.current.suppressed.add(agent.id);
     await writeCurrent.current(proof, false);
@@ -302,7 +312,7 @@ export function useChatReadState(
   const select = useCallback((id: string) => {
     selected.current = id;
     if (latest.current.opened !== id) return;
-    const agent = latest.current.data?.threads.find((row) => row.id === id);
+    const agent = summary(id);
     const proof = agent && completed(agent);
     if (proof) {
       selected.current = null;
@@ -335,7 +345,12 @@ export function useVisibleChatResult(
   workspace?: string,
   latestPage = false,
 ) {
-  const proof = agent && completed(agent);
+  const state = useServerStore().state().current;
+  const model =
+    (state.status === "live" || state.status === "stale") && agent
+      ? state.data.agents.get(agent.id)
+      : undefined;
+  const proof = model && completed(model);
   const finalId = useMemo(() => {
     const candidates = proof
       ? items.filter(
@@ -386,7 +401,7 @@ export function useVisibleChatResult(
     if (
       !loaded ||
       !agent ||
-      agent.readStateSupported !== true ||
+      !model?.markRead ||
       !callback.current ||
       !proof ||
       (!finalId && !completedTurnVisible)
@@ -514,7 +529,7 @@ export function useVisibleChatResult(
     proof?.id,
     proof?.threadId,
     proof?.turnId,
-    agent?.readStateSupported,
+    model?.markRead,
     finalId,
     nativeTurnItemIdsKey,
     completedTurnVisible,

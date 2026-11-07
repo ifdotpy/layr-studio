@@ -1,3 +1,8 @@
+vi.mock("./agents/state.ts", async (original) => ({
+  ...(await original<typeof import("./agents/state.ts")>()),
+  useWorkspace: () => ({ stateDir: "fixture" }),
+  useAgentCatalog: () => ({ agents: [] }),
+}));
 import type {
   ConnectionActivity,
   ConnectionHealth,
@@ -111,8 +116,9 @@ vi.mock("../wasm/client", () => ({}));
 vi.mock("../hooks/conversationData", () => ({ useChatWait: () => undefined }));
 import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import Conversation from "./Conversation";
+import { ConversationView as Conversation } from "./Conversation";
 import { LiveAgentPhase } from "./agents/AgentPhase";
+import { observableFixture } from "./observableFixture.tsx";
 import { localTime } from "../local-time";
 import { useOfflineSendFeedback } from "./message-delivery/useOfflineSendFeedback";
 import type { OutgoingMessage } from "../sync/send";
@@ -163,17 +169,46 @@ function renderActivity(pending: boolean, currentAgent = agent) {
   const tree = Conversation({
     id: "lead",
     agent: currentAgent,
-    data: { stateDir: "fixture", threads: [], runtime: {} },
+    detail: currentAgent,
+    requests: [],
     getDraft: () => "",
+    subscribeDraft: () => () => {},
+    setDraft: () => {},
+    send: async () => {},
+    sending: false,
+    refresh: async () => {},
+    notify: () => {},
+    limits: null,
+    accountsState: {
+      data: {
+        accounts: [],
+        archivedAccounts: [],
+        defaultAccountKey: "default",
+        defaultAccountGroups: [],
+        logins: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+      error: "",
+      setData: () => {},
+      refresh: async () => null,
+      scope: "fixture",
+    },
+    reloadLimits: () => {},
     offlineSendPending: pending,
     offlineSendDetails: "Failed to fetch",
-  } as unknown as Props);
+  });
   const phases = phaseElements(tree);
   expect(phases).toHaveLength(1);
   expect(required(phases[0]).props.savedMessagePending).toBe(pending);
   expect(required(phases[0]).props.connectionDetails).toBe("Failed to fetch");
+  const fixture = observableFixture(currentAgent ? [currentAgent] : []);
   return renderToStaticMarkup(
-    createElement(LiveAgentPhase, required(phases[0]).props),
+    createElement(
+      fixture.Provider,
+      {},
+      createElement(LiveAgentPhase, required(phases[0]).props),
+    ),
   );
 }
 afterEach(() => {

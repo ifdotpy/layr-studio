@@ -1,3 +1,6 @@
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./state.ts";
+import type { Agent } from "../../types";
 import { useServerApi } from "../../servers/ServerServicesContext";
 import "../../api";
 import Accounts, { type useAccounts } from "../Accounts";
@@ -5,7 +8,7 @@ import { ExecutionSettings } from "./ExecutionSettings";
 import { errorText } from "../../api";
 import { useCallback, useState, type ComponentProps } from "react";
 
-export function UnifiedAgentSettings({
+export function UnifiedAgentSettingsView({
   state,
   notify,
   onAccountModalOpenChange,
@@ -14,14 +17,18 @@ export function UnifiedAgentSettings({
   ...settings
 }: Omit<
   ComponentProps<typeof ExecutionSettings>,
-  "onAccountChange" | "accountDisabled" | "accounts"
+  "onAccountChange" | "accountDisabled" | "accounts" | "input" | "leadInput"
 > & {
+  agent: Agent;
+  lead?: Agent | undefined;
   state: ReturnType<typeof useAccounts>;
   notify: (message: string) => void;
   onAccountModalOpenChange?: (opened: boolean) => void;
   showAccountExclusions?: boolean;
   showTransferStatus?: boolean;
 }) {
+  const detail = useAgentDetail(settings.agent);
+  const leadDetail = useAgentDetail(settings.lead);
   const { post } = useServerApi();
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -52,20 +59,16 @@ export function UnifiedAgentSettings({
         <>
           <ExecutionSettings
             {...settings}
+            input={{ kind: "agent", summary: settings.agent, detail }}
+            leadInput={
+              settings.lead
+                ? { kind: "agent", summary: settings.lead, detail: leadDetail }
+                : undefined
+            }
             accounts={state.data.accounts}
             onAccountChange={selectAccount}
             accountDisabled={disabled || exclusionsSaving}
             accountModalOpen={accountModalOpen}
-            workerExcludedAccountKeys={
-              showExclusions
-                ? settings.agent.workerExcludedAccountKeys || []
-                : undefined
-            }
-            reviewerExcludedAccountKeys={
-              showExclusions
-                ? settings.agent.reviewerExcludedAccountKeys || []
-                : undefined
-            }
             onWorkerExcludedAccountKeysChange={
               showExclusions
                 ? (keys) => {
@@ -100,3 +103,4 @@ export function UnifiedAgentSettings({
     />
   );
 }
+export const UnifiedAgentSettings = observer(UnifiedAgentSettingsView);

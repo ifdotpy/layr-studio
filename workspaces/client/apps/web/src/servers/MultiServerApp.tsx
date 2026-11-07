@@ -1,3 +1,4 @@
+import { CombinedSidebarServicesProvider } from "./combinedSidebarServices.ts";
 import { AccessClientStatus, Reachability } from "../generated/api";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { randomUUID } from "../uuid";
@@ -96,9 +97,7 @@ const uiOnly =
   new URLSearchParams(location.search).get("studio-ui-only") === "1";
 export default function MultiServerApp() {
   // Pairing changes the shell, but must keep the local database and transport owner.
-  const [localServices] = useState(() =>
-    uiOnly ? undefined : createServerServices(localServer()),
-  );
+  const [localServices] = useState(() => createServerServices(localServer()));
   const shell = <MultiServerShell localServices={localServices} />;
   return localServices ? (
     <ServerServicesProvider services={localServices}>
@@ -980,32 +979,36 @@ function MultiServerShell({
           Servers and chats
         </Button>
         {mergedSidebar?.sources.length ? (
-          <CombinedServerSidebar
-            model={mergedSidebar}
-            backends={sidebarBackends}
-            online={sidebarOnline}
-            refreshOwner={refreshSidebarOwner}
-            executeCommand={executeCommand}
-            aliases={sidebarAliases}
-            current={current}
-            navigation={navigation}
-            send={send}
-            applyNavigation={(owner, value) =>
-              applyNavigationRef.current(owner, value)
-            }
-            mobile={mobileOpen}
-            hidden={sidebarHidden}
-            onCompactChange={setSidebarCompact}
-            close={() => {
-              setMobileOpen(false);
-              if (!sidebarCompact) setSidebarHidden(true);
+          <CombinedSidebarServicesProvider
+            value={{
+              backends: sidebarBackends,
+              online: sidebarOnline,
+              refreshOwner: refreshSidebarOwner,
+              executeCommand: executeCommand,
+              aliases: sidebarAliases,
+              send: send,
+              applyNavigation: (owner, value) =>
+                applyNavigationRef.current(owner, value),
+              settings: openManager,
+              search: () => setSearchOpen(true),
+              notify: setFailure,
             }}
-            settings={openManager}
-            search={() => setSearchOpen(true)}
-            notify={setFailure}
-            notice={failure}
-            hideOldChatsThreshold={preferences.hideOldChatsThreshold}
-          />
+          >
+            <CombinedServerSidebar
+              model={mergedSidebar}
+              current={current}
+              navigation={navigation}
+              mobile={mobileOpen}
+              hidden={sidebarHidden}
+              onCompactChange={setSidebarCompact}
+              close={() => {
+                setMobileOpen(false);
+                if (!sidebarCompact) setSidebarHidden(true);
+              }}
+              notice={failure}
+              hideOldChatsThreshold={preferences.hideOldChatsThreshold}
+            />
+          </CombinedSidebarServicesProvider>
         ) : (
           <aside className="server-sidebar" aria-label="Servers and projects">
             <header>

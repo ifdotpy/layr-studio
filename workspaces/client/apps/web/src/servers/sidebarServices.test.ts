@@ -16,7 +16,7 @@ import {
   type SidebarBackend,
 } from "../components/sidebar/services";
 import { itemGroup } from "../components/sidebar/catalog";
-import { mergeSidebar, type SidebarSource } from "./mergedSidebar";
+import { mergeSidebar } from "./mergedSidebar";
 import {
   createMergedSidebarServices,
   sidebarOwner,
@@ -25,7 +25,7 @@ import {
 } from "./sidebarServices";
 
 function fixture() {
-  const source = (id: string): SidebarSource =>
+  const source = (id: string) =>
     withSidebarCollections({
       id,
       online: true,

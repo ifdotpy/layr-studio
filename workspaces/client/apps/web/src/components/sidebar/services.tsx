@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../../deepReadonly.ts";
 import { createContext, useContext, useEffect, useState } from "react";
 import * as resources from "../../sync/subscriptions/events";
 import { post, saved, save } from "../../api";
@@ -51,7 +52,7 @@ export type SidebarServices = {
   available?: (target: SidebarTarget) => boolean;
   /** Why actions on the target are disabled, or null when they are available. */
   unavailable?: (target: SidebarTarget) => string | null;
-  project?: (path: string, target: SidebarTarget) => Project;
+  project?: (path: string, target: SidebarTarget) => DeepReadonly<Project>;
   displayPath?: (path: string, target?: SidebarTarget) => string;
   chatPath?: (id: string) => string;
   alias?: (target: SidebarTarget) => string | undefined;

@@ -15,6 +15,8 @@ import {
   createContext,
   useContext,
   useMemo,
+  useState,
+  useEffect,
   Fragment,
   type ReactNode,
 } from "react";
@@ -32,7 +34,17 @@ import type { ServerServices } from "./serverServices";
 import { createServerStore } from "../store/index.ts";
 
 const Context = createContext<ServerServices | null>(null);
-const defaultStore = createServerStore(defaultResources);
+const StoreContext = createContext<ReturnType<typeof createServerStore> | null>(
+  null,
+);
+export const ServerStoreProvider = StoreContext.Provider;
+
+/** An isolated server-view window keeps its existing transport and credential owner. */
+export function ServerViewStoreProvider({ children }: { children: ReactNode }) {
+  const [store] = useState(() => createServerStore(defaultResources));
+  useEffect(() => () => store.dispose(), [store]);
+  return <ServerStoreProvider value={store}>{children}</ServerStoreProvider>;
+}
 
 /** A chat/project subtree receives the services of its own resource owner. */
 export function ServerServicesProvider({
@@ -51,7 +63,9 @@ export function ServerServicesProvider({
           services.owner.credentialId,
         ])}
       >
-        {children}
+        <ServerStoreProvider value={services.store}>
+          {children}
+        </ServerStoreProvider>
       </Fragment>
     </Context.Provider>
   );
@@ -70,7 +84,14 @@ export function useServerSidebarServices() {
 export const useServerSync = () => useServerServices()?.sync ?? defaultSync;
 export const useServerResources = () =>
   useServerServices()?.resources ?? defaultResources;
-export const useServerStore = () => useServerServices()?.store ?? defaultStore;
+export function useServerStore() {
+  const store = useContext(StoreContext);
+  if (!store)
+    throw new Error(
+      "The server store must be provided at the application root",
+    );
+  return store;
+}
 export const useServerTranscripts = () =>
   useServerServices()?.transcripts ?? defaultTranscripts;
 export const useServerTokenRates = () =>

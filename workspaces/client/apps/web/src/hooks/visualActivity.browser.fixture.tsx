@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 declare global {
   interface Window {
     commits: Record<string, number>;
@@ -58,7 +59,11 @@ const card = (id: string, reason = true) =>
     e(
       "div",
       { id, className: "card" },
-      e(ChatStatus, { status: { kind: "working", label: "Working" } }),
+      e(ChatStatus, {
+        agent: agentSummaryFixture(id, {
+          operationalStatus: { reason: "working" },
+        }),
+      }),
       e(TokenRate, { agent: { id, turnId: "turn" } }),
       reason &&
         e(ReasoningDuration, {

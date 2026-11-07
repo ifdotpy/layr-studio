@@ -1,5 +1,6 @@
+import { observableFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
-import React, { useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { useMessages } from "../../src/hooks.ts";
 import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
@@ -287,6 +288,7 @@ function Chat({ id, visible }: { id: string; visible: boolean }) {
     nativeStatus: { phase: "retrying", message: "Provider is reconnecting" },
   } satisfies Agent;
   const agent = liveAgentView({ ...base, ...messages.liveAgent });
+  const fixture = observableFixture([agent]);
   return (
     <section
       hidden={!visible}
@@ -294,7 +296,12 @@ function Chat({ id, visible }: { id: string; visible: boolean }) {
       data-connection={messages.connection?.health ?? ""}
       data-loaded={messages.loaded}
     >
-      <AgentPhase agent={agent} connection={messages.connection} />
+      <fixture.Provider>
+        <AgentPhase
+          agent={fixture.mirror.current.agents.get(agent.id)!}
+          connection={messages.connection}
+        />
+      </fixture.Provider>
     </section>
   );
 }

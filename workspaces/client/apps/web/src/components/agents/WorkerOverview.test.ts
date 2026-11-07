@@ -1,60 +1,10 @@
 import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus } from "../../generated/api";
-import { approval, question } from "../../approvalFixtures";
 import { required } from "../componentTestFixtures.ts";
 import type { Agent } from "../../types";
-import type { ChatIndicator } from "../chat-status/chatStatusModel";
+import type { ChatIndicator } from "../../status/operationalStatus";
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { awaitingAnswerIds, workerState } from "./WorkerOverview.tsx";
-
-it("only includes pending requests that are not deferred", () => {
-  const request = {
-    kind: "agent_question" as const,
-    questions: [question("q", "Continue?")],
-  };
-  const answer = {
-    kind: "answers" as const,
-    answers: [{ id: "q", answer: ["Yes"] }],
-  };
-  assert.deepEqual(
-    [
-      ...awaitingAnswerIds([
-        approval({ id: "valid", agent: "worker", request }),
-        approval({
-          id: "sending",
-          agent: "sending",
-          request,
-          state: { kind: "answering", answer, command: "command" },
-        }),
-        approval({
-          id: "answered",
-          agent: "other",
-          request,
-          state: {
-            kind: "answered",
-            answer,
-            by: { kind: "owner" },
-            at: 2,
-          },
-        }),
-        approval({ id: "deferred", agent: "later", request, deferred: true }),
-      ]),
-    ],
-    ["worker"],
-  );
-});
-
-it("keeps unknown worker statuses in the existing waiting fallback", () => {
-  assert.equal(
-    workerState({ id: "worker", status: null }, new Set()),
-    "waiting",
-  );
-  assert.equal(
-    workerState({ id: "worker", status: AgentStatus.paused }, new Set()),
-    "stopped",
-  );
-});
 
 it("orders actionable indicators before work and keeps completed results collapsed", async () => {
   const { teamDispatchGroups } = await import("./WorkerOverview.tsx");

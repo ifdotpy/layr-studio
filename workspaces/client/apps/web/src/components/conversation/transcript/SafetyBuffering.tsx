@@ -1,3 +1,4 @@
+import type { useAgentDetail } from "../../agents/state.ts";
 import { NativeSafetyStage as GeneratedApiNativeSafetyStage } from "../../../generated/api.ts";
 import { useServerApi } from "../../../servers/ServerServicesContext";
 import ErrorDescription from "../../ErrorDescription";
@@ -7,7 +8,13 @@ import { Clock3 } from "lucide-react";
 import { errorText } from "../../../api";
 import type { Agent } from "../../../types";
 
-export default function SafetyBuffering({ agent }: { agent: Agent }) {
+export default function SafetyBuffering({
+  agent,
+  detail = agent,
+}: {
+  agent: Agent;
+  detail?: ReturnType<typeof useAgentDetail> | Agent;
+}) {
   const { post } = useServerApi();
 
   const [confirm, setConfirm] = useState(false);
@@ -15,8 +22,8 @@ export default function SafetyBuffering({ agent }: { agent: Agent }) {
   const [error, setError] = useState("");
   const [dismissed, setDismissed] = useState("");
   const lock = useRef(false);
-  const b = agent.nativeSafetyBuffering;
-  const stored = agent.nativeSafetyRetry;
+  const b = detail.nativeSafetyBuffering;
+  const stored = detail.nativeSafetyRetry;
   const retry =
     stored?.epoch === agent.epoch &&
     stored?.accountKey === (agent.accountKey || "default")

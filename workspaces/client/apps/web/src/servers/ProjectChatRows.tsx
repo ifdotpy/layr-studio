@@ -150,11 +150,7 @@ const ProjectChatButton = observer(function ProjectChatButton({
       {chat.kind === "chat" ? (
         <ChatIndicator row={chat.row} />
       ) : (
-        <ChatStatus
-          status={
-            chat.unread ? { kind: "unread", label: "Unread result" } : undefined
-          }
-        />
+        <ChatStatus room={chat} />
       )}
     </button>
   );

@@ -8,10 +8,11 @@ import {
 } from "../usage/tokenRate";
 import type { TokenRate as Rate } from "../usage/tokenRate";
 import { useVisualActivity } from "../hooks/useVisualActivity";
+import { observer } from "mobx-react-lite";
 
 import "./TokenRate.css";
 
-export default function TokenRate({
+export default observer(function TokenRate({
   agent,
   variant = "footer",
 }: {
@@ -148,4 +149,4 @@ export default function TokenRate({
         : ""}
     </span>
   );
-}
+});

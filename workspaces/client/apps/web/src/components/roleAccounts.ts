@@ -40,6 +40,7 @@ function freest(accounts: UsageAccount[]) {
 export function roleAccounts(
   lead: Agent,
   accounts: UsageAccount[],
+  detail: Omit<Agent, "id"> = lead,
 ): RoleAccount[] {
   const leadAccount = accounts.find(
     (item) => item.key === (lead.accountKey || "default"),
@@ -48,7 +49,7 @@ export function roleAccounts(
   const roles: RoleAccount[] = [
     { role: "Lead", account: leadAccount, automatic: false },
   ];
-  if (subagentsOff(lead)) return roles;
+  if (subagentsOff(detail)) return roles;
   const serves = (account: UsageAccount, model: string | null | undefined) => {
     const provider = model ? modelProvider(model) : null;
     return !provider || account.provider === provider;
@@ -67,12 +68,12 @@ export function roleAccounts(
   };
   const workers = automatic(
     "Workers",
-    lead.workerDefaults?.model,
-    new Set(lead.workerExcludedAccountKeys ?? []),
+    detail.workerDefaults?.model,
+    new Set(detail.workerExcludedAccountKeys ?? []),
   );
   // A review without its own model runs on the model of its caller, the lead.
-  const reviewModel = lead.reviewDefaults?.model || lead.model;
-  const reviewExcluded = new Set(lead.reviewerExcludedAccountKeys ?? []);
+  const reviewModel = detail.reviewDefaults?.model || lead.model;
+  const reviewExcluded = new Set(detail.reviewerExcludedAccountKeys ?? []);
   const review =
     !reviewExcluded.has(leadAccount.key) && serves(leadAccount, reviewModel)
       ? { role: "Review" as const, account: leadAccount, automatic: false }

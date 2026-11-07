@@ -2747,14 +2747,6 @@
       "fingerprint": "fa4f6030fbefdc035adeef2d5436936265f3b7f870746f8ec99214263f6012f3:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/Conversation.connection.test.ts",
-      "fingerprint": "eddc22f900c390fa02b69b8a57df6883cccc65d4f78af3dc8a6ef644fc55461a:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/components/Conversation.limits.test.ts",
-      "fingerprint": "ef061af224e61e360270c9b8d4fac594582783958e7c0f1d5f54cad5da2f8860:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/liveRequestConsumers.test.ts",
       "fingerprint": "5dd99924262143a5b700fbe1c54170c3fc0bd6acd8975886361c7ade130adbb2:0"
     },

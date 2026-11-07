@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent } from "../../src/types.ts";
 import type { PostBody, GetResult } from "../../src/apiTypes.ts";
@@ -192,24 +193,26 @@ function Fixture() {
           | null) || "light"
       }
     >
-      <ChatSettingsDialog
-        settingsOpen={opened}
-        setSettingsOpen={setOpened}
-        accountModalOpen={false}
-        agent={agent}
-        lead={agent}
-        accounts={state}
-        agentModels={{ models, loading: false, error: "", retry: () => {} }}
-        data={{ ...fixtureSnapshot([]), stateDir: "execution-preview" }}
-        workspaceId="1234567890abcdef1234567890abcdef"
-        refresh={async () => {}}
-        notify={() => {}}
-        creating={false}
-        newChat={() => {}}
-        project={() => {}}
-        selectedAccount={accounts[0]}
-        setClaudeLoginKey={() => {}}
-      />
+      <AgentModelsFixture agents={[agent]}>
+        <ChatSettingsDialog
+          settingsOpen={opened}
+          setSettingsOpen={setOpened}
+          accountModalOpen={false}
+          agent={agent}
+          lead={agent}
+          accounts={state}
+          agentModels={{ models, loading: false, error: "", retry: () => {} }}
+          data={{ ...fixtureSnapshot([]), stateDir: "execution-preview" }}
+          workspaceId="1234567890abcdef1234567890abcdef"
+          refresh={async () => {}}
+          notify={() => {}}
+          creating={false}
+          newChat={() => {}}
+          project={() => {}}
+          selectedAccount={accounts[0]}
+          setClaudeLoginKey={() => {}}
+        />
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

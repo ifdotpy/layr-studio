@@ -1,10 +1,44 @@
+import { useConversationActions } from "../conversation/navigation.ts";
 import { ChevronRight, Clock3, Terminal, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { observer } from "mobx-react-lite";
+import { useActivityView, useAgentSummary } from "./state.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import "./session-activity.css";
 import { useVisualActivity } from "../../hooks/useVisualActivity";
 
-export type { ChatActivity as SessionActivityItem } from "../chat-status/chatStatusModel";
-import type { ChatActivity as SessionActivityItem } from "../chat-status/chatStatusModel";
+export type { ChatActivity as SessionActivityItem } from "../chat-status/chatActivity";
+import type { ChatActivity as SessionActivityItem } from "../chat-status/chatActivity";
+
+const AgentSessionActivity = observer(function AgentSessionActivity({
+  agent,
+  compact,
+}: {
+  agent: SidebarAgent;
+  compact: boolean;
+}) {
+  const view = useActivityView(agent);
+  const actions = useConversationActions();
+  return (
+    <SessionActivity
+      activities={view.background}
+      onOpen={actions.openActivity}
+      compact={compact}
+    />
+  );
+});
+export const LiveSessionActivity = observer(function LiveSessionActivity({
+  agentId,
+  compact,
+}: {
+  agentId: string;
+  compact: boolean;
+}) {
+  const agent = useAgentSummary(agentId);
+  return agent ? (
+    <AgentSessionActivity agent={agent} compact={compact} />
+  ) : null;
+});
 
 function elapsed(created: number | undefined, now: number) {
   if (created === undefined || !Number.isFinite(created)) return "";

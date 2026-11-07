@@ -1,3 +1,8 @@
+vi.mock("./agents/state.ts", async (original) => ({
+  ...(await original<typeof import("./agents/state.ts")>()),
+  useWorkspace: () => ({ stateDir: "fixture" }),
+  useAgentCatalog: () => ({ agents: [] }),
+}));
 import { afterEach, expect, it, vi } from "vitest";
 import {
   isValidElement,
@@ -122,16 +127,12 @@ vi.mock("./useSendingMessageRemoval", () => ({
   useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../wasm/client", () => ({}));
-import Conversation from "./Conversation";
+import { ConversationView as Conversation } from "./Conversation";
 
 type Props = ComponentProps<typeof Conversation>;
 const propsFixture: Partial<Props> = {
   id: "lead",
-  data: {
-    stateDir: "fixture",
-    threads: [],
-    runtime: { requests: [], agents: [], projects: [], nativeNotices: [] },
-  },
+  requests: [],
   getDraft: () => "",
 };
 function elements(node: ReactNode): ReactElement<{

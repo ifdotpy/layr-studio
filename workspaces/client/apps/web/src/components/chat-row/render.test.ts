@@ -1,3 +1,4 @@
+import { ChatRowActionsContext } from "./actions.ts";
 import { AgentStatus } from "../../generated/api.ts";
 import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
@@ -192,19 +193,22 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
         createElement(
           MantineProvider,
           null,
-          createElement(SidebarRow, {
-            row,
-            selected: true,
-            serverAlias: "Remote",
-            showServer: true,
-            renaming: false,
-            organizing: false,
-            name: "",
-            compact: false,
-            markingRead: false,
-            bindings: {},
-            actions: { ...actions, open, unread: nextUnread },
-          }),
+          createElement(
+            ChatRowActionsContext.Provider,
+            { value: () => ({ ...actions, open, unread: nextUnread }) },
+            createElement(SidebarRow, {
+              row,
+              selected: true,
+              serverAlias: "Remote",
+              showServer: true,
+              renaming: false,
+              organizing: false,
+              name: "",
+              compact: false,
+              markingRead: false,
+              bindings: {},
+            }),
+          ),
         ),
       ),
     );
@@ -261,12 +265,15 @@ it("renders every server unread eligibility and pending-write menu state", async
             createElement(
               Menu,
               null,
-              createElement(UnreadAction, {
-                row,
-                disabled: false,
-                markingRead,
-                actions: { ...actions, unread },
-              }),
+              createElement(
+                ChatRowActionsContext.Provider,
+                { value: () => ({ ...actions, unread }) },
+                createElement(UnreadAction, {
+                  row,
+                  disabled: false,
+                  markingRead,
+                }),
+              ),
             ),
           ),
         ),
@@ -292,12 +299,12 @@ it("renders every server unread eligibility and pending-write menu state", async
 
 it("leaves a missing operational summary neutral", async () => {
   const f = fixture();
-  const { formatOperationalStatus } =
-    await import("../../status/operationalStatus.ts");
+  const agent = agentSummaryFixture("missing");
+  Reflect.deleteProperty(agent, "operationalStatus");
   await act(async () =>
     f.root.render(
       createElement(ChatIndicator, {
-        status: formatOperationalStatus(undefined),
+        agent,
       }),
     ),
   );

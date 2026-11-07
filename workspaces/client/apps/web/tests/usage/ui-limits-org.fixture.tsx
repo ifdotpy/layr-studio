@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { Account } from "../../src/components/Accounts.tsx";
 import type { components } from "../../src/generated/api.ts";
@@ -127,76 +128,82 @@ function Fixture() {
   const recovery = view.projection.agents.worker.recovery;
   return (
     <MantineProvider theme={theme} defaultColorScheme="auto">
-      <main style={{ padding: 12, maxWidth: 900, margin: "auto", minWidth: 0 }}>
-        <Button
-          onClick={() => setScreen(screen === "limits" ? "accounts" : "limits")}
+      <AgentModelsFixture agents={[agent]}>
+        <main
+          style={{ padding: 12, maxWidth: 900, margin: "auto", minWidth: 0 }}
         >
-          {screen === "limits" ? "Show accounts" : "Show limits"}
-        </Button>
-        {screen === "limits" ? (
-          <>
-            <div data-notice>
-              {recovery && (
-                <NativeError
+          <Button
+            onClick={() =>
+              setScreen(screen === "limits" ? "accounts" : "limits")
+            }
+          >
+            {screen === "limits" ? "Show accounts" : "Show limits"}
+          </Button>
+          {screen === "limits" ? (
+            <>
+              <div data-notice>
+                {recovery && (
+                  <NativeError
+                    agent={agent}
+                    recovery={recovery}
+                    refreshLimits={() => window.refreshFixture()}
+                  />
+                )}
+              </div>
+              <div
+                style={{ position: "fixed", bottom: 12, right: 12 }}
+                data-usage
+              >
+                <Usage
                   agent={agent}
-                  recovery={recovery}
-                  refreshLimits={() => window.refreshFixture()}
+                  stateDir="fixture"
+                  limits={limits}
+                  accounts={[
+                    partialOrganizationUsageAccount({
+                      key: "claude",
+                      provider: "claude",
+                      label: "Research",
+                      limits,
+                      ...view.projection,
+                      reload: async () => window.refreshFixture(),
+                    }),
+                  ]}
+                  accountLabel="Research"
+                  opened={limitsOpen}
+                  onChange={setLimitsOpen}
+                  reload={async () => window.refreshFixture()}
                 />
-              )}
-            </div>
-            <div
-              style={{ position: "fixed", bottom: 12, right: 12 }}
-              data-usage
-            >
-              <Usage
-                agent={agent}
-                stateDir="fixture"
-                limits={limits}
-                accounts={[
-                  partialOrganizationUsageAccount({
-                    key: "claude",
-                    provider: "claude",
-                    label: "Research",
-                    limits,
-                    ...view.projection,
-                    reload: async () => window.refreshFixture(),
-                  }),
-                ]}
-                accountLabel="Research"
-                opened={limitsOpen}
-                onChange={setLimitsOpen}
-                reload={async () => window.refreshFixture()}
+              </div>
+            </>
+          ) : (
+            <>
+              <AccountSignInNotice
+                account={account}
+                errors={[]}
+                onSignIn={(key) => (window.signedInAccount = key)}
               />
-            </div>
-          </>
-        ) : (
-          <>
-            <AccountSignInNotice
-              account={account}
-              errors={[]}
-              onSignIn={(key) => (window.signedInAccount = key)}
-            />
-            <Accounts
-              managerOnly
-              state={partialOrganizationState({
-                data: {
-                  accounts: [account],
-                  archivedAccounts: [],
-                  defaultAccountKey: "claude",
-                  defaultAccountGroups: [],
-                  logins: [],
-                },
-                setData: () => {},
-                refresh: async () => {},
-                error: "",
-                scope: "fixture",
-              } satisfies PartialOrganizationState)}
-              onError={() => {}}
-            />
-            <ClaudeProfile account={account} onSaved={() => {}} expanded />
-          </>
-        )}
-      </main>
+              <Accounts
+                managerOnly
+                state={partialOrganizationState({
+                  data: {
+                    accounts: [account],
+                    archivedAccounts: [],
+                    defaultAccountKey: "claude",
+                    defaultAccountGroups: [],
+                    logins: [],
+                  },
+                  setData: () => {},
+                  refresh: async () => {},
+                  error: "",
+                  scope: "fixture",
+                } satisfies PartialOrganizationState)}
+                onError={() => {}}
+              />
+              <ClaudeProfile account={account} onSaved={() => {}} expanded />
+            </>
+          )}
+        </main>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

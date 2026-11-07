@@ -1,3 +1,4 @@
+import { ChatRowActionsContext } from "./actions.ts";
 import type { Summary } from "./testFixture.ts";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
 // @vitest-environment happy-dom
@@ -59,20 +60,23 @@ it.each([false, true])(
     const Rows = observer(function Rows() {
       parentRenders++;
       return f.model.rows.map((row) =>
-        createElement(SidebarRow, {
-          key: row.id,
-          row,
-          selected: false,
-          serverAlias: "Server",
-          showServer: false,
-          renaming: false,
-          organizing: false,
-          name: "",
-          compact: false,
-          markingRead: false,
-          bindings: {},
-          actions,
-        }),
+        createElement(
+          ChatRowActionsContext.Provider,
+          { value: () => actions, key: row.id },
+          createElement(SidebarRow, {
+            key: row.id,
+            row,
+            selected: false,
+            serverAlias: "Server",
+            showServer: false,
+            renaming: false,
+            organizing: false,
+            name: "",
+            compact: false,
+            markingRead: false,
+            bindings: {},
+          }),
+        ),
       );
     });
     const tree = createElement(MantineProvider, null, createElement(Rows));
@@ -166,21 +170,24 @@ it("removing pendingRead restores an unchanged target through the real row", asy
     pending: SidebarAgent["markRead"] | undefined;
   }) {
     return f.model.rows.map((row) =>
-      createElement(SidebarRow, {
-        key: row.id,
-        row,
-        pendingRead: pending,
-        selected: false,
-        serverAlias: "Server",
-        showServer: false,
-        renaming: false,
-        organizing: false,
-        name: "",
-        compact: false,
-        markingRead: false,
-        bindings: {},
-        actions,
-      }),
+      createElement(
+        ChatRowActionsContext.Provider,
+        { value: () => actions, key: row.id },
+        createElement(SidebarRow, {
+          key: row.id,
+          row,
+          pendingRead: pending,
+          selected: false,
+          serverAlias: "Server",
+          showServer: false,
+          renaming: false,
+          organizing: false,
+          name: "",
+          compact: false,
+          markingRead: false,
+          bindings: {},
+        }),
+      ),
     );
   });
   const render = async () =>

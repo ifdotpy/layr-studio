@@ -1,7 +1,17 @@
+import { MarkUnreadEligibility } from "../generated/api.ts";
+import { observableFixture } from "./observableFixture.tsx";
 import { afterEach, expect, it, vi } from "vitest";
 import type { Snapshot } from "../types";
 
-const h = vi.hoisted(() => ({ post: vi.fn(), recovery: vi.fn() }));
+const h = vi.hoisted(() => ({
+  store: null as
+    | ReturnType<
+        typeof import("./observableFixture.tsx").observableFixture
+      >["store"]
+    | null,
+  post: vi.fn(),
+  recovery: vi.fn(),
+}));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (value: unknown) => [value, vi.fn()],
@@ -13,6 +23,7 @@ vi.mock("react", async (original) => ({
   },
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => h.store,
   useServerApi: () => ({ post: h.post }),
   useServerSync: () => ({ refreshProjection: h.recovery }),
 }));
@@ -38,6 +49,18 @@ it.each([false, true])(
       lastCompletedTurnStatus: "completed",
       readStateSupported: true,
     };
+    h.store = observableFixture([
+      {
+        ...agent,
+        markRead: {
+          threadId: "thread",
+          turnId: "turn",
+          read: false,
+          revision: 0,
+        },
+        markUnread: MarkUnreadEligibility["allowed"],
+      },
+    ]).store;
     const snapshot = {
       stateDir: "fixture",
       threads: [agent],

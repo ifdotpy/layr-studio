@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import {
   fixtureRoot,
@@ -194,35 +195,37 @@ function Fixture() {
         ? { forceColorScheme: scheme }
         : {})}
     >
-      <div
-        style={
-          geometry
-            ? {
-                display: "flex",
-                alignItems: "end",
-                width: "100%",
-                height: "100dvh",
-                padding: "var(--mantine-spacing-sm)",
-                containerType: "inline-size",
-                containerName: "conversation-footer",
-              }
-            : undefined
-        }
-      >
-        <Usage
-          agent={geometry ? { ...own, accountKey: "codex-main" } : own}
-          stateDir="/fixture"
-          limits={ownLimits}
-          accountLabel="own@example.test"
-          reload={() => {
-            window.reloadCalls.push(["fallback", true]);
-          }}
-          opened={true}
-          onChange={() => {}}
-          limitsLoading={false}
-          accounts={accounts}
-        />
-      </div>
+      <AgentModelsFixture agents={[own]}>
+        <div
+          style={
+            geometry
+              ? {
+                  display: "flex",
+                  alignItems: "end",
+                  width: "100%",
+                  height: "100dvh",
+                  padding: "var(--mantine-spacing-sm)",
+                  containerType: "inline-size",
+                  containerName: "conversation-footer",
+                }
+              : undefined
+          }
+        >
+          <Usage
+            agent={geometry ? { ...own, accountKey: "codex-main" } : own}
+            stateDir="/fixture"
+            limits={ownLimits}
+            accountLabel="own@example.test"
+            reload={() => {
+              window.reloadCalls.push(["fallback", true]);
+            }}
+            opened={true}
+            onChange={() => {}}
+            limitsLoading={false}
+            accounts={accounts}
+          />
+        </div>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

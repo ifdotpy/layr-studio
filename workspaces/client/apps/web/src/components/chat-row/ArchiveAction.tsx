@@ -2,17 +2,16 @@ import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
-import type { ChatRowActions } from "./actions.ts";
+import { useChatRowActions } from "./actions.ts";
 
 export const ArchiveAction = observer(function ArchiveAction({
   row,
   disabled,
-  actions,
 }: {
   row: SidebarChatView;
   disabled: boolean;
-  actions: ChatRowActions;
 }) {
+  const actions = useChatRowActions(row);
   return (
     <Menu.Item
       leftSection={

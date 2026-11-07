@@ -1,185 +1,49 @@
-import { AgentWorktreePreparation } from "../../generated/api";
-import { AgentStatus } from "../../generated/api";
-import {
-  Brain,
-  Circle,
-  Clock3,
-  CircleAlert,
-  Pause,
-  WifiOff,
-  LoaderCircle,
-  PenLine,
-  Wrench,
-} from "lucide-react";
-import type { Agent } from "../../types";
-import {
-  currentCapacityRetry,
-  DISK_FULL_WAIT_LABEL,
-  diskFullHold,
-} from "../../capacityRetry";
-import { nativeThreadError } from "../../nativeErrors";
-import { startWaitLabel } from "../../startWait";
-import { displayError, errorDetails } from "../../errorPresentation";
+import { observer } from "mobx-react-lite";
 import ErrorDescription from "../ErrorDescription";
-import { commandWaitLabel } from "./AgentProgress";
-import {
-  endedWaitLabel,
-  type ChatWaitState,
-} from "../chat-status/chatStatusModel";
-import "./provider-activity.css";
-import { useChatWait, type ChatWaitSource } from "../../hooks/conversationData";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
+import { useAgentDetail, useAgentSummary } from "./state.ts";
+import { phasePresentation } from "./phasePresentation.ts";
+import { PhaseWaitDetails } from "./PhaseWaitDetails.tsx";
 import { useVisualActivityRef } from "../../hooks/useVisualActivity";
 import type { MessageConnection } from "../../hooks/messageConnection";
+import "./provider-activity.css";
 
-// Delivery can remain pending while a healthy connection awaits its receipt.
-// Choose the copy and icon together so only transport loss looks disconnected.
-function phaseNotice(
-  connection: MessageConnection | null,
-  savedMessagePending: boolean,
-) {
-  const savedMessage = "Your message is saved and waiting for delivery.";
-  if (connection?.message)
-    return {
-      message: savedMessagePending
-        ? `${connection.message} ${savedMessage}`
-        : connection.message,
-      Icon:
-        connection.icon === "connecting"
-          ? LoaderCircle
-          : connection.icon === "offline"
-            ? WifiOff
-            : Clock3,
-    };
-  if (savedMessagePending)
-    return {
-      message: savedMessage,
-      Icon: Clock3,
-    };
-  return null;
-}
-
-export default function AgentPhase({
-  agent,
-  connection,
-  wait,
-  savedMessagePending = false,
-  connectionDetails,
-}: {
-  agent?: Agent | undefined;
+type PresentationProps = {
   connection: MessageConnection | null;
-  wait?: ChatWaitState | undefined;
   savedMessagePending?: boolean | undefined;
   connectionDetails?: string | undefined;
-}) {
+  phaseOverride?: string | undefined;
+};
+const AgentPhase = observer(function AgentPhase({
+  agent,
+  connection,
+  savedMessagePending = false,
+  connectionDetails,
+  phaseOverride,
+}: PresentationProps & { agent: SidebarAgent }) {
   const visualRef = useVisualActivityRef<HTMLDivElement>();
-  if (!agent) return null;
-  const notice = phaseNotice(connection, savedMessagePending);
-  const safety = agent.nativeSafetyBuffering;
-  if (
-    safety?.showBufferingUi === true &&
-    safety.dismissed !== true &&
-    safety.responseStarted !== true &&
-    safety.turnId === agent.turnId &&
-    agent.inFlight === true
-  )
-    return null;
-  // The terminal error appears in the transcript and the account notice.
-  if (
-    agent.status === AgentStatus.failed &&
-    agent.error &&
-    !savedMessagePending
-  )
-    return null;
-  const status = agent.status || "idle";
-  const active = ["running", "starting"].includes(status);
-  const awaitingResponse =
-    active &&
-    (agent.startAttempt?.prepareError || agent.startAttempt?.responseError);
-  const currentPhase = nativeThreadError(agent)
-    ? "blocked"
-    : currentCapacityRetry(agent)?.status === "scheduled"
-      ? "capacity-retry"
-      : agent.status === AgentStatus.starting && agent.worktreePreparation
-        ? agent.worktreePreparation === AgentWorktreePreparation["waiting"]
-          ? "folder-wait"
-          : "folder-prepare"
-        : awaitingResponse
-          ? "acknowledgement"
-          : active
-            ? agent.activity?.phase || status
-            : status;
-  const phase =
-    wait?.live && ["idle", "completed"].includes(currentPhase)
-      ? "waiting"
-      : currentPhase;
-  const names: Record<string, string> = {
-    thinking: "Thinking",
-    writing: "Writing",
-    tool: "Using tools",
-    running: "Working",
-    starting: startWaitLabel(agent) || "Starting",
-    "folder-wait": "Waiting to prepare folder",
-    "folder-prepare": "Preparing folder",
-    acknowledgement: "Waiting for Codex",
-    retrying: "Codex is retrying",
-    "capacity-retry": diskFullHold(agent)
-      ? DISK_FULL_WAIT_LABEL
-      : "Waiting to retry model",
-    blocked: "Chat stopped as a precaution",
-    auth: "Restoring sign-in",
-    safety: "Codex is checking this request",
-    error: "Codex reported an error",
-    queued: startWaitLabel(agent) || "Queued",
-    waiting: wait?.label || endedWaitLabel,
-    waiting_on_monitor: commandWaitLabel(agent),
-    parked: wait?.label || endedWaitLabel,
-    approval: "Waiting for your answer",
-    failed: "Failed",
-    paused: "Stopped",
-    interrupted: "Interrupted",
-    idle: "Ready",
-  };
-  if (["idle", "completed"].includes(phase) && !notice) return null;
-  const icons: Record<string, typeof Brain> = {
-    thinking: Brain,
-    writing: PenLine,
-    tool: Wrench,
-    starting: LoaderCircle,
-    "folder-wait": Clock3,
-    "folder-prepare": LoaderCircle,
-    running: LoaderCircle,
-    queued: Clock3,
-    waiting: Circle,
-    waiting_on_monitor: Clock3,
-    acknowledgement: Clock3,
-    retrying: LoaderCircle,
-    "capacity-retry": Clock3,
-    auth: Clock3,
-    safety: Clock3,
-    error: CircleAlert,
-    blocked: CircleAlert,
-    approval: Clock3,
-    failed: CircleAlert,
-    interrupted: CircleAlert,
-    paused: Pause,
-  };
-  const Icon = notice?.Icon || icons[phase] || Circle;
-  const waiting = ["waiting", "parked"].includes(phase);
-  const liveWait = waiting && wait?.live && !notice;
-  const native = ["retrying", "auth", "safety"].includes(phase)
-    ? typeof agent.nativeStatus === "object"
-      ? agent.nativeStatus
-      : null
-    : null;
-  const nativeError = typeof native?.error === "object" ? native.error : null;
-  const nativeMessage = native?.message || undefined;
-  const nativeErrorMessage = nativeError?.message;
-  const message =
-    displayError(nativeMessage) ||
-    displayError(nativeErrorMessage) ||
-    names[phase] ||
-    "Working";
-  const details = errorDetails(nativeError?.additionalDetails);
+  const detail = useAgentDetail(agent);
+  const view = phasePresentation(
+    agent,
+    detail,
+    connection,
+    savedMessagePending,
+    phaseOverride,
+  );
+  if (!view) return null;
+  const {
+    wait,
+    notice,
+    active,
+    phase,
+    Icon,
+    waiting,
+    liveWait,
+    nativeMessage,
+    nativeErrorMessage,
+    message,
+    details,
+  } = view;
   return (
     <div
       ref={visualRef}
@@ -207,26 +71,7 @@ export default function AgentPhase({
           </summary>
           <div className="agent-phase-wait-details">
             <p>{wait.label}</p>
-            <ul>
-              {wait.agents.map((child) => (
-                <li key={child.id}>Agent: {child.name}</li>
-              ))}
-              {wait.commands.map((command) => (
-                <li key={command.id}>Command: {command.command}</li>
-              ))}
-              {wait.monitors.map((monitor) => (
-                <li key={monitor.id}>
-                  Monitor: {monitor.command || monitor.id}
-                </li>
-              ))}
-              {wait.event && <li>Event: {wait.event}</li>}
-              {wait.inputs > 0 && (
-                <li>
-                  Input: {wait.inputs}{" "}
-                  {wait.inputs === 1 ? "answer" : "answers"} needed
-                </li>
-              )}
-            </ul>
+            <PhaseWaitDetails agent={agent} />
           </div>
         </details>
       ) : (
@@ -253,24 +98,18 @@ export default function AgentPhase({
           )}
         </div>
       )}
-      {phase === "tool" && (agent.activity?.tools?.length ?? 0) > 1 && (
-        <small>{agent.activity?.tools?.length} tools</small>
+      {phase === "tool" && (detail?.activity?.tools?.length ?? 0) > 1 && (
+        <small>{detail?.activity?.tools?.length} tools</small>
       )}
     </div>
   );
-}
+});
+export default AgentPhase;
 
-/** Subscribes to the wait itself so the conversation never renders for it. */
-export function LiveAgentPhase({
-  source,
+export const LiveAgentPhase = observer(function LiveAgentPhase({
+  agentId,
   ...props
-}: {
-  source: ChatWaitSource;
-  agent?: Agent | undefined;
-  connection: MessageConnection | null;
-  savedMessagePending?: boolean | undefined;
-  connectionDetails?: string | undefined;
-}) {
-  const wait = useChatWait(source, props.agent);
-  return <AgentPhase {...props} wait={wait} />;
-}
+}: PresentationProps & { agentId?: string | undefined }) {
+  const agent = useAgentSummary(agentId || "");
+  return agent ? <AgentPhase agent={agent} {...props} /> : null;
+});

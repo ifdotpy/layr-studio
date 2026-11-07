@@ -1,11 +1,12 @@
+import { observableFixture } from "../observableFixture.tsx";
+
 import { AgentRole, AgentSource, AgentStatus } from "../../generated/api";
 import { useState } from "react";
-import { approval, question } from "../../approvalFixtures";
-import type { Meta, StoryObj } from "@storybook/react-vite";
+import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
-import type { Agent, Snapshot } from "../../types";
-import { agentIndicators } from "../../status/operationalStatus.ts";
-import TeamPanel from "./TeamPanel";
+import type { Agent } from "../../types";
+
+import TeamPanel from "./TeamFixture.tsx";
 
 const now = Math.floor(Date.now() / 1000);
 const lead: Agent = {
@@ -121,49 +122,41 @@ const workers: Agent[] = workerFixtures.map((agent) => ({
   updated: now - 20,
   effort: "medium",
 }));
-const threads = [lead, ...workers];
-const snapshot: Snapshot = {
-  token: "fixture",
-  stateDir: "storybook",
-  threads,
-  nodes: threads,
-  chats: [],
-  edges: [],
-  runtime: {
-    agents: threads,
-    rooms: [],
-    tasks: [],
-    monitors: [],
-    complaints: [],
-    requests: [
-      approval({
-        id: "request",
-        agent: "question",
-        request: { kind: "question", questions: [question("q", "Continue?")] },
-      }),
-    ],
-    rules: [],
-    projects: [],
-    peerTeams: [],
-    events: [],
-    work: [],
-    studioErrors: [],
-  },
+const storyActions = { open: fn(), previewResult: fn(), remove: fn() };
+const teamDecorator: Decorator = (Story, context) => {
+  const [fixture] = useState(() =>
+    observableFixture([
+      {
+        ...lead,
+        ...(context.name === "Implicit Lead"
+          ? {
+              overview: {
+                result: "Release verification passed.",
+                resultTruncated: true,
+                resultFile: "reports/release.md",
+              },
+            }
+          : {}),
+      },
+      ...workers,
+    ]),
+  );
+  return (
+    <fixture.Provider>
+      <Story />
+    </fixture.Provider>
+  );
 };
-const indicators = agentIndicators(snapshot.threads);
 
 const meta = {
   title: "Agents/Team dispatch",
   component: TeamPanel,
+  decorators: [teamDecorator],
   parameters: { layout: "fullscreen" },
   args: {
-    lead,
-    workers,
-    accounts: [],
+    leadId: lead.id,
+    actions: storyActions,
     opened: "lead",
-    answerIds: new Set(["question"]),
-    deferredIds: new Set<string>(),
-    indicators,
     workerQuery: "",
     setWorkerQuery: fn(),
     workerFilter: "all",
@@ -172,10 +165,6 @@ const meta = {
     setCompletedOpen: fn(),
     setTeamOpen: fn(),
     setWideTeamOpen: fn(),
-    saveClosed: fn(),
-    open: fn(),
-    previewResult: fn(),
-    remove: fn(),
   },
 } satisfies Meta<typeof TeamPanel>;
 export default meta;
@@ -278,27 +267,8 @@ export const Dispatch: Story = {
     await userEvent.click(canvas.getByLabelText("Finished (14)"));
   },
 };
-export const AfUtils: Story = {
-  ...Dispatch,
-  args: {
-    ...meta.args,
-    lead: { ...lead, name: "af-utils / Release audit" },
-    workers: workers.map((agent) => ({
-      ...agent,
-      name:
-        agent.id === "running"
-          ? "Investigate timeout recovery in the release verification pipeline"
-          : agent.name,
-    })),
-  },
-};
-export const Attar: Story = {
-  ...Dispatch,
-  args: {
-    ...meta.args,
-    lead: { ...lead, name: "attar / Deployment preparation" },
-  },
-};
+export const AfUtils: Story = { ...Dispatch };
+export const Attar: Story = { ...Dispatch };
 
 /** Screenshot fixture leaves interaction state untouched. */
 const { play: _play, ...overview } = Dispatch;
@@ -336,16 +306,8 @@ export const Workspace: Story = {
 export const ImplicitLead: Story = {
   args: {
     opened: "running",
-    lead: {
-      ...lead,
-      overview: {
-        result: "Release verification passed.",
-        resultTruncated: true,
-        resultFile: "reports/release.md",
-      },
-    },
   },
-  play: async ({ canvasElement, args }) => {
+  play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     await expect(
       canvasElement.querySelector("[data-lead]"),
@@ -365,7 +327,7 @@ export const ImplicitLead: Story = {
     await userEvent.click(
       canvas.getByRole("button", { name: "Back to main agent" }),
     );
-    await expect(args.open).toHaveBeenLastCalledWith("lead");
+    await expect(storyActions.open).toHaveBeenLastCalledWith("lead");
     await userEvent.click(canvas.getByText("Main agent report"));
     await waitFor(() =>
       expect(canvas.getByText("Release verification passed.")).toBeVisible(),
@@ -373,11 +335,11 @@ export const ImplicitLead: Story = {
     await userEvent.click(
       canvas.getByRole("button", { name: "Continue in main chat" }),
     );
-    await expect(args.open).toHaveBeenLastCalledWith("lead");
+    await expect(storyActions.open).toHaveBeenLastCalledWith("lead");
     await userEvent.click(
       canvas.getByRole("link", { name: "Open main agent submitted result" }),
     );
-    await expect(args.previewResult).toHaveBeenLastCalledWith({
+    await expect(storyActions.previewResult).toHaveBeenLastCalledWith({
       agent: "lead",
       path: "reports/release.md",
     });

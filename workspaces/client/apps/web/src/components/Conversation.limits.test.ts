@@ -1,3 +1,11 @@
+import { required } from "./componentTestFixtures.ts";
+import { observableFixture } from "./observableFixture.tsx";
+import PromptInput from "./prompt-composer/PromptInput.tsx";
+vi.mock("./agents/state.ts", async (original) => ({
+  ...(await original<typeof import("./agents/state.ts")>()),
+  useWorkspace: () => ({ stateDir: "fixture" }),
+  useAgentCatalog: () => ({ agents: [] }),
+}));
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -81,20 +89,47 @@ vi.mock("./useSendingMessageRemoval", () => ({
   useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../wasm/client", () => ({}));
-import Conversation from "./Conversation";
-import { NativeError } from "./NativeNotice";
+import { ConversationView as Conversation } from "./Conversation";
+import { ObservedNativeError as NativeError } from "./Conversation";
 import PromptComposer from "./prompt-composer/PromptComposer";
 import RealtimeVoice from "./RealtimeVoice";
 
 type Props = ComponentProps<typeof Conversation>;
-function render(agent: Props["agent"], reloadLimits: () => void) {
+function render(
+  agent: Props["agent"],
+  reloadLimits: () => void,
+  detail: Props["detail"] = agent,
+) {
   const element = Conversation({
     id: "lead",
     agent,
-    data: { stateDir: "fixture", threads: [], runtime: {} },
+    detail,
+    requests: [],
     getDraft: () => "",
+    subscribeDraft: () => () => {},
+    setDraft: () => {},
+    send: async () => {},
+    sending: false,
+    refresh: async () => {},
+    notify: () => {},
+    limits: null,
+    accountsState: {
+      data: {
+        accounts: [],
+        archivedAccounts: [],
+        defaultAccountKey: "default",
+        defaultAccountGroups: [],
+        logins: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+      error: "",
+      setData: () => {},
+      refresh: async () => null,
+      scope: "fixture",
+    },
     reloadLimits,
-  } as unknown as Props);
+  });
   // The compact-header observer needs only these browser boundaries.
   vi.stubGlobal("window", {
     matchMedia: () => ({
@@ -191,4 +226,27 @@ it("retains the explicit limits refresh action", () => {
   reloadLimits.mockClear();
   error.props.refreshLimits();
   expect(reloadLimits).toHaveBeenCalledOnce();
+});
+
+it("enables the composer from generated detail without copying it onto the summary", () => {
+  const fixture = observableFixture([
+    { id: "lead", source: GeneratedApiAgentSource.managed, canSend: true },
+  ]);
+  const summary = required(fixture.mirror.current.agents.get("lead"));
+  const detail = required(fixture.details.get("lead")).current;
+  const tree = render(summary, () => {}, detail);
+  const composer = elements(tree).find((node) => node.type === PromptComposer);
+  expect(isValidElement<ComponentProps<typeof PromptComposer>>(composer)).toBe(
+    true,
+  );
+  if (!isValidElement<ComponentProps<typeof PromptComposer>>(composer))
+    throw new Error("Expected composer");
+  const input = elements(composer.props.children("hello")).find(
+    (node) => node.type === PromptInput,
+  );
+  expect(isValidElement<ComponentProps<typeof PromptInput>>(input)).toBe(true);
+  if (!isValidElement<ComponentProps<typeof PromptInput>>(input))
+    throw new Error("Expected prompt input");
+  expect(input.props.canSend).toBe(true);
+  fixture.store.dispose();
 });

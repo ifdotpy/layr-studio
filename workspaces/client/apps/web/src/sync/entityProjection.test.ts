@@ -1,3 +1,8 @@
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../components/observableFixture.tsx";
+import { ConversationProvider } from "../components/conversation/navigation.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -92,23 +97,30 @@ it("renders project location identically from merged and full agent rows", () =>
     [entityRow("agent", "a", { ...agent, tokensUsed: 42 }, 1)],
     true,
   ).threads[0]!;
-  const projectUi = (row: Agent) => ({
-    folderEnabled: Boolean(row.projectPath),
-    folder: renderToStaticMarkup(
-      createElement(ProjectFolderDialog, {
-        agent: row,
-        canReveal: false,
-        onReveal: () => {},
-      }),
-    ),
-    start: renderToStaticMarkup(
-      createElement(ConversationStart, {
-        projectName:
-          row.projectPath?.split("/").filter(Boolean).at(-1) || "Your project",
-        location: row.projectPath || "Project location unavailable",
-      }),
-    ),
-  });
+  const projectUi = (row: Agent) => {
+    const fixture = observableFixture([row]);
+    return {
+      folderEnabled: Boolean(row.projectPath),
+      folder: renderToStaticMarkup(
+        createElement(ProjectFolderDialog, {
+          agent: row,
+          canReveal: false,
+          onReveal: () => {},
+        }),
+      ),
+      start: renderToStaticMarkup(
+        createElement(
+          fixture.Provider,
+          {},
+          createElement(
+            ConversationProvider,
+            { value: conversationActionsFixture() },
+            createElement(ConversationStart, { agentId: row.id }),
+          ),
+        ),
+      ),
+    };
+  };
   assert.deepEqual(projectUi(fallback), projectUi(merged));
   assert.match(projectUi(fallback).start, /example/);
   assert.match(projectUi(fallback).folder, /\/projects\/example/);

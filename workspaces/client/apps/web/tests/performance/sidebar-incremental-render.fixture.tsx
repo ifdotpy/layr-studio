@@ -1,6 +1,10 @@
+import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { ChatRowActionsContext } from "../../src/components/chat-row/actions.ts";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
+const injectedStore = observableFixture();
 import type { Agent } from "../../src/types.ts";
 
-import React, { useMemo } from "react";
+import { useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import Sidebar from "../../src/components/Sidebar.tsx";
@@ -114,43 +118,36 @@ function Harness() {
     )?.checks || 0;
   return data ? (
     <>
-      <Sidebar
-        data={data}
-        opened={null}
-        open={(id) => window.fixtureActions.push([id, checks])}
-        prepareChat={(id) =>
-          window.fixtureActions.push(["prepare", id, checks])
-        }
-        newChat={noop}
-        addProject={noop}
-        changeProject={noop}
-        projectAccount={noop}
-        creating={false}
-        rename={async () => {}}
-        remove={noop}
-        mobile={false}
-        onSearch={noop}
-        close={noop}
-        collections={collections}
-        markUnread={(id) => window.fixtureActions.push(["unread", id, checks])}
-        markingRead={new Set()}
-      />
-      <SidebarRow
-        row={keyRow}
-        serverAlias="Fixture"
-        showServer={false}
-        selected={false}
-        renaming={false}
-        name=""
-        organizing={false}
-        compact={false}
-        markingRead={false}
-        bindings={{
-          "data-sidebar-id": "key-row",
-          onKeyDown: () => window.fixtureActions.push(["key", checks]),
-          onDragOver: () => window.fixtureActions.push(["drag", checks]),
-        }}
-        actions={{
+      <injectedStore.Provider>
+        <SidebarCommandsProvider
+          value={{
+            open: (id) => window.fixtureActions.push([id, checks]),
+            prepareChat: (id) =>
+              window.fixtureActions.push(["prepare", id, checks]),
+            newChat: noop,
+            addProject: noop,
+            changeProject: noop,
+            projectAccount: noop,
+            rename: async () => {},
+            remove: noop,
+            onSearch: noop,
+            markUnread: (id) =>
+              window.fixtureActions.push(["unread", id, checks]),
+          }}
+        >
+          <Sidebar
+            data={data}
+            opened={null}
+            creating={false}
+            mobile={false}
+            close={noop}
+            collections={collections}
+            markingRead={new Set()}
+          />
+        </SidebarCommandsProvider>
+      </injectedStore.Provider>
+      <ChatRowActionsContext.Provider
+        value={() => ({
           prepare: noop,
           open: noop,
           pin: noop,
@@ -163,8 +160,25 @@ function Harness() {
           changeProject: noop,
           archive: noop,
           remove: noop,
-        }}
-      />
+        })}
+      >
+        <SidebarRow
+          row={keyRow}
+          serverAlias="Fixture"
+          showServer={false}
+          selected={false}
+          renaming={false}
+          name=""
+          organizing={false}
+          compact={false}
+          markingRead={false}
+          bindings={{
+            "data-sidebar-id": "key-row",
+            onKeyDown: () => window.fixtureActions.push(["key", checks]),
+            onDragOver: () => window.fixtureActions.push(["drag", checks]),
+          }}
+        />
+      </ChatRowActionsContext.Provider>
     </>
   ) : null;
 }

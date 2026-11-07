@@ -128,7 +128,7 @@ describe("server sidebar projection", () => {
     expect(projected.compact).toEqual(compact);
     expect(projected.collapsed).toEqual(collapsed);
     expect(projected.savedOrder).toEqual(groups);
-    expect(projected.sidebarOrder).toBeUndefined();
+    expect(projected).not.toHaveProperty("sidebarOrder");
     // Preference records come from streamed memory; only the saved order reads storage.
     expect(getItem.mock.calls.map(([key]) => key).sort()).toEqual(
       [`codex-sidebar-order:${data.stateDir}`].sort(),
@@ -150,7 +150,7 @@ describe("server sidebar projection", () => {
       JSON.stringify({ projects: ["/legacy"] }),
     );
     const projected = sidebarSnapshot(data);
-    expect(projected.sidebarOrder).toEqual(order);
+    expect(projected).not.toHaveProperty("sidebarOrder");
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
   });
 

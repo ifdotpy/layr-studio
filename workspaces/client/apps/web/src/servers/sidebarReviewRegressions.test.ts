@@ -22,7 +22,7 @@ import {
   type SidebarBackend,
 } from "../components/sidebar/services";
 
-function source(id: string, count = 1, directories = false): SidebarSource {
+function source(id: string, count = 1, directories = false) {
   const path = "/" + id;
   return withSidebarCollections({
     id,
@@ -121,7 +121,12 @@ it("a reorder with shared chats on each server round-trips the sidebar order", (
     ...model.order,
     [group]: desired,
   });
-  a.sidebar.sidebarOrder = { revision: 2, groups: payload.groups };
+  a.sidebar.sidebarOrder = {
+    revision: 2,
+    groups: Object.fromEntries(
+      Object.entries(payload.groups).map(([key, ids]) => [key, [...ids]]),
+    ),
+  };
   expect(mergeSidebar([a, b]).order[group]).toEqual(desired);
 });
 it.each([false, true])(
@@ -208,6 +213,11 @@ it("an explicit reorder converts legacy combined ranks without changing unknown 
   });
   expect(payload.groups[legacyKey]).toBeUndefined();
   expect(payload.groups[nativeGroup]).toContain("unknown-native-id");
-  a.sidebar.sidebarOrder = { revision: 2, groups: payload.groups };
+  a.sidebar.sidebarOrder = {
+    revision: 2,
+    groups: Object.fromEntries(
+      Object.entries(payload.groups).map(([key, ids]) => [key, [...ids]]),
+    ),
+  };
   expect(mergeSidebar([a, b]).order[group]).toEqual(desired);
 });

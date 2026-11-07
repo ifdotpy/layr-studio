@@ -3,7 +3,7 @@ import {
   CHAT_INDICATOR_URGENCY,
   type ChatIndicator,
   type ChatIndicatorKind,
-} from "../chat-status/chatStatusModel";
+} from "../../status/operationalStatus";
 
 export function needsYou(
   chats: readonly Agent[],

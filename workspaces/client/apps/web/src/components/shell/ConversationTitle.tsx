@@ -1,66 +1,121 @@
+import { observer } from "mobx-react-lite";
 import { ActionButton } from "../ui/primitives";
 import { ArrowLeft } from "lucide-react";
-import type { Agent } from "../../types";
-import WorkspaceBadge from "./WorkspaceBadge";
+import { AgentWorkspaceBadge } from "./WorkspaceBadge";
 import { ChatServerLine } from "../../servers/ProjectChatRows";
+import { useAgentSummary } from "../agents/state.ts";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { useConversationActions } from "../conversation/navigation.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import "../conversation/conversation-chrome.css";
 
 export type ConversationTitleProps = {
-  title: string;
+  agentId?: string | undefined;
+  title?: string | undefined;
   passive?: boolean | undefined;
-  projectName?: string | undefined;
-  agent?: Agent | undefined;
+  showProject?: boolean | undefined;
   serverAlias?: string | undefined;
   serverOffline?: boolean;
-  onBack?: (() => void) | undefined;
 };
 
-export default function ConversationTitle({
+const TitleText = observer(function TitleText({
+  agent,
+  title,
+}: {
+  agent?: SidebarAgent | undefined;
+  title?: string | undefined;
+}) {
+  const text = agent?.name || title || "New conversation";
+  return (
+    <h1 id="conversation-title" title={text}>
+      <span className="conversation-title-text">{text}</span>
+    </h1>
+  );
+});
+const BackToLead = observer(function BackToLead({
+  agent,
+}: {
+  agent: SidebarAgent;
+}) {
+  const navigation = useConversationActions();
+  return !agent.isLead && agent.rootId && agent.rootId !== agent.id ? (
+    <ActionButton
+      actionRole="quiet"
+      size="compact-xs"
+      leftSection={<ArrowLeft size={13} />}
+      id="back-lead"
+      aria-label="Back to main agent"
+      title="Back to main agent"
+      onClick={() => agent.rootId && navigation.open(agent.rootId)}
+    >
+      <span className="conversation-back-label">Back to main agent</span>
+    </ActionButton>
+  ) : null;
+});
+const ProjectName = observer(function ProjectName({
+  agent,
+}: {
+  agent: SidebarAgent;
+}) {
+  const current = useServerStore().state().current;
+  const projects =
+    current.status === "live" || current.status === "stale"
+      ? current.data.projects
+      : undefined;
+  const name =
+    [...(projects?.values() || [])].find(
+      (project) => project.path === agent.projectPath,
+    )?.name || agent.projectPath?.split("/").filter(Boolean).at(-1);
+  return name ? <span className="conversation-project">{name}</span> : null;
+});
+const ServerLine = observer(function ServerLine({
+  agent,
+  alias,
+  offline,
+}: {
+  agent: SidebarAgent;
+  alias: string;
+  offline: boolean;
+}) {
+  return (
+    <span
+      className="conversation-server"
+      data-offline={offline}
+      aria-label={offline ? `${alias} offline` : undefined}
+    >
+      <ChatServerLine
+        provider={agent.provider ?? undefined}
+        alias={alias}
+        offline={offline}
+      />
+    </span>
+  );
+});
+
+export default observer(function ConversationTitle({
+  agentId,
   title,
   passive = false,
-  projectName,
-  agent,
+  showProject = false,
   serverAlias,
   serverOffline = false,
-  onBack,
 }: ConversationTitleProps) {
+  const agent = useAgentSummary(agentId || "");
   return (
     <div className="conversation-heading">
-      {!passive && onBack && (
-        <ActionButton
-          actionRole="quiet"
-          size="compact-xs"
-          leftSection={<ArrowLeft size={13} />}
-          id="back-lead"
-          aria-label="Back to main agent"
-          title="Back to main agent"
-          onClick={onBack}
-        >
-          <span className="conversation-back-label">Back to main agent</span>
-        </ActionButton>
-      )}
-      <h1 id="conversation-title" title={title}>
-        <span className="conversation-title-text">{title}</span>
-      </h1>
+      {!passive && agent && <BackToLead agent={agent} />}
+      <TitleText agent={agent} title={title} />
       <div className="conversation-meta">
-        {serverAlias && (
-          <span
-            className="conversation-server"
-            data-offline={serverOffline}
-            aria-label={serverOffline ? `${serverAlias} offline` : undefined}
-          >
-            <ChatServerLine
-              provider={agent?.provider ?? undefined}
-              alias={serverAlias}
-              offline={serverOffline}
-            />
-          </span>
+        {serverAlias && agent && (
+          <ServerLine
+            agent={agent}
+            alias={serverAlias}
+            offline={serverOffline}
+          />
         )}
-        <WorkspaceBadge agent={agent} passive={passive} />
-        {projectName && (
-          <span className="conversation-project">{projectName}</span>
-        )}
+        {agent && <AgentWorkspaceBadge agent={agent} passive={passive} />}
+        {showProject && agent && <ProjectName agent={agent} />}
       </div>
     </div>
   );
-}
+});

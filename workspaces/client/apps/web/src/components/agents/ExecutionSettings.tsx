@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import BottomSheet from "../ui/BottomSheet";
 import { AgentPermissionMode } from "../../generated/api";
 import { appendAppLog } from "../../appLog";
@@ -30,7 +31,6 @@ import {
   useEffect,
   useId,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -106,16 +106,32 @@ const displayModel = (catalog: Catalog, model: string) => {
 const fastTier = (info?: WorkerModelInfo) =>
   info?.serviceTiers?.find((tier) => tier.id === "priority");
 
+export type AgentSettingsInput = {
+  kind: "agent";
+  summary: Agent;
+  detail: Agent | undefined;
+};
+export type ExecutionSettingsInput =
+  | AgentSettingsInput
+  | { kind: "draft"; draft: Agent };
+const summaryOf = (input: ExecutionSettingsInput) =>
+  input.kind === "agent" ? input.summary : input.draft;
+const detailOf = (input: ExecutionSettingsInput) =>
+  input.kind === "agent" ? input.detail : input.draft;
+
 type SettingsProps = {
   presentation?: "menu" | "panel" | undefined;
   renderTrigger?: (props: {
     agent: Agent;
+    detail?: Agent | undefined;
+    workerDetail?: Agent | undefined;
+    reviewDetail?: Agent | undefined;
     opened: boolean;
     ref: RefObject<HTMLButtonElement | null>;
     onClick: () => void;
   }) => ReactElement;
-  agent: Agent;
-  lead?: Agent | undefined;
+  input: ExecutionSettingsInput;
+  leadInput?: AgentSettingsInput | undefined;
   catalog: Catalog;
   accounts?: Account[];
   team?: Array<Pick<Agent, "id" | "rootId" | "deletedAt" | "accountKey">>;
@@ -124,7 +140,6 @@ type SettingsProps = {
   settingsRow?: boolean;
   showAccountSummary?: boolean;
   extrasTargetId?: string;
-  nextTurnSupported?: boolean;
   onOpenChange?: (opened: boolean) => void;
   openRequest?: number;
   inline?: boolean;
@@ -141,39 +156,42 @@ type SettingsProps = {
 const accountOf = (agent: Pick<Agent, "accountKey">) =>
   agent.accountKey || "default";
 const providerOf = (account?: Pick<Account, "provider">) => account?.provider;
-const queuedFor = (agent: SettingsAgent) =>
-  agent.pendingSettingsAccountKey &&
-  agent.pendingSettingsAccountKey !== accountOf(agent)
+const queuedFor = (agent: SettingsAgent, detail: SettingsAgent = agent) =>
+  detail.pendingSettingsAccountKey &&
+  detail.pendingSettingsAccountKey !== accountOf(agent)
     ? null
-    : agent.pendingSettings;
+    : detail.pendingSettings;
 export const settingsFor = (
   agent: SettingsAgent,
   teamDefaults: boolean,
+  detail: SettingsAgent = agent,
 ): SettingsValue => {
   if (teamDefaults)
     return {
       model:
-        agent.workerDefaults?.model === undefined
+        detail.workerDefaults?.model === undefined
           ? "gpt-6-luna"
-          : (agent.workerDefaults.model ?? null),
+          : (detail.workerDefaults.model ?? null),
       effort:
-        agent.workerDefaults?.effort === undefined
+        detail.workerDefaults?.effort === undefined
           ? "high"
-          : agent.workerDefaults.effort,
-      fast_mode: !!agent.workerDefaults?.fastMode,
-      daybreak_enabled: !!agent.workerDefaults?.daybreakEnabled,
-      delegation_depth: agent.workerDefaults?.delegationDepth ?? 1,
+          : detail.workerDefaults.effort,
+      fast_mode: !!detail.workerDefaults?.fastMode,
+      daybreak_enabled: !!detail.workerDefaults?.daybreakEnabled,
+      delegation_depth: detail.workerDefaults?.delegationDepth ?? 1,
     };
-  const queued = queuedFor(agent);
+  const queued = queuedFor(agent, detail);
   return {
-    model: queued?.model ?? agent.model ?? null,
-    effort: queued ? (queued.effort ?? null) : (agent.effort ?? null),
-    fast_mode: queued ? !!queued.fastMode : !!agent.fastMode,
-    daybreak_enabled: !!(queued?.daybreakEnabled ?? agent.daybreakEnabled),
+    model: queued?.model ?? detail.model ?? agent.model ?? null,
+    effort: queued ? (queued.effort ?? null) : (detail.effort ?? null),
+    fast_mode: queued ? !!queued.fastMode : !!detail.fastMode,
+    daybreak_enabled: !!(queued?.daybreakEnabled ?? detail.daybreakEnabled),
     delegation_depth: 1,
   };
 };
-const reviewSettingsFor = (agent: Agent): ReviewSettings => ({
+const reviewSettingsFor = (
+  agent: Pick<Agent, "reviewDefaults">,
+): ReviewSettings => ({
   model:
     agent.reviewDefaults?.model === DEFAULT
       ? null
@@ -210,305 +228,300 @@ type ControllerProps = SettingsProps & {
   section?: "delegation" | "permissions";
 };
 type SettingsReceipt = { version: object; value: Agent };
-const sameRoleSettings = (left: Agent, right: Agent, role: SetupRole) =>
-  role === "review"
-    ? left.reviewDefaults?.model === right.reviewDefaults?.model &&
-      left.reviewDefaults?.effort === right.reviewDefaults?.effort &&
-      left.reviewDefaults?.fastMode === right.reviewDefaults?.fastMode
-    : sameSettings(
-        settingsFor(left, role === "worker"),
-        settingsFor(right, role === "worker"),
+const ExecutionSettingsController = observer(
+  function ExecutionSettingsController(props: ControllerProps) {
+    const subject = summaryOf(props.input);
+    const detail = detailOf(props.input);
+    const [changeStatus, setChangeStatus] = useState<SettingsChange | null>(
+      null,
+    );
+    const [statusOpen, setStatusOpen] = useState(false);
+    useEffect(() => {
+      setChangeStatus((current) =>
+        current ? observeSettingsChange(current, subject, detail || {}) : null,
       );
-function ExecutionSettingsController(props: ControllerProps) {
-  const [changeStatus, setChangeStatus] = useState<SettingsChange | null>(null);
-  const [statusOpen, setStatusOpen] = useState(false);
-  useEffect(() => {
-    setChangeStatus((current) =>
-      current ? observeSettingsChange(current, props.agent) : null,
-    );
-  }, [props.agent, changeStatus?.phase]);
-  const loggedFailure = useRef<SettingsChange | null>(null);
-  useEffect(() => {
-    if (
-      changeStatus?.phase === "failed" &&
-      !changeStatus.errorLogged &&
-      loggedFailure.current !== changeStatus
-    ) {
-      loggedFailure.current = changeStatus;
-      appendAppLog({
-        at: Date.now(),
-        level: "error",
-        title: "Execution settings change failed",
-        reason: changeStatus.error || "The settings change failed.",
-      });
-    }
-  }, [changeStatus]);
-  const statusModal = changeStatus && (
-    <Modal
-      opened={statusOpen}
-      onClose={() => setStatusOpen(false)}
-      title="Settings change"
-      centered
-      zIndex={layerZIndex.modalAbovePopover}
-    >
-      <Stack gap="sm">
-        <Text role="status">
-          {changeStatus.phase === "saving"
-            ? "Saving…"
-            : changeStatus.phase === "queued"
-              ? "Queued for the next turn"
-              : changeStatus.phase === "saved"
-                ? "Saved"
-                : "Failed"}
-        </Text>
-        <Text size="sm">
-          {changeStatus.before.model || "Default"} →{" "}
-          {changeStatus.requested.model || "Default"} ·{" "}
-          {changeStatus.before.effort || "Default"} →{" "}
-          {changeStatus.requested.effort || "Default"} · Fast{" "}
-          {changeStatus.before.fastMode ? "on" : "off"} →{" "}
-          {changeStatus.requested.fastMode ? "on" : "off"}
-        </Text>
-        {changeStatus.phase === "queued" && (
-          <Text size="sm">
-            {props.agent.status === AgentStatus.idle ||
-            props.agent.status === AgentStatus.completed
-              ? "If still queued, the change applies when this agent next runs. Check current settings for its latest state."
-              : "If still queued, the change applies at the next turn. Check current settings for its latest state."}
-          </Text>
-        )}
-        {changeStatus.phase === "saving" && changeStatus.error && (
-          <Text size="sm">
-            {changeStatus.error} Use Check settings save to confirm the same
-            request.
-          </Text>
-        )}
-        {changeStatus.phase === "failed" && (
-          <Text size="sm">
-            {changeStatus.error} See App errors for details.
-          </Text>
-        )}
-        <Button onClick={() => setStatusOpen(false)}>Close</Button>
-      </Stack>
-    </Modal>
-  );
-  const [confirmed, setConfirmed] = useState<
-    Partial<Record<SetupRole, SettingsReceipt>>
-  >({});
-  const projected = useRef({
-    agent: props.agent,
-    versions: { orchestrator: {}, worker: {}, review: {} },
-    requests: {} as Partial<Record<SetupRole, object>>,
-  });
-  const previous = projected.current.agent;
-  const changedScope =
-    previous.id !== props.agent.id ||
-    accountOf(previous) !== accountOf(props.agent);
-  // A separate identity for each written settings domain lets unrelated SSE
-  // updates coexist with a receipt. Any observed same-domain update wins,
-  // including an update followed by a return to the earlier settings.
-  for (const role of ["orchestrator", "worker", "review"] as const)
-    if (changedScope || !sameRoleSettings(previous, props.agent, role)) {
-      projected.current.versions[role] = {};
-      delete projected.current.requests[role];
-    }
-  projected.current.agent = props.agent;
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const beginSettingsSave = (role: SetupRole) => {
-    const version = projected.current.versions[role];
-    const request = {};
-    projected.current.requests[role] = request;
-    return (value: Agent) => {
-      const latest = projected.current;
+    }, [
+      subject.id,
+      subject.accountKey,
+      detail?.pendingSettingsAccountKey,
+      changeStatus?.phase,
+    ]);
+    const loggedFailure = useRef<SettingsChange | null>(null);
+    useEffect(() => {
       if (
-        !mounted.current ||
-        latest.versions[role] !== version ||
-        latest.requests[role] !== request ||
-        value.id !== latest.agent.id ||
-        accountOf(value) !== accountOf(latest.agent)
-      )
-        return false;
-      setConfirmed((old) => ({ ...old, [role]: { version, value } }));
-      return true;
-    };
-  };
-  const receipt = (role: SetupRole) => {
-    const saved = confirmed[role];
-    return saved?.version === projected.current.versions[role]
-      ? saved.value
-      : undefined;
-  };
-  const main = receipt("orchestrator");
-  const worker = receipt("worker");
-  const review = receipt("review");
-  // Only execution fields bridge the response-to-SSE interval. Status and
-  // other agent fields continue to come from the workspace projection.
-  const triggerAgent = useMemo(
-    () =>
-      main || worker || review
-        ? {
-            ...props.agent,
-            ...(main
-              ? {
-                  model: main.model,
-                  effort: main.effort,
-                  fastMode: main.fastMode,
-                  daybreakEnabled: main.daybreakEnabled,
-                  pendingSettings: main.pendingSettings,
-                  pendingSettingsAccountKey: main.pendingSettingsAccountKey,
-                }
-              : {}),
-            ...(worker ? { workerDefaults: worker.workerDefaults } : {}),
-            ...(review ? { reviewDefaults: review.reviewDefaults } : {}),
-          }
-        : props.agent,
-    [props.agent, main, worker, review],
-  );
-  const [selectedRole, setRole] = useState<SetupRole>(
-    props.initialRole || (props.agent.isLead ? "orchestrator" : "worker"),
-  );
-  // With subagents off, the composer picker of a lead has no Workers role; the
-  // settings rows still set the defaults for later subagents.
-  const workersHidden =
-    !props.settingsRow && !!props.agent.isLead && subagentsOff(props.agent);
-  const role =
-    workersHidden && selectedRole === "worker" ? "orchestrator" : selectedRole;
-  const [opened, setOpened] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    if ((props.openRequest || 0) > 0) {
-      triggerRef.current?.focus({ preventScroll: true });
-      setRole(props.agent.isLead ? "orchestrator" : "worker");
-      setOpened(true);
-    }
-  }, [props.openRequest]);
-  const changeOpened = useCallback(
-    (value: boolean) => {
-      setOpened(value);
-      if (!value) triggerRef.current?.focus({ preventScroll: true });
-      if (!value && props.settingsRow)
-        setRole(
-          props.initialRole || (props.agent.isLead ? "orchestrator" : "worker"),
-        );
-    },
-    [props.settingsRow, props.initialRole, props.agent.isLead],
-  );
-  const inheritedRole = !props.agent.isLead && role !== "worker";
-  const agent = inheritedRole ? props.lead || props.agent : props.agent;
-  const readOnlyReason = inheritedRole
-    ? props.lead
-      ? "Inherited from the lead. Open the lead chat to change these settings."
-      : "Managed by the lead. Its settings are unavailable in this chat."
-    : undefined;
-  const roleSwitchId = useId();
-  const focusRole = useRef(false);
-  useLayoutEffect(() => {
-    const selected = document
-      .getElementById(roleSwitchId)
-      ?.querySelector<HTMLInputElement>("input:checked");
-    // Each role has isolated draft state. Preserve the selected keyboard
-    // target when its form remounts inside the stable focus trap.
-    selected?.setAttribute("data-autofocus", "true");
-    if (focusRole.current) {
-      selected?.focus();
-      focusRole.current = false;
-    }
-  }, [role, roleSwitchId, opened]);
-  const scope = JSON.stringify([agent.id, accountOf(agent), role]);
-  const controls = (
-    <ScopedExecutionSettings
-      key={scope}
-      {...props}
-      beginSettingsSave={beginSettingsSave}
-      transferOpen={transferOpen}
-      setTransferOpen={setTransferOpen}
-      onSettingsChange={(change) => {
-        setChangeStatus(change);
-        setStatusOpen(true);
-      }}
-      onSettingsFailure={(key, message, uncertain) =>
-        setChangeStatus((current) =>
-          current &&
-          current.requestKey === key &&
-          projected.current.agent.id === current.agentId &&
-          accountOf(projected.current.agent) === current.accountKey
-            ? {
-                ...current,
-                phase: uncertain ? "saving" : "failed",
-                error: message,
-                errorLogged: true,
-              }
-            : current,
-        )
+        changeStatus?.phase === "failed" &&
+        !changeStatus.errorLogged &&
+        loggedFailure.current !== changeStatus
+      ) {
+        loggedFailure.current = changeStatus;
+        appendAppLog({
+          at: Date.now(),
+          level: "error",
+          title: "Execution settings change failed",
+          reason: changeStatus.error || "The settings change failed.",
+        });
       }
-      onSettingsConfirmed={(key, nextTurn) =>
-        setChangeStatus((current) =>
-          current &&
-          current.phase !== "failed" &&
-          current.requestKey === key &&
-          projected.current.agent.id === current.agentId &&
-          accountOf(projected.current.agent) === current.accountKey
-            ? { ...current, phase: nextTurn ? "queued" : "saved" }
-            : current,
-        )
-      }
-      presentation={props.renderTrigger ? "panel" : props.presentation}
-      agent={agent}
-      inheritedUnavailable={inheritedRole && !props.lead}
-      readOnlyReason={readOnlyReason}
-      roleSwitchId={roleSwitchId}
-      teamDefaults={role === "review" || (role === "worker" && !!agent.isLead)}
-      role={role}
-      workersHidden={workersHidden}
-      onRole={(value) => {
-        focusRole.current = true;
-        setRole(value);
-      }}
-      opened={opened}
-      triggerRef={triggerRef}
-      setOpened={changeOpened}
-    />
-  );
-  if (props.section) return controls;
-  if (!props.renderTrigger)
-    return (
-      <>
-        {controls}
-        {statusModal}
-      </>
+    }, [changeStatus]);
+    const statusModal = changeStatus && (
+      <Modal
+        opened={statusOpen}
+        onClose={() => setStatusOpen(false)}
+        title="Settings change"
+        centered
+        zIndex={layerZIndex.modalAbovePopover}
+      >
+        <Stack gap="sm">
+          <Text role="status">
+            {changeStatus.phase === "saving"
+              ? "Saving…"
+              : changeStatus.phase === "queued"
+                ? "Queued for the next turn"
+                : changeStatus.phase === "saved"
+                  ? "Saved"
+                  : "Failed"}
+          </Text>
+          <Text size="sm">
+            {changeStatus.before.model || "Default"} →{" "}
+            {changeStatus.requested.model || "Default"} ·{" "}
+            {changeStatus.before.effort || "Default"} →{" "}
+            {changeStatus.requested.effort || "Default"} · Fast{" "}
+            {changeStatus.before.fastMode ? "on" : "off"} →{" "}
+            {changeStatus.requested.fastMode ? "on" : "off"}
+          </Text>
+          {changeStatus.phase === "queued" && (
+            <Text size="sm">
+              {subject.status === AgentStatus.idle ||
+              subject.status === AgentStatus.completed
+                ? "If still queued, the change applies when this agent next runs. Check current settings for its latest state."
+                : "If still queued, the change applies at the next turn. Check current settings for its latest state."}
+            </Text>
+          )}
+          {changeStatus.phase === "saving" && changeStatus.error && (
+            <Text size="sm">
+              {changeStatus.error} Use Check settings save to confirm the same
+              request.
+            </Text>
+          )}
+          {changeStatus.phase === "failed" && (
+            <Text size="sm">
+              {changeStatus.error} See App errors for details.
+            </Text>
+          )}
+          <Button onClick={() => setStatusOpen(false)}>Close</Button>
+        </Stack>
+      </Modal>
     );
-  return (
-    <ExecutionMenu
-      opened={opened}
-      setOpened={changeOpened}
-      accountModalOpen={props.accountModalOpen || transferOpen || statusOpen}
-      statusModal={statusModal}
-      label={settingsLabel(
-        agent,
-        role,
-        role === "review" || (role === "worker" && !!agent.isLead),
-      )}
-      trigger={props.renderTrigger({
-        agent: triggerAgent,
-        opened,
-        ref: triggerRef,
-        onClick: () => changeOpened(!opened),
-      })}
-    >
-      {controls}
-    </ExecutionMenu>
-  );
-}
+    const [confirmed, setConfirmed] = useState<
+      Partial<Record<SetupRole, SettingsReceipt>>
+    >({});
+    const signatures = {
+      orchestrator: JSON.stringify(settingsFor(subject, false, detail || {})),
+      worker: JSON.stringify(settingsFor(subject, true, detail || {})),
+      review: JSON.stringify(reviewSettingsFor(detail || {})),
+    };
+    const settingsScope = JSON.stringify([subject.id, accountOf(subject)]);
+    const projected = useRef({
+      agent: subject,
+      scope: settingsScope,
+      signatures,
+      versions: { orchestrator: {}, worker: {}, review: {} },
+      requests: {} as Partial<Record<SetupRole, object>>,
+    });
+    for (const role of ["orchestrator", "worker", "review"] as const)
+      if (
+        projected.current.scope !== settingsScope ||
+        projected.current.signatures[role] !== signatures[role]
+      ) {
+        projected.current.versions[role] = {};
+        delete projected.current.requests[role];
+      }
+    projected.current.agent = subject;
+    projected.current.scope = settingsScope;
+    projected.current.signatures = signatures;
+    const mounted = useRef(true);
+    useEffect(() => {
+      mounted.current = true;
+      return () => {
+        mounted.current = false;
+      };
+    }, []);
+    const beginSettingsSave = (role: SetupRole) => {
+      const version = projected.current.versions[role];
+      const request = {};
+      projected.current.requests[role] = request;
+      return (value: Agent) => {
+        const latest = projected.current;
+        if (
+          !mounted.current ||
+          latest.versions[role] !== version ||
+          latest.requests[role] !== request ||
+          value.id !== latest.agent.id ||
+          accountOf(value) !== accountOf(latest.agent)
+        )
+          return false;
+        setConfirmed((old) => ({ ...old, [role]: { version, value } }));
+        return true;
+      };
+    };
+    const receipt = (role: SetupRole) => {
+      const saved = confirmed[role];
+      return saved?.version === projected.current.versions[role]
+        ? saved.value
+        : undefined;
+    };
+    const main = receipt("orchestrator");
+    const worker = receipt("worker");
+    const review = receipt("review");
+    // Only execution fields bridge the response-to-SSE interval. Status and
+    // other agent fields continue to come from the workspace projection.
+    const [selectedRole, setRole] = useState<SetupRole>(
+      props.initialRole || (subject.isLead ? "orchestrator" : "worker"),
+    );
+    // With subagents off, the composer picker of a lead has no Workers role; the
+    // settings rows still set the defaults for later subagents.
+    const workersHidden =
+      !props.settingsRow && !!subject.isLead && subagentsOff(detail || {});
+    const role =
+      workersHidden && selectedRole === "worker"
+        ? "orchestrator"
+        : selectedRole;
+    const [opened, setOpened] = useState(false);
+    const [transferOpen, setTransferOpen] = useState(false);
+    const triggerRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+      if ((props.openRequest || 0) > 0) {
+        triggerRef.current?.focus({ preventScroll: true });
+        setRole(subject.isLead ? "orchestrator" : "worker");
+        setOpened(true);
+      }
+    }, [props.openRequest]);
+    const changeOpened = useCallback(
+      (value: boolean) => {
+        setOpened(value);
+        if (!value) triggerRef.current?.focus({ preventScroll: true });
+        if (!value && props.settingsRow)
+          setRole(
+            props.initialRole || (subject.isLead ? "orchestrator" : "worker"),
+          );
+      },
+      [props.settingsRow, props.initialRole, subject.isLead],
+    );
+    const inheritedRole = !subject.isLead && role !== "worker";
+    const input = inheritedRole ? props.leadInput || props.input : props.input;
+    const agent = summaryOf(input);
+    const readOnlyReason = inheritedRole
+      ? props.leadInput?.summary
+        ? "Inherited from the lead. Open the lead chat to change these settings."
+        : "Managed by the lead. Its settings are unavailable in this chat."
+      : undefined;
+    const roleSwitchId = useId();
+    const focusRole = useRef(false);
+    useLayoutEffect(() => {
+      const selected = document
+        .getElementById(roleSwitchId)
+        ?.querySelector<HTMLInputElement>("input:checked");
+      // Each role has isolated draft state. Preserve the selected keyboard
+      // target when its form remounts inside the stable focus trap.
+      selected?.setAttribute("data-autofocus", "true");
+      if (focusRole.current) {
+        selected?.focus();
+        focusRole.current = false;
+      }
+    }, [role, roleSwitchId, opened]);
+    const scope = JSON.stringify([agent.id, accountOf(agent), role]);
+    const controls = (
+      <ScopedExecutionSettings
+        key={scope}
+        {...props}
+        beginSettingsSave={beginSettingsSave}
+        transferOpen={transferOpen}
+        setTransferOpen={setTransferOpen}
+        onSettingsChange={(change) => {
+          setChangeStatus(change);
+          setStatusOpen(true);
+        }}
+        onSettingsFailure={(key, message, uncertain) =>
+          setChangeStatus((current) =>
+            current &&
+            current.requestKey === key &&
+            projected.current.agent.id === current.agentId &&
+            accountOf(projected.current.agent) === current.accountKey
+              ? {
+                  ...current,
+                  phase: uncertain ? "saving" : "failed",
+                  error: message,
+                  errorLogged: true,
+                }
+              : current,
+          )
+        }
+        onSettingsConfirmed={(key, nextTurn) =>
+          setChangeStatus((current) =>
+            current &&
+            current.phase !== "failed" &&
+            current.requestKey === key &&
+            projected.current.agent.id === current.agentId &&
+            accountOf(projected.current.agent) === current.accountKey
+              ? { ...current, phase: nextTurn ? "queued" : "saved" }
+              : current,
+          )
+        }
+        presentation={props.renderTrigger ? "panel" : props.presentation}
+        input={input}
+        inheritedUnavailable={inheritedRole && !props.leadInput?.summary}
+        readOnlyReason={readOnlyReason}
+        roleSwitchId={roleSwitchId}
+        teamDefaults={
+          role === "review" || (role === "worker" && !!agent.isLead)
+        }
+        role={role}
+        workersHidden={workersHidden}
+        onRole={(value) => {
+          focusRole.current = true;
+          setRole(value);
+        }}
+        opened={opened}
+        triggerRef={triggerRef}
+        setOpened={changeOpened}
+      />
+    );
+    if (props.section) return controls;
+    if (!props.renderTrigger)
+      return (
+        <>
+          {controls}
+          {statusModal}
+        </>
+      );
+    return (
+      <ExecutionMenu
+        opened={opened}
+        setOpened={changeOpened}
+        accountModalOpen={props.accountModalOpen || transferOpen || statusOpen}
+        statusModal={statusModal}
+        label={settingsLabel(
+          agent,
+          role,
+          role === "review" || (role === "worker" && !!agent.isLead),
+        )}
+        trigger={props.renderTrigger({
+          agent: subject,
+          detail: main || detail,
+          workerDetail: worker,
+          reviewDetail: review,
+          opened,
+          ref: triggerRef,
+          onClick: () => changeOpened(!opened),
+        })}
+      >
+        {controls}
+      </ExecutionMenu>
+    );
+  },
+);
 
-function ScopedExecutionSettings({
-  agent,
+const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
+  input,
   presentation = "menu",
   renderTrigger,
   section,
@@ -520,7 +533,6 @@ function ScopedExecutionSettings({
   accounts = [],
   refresh,
   teamDefaults = false,
-  nextTurnSupported,
   onOpenChange,
   initialRole = "orchestrator",
   settingsRow = false,
@@ -564,6 +576,14 @@ function ScopedExecutionSettings({
   triggerRef: RefObject<HTMLButtonElement | null>;
   setOpened: (opened: boolean) => void;
 }) {
+  const agent = summaryOf(input);
+  const detail = detailOf(input);
+  workerExcludedAccountKeys ??= onWorkerExcludedAccountKeysChange
+    ? (detail?.workerExcludedAccountKeys ?? undefined)
+    : undefined;
+  reviewerExcludedAccountKeys ??= onReviewerExcludedAccountKeysChange
+    ? (detail?.reviewerExcludedAccountKeys ?? undefined)
+    : undefined;
   const { post, save, saved } = useServerApi();
 
   const [permissionsTarget, setPermissionsTarget] =
@@ -586,10 +606,7 @@ function ScopedExecutionSettings({
       mounted.current = false;
     };
   }, []);
-  const canQueueSettings =
-    nextTurnSupported ??
-    (agent as Agent & { nextTurnSettingsSupported?: boolean })
-      .nextTurnSettingsSupported === true;
+  const canQueueSettings = detail?.nextTurnSettingsSupported === true;
   useEffect(() => {
     onOpenChange?.(opened);
     return () => onOpenChange?.(false);
@@ -641,12 +658,12 @@ function ScopedExecutionSettings({
       !saving &&
       pendingYolo &&
       (pendingYolo.value ===
-        (agent.permissionMode === AgentPermissionMode["bypassPermissions"]) ||
+        (detail?.permissionMode === AgentPermissionMode["bypassPermissions"]) ||
         pendingYolo.baseline !==
-          (agent.permissionMode === AgentPermissionMode["bypassPermissions"]))
+          (detail?.permissionMode === AgentPermissionMode["bypassPermissions"]))
     )
       setPendingYolo(null);
-  }, [saving, pendingYolo, agent.permissionMode]);
+  }, [saving, pendingYolo, detail?.permissionMode]);
   const [pending, setPending] = useState<{
     values: SettingsValue;
     baseline: SettingsValue;
@@ -666,9 +683,9 @@ function ScopedExecutionSettings({
     : agent.isLead
       ? "Main agent"
       : "Subagent";
-  const queued = queuedFor(agent);
-  const stored = settingsFor(agent, teamDefaults);
-  const reviewStored = reviewSettingsFor(agent);
+  const queued = queuedFor(agent, detail || {});
+  const stored = settingsFor(agent, teamDefaults, detail || {});
+  const reviewStored = reviewSettingsFor(detail || {});
   const reviewCurrent = reviewPending?.values || reviewStored;
   const current = pending?.values || stored;
   const refreshSavedSettings = (
@@ -778,6 +795,7 @@ function ScopedExecutionSettings({
     !teamDefaults && (!!agent.inFlight || busy.has(agent.status ?? ""));
   const catalogKnown = !catalog.loading && !catalog.error;
   const disabled =
+    !detail ||
     !!readOnlyReason ||
     saving ||
     !!unconfirmed ||
@@ -793,7 +811,7 @@ function ScopedExecutionSettings({
   const modeQueued =
     !teamDefaults &&
     !!(active || queued || unconfirmed) &&
-    daybreakEnabled !== !!agent.daybreakEnabled;
+    daybreakEnabled !== !!detail?.daybreakEnabled;
   const modeLabel = daybreakEnabled ? "Daybreak" : "Standard";
   const modelOptions = toModelOptions(models, {
     provider: selectedProvider || "",
@@ -831,7 +849,7 @@ function ScopedExecutionSettings({
       supportsDaybreakMode(row, false),
   );
   const reviewInfo = modelForValue(reviewModels, reviewCurrent.model);
-  const reviewFast = reviewCurrent.fast_mode ?? !!agent.fastMode;
+  const reviewFast = reviewCurrent.fast_mode ?? !!detail?.fastMode;
   const reviewOptions = toModelOptions(reviewModels);
   if (reviewCurrent.model && !modelForValue(reviewOptions, reviewCurrent.model))
     reviewOptions.push({
@@ -852,12 +870,14 @@ function ScopedExecutionSettings({
     const acceptCanonical = beginSettingsSave(
       teamDefaults ? "worker" : "orchestrator",
     );
-    request = { ...request, expected_account_key: accountOf(agent) };
+    const requestAgentId = agent.id;
+    const requestAccountKey = accountOf(agent);
+    request = { ...request, expected_account_key: requestAccountKey };
     const statusKey = request.request_id || randomUUID();
     if (!teamDefaults && !onDraftChange) {
       onSettingsChange({
-        agentId: agent.id,
-        accountKey: accountOf(agent),
+        agentId: requestAgentId,
+        accountKey: requestAccountKey,
         requestKey: statusKey,
         phase: "saving",
         before: {
@@ -897,7 +917,7 @@ function ScopedExecutionSettings({
         // selection without going through the account tile's preflight.
         const offered = await readWorkerModels(
           catalogReader,
-          accountOf(agent),
+          requestAccountKey,
           true,
         );
         if (!mounted.current) return;
@@ -915,8 +935,8 @@ function ScopedExecutionSettings({
       );
       if (
         !canonical ||
-        canonical.id !== agent.id ||
-        accountOf(canonical) !== accountOf(agent)
+        canonical.id !== requestAgentId ||
+        accountOf(canonical) !== requestAccountKey
       )
         throw new Error(
           "The settings account changed. Check the current settings.",
@@ -956,7 +976,7 @@ function ScopedExecutionSettings({
             ? "Execution settings save unconfirmed"
             : "Execution settings change failed",
           reason: errorText(failure),
-          detail: `Agent: ${agent.id}; account: ${accountOf(agent)}; request: ${statusKey}`,
+          detail: `Agent: ${requestAgentId}; account: ${requestAccountKey}; request: ${statusKey}`,
         });
         onSettingsFailure(statusKey, errorText(failure), uncertain);
       }
@@ -1116,7 +1136,7 @@ function ScopedExecutionSettings({
     if ("model" in patch && !prepared) {
       next.effort = null;
       const nextInfo = modelForValue(reviewModels, next.model);
-      if (!fastTier(nextInfo) && (next.fast_mode ?? agent.fastMode))
+      if (!fastTier(nextInfo) && (next.fast_mode ?? detail?.fastMode))
         next.fast_mode = false;
     }
     if (onDraftChange) {
@@ -1202,7 +1222,7 @@ function ScopedExecutionSettings({
       setPendingYolo({
         value: canonical.permissionMode === "bypassPermissions",
         baseline:
-          agent.permissionMode === AgentPermissionMode["bypassPermissions"],
+          detail?.permissionMode === AgentPermissionMode["bypassPermissions"],
       });
       refreshSavedSettings(generation);
     } catch (failure) {
@@ -1458,7 +1478,7 @@ function ScopedExecutionSettings({
           Model settings apply to the next turn. The current response keeps its
           settings.
           {modeQueued &&
-            ` Current mode: ${agent.daybreakEnabled ? "Daybreak" : "Standard"}. Next turn: ${modeLabel}.`}
+            ` Current mode: ${detail?.daybreakEnabled ? "Daybreak" : "Standard"}. Next turn: ${modeLabel}.`}
         </p>
       )}
       {active && !canQueueSettings && (
@@ -1497,7 +1517,7 @@ function ScopedExecutionSettings({
   );
   const fullAccess =
     pendingYolo?.value ??
-    agent.permissionMode === AgentPermissionMode["bypassPermissions"];
+    detail?.permissionMode === AgentPermissionMode["bypassPermissions"];
   const askingNextTurn =
     (!!agent.inFlight || busy.has(agent.status ?? "")) && !fullAccess;
   const permissions =
@@ -1514,7 +1534,7 @@ function ScopedExecutionSettings({
             fullWidth
             aria-label="Full access without approval"
             value={fullAccess ? "full" : "ask"}
-            disabled={saving || !("permissionMode" in agent)}
+            disabled={saving || detail?.permissionMode === undefined}
             data={[
               { value: "ask", label: "Ask" },
               { value: "full", label: "Full" },
@@ -1522,7 +1542,7 @@ function ScopedExecutionSettings({
             onChange={(value) => void changeYolo(value === "full")}
           />
           <Text size="xs" c="dimmed" className="execution-setting-description">
-            {!("permissionMode" in agent)
+            {detail?.permissionMode === undefined
               ? "Available after the server update."
               : askingNextTurn
                 ? "Ask policy changes apply from the next turn."
@@ -1541,13 +1561,13 @@ function ScopedExecutionSettings({
             label="Full access without approval"
             aria-label="Full access without approval"
             checked={fullAccess}
-            disabled={saving || !("permissionMode" in agent)}
+            disabled={saving || detail?.permissionMode === undefined}
             description={
-              !("permissionMode" in agent)
+              detail?.permissionMode === undefined
                 ? "Available after the server update."
                 : askingNextTurn
                   ? "Ask policy changes apply from the next turn."
-                  : agent.permissionMode == null
+                  : detail?.permissionMode == null
                     ? "The team uses normal Codex permissions."
                     : fullAccess
                       ? "Tools run without permission prompts."
@@ -1565,7 +1585,7 @@ function ScopedExecutionSettings({
       )
     ) : null;
   const mainSettings =
-    role === "orchestrator" ? current : settingsFor(agent, false);
+    role === "orchestrator" ? current : settingsFor(agent, false, detail || {});
   const mainModel = mainSettings.model || agent.model || "";
   const mainInfo = infoFor(parentCatalog, mainModel);
   const summaryRole = settingsRow ? initialRole : "orchestrator";
@@ -1574,7 +1594,7 @@ function ScopedExecutionSettings({
       ? mainSettings
       : role === "worker"
         ? current
-        : settingsFor(agent, true);
+        : settingsFor(agent, true, detail || {});
   const summaryReview = role === "review" ? reviewCurrent : reviewStored;
   const summaryFast =
     summaryRole === "review"
@@ -1777,7 +1797,7 @@ function ScopedExecutionSettings({
       </ExecutionMenu>
     </>
   );
-}
+});
 
 const settingsLabel = (agent: Agent, role: SetupRole, teamDefaults: boolean) =>
   role === "review"

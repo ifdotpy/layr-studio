@@ -1,5 +1,5 @@
 /* Owner of the dispatch-board state colors and rail size.
-   States are ChatIndicatorKind values (chat-status/chatStatusModel.ts).
+   States are the visible ChatIndicatorKind values (status/operationalStatus.ts).
    See docs/design/redesign-brief.md. */
 :root {
   /* Width of a selection rail and of the focus ring offset. */

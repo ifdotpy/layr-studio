@@ -330,17 +330,32 @@ test("the owner adapter preserves saved organization in standalone and classic s
     const published = await frameSnapshot();
     assert.ok(published);
 
-    expect(published!.stateDir).toBe(scope);
+    const workspace = published.entities.find(
+      (entity) => entity.collection === "workspace",
+    );
+    assert.ok(workspace?.collection === "workspace");
+    expect(workspace.value.stateDir).toBe(scope);
     expect(published!.compact).toEqual(compact);
     expect(published!.collapsed).toEqual(tree);
-    expect(published!.sidebarOrder).toEqual({ revision: 3, groups: order });
+    expect(workspace.value.sidebarOrder).toEqual({
+      revision: 3,
+      groups: order,
+    });
     expect(
-      published!.projects.find((project) => project.path === path)!.folders,
+      published.entities.flatMap((entity) =>
+        entity.collection === "project" && entity.value.path === path
+          ? [entity.value]
+          : [],
+      )[0]?.folders,
     ).toEqual([
       { id: "parent", name: "Parent", parentId: null },
       { id: "nested", name: "Nested", parentId: "parent" },
     ]);
-    expect(published!.peerTeams.map((team) => team.id)).toEqual(["team"]);
+    expect(
+      published.entities
+        .filter((entity) => entity.collection === "peerTeam")
+        .map((entity) => entity.id),
+    ).toEqual(["team"]);
     expect(
       published!.entities
         .filter((entity) => entity.collection === "agentSummary")

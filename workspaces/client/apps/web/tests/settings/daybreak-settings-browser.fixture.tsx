@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { WorkerModelInfo } from "../../src/components/agents/WorkerModelPicker.tsx";
 import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
@@ -56,7 +57,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettings } from "../../src/components/agents/ExecutionSettings.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
 const initial: Agent = {
   id: "first",
   accountKey: "default",
@@ -202,20 +203,22 @@ function Fixture() {
   };
   return (
     <MantineProvider>
-      <ModelCatalogReader.Provider value={reader}>
-        <ExecutionSettings
-          key={mount}
-          agent={agent}
-          initialRole={defaults ? "worker" : "orchestrator"}
-          catalog={{
-            models,
-            loading: false,
-            error: "",
-            retry: () => window.retries++,
-          }}
-          refresh={async () => {}}
-        />
-      </ModelCatalogReader.Provider>
+      <AgentModelsFixture agents={[agent]}>
+        <ModelCatalogReader.Provider value={reader}>
+          <ExecutionSettings
+            key={mount}
+            agent={agent}
+            initialRole={defaults ? "worker" : "orchestrator"}
+            catalog={{
+              models,
+              loading: false,
+              error: "",
+              retry: () => window.retries++,
+            }}
+            refresh={async () => {}}
+          />
+        </ModelCatalogReader.Provider>
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

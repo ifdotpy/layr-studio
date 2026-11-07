@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { NumberInput, TextInput, useMantineColorScheme } from "@mantine/core";
 import { expect, within } from "storybook/test";
-import type { ChatIndicatorKind } from "../components/chat-status/chatStatusModel";
+import type { ChatIndicatorKind } from "../status/operationalStatus";
 import { type CSSProperties, useEffect } from "react";
 import { ActionButton } from "../components/ui/primitives";
 import { computedContrast } from "./computedContrast";

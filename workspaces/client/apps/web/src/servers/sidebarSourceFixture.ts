@@ -19,66 +19,87 @@ export function agentEntities(
     value,
   }));
 }
-export function withSidebarCollections(
-  source: Omit<SidebarSource, "collections" | "view">,
-): SidebarSource {
+type SidebarFixtureState =
+  import("./sidebarSnapshot.ts").ServerSidebarSnapshot & {
+    stateDir: string;
+    projects: import("../types.ts").Project[];
+    peerTeams: import("../types.ts").PeerTeam[];
+    peerTeamsVersion: Snapshot["runtime"]["peerTeamsVersion"];
+    projectOrganizationVersion: Snapshot["runtime"]["projectOrganizationVersion"];
+    sidebarOrder: Snapshot["runtime"]["sidebarOrder"];
+  };
+export function withSidebarCollections(source: {
+  id: string;
+  online: boolean;
+  sidebar: import("./sidebarSnapshot.ts").ServerSidebarSnapshot &
+    Partial<SidebarFixtureState>;
+}) {
   const mirror = createStateMirror();
-  const entities: readonly SidebarEntity[] = [
-    ...source.sidebar.entities,
-    ...source.sidebar.projects
-      .filter(
-        (project) =>
-          !source.sidebar.entities.some(
-            (entity) =>
-              entity.collection === "project" && entity.id === project.id,
-          ),
-      )
-      .map((value) => ({
+  const sidebar: SidebarFixtureState = {
+    stateDir: "",
+    projects: [],
+    peerTeams: [],
+    peerTeamsVersion: undefined,
+    projectOrganizationVersion: undefined,
+    sidebarOrder: undefined,
+    ...source.sidebar,
+  };
+  const read = () => {
+    mirror.apply([
+      ...sidebar.entities.filter(
+        (entity) =>
+          !["project", "peerTeam", "workspace"].includes(entity.collection),
+      ),
+      ...sidebar.projects.map((value) => ({
         collection: "project" as const,
         id: value.id,
         value,
       })),
-    ...source.sidebar.peerTeams
-      .filter(
-        (team) =>
-          !source.sidebar.entities.some(
-            (entity) =>
-              entity.collection === "peerTeam" && entity.id === team.id,
-          ),
-      )
-      .map((value) => ({
+      ...sidebar.peerTeams.map((value) => ({
         collection: "peerTeam" as const,
         id: value.id,
         value,
       })),
-  ];
-  mirror.apply(entities);
+      {
+        collection: "workspace",
+        id: "fixture",
+        value: {
+          stateDir: sidebar.stateDir,
+          sidebarOrder: sidebar.sidebarOrder,
+          peerTeamsVersion: sidebar.peerTeamsVersion,
+          projectOrganizationVersion: sidebar.projectOrganizationVersion,
+        },
+      },
+    ]);
+    return mirror.current;
+  };
   return {
     ...source,
-    collections: mirror.current,
-    view: createSidebarViewModel(
-      () => mirror.current,
-      () => ({ query: "", archived: false, opened: null, rank: () => 0 }),
-    ),
+    sidebar,
+    get collections() {
+      return read();
+    },
+    view: createSidebarViewModel(read, () => ({
+      query: "",
+      archived: false,
+      opened: null,
+      rank: () => 0,
+    })),
   };
 }
 export function sourceAgents(source: SidebarSource): readonly SidebarAgent[] {
   return [...source.collections.agents.values()];
 }
 export function replaceSourceAgents(
-  source: SidebarSource,
+  source: ReturnType<typeof withSidebarCollections>,
   agents: readonly SidebarAgent[],
 ) {
-  source.sidebar = {
-    ...source.sidebar,
-    entities: [
-      ...source.sidebar.entities.filter(
-        (entity) => entity.collection !== "agentSummary",
-      ),
-      ...agentEntities(agents),
-    ],
-  };
-  Object.assign(source, withSidebarCollections(source));
+  source.sidebar.entities = [
+    ...source.sidebar.entities.filter(
+      (entity) => entity.collection !== "agentSummary",
+    ),
+    ...agentEntities(agents),
+  ];
 }
 
 export function sidebarFactsFixture(agents: readonly SidebarAgent[]) {

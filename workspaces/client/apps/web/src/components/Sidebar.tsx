@@ -1,3 +1,8 @@
+import type { DeepReadonly } from "../deepReadonly.ts";
+import { useSidebarCommands } from "./sidebar/commands.ts";
+import { SidebarProjectView } from "./sidebar/viewModel.ts";
+import type { ChatRowActions } from "./chat-row/actions.ts";
+import { ChatRowActionsContext } from "./chat-row/actions.ts";
 import { outboxRequests } from "../browserPersistence";
 import { observer } from "mobx-react-lite";
 import { useServerStore } from "../servers/ServerServicesContext.tsx";
@@ -102,41 +107,22 @@ type WithoutOrganizationId<Request> = Request extends { id: string }
 type OrganizationData = WithoutOrganizationId<OrganizationRequest>;
 export type SidebarProps = {
   services?: SidebarServices;
-  settings?: () => void;
   notice?: string;
-  data: Snapshot;
+  data: DeepReadonly<Snapshot>;
   rows?: readonly SidebarChatView[];
   collections?: StateCollections;
   /** Registered project paths when data also contains inferred view projects. */
   registeredProjectPaths?: ReadonlySet<string>;
   opened: string | null;
   selectionIdentity?: string;
-  open: (id: string) => void;
-  prepareChat?: (id: string) => void;
-  newChat: (path?: string, folder?: string) => void;
-  newSharedChat?: (path?: string) => void;
-  addProject: () => void;
   /** Projects of paired servers, listed read-only below this server's projects. */
   remoteProjects?: RemoteProjectList;
-  changeProject: (id: string) => void;
-  projectAccount: (path: string) => void;
-  projectFolders?: (path: string) => void;
-  deleteProject?: (path: string) => void;
   creating: boolean;
-  rename: (id: string, name: string) => Promise<void>;
-  remove: (id: string, room: boolean) => void;
   mobile: boolean;
   collapsed?: boolean;
   onCompactChange?: (compact: boolean) => void;
-  onSearch: () => void;
   close: () => void;
-  refresh?: () => Promise<void>;
-  notify?: (message: string) => void;
   offlineServers?: ReadonlySet<string>;
-  markUnread: (
-    id: string,
-    target: NonNullable<SidebarAgent["markRead"]>,
-  ) => void;
   markingRead: Set<string>;
   pendingReadTargets?: ReadonlyMap<
     string,
@@ -144,7 +130,7 @@ export type SidebarProps = {
   >;
   hideOldChatsThreshold?: number;
 };
-type NavigableProject = Project & { path: string; name: string };
+type NavigableProject = SidebarProjectView;
 export function projectDisplayName(
   project: Pick<Project, "path" | "name">,
 ): string {
@@ -176,6 +162,7 @@ const SidebarContents = observer(function SidebarContents(
   p: SidebarProps & { services: SidebarServices },
 ) {
   const services = p.services;
+  const commands = useSidebarCommands();
   const store = useServerStore();
   const resource =
     p.rows === undefined && p.collections === undefined
@@ -203,7 +190,7 @@ const SidebarContents = observer(function SidebarContents(
   const ownedProject = (
     project: NavigableProject,
     target: SidebarTarget,
-  ): Project => services.project?.(project.path, target) || project;
+  ): Project => services.project?.(project.path, target) || project.project;
   const ownsFolder = (
     project: NavigableProject,
     chat: SidebarChatView,
@@ -241,7 +228,7 @@ const SidebarContents = observer(function SidebarContents(
   };
   const openChat = (id: string) => {
     if (compact) closeSidebar();
-    p.open(id);
+    commands.open(id);
   };
   const inline = !compact && !p.collapsed;
   // Page layout rules read this flag. It replaces #root:has(#sidebar), which
@@ -277,11 +264,15 @@ const SidebarContents = observer(function SidebarContents(
   const [renameInPriority, setRenameInPriority] = useState(false);
   const hideOldChatsThreshold =
     p.hideOldChatsThreshold ?? DEFAULT_HIDE_OLD_CHATS_THRESHOLD;
+  const workspace = p.rows
+    ? undefined
+    : collections.workspaces.values().next().value;
+  const stateDir = p.rows ? p.data.stateDir : workspace?.stateDir || "";
   const sorting = useSidebarOrder(
-    `codex-sidebar-order:${p.data.stateDir}`,
-    runtime?.sidebarOrder ?? undefined,
-    p.refresh,
-    p.notify,
+    `codex-sidebar-order:${stateDir}`,
+    (p.rows ? runtime?.sidebarOrder : workspace?.sidebarOrder) ?? undefined,
+    commands.refresh,
+    commands.notify,
     services,
     p.data.token,
   );
@@ -313,23 +304,23 @@ const SidebarContents = observer(function SidebarContents(
           services.owner({ kind: "chat", id: conversion.source.id }).storage,
         ).get(
           "projectSave",
-          `${p.data.stateDir}:${conversion.source.id}:${conversion.target.id}`,
+          `${stateDir}:${conversion.source.id}:${conversion.target.id}`,
         )
       ) {
-        p.notify?.(
+        commands.notify?.(
           "Retry the saved request to confirm its result before closing.",
         );
         return;
       }
     } catch {
-      p.notify?.(
+      commands.notify?.(
         "Load the chat server to check the saved request before closing.",
       );
       return;
     }
     setConversion(null);
   };
-  const compactKey = `codex-project-compact:${p.data.stateDir}`;
+  const compactKey = `codex-project-compact:${stateDir}`;
   const [compactProjects, setCompactProjects] = useSidebarVisualState<
     Record<string, boolean>
   >(compactKey, {});
@@ -359,24 +350,22 @@ const SidebarContents = observer(function SidebarContents(
         (p.rows
           ? (runtime?.projects ?? [])
           : [...collections.projects.values()]
-        )
-          .filter(
-            (project): project is Project & { path: string } =>
-              typeof project.path === "string",
-          )
-          .map((project): NavigableProject => ({
-            ...project,
-            name: projectDisplayName(project),
-          })),
+        ).filter(
+          (project): project is Project & { path: string } =>
+            typeof project.path === "string",
+        ),
       ),
     [collections, p.rows, runtime?.projects],
   ).get();
-  const teamMove = usePeerTeamMove(p.refresh, p.notify, (path, member, team) =>
-    services.owner(
-      team
-        ? projectTarget(path, undefined, team)
-        : { kind: "chat", id: member },
-    ),
+  const teamMove = usePeerTeamMove(
+    commands.refresh,
+    commands.notify,
+    (path, member, team) =>
+      services.owner(
+        team
+          ? projectTarget(path, undefined, team)
+          : { kind: "chat", id: member },
+      ),
   );
   const [dialog, setDialog] = useState<{
     title: string;
@@ -388,13 +377,13 @@ const SidebarContents = observer(function SidebarContents(
   const canOrganizeProjects = !!runtime?.projectOrganizationVersion;
   const requireProjectSupport = () => {
     if (canOrganizeProjects) return true;
-    p.notify?.(
+    commands.notify?.(
       "Restart Studio after active work finishes to edit project names and folders.",
     );
     return false;
   };
   const savedProject = async () => {
-    await p.refresh?.();
+    await commands.refresh?.();
     setDialog(null);
   };
   const editProject = (
@@ -425,7 +414,7 @@ const SidebarContents = observer(function SidebarContents(
     JSON.stringify([path, "folder", id]);
   // Not the bare path: saved values of the earlier project collapse stay unused.
   const projectTreeKey = (path: string) => JSON.stringify([path, "project"]);
-  const projectKey = `codex-project-tree:${p.data.stateDir}`;
+  const projectKey = `codex-project-tree:${stateDir}`;
   const [collapsed, setCollapsed] = useSidebarVisualState<
     Record<string, boolean>
   >(projectKey, {});
@@ -440,7 +429,7 @@ const SidebarContents = observer(function SidebarContents(
   >({});
   const organize = async (id: string, data: OrganizationData) => {
     if (!canEdit({ kind: "chat", id })) {
-      p.notify?.("The sidebar server is offline or unavailable.");
+      commands.notify?.("The sidebar server is offline or unavailable.");
       return false;
     }
     if (organizationLock.current) return false;
@@ -460,8 +449,8 @@ const SidebarContents = observer(function SidebarContents(
       await services
         .owner({ kind: "chat", id })
         .post("/api/organization", { id, ...data });
-      if (hasOptimistic) void p.refresh?.();
-      else await p.refresh?.();
+      if (hasOptimistic) void commands.refresh?.();
+      else await commands.refresh?.();
       return true;
     } catch (error) {
       if (hasOptimistic)
@@ -470,7 +459,7 @@ const SidebarContents = observer(function SidebarContents(
           delete next[id];
           return next;
         });
-      p.notify?.(errorText(error));
+      commands.notify?.(errorText(error));
       return false;
     } finally {
       organizationLock.current = false;
@@ -627,7 +616,7 @@ const SidebarContents = observer(function SidebarContents(
       ({ id }) => {
         const chat = findRow(id)!;
         if (!folder && teamFor(id)) {
-          teamMove.move(project, id, null);
+          teamMove.move(project.project, id, null);
           return;
         }
         void organize(id, {
@@ -665,7 +654,7 @@ const SidebarContents = observer(function SidebarContents(
   const rename = async (e: React.FormEvent, id: string) => {
     e.preventDefault();
     try {
-      await p.rename(id, name);
+      await commands.rename(id, name);
       setRenaming(null);
     } catch {
       /* Keep the draft when the server rejects the name. */
@@ -695,48 +684,50 @@ const SidebarContents = observer(function SidebarContents(
   const groupMap = useMemo(
     () =>
       computed(() => {
-        const groups = new Map<
-          string,
-          NavigableProject & {
-            chats: SidebarChatView[];
-            registered: boolean;
-            hasChats: boolean;
-          }
-        >();
+        const groups = new Map<string, SidebarProjectView>();
         for (const project of projects)
-          groups.set(project.path, {
-            ...project,
-            chats: [],
-            registered: p.registeredProjectPaths?.has(project.path) ?? true,
-            hasChats:
+          groups.set(
+            project.path,
+            new SidebarProjectView(
+              project,
+              p.registeredProjectPaths?.has(project.path) ?? true,
               byProject.has(project.path) ||
-              sharedProjectPaths.has(project.path),
-          });
+                sharedProjectPaths.has(project.path),
+            ),
+          );
         for (const a of agents) {
           const path = a.projectPath || "";
           if (!groups.has(path))
-            groups.set(path, {
-              id: path,
-              created: 0,
+            groups.set(
               path,
-              name: path.split("/").filter(Boolean).at(-1) || "Other chats",
-              chats: [],
-              registered: false,
-              hasChats: true,
-            });
+              new SidebarProjectView(
+                {
+                  id: path,
+                  created: 0,
+                  path,
+                  name: path.split("/").filter(Boolean).at(-1) || "Other chats",
+                },
+                false,
+                true,
+              ),
+            );
         }
         for (const room of sharedRooms) {
           const path = room.projectPath || "";
           if (!groups.has(path))
-            groups.set(path, {
-              id: path,
-              created: 0,
+            groups.set(
               path,
-              name: path.split("/").filter(Boolean).at(-1) || "Other chats",
-              chats: [],
-              registered: false,
-              hasChats: true,
-            });
+              new SidebarProjectView(
+                {
+                  id: path,
+                  created: 0,
+                  path,
+                  name: path.split("/").filter(Boolean).at(-1) || "Other chats",
+                },
+                false,
+                true,
+              ),
+            );
         }
         for (const a of filtered) {
           if (
@@ -820,10 +811,49 @@ const SidebarContents = observer(function SidebarContents(
           .toLowerCase()
           .includes(query.toLowerCase())),
   );
+  const rowActions = (
+    row: SidebarChatView,
+    priority: boolean,
+  ): ChatRowActions => ({
+    prepare: () => commands.prepareChat?.(row.id),
+    open: () => openChat(row.id),
+    pin: () => {
+      void organize(row.id, { pinned: !row.agent.pinned });
+    },
+    rename: (event) => {
+      void rename(event, row.id);
+    },
+    name: setName,
+    cancelRename: () => setRenaming(null),
+    beginRename: () => {
+      setName(row.agent.name ?? "");
+      setRenameInPriority(priority);
+      setRenaming(row.id);
+    },
+    unread: () => {
+      if (row.agent.markRead)
+        commands.markUnread(row.id, { ...row.agent.markRead });
+    },
+    move: () => {
+      if (!requireProjectSupport()) return;
+      const project = groupMap.get(row.projectPath || "")!;
+      setDialog({
+        title: "Move chat",
+        path: project.path,
+        agentId: row.id,
+      });
+    },
+    changeProject: () => commands.changeProject(row.id),
+    archive: () => {
+      void organize(row.id, { archived: !row.agent.archived });
+    },
+    remove: () => commands.remove(row.id, false),
+  });
   const renderRow = (row: SidebarChatView, priority = false) => (
     <SidebarRow
       key={row.id}
       row={row}
+      priority={priority}
       selected={p.opened === row.id}
       showServer={services.serverForChat(row.id) !== services.cache.ownerId}
       serverAlias={
@@ -886,41 +916,6 @@ const SidebarContents = observer(function SidebarContents(
         ),
         draggable: canEdit({ kind: "chat", id: row.id }),
       }}
-      actions={{
-        prepare: () => p.prepareChat?.(row.id),
-        open: () => openChat(row.id),
-        pin: () => {
-          void organize(row.id, { pinned: !row.agent.pinned });
-        },
-        rename: (event) => {
-          void rename(event, row.id);
-        },
-        name: setName,
-        cancelRename: () => setRenaming(null),
-        beginRename: () => {
-          setName(row.agent.name ?? "");
-          setRenameInPriority(priority);
-          setRenaming(row.id);
-        },
-        unread: () => {
-          if (row.agent.markRead)
-            p.markUnread(row.id, { ...row.agent.markRead });
-        },
-        move: () => {
-          if (!requireProjectSupport()) return;
-          const project = groupMap.get(row.projectPath || "")!;
-          setDialog({
-            title: "Move chat",
-            path: project.path,
-            agentId: row.id,
-          });
-        },
-        changeProject: () => p.changeProject(row.id),
-        archive: () => {
-          void organize(row.id, { archived: !row.agent.archived });
-        },
-        remove: () => p.remove(row.id, false),
-      }}
     />
   );
   const renderPeerTeam = (
@@ -962,7 +957,7 @@ const SidebarContents = observer(function SidebarContents(
             !organizationLock.current
           );
         },
-        ({ id }) => teamMove.move(group, id, team.id),
+        ({ id }) => teamMove.move(group.project, id, team.id),
         reorder,
       );
     return (
@@ -988,9 +983,9 @@ const SidebarContents = observer(function SidebarContents(
             ) ?? false
           }
           roomId={runtime?.rooms?.find((r) => r.radio?.teamId === team.id)?.id}
-          scope={p.data.stateDir}
+          scope={stateDir}
           openRoom={openChat}
-          refresh={p.refresh}
+          refresh={commands.refresh}
           reorder={teamDrop(
             sorting.bindings(
               itemGroup(group.path),
@@ -1159,7 +1154,7 @@ const SidebarContents = observer(function SidebarContents(
                         }
                         onClick={() => {
                           if (requireProjectSupport())
-                            p.newChat(group.path, folder.id);
+                            commands.newChat(group.path, folder.id);
                         }}
                       >
                         <Plus size={15} />
@@ -1208,9 +1203,9 @@ const SidebarContents = observer(function SidebarContents(
                                   expected_revision:
                                     group.organizationRevision || 0,
                                 });
-                              await p.refresh?.();
+                              await commands.refresh?.();
                             } catch (error) {
-                              p.notify?.(errorText(error));
+                              commands.notify?.(errorText(error));
                             }
                           }}
                         >
@@ -1284,16 +1279,16 @@ const SidebarContents = observer(function SidebarContents(
           aria-label="Search chats"
           title="Search chats (Ctrl+K / ⌘K)"
           aria-keyshortcuts="Control+k Meta+k"
-          onClick={p.onSearch}
+          onClick={commands.onSearch}
         >
           <Search size={18} />
         </ActionIcon>
-        {p.settings && (
+        {commands.settings && (
           <ActionIcon
             variant="subtle"
             aria-label="Studio settings"
             title="Settings"
-            onClick={p.settings}
+            onClick={commands.settings}
           >
             <Settings size={18} />
           </ActionIcon>
@@ -1338,12 +1333,12 @@ const SidebarContents = observer(function SidebarContents(
                 {archive ? "Show active chats" : "Show archived chats"}
               </Menu.Item>
               {/* A narrow sidebar hides these two buttons; the menu keeps them. */}
-              {p.newSharedChat && (
-                <Menu.Item onClick={() => p.newSharedChat?.()}>
+              {commands.newSharedChat && (
+                <Menu.Item onClick={() => commands.newSharedChat?.()}>
                   New shared chat
                 </Menu.Item>
               )}
-              <Menu.Item onClick={p.addProject}>Add project</Menu.Item>
+              <Menu.Item onClick={commands.addProject}>Add project</Menu.Item>
             </Menu.Dropdown>
           </Menu>
           <ActionIcon
@@ -1351,16 +1346,16 @@ const SidebarContents = observer(function SidebarContents(
             aria-label="New chat"
             title="New chat"
             disabled={p.creating}
-            onClick={() => p.newChat()}
+            onClick={() => commands.newChat()}
           >
             <SquarePen size={16} />
           </ActionIcon>
-          {p.newSharedChat && (
+          {commands.newSharedChat && (
             <ActionIcon
               className="sidebar-shared-chat"
               aria-label="New shared chat"
               title="New shared chat"
-              onClick={() => p.newSharedChat?.()}
+              onClick={() => commands.newSharedChat?.()}
             >
               <Users size={16} />
             </ActionIcon>
@@ -1368,7 +1363,7 @@ const SidebarContents = observer(function SidebarContents(
           <ActionIcon
             className="sidebar-add-project"
             aria-label="Add project"
-            onClick={p.addProject}
+            onClick={commands.addProject}
           >
             <Plus size={18} />
           </ActionIcon>
@@ -1427,7 +1422,8 @@ const SidebarContents = observer(function SidebarContents(
                           {...(blocked ? { "aria-disabled": true } : {})}
                           {...(blocked ? { "data-disabled": true } : {})}
                           onClick={() => {
-                            if (!blocked) p.newChat(group.path || undefined);
+                            if (!blocked)
+                              commands.newChat(group.path || undefined);
                           }}
                           disabled={p.creating}
                         >
@@ -1454,10 +1450,10 @@ const SidebarContents = observer(function SidebarContents(
                       >
                         New chat folder
                       </Menu.Item>
-                      {p.newSharedChat && (
+                      {commands.newSharedChat && (
                         <Menu.Item
                           disabled={!canEdit(projectTarget(group.path))}
-                          onClick={() => p.newSharedChat?.(group.path)}
+                          onClick={() => commands.newSharedChat?.(group.path)}
                         >
                           New shared chat
                         </Menu.Item>
@@ -1500,25 +1496,25 @@ const SidebarContents = observer(function SidebarContents(
                       >
                         Rename project
                       </Menu.Item>
-                      {p.projectFolders && (
+                      {commands.projectFolders && (
                         <Menu.Item
                           disabled={!canEdit(projectTarget(group.path))}
-                          onClick={() => p.projectFolders?.(group.path)}
+                          onClick={() => commands.projectFolders?.(group.path)}
                         >
                           Folders
                         </Menu.Item>
                       )}
                       <Menu.Item
                         disabled={!canEdit(projectTarget(group.path))}
-                        onClick={() => p.projectAccount(group.path)}
+                        onClick={() => commands.projectAccount(group.path)}
                       >
                         Project account
                       </Menu.Item>
-                      {group.registered && p.deleteProject && (
+                      {group.registered && commands.deleteProject && (
                         <Menu.Item
                           color="red"
                           disabled={!canEdit(projectTarget(group.path))}
-                          onClick={() => p.deleteProject?.(group.path)}
+                          onClick={() => commands.deleteProject?.(group.path)}
                         >
                           Delete project…
                         </Menu.Item>
@@ -1558,7 +1554,7 @@ const SidebarContents = observer(function SidebarContents(
                           ).ownerId,
                       )}
                       action={teamDialog.action}
-                      refresh={p.refresh}
+                      refresh={commands.refresh}
                       close={() => setTeamDialog(null)}
                     />
                   </SidebarBackendProvider>
@@ -1673,14 +1669,14 @@ const SidebarContents = observer(function SidebarContents(
     (!dialog?.agentId || dialogAgent) &&
     (!dialog?.folder || dialog.folder === "new" || dialogFolder);
   return (
-    <>
+    <ChatRowActionsContext.Provider value={rowActions}>
       <SidebarFrame
-        scope={`${p.services.cache.ownerId}:${p.data.stateDir}`}
+        scope={`${p.services.cache.ownerId}:${stateDir}`}
         opened={p.mobile}
         {...(p.collapsed !== undefined ? { collapsed: p.collapsed } : {})}
         close={closeSidebar}
         onCompactChange={reportCompact}
-        {...(p.settings
+        {...(commands.settings
           ? { drawerZIndex: layoutValues.layers.navigation }
           : {})}
         onEntered={() => {
@@ -1711,12 +1707,12 @@ const SidebarContents = observer(function SidebarContents(
             >
               <ConvertChatForm
                 key={`${conversion.source.id}:${conversion.target.id}`}
-                project={conversion.project}
+                project={conversion.project.project}
                 source={conversion.source}
                 target={conversion.target}
-                scope={p.data.stateDir}
+                scope={stateDir}
                 saved={async () => {
-                  await p.refresh?.();
+                  await commands.refresh?.();
                   openChat(conversion.target.id);
                   setConversion(null);
                 }}
@@ -1782,6 +1778,6 @@ const SidebarContents = observer(function SidebarContents(
             </p>
           ))}
       </Modal>
-    </>
+    </ChatRowActionsContext.Provider>
   );
 });

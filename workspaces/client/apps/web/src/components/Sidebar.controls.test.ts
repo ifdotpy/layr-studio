@@ -1,3 +1,6 @@
+import { SidebarCommandsProvider } from "./sidebar/commands.ts";
+import { observableFixture } from "./observableFixture.tsx";
+import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
 import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -33,27 +36,38 @@ it("leaves the desktop close action to the workspace header", () => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false }) });
   const markup = renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      null,
-      createElement(Sidebar, {
-        data: snapshotFixture(),
-        opened: "",
-        rows: [],
-        markingRead: new Set<string>(),
-        creating: false,
-        mobile: false,
-        close: () => {},
-        onSearch: () => {},
-        open: () => {},
-        newChat: () => {},
-        addProject: () => {},
-        changeProject: () => {},
-        projectAccount: () => {},
-        rename: async () => {},
-        remove: () => {},
-        markUnread: () => {},
-        refresh: async () => {},
-      }),
+      ServerStoreProvider,
+      { value: observableFixture().store },
+      createElement(
+        MantineProvider,
+        null,
+        createElement(
+          SidebarCommandsProvider,
+          {
+            value: {
+              onSearch: () => {},
+              open: () => {},
+              newChat: () => {},
+              addProject: () => {},
+              changeProject: () => {},
+              projectAccount: () => {},
+              rename: async () => {},
+              remove: () => {},
+              markUnread: () => {},
+              refresh: async () => {},
+            },
+          },
+          createElement(Sidebar, {
+            data: snapshotFixture(),
+            opened: "",
+            rows: [],
+            markingRead: new Set<string>(),
+            creating: false,
+            mobile: false,
+            close: () => {},
+          }),
+        ),
+      ),
     ),
   );
   expect(markup).toContain('aria-label="Search chats"');
@@ -88,33 +102,44 @@ it("shows an upgraded chat at the project root without changing its old line fol
   const before = JSON.stringify(data.runtime.projects);
   const markup = renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      null,
-      createElement(Sidebar, {
-        data,
-        opened: "",
-        rows: [
-          rowFixture("lead", {
-            name: "Upgraded chat",
-            projectPath: "/source",
-            projectFolder: "old-folder",
+      ServerStoreProvider,
+      { value: observableFixture().store },
+      createElement(
+        MantineProvider,
+        null,
+        createElement(
+          SidebarCommandsProvider,
+          {
+            value: {
+              onSearch: () => {},
+              open: () => {},
+              newChat: () => {},
+              addProject: () => {},
+              changeProject: () => {},
+              projectAccount: () => {},
+              rename: async () => {},
+              remove: () => {},
+              markUnread: () => {},
+              refresh: async () => {},
+            },
+          },
+          createElement(Sidebar, {
+            data,
+            opened: "",
+            rows: [
+              rowFixture("lead", {
+                name: "Upgraded chat",
+                projectPath: "/source",
+                projectFolder: "old-folder",
+              }),
+            ],
+            markingRead: new Set<string>(),
+            creating: false,
+            mobile: false,
+            close: () => {},
           }),
-        ],
-        markingRead: new Set<string>(),
-        creating: false,
-        mobile: false,
-        close: () => {},
-        onSearch: () => {},
-        open: () => {},
-        newChat: () => {},
-        addProject: () => {},
-        changeProject: () => {},
-        projectAccount: () => {},
-        rename: async () => {},
-        remove: () => {},
-        markUnread: () => {},
-        refresh: async () => {},
-      }),
+        ),
+      ),
     ),
   );
   expect(markup.match(/data-chat="lead"/g)).toHaveLength(1);

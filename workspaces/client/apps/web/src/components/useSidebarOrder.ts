@@ -15,10 +15,11 @@ import {
 import { ApiError, errorText, untilAnswered, type PostBody } from "../api";
 
 import type { components } from "../generated/api";
+import type { DeepReadonly } from "../deepReadonly.ts";
 
-type Order = Record<string, string[]>;
+type Order = Readonly<Record<string, readonly string[]>>;
 type Drag = { group: string; id: string };
-type ServerOrder = components["schemas"]["SidebarOrderDto"];
+type ServerOrder = DeepReadonly<components["schemas"]["SidebarOrderDto"]>;
 type SidebarOrderResponse = components["schemas"]["SidebarOrderResponse"];
 type Pending = {
   ownerId?: string;
@@ -208,7 +209,9 @@ export function useSidebarOrder(
           action: "reorder",
           request_id: randomUUID(),
           expected_revision: revision.current,
-          groups: value,
+          groups: Object.fromEntries(
+            Object.entries(value).map(([key, ids]) => [key, [...ids]]),
+          ),
         },
       },
       value,

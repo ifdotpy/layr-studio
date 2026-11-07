@@ -1,3 +1,12 @@
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
+// These probes own resource-read effects; context detail is outside their fixture.
+vi.mock("./agents/state.ts", async (original) => ({
+  ...(await original<typeof import("./agents/state.ts")>()),
+  useAgentDetail: () => undefined,
+}));
 import { ProviderKind as GeneratedApiProviderKind } from "../generated/api.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, Snapshot } from "../types";

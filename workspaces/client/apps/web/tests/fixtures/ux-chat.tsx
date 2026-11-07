@@ -1,10 +1,15 @@
+import { ConversationProvider } from "../../src/components/conversation/navigation.ts";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../../src/components/observableFixture.tsx";
 import React, { useCallback, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import Conversation from "../../src/components/Conversation.tsx";
-import { ChatWaitSource } from "../../src/hooks/conversationData.ts";
+import { LiveConversation as Conversation } from "../../src/components/Conversation.tsx";
+import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
 
 import type { Agent } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
@@ -80,8 +85,15 @@ function Fixture() {
     scope: "ux-chat-fixture",
   };
   const data = fixtureSnapshot([agent]);
-  const [waitSource] = useState(() => new ChatWaitSource());
-  waitSource.set(data);
+  const model = observableFixture([agent]);
+  model.apply([
+    ...sidebarEntities(model.mirror.current),
+    {
+      collection: "workspace",
+      id: "workspace",
+      value: { stateDir: data.stateDir },
+    },
+  ]);
   const getDraft = useCallback(
     (session: string) => currentDrafts.current[session] || "",
     [],
@@ -120,84 +132,91 @@ function Fixture() {
     regularSelections: regularSelections.current,
   };
   return (
-    <MantineProvider defaultColorScheme="dark">
-      <main
-        style={{ height: "100dvh", display: "flex", flexDirection: "column" }}
-      >
-        {notice && (
-          <div id="fixture-notice" role="status">
-            {notice}
-          </div>
-        )}
-        <Conversation
-          id={id}
-          syncWorkspaceId={window.__uxChatSyncIdentity?.workspaceId}
-          agent={agent}
-          data={data}
-          waitSource={waitSource}
-          accountsState={accountsState}
-          getDraft={getDraft}
-          subscribeDraft={subscribeDraft}
-          setDraft={setDraft}
-          sending={sending}
-          outgoing={failedOutgoing}
-          send={async (options) => {
-            setSending(true);
-            try {
-              const failure = window.__uxChatSendFailure;
-              if (failure !== undefined) {
-                const messageId = "image-refusal";
-                setFailedOutgoing([
-                  {
-                    id: messageId,
-                    body: {
-                      id: messageId,
-                      room: id,
+    <model.Provider>
+      <ConversationProvider value={conversationActionsFixture(setId)}>
+        <MantineProvider defaultColorScheme="dark">
+          <main
+            style={{
+              height: "100dvh",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
+            {notice && (
+              <div id="fixture-notice" role="status">
+                {notice}
+              </div>
+            )}
+            <Conversation
+              id={id}
+              syncWorkspaceId={window.__uxChatSyncIdentity?.workspaceId}
+              agent={model.mirror.current.agents.get(agent.id)}
+              snapshot={data}
+              accountsState={accountsState}
+              getDraft={getDraft}
+              subscribeDraft={subscribeDraft}
+              setDraft={setDraft}
+              sending={sending}
+              outgoing={failedOutgoing}
+              send={async (options) => {
+                setSending(true);
+                try {
+                  const failure = window.__uxChatSendFailure;
+                  if (failure !== undefined) {
+                    const messageId = "image-refusal";
+                    setFailedOutgoing([
+                      {
+                        id: messageId,
+                        body: {
+                          id: messageId,
+                          room: id,
+                          text: getDraft(id),
+                          assets: [],
+                          delivery: "queue",
+                        },
+                        status: {
+                          source: "device",
+                          state: { kind: "transport_failed", error: failure },
+                        },
+                        created: Date.now(),
+                      },
+                    ]);
+                    throw new Error(failure);
+                  }
+                  await fetch("/api/fixture-send", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
                       text: getDraft(id),
-                      assets: [],
-                      delivery: "queue",
-                    },
-                    status: {
-                      source: "device",
-                      state: { kind: "transport_failed", error: failure },
-                    },
-                    created: Date.now(),
-                  },
-                ]);
-                throw new Error(failure);
-              }
-              await fetch("/api/fixture-send", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  text: getDraft(id),
-                  ...options,
-                } satisfies UxChatFixtureSendBody),
-              });
-              setDraft("");
-            } finally {
-              setSending(false);
-            }
-          }}
-          refresh={async () => {}}
-          notify={setNotice}
-          limits={null}
-          reloadLimits={() => {}}
-          onSelect={(target) => {
-            regularSelections.current.push(target);
-            // The normal selection path rejects a chat missing from its snapshot.
-            if (data.threads.some((thread) => thread.id === target))
-              setId(target);
-          }}
-          onBranchCreated={(target) => {
-            branchSelections.current.push(target);
-            setId(target);
-          }}
-          jumpTarget={jumpTarget}
-          onJumpHandled={() => setJumpTarget(undefined)}
-        />
-      </main>
-    </MantineProvider>
+                      ...options,
+                    } satisfies UxChatFixtureSendBody),
+                  });
+                  setDraft("");
+                } finally {
+                  setSending(false);
+                }
+              }}
+              refresh={async () => {}}
+              notify={setNotice}
+              limits={null}
+              reloadLimits={() => {}}
+              onSelect={(target) => {
+                regularSelections.current.push(target);
+                // The normal selection path rejects a chat missing from its snapshot.
+                if (data.threads.some((thread) => thread.id === target))
+                  setId(target);
+              }}
+              onBranchCreated={(target) => {
+                branchSelections.current.push(target);
+                setId(target);
+              }}
+              jumpTarget={jumpTarget}
+              onJumpHandled={() => setJumpTarget(undefined)}
+            />
+          </main>
+        </MantineProvider>
+      </ConversationProvider>
+    </model.Provider>
   );
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);

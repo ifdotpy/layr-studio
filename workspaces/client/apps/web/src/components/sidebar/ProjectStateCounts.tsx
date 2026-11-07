@@ -1,14 +1,16 @@
+import { observer } from "mobx-react-lite";
 import {
   aggregateStates,
   projectStateLabel,
   type projectStateCounts,
 } from "./fleet";
 
-export default function ProjectStateCounts({
-  counts,
+export default observer(function ProjectStateCounts({
+  view,
 }: {
-  counts: ReturnType<typeof projectStateCounts>;
+  view: { readonly counts: ReturnType<typeof projectStateCounts> };
 }) {
+  const counts = view.counts;
   const label = projectStateLabel(counts);
   if (!label) return null;
   return (
@@ -28,4 +30,4 @@ export default function ProjectStateCounts({
         ))}
     </span>
   );
-}
+});

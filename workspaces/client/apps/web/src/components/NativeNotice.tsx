@@ -1,3 +1,4 @@
+import type { useAgentDetail } from "./agents/state.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import { displayError, errorDetails } from "../errorPresentation";
 import { currentCapacityRetry } from "../capacityRetry";
@@ -58,6 +59,7 @@ export function isNonBlockingWarning(item: Message): boolean {
 
 export function NativeError({
   agent,
+  detail = agent,
   planType,
   recovery,
   openLimits,
@@ -67,6 +69,7 @@ export function NativeError({
   refresh,
 }: {
   agent: Agent;
+  detail?: ReturnType<typeof useAgentDetail> | Agent;
   planType?: string | undefined;
   recovery?: components["schemas"]["LimitRecovery"] | null | undefined;
   openLimits?: () => void;
@@ -76,28 +79,28 @@ export function NativeError({
   chooseChat?: (() => void) | undefined;
   refresh?: () => Promise<void>;
 }) {
-  const usageResume = agent.usageResume;
+  const usageResume = detail.usageResume;
   const authResume =
     usageResume?.cause === "auth" &&
     (usageResume.status === "scheduled" ||
       usageResume.reason === "Automatic resume is off for this chat.");
   const retry = currentCapacityRetry(agent);
-  const blocked = nativeThreadError(agent);
-  const connectionCheck = agent.manualConnectionCheck?.receipt;
-  const error = nativeErrorView(blocked || agent.error, planType);
+  const blocked = nativeThreadError(agent, detail);
+  const connectionCheck = detail.manualConnectionCheck?.receipt;
+  const error = nativeErrorView(blocked || detail.error, planType);
   const detailView = connectionCheck
-    ? nativeErrorView(agent.error, planType)
+    ? nativeErrorView(detail.error, planType)
     : error;
-  const wait = agent.contextRepairWait;
+  const wait = detail.contextRepairWait;
   if (
     !blocked &&
     !retry &&
     !connectionCheck &&
     agent.status === GeneratedApiAgentStatus.queued &&
     wait?.scope === "local" &&
-    typeof agent.error === "string" &&
-    agent.error === wait.error &&
-    agent.error.startsWith("Context repair waits for monitors: ")
+    typeof detail.error === "string" &&
+    detail.error === wait.error &&
+    detail.error.startsWith("Context repair waits for monitors: ")
   )
     return null;
   return (
@@ -109,7 +112,7 @@ export function NativeError({
         <span>
           {(connectionCheck && "Previous turn needs review") ||
             error.title ||
-            (blocked ? error.message : agentErrorLabel(agent)) ||
+            (blocked ? error.message : agentErrorLabel(agent, detail.error)) ||
             (retry ? "Model retry" : "")}
         </span>
       )}
@@ -120,7 +123,10 @@ export function NativeError({
             : "Codex answered the connection check. The previous outcome is unconfirmed. Review the history before continuing."}
         </small>
       ) : !recovery && !authResume && !retry ? (
-        <Guidance error={error} cyberAccessProgram={agent.cyberAccessProgram} />
+        <Guidance
+          error={error}
+          cyberAccessProgram={detail.cyberAccessProgram}
+        />
       ) : null}
       {(recovery || authResume) && (
         <LimitRecoveryNotice
@@ -139,7 +145,7 @@ export function NativeError({
           retry={retry}
         />
       )}
-      {refresh && agent.manualConnectionCheck?.available && (
+      {refresh && detail.manualConnectionCheck?.available && (
         <ConnectionRecovery
           key={JSON.stringify([
             agent.id,
@@ -147,7 +153,7 @@ export function NativeError({
             agent.turnId,
             agent.epoch,
             agent.accountKey,
-            agent.error,
+            detail.error,
           ])}
           agentId={agent.id}
           refresh={refresh}

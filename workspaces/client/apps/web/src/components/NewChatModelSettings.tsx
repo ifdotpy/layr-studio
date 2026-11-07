@@ -288,7 +288,7 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
       aria-label="Agent settings"
     >
       <ExecutionSettings
-        agent={agent}
+        input={{ kind: "draft", draft: agent }}
         catalog={catalog}
         accounts={accounts?.accounts || []}
         refresh={async () => {}}

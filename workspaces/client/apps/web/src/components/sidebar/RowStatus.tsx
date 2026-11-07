@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { createProjectStatusView } from "./viewModel.ts";
 import type { ReactNode } from "react";
 import { observer } from "mobx-react-lite";
 import type { SidebarChatView } from "./viewModel.ts";
@@ -42,16 +44,9 @@ export const SidebarProjectStates = observer(function SidebarProjectStates({
   rows: readonly SidebarChatView[];
   archived: boolean;
 }) {
-  const counts = { working: 0, answer: 0, error: 0 };
-  for (const row of rows) {
-    if (row.agent.archived !== archived) continue;
-    const kind = row.indicator.kind;
-    if (
-      kind === ChatOperationalKind.working ||
-      kind === ChatOperationalKind.answer ||
-      kind === ChatOperationalKind.error
-    )
-      counts[kind]++;
-  }
-  return <ProjectStateCounts counts={counts} />;
+  const view = useMemo(
+    () => createProjectStatusView(rows, archived),
+    [rows, archived],
+  );
+  return <ProjectStateCounts view={view} />;
 });

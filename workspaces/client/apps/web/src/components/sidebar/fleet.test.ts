@@ -1,3 +1,4 @@
+import { ChatRowActionsContext } from "../chat-row/actions.ts";
 import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../../generated/api.ts";
 import { describe, expect, it } from "vitest";
@@ -5,7 +6,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import type { Agent } from "../../types";
-import { type ChatIndicator } from "../chat-status/chatStatusModel";
+import { type ChatIndicator } from "../../status/operationalStatus";
 import { needsYou, projectStateCounts, projectStateLabel } from "./fleet";
 import ProjectStateCounts from "./ProjectStateCounts";
 import SidebarRow from "../SidebarRow";
@@ -69,13 +70,13 @@ describe("fleet presentation", () => {
       "2 working, 1 needs you",
     );
     const html = renderToStaticMarkup(
-      createElement(ProjectStateCounts, { counts }),
+      createElement(ProjectStateCounts, { view: { counts } }),
     );
     expect(html).toContain('aria-label="1 working, 1 needs you, 1 failed"');
     expect(
       renderToStaticMarkup(
         createElement(ProjectStateCounts, {
-          counts: { working: 0, answer: 0, error: 0 },
+          view: { counts: { working: 0, answer: 0, error: 0 } },
         }),
       ),
     ).toBe("");
@@ -102,37 +103,42 @@ function renderRow(overrides: Partial<Parameters<typeof SidebarRow>[0]> = {}) {
     createElement(
       MantineProvider,
       {},
-      createElement(SidebarRow, {
-        row: rowFixture("answer", {
-          name: "Chat answer",
-          pinned: true,
-          operationalStatus: { reason: "needs_input", wait: null },
-        }),
-        selected: true,
-        serverAlias: "MAC",
-        showServer: false,
-        renaming: false,
-        organizing: false,
-        name: "",
-        compact: false,
-        markingRead: false,
-        bindings: {},
-        actions: {
-          prepare: noop,
-          open: noop,
-          pin: noop,
-          rename: noop,
-          name: noop,
-          cancelRename: noop,
-          beginRename: noop,
-          unread: noop,
-          move: noop,
-          changeProject: noop,
-          archive: noop,
-          remove: noop,
+      createElement(
+        ChatRowActionsContext.Provider,
+        {
+          value: () => ({
+            prepare: noop,
+            open: noop,
+            pin: noop,
+            rename: noop,
+            name: noop,
+            cancelRename: noop,
+            beginRename: noop,
+            unread: noop,
+            move: noop,
+            changeProject: noop,
+            archive: noop,
+            remove: noop,
+          }),
         },
-        ...overrides,
-      }),
+        createElement(SidebarRow, {
+          row: rowFixture("answer", {
+            name: "Chat answer",
+            pinned: true,
+            operationalStatus: { reason: "needs_input", wait: null },
+          }),
+          selected: true,
+          serverAlias: "MAC",
+          showServer: false,
+          renaming: false,
+          organizing: false,
+          name: "",
+          compact: false,
+          markingRead: false,
+          bindings: {},
+          ...overrides,
+        }),
+      ),
     ),
   );
 }

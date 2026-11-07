@@ -1,3 +1,8 @@
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "../observableFixture.tsx";
+import { ConversationProvider } from "./navigation.ts";
 import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
@@ -18,13 +23,13 @@ import {
 } from "lucide-react";
 import ConversationTitle from "../shell/ConversationTitle";
 import ConversationStart from "./ConversationStart";
-import { ExecutionSettings } from "../agents/ExecutionSettings";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../observableFixture.tsx";
 import Usage, { type UsageAccount } from "../Usage";
 import { createServerServices } from "../../servers/serverServices";
 import { ServerServicesProvider } from "../../servers/ServerServicesContext";
 import type { Agent } from "../../types";
 import type { AccountLimitsSnapshot } from "../../usage/accountUsage";
-import type { ChatIndicator } from "../chat-status/chatStatusModel";
+import type { ChatIndicator } from "../../status/operationalStatus";
 import "./empty-chat-settings.css";
 
 const indicators: ChatIndicator[] = [
@@ -150,96 +155,163 @@ services.watchResourceReads = (_resources, read, failed) => {
   });
 };
 
+const projectNames = ["codex-studio", "af-utils", "attar"];
+const reasonByKind = {
+  working: "working",
+  answer: "needs_input",
+  error: "failed",
+  unread: "unread_result",
+  paused: "stopped",
+  none: "ready",
+  loading: "ready",
+} as const;
+const titleFixture = observableFixture(
+  projectNames.flatMap((projectName, projectIndex) => [
+    {
+      ...lead,
+      id: projectIndex === 0 ? lead.id : projectName,
+      name: titles[0],
+      isLead: true,
+      projectPath: `/projects/${projectName}`,
+    },
+    ...recentChats.map((chat, index): Agent => ({
+      id: projectIndex === 0 ? chat.id : `${projectName}-${chat.id}`,
+      source: GeneratedApiAgentSource["managed"],
+      isLead: true,
+      name: chat.title,
+      projectPath: `/projects/${projectName}`,
+      created: index,
+      operationalStatus:
+        chat.indicator?.kind === "answer"
+          ? { reason: "needs_input", wait: null }
+          : { reason: reasonByKind[chat.indicator?.kind || "none"] },
+    })),
+  ]),
+);
+titleFixture.apply([
+  ...[...titleFixture.mirror.current.agents.values()].map((value) => ({
+    collection: "agentSummary" as const,
+    id: value.id,
+    value,
+  })),
+  ...projectNames.map((name) => ({
+    collection: "project" as const,
+    id: name,
+    value: { id: name, name, path: `/projects/${name}` },
+  })),
+]);
+function StartFixture({
+  id = lead.id,
+  open,
+}: {
+  id?: string;
+  open: (id: string) => void;
+}) {
+  return (
+    <titleFixture.Provider>
+      <ConversationProvider value={conversationActionsFixture(open)}>
+        <ConversationStart agentId={id} />
+      </ConversationProvider>
+    </titleFixture.Provider>
+  );
+}
+function TitleFixture() {
+  return (
+    <titleFixture.Provider>
+      <ConversationProvider value={conversationActionsFixture(fn())}>
+        <ConversationTitle agentId={lead.id} serverAlias="MAC" />
+      </ConversationProvider>
+    </titleFixture.Provider>
+  );
+}
+
 const meta = {
   title: "Conversation/Dispatch chrome",
   parameters: { layout: "fullscreen" },
   args: { onSelect: fn(), onTeam: fn() },
   render: (args: { onSelect: (id: string) => void; onTeam: () => void }) => (
     <ServerServicesProvider services={services}>
-      <main className="workspace" style={{ position: "fixed", inset: 0 }}>
-        <header className="workspace-header simple-workspace-header">
-          <ActionIcon aria-label="Toggle conversations">
-            <PanelLeft size={18} />
-          </ActionIcon>
-          <ConversationTitle title={titles[0]} agent={lead} serverAlias="MAC" />
-          <Button
-            aria-label="Team"
-            title="Team: 1 working of 6"
-            leftSection={<Users size={16} />}
-            onClick={args.onTeam}
-          >
-            Team
-          </Button>
-          <Button
-            variant="subtle"
-            leftSection={<Mail size={16} />}
-            aria-label="Messages"
-          >
-            <span className="messages-toggle-label">Messages</span>
-          </Button>
-          <ActionIcon aria-label="Chat actions">
-            <Settings2 size={18} />
-          </ActionIcon>
-        </header>
-        <section id="conversation">
-          <div id="messages">
-            <div className="message-content">
-              <ConversationStart
-                projectName="codex-studio"
-                location="/projects/codex-studio"
-                recentChats={recentChats}
-                onSelect={args.onSelect}
-              />
+      <titleFixture.Provider>
+        <main className="workspace" style={{ position: "fixed", inset: 0 }}>
+          <header className="workspace-header simple-workspace-header">
+            <ActionIcon aria-label="Toggle conversations">
+              <PanelLeft size={18} />
+            </ActionIcon>
+            <TitleFixture />
+            <Button
+              aria-label="Team"
+              title="Team: 1 working of 6"
+              leftSection={<Users size={16} />}
+              onClick={args.onTeam}
+            >
+              Team
+            </Button>
+            <Button
+              variant="subtle"
+              leftSection={<Mail size={16} />}
+              aria-label="Messages"
+            >
+              <span className="messages-toggle-label">Messages</span>
+            </Button>
+            <ActionIcon aria-label="Chat actions">
+              <Settings2 size={18} />
+            </ActionIcon>
+          </header>
+          <section id="conversation">
+            <div id="messages">
+              <div className="message-content">
+                <StartFixture open={args.onSelect} />
+              </div>
             </div>
-          </div>
-          <form id="composer">
-            <Textarea
-              aria-label="Message"
-              placeholder="Describe the work…"
-              autosize
-              minRows={1}
-            />
-            <div className="composer-bar">
-              <div className="composer-tools">
-                <div
-                  className="empty-chat-settings composer-context-row"
-                  aria-label="Agent settings"
-                >
-                  {(["orchestrator", "worker"] as const).map((role) => (
-                    <div className="empty-chat-setting" key={role}>
-                      <ExecutionSettings
-                        agent={lead}
-                        catalog={catalog}
-                        refresh={async () => {}}
-                        settingsRow
-                        initialRole={role}
-                      />
-                    </div>
-                  ))}
+            <form id="composer">
+              <Textarea
+                aria-label="Message"
+                placeholder="Describe the work…"
+                autosize
+                minRows={1}
+              />
+              <div className="composer-bar">
+                <div className="composer-tools">
+                  <div
+                    className="empty-chat-settings composer-context-row"
+                    aria-label="Agent settings"
+                  >
+                    {(["orchestrator", "worker"] as const).map((role) => (
+                      <div className="empty-chat-setting" key={role}>
+                        <ExecutionSettings
+                          agent={lead}
+                          catalog={catalog}
+                          refresh={async () => {}}
+                          settingsRow
+                          initialRole={role}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="composer-submit-actions">
+                  <ActionIcon aria-label="Queue for next turn">
+                    <ListEnd size={18} />
+                  </ActionIcon>
+                  <ActionIcon aria-label="Send message">
+                    <ArrowUp size={18} />
+                  </ActionIcon>
                 </div>
               </div>
-              <div className="composer-submit-actions">
-                <ActionIcon aria-label="Queue for next turn">
-                  <ListEnd size={18} />
-                </ActionIcon>
-                <ActionIcon aria-label="Send message">
-                  <ArrowUp size={18} />
-                </ActionIcon>
-              </div>
+            </form>
+            <div className="conversation-composer-footer">
+              <Usage
+                agent={lead}
+                stateDir="story-dispatch"
+                limits={limits}
+                accounts={usageAccounts}
+                accountLabel="Engineering"
+                reload={fn()}
+              />
             </div>
-          </form>
-          <div className="conversation-composer-footer">
-            <Usage
-              agent={lead}
-              stateDir="story-dispatch"
-              limits={limits}
-              accounts={usageAccounts}
-              accountLabel="Engineering"
-              reload={fn()}
-            />
-          </div>
-        </section>
-      </main>
+          </section>
+        </main>
+      </titleFixture.Provider>
     </ServerServicesProvider>
   ),
 } satisfies Meta<{ onSelect: (id: string) => void; onTeam: () => void }>;
@@ -279,12 +351,10 @@ export const SeveralProjects: Story = {
   render: (args) => (
     <div>
       {["codex-studio", "af-utils", "attar"].map((projectName) => (
-        <ConversationStart
+        <StartFixture
           key={projectName}
-          projectName={projectName}
-          location={`/projects/${projectName}`}
-          recentChats={recentChats}
-          onSelect={args.onSelect}
+          id={projectName === "codex-studio" ? lead.id : projectName}
+          open={args.onSelect}
         />
       ))}
     </div>

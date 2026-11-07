@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import {
   initialConfirmedLead,
   confirmedWorkspaceId,
@@ -26,20 +27,23 @@ function Fixture() {
   window.setLead = (value) => flushSync(() => setLead(value));
   return (
     <MantineProvider>
-      <Control
-        compact
-        lead={lead}
-        stateDir="fixture-state"
-        workspaceId={confirmedWorkspaceId}
-        refresh={async () => {
-          window.refreshCount++;
-          if (window.refreshHold)
-            await new Promise<void>(
-              (resolve) => (window.refreshRelease = resolve),
-            );
-          if (window.refreshFailure) throw new Error("Credentials unavailable");
-        }}
-      />
+      <AgentModelsFixture agents={[lead]}>
+        <Control
+          compact
+          lead={lead}
+          stateDir="fixture-state"
+          workspaceId={confirmedWorkspaceId}
+          refresh={async () => {
+            window.refreshCount++;
+            if (window.refreshHold)
+              await new Promise<void>(
+                (resolve) => (window.refreshRelease = resolve),
+              );
+            if (window.refreshFailure)
+              throw new Error("Credentials unavailable");
+          }}
+        />
+      </AgentModelsFixture>
     </MantineProvider>
   );
 }

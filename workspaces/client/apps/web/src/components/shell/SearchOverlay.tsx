@@ -10,11 +10,11 @@ import {
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type GetResult } from "../../api";
-import type { Snapshot } from "../../types";
+import { observer } from "mobx-react-lite";
+import { useAgentSummary } from "../agents/state.ts";
 import { useWorkspaceResource as useResource } from "../useWorkspaceResource";
 import "./Workspace.css";
 type SearchProps = {
-  data: Snapshot;
   revision: number;
   onSelect: (id: string, messageId?: string) => void;
   onClose: () => void;
@@ -120,9 +120,7 @@ export function SearchContent(c: SearchProps) {
               {result.kind}
             </Badge>
             <small>
-              {c.data.threads.find((a) => a.id === result.agent)?.name ||
-                result.agent ||
-                "Unassigned"}
+              <SearchAgentName id={result.agent || ""} />
             </small>
           </div>
           <p className="workspace-prose">{result.text}</p>
@@ -189,3 +187,11 @@ export function SearchContent(c: SearchProps) {
     </>
   );
 }
+
+const SearchAgentName = observer(function SearchAgentName({
+  id,
+}: {
+  id: string;
+}) {
+  return useAgentSummary(id)?.name || id || "Unassigned";
+});

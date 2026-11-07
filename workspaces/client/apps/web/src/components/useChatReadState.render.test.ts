@@ -1,3 +1,6 @@
+import { WorkerIndicator } from "./agents/worker/Heading.tsx";
+import TeamFixture from "./agents/TeamFixture.tsx";
+import { observableFixture } from "./observableFixture.tsx";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -10,12 +13,19 @@ import {
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { snapshotFixture } from "../snapshotFixture.ts";
 const service = vi.hoisted(() => ({
+  store: null as
+    | ReturnType<
+        typeof import("./observableFixture.tsx").observableFixture
+      >["store"]
+    | null,
   post: vi.fn(),
   refreshProjection: vi.fn(),
+  subscribeStateProjection: () => () => {},
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => service.store,
   useServerApi: () => ({ post: service.post }),
-  useServerSync: () => ({ refreshProjection: service.refreshProjection }),
+  useServerSync: () => service,
 }));
 vi.mock("../sync/client", () => ({}));
 let root: Root | undefined;
@@ -45,6 +55,7 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
     operationalStatus: { reason: "unread_result" },
   });
   const data = snapshotFixture([agent]);
+  service.store = observableFixture([agent]).store;
   let finish: (response: unknown) => void = () => {};
   service.post.mockReturnValue(
     new Promise((resolve) => {
@@ -61,18 +72,27 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
       [data.threads, read.pendingReadTargets, read.readStateFor],
     );
     return createElement(
-      "div",
-      null,
-      createElement("button", { onClick: () => read.select(agent.id) }, "Read"),
-      createElement("span", {
-        "data-conversation": indicators.get(agent.id)?.kind,
-      }),
-      createElement("span", {
-        "data-sidebar": formatAgentStatus(
-          agent,
-          read.pendingReadTargets.get(agent.id),
-        ).kind,
-      }),
+      TeamFixture,
+      { leadId: agent.id, pendingReads: read.pendingReadTargets },
+      createElement(
+        "div",
+        null,
+        createElement(WorkerIndicator, { agent }),
+        createElement(
+          "button",
+          { onClick: () => read.select(agent.id) },
+          "Read",
+        ),
+        createElement("span", {
+          "data-conversation": indicators.get(agent.id)?.kind,
+        }),
+        createElement("span", {
+          "data-sidebar": formatAgentStatus(
+            agent,
+            read.pendingReadTargets.get(agent.id),
+          ).kind,
+        }),
+      ),
     );
   }
   const host = document.createElement("div");
@@ -84,8 +104,10 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
       .querySelector("[data-conversation]")
       ?.getAttribute("data-conversation"),
   ).toBe("unread");
+  expect(host.querySelector(".chat-status-unread")).not.toBeNull();
   await act(async () => host.querySelector("button")?.click());
   expect(service.post).toHaveBeenCalledTimes(1);
+  expect(host.querySelector(".chat-status-unread")).toBeNull();
   expect(
     host.querySelector("[data-sidebar]")?.getAttribute("data-sidebar"),
   ).toBe("none");

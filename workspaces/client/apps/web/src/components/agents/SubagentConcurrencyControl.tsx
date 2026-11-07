@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./state.ts";
 import { outboxRequests } from "../../browserPersistence";
 import { AgentMode } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -157,7 +159,7 @@ export default function SubagentConcurrencyControl(props: Props) {
   );
 }
 
-function ScopedConcurrencyControl({
+const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   lead,
   compact = false,
   workspaceId,
@@ -179,7 +181,8 @@ function ScopedConcurrencyControl({
   };
   const { post } = useServerApi();
 
-  const snapshot = stateOf(lead);
+  const detail = useAgentDetail(lead);
+  const snapshot = stateOf(detail || {});
   const supported = snapshot !== undefined;
   const [initial, setInitial] = useState(() => {
     try {
@@ -376,9 +379,10 @@ function ScopedConcurrencyControl({
   };
 
   const legacyMode =
-    lead.agentModeSupported &&
-    (lead.agentMode === AgentMode.single || lead.agentMode === AgentMode.multi)
-      ? lead.agentMode
+    detail?.agentModeSupported &&
+    (detail.agentMode === AgentMode.single ||
+      detail.agentMode === AgentMode.multi)
+      ? detail.agentMode
       : undefined;
   const mode = confirmed
     ? confirmed.concurrency === 0
@@ -521,4 +525,4 @@ function ScopedConcurrencyControl({
       )}
     </form>
   );
-}
+});

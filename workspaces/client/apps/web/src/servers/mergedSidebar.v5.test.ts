@@ -85,27 +85,27 @@ it("rebinds computed project keys when retained routing metadata changes", () =>
     homeServerId: "local-backend",
   };
   const snapshot = (aliased: boolean) =>
-    sidebarSnapshot(
-      snapshotFixture([], {
-        projects: [
-          {
-            ...project,
-            ...(aliased
-              ? {
-                  projectAliases: [
-                    {
-                      serverId: "remote-backend",
-                      projectId: "remote-p",
-                      name: "Remote",
-                    },
-                  ],
-                }
-              : {}),
-          },
-        ],
-      }),
-      [{ collection: "agentSummary", id: agent.id, value: agent }],
-    );
+    sidebarSnapshot(snapshotFixture([]), [
+      { collection: "agentSummary", id: agent.id, value: agent },
+      {
+        collection: "project",
+        id: project.id,
+        value: {
+          ...project,
+          ...(aliased
+            ? {
+                projectAliases: [
+                  {
+                    serverId: "remote-backend",
+                    projectId: "remote-p",
+                    name: "Remote",
+                  },
+                ],
+              }
+            : {}),
+        },
+      },
+    ]);
   store.update("local", snapshot(false));
   const select = createMergedSidebarSelector(),
     sources = () => store.sources(["local"], new Set(["local"]));

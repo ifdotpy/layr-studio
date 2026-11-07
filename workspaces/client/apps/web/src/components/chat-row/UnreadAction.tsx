@@ -3,19 +3,18 @@ import { Menu } from "@mantine/core";
 import { Mail } from "lucide-react";
 import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
-import type { ChatRowActions } from "./actions.ts";
+import { useChatRowActions } from "./actions.ts";
 
 export const UnreadAction = observer(function UnreadAction({
   row,
   disabled,
   markingRead,
-  actions,
 }: {
   row: SidebarChatView;
   disabled: boolean;
   markingRead: boolean;
-  actions: ChatRowActions;
 }) {
+  const actions = useChatRowActions(row);
   const unreadHelp = markingRead
     ? "The read status is changing."
     : markUnreadHelp(row.agent.markUnread);

@@ -31,6 +31,11 @@ vi.mock("react", async (original) => ({
   useEffect: (effect: () => void | (() => void)) => h.effects.push(effect),
   useLayoutEffect: () => {},
 }));
+// This effect-only fixture calls the component body before its snapshot boundary.
+vi.mock("mobx-react-lite", async (original) => ({
+  ...(await original<typeof import("mobx-react-lite")>()),
+  observer: <T>(component: T) => component,
+}));
 vi.mock("./hooks", () => ({
   useSnapshot: () => {
     throw h.snapshotBoundary;

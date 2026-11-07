@@ -1,3 +1,11 @@
+import type { Snapshot } from "../types.ts";
+import {
+  useAgentCatalog,
+  useAgentDetail,
+  useWorkspace,
+  useStateCollections,
+} from "./agents/state.ts";
+import { observer } from "mobx-react-lite";
 import { serverStatus } from "../messageSendStatus";
 import { MessageSendStatus } from "../generated/api.ts";
 import {
@@ -28,10 +36,6 @@ import {
 } from "../servers/ServerServicesContext";
 import { useServerActivity } from "../servers/activity";
 import { useLiveText, withLiveText } from "../conversation/liveText";
-import {
-  type ChatWaitSource,
-  type ConversationData,
-} from "../hooks/conversationData";
 import { serviceTimeText } from "../local-time";
 import AgentAvatar from "./agents/AgentAvatar";
 import MessageQueue, {
@@ -113,7 +117,7 @@ import PromptComposer, {
 } from "./prompt-composer/PromptComposer";
 import PromptInput from "./prompt-composer/PromptInput";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
-import Requests, { RequestCard } from "./questions/Requests";
+import Requests, { LiveRequestCard as RequestCard } from "./questions/Requests";
 import { useQuestionCards } from "./questions/useQuestionCards";
 import MessageDate from "./conversation/transcript/MessageDate";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
@@ -141,9 +145,8 @@ import ComposerAttachments, {
   MessageAttachments,
   type Attachment,
 } from "./ComposerAttachments";
-import ConversationStart, {
-  type RecentProjectChat,
-} from "./conversation/ConversationStart";
+import { LiveConversationStart } from "./conversation/ConversationStart";
+
 import "./chat-controls.css";
 import "./conversation/empty-chat-settings.css";
 import { copyText } from "../clipboard/clipboard";
@@ -343,21 +346,19 @@ function useCompactHeaderTools() {
   return compact;
 }
 
-export default function Conversation(p: {
+export function ConversationView(p: {
   id: string | null;
   visible?: boolean;
   headerToolsInMenu?: boolean | undefined;
   onRailToolsChange?: ((tools: ReactNode) => void) | undefined;
   transcriptHeading?: ReactNode;
-  projectName?: string | undefined;
-  recentChats?: RecentProjectChat[] | undefined;
   syncWorkspaceId?: string | undefined;
   agent?: Agent | undefined;
+  detail?: ReturnType<typeof useAgentDetail>;
   lead?: Agent | undefined;
   room?: Room | undefined;
   legacy?: Json | undefined;
-  data: ConversationData;
-  waitSource: ChatWaitSource;
+  requests?: Snapshot["runtime"]["requests"];
   getDraft: DraftReader;
   subscribeDraft: DraftSubscription;
   setDraft: (v: string | ((current: string) => string), id?: string) => void;
@@ -393,6 +394,8 @@ export default function Conversation(p: {
   limitsAccountLabel?: string | undefined;
   reloadLimits: () => void;
 }) {
+  const stateDir = useWorkspace()?.stateDir || "";
+  const agents = useAgentCatalog().agents;
   const { removeSendingMessage } = useSendingMessageRemoval();
   const { queueUploads } = useServerUploads();
   const { get, post, command } = useServerApi();
@@ -514,21 +517,20 @@ export default function Conversation(p: {
     pageLoading,
     showLatest,
     ensureMessage,
-    liveAgent,
     connection,
     loaded,
   } = useMessages(
     p.id,
     kind,
     p.agent?.source === GeneratedApiAgentSource.managed,
-    p.data.stateDir,
+    stateDir,
     p.syncWorkspaceId,
     p.visible ?? true,
   );
   const outgoing = (p.outgoing || []).filter(
     (entry) => entry.body.room === p.id,
   );
-  const removed = useRemovedMessages(p.data.stateDir, kind, p.id);
+  const removed = useRemovedMessages(stateDir, kind, p.id);
   const receiptIds = [
     ...new Set([
       ...outgoing
@@ -563,7 +565,7 @@ export default function Conversation(p: {
   ].sort();
   const receipts = useMessageReceipts(
     p.agent?.source === GeneratedApiAgentSource.managed ? p.id : null,
-    `${p.data.stateDir}:${p.syncWorkspaceId}:${p.id}`,
+    `${stateDir}:${p.syncWorkspaceId}:${p.id}`,
     p.syncWorkspaceId,
     receiptIds,
   );
@@ -612,7 +614,7 @@ export default function Conversation(p: {
   );
   const historyAgentId = p.id;
   const promptRecall = usePromptRecall(
-    `${p.data.stateDir}:${kind}:${p.id}:${historyVersion}`,
+    `${stateDir}:${kind}:${p.id}:${historyVersion}`,
     p.room ? [] : items,
     () => p.getDraft(p.id || "new"),
     p.setDraft,
@@ -663,10 +665,10 @@ export default function Conversation(p: {
     revealRequest,
     getAnchorId,
   } = useConversationScroll(
-    `${p.data.stateDir}:${kind}:${p.id}`,
+    `${stateDir}:${kind}:${p.id}`,
     loaded,
     !after,
-    `studio-turns:${p.data.stateDir}:${p.id}`,
+    `studio-turns:${stateDir}:${p.id}`,
   );
   const pageStatus = useRef<PageStatusStore>({
     value: null,
@@ -808,14 +810,14 @@ export default function Conversation(p: {
       .catch((error) => p.notify(errorText(error)))
       .finally(() => p.onJumpHandled?.(target.requestId));
   }, [p.jumpTarget?.requestId, p.id]);
-  const attachmentKey = `codex-agent-attachments:${p.data.stateDir}`;
+  const attachmentKey = `codex-agent-attachments:${stateDir}`;
   const [attachments, setAttachments] = useAttachmentDrafts(
     attachmentKey,
     p.notify,
   );
   const [addingFiles, setUploading] = useState(false);
   const uploadRecovery = useUploadRecovery(
-    p.data.stateDir,
+    stateDir,
     p.syncWorkspaceId || "",
     setAttachments,
   );
@@ -855,13 +857,8 @@ export default function Conversation(p: {
   const activeId = useRef(p.id);
   activeId.current = p.id;
   const assets = attachments[p.id || ""] || [];
-  const agent = useMemo(
-    () =>
-      p.agent && liveAgent?.id === p.id
-        ? ({ ...p.agent, ...liveAgent } as Agent)
-        : p.agent,
-    [p.agent, liveAgent, p.id],
-  );
+  const agent = p.agent;
+  const detail = p.detail;
   const controls = {
     steer: providerSupports(agent?.provider, "steer"),
     fork: providerSupports(agent?.provider, "fork"),
@@ -875,28 +872,28 @@ export default function Conversation(p: {
     p.syncWorkspaceId,
     !historical && !after,
   );
-  const threadBlock = nativeThreadError(agent);
+  const threadBlock = nativeThreadError(agent, detail);
   const capacityRetry = agent ? currentCapacityRetry(agent) : null;
   const displayPhase = useDisplayPhase(
     p.id,
-    agent?.activity?.phase || "thinking",
+    detail?.activity?.phase || "thinking",
   );
   const detailedActivity =
     !!threadBlock ||
     capacityRetry?.status === "scheduled" ||
     !!connection?.message ||
     !!p.offlineSendPending ||
-    !!agent?.error ||
-    !!agent?.startAttempt?.prepareError ||
-    !!agent?.startAttempt?.responseError ||
+    !!detail?.error ||
+    !!detail?.startAttempt?.prepareError ||
+    !!detail?.startAttempt?.responseError ||
     ["retrying", "auth", "safety", "error"].includes(
-      agent?.activity?.phase || "",
+      detail?.activity?.phase || "",
     ) ||
     !["starting", "running", "queued", "idle", "completed"].includes(
       agent?.status || "idle",
     );
   const reasoningVisible =
-    agent?.activity?.phase === "thinking" &&
+    detail?.activity?.phase === "thinking" &&
     items.at(-1)?.turnId === agent?.turnId &&
     items.at(-1)?.role === "reasoning" &&
     typeof items.at(-1)?.reasoningSince === "number";
@@ -932,18 +929,29 @@ export default function Conversation(p: {
           notify={p.notify}
           agent={p.agent}
           lead={p.lead}
-          team={p.data.runtime?.agents || []}
+          team={agents}
           catalog={modelCatalog}
           refresh={p.refresh}
           openRequest={
             modelCommandRequest.id === p.id ? modelCommandRequest.serial : 0
           }
-          renderTrigger={({ agent, opened, ref, onClick }) => (
+          renderTrigger={({
+            agent,
+            detail,
+            workerDetail,
+            reviewDetail,
+            opened,
+            ref,
+            onClick,
+          }) => (
             <ExecutionSummaryTrigger
               ref={ref}
               agent={agent}
+              detail={detail}
+              workerDetail={workerDetail}
+              reviewDetail={reviewDetail}
               lead={p.lead}
-              team={p.data.runtime?.agents || []}
+              team={agents}
               aria-expanded={opened}
               onOpen={onClick}
             />
@@ -951,7 +959,7 @@ export default function Conversation(p: {
         />
       </div>
     ) : null;
-  const queueScope = `${p.data.stateDir}:${p.syncWorkspaceId || ""}:${p.id}`;
+  const queueScope = `${stateDir}:${p.syncWorkspaceId || ""}:${p.id}`;
   const messageQueue = useMessageQueue({
     id: p.id,
     enabled: managed,
@@ -1030,7 +1038,7 @@ export default function Conversation(p: {
     setUploading(true);
     try {
       uploadRecovery.include(
-        await queueUploads(p.data.stateDir, id, files, p.syncWorkspaceId || ""),
+        await queueUploads(stateDir, id, files, p.syncWorkspaceId || ""),
       );
       uploadRecovery.retry();
     } finally {
@@ -1253,14 +1261,23 @@ export default function Conversation(p: {
     p.setDraft(`${draft}${separator}${quoted}\n\n`);
     input.current?.focus();
   });
-  const team = p.data.threads.filter(
+  const team = agents.filter(
     (a) => a.rootId === (agent?.rootId || p.room?.rootId),
   );
-  const runtime = p.data.runtime;
-  // Snapshots replace the request array often; keep one identity per question state.
-  const pendingQuestionList = (runtime?.requests || []).filter(
-    isPendingQuestionRequest,
+  const root = p.agent?.rootId || p.lead?.id || p.agent?.id;
+  const requestSource = (p.requests || []).filter(
+    (request) =>
+      p.room ||
+      p.legacy ||
+      !request.agent ||
+      agents.some(
+        (agent) =>
+          (agent.id === root || agent.rootId === root) &&
+          agent.id === request.agent,
+      ),
   );
+  // Snapshots replace the request array often; keep one identity per question state.
+  const pendingQuestionList = requestSource.filter(isPendingQuestionRequest);
   const pendingQuestionKey = JSON.stringify(
     pendingQuestionList.map((request) => [request.id, request.agent]),
   );
@@ -1270,26 +1287,19 @@ export default function Conversation(p: {
   );
   const requests = useMemo(
     () =>
-      (runtime?.requests || []).filter(
+      requestSource.filter(
         (r) =>
           !r.agent ||
           r.agent === p.id ||
           (!mobileClient && team.some((a) => a.id === r.agent)),
       ),
-    [
-      runtime?.requests,
-      p.id,
-      mobileClient,
-      p.data.threads,
-      agent?.rootId,
-      p.room?.rootId,
-    ],
+    [p.requests, p.id, mobileClient, agents, agent?.rootId, p.room?.rootId],
   );
   const first = p.room?.members?.[0] || items.find((m) => m.sender)?.sender;
   const canSend =
     !p.schemaMismatch &&
     !threadBlock &&
-    (!!agent?.canSend || !!p.legacy || !p.id);
+    (!!detail?.canSend || !!p.legacy || !p.id);
   const lastAssistantByTurn = useMemo(() => {
     const last = new Map<string, string>();
     const unconfirmed = new Set(
@@ -1350,7 +1360,7 @@ export default function Conversation(p: {
   );
   const questionCards = useQuestionCards(
     managed && !p.room ? agent?.id : undefined,
-    p.data.stateDir,
+    stateDir,
     transcriptItems,
     pendingQuestions,
   );
@@ -1375,7 +1385,7 @@ export default function Conversation(p: {
     try {
       for (const message of messages)
         await removeSendingMessage(
-          { stateDir: p.data.stateDir, workspaceId: p.syncWorkspaceId, kind },
+          { stateDir: stateDir, workspaceId: p.syncWorkspaceId, kind },
           { chat: p.id, message },
         );
       void messageQueue.reload().catch(() => {});
@@ -1542,7 +1552,7 @@ export default function Conversation(p: {
           streaming={!!m.streaming}
           agentId={
             p.room
-              ? p.data.threads.find((item) => item.id === m.sender)?.id
+              ? agents.find((item) => item.id === m.sender)?.id
               : managed
                 ? agent?.id
                 : undefined
@@ -1596,7 +1606,7 @@ export default function Conversation(p: {
             ? {
                 message: m,
                 agentId: !p.room && managed ? agent?.id : undefined,
-                stateDir: p.data.stateDir,
+                stateDir: stateDir,
                 rootId:
                   !p.room && managed ? agent?.rootId || agent?.id : undefined,
                 accounts: p.limitsAccounts,
@@ -1682,9 +1692,9 @@ export default function Conversation(p: {
       ? p.outgoing?.find((entry) => entry.id === m.clientMessageId)
       : undefined,
     p.offlineSendPending,
-    p.data.stateDir,
+    stateDir,
     p.limitsAccounts,
-    p.room ? p.data.threads : undefined,
+    p.room ? agents : undefined,
     p.notify,
     p.onObserved,
   ];
@@ -1692,10 +1702,10 @@ export default function Conversation(p: {
     () => (
       <>
         {managed && !p.room && agent?.provider === ProviderKind.Claude && (
-          <ClaudeRepairNotice agent={agent} />
+          <ObservedClaudeRepairNotice agent={agent} detail={detail} />
         )}
         <LiveTurnHistory
-          key={`${p.data.stateDir}:${p.id}`}
+          key={`${stateDir}:${p.id}`}
           liveAgentId={p.room ? undefined : (p.id ?? undefined)}
           items={transcriptItems}
           scrollContainer={scroll}
@@ -1706,7 +1716,7 @@ export default function Conversation(p: {
           agent={managed && !p.room ? agent : undefined}
           currentTurn={agent?.turnId || undefined}
           enabled={managed && !p.room}
-          storageKey={`studio-turns:${p.data.stateDir}:${p.id}`}
+          storageKey={`studio-turns:${stateDir}:${p.id}`}
           renderMessage={(item) =>
             item.idleCompaction ? (
               <IdleCompactionNotice key={item.id} text={item.text} />
@@ -1736,8 +1746,8 @@ export default function Conversation(p: {
                     request={request}
                     messageId={messageId}
                     showDates={!!p.room}
-                    scope={p.data.stateDir}
-                    agents={p.data.threads}
+                    scope={stateDir}
+                    agents={agents}
                     refresh={p.refresh}
                     notify={p.notify}
                     onAnswerOpen={() => setFollow(false)}
@@ -1761,11 +1771,12 @@ export default function Conversation(p: {
       revealRequest,
       setFollow,
       agent,
+      detail,
       managed,
       p.room,
       p.id,
-      p.data.stateDir,
-      p.data.threads,
+      stateDir,
+      agents,
       planType,
       p.outgoing,
       p.notify,
@@ -1808,7 +1819,7 @@ export default function Conversation(p: {
           loadingOlder={pageLoading}
           agentId={managed ? p.id || undefined : undefined}
           container={scroll}
-          storageKey={`studio-prompt-bookmarks:${p.data.stateDir}:${p.id}`}
+          storageKey={`studio-prompt-bookmarks:${stateDir}:${p.id}`}
           jump={jumpToPrompt}
         />
       ) : null,
@@ -1821,7 +1832,7 @@ export default function Conversation(p: {
       pageLoading,
       managed,
       scroll,
-      p.data.stateDir,
+      stateDir,
       jumpToPrompt,
       older,
       setFollow,
@@ -1926,8 +1937,8 @@ export default function Conversation(p: {
   );
   const dictation = managed && p.id && (
     <Dictation
-      key={`${p.data.stateDir}:${p.id}`}
-      chatId={`${p.data.stateDir}:${p.id}`}
+      key={`${stateDir}:${p.id}`}
+      chatId={`${stateDir}:${p.id}`}
       disabled={!canSend || p.sending}
       onInsert={(text) =>
         p.setDraft(
@@ -2040,9 +2051,10 @@ export default function Conversation(p: {
           </Button>
         </div>
       </Modal>
-      {agent && (agent.error || threadBlock || capacityRetry) && (
-        <NativeError
+      {agent && (detail?.error || threadBlock || capacityRetry) && (
+        <ObservedNativeError
           agent={agent}
+          detail={detail}
           refresh={p.refresh}
           planType={planType}
           recovery={
@@ -2182,18 +2194,7 @@ export default function Conversation(p: {
                 <p>Agent messages will appear here.</p>
               </div>
             ) : (
-              <ConversationStart
-                projectName={
-                  p.projectName ||
-                  p.agent?.projectPath?.split("/").filter(Boolean).at(-1) ||
-                  "Your project"
-                }
-                location={
-                  p.agent?.projectPath || "Project location unavailable"
-                }
-                recentChats={p.recentChats}
-                onSelect={p.onSelect}
-              />
+              <LiveConversationStart agentId={p.id || ""} />
             ))}
           {transcript}
           <PageIndicator
@@ -2203,7 +2204,11 @@ export default function Conversation(p: {
             retry={() => loadPage("newer")}
           />
           {!p.room && agent && (
-            <SafetyBuffering key={`safety:${agent.id}`} agent={agent} />
+            <ObservedSafetyBuffering
+              key={`safety:${agent.id}`}
+              agent={agent}
+              detail={detail}
+            />
           )}
           <div className="chat-activity">
             {!detailedActivity &&
@@ -2214,14 +2219,8 @@ export default function Conversation(p: {
                 queue.length > 0
               ) && (
                 <LiveAgentPhase
-                  source={p.waitSource}
-                  agent={{
-                    ...agent,
-                    activity: {
-                      ...agent.activity,
-                      phase: displayPhase,
-                    },
-                  }}
+                  agentId={agent.id}
+                  phaseOverride={displayPhase}
                   connection={connection}
                   savedMessagePending={p.offlineSendPending}
                   connectionDetails={p.offlineSendDetails}
@@ -2230,8 +2229,7 @@ export default function Conversation(p: {
           </div>
           {!p.room && detailedActivity && (
             <LiveAgentPhase
-              source={p.waitSource}
-              agent={agent}
+              agentId={agent?.id}
               connection={connection}
               savedMessagePending={p.offlineSendPending}
               connectionDetails={p.offlineSendDetails}
@@ -2246,12 +2244,12 @@ export default function Conversation(p: {
                 : undefined
             }
             showDates={!!p.room}
-            scope={p.data.stateDir}
-            allRequests={runtime?.requests || []}
+            scope={stateDir}
+            allRequests={p.requests || []}
             requests={requests.filter(
               (request) => !inlineRequestIds.has(request.id),
             )}
-            agents={p.data.threads}
+            agents={agents}
             refresh={p.refresh}
             notify={p.notify}
           />
@@ -2323,7 +2321,7 @@ export default function Conversation(p: {
               />
             </>
           )}
-          {agent && isCyberPolicyRefusal(agent.error) && (
+          {agent && isCyberPolicyRefusal(detail?.error) && (
             <div className="native-policy-composer-warning" role="note">
               <strong>Before you continue</strong>
               <span>
@@ -2423,7 +2421,7 @@ export default function Conversation(p: {
                       enabled:
                         !!managed && !p.room && !!p.id && p.id === agent?.id,
                       agentId: p.id || "",
-                      workspace: p.syncWorkspaceId || p.data.stateDir,
+                      workspace: p.syncWorkspaceId || stateDir,
                       account: p.agent?.accountKey || "default",
                       cwd: p.agent?.cwd || "",
                       provider: String(p.agent?.provider || ""),
@@ -2548,11 +2546,8 @@ export default function Conversation(p: {
               <Usage
                 key={p.agent?.accountKey || "default"}
                 visible={p.visible ?? true}
-                agent={{
-                  ...agent,
-                  accountKey: p.agent?.accountKey || "default",
-                }}
-                stateDir={p.data.stateDir}
+                agent={agent}
+                stateDir={stateDir}
                 limits={p.limits}
                 accounts={p.limitsAccounts}
                 limitsLoading={p.limitsLoading}
@@ -2568,3 +2563,24 @@ export default function Conversation(p: {
     </section>
   );
 }
+const ObservedClaudeRepairNotice = observer(ClaudeRepairNotice);
+const ObservedSafetyBuffering = observer(SafetyBuffering);
+export const ObservedNativeError = observer(NativeError);
+const ObservedConversation = observer(ConversationView);
+export const LiveConversation = observer(function LiveConversation({
+  snapshot,
+  ...props
+}: Parameters<typeof ConversationView>[0] & {
+  snapshot: Snapshot;
+}) {
+  const state = useStateCollections();
+  const detail = useAgentDetail(props.agent);
+  return state ? (
+    <ObservedConversation
+      {...props}
+      detail={detail}
+      requests={snapshot.runtime.requests}
+    />
+  ) : null;
+});
+export default ObservedConversation;

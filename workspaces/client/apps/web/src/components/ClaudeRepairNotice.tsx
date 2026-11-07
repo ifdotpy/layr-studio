@@ -1,3 +1,4 @@
+import type { useAgentDetail } from "./agents/state.ts";
 import { useEffect, useState } from "react";
 import { useServerApi } from "../servers/ServerServicesContext";
 import type { Agent } from "../types";
@@ -9,7 +10,13 @@ import {
 import "./claude-repair-notice.css";
 
 /** Read saved evidence only. This component never starts a session repair or a turn. */
-export default function ClaudeRepairNotice({ agent }: { agent: Agent }) {
+export default function ClaudeRepairNotice({
+  agent,
+  detail = agent,
+}: {
+  agent: Agent;
+  detail?: ReturnType<typeof useAgentDetail> | Agent;
+}) {
   const { get } = useServerApi();
   const [result, setResult] = useState<{
     scope: string;
@@ -45,7 +52,7 @@ export default function ClaudeRepairNotice({ agent }: { agent: Agent }) {
   const current = result?.scope === scope ? result : undefined;
   const repairRequired =
     /CLAUDE_SESSION_REPAIR_REQUIRED|needs repair|journal.*repair/i.test(
-      JSON.stringify(agent.error || ""),
+      JSON.stringify(detail.error || ""),
     );
   const report = current?.report;
   if ((!report || report.status === "none") && !repairRequired) return null;

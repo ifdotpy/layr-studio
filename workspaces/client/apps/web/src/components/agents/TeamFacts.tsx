@@ -16,7 +16,8 @@ import {
   Wrench,
 } from "lucide-react";
 import type { Agent } from "../../types";
-import type { ChatIndicatorKind } from "../chat-status/chatStatusModel";
+import { observer } from "mobx-react-lite";
+import type { ChatIndicatorKind } from "../../status/operationalStatus";
 
 const stateIcons = {
   answer: CircleHelp,
@@ -36,7 +37,13 @@ export function TeamStateIcon({ kind }: { kind: ChatIndicatorKind }) {
     />
   );
 }
-export function TeamRoleIcon({ agent, lead }: { agent: Agent; lead: boolean }) {
+export const TeamRoleIcon = observer(function TeamRoleIcon({
+  agent,
+  lead,
+}: {
+  agent: Agent;
+  lead: boolean;
+}) {
   const role =
     lead || agent.isLead || ["lead", "orchestrator"].includes(agent.role || "")
       ? "Lead"
@@ -49,25 +56,28 @@ export function TeamRoleIcon({ agent, lead }: { agent: Agent; lead: boolean }) {
       <Icon aria-hidden="true" />
     </span>
   );
-}
-export function activityPresentation(agent: Agent) {
-  if (agent.commandProgress?.length)
+});
+export function activityPresentation(
+  agent: Agent,
+  detail: Agent | undefined = agent,
+) {
+  if (detail?.commandProgress?.length)
     return { Icon: Terminal, label: "Command" };
   if (agent.status === AgentStatus.waiting_on_monitor)
     return { Icon: Timer, label: "Waiting on monitor" };
   if (["waiting", "parked", "queued", "starting"].includes(agent.status || ""))
     return { Icon: Timer, label: "Waiting" };
-  if (agent.activity?.phase === "thinking")
+  if (detail?.activity?.phase === "thinking")
     return { Icon: Brain, label: "Thinking" };
-  if (agent.activity?.phase === "writing")
+  if (detail?.activity?.phase === "writing")
     return { Icon: PenLine, label: "Writing" };
   if (
-    agent.activity?.tools?.some((tool) =>
+    detail?.activity?.tools?.some((tool) =>
       /command|exec/i.test(tool.type + tool.name),
     )
   )
     return { Icon: Terminal, label: "Command" };
-  if (agent.activity?.phase === "tool")
+  if (detail?.activity?.phase === "tool")
     return { Icon: Wrench, label: "Using tools" };
   return { Icon: ClipboardList, label: "Task" };
 }

@@ -1,0 +1,847 @@
+import NewChatModelSettings from "./NewChatModelSettings.tsx";
+import { type NewChatSettings } from "./newChatSettings.ts";
+import { observable, runInAction } from "mobx";
+import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
+import { createRoot } from "react-dom/client";
+import { WorkerError } from "./agents/worker/Details.tsx";
+import { NativeModelActions } from "./conversation/NativeModelActions.tsx";
+import { ConversationProvider } from "./conversation/navigation.ts";
+import { ExecutionSummaryTrigger } from "./agents/ExecutionSummaryTrigger.tsx";
+import { ClaudeSettings } from "./ClaudeSettings.tsx";
+import TurnHistory from "./conversation/transcript/TurnHistory.tsx";
+import { snapshotFixture } from "../snapshotFixture.ts";
+// @vitest-environment happy-dom
+import {
+  createElement,
+  act,
+  Profiler,
+  Fragment,
+  type ComponentProps,
+  type ReactNode,
+} from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MantineProvider, Menu } from "@mantine/core";
+import { beforeEach, expect, it, vi } from "vitest";
+import {
+  AgentMode,
+  AgentSource,
+  AgentStatus,
+  AgentPermissionMode,
+  ProviderKind,
+} from "../generated/api.ts";
+import {
+  observableFixture,
+  conversationActionsFixture,
+} from "./observableFixture.tsx";
+import { required } from "./componentTestFixtures.ts";
+import { ChatSettingsDialog } from "./agents/ChatSettingsDialog.tsx";
+import { UnifiedAgentSettings } from "./agents/UnifiedAgentSettings.tsx";
+import { LiveAgentPhase } from "./agents/AgentPhase.tsx";
+import Usage from "./Usage.tsx";
+import Requests from "./questions/Requests.tsx";
+import { approval } from "../approvalFixtures.ts";
+import type { AgentSetupPickerProps } from "./agents/AgentSetupPicker.tsx";
+
+const h = vi.hoisted(() => ({
+  catalog: null as null | {
+    models: {
+      model: string;
+      provider: "codex";
+      supportedReasoningEfforts: { reasoningEffort: string }[];
+    }[];
+    loading: boolean;
+    error: string;
+    retry: () => void;
+  },
+  pickers: [] as AgentSetupPickerProps[],
+  sync: { subscribeStateProjection: () => () => {} },
+  api: {
+    saved: (_key: string, initial: unknown) => initial,
+    save: () => {},
+    post: vi.fn(),
+    get: vi.fn(),
+    command: {},
+  },
+}));
+vi.mock("../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../servers/ServerServicesContext")>()),
+  useServerApi: () => h.api,
+  useServerSync: () => h.sync,
+}));
+vi.mock("@mantine/core", async (original) => {
+  const actual = await original<typeof import("@mantine/core")>();
+  const children = ({ children }: { children?: ReactNode }) =>
+    createElement(Fragment, null, children);
+  return {
+    ...actual,
+    Modal: Object.assign(
+      ({ children }: { children?: ReactNode }) =>
+        createElement(Fragment, null, children),
+      actual.Modal,
+    ),
+    Popover: Object.assign(
+      ({ children }: { children?: ReactNode }) =>
+        createElement(Fragment, null, children),
+      actual.Popover,
+      { Target: children, Dropdown: children },
+    ),
+  };
+});
+vi.mock("./Accounts", async (original) => ({
+  ...(await original<typeof import("./Accounts")>()),
+  default: ({
+    renderPicker,
+  }: {
+    renderPicker: (select: () => void, disabled: boolean) => ReactNode;
+  }) => renderPicker(() => {}, false),
+  AccountTransferStatus: () => null,
+}));
+vi.mock("./AccountSignInNotice", () => ({
+  default: ({ errors }: { errors: (string | undefined)[] }) =>
+    createElement("output", null, errors.filter(Boolean).join(" ")),
+}));
+vi.mock("./agents/WorkerModelPicker", async (original) => {
+  const actual = await original<typeof import("./agents/WorkerModelPicker")>();
+  return {
+    ...actual,
+    useWorkerModels: (...args: Parameters<typeof actual.useWorkerModels>) =>
+      h.catalog || actual.useWorkerModels(...args),
+  };
+});
+vi.mock("./newChatSettings", async (original) => ({
+  ...(await original<typeof import("./newChatSettings")>()),
+  readNewChatResource: async (_server: unknown, path: string) =>
+    path === "/api/accounts"
+      ? accounts.data
+      : path === "/api/projects"
+        ? { items: [] }
+        : { models: h.catalog?.models || [] },
+}));
+vi.mock("./TokenRate", () => ({ default: () => null }));
+vi.mock("./agents/AgentSetupPicker", () => ({
+  AgentSetupPicker: (props: AgentSetupPickerProps) => {
+    h.pickers.push(props);
+    return createElement("output", null, props.model, " ", props.effort);
+  },
+}));
+const catalog = { models: [], loading: false, error: "", retry: () => {} };
+const accounts: ComponentProps<typeof UnifiedAgentSettings>["state"] = {
+  data: {
+    accounts: [],
+    archivedAccounts: [],
+    defaultAccountKey: "default",
+    defaultAccountGroups: [],
+    logins: [],
+    supportsDelete: true,
+    supportsDisconnect: true,
+  },
+  error: "",
+  setData: () => {},
+  refresh: async () => null,
+  scope: "owner",
+};
+const record = {
+  id: "lead",
+  source: AgentSource.managed,
+  provider: ProviderKind.codex,
+  isLead: true,
+  status: AgentStatus.idle,
+  threadId: "thread",
+  epoch: 1,
+  model: "gpt-6-astra",
+  concurrency: 7,
+  subagentConcurrencyVersion: 2,
+  agentModeRevision: 3,
+  permissionMode: AgentPermissionMode.bypassPermissions,
+  effort: "xhigh",
+  workerDefaults: {
+    model: "worker-sentinel",
+    effort: "medium",
+    fastMode: false,
+    delegationDepth: 2,
+  },
+  reviewDefaults: { model: "review-sentinel", effort: "high", fastMode: false },
+  workerExcludedAccountKeys: ["excluded-worker"],
+  reviewerExcludedAccountKeys: ["excluded-review"],
+  contextUsage: { tokens: 250, window: 1000 },
+  compactions: 4,
+};
+function render(
+  fixture: ReturnType<typeof observableFixture>,
+  view: ReactNode,
+) {
+  return renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      { env: "test" },
+      createElement(fixture.Provider, null, view),
+    ),
+  );
+}
+beforeEach(() => {
+  h.pickers = [];
+  h.catalog = null;
+  h.api.post.mockReset();
+});
+
+it("reads generated team concurrency and defaults through ChatSettingsDialog", () => {
+  const f = observableFixture([record]);
+  const agent = required(f.mirror.current.agents.get("lead"));
+  expect("concurrency" in agent).toBe(false);
+  const html = render(
+    f,
+    createElement(ChatSettingsDialog, {
+      settingsOpen: true,
+      accountModalOpen: false,
+      setSettingsOpen: () => {},
+      agent,
+      lead: agent,
+      accounts,
+      notify: () => {},
+      agentModels: catalog,
+      data: snapshotFixture([]),
+      refresh: async () => {},
+      workspaceId: "workspace",
+      creating: false,
+      newChat: () => {},
+      project: () => {},
+      setClaudeLoginKey: () => {},
+    }),
+  );
+  expect(html).toContain('value="7"');
+  expect(html).toContain('value="2" selected=""');
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  const full = required(
+    host.querySelector<HTMLInputElement>('input[value="full"]'),
+  );
+  expect(full.checked).toBe(true);
+  expect(full.disabled).toBe(false);
+  f.store.dispose();
+});
+
+it.each([
+  {
+    role: "orchestrator" as const,
+    model: "",
+    effort: "xhigh",
+    excluded: undefined,
+  },
+  {
+    role: "worker" as const,
+    model: "worker-sentinel",
+    effort: "medium",
+    excluded: ["excluded-worker"],
+  },
+  {
+    role: "review" as const,
+    model: "review-sentinel",
+    effort: "high",
+    excluded: ["excluded-review"],
+  },
+])(
+  "reads generated $role effort and exclusions through UnifiedAgentSettings",
+  ({ role, model, effort, excluded }) => {
+    const f = observableFixture([record]);
+    const agent = required(f.mirror.current.agents.get("lead"));
+    render(
+      f,
+      createElement(UnifiedAgentSettings, {
+        agent,
+        initialRole: role,
+        state: accounts,
+        notify: () => {},
+        catalog,
+        refresh: async () => {},
+      }),
+    );
+    const picker = required(h.pickers.find((p) => p.role === role));
+    expect(picker.effort).toBe(effort);
+    if (model) expect(picker.model).toBe(model);
+    expect(picker.excludedKeys).toEqual(excluded);
+    f.store.dispose();
+  },
+);
+
+it("keeps a native thread block visible through the generated phase caller", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      status: AgentStatus.running,
+      nativeThreadBlock: {
+        threadId: "thread",
+        error: { message: "Safety block" },
+      },
+    },
+  ]);
+  const html = render(
+    f,
+    createElement(LiveAgentPhase, { agentId: "lead", connection: null }),
+  );
+  expect(html).toContain('data-phase="blocked"');
+  f.store.dispose();
+});
+
+it("keeps generated request owners blocked for the same native thread", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      nativeThreadBlock: {
+        threadId: "thread",
+        error: { message: "Safety block" },
+      },
+    },
+  ]);
+  const request = approval({
+    request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+    params: { threadId: "thread" },
+  });
+  const html = render(
+    f,
+    createElement(Requests, {
+      requests: [request],
+      allRequests: [request],
+      agents: [...f.mirror.current.agents.values()],
+      scope: "owner",
+      refresh: async () => {},
+      notify: () => {},
+    }),
+  );
+  expect(html).toContain("This chat stopped as a precaution");
+  f.store.dispose();
+});
+
+it("reads generated context usage and compactions through Usage", () => {
+  const f = observableFixture([record]);
+  const html = render(
+    f,
+    createElement(Usage, {
+      agent: required(f.mirror.current.agents.get("lead")),
+      stateDir: "owner",
+      limits: null,
+      reload: () => {},
+    }),
+  );
+  expect(html).toContain("Context 25%");
+  expect(html).toContain("Compacted 4 times.");
+  f.store.dispose();
+});
+
+it("reads worker and reviewer defaults through the composer summary trigger", () => {
+  const f = observableFixture([record]);
+  const agent = required(f.mirror.current.agents.get("lead"));
+  const html = render(
+    f,
+    createElement(ExecutionSummaryTrigger, {
+      agent,
+      team: [agent],
+      onOpen: () => {},
+    }),
+  );
+  expect(html).toContain("worker-sentinel");
+  expect(html).toContain("review-sentinel");
+  f.store.dispose();
+});
+it("reads native detail errors through Claude settings", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      provider: ProviderKind.claude,
+      nativeStatus: { error: "native-only-error" },
+    },
+  ]);
+  const html = render(
+    f,
+    createElement(ClaudeSettings, {
+      agent: required(f.mirror.current.agents.get("lead")),
+      onSignIn: () => {},
+    }),
+  );
+  expect(html).toContain("native-only-error");
+  f.store.dispose();
+});
+it("reads a native turn error through the real transcript history caller", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      status: AgentStatus.failed,
+      nativeTurnError: {
+        turnId: "turn",
+        error: { message: "native-turn-only-error" },
+      },
+    },
+  ]);
+  const html = render(
+    f,
+    createElement(TurnHistory, {
+      agent: required(f.mirror.current.agents.get("lead")),
+      enabled: true,
+      storageKey: "owner",
+      onJump: () => {},
+      items: [
+        {
+          id: "answer",
+          role: "assistant",
+          text: "Answer",
+          turnId: "turn",
+          turnStatus: "failed",
+        },
+      ],
+      renderMessage: (item) =>
+        createElement(
+          "span",
+          null,
+          item.nativeError ? JSON.stringify(item.nativeError) : item.text,
+        ),
+    }),
+  );
+  expect(html).toContain("native-turn-only-error");
+  f.store.dispose();
+});
+
+it("guards the App native action menu with generated summary and detail", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      nativeThreadBlock: {
+        threadId: "thread",
+        error: { message: "Safety block" },
+      },
+    },
+  ]);
+  const html = render(
+    f,
+    createElement(
+      ConversationProvider,
+      { value: conversationActionsFixture() },
+      createElement(
+        Menu,
+        { opened: true, withinPortal: false },
+        createElement(
+          Menu.Target,
+          null,
+          createElement("button", null, "Actions"),
+        ),
+        createElement(
+          Menu.Dropdown,
+          null,
+          createElement(NativeModelActions, {
+            agent: required(f.mirror.current.agents.get("lead")),
+          }),
+        ),
+      ),
+    ),
+  );
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  expect(
+    required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
+      .disabled,
+  ).toBe(true);
+  f.store.dispose();
+});
+
+it("keeps worker error and native menu leaves isolated from detail activity", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const initial = {
+    ...record,
+    error: "Stored error",
+    activity: { phase: "thinking" },
+    nativeThreadBlock: {
+      threadId: "thread",
+      error: { message: "Safety block" },
+    },
+  };
+  const f = observableFixture([initial]);
+  const agent = required(f.mirror.current.agents.get("lead"));
+  const detail = required(f.details.get("lead"));
+  const commits = new Map<string, number>();
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const count = (id: string) => commits.set(id, (commits.get(id) || 0) + 1);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(
+            f.Provider,
+            null,
+            createElement(
+              Profiler,
+              { id: "error", onRender: () => count("error") },
+              createElement(WorkerError, { agent }),
+            ),
+            createElement(
+              ConversationProvider,
+              { value: conversationActionsFixture() },
+              createElement(
+                Menu,
+                { opened: true, withinPortal: false },
+                createElement(
+                  Menu.Target,
+                  null,
+                  createElement("button", null, "Actions"),
+                ),
+                createElement(
+                  Menu.Dropdown,
+                  null,
+                  createElement(
+                    Profiler,
+                    { id: "menu", onRender: () => count("menu") },
+                    createElement(NativeModelActions, { agent }),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    commits.clear();
+    await act(async () =>
+      detail.apply({ ...initial, activity: { phase: "writing" } }),
+    );
+    expect(commits.get("error") || 0).toBe(0);
+    expect(commits.get("menu") || 0).toBe(0);
+    await act(async () =>
+      detail.apply({
+        ...initial,
+        error: "Changed error",
+        activity: { phase: "writing" },
+      }),
+    );
+    expect(commits.get("error") || 0).toBeGreaterThan(0);
+    expect(commits.get("menu") || 0).toBe(0);
+  } finally {
+    await act(async () => root.unmount());
+    f.store.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("updates settings, context usage and native actions when the owning detail slot arrives and changes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const f = observableFixture([record]);
+  const agent = required(f.mirror.current.agents.get("lead"));
+  const detail = required(f.details.get("lead"));
+  type Current = ReturnType<typeof f.store.agentDetail>["current"];
+  const current = observable.box<Current>(
+    { status: "loading" },
+    { deep: false },
+  );
+  const store = {
+    ...f.store,
+    agentDetail: () => ({
+      get current() {
+        return current.get();
+      },
+    }),
+  };
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(
+            ServerStoreProvider,
+            { value: store },
+            createElement(UnifiedAgentSettings, {
+              agent,
+              state: accounts,
+              notify: () => {},
+              catalog,
+              refresh: async () => {},
+            }),
+            createElement(Usage, {
+              agent,
+              stateDir: "loading-owner",
+              limits: null,
+              reload: () => {},
+              visible: false,
+            }),
+            createElement(
+              ConversationProvider,
+              { value: conversationActionsFixture() },
+              createElement(
+                Menu,
+                { opened: true, withinPortal: false },
+                createElement(
+                  Menu.Target,
+                  null,
+                  createElement("button", null, "Actions"),
+                ),
+                createElement(
+                  Menu.Dropdown,
+                  null,
+                  createElement(NativeModelActions, { agent }),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(host.textContent).not.toContain("xhigh");
+    expect(required(h.pickers.at(-1)).disabled).toBe(true);
+    expect(host.textContent).not.toContain("Context 25%");
+    expect(
+      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
+        .disabled,
+    ).toBe(true);
+    await act(async () =>
+      runInAction(() => current.set({ status: "live", data: detail.current })),
+    );
+    expect(host.textContent).toContain("xhigh");
+    expect(required(h.pickers.at(-1)).disabled).toBe(false);
+    expect(host.textContent).toContain("Context 25%");
+    expect(
+      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
+        .disabled,
+    ).toBe(false);
+    await act(async () =>
+      detail.apply({
+        ...record,
+        effort: "low",
+        contextUsage: { tokens: 500, window: 1000 },
+        nativeThreadBlock: {
+          threadId: "thread",
+          error: { message: "Safety block" },
+        },
+      }),
+    );
+    expect(host.textContent).toContain("low");
+    expect(host.textContent).toContain("Context 50%");
+    expect(
+      required(host.querySelector<HTMLButtonElement>('[data-action="compact"]'))
+        .disabled,
+    ).toBe(true);
+    expect(f.mirror.current.agents.get("lead")).toBe(agent);
+    expect("effort" in agent).toBe(false);
+  } finally {
+    await act(async () => root.unmount());
+    f.store.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps request approval disabled until its native-thread detail is known", () => {
+  const f = observableFixture([record]);
+  const store = {
+    ...f.store,
+    agentDetail: () => ({ current: { status: "loading" as const } }),
+  };
+  const request = approval({
+    request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+    params: { threadId: "thread" },
+  });
+  const html = render(
+    f,
+    createElement(
+      ServerStoreProvider,
+      { value: store },
+      createElement(Requests, {
+        requests: [request],
+        allRequests: [request],
+        agents: [...f.mirror.current.agents.values()],
+        scope: "owner",
+        refresh: async () => {},
+        notify: () => {},
+      }),
+    ),
+  );
+  const host = document.createElement("div");
+  host.innerHTML = html;
+  expect(
+    required(
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent?.trim() === "Approve",
+      ),
+    ).disabled,
+  ).toBe(true);
+  expect(html).not.toContain("This chat stopped as a precaution");
+  f.store.dispose();
+});
+
+async function mountCaller(
+  f: ReturnType<typeof observableFixture>,
+  view: ReactNode,
+) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      createElement(
+        MantineProvider,
+        { env: "test" },
+        createElement(f.Provider, null, view),
+      ),
+    ),
+  );
+  return {
+    host,
+    async close() {
+      await act(async () => root.unmount());
+      host.remove();
+      f.store.dispose();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+function settingsCaller(
+  agent: ComponentProps<typeof UnifiedAgentSettings>["agent"],
+  extra: Partial<ComponentProps<typeof UnifiedAgentSettings>> = {},
+) {
+  return createElement(UnifiedAgentSettings, {
+    agent,
+    state: accounts,
+    notify: () => {},
+    catalog: {
+      ...catalog,
+      models: [
+        {
+          model: "gpt-6-astra",
+          provider: ProviderKind.codex,
+          serviceTiers: [],
+          supportedReasoningEfforts: [{ reasoningEffort: "medium" }],
+        },
+      ],
+    },
+    refresh: async () => {},
+    ...extra,
+  });
+}
+it("edits a new chat draft model, effort and role defaults without a detail subscription", async () => {
+  h.catalog = {
+    models: ["gpt-6-astra", "gpt-6-luna"].map((model) => ({
+      model,
+      provider: ProviderKind.codex,
+      supportedReasoningEfforts: [
+        { reasoningEffort: "high" },
+        { reasoningEffort: "medium" },
+      ],
+    })),
+    loading: false,
+    error: "",
+    retry: () => {},
+  };
+  const f = observableFixture();
+  const reads = vi.spyOn(f.store, "agentDetail");
+  let draft: Omit<NewChatSettings, "workspaceMode"> | null = null;
+  const screen = await mountCaller(
+    f,
+    createElement(NewChatModelSettings, {
+      projectId: "project",
+      path: "/project",
+      onChange: (value) => {
+        draft = value;
+      },
+    }),
+  );
+  try {
+    expect(required(h.pickers.at(-1)).disabled).toBe(false);
+    await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-luna"));
+    await act(async () => required(h.pickers.at(-1)).onEffort("high"));
+    expect(draft).toMatchObject({ model: "gpt-6-luna", effort: "high" });
+    await act(async () => required(h.pickers.at(-1)).onRole("worker"));
+    await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-astra"));
+    expect(draft).toMatchObject({ worker_defaults: { model: "gpt-6-astra" } });
+    expect(reads).not.toHaveBeenCalled();
+  } finally {
+    await screen.close();
+  }
+});
+it("queues supported running-chat settings through UnifiedAgentSettings", async () => {
+  const f = observableFixture([
+    { ...record, status: AgentStatus.running, nextTurnSettingsSupported: true },
+  ]);
+  h.api.post.mockImplementation(() => new Promise(() => {}));
+  const screen = await mountCaller(
+    f,
+    settingsCaller(required(f.mirror.current.agents.get("lead"))),
+  );
+  try {
+    expect(required(h.pickers.at(-1)).disabled).toBe(false);
+    await act(async () => {
+      void required(h.pickers.at(-1)).onEffort("medium");
+    });
+    expect(h.api.post).toHaveBeenCalledWith(
+      "/api/conversation",
+      expect.objectContaining({ next_turn: true, effort: "medium" }),
+      expect.anything(),
+    );
+  } finally {
+    await screen.close();
+  }
+});
+it("reports an in-place settings account mismatch during a save", async () => {
+  const f = observableFixture([record]);
+  h.api.post.mockImplementation(() => new Promise(() => {}));
+  const agent = required(f.mirror.current.agents.get("lead"));
+  const screen = await mountCaller(f, settingsCaller(agent));
+  try {
+    await act(async () => {
+      void required(h.pickers.at(-1)).onEffort("medium");
+    });
+    await act(async () =>
+      f.apply([
+        {
+          collection: "agentSummary",
+          id: "lead",
+          value: { ...agent, accountKey: "other" },
+        },
+      ]),
+    );
+    expect(h.api.post).toHaveBeenCalled();
+    expect(f.mirror.current.agents.get("lead")).toBe(agent);
+    expect(screen.host.textContent).toContain(
+      "The settings account changed before the change applied.",
+    );
+  } finally {
+    await screen.close();
+  }
+});
+it("shows legacy single-agent mode from generated detail through ChatSettingsDialog", () => {
+  const f = observableFixture([
+    {
+      ...record,
+      concurrency: undefined,
+      subagentConcurrencyVersion: undefined,
+      agentModeSupported: true,
+      agentMode: AgentMode.single,
+    },
+  ]);
+  const agent = required(f.mirror.current.agents.get("lead"));
+  const html = render(
+    f,
+    createElement(ChatSettingsDialog, {
+      settingsOpen: true,
+      accountModalOpen: false,
+      setSettingsOpen: () => {},
+      agent,
+      lead: agent,
+      accounts,
+      notify: () => {},
+      agentModels: catalog,
+      data: snapshotFixture([]),
+      refresh: async () => {},
+      workspaceId: "workspace",
+      creating: false,
+      newChat: () => {},
+      project: () => {},
+      setClaudeLoginKey: () => {},
+    }),
+  );
+  expect(html).toContain('data-agent-mode="single"');
+  f.store.dispose();
+});

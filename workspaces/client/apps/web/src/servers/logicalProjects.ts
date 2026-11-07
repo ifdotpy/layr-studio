@@ -44,7 +44,10 @@ export function logicalProjects(
       const id = project.id || project.path;
       const registeredTarget =
         project.id ||
-        view.sidebar?.projects.find((row) => row.path === project.path)?.path ||
+        view.sidebar?.entities.find(
+          (row) =>
+            row.collection === "project" && row.value.path === project.path,
+        )?.id ||
         undefined;
       const home = project.homeServerId || source;
       const aliases = project.projectAliases || [];

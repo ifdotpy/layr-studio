@@ -83,12 +83,13 @@ function readableError(value: unknown): ReadableError | undefined {
 
 export function nativeThreadError(
   agent?: Pick<Agent, "threadId" | "nativeThreadBlock" | "error">,
+  detail: Pick<Agent, "nativeThreadBlock" | "error"> | undefined = agent,
 ): unknown {
-  const block = objectRecord(agent?.nativeThreadBlock);
+  const block = objectRecord(detail?.nativeThreadBlock);
   if (agent?.threadId && block?.threadId === agent.threadId && "error" in block)
     return block.error;
-  return knownNativeErrorKind(agent?.error) === "misalignmentPolicyViolation"
-    ? agent?.error
+  return knownNativeErrorKind(detail?.error) === "misalignmentPolicyViolation"
+    ? detail?.error
     : undefined;
 }
 

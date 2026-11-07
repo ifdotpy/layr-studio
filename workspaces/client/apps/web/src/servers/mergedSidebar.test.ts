@@ -1,3 +1,4 @@
+import { sidebarEntities } from "./sidebarSnapshot.ts";
 import {
   withSidebarCollections,
   agentEntities,
@@ -39,7 +40,7 @@ const agent = agentSummaryFixture;
 function source(
   id: string,
   projects: Project[] = [{ id: path, path, name: id, folders: [] }],
-): SidebarSource {
+) {
   return withSidebarCollections({
     id,
     online: true,
@@ -431,12 +432,20 @@ describe("complete multi-server sidebar projection", () => {
     const local = source("local");
     const remote = source("remote");
     const store = createSidebarSourceStore();
-    store.update("local", local.sidebar);
-    store.update("remote", remote.sidebar);
+    store.update("local", {
+      ...local.sidebar,
+      entities: sidebarEntities(local.collections),
+    });
+    store.update("remote", {
+      ...remote.sidebar,
+      entities: sidebarEntities(remote.collections),
+    });
     store.update("remote", undefined);
     const sources = store.sources(["local", "remote"], new Set(["local"]));
     assert.ok(sources[1] != null);
-    expect(sources[1].sidebar).toBe(remote.sidebar);
+    expect(sources[1].sidebar).toBe(
+      store.sources(["remote"], new Set())[0]?.sidebar,
+    );
     expect(sources[1].online).toBe(false);
     const select = createMergedSidebarSelector();
     const before = select(sources);

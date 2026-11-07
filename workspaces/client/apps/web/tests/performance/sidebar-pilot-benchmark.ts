@@ -11,7 +11,6 @@ import { chromium, type Browser } from "playwright";
 import { browserExecutablePath } from "../browser-executable.ts";
 import { required } from "./performance-fixture.ts";
 import { pilotAgents, pilotSize, pilotUpdate } from "./sidebar-pilot-data.ts";
-import type {} from "./sidebar-pilot.fixture.tsx";
 
 const base = "947e17dfb3209bc90afac82a555d82a036a7240f";
 const web = resolve(import.meta.dirname, "../..");
@@ -105,7 +104,7 @@ for (const label of ["base", "integrated"]) {
               if (baseline)
                 contents = contents.replace(
                   /declare const baselineChatIndicators:[\s\S]*?;/,
-                  'import { chatIndicators as baselineChatIndicators } from "/src/components/chat-status/chatStatusModel.ts";',
+                  'import { chatIndicators as baselineChatIndicators } from "/src/components/chat-status/chatActivity.ts";',
                 );
               return { contents, loader: "ts" };
             },

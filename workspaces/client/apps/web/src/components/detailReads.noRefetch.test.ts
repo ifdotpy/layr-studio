@@ -1,3 +1,7 @@
+vi.mock("./agents/state.ts", async (original) => ({
+  ...(await original<typeof import("./agents/state.ts")>()),
+  useAgentDetail: <T>(agent: T) => agent,
+}));
 import {
   AccountStatus as GeneratedApiAccountStatus,
   ProviderKind as GeneratedApiProviderKind,
@@ -77,7 +81,7 @@ vi.mock("./ProjectDirectoryPicker", () => ({ default: "directory-picker" }));
 
 import { useTurnErrors } from "./useTurnErrors";
 import MessageInfo from "./conversation/transcript/MessageInfo";
-import { ClaudeSettings } from "./ClaudeSettings";
+import { ClaudeSettingsView as ClaudeSettings } from "./ClaudeSettings";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 import ProjectLocationsSettings from "./ProjectLocationsSettings";
 import { NativeNotice } from "./NativeNotice";

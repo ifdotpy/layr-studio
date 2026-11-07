@@ -10,6 +10,34 @@ export type SidebarAgent = DeepReadonly<
   components["schemas"]["AgentSummaryEntityDto"]
 >;
 type Team = DeepReadonly<components["schemas"]["PeerTeamEntityDto"]>;
+type Project = DeepReadonly<components["schemas"]["ProjectEntityDto"]> & {
+  readonly path: string;
+};
+/** Project groups retain their generated project; only membership is local view state. */
+export class SidebarProjectView {
+  readonly chats: SidebarChatView[] = [];
+  readonly project: Project;
+  readonly registered: boolean;
+  readonly hasChats: boolean;
+  constructor(project: Project, registered: boolean, hasChats: boolean) {
+    this.project = project;
+    this.registered = registered;
+    this.hasChats = hasChats;
+    makeObservable(this, { name: computed });
+  }
+  get path() {
+    return this.project.path;
+  }
+  get name() {
+    return this.project.name || this.project.path || "Project";
+  }
+  get folders() {
+    return this.project.folders;
+  }
+  get organizationRevision() {
+    return this.project.organizationRevision;
+  }
+}
 export interface SidebarIdentity {
   chatKey(id: string): string;
   projectKey(agent: SidebarAgent): string;
@@ -156,6 +184,26 @@ export interface SidebarInputs {
   readonly archived: boolean;
   readonly opened: string | null;
   readonly rank: (group: string, id: string) => number;
+}
+export function createProjectStatusView(
+  rows: readonly SidebarChatView[],
+  archived: boolean,
+) {
+  const counts = computed(() => {
+    const value = { working: 0, answer: 0, error: 0 };
+    for (const row of rows) {
+      if (row.agent.archived !== archived) continue;
+      const kind = row.indicator.kind;
+      if (kind === "working" || kind === "answer" || kind === "error")
+        value[kind]++;
+    }
+    return value;
+  });
+  return {
+    get counts() {
+      return counts.get();
+    },
+  };
 }
 /** Callers retain transient controls and effective order in their existing owners.
  * A React caller recreates this facade when those plain inputs change. */

@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { useAgentDetail } from "./state.ts";
 import { AgentSource } from "../../generated/api";
 import { ProviderKind } from "../../generated/providerKind.ts";
 import { lazy, Suspense } from "react";
@@ -35,9 +37,13 @@ type Props = {
   setClaudeLoginKey: (key: string) => void;
 };
 
-export function ChatSettingsDialog(p: Props) {
+export const ChatSettingsDialog = observer(function ChatSettingsDialog(
+  p: Props,
+) {
   const mobile = useMediaQuery("(max-width: 48em)");
   const root = p.lead || p.agent;
+  const detail = useAgentDetail(p.agent || undefined);
+  const rootDetail = useAgentDetail(root || undefined);
   return (
     <Modal
       opened={p.settingsOpen}
@@ -64,7 +70,7 @@ export function ChatSettingsDialog(p: Props) {
                 />
                 <DelegationSettings
                   settingsRow
-                  agent={root}
+                  input={{ kind: "agent", summary: root, detail: rootDetail }}
                   catalog={p.agentModels}
                   accounts={p.accounts.data.accounts}
                   refresh={p.refresh}
@@ -78,7 +84,7 @@ export function ChatSettingsDialog(p: Props) {
                 p.agent.provider === ProviderKind.Codex && (
                   <ExecutionPermissions
                     settingsRow
-                    agent={p.agent}
+                    input={{ kind: "agent", summary: p.agent, detail }}
                     catalog={p.agentModels}
                     refresh={p.refresh}
                   />
@@ -129,4 +135,4 @@ export function ChatSettingsDialog(p: Props) {
       </Group>
     </Modal>
   );
-}
+});

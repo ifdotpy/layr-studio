@@ -1,3 +1,8 @@
+import {
+  useSidebarCommands,
+  type SidebarCommands,
+} from "../components/sidebar/commands.ts";
+import { CombinedSidebarServicesProvider } from "./combinedSidebarServices.ts";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
 import { createRoot } from "react-dom/client";
@@ -23,6 +28,7 @@ import { required } from "../components/componentTestFixtures.ts";
 
 const captured = vi.hoisted(() => ({
   props: null as SidebarProps | null,
+  commands: null as SidebarCommands | null,
   lists: 0,
   groups: null as unknown,
   ordered: null as unknown,
@@ -30,6 +36,7 @@ const captured = vi.hoisted(() => ({
 vi.mock("../components/Sidebar", () => ({
   default: observer((props: SidebarProps) => {
     captured.props = props;
+    captured.commands = useSidebarCommands();
     const list = useMemo(() => {
       captured.lists++;
       return createSidebarList(
@@ -70,9 +77,9 @@ it("routes overlapping row ids and the completed-result CAS target to their owni
   );
   expect(props.data.threads).toEqual([]);
   const id = model.chatKey("remote", "same");
-  props.open(id);
-  props.changeProject(id);
-  props.markUnread(id, target);
+  required(captured.commands).open(id);
+  required(captured.commands).changeProject(id);
+  required(captured.commands).markUnread(id, target);
   expect(send.mock.calls).toEqual([
     ["remote", { action: "open", id: "same" }],
     ["remote", { action: "change-project", id: "same" }],
@@ -99,31 +106,38 @@ function combinedElement(
   executeCommand: (owner: string, command: ServerCommand) => Promise<void>,
   send: (owner: string, command: ServerCommand) => void = vi.fn(),
 ) {
-  return createElement(CombinedServerSidebar, {
-    model,
-    backends: new Map(
-      ["local", "remote"].map((id) => [
-        id,
-        { ...localSidebarBackend, ownerId: id },
-      ]),
-    ),
-    online: () => true,
-    refreshOwner: async () => navigationSnapshot(null, null, ""),
-    executeCommand,
-    aliases: {},
-    current: "remote",
-    navigation: {},
-    send,
-    applyNavigation: vi.fn(),
-    mobile: false,
-    hidden: false,
-    close: vi.fn(),
-    settings: vi.fn(),
-    search: vi.fn(),
-    notify: vi.fn(),
-    notice: "",
-    hideOldChatsThreshold: 3,
-  });
+  return createElement(
+    CombinedSidebarServicesProvider,
+    {
+      value: {
+        backends: new Map(
+          ["local", "remote"].map((id) => [
+            id,
+            { ...localSidebarBackend, ownerId: id },
+          ]),
+        ),
+        online: () => true,
+        refreshOwner: async () => navigationSnapshot(null, null, ""),
+        executeCommand,
+        aliases: {},
+        send,
+        applyNavigation: vi.fn(),
+        settings: vi.fn(),
+        search: vi.fn(),
+        notify: vi.fn(),
+      },
+    },
+    createElement(CombinedServerSidebar, {
+      model,
+      current: "remote",
+      navigation: {},
+      mobile: false,
+      hidden: false,
+      close: vi.fn(),
+      notice: "",
+      hideOldChatsThreshold: 3,
+    }),
+  );
 }
 
 it("freezes a queued read CAS target while its generated row mirror advances", async () => {
@@ -158,13 +172,16 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
   });
   const delivered: ServerCommand[] = [];
   let dispatch: Promise<void> | undefined;
-  const props = renderCombined(model, (_owner, command) => {
+  renderCombined(model, (_owner, command) => {
     dispatch = ready.then(() => {
       delivered.push(command);
     });
     return dispatch;
   });
-  props.markUnread(model.chatKey("remote", "same"), target);
+  required(captured.commands).markUnread(
+    model.chatKey("remote", "same"),
+    target,
+  );
   store.update(
     "remote",
     sidebarSnapshot(

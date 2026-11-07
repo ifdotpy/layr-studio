@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { reportPromptComposerRender } from "../../prompt-composer/renderProbe";
 import {
   Fragment,
@@ -502,7 +503,7 @@ const HistoryContent = memo(function HistoryContent({
   );
 });
 
-export default function TurnHistory({
+function TurnHistory({
   items: sourceItems,
   currentTurn,
   enabled,
@@ -658,3 +659,5 @@ export default function TurnHistory({
     />
   );
 }
+
+export default observer(TurnHistory);

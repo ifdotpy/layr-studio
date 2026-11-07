@@ -1,6 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { Pin } from "lucide-react";
-import type { SidebarChatView } from "../sidebar/viewModel.ts";
+import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
 import type { ProjectChat } from "../../servers/ProjectChatRows.tsx";
 
 type ChatProps = { row: SidebarChatView; pinned?: boolean | undefined };
@@ -12,9 +12,12 @@ const ChatPin = observer(function ChatPin({ row, pinned }: ChatProps) {
 export const ChatTitle = observer(function ChatTitle(
   props:
     | ChatProps
+    | { agent: SidebarAgent }
     | { room: Pick<Extract<ProjectChat, { kind: "room" }>, "id" | "name"> },
 ) {
-  return "row" in props ? (
+  return "agent" in props ? (
+    <strong title={props.agent.name || undefined}>{props.agent.name}</strong>
+  ) : "row" in props ? (
     <strong>
       <ChatPin row={props.row} pinned={props.pinned} />
       {props.row.agent.name}

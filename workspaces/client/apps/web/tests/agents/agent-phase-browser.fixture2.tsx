@@ -1,11 +1,10 @@
+import { observableFixture } from "../../src/components/observableFixture.tsx";
 import { backgroundDisplay } from "../fixtures/background.ts";
-import React, { useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
 import ChatStatus from "../../src/components/agents/ChatStatus.tsx";
-import { chatWaitState } from "../../src/components/chat-status/chatStatusModel.ts";
-import { formatOperationalStatus } from "../../src/status/operationalStatus.ts";
 import type { components } from "../../src/generated/api.ts";
 import type {
   Agent,
@@ -78,25 +77,70 @@ const initial: PhaseSnapshot = {
   threads: [lead, window.worker(1), window.worker(2)],
   runtime: { requests: [], tasks: [], monitors: [] },
 };
-// The one-off waiting-state fixture omits unrelated snapshot fields and runtime collections.
-function phaseSnapshot(value: unknown): Snapshot {
-  return value as Snapshot;
-}
+
 function Fixture() {
   const [data, setData] = useState<PhaseSnapshot>(initial);
   window.setData = (value) => flushSync(() => setData(value));
   const agent = data.threads[0]!;
-  const full = phaseSnapshot(data);
-  const wait = chatWaitState(full, agent);
-  const indicator = formatOperationalStatus(data.operationalStatus);
+  const fixture = observableFixture(
+    data.threads.map((row) =>
+      row.id === agent.id
+        ? { ...row, operationalStatus: data.operationalStatus }
+        : row,
+    ),
+  );
+  fixture.processes.apply({
+    processes: [],
+    activities: [
+      ...data.runtime.tasks.map((task) => ({
+        source: "task" as const,
+        value: {
+          agent: task.agent || "lead",
+          command: task.command,
+          created: task.created || 0,
+          display: task.display,
+          id: task.id,
+          kind: task.kind || ("command" as const),
+          name: task.name || "",
+          status: task.status,
+          turnId: task.turnId || "",
+        },
+      })),
+      ...data.runtime.monitors.map((monitor) => ({
+        source: "process" as const,
+        value: {
+          agent: monitor.agent || "lead",
+          accountKey: "default",
+          bytes: 0,
+          cancelRequested: false,
+          command: monitor.command,
+          created: monitor.created,
+          display: monitor.display,
+          epoch: 0,
+          generation: monitor.id,
+          id: monitor.id,
+          key: monitor.id,
+          name: monitor.name || "",
+          outputPatterns: [],
+          outputTruncated: false,
+          source: "monitor" as const,
+          status: monitor.status,
+          tail: "",
+        },
+      })),
+    ],
+  });
+  const model = fixture.mirror.current.agents.get(agent.id)!;
   return (
-    <main style={{ width: "100%", padding: 16, marginTop: 260 }}>
-      <div id="indicator">
-        <ChatStatus status={indicator} />
-      </div>
-      <AgentPhase agent={agent} connection={null} wait={wait} />
-      <div id="anchor">Next content</div>
-    </main>
+    <fixture.Provider>
+      <main style={{ width: "100%", padding: 16, marginTop: 260 }}>
+        <div id="indicator">
+          <ChatStatus agent={model} />
+        </div>
+        <AgentPhase agent={model} connection={null} />
+        <div id="anchor">Next content</div>
+      </main>
+    </fixture.Provider>
   );
 }
 const root = document.getElementById("root")!;
