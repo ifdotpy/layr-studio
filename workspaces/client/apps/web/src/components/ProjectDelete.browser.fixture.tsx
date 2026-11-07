@@ -179,14 +179,21 @@ function Fixture() {
             })),
           },
         },
-        data.threads.map((chat) => ({
-          collection: "agentSummary",
-          id: chat.id,
-          value: agentSummaryFixture(chat.id, {
-            name: chat.name || "Chat",
-            projectPath: chat.projectPath || chat.cwd || "",
-          }),
-        })),
+        [
+          ...data.runtime.projects.map((value) => ({
+            collection: "project" as const,
+            id: value.id,
+            value,
+          })),
+          ...data.threads.map((chat) => ({
+            collection: "agentSummary" as const,
+            id: chat.id,
+            value: agentSummaryFixture(chat.id, {
+              name: chat.name || "Chat",
+              projectPath: chat.projectPath || chat.cwd || "",
+            }),
+          })),
+        ],
       ),
     );
     return source.sources(["owner"], new Set(["owner"]));
