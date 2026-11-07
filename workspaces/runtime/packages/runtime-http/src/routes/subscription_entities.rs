@@ -231,12 +231,22 @@ mod tests {
                 .iter()
                 .any(|row| row["collection"] == "agent" || row["collection"] == "agentDetail")
         );
+        // Global state includes both agents, ordered by their durable changes.
         let summary = documents
             .iter()
-            .find(|row| row["collection"] == "agentSummary")
+            .find(|row| row["collection"] == "agentSummary" && row["id"] == "chat")
             .expect("summary");
         assert_eq!(summary["value"]["name"], "List chat");
         assert!(summary["value"].get("lastAnswer").is_none());
+        let worker = documents
+            .iter()
+            .find(|row| row["collection"] == "agentSummary" && row["id"] == "worker")
+            .expect("worker summary");
+        assert_eq!(worker["value"]["id"], "worker");
+        assert_eq!(worker["value"]["rootId"], "chat");
+        assert_eq!(worker["value"]["status"], "idle");
+        // This worker fixture has no name; its summary preserves that absence.
+        assert!(worker["value"]["name"].is_null());
         let detail = initial_snapshot(state.clone(), detail_ref.clone(), None)
             .await
             .expect("detail snapshot");
