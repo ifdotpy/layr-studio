@@ -91,6 +91,44 @@ it("hydrates the cached data before returning its resume cursor", async () => {
   cache.stop();
 });
 
+// Model entities are keyed by account and model; their value names the model.
+it("hydrates a state record whose entity key differs from its value id", async () => {
+  const state = { kind: "state" } as const;
+  const entity = {
+    collection: "model",
+    id: "default:gpt-6-luna",
+    value: { id: "gpt-6-luna" },
+  };
+  const storage = {
+    get: vi.fn().mockResolvedValue({
+      version: SUBSCRIPTION_CACHE_VERSION,
+      contractHash: API_SCHEMA_HASH,
+      subscription: subscriptionKey(state),
+      cursor,
+      data: [
+        {
+          kind: "entity",
+          id: "entity:model:default:gpt-6-luna",
+          seq: 4,
+          entity,
+        },
+      ],
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("fixture");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  expect(await cache.load(state)).toEqual(cursor);
+  expect(storage.delete).not.toHaveBeenCalled();
+  expect(
+    collection
+      .all()
+      .some((row) => row.id === "entity:model:default:gpt-6-luna"),
+  ).toBe(true);
+  cache.stop();
+});
+
 it("drops a malformed entity before exposing a resume cursor", async () => {
   const selected = { kind: "agentDetail", agentId: "agent" } as const;
   const storage = {

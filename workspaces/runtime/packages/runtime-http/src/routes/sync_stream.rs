@@ -136,19 +136,17 @@ impl ResourceIdentity for SubscribedResource {
 
 fn cache_decisions(
     resources: &[SubscribedResource],
-    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
 ) -> Vec<crate::generated::SubscriptionCacheDecision> {
     resources
         .iter()
         .map(|resource| crate::generated::SubscriptionCacheDecision {
             resource: resource.resource.clone(),
-            policy: super::subscriptions::cache_policy(&resource.resource, locality),
+            policy: super::subscriptions::cache_policy(&resource.resource),
         })
         .collect()
 }
 
 struct SyncSession {
-    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
     principal: studio_runtime_services::principal::Principal,
     resources: Vec<SubscribedResource>,
     generation: i64,
@@ -343,7 +341,7 @@ async fn sync_subscriptions(
     {
         return Err(ApiError::validation(vec![json!("body"), json!("add")]));
     }
-    let cache_policies = cache_decisions(&added, session.locality);
+    let cache_policies = cache_decisions(&added);
     session
         .sender
         .try_send(SubscriptionChange {
@@ -476,7 +474,7 @@ async fn sync_stream(
         Ok(since) => since,
         Err(error) => return error.into_response(),
     };
-    let cache_policies = cache_decisions(&resources, locality);
+    let cache_policies = cache_decisions(&resources);
     let store = match state.store.clone() {
         Some(store) => store,
         None => return ApiError::internal().into_response(),
@@ -622,7 +620,6 @@ async fn sync_stream(
             sessions.insert(
                 session_id.clone(),
                 SyncSession {
-                    locality,
                     principal: principal.clone(),
                     resources: resources.clone(),
                     generation: 0,
@@ -4421,7 +4418,7 @@ mod tests {
             let ack = document_bytes(&ack);
             assert_eq!(ack["gen"], generation);
             if !interest {
-                assert_eq!(ack["cachePolicies"][0]["policy"], "noCache");
+                assert_eq!(ack["cachePolicies"][0]["policy"], "cache");
                 let resource = body.next().await.expect("added resource").expect("bytes");
                 assert!(String::from_utf8_lossy(&resource).starts_with("event: resources\n"));
                 rates = floating_test_rates(2);

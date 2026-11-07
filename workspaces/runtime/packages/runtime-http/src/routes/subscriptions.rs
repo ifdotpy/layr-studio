@@ -462,17 +462,9 @@ resource_handlers! {
 }
 
 /// Only subscriptions whose projection rows are owned by their cursor can resume.
-pub(super) fn cache_policy(
-    resource: &ResourceRef,
-    locality: studio_runtime_schema::sync_protocol::FrontendLocality,
-) -> crate::generated::SubscriptionCachePolicy {
-    use crate::generated::SubscriptionCachePolicy;
-    use studio_runtime_schema::sync_protocol::FrontendLocality;
-    if matches!(locality, FrontendLocality::Remote) {
-        registered_cache_policy(resource)
-    } else {
-        SubscriptionCachePolicy::NoCache
-    }
+/// Every frontend may keep them, so a local window also opens from its cache.
+pub(super) fn cache_policy(resource: &ResourceRef) -> crate::generated::SubscriptionCachePolicy {
+    registered_cache_policy(resource)
 }
 
 pub(super) fn handler(
@@ -782,23 +774,12 @@ mod tests {
     fn cache_policy_excludes_overlapping_terminal_detail() {
         use crate::generated::SubscriptionCachePolicy;
         use studio_runtime_schema::resource_ref::{EmptyResource, TerminalResource};
-        use studio_runtime_schema::sync_protocol::FrontendLocality;
         let detail = ResourceRef::TerminalResource(TerminalResource {
             terminal_id: "one".to_owned().try_into().expect("nonempty id"),
         });
         let list = ResourceRef::TerminalsResource(EmptyResource {});
-        assert_eq!(
-            cache_policy(&detail, FrontendLocality::Remote),
-            SubscriptionCachePolicy::NoCache
-        );
-        assert_eq!(
-            cache_policy(&list, FrontendLocality::Remote),
-            SubscriptionCachePolicy::Cache
-        );
-        assert_eq!(
-            cache_policy(&list, FrontendLocality::Local),
-            SubscriptionCachePolicy::NoCache
-        );
+        assert_eq!(cache_policy(&detail), SubscriptionCachePolicy::NoCache);
+        assert_eq!(cache_policy(&list), SubscriptionCachePolicy::Cache);
     }
 
     #[tokio::test]

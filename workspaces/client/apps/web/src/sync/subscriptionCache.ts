@@ -161,7 +161,8 @@ function decode(
         !entity ||
         (entity.collection === "agentDetail" &&
           entity.value.id !== entity.id) ||
-        ("id" in entity.value && entity.value.id !== entity.id) ||
+        // An entity key may differ from its value id: a model is keyed by
+        // account and model. The row id below checks the key.
         !scope ||
         !scope.collections.includes(entity.collection) ||
         row.id !== `entity:${entity.collection}:${entity.id}` ||
