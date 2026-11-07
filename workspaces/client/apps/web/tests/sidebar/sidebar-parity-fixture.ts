@@ -570,7 +570,6 @@ export async function sidebarParityFixture(
         assert.ok(body.name);
         row(body.id).name = body.name;
         sidebarRow(body.id).name = body.name;
-        sidebarRow(body.id).searchText = body.name.toLowerCase();
         // The legacy fixture acknowledges renames without the current receipt.
         return reply({ ok: true } satisfies JsonInput);
       }
