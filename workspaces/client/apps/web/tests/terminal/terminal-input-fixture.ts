@@ -1,5 +1,5 @@
 import { cacheFixture } from "../cacheFixture.ts";
-import type { Agent, Snapshot } from "../../src/types.ts";
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -13,24 +13,19 @@ export function mount(shell: string) {
     cacheFixture("shell:" + shell),
   );
   setToken("fixture-token");
-  const agent: Agent = {
-    id: "agent",
-    name: "Fixture",
-    source: "managed",
-    status: "idle",
-  };
-  // This one-off fixture omits snapshot metadata and runtime collections.
-  const data = { threads: [agent] } as Snapshot;
   const root = createRoot(document.getElementById("app")!);
   root.render(
     React.createElement(
       MantineProvider,
       null,
-      React.createElement(TerminalDock, {
-        data,
-        agent,
-        notify: (value) => window.notices.push(value),
-      }),
+      React.createElement(
+        ServerViewStoreProvider,
+        null,
+        React.createElement(TerminalDock, {
+          agentId: "agent",
+          notify: (value) => window.notices.push(value),
+        }),
+      ),
     ),
   );
   window.reactRoot = root;

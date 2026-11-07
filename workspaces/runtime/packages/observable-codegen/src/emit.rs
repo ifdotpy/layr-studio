@@ -170,7 +170,15 @@ fn render_all(
         }
     }
     for resource in resources.iter().filter(|r| r.collections.is_empty()) {
-        let dto = if resource.mapped {
+        let dto = if resource.mapped
+            && let Shape::Array(item) = &roots[&resource.facade]
+            && let Shape::Object(name) = item.as_ref()
+            && metadata
+                .iter()
+                .any(|model| model.schema == *name && model.declared_fields)
+        {
+            format!("ReadonlyArray<{}>", readonly_dto(name, metadata))
+        } else if resource.mapped {
             format!(
                 "DeepReadonly<ObservableInput<ResourceData<Extract<ResourceRef, {{kind: {}}}>>>>",
                 quote(&resource.kind)

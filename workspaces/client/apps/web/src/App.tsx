@@ -2803,7 +2803,7 @@ export default observer(function App({ active = true }: { active?: boolean }) {
           </div>
           {!mobileClient && studioPreferences.showTerminals && (
             <Suspense fallback={null}>
-              <TerminalDock data={data} agent={agent || lead} notify={notify} />
+              <TerminalDock agentId={(agent || lead)?.id} notify={notify} />
             </Suspense>
           )}
           <SearchOverlay

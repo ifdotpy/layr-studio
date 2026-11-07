@@ -61,7 +61,6 @@ type SnapshotRuntime = WorkspaceEntityDto & {
   modelsByAccount?:
     | Record<string, components["schemas"]["ModelEntityDto"][]>
     | undefined;
-  terminals?: components["schemas"]["TerminalRecord"][] | undefined;
   desktop?: components["schemas"]["DesktopResponse"] | undefined;
   sessionCostsByAgent?:
     | Record<string, components["schemas"]["SessionCostResponse"]>

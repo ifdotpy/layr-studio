@@ -28,6 +28,7 @@ export default {
       "src/components/sidebar/LayrCopyProgress.test.ts",
       "src/components/shell/workspacePanelWidth.test.ts",
       "src/components/terminalHeight.test.ts",
+      "src/components/terminalStore.test.ts",
       "src/components/terminalResize.test.ts",
       "src/components/edge-rail/edgeRailPolicy.test.ts",
       "src/components/edge-rail/EdgeRail.render.test.ts",

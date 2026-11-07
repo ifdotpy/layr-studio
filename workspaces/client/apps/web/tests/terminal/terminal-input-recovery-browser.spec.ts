@@ -1,8 +1,9 @@
+import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Route } from "@playwright/test";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 import type { ResourceRef } from "../playwright.ts";
 import { fixturePostBody } from "../teams/helpers.ts";
-import { createFixtureViteServer as createServer } from "../playwright.ts";
+import { builtTerminalFixture } from "./builtTerminalFixture.ts";
 // Actual TerminalDock input callbacks and HTTP, with an isolated xterm fixture.
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -28,20 +29,11 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
   const temporary = await mkdtemp(
     join(tmpdir(), "studio-terminal-input-recovery-"),
   );
-  const server = await createServer({
-    configFile: false,
-    root: join(root, "workspaces/client/apps/web"),
-    cacheDir: temporary,
-    optimizeDeps: {
-      include: [
-        "react",
-        "react-dom/client",
-        "react/jsx-dev-runtime",
-        "@mantine/core",
-        "lucide-react",
-      ],
-    },
-    plugins: [
+  const server = await builtTerminalFixture(
+    join(root, "workspaces/client/apps/web"),
+    temporary,
+    "terminal-input-fixture.ts",
+    [
       {
         name: "terminal-input-harness",
         enforce: "pre",
@@ -56,7 +48,85 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
         },
       },
     ],
-    server: { host: "127.0.0.1", port: 0, hmr: false },
+  );
+  server.middlewares.stack.unshift({
+    route: "/api/sync/stream",
+    handle(request: IncomingMessage, response: ServerResponse) {
+      const resources: ResourceRef[] = JSON.parse(
+        new URL(request.url!, "http://fixture").searchParams.get("resources") ||
+          "[]",
+      );
+      response.writeHead(200, {
+        ...apiSchemaHeaders(),
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+      });
+      response.write(
+        apiSchemaHandshakeSse(
+          protocol3SseEvent("resources", {
+            protocol: 4,
+            workspaceId,
+            epoch: "terminal-input",
+            revision: 1,
+            reason: "initial",
+            resources,
+            resourceVersions: resources.map((resource) => ({
+              resource,
+              revision: 2,
+              cursor: { workspaceId, seq: 2 },
+              replyKind: "snapshot",
+              ...(resource.kind === "terminal-output"
+                ? {
+                    viewSnapshot: {
+                      terminalOutput: {
+                        text: "",
+                        offset: 0,
+                        truncated: false,
+                        status: "running",
+                      },
+                    },
+                  }
+                : {
+                    entityChanges: {
+                      after: 0,
+                      through: 2,
+                      documents:
+                        resource.kind === "terminals"
+                          ? ["a", "b"].map((id, index) => ({
+                              op: "upsert",
+                              collection: "terminal",
+                              id: "shell-" + id,
+                              seq: index + 1,
+                              value: {
+                                id: "shell-" + id,
+                                agent: "agent",
+                                title: "Shell " + id.toUpperCase(),
+                                cwd: "/fixture",
+                                status: "running",
+                                created: 1,
+                              },
+                            }))
+                          : [],
+                    },
+                  }),
+            })),
+          }),
+        ),
+      );
+      const heartbeat = setInterval(
+        () =>
+          response.write(
+            protocol3SseEvent("heartbeat", {
+              protocol: 4,
+              workspaceId,
+              epoch: "terminal-input",
+              revision: 1,
+            }),
+          ),
+        1000,
+      );
+      request.once("close", () => clearInterval(heartbeat));
+    },
   });
   await server.listen();
   try {
@@ -74,7 +144,6 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
         }
       >(),
       holdTexts = new Set<string>();
-    const failOutput = new Set<string>();
     page.on("pageerror", (error) => errors.push(error.message));
     await page.route("**/api/sync/identity", (route) =>
       route.fulfill({
@@ -88,58 +157,13 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
         headers: apiSchemaHeaders(),
       }),
     );
-    await page.route("**/api/sync/stream?*", (route) => {
-      const resources: ResourceRef[] = JSON.parse(
-        new URL(route.request().url()).searchParams.get("resources") || "[]",
-      );
-      return route.fulfill({
-        contentType: "text/event-stream",
-        headers: apiSchemaHeaders(),
-        body: apiSchemaHandshakeSse(
-          protocol3SseEvent("resources", {
-            protocol: 4,
-            workspaceId,
-            epoch: "terminal-input",
-            revision: 1,
-            reason: "initial",
-            resources,
-            resourceVersions: resources.map((resource) => ({
-              resource,
-              revision: 1,
-            })),
-          }),
-        ),
-      });
-    });
     await page.route("**/check", (route) =>
       route.fulfill({
         contentType: "text/html",
         body: '<!doctype html><div id="app"></div>',
       }),
     );
-    await page.route("**/api/terminals", (route) =>
-      route.fulfill({
-        json: {
-          items: ["a", "b"].map((id) => ({
-            id: "shell-" + id,
-            agent: "agent",
-            title: "Shell " + id.toUpperCase(),
-            cwd: "/fixture",
-            status: "running",
-            created: 1,
-          })),
-        },
-        headers: apiSchemaHeaders(),
-      }),
-    );
     await page.route(/\/api\/terminals\/output(?:\?.*)?$/, (route) => {
-      const id = new URL(route.request().url()).searchParams.get("id");
-      if (failOutput.delete(id!))
-        return route.fulfill({
-          status: 503,
-          json: { error: "Output connection lost" },
-          headers: apiSchemaHeaders(),
-        });
       return route.fulfill({
         json: { text: "", offset: 0, truncated: false, status: "running" },
         headers: apiSchemaHeaders(),
@@ -188,7 +212,7 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
     });
     await page.addScriptTag({
       type: "module",
-      url: "/tests/terminal/terminal-input-fixture.ts",
+      url: "/fixture.js",
     });
     await page.waitForFunction(
       () => typeof window.terminalInputRecoveryMount === "function",
@@ -267,9 +291,8 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
         0,
       );
     };
-    const reconnect = async (shell = "shell-a") => {
+    const reconnect = async () => {
       const before = await count();
-      failOutput.add(shell);
       await page
         .getByRole("button", { name: "Reconnect", exact: true })
         .click();
@@ -443,6 +466,7 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
       "PASS: ordered input, resume deadline, manual reconnect, late outcomes, unmount, shell switch, and no stale input replay",
     );
   } finally {
+    await fixturePage.close();
     await server.close();
     await rm(temporary, { recursive: true, force: true });
   }

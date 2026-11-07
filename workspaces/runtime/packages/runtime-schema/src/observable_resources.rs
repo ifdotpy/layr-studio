@@ -162,6 +162,7 @@ pub fn resources() -> Vec<ObservableResource> {
                 brand: "AgentId".into(),
             }],
         ),
+        ObservableResource::mapped("terminals", "terminals", vec![]),
         ObservableResource::named(
             "terminal",
             "terminal",
@@ -228,7 +229,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 13);
+        assert_eq!(resources.len(), 14);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]

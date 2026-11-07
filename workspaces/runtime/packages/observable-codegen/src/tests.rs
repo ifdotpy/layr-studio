@@ -560,3 +560,22 @@ fn all_of_reference_siblings_are_not_silently_discarded() {
     assert_eq!(error.kind, UnsupportedShape::Composition);
     assert!(error.path.ends_with("/allOf/0/properties"));
 }
+
+#[test]
+fn mapped_arrays_use_declared_element_fields_without_changing_closed_lists() {
+    let mut document = fixture();
+    document["components"]["schemas"]["SubscriptionDataMap"]["properties"]["fixture"] =
+        json!({"type":"array","items":{"$ref":"#/components/schemas/Row"}});
+    let list = vec![ObservableResource::mapped(
+        "fixture",
+        "fixture",
+        resources()[0].args.clone(),
+    )];
+    let closed = render(&document, &models(), &list).expect("closed list");
+    assert!(closed.contains("export type FixtureData = DeepReadonly<ObservableInput<ResourceData<Extract<ResourceRef, {kind: \"fixture\"}>>>>;"));
+    document["components"]["schemas"]["Row"]["additionalProperties"] = json!(true);
+    let mut metadata = models();
+    metadata[0].declared_fields = true;
+    let generated = render(&document, &metadata, &list).expect("declared-field list");
+    assert!(generated.contains("export type FixtureData = ReadonlyArray<DeepReadonly<import('./observableFieldTypes.ts').RowFields>>;"));
+}

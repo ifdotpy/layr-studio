@@ -2066,7 +2066,6 @@ for (const [collection, field, singleton] of [
   ["accountCost", "accountCostsByAccount", false],
   ["sessionCost", "sessionCostsByAgent", false],
   ["desktop", "desktop", true],
-  ["terminal", "terminals", false],
 ] as const)
   it(`projects ${collection} source entities and deletion`, () => {
     const state = emptyEntityProjection();
@@ -2084,11 +2083,7 @@ for (const [collection, field, singleton] of [
     } as EntityRow;
     const initial = applyEntityRows(state, [row], true);
     assert.deepEqual(
-      singleton
-        ? initial.runtime[field]
-        : collection === "terminal"
-          ? initial.runtime[field]![0]
-          : initial.runtime[field]![id],
+      singleton ? initial.runtime[field] : initial.runtime[field]![id],
       value,
     );
     const next = applyEntityRows(
@@ -2105,11 +2100,7 @@ for (const [collection, field, singleton] of [
       true,
     );
     assert.equal(
-      singleton
-        ? next.runtime[field]
-        : collection === "terminal"
-          ? next.runtime[field]![0]
-          : next.runtime[field]![id],
+      singleton ? next.runtime[field] : next.runtime[field]![id],
       undefined,
     );
   });

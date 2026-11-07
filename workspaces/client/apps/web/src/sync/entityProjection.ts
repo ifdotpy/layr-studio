@@ -234,10 +234,6 @@ function projectSnapshotCollections(
       prior && !changed.has("desktop")
         ? prior.runtime.desktop
         : values.desktop.get("current"),
-    terminals:
-      prior && !changed.has("terminal")
-        ? prior.runtime.terminals
-        : entityValues(values, "terminal"),
     rateLimitsByAccount,
     rateLimits: rateLimitsByAccount?.default ?? null,
     studioErrors,

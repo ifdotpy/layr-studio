@@ -1,7 +1,7 @@
 import { TerminalState as GeneratedApiTerminalState } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
 import { useScreenEnvironment } from "../servers/ScreenContext";
-import { useServerApi, useServerSync } from "../servers/ServerServicesContext";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
 import { Button, TextInput } from "@mantine/core";
 import {
   ChevronDown,
@@ -13,20 +13,20 @@ import {
   Square,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useLayoutEffect,
-} from "react";
+import { useEffect, useRef, useState, useLayoutEffect } from "react";
 import type { CSSProperties } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { errorText, type GetResult, type PostBody } from "../api";
-import type { Agent, Snapshot } from "../types";
+import { observer } from "mobx-react-lite";
+import { resourceData, type ResourceSlot } from "../store/runtime.ts";
+import {
+  terminalId,
+  type TerminalOutput,
+  type TerminalRecord,
+} from "../generated/observableResources.ts";
+import { createArea } from "./area.ts";
 import "./terminal-dock.css";
 import { copyText } from "../clipboard/clipboard";
-import { useSubscription } from "../sync/subscriptions";
 import { serverParentOrigin } from "../servers/environment";
 
 import { layoutValues } from "../layout/layout-contract.generated";
@@ -41,8 +41,11 @@ const terminalBounds = (rootFont: number) => ({
   viewportMaxRatio: layoutValues.terminal.viewportMaxRatio,
 });
 
-type Shell = GetResult<"/api/terminals">["items"][number];
-type Entry = Shell & { key: string };
+export const [TerminalActionsProvider, useTerminalActions] = createArea<
+  Pick<ReturnType<typeof useServerApi>, "get" | "post" | "syncPost"> & {
+    notify(message: string): void;
+  }
+>("Terminal");
 const running = (status: string) =>
   ["running", "starting", "approval"].includes(status);
 // In the combined window the shell draws the closed bar under its sidebar and makes room
@@ -63,13 +66,11 @@ function terminalTheme() {
   };
 }
 
-export default function TerminalDock({
-  data,
-  agent,
+export default observer(function TerminalDock({
+  agentId,
   notify,
 }: {
-  data: Snapshot | null;
-  agent?: Agent | undefined;
+  agentId?: string | undefined;
   notify: (message: string) => void;
 }) {
   const {
@@ -81,8 +82,13 @@ export default function TerminalDock({
     serverViewId,
   } = useScreenEnvironment();
   const shellTerminal = isServerView && !isClassicServerView && hasShell;
-  const { subscribeStateProjection } = useServerSync();
-  const { get, post, save, saved } = useServerApi();
+  const store = useServerStore();
+  const agents = resourceData(store.state().current)?.agents;
+  const agent = agentId ? agents?.get(agentId) : undefined;
+  const terminalList = store.terminals().current;
+  const shells = resourceData(terminalList) ?? [];
+  const api = useServerApi();
+  const { post, save, saved } = api;
 
   const [opened, setOpened] = useState(() =>
     saved("codex.terminal.open", false),
@@ -117,49 +123,20 @@ export default function TerminalDock({
     setHeight(next);
     save("codex.terminal.height", next);
   };
-  const [shells, setShells] = useState<Shell[]>([]);
   const [selected, setSelected] = useState(() =>
     saved("codex.terminal.selected", ""),
   );
   const [query, setQuery] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
-  const [error, setError] = useState("");
+  const error = "error" in terminalList ? errorText(terminalList.error) : "";
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState("");
   const [pending, setPending] = useState(false);
   const [endTarget, setEndTarget] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
-  const listingRevision = useRef(0);
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
-  const load = useCallback(async (allowed: () => boolean = () => true) => {
-    const request = ++listingRevision.current;
-    const current = () => request === listingRevision.current && allowed();
-    try {
-      const value = await get("/api/terminals");
-      if (!current()) return;
-      setShells(value.items || []);
-      setError("");
-    } catch (error) {
-      if (current()) throw error;
-    }
-  }, []);
-  useEffect(
-    () =>
-      subscribeStateProjection(
-        (snapshot) => {
-          if (snapshot?.runtime.terminals) {
-            setShells(snapshot.runtime.terminals);
-            setError("");
-          }
-        },
-        (failure) => {
-          if (failure) setError(errorText(failure));
-        },
-      ),
-    [subscribeStateProjection],
-  );
   // Page layout rules read this flag instead of #root:has(.terminal-dock).
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -198,12 +175,11 @@ export default function TerminalDock({
     setRenaming(false);
     setEndTarget(null);
   }, [selected]);
-  const entries: Entry[] = shells
-    .filter((shell) => shell.status !== GeneratedApiTerminalState.closed)
-    .map((shell) => ({ key: `shell:${shell.id}`, ...shell }));
-  const current = entries.find((entry) => entry.key === selected);
-  const owner = (id: string) =>
-    data?.threads.find((item) => item.id === id)?.name || "Agent";
+  const entries = shells.filter(
+    (shell) => shell.status !== GeneratedApiTerminalState.closed,
+  );
+  const current = entries.find((entry) => `shell:${entry.id}` === selected);
+  const owner = (id: string) => agents?.get(id)?.name || "Agent";
   const filtered = entries.filter((entry) =>
     `${entry.title} ${entry.cwd || ""} ${owner(entry.agent)} ${entry.status}`
       .toLowerCase()
@@ -232,15 +208,10 @@ export default function TerminalDock({
         cols: 100,
         rows: 24,
       });
-      setShells((items) => [
-        shell,
-        ...items.filter((item) => item.id !== shell.id),
-      ]);
       setSelected(`shell:${shell.id}`);
       setQuery("");
       setScrollTop(0);
       if (list.current) list.current.scrollTop = 0;
-      await load();
     } catch (e) {
       notifyRef.current(errorText(e));
     } finally {
@@ -302,7 +273,6 @@ export default function TerminalDock({
     setPending(true);
     try {
       await post(path, body);
-      await load();
       return true;
     } catch (e) {
       notifyRef.current(errorText(e));
@@ -312,356 +282,361 @@ export default function TerminalDock({
     }
   };
   return (
-    <section
-      ref={dock}
-      className={`terminal-dock ${opened ? "is-open" : ""}`}
-      data-shell-terminal={shellTerminal || undefined}
-      aria-label="Terminals"
-      style={
-        {
-          height: geometry.height,
-          "--terminal-dock-height": `${geometry.height}px`,
-        } as CSSProperties
-      }
-    >
-      {opened && (
-        <div
-          className="terminal-dock-resizer"
-          role="separator"
-          aria-label="Terminal panel height"
-          aria-orientation="horizontal"
-          tabIndex={0}
-          aria-valuemin={geometry.min}
-          aria-valuemax={geometry.max}
-          aria-valuenow={geometry.height}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") cancelResize();
-            if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-              event.preventDefault();
-              cancelResize();
-              commitHeight(
-                Math.min(
-                  geometry.max,
-                  Math.max(
-                    geometry.min,
-                    geometry.height +
-                      (event.key === "ArrowUp" ? heightStep : -heightStep),
-                  ),
-                ),
-              );
-            }
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            resize.current.start(
-              scope,
-              event.pointerId,
-              event.clientY,
-              geometry.height,
-            );
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => {
-            const next = resize.current.move(
-              scope,
-              event.pointerId,
-              event.clientY,
-              geometry.min,
-              geometry.max,
-            );
-            if (next !== null) setDragHeight(next);
-          }}
-          onPointerUp={(event) => {
-            const next = resize.current.finish(scope, event.pointerId);
-            if (next !== null)
-              commitHeight(
-                Math.min(geometry.max, Math.max(geometry.min, next)),
-              );
-            setDragHeight(null);
-            if (event.currentTarget.hasPointerCapture(event.pointerId))
-              event.currentTarget.releasePointerCapture(event.pointerId);
-          }}
-          onPointerCancel={cancelResize}
-          onLostPointerCapture={cancelResize}
-        />
-      )}
-      <header className="terminal-dock-bar">
-        <button
-          type="button"
-          className="terminal-dock-toggle"
-          onClick={() => setOpened(!opened)}
-          aria-expanded={opened}
-          aria-label={opened ? "Hide terminals" : "Show terminals"}
-        >
-          <TerminalIcon size={15} />
-          <strong>Terminals</strong>
-          {entries.length > 0 && (
-            <span className="terminal-dock-count">{entries.length}</span>
-          )}
-          {entries.some((entry) => running(entry.status)) && (
-            <span className="terminal-dock-running">
-              {entries.filter((entry) => running(entry.status)).length} active
-            </span>
-          )}
-          {opened ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-        </button>
-        {!opened && current && (
-          <span className="terminal-dock-current">{current.title}</span>
-        )}
-        <span className="terminal-dock-spacer" />
+    <TerminalActionsProvider value={{ ...api, notify }}>
+      <section
+        ref={dock}
+        className={`terminal-dock ${opened ? "is-open" : ""}`}
+        data-shell-terminal={shellTerminal || undefined}
+        aria-label="Terminals"
+        style={
+          {
+            height: geometry.height,
+            "--terminal-dock-height": `${geometry.height}px`,
+          } as CSSProperties
+        }
+      >
         {opened && (
-          <Button
-            size="compact-xs"
-            variant="subtle"
-            onClick={() => setOpened(false)}
-          >
-            Hide panel
-          </Button>
+          <div
+            className="terminal-dock-resizer"
+            role="separator"
+            aria-label="Terminal panel height"
+            aria-orientation="horizontal"
+            tabIndex={0}
+            aria-valuemin={geometry.min}
+            aria-valuemax={geometry.max}
+            aria-valuenow={geometry.height}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") cancelResize();
+              if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+                event.preventDefault();
+                cancelResize();
+                commitHeight(
+                  Math.min(
+                    geometry.max,
+                    Math.max(
+                      geometry.min,
+                      geometry.height +
+                        (event.key === "ArrowUp" ? heightStep : -heightStep),
+                    ),
+                  ),
+                );
+              }
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              resize.current.start(
+                scope,
+                event.pointerId,
+                event.clientY,
+                geometry.height,
+              );
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) => {
+              const next = resize.current.move(
+                scope,
+                event.pointerId,
+                event.clientY,
+                geometry.min,
+                geometry.max,
+              );
+              if (next !== null) setDragHeight(next);
+            }}
+            onPointerUp={(event) => {
+              const next = resize.current.finish(scope, event.pointerId);
+              if (next !== null)
+                commitHeight(
+                  Math.min(geometry.max, Math.max(geometry.min, next)),
+                );
+              setDragHeight(null);
+              if (event.currentTarget.hasPointerCapture(event.pointerId))
+                event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerCancel={cancelResize}
+            onLostPointerCapture={cancelResize}
+          />
         )}
-        <Button
-          variant="subtle"
-          size="compact-xs"
-          aria-label="New terminal"
-          title="New terminal"
-          leftSection={<Plus size={13} />}
-          disabled={!agent}
-          loading={creating}
-          onClick={() => void create()}
-        >
-          <span className="terminal-new-label">New terminal</span>
-        </Button>
-      </header>
-      {opened && (
-        <div className="terminal-dock-body">
-          <aside
-            className="terminal-dock-sessions"
-            aria-label="Terminal sessions"
+        <header className="terminal-dock-bar">
+          <button
+            type="button"
+            className="terminal-dock-toggle"
+            onClick={() => setOpened(!opened)}
+            aria-expanded={opened}
+            aria-label={opened ? "Hide terminals" : "Show terminals"}
           >
-            <TextInput
-              aria-label="Find terminal"
-              placeholder="Find a terminal"
-              leftSection={<Search size={13} />}
-              size="xs"
-              value={query}
-              onChange={(event) => {
-                setQuery(event.currentTarget.value);
-                setScrollTop(0);
-                if (list.current) list.current.scrollTop = 0;
-              }}
-            />
-            <div
-              className="terminal-dock-list"
-              ref={list}
-              onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
+            <TerminalIcon size={15} />
+            <strong>Terminals</strong>
+            {entries.length > 0 && (
+              <span className="terminal-dock-count">{entries.length}</span>
+            )}
+            {activeCount > 0 && (
+              <span className="terminal-dock-running">
+                {activeCount} active
+              </span>
+            )}
+            {opened ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          </button>
+          {!opened && current && (
+            <span className="terminal-dock-current">{current.title}</span>
+          )}
+          <span className="terminal-dock-spacer" />
+          {opened && (
+            <Button
+              size="compact-xs"
+              variant="subtle"
+              onClick={() => setOpened(false)}
             >
-              <div
-                style={{
-                  height: filtered.length * rowHeight,
-                  position: "relative",
+              Hide panel
+            </Button>
+          )}
+          <Button
+            variant="subtle"
+            size="compact-xs"
+            aria-label="New terminal"
+            title="New terminal"
+            leftSection={<Plus size={13} />}
+            disabled={!agent}
+            loading={creating}
+            onClick={() => void create()}
+          >
+            <span className="terminal-new-label">New terminal</span>
+          </Button>
+        </header>
+        {opened && (
+          <div className="terminal-dock-body">
+            <aside
+              className="terminal-dock-sessions"
+              aria-label="Terminal sessions"
+            >
+              <TextInput
+                aria-label="Find terminal"
+                placeholder="Find a terminal"
+                leftSection={<Search size={13} />}
+                size="xs"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.currentTarget.value);
+                  setScrollTop(0);
+                  if (list.current) list.current.scrollTop = 0;
                 }}
+              />
+              <div
+                className="terminal-dock-list"
+                ref={list}
+                onScroll={(event) =>
+                  setScrollTop(event.currentTarget.scrollTop)
+                }
               >
-                {visible.map((entry, index) => (
-                  <button
-                    type="button"
-                    className={`terminal-session ${current?.key === entry.key ? "is-selected" : ""}`}
-                    key={entry.key}
-                    onClick={() => setSelected(entry.key)}
-                    aria-pressed={current?.key === entry.key}
-                    aria-label={`${entry.title} Your terminal · ${owner(entry.agent)}`}
-                    style={{
-                      position: "absolute",
-                      top: (start + index) * rowHeight,
-                      height: rowHeight,
-                      width: "100%",
-                    }}
-                    title={`${entry.title}\n${entry.cwd || ""}`}
-                  >
-                    <span
-                      className={`terminal-session-dot ${running(entry.status) ? "is-running" : ""}`}
-                    />
-                    <span className="terminal-session-description">
-                      <strong>{entry.title}</strong>
-                      <small>
-                        {owner(entry.agent)} · {entry.status}
-                      </small>
-                    </span>
-                  </button>
-                ))}
+                <div
+                  style={{
+                    height: filtered.length * rowHeight,
+                    position: "relative",
+                  }}
+                >
+                  {visible.map((entry, index) => (
+                    <button
+                      type="button"
+                      className={`terminal-session ${current?.id === entry.id ? "is-selected" : ""}`}
+                      key={entry.id}
+                      onClick={() => setSelected(`shell:${entry.id}`)}
+                      aria-pressed={current?.id === entry.id}
+                      aria-label={`${entry.title} Your terminal · ${owner(entry.agent)}`}
+                      style={{
+                        position: "absolute",
+                        top: (start + index) * rowHeight,
+                        height: rowHeight,
+                        width: "100%",
+                      }}
+                      title={`${entry.title}\n${entry.cwd || ""}`}
+                    >
+                      <span
+                        className={`terminal-session-dot ${running(entry.status) ? "is-running" : ""}`}
+                      />
+                      <span className="terminal-session-description">
+                        <strong>{entry.title}</strong>
+                        <small>
+                          {owner(entry.agent)} · {entry.status}
+                        </small>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+                {!filtered.length && (
+                  <p className="terminal-dock-empty">
+                    {query
+                      ? "No matching sessions"
+                      : "Your terminals appear here."}
+                  </p>
+                )}
               </div>
-              {!filtered.length && (
-                <p className="terminal-dock-empty">
-                  {query
-                    ? "No matching sessions"
-                    : "Your terminals appear here."}
+            </aside>
+            <div className="terminal-dock-detail">
+              {error && (
+                <p className="terminal-dock-error" role="status">
+                  {error}
                 </p>
               )}
-            </div>
-          </aside>
-          <div className="terminal-dock-detail">
-            {error && (
-              <p className="terminal-dock-error" role="status">
-                {error}{" "}
-                <button
-                  onClick={() =>
-                    void load().catch((e) => setError(errorText(e)))
-                  }
-                >
-                  Retry
-                </button>
-              </p>
-            )}
-            {current ? (
-              <>
-                <div className="terminal-detail-heading">
-                  {renaming ? (
-                    <form
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        void action("/api/terminals/rename", {
-                          id: current.id,
-                          title,
-                        }).then((ok) => {
-                          if (ok) setRenaming(false);
-                        });
-                      }}
-                    >
-                      <TextInput
-                        aria-label="Terminal name"
-                        value={title}
-                        autoFocus
-                        maxLength={120}
-                        onChange={(event) =>
-                          setTitle(event.currentTarget.value)
-                        }
-                        onKeyDown={(event) => {
-                          if (event.key === "Escape") setRenaming(false);
+              {current ? (
+                <>
+                  <div className="terminal-detail-heading">
+                    {renaming ? (
+                      <form
+                        onSubmit={(event) => {
+                          event.preventDefault();
+                          void action("/api/terminals/rename", {
+                            id: current.id,
+                            title,
+                          }).then((ok) => {
+                            if (ok) setRenaming(false);
+                          });
                         }}
-                      />
-                      <Button
-                        size="compact-xs"
-                        type="submit"
-                        disabled={pending || !title.trim()}
                       >
-                        Save
-                      </Button>
-                    </form>
-                  ) : (
-                    <button
-                      className="terminal-detail-title"
-                      title="Rename terminal"
-                      onClick={() => {
-                        setTitle(current.title);
-                        setRenaming(true);
-                      }}
-                    >
-                      {current.title}
-                    </button>
-                  )}
-                  <span className="terminal-detail-status">
-                    {current.status}
-                    {current.exitCode != null
-                      ? ` · Exit ${current.exitCode}`
-                      : ""}
-                  </span>
-                  <span className="terminal-dock-spacer" />
-                  <Button
-                    size="compact-xs"
-                    color="red"
-                    variant="subtle"
-                    disabled={pending}
-                    onClick={() => {
-                      if (running(current.status)) setEndTarget(current.id);
-                      else
-                        void action("/api/terminals/close", { id: current.id });
-                    }}
-                  >
-                    End session
-                  </Button>
-                </div>
-                {endTarget === current.id && (
-                  <div
-                    className="terminal-end-confirm"
-                    role="alertdialog"
-                    aria-label="End terminal session"
-                  >
-                    <p>
-                      End this session? This stops the shell and its active
-                      processes.
-                    </p>
+                        <TextInput
+                          aria-label="Terminal name"
+                          value={title}
+                          autoFocus
+                          maxLength={120}
+                          onChange={(event) =>
+                            setTitle(event.currentTarget.value)
+                          }
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") setRenaming(false);
+                          }}
+                        />
+                        <Button
+                          size="compact-xs"
+                          type="submit"
+                          disabled={pending || !title.trim()}
+                        >
+                          Save
+                        </Button>
+                      </form>
+                    ) : (
+                      <button
+                        className="terminal-detail-title"
+                        title="Rename terminal"
+                        onClick={() => {
+                          setTitle(current.title);
+                          setRenaming(true);
+                        }}
+                      >
+                        {current.title}
+                      </button>
+                    )}
+                    <span className="terminal-detail-status">
+                      {current.status}
+                      {current.exitCode != null
+                        ? ` · Exit ${current.exitCode}`
+                        : ""}
+                    </span>
+                    <span className="terminal-dock-spacer" />
                     <Button
-                      size="compact-xs"
-                      disabled={pending}
-                      onClick={() => setEndTarget(null)}
-                    >
-                      Keep session
-                    </Button>
-                    <Button
-                      variant="filled"
                       size="compact-xs"
                       color="red"
-                      loading={pending}
+                      variant="subtle"
+                      disabled={pending}
                       onClick={() => {
-                        const id = current.id;
-                        setEndTarget(null);
-                        void action("/api/terminals/close", { id });
+                        if (running(current.status)) setEndTarget(current.id);
+                        else
+                          void action("/api/terminals/close", {
+                            id: current.id,
+                          });
                       }}
                     >
-                      End session and stop processes
+                      End session
                     </Button>
                   </div>
-                )}
-                <div className="terminal-detail-path" title={current.cwd}>
-                  {current.cwd || owner(current.agent)}
+                  {endTarget === current.id && (
+                    <div
+                      className="terminal-end-confirm"
+                      role="alertdialog"
+                      aria-label="End terminal session"
+                    >
+                      <p>
+                        End this session? This stops the shell and its active
+                        processes.
+                      </p>
+                      <Button
+                        size="compact-xs"
+                        disabled={pending}
+                        onClick={() => setEndTarget(null)}
+                      >
+                        Keep session
+                      </Button>
+                      <Button
+                        variant="filled"
+                        size="compact-xs"
+                        color="red"
+                        loading={pending}
+                        onClick={() => {
+                          const id = current.id;
+                          setEndTarget(null);
+                          void action("/api/terminals/close", { id });
+                        }}
+                      >
+                        End session and stop processes
+                      </Button>
+                    </div>
+                  )}
+                  <div className="terminal-detail-path" title={current.cwd}>
+                    {current.cwd || owner(current.agent)}
+                  </div>
+                  <ShellView
+                    key={current.id}
+                    shell={current}
+                    outputSlot={store.terminalOutput(terminalId(current.id))}
+                  />
+                </>
+              ) : (
+                <div className="terminal-dock-welcome">
+                  <TerminalIcon size={26} />
+                  <strong>Your terminals, always here</strong>
+                  <p>
+                    Start a shell in{" "}
+                    {agent?.cwd || "the selected agent’s folder"}.
+                  </p>
+                  <Button
+                    size="xs"
+                    leftSection={<Plus size={14} />}
+                    disabled={!agent}
+                    loading={creating}
+                    onClick={() => void create()}
+                  >
+                    Open terminal
+                  </Button>
+                  <small>⌘ / Ctrl + ` to show or hide</small>
                 </div>
-                <ShellView key={current.key} shell={current} notify={notify} />
-              </>
-            ) : (
-              <div className="terminal-dock-welcome">
-                <TerminalIcon size={26} />
-                <strong>Your terminals, always here</strong>
-                <p>
-                  Start a shell in {agent?.cwd || "the selected agent’s folder"}
-                  .
-                </p>
-                <Button
-                  size="xs"
-                  leftSection={<Plus size={14} />}
-                  disabled={!agent}
-                  loading={creating}
-                  onClick={() => void create()}
-                >
-                  Open terminal
-                </Button>
-                <small>⌘ / Ctrl + ` to show or hide</small>
-              </div>
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      )}
-    </section>
+        )}
+      </section>
+    </TerminalActionsProvider>
   );
-}
+});
 
-export function ShellView({
+export const ShellView = observer(function ShellView({
   shell,
-  notify,
+  outputSlot,
 }: {
-  shell: Shell;
-  notify: (message: string) => void;
+  shell: TerminalRecord;
+  outputSlot: ResourceSlot<TerminalOutput>;
 }) {
-  const output = useSubscription({
-    kind: "terminal-output",
-    terminalId: shell.id,
-  });
+  const output = outputSlot.current;
+  const data = resourceData(output);
+  const outputError = "error" in output ? output.error : undefined;
   const [manualOutput, setManualOutput] =
     useState<GetResult<"/api/terminals/output">>();
-  useEffect(() => setManualOutput(undefined), [output.data]);
-  const outputRef = useRef(output.data);
-  outputRef.current = manualOutput ?? output.data;
+  useEffect(
+    () => setManualOutput(undefined),
+    [data?.text, data?.offset, data?.status],
+  );
+  const outputRef = useRef(data);
+  outputRef.current = manualOutput ?? data;
   const offsetRef = useRef(0);
   const applyOutputRef = useRef<() => void>(() => {});
-  const { get, post, syncPost } = useServerApi();
+  const { get, post, syncPost, notify } = useTerminalActions();
 
   const host = useRef<HTMLDivElement>(null);
   const terminal = useRef<Terminal | null>(null);
@@ -673,7 +648,7 @@ export function ShellView({
   const inputUncertain = useRef(false);
   const pendingInput = useRef<object | null>(null);
   const [truncated, setTruncated] = useState(false);
-  const [status, setStatus] = useState(shell.status);
+  const status = (manualOutput ?? data)?.status ?? shell.status;
   const [retry, setRetry] = useState(0);
   const inputChain = useRef(Promise.resolve());
   const downloadAttempt = useRef<symbol | null>(null);
@@ -883,7 +858,6 @@ export function ShellView({
             .join("");
           if (append) instance!.write(append);
           offsetRef.current = value.offset;
-          setStatus(value.status);
           instance!.options.disableStdin =
             inputBlocked.current || !running(value.status);
           setFailure(value.error || "");
@@ -905,8 +879,15 @@ export function ShellView({
   }, [shell.id, retry]);
   useEffect(() => {
     applyOutputRef.current();
-    if (output.error) setFailure(errorText(output.error));
-  }, [output.data, output.error]);
+    if (outputError) setFailure(errorText(outputError));
+  }, [
+    data?.text,
+    data?.offset,
+    data?.status,
+    data?.error,
+    outputError,
+    manualOutput,
+  ]);
   return (
     <div className="terminal-shell-view">
       {truncated && (
@@ -993,4 +974,4 @@ export function ShellView({
       </footer>
     </div>
   );
-}
+});

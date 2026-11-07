@@ -116,7 +116,7 @@ function Fixture() {
         }
         dismiss={() => {}}
       />
-      <TerminalDock data={data} agent={agent} notify={() => {}} />
+      <TerminalDock agentId={agent.id} notify={() => {}} />
     </MantineProvider>
   );
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createFixtureViteServer as createServer } from "../playwright.ts";
+import { builtTerminalFixture } from "./builtTerminalFixture.ts";
 // Exercise the Codex 0.159 write_stdin_approval request through the real card and answer API.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -21,17 +21,11 @@ test("Terminal Input Approval Ui", async ({
   const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
   const temporary = await mkdtemp(join(tmpdir(), "studio-stdin-approval-"));
 
-  const server = await createServer({
-    configFile: false,
-    root: join(root, "workspaces/client/apps/web"),
-    cacheDir: join(temporary, "vite"),
-    plugins: [
-      {
-        name: "stdin-approval-fixture",
-      },
-    ],
-    server: { host: "127.0.0.1", port: 0, hmr: false },
-  });
+  const server = await builtTerminalFixture(
+    join(root, "workspaces/client/apps/web"),
+    temporary,
+    "stdin-approval-fixture.tsx",
+  );
   await server.listen();
   try {
     const page = testPage;
@@ -47,7 +41,7 @@ test("Terminal Input Approval Ui", async ({
     await page.route("**/check", (route) =>
       route.fulfill({
         contentType: "text/html",
-        body: '<!doctype html><div id="root"></div><script type="module">import "/tests/terminal/stdin-approval-fixture.tsx";</script>',
+        body: '<!doctype html><div id="root"></div><script type="module">import "/fixture.js";</script>',
       }),
     );
     await page.goto(server.resolvedUrls!.local[0]! + "check");

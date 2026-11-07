@@ -10656,9 +10656,7 @@ class TerminalOutputModel {
     return this;
   }
 }
-type TerminalRecordDto = DeepReadonly<
-  import("./observableFieldTypes.ts").TerminalRecordFields
->;
+type TerminalRecordDto = TerminalsData[number];
 class TerminalRecordModel {
   agent: TerminalRecordDto["agent"];
   created: TerminalRecordDto["created"];
@@ -10779,6 +10777,31 @@ class TerminalRecordModel {
     }
     return this;
   }
+}
+function reconcileTerminalRecord(
+  data: TerminalRecordModel[],
+  dto: readonly TerminalRecordDto[],
+): TerminalRecordModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in TerminalRecord");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: TerminalRecordModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new TerminalRecordModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
 }
 type TextBlobRefDto = DeepReadonly<components["schemas"]["TextBlobRef"]>;
 class TextBlobRefModel {
@@ -13995,6 +14018,9 @@ export type WorkSubscriptionData = DeepReadonly<
 export type TasksData = DeepReadonly<
   ObservableInput<ResourceData<Extract<ResourceRef, { kind: "tasks" }>>>
 >;
+export type TerminalsData = ReadonlyArray<
+  DeepReadonly<import("./observableFieldTypes.ts").TerminalRecordFields>
+>;
 export type TerminalRecord = DeepReadonly<
   import("./observableFieldTypes.ts").TerminalRecordFields
 >;
@@ -14611,6 +14637,22 @@ export function createTasksMirror(): {
     },
   };
 }
+export function createTerminalsMirror(): {
+  readonly current: TerminalsData;
+  apply(dto: TerminalsData): void;
+} {
+  let model: TerminalRecordModel[] = reconcileTerminalRecord([], []);
+  return {
+    get current(): TerminalsData {
+      return model;
+    },
+    apply(dto: TerminalsData): void {
+      runInAction(() => {
+        model = reconcileTerminalRecord(model, dto);
+      });
+    },
+  };
+}
 export function createTerminalMirror(dto: TerminalRecord): {
   readonly current: TerminalRecord;
   apply(dto: TerminalRecord): void;
@@ -14686,6 +14728,7 @@ export interface ObservableResources {
   monitors(agentId?: AgentId): ResourceSlot<MonitorsData>;
   work(agentId: AgentId): ResourceSlot<WorkSubscriptionData>;
   tasks(agentId?: AgentId): ResourceSlot<TasksData>;
+  terminals(): ResourceSlot<TerminalsData>;
   terminal(terminalId: TerminalId): ResourceSlot<TerminalRecord>;
   terminalOutput(terminalId: TerminalId): ResourceSlot<TerminalOutput>;
   retainedWorktrees(agentId: AgentId): ResourceSlot<RetainedWorktreesData>;
@@ -14895,6 +14938,7 @@ export function createObservableResources(
         ? data
         : dto.map((item) => new TaskEntityDtoModel(item)),
   });
+  let terminalsSlot: ResourceSlot<TerminalsData> | undefined;
   const terminalSlots = runtime.keyed<
     Extract<ResourceRef, { kind: "terminal" }>,
     TerminalRecordModel
@@ -14998,6 +15042,19 @@ export function createObservableResources(
         ...(agentId === undefined ? {} : { agentId }),
       };
       return tasksSlots(ref);
+    },
+    terminals() {
+      if (terminalsSlot !== undefined) return terminalsSlot;
+      const ref: Extract<ResourceRef, { kind: "terminals" }> = {
+        kind: "terminals",
+      };
+      const key = subscriptionKey(ref);
+      return (terminalsSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => reconcileTerminalRecord([], dto),
+        apply: (data, dto) => reconcileTerminalRecord(data, dto),
+      }));
     },
     terminal(terminalId: TerminalId) {
       const ref: Extract<ResourceRef, { kind: "terminal" }> = {

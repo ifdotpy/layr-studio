@@ -1,7 +1,4 @@
-import {
-  WorkStatus as GeneratedApiWorkStatus,
-  TerminalState as GeneratedApiTerminalState,
-} from "../generated/api.ts";
+import { WorkStatus as GeneratedApiWorkStatus } from "../generated/api.ts";
 import type {
   ResourceRef,
   ResourceData,
@@ -28,7 +25,6 @@ const h = vi.hoisted(() => ({
   get: vi.fn(async () => ({})),
   post: vi.fn(async () => ({ status: "completed", processes: [] })),
   storage: {},
-  writes: [] as string[],
   nullRefs: 0,
   refs: [] as ResourceRef[],
   errors: new Map<string, Error>(),
@@ -110,27 +106,8 @@ vi.mock("../servers/ServerServicesContext", () => ({
   useServerResources: () => ({ watchResourceConnection: h.watchConnection }),
   useServerTranscripts: () => ({ peekTranscript: () => undefined }),
 }));
-vi.mock("@xterm/xterm", () => ({
-  Terminal: class {
-    options = {};
-    write(value: string) {
-      h.writes.push(value);
-    }
-    loadAddon() {}
-    open() {}
-    onData() {}
-    reset() {}
-    dispose() {}
-  },
-}));
-vi.mock("@xterm/addon-fit", () => ({
-  FitAddon: class {
-    fit() {}
-  },
-}));
 import Tasks from "./shell/Tasks";
 import { UserMessage } from "./shell/messages/UserMessages";
-import { ShellView } from "./TerminalDock";
 import { useMessages } from "../hooks";
 const snapshot = () => componentSnapshot([{ id: "lead", epoch: 1 }]);
 function render<T>(fn: () => T, offset = 0) {
@@ -148,7 +125,6 @@ afterEach(() => {
   h.watchConnection.mockClear();
   h.get.mockClear();
   h.post.mockClear();
-  h.writes = [];
   h.nullRefs = 0;
   h.refs = [];
   h.errors.clear();
@@ -289,47 +265,6 @@ it("keeps live agent transport after visiting a stale room in the same component
     message: "",
   });
   expect(h.watchConnection).toHaveBeenCalledTimes(2);
-  expect(h.get).not.toHaveBeenCalled();
-});
-it("terminal hints apply Unicode appends without GET /api/terminals/output", async () => {
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
-  // The terminal waits for its bundled font and reads its colors from CSS.
-  vi.stubGlobal("document", {
-    fonts: { load: async () => [] },
-    documentElement: {},
-  });
-  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
-  const shell = {
-    id: "shell",
-    agent: "lead",
-    title: "Shell",
-    cwd: "/",
-    status: "running",
-    created: 1,
-  } as const;
-  h.data.set("terminal-output", {
-    text: "a🙂",
-    offset: 2,
-    status: GeneratedApiTerminalState.running,
-    truncated: false,
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "terminal-output" }>>);
-  const read = () => ShellView({ shell, notify: vi.fn() });
-  render(read);
-  await vi.waitFor(() => expect(h.writes).toEqual(["a🙂"]));
-  h.data.set("terminal-output", {
-    text: "a🙂中",
-    offset: 3,
-    status: GeneratedApiTerminalState.running,
-    truncated: false,
-  } satisfies ResourceData<Extract<ResourceRef, { kind: "terminal-output" }>>);
-  render(read);
-  expect(h.writes).toEqual(["a🙂", "中"]);
   expect(h.get).not.toHaveBeenCalled();
 });
 import { required } from "./componentTestFixtures";
