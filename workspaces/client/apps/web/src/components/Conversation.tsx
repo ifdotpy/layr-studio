@@ -15,7 +15,7 @@ import {
   resolveLayoutLength,
 } from "../layout/deriveWorkspaceLayout";
 import { layoutQueries } from "../layout/layout-contract.generated";
-import { PRIMARY_TOUCH_POINTER_QUERY } from "../hooks/touchCapability";
+import { usePrimaryTouch } from "../hooks/touchCapability";
 import {
   MAX_TURN_ATTACHMENTS,
   MAX_DRAFT_TEXT_CODEPOINTS,
@@ -407,7 +407,7 @@ export default function Conversation(p: {
     typeof rateLimits?.planType === "string" ? rateLimits.planType : undefined;
   const mobileClient = useMediaQuery(layoutQueries.navigationCompact);
   // A touch keyboard's Enter adds a new line at every width; the button sends.
-  const touchInput = useMediaQuery(PRIMARY_TOUCH_POINTER_QUERY);
+  const touchInput = usePrimaryTouch();
   const kind = p.room ? "room" : p.legacy ? "legacy" : "agent";
   const compactHeaderTools = useCompactHeaderTools();
   const [headerTools, setHeaderTools] = useState<HTMLElement | null>(null);

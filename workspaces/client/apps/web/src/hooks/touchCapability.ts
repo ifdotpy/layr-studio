@@ -1,3 +1,5 @@
+import { useMediaQuery } from "@mantine/hooks";
+
 /** Owner of touch capability for viewport and safe-strip controls. */
 export function touchPointerMedia() {
   return window.matchMedia("(any-pointer: coarse)");
@@ -11,8 +13,11 @@ export function hasTouchCapability(
 }
 
 /** Owner of primary touch input for mobile layout and keyboard gestures. */
-export const PRIMARY_TOUCH_POINTER_QUERY = "(pointer: coarse)";
-
 export function primaryTouchPointerMedia() {
-  return window.matchMedia(PRIMARY_TOUCH_POINTER_QUERY);
+  return window.matchMedia("(pointer: coarse)");
+}
+
+/** Whether the primary input is touch, following changes of the device. */
+export function usePrimaryTouch() {
+  return useMediaQuery("(pointer: coarse)");
 }
