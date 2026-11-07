@@ -53301,7 +53301,6 @@
             "properties": {
               "collection": {
                 "const": "agent",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53323,7 +53322,6 @@
             "properties": {
               "collection": {
                 "const": "chat",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53345,7 +53343,6 @@
             "properties": {
               "collection": {
                 "const": "complaint",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53367,7 +53364,6 @@
             "properties": {
               "collection": {
                 "const": "edge",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53389,7 +53385,6 @@
             "properties": {
               "collection": {
                 "const": "event",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53411,7 +53406,6 @@
             "properties": {
               "collection": {
                 "const": "model",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53433,7 +53427,6 @@
             "properties": {
               "collection": {
                 "const": "monitor",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53455,7 +53448,6 @@
             "properties": {
               "collection": {
                 "const": "peerTeam",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53477,7 +53469,6 @@
             "properties": {
               "collection": {
                 "const": "project",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53499,7 +53490,6 @@
             "properties": {
               "collection": {
                 "const": "request",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53521,7 +53511,6 @@
             "properties": {
               "collection": {
                 "const": "room",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53543,7 +53532,6 @@
             "properties": {
               "collection": {
                 "const": "rule",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53565,7 +53553,6 @@
             "properties": {
               "collection": {
                 "const": "task",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53587,7 +53574,6 @@
             "properties": {
               "collection": {
                 "const": "uiPreferences",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53609,7 +53595,6 @@
             "properties": {
               "collection": {
                 "const": "work",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53631,7 +53616,6 @@
             "properties": {
               "collection": {
                 "const": "workspace",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53653,7 +53637,6 @@
             "properties": {
               "collection": {
                 "const": "rateLimit",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53675,7 +53658,6 @@
             "properties": {
               "collection": {
                 "const": "messageReceipt",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53697,7 +53679,6 @@
             "properties": {
               "collection": {
                 "const": "plan",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53719,7 +53700,6 @@
             "properties": {
               "collection": {
                 "const": "annotation",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53741,7 +53721,6 @@
             "properties": {
               "collection": {
                 "const": "studioError",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53822,7 +53801,6 @@
             "properties": {
               "collection": {
                 "const": "queue",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53844,7 +53822,6 @@
             "properties": {
               "collection": {
                 "const": "accounts",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53866,7 +53843,6 @@
             "properties": {
               "collection": {
                 "const": "accountCost",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53888,7 +53864,6 @@
             "properties": {
               "collection": {
                 "const": "sessionCost",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53910,7 +53885,6 @@
             "properties": {
               "collection": {
                 "const": "desktop",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53932,7 +53906,6 @@
             "properties": {
               "collection": {
                 "const": "terminal",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53954,7 +53927,6 @@
             "properties": {
               "collection": {
                 "const": "retainedWorktree",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53976,7 +53948,6 @@
             "properties": {
               "collection": {
                 "const": "questionHistory",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53998,7 +53969,6 @@
             "properties": {
               "collection": {
                 "const": "agentSummary",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54020,7 +53990,6 @@
             "properties": {
               "collection": {
                 "const": "agentDetail",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54042,7 +54011,6 @@
             "properties": {
               "collection": {
                 "const": "workDetail",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54064,7 +54032,6 @@
             "properties": {
               "collection": {
                 "const": "workResult",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54086,7 +54053,6 @@
             "properties": {
               "collection": {
                 "const": "workDecision",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54108,7 +54074,6 @@
             "properties": {
               "collection": {
                 "const": "workRelease",
-                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54130,7 +54095,6 @@
             "properties": {
               "collection": {
                 "const": "agentTail",
-                "enum": null,
                 "type": "string"
               },
               "op": {

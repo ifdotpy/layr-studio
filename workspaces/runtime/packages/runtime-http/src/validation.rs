@@ -2351,3 +2351,16 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod v5_schema_tests {
+    #[test]
+    fn v5_entity_batch_registry_compiles_for_real_router_startup() {
+        let registry = super::Registry::compile(&[])
+            .expect("all router components including EntityChangeBatch compile");
+        assert!(registry.validate_component(
+            "EntityChangeBatch",
+            &studio_json::json!({"after":0,"through":0,"documents":[]})
+        ));
+    }
+}
