@@ -129,6 +129,7 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
     "accountCost",
     "sessionCost",
     "desktop",
+    "model",
 ];
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its

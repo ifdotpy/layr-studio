@@ -8,12 +8,13 @@ use rusqlite::Transaction;
 
 use crate::StoreResult;
 
-const MOVES: [(&str, &str); 5] = [
+const MOVES: [(&str, &str); 6] = [
     ("rateLimit", "runtime_rate_limits"),
     ("accounts", "runtime_account_summaries"),
     ("accountCost", "runtime_account_costs"),
     ("sessionCost", "runtime_session_costs"),
     ("desktop", "runtime_desktop_states"),
+    ("model", "runtime_models"),
 ];
 
 pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
@@ -38,7 +39,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     crate::durable_seq::install(tx)?;
     let copies: bool = tx.query_row(
         "SELECT EXISTS(SELECT 1 FROM sync_entities
-           WHERE collection IN ('rateLimit','accounts','accountCost','sessionCost','desktop'))",
+           WHERE collection IN ('rateLimit','accounts','accountCost','sessionCost','desktop','model'))",
         [],
         |row| row.get(0),
     )?;
@@ -46,7 +47,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         crate::durable_seq::keep_counter(tx)?;
         tx.execute(
             "DELETE FROM sync_entities
-             WHERE collection IN ('rateLimit','accounts','accountCost','sessionCost','desktop')",
+             WHERE collection IN ('rateLimit','accounts','accountCost','sessionCost','desktop','model')",
             [],
         )?;
     }

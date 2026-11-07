@@ -1,16 +1,15 @@
 //! Durable per-account model catalog entities.
 
 use serde::Deserialize;
-use studio_json::{Value, json};
+use studio_json::json;
 use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::model_catalog::ModelCatalog;
 use studio_runtime_services::model_catalog::ChangeCallback;
-use studio_runtime_store::{RuntimeStore, StoreError, SyncDocumentsRepository, Transaction};
+use studio_runtime_store::{RuntimeStore, StoreError, Transaction, observations};
 use tokio::sync::mpsc;
 #[cfg(test)]
 use tokio::sync::oneshot;
 
-const MODEL_COLLECTION: &str = "model";
 const MODEL_ID_SEPARATOR: &str = ":";
 
 /// The account needed to retire an existing model entity.
@@ -118,21 +117,14 @@ fn publish_catalog(
             row.provider = Some(provider);
             // Serialization is the durable SSE boundary; metadata stays opaque.
             row.extra.insert("catalogPosition".into(), json!(position));
-            changed |= SyncDocumentsRepository::put_entity(
-                transaction,
-                MODEL_COLLECTION,
-                &id,
-                json!(row),
-                false,
-            )?;
+            changed |= observations::put(transaction, observations::MODELS, &id, &json!(row))?;
             next_ids.insert(id);
         }
     }
 
-    let mut statement = transaction
-        .prepare_cached("SELECT id,payload FROM sync_entities WHERE collection=?1 AND deleted=0")?;
+    let mut statement = transaction.prepare_cached("SELECT id,record FROM runtime_models")?;
     let existing = statement
-        .query_map([MODEL_COLLECTION], |row| {
+        .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -146,13 +138,7 @@ fn publish_catalog(
         .is_some_and(|model| model.0.account_key.as_deref() == Some(account));
         (belongs_to_account && id.starts_with(&prefix) && !next_ids.contains(&id)).then_some(id)
     }) {
-        changed |= SyncDocumentsRepository::put_entity(
-            transaction,
-            MODEL_COLLECTION,
-            &id,
-            Value::Null,
-            true,
-        )?;
+        changed |= observations::delete(transaction, observations::MODELS, &id)?;
     }
     Ok(changed)
 }
@@ -160,6 +146,7 @@ fn publish_catalog(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use studio_json::Value;
     fn typed(value: Value) -> ModelCatalog {
         ModelCatalog::parse(value).expect("valid catalog")
     }
@@ -262,9 +249,8 @@ mod tests {
 
         let rows = store
             .test_read_transaction(|tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,deleted,payload FROM sync_entities WHERE collection='model' ORDER BY id",
-                )?;
+                let mut statement =
+                    tx.prepare("SELECT id,0,record FROM runtime_models ORDER BY id")?;
                 let rows = statement
                     .query_map([], |row| {
                         Ok((
@@ -277,7 +263,8 @@ mod tests {
                 Ok(rows)
             })
             .expect("model entities read");
-        assert_eq!(rows.len(), 3);
+        // A removed model leaves the table; the stream sends its delete from durable_rows.
+        assert_eq!(rows.len(), 2);
         let one_alpha = rows
             .iter()
             .find(|(id, _, _)| id == "one:alpha")
@@ -288,10 +275,8 @@ mod tests {
         assert_eq!(one_value["value"]["provider"], "codex");
         assert_eq!(one_value["value"]["hidden"], true);
         assert_eq!(one_value["value"]["catalogPosition"], 0);
-        assert!(
-            rows.iter()
-                .any(|(id, deleted, _)| id == "one:hidden" && *deleted)
-        );
+        // A removed model leaves its table; the stream sends the delete from durable_rows.
+        assert!(!rows.iter().any(|(id, _, _)| id == "one:hidden"));
         assert!(
             rows.iter()
                 .any(|(id, deleted, _)| id == "two:alpha" && !deleted)
@@ -342,10 +327,7 @@ mod tests {
         flushed.await.expect("publisher reaches flush marker");
 
         let rows = read_model_rows(&store);
-        assert!(
-            rows.iter()
-                .any(|(id, deleted, _)| id == "one:old-model" && *deleted)
-        );
+        assert!(!rows.iter().any(|(id, _, _)| id == "one:old-model"));
         assert!(
             rows.iter()
                 .any(|(id, deleted, _)| id == "one:new-model" && !deleted)
@@ -359,9 +341,8 @@ mod tests {
     fn read_model_rows(store: &RuntimeStore) -> Vec<(String, bool, String)> {
         store
             .test_read_transaction(|tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,deleted,payload FROM sync_entities WHERE collection='model' ORDER BY id",
-                )?;
+                let mut statement =
+                    tx.prepare("SELECT id,0,record FROM runtime_models ORDER BY id")?;
                 let rows = statement
                     .query_map([], |row| {
                         Ok((

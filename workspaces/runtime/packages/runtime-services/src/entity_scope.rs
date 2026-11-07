@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 15] = [
+const DIRECT_SOURCES: [DirectSource; 16] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -509,16 +509,21 @@ const DIRECT_SOURCES: [DirectSource; 15] = [
         table: "runtime_desktop_states",
         collections: &["desktop"],
     },
+    DirectSource {
+        table: "runtime_models",
+        collections: &["model"],
+    },
 ];
 
 /// Observation tables: a row's `record` is `{"collection","id","value"}`; the document is
 /// its `value`.
-const OBSERVATION_SOURCES: [&str; 5] = [
+const OBSERVATION_SOURCES: [&str; 6] = [
     studio_runtime_store::account_state::RATE_LIMITS,
     "runtime_account_summaries",
     "runtime_account_costs",
     "runtime_session_costs",
     "runtime_desktop_states",
+    "runtime_models",
 ];
 
 /// Direct sources that are `durable_rows` names of derived documents, not tables.

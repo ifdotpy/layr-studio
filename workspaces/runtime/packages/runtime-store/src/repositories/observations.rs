@@ -1,7 +1,7 @@
 //! Tables of account observations whose client documents are built at read time
 //! (#630 item 127): the account list summary (`accounts`), the cost summary of each
 //! account (`accountCost`) and of each session (`sessionCost`), and the desktop
-//! application state (`desktop`). The rate-limit views have their own owner
+//! application state (`desktop`) and the model catalogs (`model`). The rate-limit views have their own owner
 //! (`account_state::RATE_LIMITS`). A row's `record` is the envelope
 //! `{"collection":..,"id":..,"value":..}` that the readers decode; the document is its
 //! `value`.
@@ -40,8 +40,20 @@ pub const DESKTOP: Observation = Observation {
     collection: "desktop",
 };
 
+/// The model catalog of each provider account; ids are `account:model`.
+pub const MODELS: Observation = Observation {
+    table: "runtime_models",
+    collection: "model",
+};
+
 /// Every observation table.
-pub const ALL: [Observation; 4] = [ACCOUNT_SUMMARIES, ACCOUNT_COSTS, SESSION_COSTS, DESKTOP];
+pub const ALL: [Observation; 5] = [
+    ACCOUNT_SUMMARIES,
+    ACCOUNT_COSTS,
+    SESSION_COSTS,
+    DESKTOP,
+    MODELS,
+];
 
 /// The observation table of client collection `collection`.
 pub fn of_collection(collection: &str) -> Option<Observation> {
