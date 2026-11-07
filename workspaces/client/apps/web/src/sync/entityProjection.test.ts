@@ -2060,3 +2060,65 @@ for (const [collection, field, singleton] of [
       undefined,
     );
   });
+
+it("retains equal nested entity payloads at ingress while advancing the replay sequence", () => {
+  const state = emptyEntityProjection();
+  const summary = agentSummaryFixture("lead", {
+    operationalStatus: {
+      reason: "waiting",
+      wait: { agents: 1, commands: 0, monitors: 0, inputs: 0, event: null },
+    },
+  });
+  const first = applyEntityChanges(
+    state,
+    [entityRow("agentSummary", "lead", summary, 1)],
+    true,
+  );
+  const equal = applyEntityChanges(
+    state,
+    [entityRow("agentSummary", "lead", structuredClone(summary), 3)],
+    true,
+  );
+  assert.equal(equal, first);
+  assert.equal(equal.threads[0], first.threads[0]);
+  assert.equal(state.rows.get("entity:agentSummary:lead")?.seq, 3);
+  const older = applyEntityChanges(
+    state,
+    [entityRow("agentSummary", "lead", { ...summary, name: "Stale" }, 2)],
+    true,
+  );
+  assert.equal(older, first);
+  const changed = applyEntityChanges(
+    state,
+    [
+      entityRow(
+        "agentSummary",
+        "lead",
+        { ...summary, operationalStatus: { reason: "working" } },
+        4,
+      ),
+    ],
+    true,
+  );
+  assert.notEqual(changed.threads[0], first.threads[0]);
+  assert.deepEqual(changed.threads[0]?.operationalStatus, {
+    reason: "working",
+  });
+});
+
+it("retains equal project facts while advancing their existing command sequence proof", () => {
+  const state = emptyEntityProjection();
+  const project = { id: "project", path: "/project", name: "Project" };
+  const first = applyEntityChanges(
+    state,
+    [entityRow("project", project.id, project, 1)],
+    true,
+  );
+  const next = applyEntityChanges(
+    state,
+    [entityRow("project", project.id, { ...project }, 2)],
+    true,
+  );
+  assert.equal(next.runtime.projects[0], first.runtime.projects[0]);
+  assert.equal(next.runtime.projectSequences?.project, 2);
+});

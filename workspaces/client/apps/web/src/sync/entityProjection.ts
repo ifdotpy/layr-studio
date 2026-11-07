@@ -1,3 +1,4 @@
+import { compareStructural } from "mobx";
 import type {
   AgentEntityDto,
   ChatEntityDto,
@@ -485,6 +486,24 @@ export function applyEntityChanges(
       state.values[oldCollection].delete(oldEntityId);
       changed.add(oldCollection);
     }
+    // Read-time entities can be re-emitted for a dependent source change.
+    // Keep equal facts stable, but still reject any later stale replay.
+    if (
+      compareStructural(
+        state.values[payload.collection].get(payload.id),
+        payload.value,
+      )
+    ) {
+      state.rows.set(row.id, {
+        seq: row.seq,
+        collection: payload.collection,
+        entityId: payload.id,
+      });
+      state.tombstones.delete(row.id);
+      // Project sequences are also command proofs, even when its fields are equal.
+      if (payload.collection === "project") changed.add("project");
+      continue;
+    }
     switch (payload.collection) {
       case "retainedWorktree":
         state.values.retainedWorktree.set(payload.id, payload.value);
@@ -593,7 +612,7 @@ export function applyEntityChanges(
         state.values.workspace.set(payload.id, payload.value);
         break;
       case "agentTail":
-        // Sidebar data is consumed by its generated resource, not Snapshot.
+        // Tails are consumed by the generated state facade, never merged into detail.
         continue;
       default: {
         const exhaustive: never = payload;
