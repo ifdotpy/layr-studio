@@ -550,8 +550,7 @@ mod room_preparation_tests {
 
     #[test]
     fn agent_context_empty_lead_follows_typed_fields() {
-        let db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_agents(id TEXT, parent_id TEXT, root_id TEXT, deleted_at REAL, record TEXT); CREATE INDEX runtime_agent_live_root_v2 ON runtime_agents(root_id); CREATE TABLE runtime_work(id TEXT, record TEXT);").unwrap();
+        let db = studio_runtime_store::test_canvas();
         let mut agent = AgentRecord::from_value(json!({"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","compactions":0,"isLead":true})).unwrap();
         assert!(agent_view_context(&db, &agent, None).unwrap().empty_lead);
         agent.deleted_at = Some(0.0);
