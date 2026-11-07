@@ -24,36 +24,38 @@ const perfRoot: Plugin = {
   },
 };
 const target = "http://127.0.0.1:4620";
+const perfReporting = process.env.STUDIO_PERF_REPORTING === "1";
 export default defineConfig({
   base: "./",
   define: {
-    __STUDIO_PERF_REPORTING__: JSON.stringify(
-      process.env.STUDIO_PERF_REPORTING === "1",
-    ),
+    __STUDIO_PERF_REPORTING__: JSON.stringify(perfReporting),
   },
   resolve: {
-    alias:
-      process.env.STUDIO_PERF_REPORTING === "1"
-        ? [
-            {
-              find: "./prompt-composer/PromptComposer",
-              replacement: fileURLToPath(
-                new URL("./src/perf/ProfiledComposer.tsx", import.meta.url),
-              ),
-            },
-            {
-              find: "./conversation/transcript/TurnHistory",
-              replacement: fileURLToPath(
-                new URL("./src/perf/ProfiledHistory.tsx", import.meta.url),
-              ),
-            },
-          ]
-        : [],
+    alias: perfReporting
+      ? [
+          {
+            find: /^mobx$/,
+            replacement: fileURLToPath(
+              import.meta.resolve("mobx/dist/mobx.esm.development.js"),
+            ),
+          },
+          {
+            find: "./prompt-composer/PromptComposer",
+            replacement: fileURLToPath(
+              new URL("./src/perf/ProfiledComposer.tsx", import.meta.url),
+            ),
+          },
+          {
+            find: "./conversation/transcript/TurnHistory",
+            replacement: fileURLToPath(
+              new URL("./src/perf/ProfiledHistory.tsx", import.meta.url),
+            ),
+          },
+        ]
+      : [],
   },
   plugins: [
-    ...(process.env.STUDIO_PERF_REPORTING === "1"
-      ? [perfRoot, perfInstrumentation()]
-      : []),
+    ...(perfReporting ? [perfRoot, perfInstrumentation()] : []),
     precompressAssets(),
     {
       name: "studio-offline-shell",
