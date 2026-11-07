@@ -2586,25 +2586,30 @@ fn record_manual_release_closure(
         return Ok(false);
     };
     let mut statement = tx.prepare_cached(
-        "SELECT record FROM runtime_agents WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 ORDER BY rowid LIMIT 2",
+        "SELECT record,CASE WHEN json_valid(record) THEN json_extract(record,'$.nativeRelease.id') END,json_valid(record) FROM runtime_agents WHERE id IN (SELECT chat FROM sessions WHERE thread_id=?1 AND state<>'ended') AND account_key=?2 ORDER BY rowid LIMIT 2",
     )?;
     let rows = statement
         .query_map(params![thread, identity.account], |row| {
-            row.get::<_, String>(0)
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, rusqlite::types::Value>(1)?,
+                row.get::<_, bool>(2)?,
+            ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    let [raw] = rows.as_slice() else {
+    let [(raw, id, valid)] = rows.as_slice() else {
         return Ok(false);
     };
-    let mut agent: AgentRecord = studio_json::from_str(raw).map_err(|_| invalid(thread))?;
-    let record = agent.value();
-    let release = &record["nativeRelease"];
-    if !release["id"]
-        .as_str()
-        .is_some_and(|id| id.starts_with(crate::agent_management_recovery::MANUAL_RELEASE_PREFIX))
+    // Only manual-release prefix matches receive full record validation. Ordinary
+    // closures skip unrelated schema fields; syntax errors keep the located decode error.
+    if *valid
+        && !matches!(id, rusqlite::types::Value::Text(id) if id.starts_with(crate::agent_management_recovery::MANUAL_RELEASE_PREFIX))
     {
         return Ok(false);
     }
+    let mut agent: AgentRecord = studio_json::from_str(raw).map_err(|_| invalid(thread))?;
+    let record = agent.value();
+    let release = &record["nativeRelease"];
     // Never let the legacy turn route accept weaker closure evidence for a
     // manual release, even when this notification fails the exact scope check.
     let Some(source) = publication.native_source.as_ref() else {
@@ -5045,6 +5050,160 @@ mod deleted_command_query_tests {
             plan.iter().any(|step| step
                 .contains("SEARCH t USING INDEX sqlite_autoindex_runtime_tasks_1 (id=?)")),
             "{plan:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod manual_release_decode_tests {
+    use super::*;
+
+    #[cfg(feature = "perf-reporting")]
+    #[test]
+    fn ordinary_thread_closure_decodes_no_full_agent() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT,account_key TEXT);
+            CREATE TABLE sessions(chat TEXT,thread_id TEXT,state TEXT);
+            INSERT INTO runtime_agents VALUES('owner','{\"id\":\"owner\",\"rootId\":\"owner\",\"epoch\":1,\"status\":\"idle\",\"accountKey\":\"default\",\"provider\":\"codex\",\"compactions\":0}','default');
+            INSERT INTO sessions VALUES('owner','thread','active');").unwrap();
+        let tx = db.transaction().unwrap();
+        let entry = JournalEntry {
+            received_at_ms: 1,
+            cursor: studio_runtime_process::EventCursor(1),
+            generation: Generation(1),
+            payload: JournalPayload::Stderr(Value::Null),
+        };
+        let label = "ordinary-closure-decode-witness";
+        studio_json::perf_reporting::with_job(label.into(), || {
+            assert!(
+                !record_manual_release_closure(
+                    &tx,
+                    &JournalIdentity {
+                        account: "default",
+                        journal_scope: "default"
+                    },
+                    &crate::notification_dispatch::PublicationContext::default(),
+                    &entry,
+                    "thread/closed",
+                    &json!({"threadId":"thread"}),
+                )
+                .unwrap()
+            );
+        });
+        let decodes = studio_json::perf_reporting::decode_snapshot();
+        let full = decodes
+            .iter()
+            .filter(|(key, _)| key.starts_with(label) && key.ends_with("::AgentRecord"))
+            .map(|(_, value)| value.count)
+            .sum::<u64>();
+        eprintln!("ordinary closure full-AgentRecord decodes={full}");
+        assert_eq!(full, 0);
+    }
+
+    #[test]
+    fn corrupt_thread_closure_keeps_located_error_and_rolls_back() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_agents(id TEXT,record TEXT,account_key TEXT);
+            CREATE TABLE sessions(chat TEXT,thread_id TEXT,state TEXT);
+            CREATE TABLE effects(count INTEGER);
+            INSERT INTO effects VALUES(0);
+            INSERT INTO runtime_agents VALUES('owner','{','default');
+            INSERT INTO sessions VALUES('owner','thread','active');",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let entry = JournalEntry {
+            received_at_ms: 1,
+            cursor: studio_runtime_process::EventCursor(1),
+            generation: Generation(1),
+            payload: JournalPayload::Stderr(Value::Null),
+        };
+        let result = agent_fault::isolate(
+            &tx,
+            agent_fault::FaultStage::JournalFrame,
+            &mut None,
+            |_| {
+                tx.execute("UPDATE effects SET count=count+1", [])?;
+                record_manual_release_closure(
+                    &tx,
+                    &JournalIdentity {
+                        account: "default",
+                        journal_scope: "default",
+                    },
+                    &crate::notification_dispatch::PublicationContext::default(),
+                    &entry,
+                    "thread/closed",
+                    &json!({"threadId":"thread"}),
+                )
+            },
+            || panic!("a corrupt uncorrelated closure must not settle"),
+        );
+        assert!(
+            matches!(result, Err(WorkerError::Store(StoreError::InvalidSyncObject { scope, id }))
+            if scope == "account_worker" && id == "thread")
+        );
+        assert_eq!(
+            tx.query_row("SELECT count FROM effects", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            tx.query_row(
+                "SELECT record FROM runtime_agents WHERE id='owner'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "{"
+        );
+    }
+
+    #[test]
+    fn ordinary_thread_closure_skips_unrelated_invalid_schema() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_agents(id TEXT,record TEXT,account_key TEXT);
+            CREATE TABLE sessions(chat TEXT,thread_id TEXT,state TEXT);
+            INSERT INTO runtime_agents VALUES('owner','{}','default');
+            INSERT INTO sessions VALUES('owner','thread','active');",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        let entry = JournalEntry {
+            received_at_ms: 1,
+            cursor: studio_runtime_process::EventCursor(1),
+            generation: Generation(1),
+            payload: JournalPayload::Stderr(Value::Null),
+        };
+        let result = agent_fault::isolate(
+            &tx,
+            agent_fault::FaultStage::JournalFrame,
+            &mut None,
+            |_| {
+                record_manual_release_closure(
+                    &tx,
+                    &JournalIdentity {
+                        account: "default",
+                        journal_scope: "default",
+                    },
+                    &crate::notification_dispatch::PublicationContext::default(),
+                    &entry,
+                    "thread/closed",
+                    &json!({"threadId":"thread"}),
+                )
+            },
+            || panic!("ordinary closure must not invoke fault settlement"),
+        );
+        assert!(matches!(result, Ok(Ok(false))));
+        assert_eq!(
+            tx.query_row(
+                "SELECT record FROM runtime_agents WHERE id='owner'",
+                [],
+                |row| row.get::<_, String>(0)
+            )
+            .unwrap(),
+            "{}"
         );
     }
 }
