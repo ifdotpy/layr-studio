@@ -152,7 +152,7 @@ pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_st
         .chain(
             studio_runtime_services::entity_scope::live_documents(
                 db,
-                r#"["task","monitor","event","messageReceipt"]"#,
+                r#"["task","monitor","event","messageReceipt","project"]"#,
             )
             .expect("window documents"),
         )
@@ -161,8 +161,14 @@ pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_st
 
 /// Collections of [`read_time_rows`].
 #[allow(dead_code)]
-pub(crate) const READ_TIME_COLLECTIONS: [&str; 5] =
-    ["agent", "task", "monitor", "event", "messageReceipt"];
+pub(crate) const READ_TIME_COLLECTIONS: [&str; 6] = [
+    "agent",
+    "task",
+    "monitor",
+    "event",
+    "messageReceipt",
+    "project",
+];
 
 /// Readers build a document for every source row; the frozen oracle kept copies only
 /// of what it published. Keep the read-time rows of `actual` that the oracle has.

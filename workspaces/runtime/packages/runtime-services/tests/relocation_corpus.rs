@@ -421,8 +421,17 @@ async fn python_location_and_move_corpus_through_consumers() {
                 .expect("result");
                 assert_eq!(json!(result.reply), case["expected"]["registration"]);
                 if !case["project"].is_null() {
-                    let payload:String=db.query_row("SELECT payload FROM sync_entities WHERE collection='project' AND id='/home-project'",[],|r|r.get(0)).expect("project sync published");
-                    let payload: Value = studio_json::from_str(&payload).expect("payload");
+                    // The stored project owns the locations; its client document is
+                    // built from it at read time.
+                    let record: String = db
+                        .query_row(
+                            "SELECT record FROM runtime_projects WHERE id='/home-project'",
+                            [],
+                            |r| r.get(0),
+                        )
+                        .expect("project stored");
+                    let payload =
+                        json!({"value": studio_json::from_str::<Value>(&record).expect("record")});
                     assert_eq!(
                         payload["value"]["locations"],
                         case["expected"]["project"]["locations"]

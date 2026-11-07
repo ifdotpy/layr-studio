@@ -86,7 +86,7 @@ impl Fixture {
         let reader = store.test_reader().expect("reader");
         let seq: i64 = reader
             .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id='/p'",
                 [],
                 |r| r.get(0),
             )
@@ -301,7 +301,7 @@ async fn project_deletion_rolls_back_every_write_boundary() {
         "CREATE TRIGGER fail BEFORE UPDATE ON runtime_agents WHEN NEW.id='z' BEGIN SELECT RAISE(ABORT,'injected second agent'); END",
         "CREATE TRIGGER fail BEFORE UPDATE ON runtime_rooms BEGIN SELECT RAISE(ABORT,'injected room'); END",
         "CREATE TRIGGER fail BEFORE INSERT ON request_results BEGIN SELECT RAISE(ABORT,'injected receipt'); END",
-        "CREATE TRIGGER fail BEFORE UPDATE ON sync_entities WHEN NEW.collection='project' AND NEW.deleted=1 BEGIN SELECT RAISE(ABORT,'injected publication'); END",
+        "CREATE TRIGGER fail BEFORE UPDATE ON runtime_projects WHEN json_type(NEW.record,'$.sidebarHidden')='true' BEGIN SELECT RAISE(ABORT,'injected publication'); END",
     ] {
         let f = Fixture::new(
             vec![agent("a", None, "/p"), agent("z", None, "/p")],
@@ -363,7 +363,7 @@ async fn project_deletion_remote_and_ambiguous_membership_fail_closed() {
         let reader = f.store.test_reader().expect("reader");
         let seq: i64 = reader
             .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id='/p'",
                 [],
                 |r| r.get(0),
             )
@@ -704,7 +704,7 @@ async fn project_deletion_local_aliases_belong_to_one_scope() {
             .test_reader()
             .expect("reader")
             .query_row(
-                "SELECT seq FROM sync_entities WHERE collection='project' AND id='/p'",
+                "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id='/p'",
                 [],
                 |r| r.get::<_, i64>(0)
             )

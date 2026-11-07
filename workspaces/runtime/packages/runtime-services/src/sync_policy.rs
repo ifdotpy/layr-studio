@@ -238,41 +238,6 @@ impl ProjectVaultSnapshot {
         studio_runtime_store::sha256_hex(&serialized)
     }
 
-    /// Check the small persisted project set before deciding whether a full
-    /// cold projection rebuild is needed after process restart.
-    pub fn matches_entity_projections(&self, connection: &Connection) -> StoreResult<bool> {
-        for (id, project) in &self.projects {
-            let payload = connection
-                .query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [id],
-                    |row| row.get::<_, String>(0),
-                )
-                .optional()?;
-            let Some(payload) = payload else {
-                return Ok(false);
-            };
-            let payload: Value = studio_json::from_str(&payload)?;
-            let ready = payload
-                .pointer("/value/layrReadiness/state")
-                .and_then(Value::as_str)
-                == Some("ready");
-            let expected_vault = if ready { self.view(id, project)? } else { None };
-            if payload.pointer("/value/vault") != expected_vault.as_ref() {
-                return Ok(false);
-            }
-            let expected_sync = if ready {
-                self.sync_view(id, project)?
-            } else {
-                None
-            };
-            if ready && payload.pointer("/value/layrSync") != expected_sync.as_ref() {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-
     fn recheck(&self, transaction: &Transaction<'_>) -> StoreResult<()> {
         let current = projection_records(transaction, "runtime_projects")?;
         if current.len() != self.projects.len()
@@ -285,33 +250,6 @@ impl ProjectVaultSnapshot {
             ));
         }
         Ok(())
-    }
-
-    fn view(&self, id: &str, project: &Value) -> StoreResult<Option<Value>> {
-        if self.projects.get(id) != Some(project) {
-            return Err(StoreError::RecordContract(
-                "project record changed after its cached vault view was read",
-            ));
-        }
-        match self.views.get(id) {
-            Some(Ok(view)) => Ok(view.clone()),
-            Some(Err((object, project_id))) => Err(StoreError::InvalidStoredRecord {
-                object,
-                id: project_id.clone(),
-            }),
-            None => Err(StoreError::RecordContract(
-                "cached vault view is missing for a persisted project",
-            )),
-        }
-    }
-
-    fn sync_view(&self, id: &str, project: &Value) -> StoreResult<Option<Value>> {
-        if self.projects.get(id) != Some(project) {
-            return Err(StoreError::RecordContract(
-                "project record changed after its cached sync report was read",
-            ));
-        }
-        Ok(self.sync_views.get(id).cloned().flatten())
     }
 }
 
@@ -430,16 +368,11 @@ pub fn maintain_entity_projections_with_server_id(
         for (table, collection) in [
             ("runtime_rooms", "room"),
             ("runtime_complaints", "complaint"),
-            ("runtime_projects", "project"),
         ] {
             let records = source_records.get(table).ok_or(StoreError::RecordContract(
                 "entity projection source snapshot is incomplete",
             ))?;
             for (id, raw) in records {
-                if table == "runtime_projects" && !valid_stored_record(table, id, raw) {
-                    eprintln!("ERROR project projection skipped invalid row id={id}");
-                    continue;
-                }
                 if collection == "room" {
                     let Ok(room) = studio_json::from_str::<
                         studio_runtime_schema::room_record::RoomRecord,
@@ -485,64 +418,6 @@ pub fn maintain_entity_projections_with_server_id(
                             false,
                         )?;
                     }
-                    continue;
-                }
-                let record: studio_runtime_schema::project_record::ProjectRecord =
-                    match studio_json::from_str(raw) {
-                        Ok(record) => record,
-                        Err(error) => {
-                            eprintln!("ERROR project projection skipped row id={id}: {error}");
-                            continue;
-                        }
-                    };
-                let studio_runtime_schema::project_record::ProjectRecord::Live(project) = record
-                else {
-                    retire_if_live(transaction, "project", id, &validate_projection)?;
-                    continue;
-                };
-                let source: Value = studio_json::from_str(raw)?;
-                let prior = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [&id], |row| row.get::<_, Option<String>>(0),
-                ).optional()?.flatten();
-                let prior = prior
-                    .map(|payload| studio_json::from_str::<Value>(&payload))
-                    .transpose()?;
-                let value = prior.as_ref().and_then(|payload| payload.get("value"));
-                let readiness =
-                    project_context::<studio_runtime_schema::project_projection::ProjectReadiness>(
-                        value.and_then(|value| value.get("layrReadiness")),
-                    )?;
-                let ready = matches!(&readiness, studio_runtime_schema::queue_command::Field::Value(context) if context.state == studio_runtime_schema::project_projection::ReadinessState::Ready);
-                let (sync, vault) = if ready && !state_dir.is_empty() {
-                    let cached_sync = vault_snapshot.sync_view(id, &source)?;
-                    let cached_vault = vault_snapshot.view(id, &source)?;
-                    (
-                        project_context(cached_sync.as_ref())?,
-                        project_context(cached_vault.as_ref())?,
-                    )
-                } else {
-                    (
-                        project_context(value.and_then(|value| value.get("layrSync")))?,
-                        project_context(value.and_then(|value| value.get("vault")))?,
-                    )
-                };
-                let peer_leads =
-                    crate::project_projection::peer_leads_of(transaction, &project.id)?;
-                if let Some(projected) = crate::project_projection::project_record(
-                    *project,
-                    readiness,
-                    sync,
-                    vault,
-                    &peer_leads,
-                ) {
-                    SyncDocumentsRepository::put_entity(
-                        transaction,
-                        "project",
-                        id,
-                        projected,
-                        false,
-                    )?;
                 }
             }
         }
@@ -1463,21 +1338,6 @@ fn project_vault_source(project: &Value) -> Option<&str> {
                 .and_then(Value::as_str)
                 .filter(|id| !id.is_empty())
         })
-}
-
-fn project_context<T: serde::de::DeserializeOwned>(
-    value: Option<&Value>,
-) -> StoreResult<studio_runtime_schema::queue_command::Field<T>> {
-    use studio_runtime_schema::queue_command::Field;
-    match value {
-        None => Ok(Field::Missing),
-        Some(Value::Null) => Ok(Field::Null),
-        Some(value) => {
-            let studio_runtime_schema::json_object::JsonObject(context) =
-                serde::Deserialize::deserialize(value)?;
-            Ok(Field::Value(context))
-        }
-    }
 }
 
 fn put_projection(
@@ -2910,7 +2770,6 @@ mod tests {
                     "INSERT INTO runtime_projects(id,record) VALUES('good',?1)",
                     [r#"{"recordKind":"live","id":"good","path":"/good"}"#],
                 )?;
-                SyncDocumentsRepository::put_entity(tx, "project", "bad", json!({"id":"bad","name":"last known"}), false)?;
                 SyncDocumentsRepository::put_entity(tx, "peerTeam", "team", json!({"id":"team","name":"last known","projectPath":"/bad","members":["a","b"]}), false)?;
                 Ok(())
             })
@@ -2922,13 +2781,13 @@ mod tests {
         store.transaction(move |tx| {
             let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
             maintain_entity_projections_with_server_id(tx, "", None, &snapshot, &rooms, |_, _, _, _| true)?;
-            let count: i64 = tx.query_row("SELECT count(*) FROM sync_entities WHERE collection='project' AND id='good' AND deleted=0", [], |row| row.get(0))?;
-            assert_eq!(count, 1);
-            for (collection, id) in [("project", "bad"), ("peerTeam", "team")] {
-                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=0", [collection, id], |row| row.get(0))?;
-                let payload: Value = studio_json::from_str(&payload)?;
-                assert_eq!(payload["value"]["name"], "last known");
-            }
+            // Project documents are built at read time: the row that does not decode has
+            // none, the good row has one.
+            assert!(crate::entity_scope::direct_document(tx, "project", "good")?.is_some());
+            assert!(crate::entity_scope::direct_document(tx, "project", "bad")?.is_none());
+            let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team' AND deleted=0", [], |row| row.get(0))?;
+            let payload: Value = studio_json::from_str(&payload)?;
+            assert_eq!(payload["value"]["name"], "last known");
             Ok(())
         }).await.unwrap();
     }
@@ -3027,8 +2886,6 @@ mod tests {
     use rusqlite::Connection;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
     use std::cell::RefCell;
-    use std::fs;
-    use studio_runtime_store::ProjectsRepository;
 
     thread_local! {
         static TRACED_SQL: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
@@ -4473,182 +4330,6 @@ mod tests {
             Err(SyncPolicyError::InvalidStoredObject { scope, id })
                 if scope == "uiPreferences" && id == "user"
         ));
-    }
-
-    /// The sidebar chip reads the Mac sync report of each round, not the report that an
-    /// older build left in the projected entity (Python `codex_vm_agents.project_sync`).
-    #[tokio::test]
-    async fn maintained_project_projection_reads_the_current_mac_sync_report() {
-        let root = tempfile::tempdir().expect("isolated state directory");
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("open isolated runtime store");
-        let source = "/workspace/Synced";
-        let layr_id = sha256_hex(source.as_bytes());
-        let folder = store.root().join("linux-vm/layr-projects").join(&layr_id);
-        fs::create_dir_all(folder.join("sync")).unwrap();
-        fs::write(
-            folder.join("project.json"),
-            json!({"projectId":layr_id,"source":root.path()}).to_string(),
-        )
-        .unwrap();
-        fs::write(
-            folder.join("sync/status.json"),
-            json!({"state":"conflict","conflicts":["a.txt"],"choices":[],"withAgent":[],"deletes":0,"reason":null,"at":5.0,"sent":2}).to_string(),
-        )
-        .unwrap();
-        let project = json!({"recordKind":"live","id":source,"path":source,"peerTeams":[],"projectAliases":[{"serverId":"local","projectId":source,"name":"Synced"}]});
-        let other = json!({"recordKind":"live","id":"/workspace/Plain","path":"/workspace/Plain","peerTeams":[]});
-        let records = [
-            (source.to_owned(), project.clone()),
-            ("/workspace/Plain".to_owned(), other.clone()),
-        ];
-        let snapshot = ProjectVaultSnapshot::capture(store.root(), &records);
-        let state_dir = store.root().to_string_lossy().into_owned();
-        let expected = json!({
-            "projectId":layr_id,"state":"conflict","enabled":true,"conflicts":["a.txt"],
-            "choices":[],"withAgent":[],"deletes":0,"reason":null,
-        });
-        store
-            .transaction(move |transaction| {
-                for record in [&project, &other] {
-                    ProjectsRepository::put_project(transaction, record)?;
-                    let mut prior = record.clone();
-                    prior["layrReadiness"] = json!({"state":"ready"});
-                    prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
-                    SyncDocumentsRepository::put_entity(
-                        transaction,
-                        "project",
-                        record["id"].as_str().unwrap(),
-                        prior,
-                        false,
-                    )?;
-                }
-                let rooms = crate::sync_entity_context::RoomDirectory::load(transaction)?;
-                maintain_entity_projections_with_server_id(
-                    transaction,
-                    &state_dir,
-                    None,
-                    &snapshot,
-                    &rooms,
-                    |_, _, _, _| true,
-                )?;
-                let read = |id: &str| -> Result<Value, StoreError> {
-                    let payload: String = transaction.query_row(
-                        "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                        [id],
-                        |row| row.get(0),
-                    )?;
-                    Ok(studio_json::from_str(&payload)?)
-                };
-                assert_eq!(read(source)?["value"]["layrSync"], expected);
-                // A project without a Mac folder shows no sync report.
-                assert!(read("/workspace/Plain")?["value"].get("layrSync").is_none());
-                assert!(snapshot.matches_entity_projections(transaction)?);
-                Ok::<_, StoreError>(())
-            })
-            .await
-            .expect("maintain project projection");
-    }
-
-    #[tokio::test]
-    async fn maintained_project_projection_matches_python_vault_corpus_and_surfaces_bad_records() {
-        let cases: Vec<Value> =
-            studio_json::from_str(include_str!("../tests/vault/project-view-cases.json"))
-                .expect("project vault corpus");
-        for case in cases {
-            let root = tempfile::tempdir().expect("isolated state directory");
-            let store = RuntimeStore::open(Some(root.path()))
-                .await
-                .expect("open isolated runtime store");
-            let project_id = case["projectId"]
-                .as_str()
-                .expect("fixture project id")
-                .to_owned();
-            let folder = store
-                .root()
-                .join("linux-vm/layr-projects")
-                .join(&project_id);
-            fs::create_dir_all(&folder).unwrap();
-            for (name, value) in case["records"].as_object().unwrap() {
-                fs::write(folder.join(name), studio_json::to_vec(value).unwrap()).unwrap();
-            }
-            if let Some(records) = case.get("rawRecords").and_then(Value::as_object) {
-                for (name, contents) in records {
-                    fs::write(folder.join(name), contents.as_str().unwrap()).unwrap();
-                }
-            }
-            let workspace = root.path().join("workspace");
-            fs::create_dir(&workspace).unwrap();
-            let mut project = case["project"].clone();
-            project["recordKind"] = json!("live");
-            if let Some(aliases) = project
-                .get_mut("projectAliases")
-                .and_then(Value::as_array_mut)
-            {
-                for alias in aliases {
-                    alias["serverId"] = json!("local");
-                    alias["name"] = json!("Project");
-                }
-            }
-            project["path"] = json!(workspace.to_string_lossy());
-            project["peerTeams"] = json!([]);
-            let prior = project.clone();
-            let snapshot = ProjectVaultSnapshot::capture(
-                store.root(),
-                &[(project["id"].as_str().unwrap().to_owned(), project.clone())],
-            );
-
-            let state_dir = store.root().to_string_lossy().into_owned();
-            let expected = case["expected"].clone();
-            let expected_error = case.get("expectedError").is_some();
-            let transaction_project_id = project["id"]
-                .as_str()
-                .expect("fixture project record ID")
-                .to_owned();
-            let result = store.transaction(move |transaction| {
-                ProjectsRepository::put_project(transaction, &project)?;
-                let mut prior = prior;
-                prior["layrReadiness"] = json!({"state":"ready"});
-                prior["layrSync"] = json!({"projectId":"old","state":"synced","enabled":true,"conflicts":[],"choices":[],"withAgent":[],"deletes":0});
-                prior["vault"] = json!({"projectId":"old","state":"none"});
-                SyncDocumentsRepository::put_entity(
-                    transaction,
-                    "project",
-                    project["id"].as_str().unwrap(),
-                    prior,
-                    false,
-                )?;
-                let rooms = crate::sync_entity_context::RoomDirectory::load(transaction)?;
-                maintain_entity_projections_with_server_id(
-                    transaction,
-                    &state_dir,
-                    None,
-                    &snapshot,
-                    &rooms,
-                    |_, _, _, _| true,
-                )?;
-                let payload: String = transaction.query_row(
-                    "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                    [transaction_project_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                let payload: Value = studio_json::from_str(&payload)?;
-                assert_eq!(payload["value"]["vault"], expected);
-                Ok(())
-            }).await;
-            if expected_error {
-                assert!(matches!(
-                    result,
-                    Err(StoreError::InvalidStoredRecord {
-                        object: "vault.json",
-                        id,
-                    }) if id == project_id
-                ));
-            } else {
-                result.expect("maintain project projection");
-            }
-        }
     }
 }
 

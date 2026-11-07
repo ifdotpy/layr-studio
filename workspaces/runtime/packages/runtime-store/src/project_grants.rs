@@ -115,6 +115,11 @@ pub fn check_triggers_sql() -> String {
 pub(crate) fn install(transaction: &Transaction<'_>) -> StoreResult<()> {
     transaction.execute_batch(&tables_sql())?;
     transaction.execute_batch(&check_triggers_sql())?;
+    // A grant change marks its project's document (`durable_seq`); a reduced schema
+    // without the change source has nothing to mark.
+    if crate::schema::table_exists(transaction, "durable_rows")? {
+        transaction.execute_batch(&crate::durable_seq::grant_mark_triggers_sql())?;
+    }
     Ok(())
 }
 
@@ -166,7 +171,7 @@ pub fn has_active_peer(transaction: &Transaction<'_>, peer: &str) -> StoreResult
 }
 
 /// Every row, active or revoked, for the owner's list.
-pub fn all_rows(transaction: &Transaction<'_>) -> StoreResult<Vec<GrantRow>> {
+pub fn all_rows(transaction: &rusqlite::Connection) -> StoreResult<Vec<GrantRow>> {
     let mut query = transaction.prepare(
         "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label
          FROM project_grants ORDER BY created_at,grant_id,capability",

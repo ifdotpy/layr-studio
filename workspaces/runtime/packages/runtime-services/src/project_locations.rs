@@ -2,7 +2,7 @@
 use crate::event_write::{python_json, truthy};
 pub use crate::relocation::RelocationError as LocationError;
 use crate::relocation::{invalid, timestamp, validate};
-use rusqlite::{OptionalExtension, Transaction};
+use rusqlite::Transaction;
 use serde::{Deserialize, Serialize};
 use studio_json::{Value, json};
 #[cfg(test)]
@@ -1000,10 +1000,12 @@ pub fn location_admission(
     project: &str,
     actor: Option<(&str, i64)>,
 ) -> Result<LocationAdmission, LocationError> {
-    let seq=db.query_row(
-        "SELECT s.seq FROM sync_entities s JOIN runtime_projects p ON p.id=s.id WHERE s.collection='project' AND s.id=?1 AND s.deleted=0",
-        [project],|row|row.get::<_,i64>(0),
-    ).optional()?.ok_or(LocationError::Refused("The project changed before location reservation"))?;
+    let seq = studio_runtime_store::ProjectsRepository::document_version(db, project)?
+        .filter(|(_, live)| *live)
+        .map(|(seq, _)| seq)
+        .ok_or(LocationError::Refused(
+            "The project changed before location reservation",
+        ))?;
     Ok(LocationAdmission {
         project: project.into(),
         seq,

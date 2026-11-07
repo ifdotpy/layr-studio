@@ -101,6 +101,7 @@ mod m2026_11_06_immutable_rows;
 mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
 mod m2026_11_06_process_exit_check;
+mod m2026_11_06_project_read_time;
 pub(crate) mod m2026_11_06_start_attempt_on_turns;
 mod m2026_11_06_status_on_chats;
 
@@ -1673,6 +1674,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_enum_column_checks::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-project-read-time",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Project copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_project_read_time::apply(c.transaction),
     },
 ];
 

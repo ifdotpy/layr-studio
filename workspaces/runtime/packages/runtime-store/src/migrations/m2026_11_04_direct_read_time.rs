@@ -22,11 +22,21 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     }
     // A new number for each existing row; the triggers number later writes.
     crate::durable_seq::install(tx)?;
-    let list = crate::DIRECT_COLLECTIONS
-        .iter()
-        .map(|collection| format!("'{collection}'"))
-        .collect::<Vec<_>>()
-        .join(",");
+    // The collections of this step; later steps move more collections themselves.
+    let list = [
+        "plan",
+        "annotation",
+        "rule",
+        "request",
+        "questionHistory",
+        "complaint",
+        "edge",
+        "chat",
+    ]
+    .iter()
+    .map(|collection| format!("'{collection}'"))
+    .collect::<Vec<_>>()
+    .join(",");
     let copies: bool = tx.query_row(
         &format!("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection IN ({list}))"),
         [],

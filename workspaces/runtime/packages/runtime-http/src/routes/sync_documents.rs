@@ -237,15 +237,12 @@ pub(crate) async fn pull(
                         .map_err(map_sync_store_error)?
                 {
                     // Under steady writes the commit generation always differs from the last
-                    // maintenance. The projections are still current when this snapshot's
-                    // project payloads already carry the vault views just captured, so serve
-                    // the page without taking the global maintenance lock. Nothing is marked
-                    // here: the snapshot may predate the sampled generation.
+                    // maintenance. Project documents are built at read time, so a complete
+                    // seed is current: serve the page without taking the global maintenance
+                    // lock. Nothing is marked here: the snapshot may predate the sampled
+                    // generation.
                     let current = sync_policy::has_complete_entity_seed(connection)
-                        .map_err(map_sync_store_error)?
-                        && vault_snapshot
-                            .matches_entity_projections(connection)
-                            .map_err(map_sync_store_error)?;
+                        .map_err(map_sync_store_error)?;
                     if !current {
                         return Ok(EntityPullResult::NeedsMaintenance(generation));
                     }
@@ -405,9 +402,6 @@ async fn pull_with_maintenance(
 
                     if sync_policy::has_complete_entity_seed(transaction)
                         .map_err(map_sync_store_error)?
-                        && vault_snapshot
-                            .matches_entity_projections(transaction)
-                            .map_err(map_sync_store_error)?
                     {
                         let response = pull_entities(
                             transaction,
@@ -1624,137 +1618,6 @@ mod vault_maintenance_tests {
             .await
             .expect("second pull succeeds after the first maintenance commits");
         state.shutdown_mutations().await;
-    }
-
-    #[tokio::test]
-    async fn entity_pull_reprojects_when_cached_vault_changes_without_a_store_write() {
-        let directory = tempfile::tempdir().expect("isolated state directory");
-        let store = Arc::new(
-            RuntimeStore::open(Some(directory.path()))
-                .await
-                .expect("runtime store opens"),
-        );
-        let source = "/workspace/Project One";
-        let project_id = studio_runtime_store::sha256_hex(source.as_bytes());
-        let project = json!({
-            "id": source,
-            "path": source,
-            "peerTeams": [],
-            "projectAliases": [{
-                "serverId": "fixture-server",
-                "projectId": source,
-                "name": "Project One",
-            }],
-        });
-        let project_folder = store
-            .root()
-            .join("linux-vm/layr-projects")
-            .join(&project_id);
-        tokio::fs::create_dir_all(&project_folder)
-            .await
-            .expect("vault folder is created");
-        tokio::fs::write(
-            project_folder.join("vault.json"),
-            br#"{"configured":true,"prefix":"project"}"#,
-        )
-        .await
-        .expect("vault record is written");
-        tokio::fs::write(
-            project_folder.join("vault-site.json"),
-            br#"{"site":"https://before.example/"}"#,
-        )
-        .await
-        .expect("site record is written");
-
-        let source_for_store = source.to_owned();
-        store
-            .transaction(move |transaction| {
-                ProjectsRepository::put_project(transaction, &project)?;
-                let mut ready_project = project.clone();
-                ready_project["layrReadiness"] = json!({"state":"ready","projectId":project_id});
-                ready_project["layrSync"] = json!({
-                    "projectId":project_id,
-                    "state":"synced",
-                    "enabled":true,
-                    "conflicts":[],
-                    "choices":[],
-                    "withAgent":[],
-                    "deletes":0,
-                });
-                SyncDocumentsRepository::put_entity(
-                    transaction,
-                    "project",
-                    &source_for_store,
-                    ready_project,
-                    false,
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("project source and ready entity are stored");
-        let validators = crate::validation::Registry::compile(&[(
-            "GET".to_owned(),
-            "/api/sync/pull".to_owned(),
-        )])
-        .expect("sync pull validators compile");
-        let state_dir = store.root().to_string_lossy().into_owned();
-        let pull = || {
-            pull_with_maintenance(
-                store.clone(),
-                state_dir.clone(),
-                validators.clone(),
-                0,
-                100,
-                false,
-                0,
-                false,
-                None,
-                0,
-                || -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
-                    Box::pin(async {})
-                },
-            )
-        };
-        let first_pull = pull().await.expect("entity pull succeeds");
-        assert!(response_value(&first_pull)["documents"].is_array());
-        let first_payload: String = store
-            .test_reader()
-            .expect("read store")
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                [source],
-                |row| row.get(0),
-            )
-            .expect("project projection exists");
-        let first_payload: Value = studio_json::from_str(&first_payload).expect("JSON payload");
-        assert_eq!(
-            first_payload["value"]["vault"]["site"],
-            "https://before.example/"
-        );
-
-        tokio::fs::write(
-            project_folder.join("vault-site.json"),
-            br#"{"site":"https://after.example/"}"#,
-        )
-        .await
-        .expect("cached vault changes without a SQLite write");
-        let second_pull = pull().await.expect("entity pull succeeds");
-        assert!(response_value(&second_pull)["documents"].is_array());
-        let second_payload: String = store
-            .test_reader()
-            .expect("read store")
-            .query_row(
-                "SELECT payload FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-                [source],
-                |row| row.get(0),
-            )
-            .expect("updated project projection exists");
-        let second_payload: Value = studio_json::from_str(&second_payload).expect("JSON payload");
-        assert_eq!(
-            second_payload["value"]["vault"]["site"],
-            "https://after.example/"
-        );
-        assert_ne!(first_payload, second_payload);
     }
 
     /// Steady writes keep moving the commit generation. A pull whose projections still match

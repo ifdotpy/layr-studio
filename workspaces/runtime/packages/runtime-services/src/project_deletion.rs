@@ -4,7 +4,7 @@ use crate::{
     agent_lifecycle_runtime::{self, LifecyclePorts},
     agent_management::{Action, ManagementError},
 };
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -136,13 +136,9 @@ fn delete_in_transaction(
         };
     let (_, raw_project) = ProjectsRepository::get(tx, &request.id)?.ok_or(Error::NotFound)?;
     let project = decode_project(&request.id, &raw_project)?;
-    let seq: Option<i64> = tx
-        .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=0",
-            [&request.id],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let seq = ProjectsRepository::document_version(tx, &request.id)?
+        .filter(|(_, live)| *live)
+        .map(|(seq, _)| seq);
     if seq != Some(request.expected_project_seq) {
         return Err(Error::Sequence);
     }
@@ -715,13 +711,7 @@ pub(crate) fn admission_version(
     db: &Connection,
     id: &str,
 ) -> Result<Option<(i64, bool)>, StoreError> {
-    let version: Option<(i64, bool)> = db
-        .query_row(
-            "SELECT seq,deleted FROM sync_entities WHERE collection='project' AND id=?1",
-            [id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
+    let version = ProjectsRepository::document_version(db, id)?.map(|(seq, live)| (seq, !live));
     version
         .map(|(seq, deleted)| {
             Ok((

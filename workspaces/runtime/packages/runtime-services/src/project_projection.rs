@@ -100,11 +100,57 @@ pub fn active_peer_leads(project_id: &str, grants: &[GrantRow]) -> Vec<PeerLead>
 /// The peer leads of a local project, read from the store. Used by every writer of a
 /// peer team, so the team entities and the project record agree.
 pub fn peer_leads_of(
-    tx: &rusqlite::Transaction<'_>,
+    connection: &rusqlite::Connection,
     project_id: &str,
 ) -> StoreResult<Vec<PeerLead>> {
-    let grants = project_grants::all_rows(tx)?;
+    let grants = project_grants::all_rows(connection)?;
     Ok(active_peer_leads(project_id, &grants))
+}
+
+/// The `project` document of local project `id`, built at read time from its stored
+/// row `raw` and its grants. None when the project is removed or hidden from the
+/// sidebar, or when its row does not decode (the reader skips it and reports it).
+pub fn local_project_view(
+    connection: &rusqlite::Connection,
+    id: &str,
+    raw: &str,
+) -> StoreResult<Option<studio_json::OwnedRawJson>> {
+    let record: studio_runtime_schema::project_record::ProjectRecord =
+        match studio_json::from_str(raw) {
+            Ok(record) => record,
+            Err(error) => {
+                eprintln!("ERROR project projection skipped row id={id}: {error}");
+                return Ok(None);
+            }
+        };
+    let studio_runtime_schema::project_record::ProjectRecord::Live(project) = record else {
+        return Ok(None);
+    };
+    if project.sidebar_hidden.value() == Some(&true) {
+        return Ok(None);
+    }
+    let peer_leads = peer_leads_of(connection, &project.id)?;
+    project_record(
+        *project,
+        Field::Missing,
+        Field::Missing,
+        Field::Missing,
+        &peer_leads,
+    )
+    .map(|projection| {
+        // An empty team list is left out, as in the stored record.
+        let mut view = studio_json::to_value(&projection)?;
+        if let Some(fields) = view.as_object_mut()
+            && fields
+                .get("peerTeams")
+                .is_some_and(|teams| teams.as_array().is_some_and(Vec::is_empty))
+        {
+            fields.remove("peerTeams");
+        }
+        studio_json::OwnedRawJson::from_string(studio_json::to_string(&view)?)
+    })
+    .transpose()
+    .map_err(Into::into)
 }
 
 pub fn project_record(

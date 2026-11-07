@@ -122,6 +122,7 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
     "complaint",
     "edge",
     "chat",
+    "project",
 ];
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its

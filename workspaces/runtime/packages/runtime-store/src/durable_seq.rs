@@ -110,6 +110,10 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_rules"),
     DurableTable::new("approvals", "request"),
     DurableTable::record("runtime_complaints"),
+    // Projects: a `project` document per live local project (`runtime_projects`, whose
+    // entry the project grant writers also mark) and per mirrored peer project.
+    DurableTable::record("runtime_projects"),
+    DurableTable::record("peer_projects"),
     // Chat membership edges: an `edge` document per chat edge, built at read time.
     DurableTable::new("graph_edges", "target"),
     // Window sources: a row in its window (`TASK_WINDOW`, `MONITOR_WINDOW`) is sent
@@ -209,9 +213,29 @@ END;
     )
 }
 
+/// Triggers that give a live local project a new number when one of its grants changes:
+/// its `project` document lists the active peer leads. A gone project stays gone.
+pub(crate) fn grant_mark_triggers_sql() -> String {
+    let mark = |row: &str| {
+        format!(
+            "UPDATE durable_rows SET seq={NEXT} WHERE tbl='runtime_projects' AND id={row}.local_project AND deleted=0;"
+        )
+    };
+    format!(
+        "CREATE TRIGGER IF NOT EXISTS durable_project_grants_insert AFTER INSERT ON project_grants BEGIN {new} END;
+         CREATE TRIGGER IF NOT EXISTS durable_project_grants_update AFTER UPDATE ON project_grants BEGIN {old} {new} END;
+         CREATE TRIGGER IF NOT EXISTS durable_project_grants_delete AFTER DELETE ON project_grants BEGIN {old} END;",
+        new = mark("NEW"),
+        old = mark("OLD"),
+    )
+}
+
 /// Number the rows of every opted-in table that have no entry yet (rows that predate
 /// the source) and install the triggers. Runs as a migration and on a fresh state.
 pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
+    if crate::schema::table_exists(tx, "project_grants")? {
+        tx.execute_batch(&grant_mark_triggers_sql())?;
+    }
     for table in DURABLE_TABLES {
         let name = table.name;
         // A table created later by its own migration is numbered when it exists.

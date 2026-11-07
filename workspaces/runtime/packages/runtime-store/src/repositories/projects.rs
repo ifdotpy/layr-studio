@@ -54,7 +54,8 @@ pub struct ProjectsRepository;
 
 impl ProjectsRepository {
     /// Distinguish a destructive project lifetime fence from sidebar-only removal.
-    /// The recorded sequence is the exact project tombstone's durable sequence.
+    /// The recorded sequence is the change number of the hide that retired the project
+    /// document (its `durable_rows` entry).
     pub fn record_destructive_removal(
         tx: &Transaction<'_>,
         id: &str,
@@ -62,7 +63,7 @@ impl ProjectsRepository {
         deleted_at: i64,
     ) -> StoreResult<()> {
         let seq: i64 = tx.query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1 AND deleted=1",
+            "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id=?1",
             [id],
             |row| row.get(0),
         )?;
@@ -91,9 +92,28 @@ impl ProjectsRepository {
             .flatten();
         let removal: Option<ProjectRemoval> =
             raw.map(|raw| studio_json::from_str(&raw)).transpose()?;
+        // The removal write itself takes a number above the recorded one; a later
+        // registration replaces the row and its removal.
         Ok(removal.is_some_and(|removal| {
-            removal.reason == ProjectRemovalReason::Delete && removal.sequence == seq
+            removal.reason == ProjectRemovalReason::Delete && removal.sequence <= seq
         }))
+    }
+
+    /// The change number of the `project` document of local project `id` and whether the
+    /// document is live (a live project not hidden from the sidebar). None when the
+    /// project has no number.
+    pub fn document_version(connection: &Connection, id: &str) -> StoreResult<Option<(i64, bool)>> {
+        Ok(connection
+            .query_row(
+                "SELECT d.seq, d.deleted=0 AND p.id IS NOT NULL
+                   AND json_extract(p.record,'$.removal') IS NULL
+                   AND json_type(p.record,'$.sidebarHidden') IS NOT 'true'
+                 FROM durable_rows d LEFT JOIN runtime_projects p ON p.id=d.id
+                 WHERE d.tbl='runtime_projects' AND d.id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?)
     }
 
     pub fn list(connection: &Connection) -> StoreResult<Vec<(String, Value)>> {
@@ -319,19 +339,11 @@ impl ProjectsRepository {
             );
         }
         let record = studio_json::to_string(&project)?;
-        let stored: String = transaction.query_row(
+        // The `project` document is built at read time from this row.
+        transaction.execute(
             "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record RETURNING record",
+             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
             params![project.id, record],
-            |row| row.get(0),
-        )?;
-        let record = studio_json::value::RawValue::from_string(stored)?;
-        SyncDocumentsRepository::put_entity(
-            transaction,
-            "project",
-            &project.id,
-            record,
-            project.sidebar_hidden.value() == Some(&true),
         )?;
         Ok(())
     }
@@ -347,13 +359,6 @@ impl ProjectsRepository {
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
             params![id, record],
         )?;
-        SyncDocumentsRepository::put_entity(
-            transaction,
-            "project",
-            id,
-            project.clone(),
-            project.get("sidebarHidden").and_then(Value::as_bool) == Some(true),
-        )?;
         Ok(())
     }
 
@@ -364,13 +369,11 @@ impl ProjectsRepository {
         patch: &T,
     ) -> StoreResult<()> {
         let patch = studio_json::to_string(patch)?;
-        let (record, hidden): (String, bool) = transaction.query_row(
-            "UPDATE runtime_projects SET record=json_patch(record,json(?2)) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL RETURNING record,json_type(record,'$.sidebarHidden')='true'",
+        transaction.query_row(
+            "UPDATE runtime_projects SET record=json_patch(record,json(?2)) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL RETURNING id",
             params![id, patch],
-            |row| Ok((row.get(0)?, row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
+            |row| row.get::<_, String>(0),
         )?;
-        let record = studio_json::value::RawValue::from_string(record)?;
-        SyncDocumentsRepository::put_entity(transaction, "project", id, record, hidden)?;
         Ok(())
     }
 
@@ -387,7 +390,6 @@ impl ProjectsRepository {
             params![id, existing.to_string()],
         )? > 0;
         if removed {
-            SyncDocumentsRepository::put_entity(transaction, "project", id, json!({}), true)?;
             let mut statement = transaction.prepare_cached(
                 "SELECT id FROM sync_entities WHERE collection='peerTeam' AND deleted=0 \
                  AND json_extract(payload,'$.value.projectPath')=?1",
@@ -683,8 +685,8 @@ mod tests {
         let mut db = Connection::open_in_memory().expect("database");
         db.execute_batch(
             "CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
-            CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,deleted INTEGER);
-            INSERT INTO sync_entities VALUES('project','p',17,1);",
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER);
+            INSERT INTO durable_rows VALUES('runtime_projects','p',17,0,0);",
         )
         .expect("schema");
         let tx = db.transaction().expect("transaction");
@@ -701,7 +703,10 @@ mod tests {
         let record: Value = studio_json::from_str(&record).expect("project");
         assert_eq!(record["removal"]["reason"], "delete");
         assert_eq!(record["removal"]["sequence"], 17);
-        assert!(!ProjectsRepository::is_destructive_removal(&tx, "p", 18).expect("other lifetime"));
+        // A version before the removal fence is an earlier lifetime.
+        assert!(
+            !ProjectsRepository::is_destructive_removal(&tx, "p", 16).expect("earlier lifetime")
+        );
         assert!(
             ProjectsRepository::list(&tx)
                 .expect("visible projects")

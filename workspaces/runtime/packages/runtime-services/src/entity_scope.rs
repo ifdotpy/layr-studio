@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 7] = [
+const DIRECT_SOURCES: [DirectSource; 9] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -473,7 +473,21 @@ const DIRECT_SOURCES: [DirectSource; 7] = [
         table: durable_seq::CHAT_VIEW_MARK,
         collections: &["chat"],
     },
+    // Local projects; a grant change marks the project's entry (`durable_seq`).
+    DirectSource {
+        table: "runtime_projects",
+        collections: &["project"],
+    },
+    // The mirrored projects of paired servers (`peer:` ids).
+    DirectSource {
+        table: PEER_PROJECTS,
+        collections: &["project"],
+    },
 ];
+
+/// The table of mirrored peer projects; their ids start with [`PEER_PROJECT_PREFIX`].
+const PEER_PROJECTS: &str = "peer_projects";
+const PEER_PROJECT_PREFIX: &str = "peer:";
 
 /// Units of the direct sources in `(after, through]`, at most `fetch` per source, with
 /// the delete rule of [`work_units`]. `id` selects one row. These collections belong
@@ -593,12 +607,26 @@ fn direct_docs(
             "complaint",
             crate::sync_policy::complaint_view(connection, id, &raw),
         ),
+        "runtime_projects" => (
+            "project",
+            crate::project_projection::local_project_view(connection, id, &raw),
+        ),
+        PEER_PROJECTS => (
+            "project",
+            studio_json::OwnedRawJson::from_string(raw.clone())
+                .map(Some)
+                .map_err(StoreError::from),
+        ),
         _ => return Err(StoreError::RecordContract("unknown direct source")),
     };
     // A row that does not decode has no document: the stream skips it and reports it here.
     match view {
         Ok(Some(value)) if wanted.contains(collection) => {
             rows.push(upsert(collection, id, seq, value)?);
+        }
+        // A hidden or removed project leaves its readers' lists: a delete in a delta.
+        Ok(None) if collection == "project" && !snapshot => {
+            rows.extend(tombstones(&[collection], wanted, id, seq));
         }
         Ok(_) => {}
         Err(error) => {
@@ -968,9 +996,12 @@ pub fn direct_document(
             .into_iter()
             .next());
     }
+    // A `project` id names its source: a peer mirror or a local project.
+    let peer = collection == "project" && id.starts_with(PEER_PROJECT_PREFIX);
     let source = DIRECT_SOURCES
         .iter()
-        .find(|source| source.collections.contains(&collection))
+        .filter(|source| source.collections.contains(&collection))
+        .find(|source| collection != "project" || (source.table == PEER_PROJECTS) == peer)
         .ok_or(StoreError::RecordContract("not a direct collection"))?;
     let seq: Option<i64> = connection
         .prepare_cached("SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2 AND deleted=0")?

@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use rusqlite::Transaction;
 use studio_json::json;
-use studio_runtime_store::{RuntimeStore, StoreError, SyncDocumentsRepository};
+use studio_runtime_store::{RuntimeStore, StoreError};
 use tokio::sync::{Notify, watch};
 
 use crate::multi_server_orchestration::{ExchangeOutcome, OrchestrationDriver};
@@ -147,35 +147,38 @@ fn mirrored(
     result
 }
 
-/// Make the published entities of `server` equal to `entities`; no entities removes them all.
+/// Make the mirrored projects of `server` equal to `entities`; no entities removes them
+/// all. Their `project` documents are built at read time from `peer_projects`.
 fn publish(
     tx: &Transaction<'_>,
     server: &str,
     entities: &BTreeMap<String, ProjectMirror>,
 ) -> Result<(), StoreError> {
     let prefix = format!("{ID_PREFIX}{server}:");
-    let mut statement = tx.prepare(
-        "SELECT id FROM sync_entities WHERE collection='project' AND deleted=0 \
-         AND substr(id,1,length(?1))=?1",
-    )?;
+    let mut statement =
+        tx.prepare("SELECT id FROM peer_projects WHERE substr(id,1,length(?1))=?1")?;
     let stale = statement
         .query_map([&prefix], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     drop(statement);
     for id in stale.iter().filter(|id| !entities.contains_key(*id)) {
-        SyncDocumentsRepository::put_entity(tx, "project", id, (), true)?;
+        tx.execute("DELETE FROM peer_projects WHERE id=?1", [id])?;
     }
     for (id, value) in entities {
-        SyncDocumentsRepository::put_entity(tx, "project", id, value, false)?;
+        tx.execute(
+            "INSERT INTO peer_projects(id,record) VALUES(?1,?2) \
+             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
+            rusqlite::params![id, studio_json::to_string(value)?],
+        )?;
     }
     Ok(())
 }
 
-/// Servers that have published entities.
+/// Servers that have mirrored projects.
 fn published_servers(tx: &Transaction<'_>) -> Result<BTreeSet<String>, StoreError> {
     let mut statement = tx.prepare(
-        "SELECT DISTINCT json_extract(payload,'$.value.homeServerId') FROM sync_entities \
-         WHERE collection='project' AND deleted=0 AND substr(id,1,?1)=?2",
+        "SELECT DISTINCT json_extract(record,'$.homeServerId') FROM peer_projects \
+         WHERE substr(id,1,?1)=?2",
     )?;
     let servers = statement
         .query_map(
@@ -578,9 +581,8 @@ mod tests {
     async fn published(store: &RuntimeStore) -> BTreeMap<String, Value> {
         store
             .read_async("test", |tx| {
-                let mut statement = tx.prepare(
-                    "SELECT id,payload FROM sync_entities WHERE collection='project' AND deleted=0 AND id LIKE 'peer:%' ORDER BY id",
-                )?;
+                let mut statement =
+                    tx.prepare("SELECT id,record FROM peer_projects ORDER BY id")?;
                 let rows = statement
                     .query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -589,7 +591,7 @@ mod tests {
                 Ok::<_, StoreError>(
                     rows.into_iter()
                         .map(|(id, payload)| {
-                            (id, studio_json::from_str::<Value>(&payload).unwrap()["value"].clone())
+                            (id, studio_json::from_str::<Value>(&payload).unwrap())
                         })
                         .collect(),
                 )

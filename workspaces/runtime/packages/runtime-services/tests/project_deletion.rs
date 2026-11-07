@@ -147,7 +147,7 @@ async fn delete_with_ports(
     let reader = store.test_reader().expect("reader");
     let seq = reader
         .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
+            "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id=?1",
             [&id],
             |r| r.get(0),
         )
@@ -293,7 +293,7 @@ async fn project_deletion_receipt_survives_store_restart() {
     let reader = store.test_reader().expect("reader");
     let seq = reader
         .query_row(
-            "SELECT seq FROM sync_entities WHERE collection='project' AND id=?1",
+            "SELECT seq FROM durable_rows WHERE tbl='runtime_projects' AND id=?1",
             [&id],
             |r| r.get(0),
         )
