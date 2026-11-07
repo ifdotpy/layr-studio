@@ -1,3 +1,4 @@
+import { AgentSource } from "../generated/api.ts";
 import type { components } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 
@@ -70,7 +71,7 @@ export function agentIndicators(
 ): Map<string, ChatIndicator> {
   return new Map(
     agents
-      .filter((agent) => agent.source === "managed")
+      .filter((agent) => agent.source === AgentSource.managed)
       .map((agent) => [
         agent.id,
         formatAgentStatus(agent, pendingReads.get(agent.id)),

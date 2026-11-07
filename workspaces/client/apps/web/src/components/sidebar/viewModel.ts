@@ -1,3 +1,4 @@
+import { AgentSource, AgentStatus } from "../../generated/api.ts";
 import { computed, makeObservable } from "mobx";
 import type { components } from "../../generated/api.ts";
 import type { DeepReadonly } from "../../deepReadonly.ts";
@@ -103,7 +104,8 @@ export class SidebarChatView {
     const wait = this.agent.startWait;
     return wait?.reason === "workspace_copy" &&
       wait.epoch === this.agent.epoch &&
-      (this.agent.status === "queued" || this.agent.status === "starting")
+      (this.agent.status === AgentStatus.queued ||
+        this.agent.status === AgentStatus.starting)
       ? wait.progress
       : null;
   }
@@ -113,9 +115,9 @@ export class SidebarChatView {
       !!this.agent.pinned ||
       this.agent.inFlight ||
       this.agent.markRead?.read === false ||
-      this.agent.status === "running" ||
-      this.agent.status === "starting" ||
-      this.agent.status === "approval" ||
+      this.agent.status === AgentStatus.running ||
+      this.agent.status === AgentStatus.starting ||
+      this.agent.status === AgentStatus.approval ||
       this.indicator.kind === "unread" ||
       nowSeconds - this.activityAt < COMPACT_RECENT_WINDOW_SECONDS
     );
@@ -163,7 +165,7 @@ export function createSidebarViewModel(
     return [...collections.agents.values()]
       .filter(
         (a) =>
-          a.source === "managed" &&
+          a.source === AgentSource.managed &&
           a.isLead &&
           !a.sharedRoomId &&
           !a.movedTo &&

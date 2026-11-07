@@ -1,3 +1,4 @@
+import { AgentStatus } from "../../generated/api.ts";
 import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler, StrictMode } from "react";
@@ -345,7 +346,7 @@ it("renders only epoch-valid active workspace copy progress from summary facts",
     f.publish([
       {
         ...row,
-        status: "completed",
+        status: AgentStatus.completed,
         startWait: { reason: "workspace_copy", epoch: 1, progress },
       },
     ]);

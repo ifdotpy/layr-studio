@@ -1,3 +1,4 @@
+import { AgentSource } from "../generated/api.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { describe, expect, it } from "vitest";
 import {
@@ -79,7 +80,9 @@ it("sidebar and conversation trust the same supplied reason, not raw status flag
     label: "Working",
   });
   expect(
-    agentIndicators([{ id: "missing", source: "managed" }]).get("missing"),
+    agentIndicators([{ id: "missing", source: AgentSource.managed }]).get(
+      "missing",
+    ),
   ).toEqual({ kind: "loading", label: "" });
 });
 it("the pending read overlay applies only to the captured completed-result proof", () => {
