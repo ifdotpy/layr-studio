@@ -353,13 +353,6 @@ pub fn maintain_entity_projections_with_server_id(
             &validate_projection,
         )
     })?;
-    if table_exists(transaction, "user_terminals")? {
-        for terminal in studio_runtime_store::TerminalsRepository::list(transaction)? {
-            if let Some(id) = terminal.get("id").and_then(Value::as_str) {
-                crate::terminal_driver::publish_terminal(transaction, id)?;
-            }
-        }
-    }
     for (id, _) in peer_agents {
         crate::queue_write::publish_queue(transaction, id)?;
     }

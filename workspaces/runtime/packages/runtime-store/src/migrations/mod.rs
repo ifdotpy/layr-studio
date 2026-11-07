@@ -106,6 +106,7 @@ mod m2026_11_06_process_exit_check;
 mod m2026_11_06_project_read_time;
 pub(crate) mod m2026_11_06_start_attempt_on_turns;
 mod m2026_11_06_status_on_chats;
+mod m2026_11_06_terminal_read_time;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1707,6 +1708,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_observation_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-terminal-read-time",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Terminal copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_terminal_read_time::apply(c.transaction),
     },
 ];
 

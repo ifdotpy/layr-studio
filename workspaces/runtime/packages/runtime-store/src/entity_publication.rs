@@ -41,7 +41,6 @@ pub struct PendingEntities {
     /// Source rows of the derived Studio error list that changed.
     pub studio_errors: StudioErrorSources,
     pub queues: BTreeSet<String>,
-    pub terminals: BTreeSet<String>,
 }
 
 impl PendingEntities {
@@ -54,7 +53,6 @@ impl PendingEntities {
             && self.work.is_empty()
             && self.studio_errors.is_empty()
             && self.queues.is_empty()
-            && self.terminals.is_empty()
     }
 }
 
@@ -119,7 +117,6 @@ enum Source {
     Task,
     Work,
     QueueAsset,
-    Terminal,
     /// Read only by the Studio error list.
     Monitor,
     /// Read only by the Studio error list (dismissals).
@@ -141,7 +138,6 @@ impl Source {
             "runtime_tasks" => Some(Self::Task),
             "runtime_work" => Some(Self::Work),
             "runtime_assets" => Some(Self::QueueAsset),
-            "user_terminals" => Some(Self::Terminal),
             "runtime_monitors" => Some(Self::Monitor),
             "runtime_error_incidents" => Some(Self::Incident),
             "chats" => Some(Self::Chat),
@@ -169,7 +165,6 @@ impl Source {
             Self::Task => "runtime_tasks",
             Self::Work => "runtime_work",
             Self::QueueAsset => "runtime_assets",
-            Self::Terminal => "user_terminals",
             Self::Monitor => "runtime_monitors",
             Self::Incident => "runtime_error_incidents",
             Self::Chat => "chats",
@@ -290,7 +285,6 @@ pub(crate) fn pending(
                     | Source::Item
                     | Source::Task
                     | Source::Work
-                    | Source::Terminal
                     | Source::Monitor
                     | Source::Incident
                     | Source::Chat
@@ -346,20 +340,6 @@ pub(crate) fn pending(
                 )?;
                 for id in statement.query_map([], |row| row.get::<_, String>(0))? {
                     pending.queues.insert(id?);
-                }
-            }
-        }
-    }
-    for ((source, _), id) in &ids {
-        if *source == Source::Terminal {
-            if let Some(id) = id {
-                pending.terminals.insert(id.clone());
-            } else {
-                let mut statement = transaction.prepare_cached(
-                    "SELECT id FROM sync_entities WHERE collection='terminal' AND deleted=0",
-                )?;
-                for id in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.terminals.insert(id?);
                 }
             }
         }
@@ -440,7 +420,6 @@ pub(crate) fn pending(
             Source::Work => pending.work.insert(id),
             Source::Request
             | Source::QueueAsset
-            | Source::Terminal
             | Source::Monitor
             | Source::Incident
             | Source::Chat

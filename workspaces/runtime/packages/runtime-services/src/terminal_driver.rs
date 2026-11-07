@@ -1181,29 +1181,41 @@ fn new_id() -> Result<String, TerminalError> {
         .to_string())
 }
 
-/// Terminal collection owner. Output buffers and native process identity are
-/// excluded; close/delete publishes a tombstone in the source transaction.
-pub fn publish_terminal(
-    transaction: &studio_runtime_store::Transaction<'_>,
-    id: &str,
-) -> studio_runtime_store::StoreResult<()> {
-    let row = TerminalsRepository::get(transaction, id)?;
-    let (value, deleted) = match row.filter(|row| row.record.status() != Some("closed")) {
-        Some(row) => {
-            let mut value = row.record.value();
-            hide_process_identity(&mut value);
-            (value, false)
-        }
-        None => (Value::Null, true),
-    };
-    studio_runtime_store::SyncDocumentsRepository::put_entity(
-        transaction,
-        "terminal",
-        id,
-        value,
-        deleted,
-    )?;
-    Ok(())
+/// The `terminal` document of stored record `raw`, built at read time. Output buffers and
+/// native process identity stay out; a closed terminal has no document.
+pub(crate) fn terminal_view(
+    raw: &str,
+) -> studio_runtime_store::StoreResult<Option<studio_json::OwnedRawJson>> {
+    let mut value: Value = studio_json::from_str(raw)?;
+    if value.get("status").and_then(Value::as_str) == Some("closed") {
+        return Ok(None);
+    }
+    hide_process_identity(&mut value);
+    Ok(Some(studio_json::OwnedRawJson::from_string(
+        studio_json::to_string(&value)?,
+    )?))
+}
+
+#[cfg(test)]
+mod view_tests {
+    use studio_json::{Value, json};
+
+    #[test]
+    fn the_view_hides_process_identity_and_a_closed_terminal_has_none() {
+        let open =
+            json!({"id":"t","status":"running","_processIdentity":{"pid":1},"_closeRequestId":"r"});
+        let view = super::terminal_view(&open.to_string())
+            .expect("view")
+            .expect("open terminal");
+        let view: Value = studio_json::from_str(view.as_str()).expect("view JSON");
+        assert_eq!(view, json!({"id":"t","status":"running"}));
+        let closed = json!({"id":"t","status":"closed"});
+        assert!(
+            super::terminal_view(&closed.to_string())
+                .expect("view")
+                .is_none()
+        );
+    }
 }
 
 #[cfg(test)]

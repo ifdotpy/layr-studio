@@ -23,9 +23,6 @@ impl EntityPublisher for DefaultPublisher {
             ..Default::default()
         };
         let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
-        for id in &pending.terminals {
-            crate::terminal_driver::publish_terminal(transaction, id)?;
-        }
         for id in &pending.queues {
             crate::queue_write::publish_queue(transaction, id)?;
         }

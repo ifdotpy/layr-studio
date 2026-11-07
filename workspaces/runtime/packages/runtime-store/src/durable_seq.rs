@@ -122,6 +122,8 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     DurableTable::record("runtime_session_costs"),
     DurableTable::record("runtime_desktop_states"),
     DurableTable::record("runtime_models"),
+    // A `terminal` document per terminal; output writes leave `record` alone.
+    DurableTable::record("user_terminals"),
     // Chat membership edges: an `edge` document per chat edge, built at read time.
     DurableTable::new("graph_edges", "target"),
     // Window sources: a row in its window (`TASK_WINDOW`, `MONITOR_WINDOW`) is sent

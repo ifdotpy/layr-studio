@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 16] = [
+const DIRECT_SOURCES: [DirectSource; 17] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -512,6 +512,10 @@ const DIRECT_SOURCES: [DirectSource; 16] = [
     DirectSource {
         table: "runtime_models",
         collections: &["model"],
+    },
+    DirectSource {
+        table: "user_terminals",
+        collections: &["terminal"],
     },
 ];
 
@@ -673,6 +677,7 @@ fn direct_docs(
                 .map_or("", |source| source.collections[0]),
             observation_value(&raw),
         ),
+        "user_terminals" => ("terminal", crate::terminal_driver::terminal_view(&raw)),
         PEER_PROJECTS => (
             "project",
             studio_json::OwnedRawJson::from_string(raw.clone())
@@ -686,8 +691,9 @@ fn direct_docs(
         Ok(Some(value)) if wanted.contains(collection) => {
             rows.push(upsert(collection, id, seq, value)?);
         }
-        // A hidden or removed project leaves its readers' lists: a delete in a delta.
-        Ok(None) if collection == "project" && !snapshot => {
+        // A hidden project or a closed terminal leaves its readers' lists: a delete in a
+        // delta.
+        Ok(None) if matches!(collection, "project" | "terminal") && !snapshot => {
             rows.extend(tombstones(&[collection], wanted, id, seq));
         }
         Ok(_) => {}
