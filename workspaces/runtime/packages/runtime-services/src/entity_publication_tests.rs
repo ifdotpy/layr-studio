@@ -2762,3 +2762,255 @@ async fn sidebar_tail_marks_once_per_existing_commit_and_skips_replay_and_worker
         "worker tails do not invalidate a lead sidebar row"
     );
 }
+
+#[tokio::test]
+async fn sidebar_review_malformed_dependents_do_not_remove_healthy_lead_baseline_or_delta() {
+    for dependent in ["child", "monitor", "task"] {
+        let directory = tempfile::tempdir().expect("state");
+        let store = studio_runtime_store::RuntimeStore::open(Some(directory.path()))
+            .await
+            .expect("store");
+        seed_chat(&store, chat(json!({"autoWake":true,"status":"waiting"}))).await;
+        seed_chat(&store,json!({"compactions":0,"accountKey":"default","provider":"codex","id":"held-child","rootId":CHAT,"parentId":CHAT,"isLead":false,"epoch":1,"status":"idle"})).await;
+        store.transaction(move |tx| {
+            match dependent {
+                "child" => {tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.provider','broken') WHERE id='held-child'",[])?;}
+                "monitor" => {tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('bad-monitor',?1)",[json!({"id":"bad-monitor","agent":CHAT,"status":"running","command":7}).to_string()])?;}
+                "task" => {tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('bad-task',?1)",[json!({"id":"bad-task","agent":CHAT,"status":"running","kind":"command"}).to_string()])?;}
+                _ => unreachable!("fixture case"),
+            }
+            Ok(())
+        }).await.expect("pre-existing malformed dependent");
+        crate::entity_publication::install(&store)
+            .await
+            .expect("publisher");
+        let baseline = store
+            .test_read_transaction(|tx| {
+                crate::entity_scope::resume(
+                    tx,
+                    None,
+                    Some("[\"sidebarChatRow\"]"),
+                    None,
+                    None,
+                    false,
+                    100,
+                )
+            })
+            .expect("baseline");
+        assert!(
+            baseline.rows.iter().any(|r| r.id == CHAT && !r.deleted),
+            "{dependent} must not omit healthy lead baseline"
+        );
+        let before = baseline.max_sequence;
+        store
+            .transaction(|tx| {
+                let mut lead =
+                    AgentRepository::get(tx, &studio_runtime_store::AgentId::from(CHAT))?
+                        .expect("lead")
+                        .value();
+                lead["name"] = json!("Still healthy");
+                AgentRepository::put(tx, &AgentRecord::from_value(lead)?)
+            })
+            .await
+            .expect("healthy source update");
+        let delta = store
+            .test_read_transaction(|tx| {
+                crate::entity_scope::resume(
+                    tx,
+                    Some(before),
+                    Some("[\"sidebarChatRow\"]"),
+                    None,
+                    None,
+                    false,
+                    100,
+                )
+            })
+            .expect("delta");
+        let row = delta
+            .rows
+            .iter()
+            .find(|r| r.id == CHAT && !r.deleted)
+            .unwrap_or_else(|| panic!("{dependent} must not suppress healthy lead delta"));
+        let payload: Value =
+            studio_json::from_str(row.payload.as_deref().expect("payload")).expect("JSON");
+        assert_eq!(payload["value"]["name"], "Still healthy");
+    }
+}
+
+#[tokio::test]
+async fn sidebar_review_overlapping_marks_coalesce_and_deliver_later_facts_atomically() {
+    let (_directory, store) = store().await;
+    seed_chat(&store, chat(json!({"status":"waiting","autoWake":true}))).await;
+    seed_chat(&store,json!({"compactions":0,"accountKey":"default","provider":"codex","id":"mark-child","rootId":CHAT,"parentId":CHAT,"isLead":false,"epoch":1,"status":"running","autoWake":true})).await;
+    store.transaction(|tx| {
+        tx.execute_batch("CREATE TEMP TABLE sidebar_mark_calls(id TEXT NOT NULL);
+            CREATE TEMP TRIGGER sidebar_mark_insert AFTER INSERT ON main.durable_rows WHEN NEW.tbl IN ('agent_views','sidebar_views') BEGIN INSERT INTO sidebar_mark_calls VALUES(NEW.id); END;
+            CREATE TEMP TRIGGER sidebar_mark_update AFTER UPDATE ON main.durable_rows WHEN NEW.tbl IN ('agent_views','sidebar_views') BEGIN INSERT INTO sidebar_mark_calls VALUES(NEW.id); END;")?;
+        Ok(())
+    }).await.expect("mark witness");
+    for change in ["child", "order", "project"] {
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM sidebar_mark_calls", [])?;
+                Ok(())
+            })
+            .await
+            .expect("reset witness");
+        let before = store
+            .test_read_transaction(|tx| studio_runtime_store::durable_seq::high(tx))
+            .expect("cursor");
+        store
+            .transaction(move |tx| {
+                let mut lead =
+                    AgentRepository::get(tx, &studio_runtime_store::AgentId::from(CHAT))?
+                        .expect("lead")
+                        .value();
+                lead["tail"] = json!(format!("tail {change}"));
+                AgentRepository::put(tx, &AgentRecord::from_value(lead.clone())?)?;
+                // A queued sidebar mark is covered by the later broad mark, and the
+                // early broad mark exposes facts written later in this commit.
+                crate::sidebar::invalidate_all(tx)?;
+                crate::agents_create::publish_agent(tx, &lead)?;
+                match change {
+                    "child" => {
+                        let mut child = AgentRepository::get(
+                            tx,
+                            &studio_runtime_store::AgentId::from("mark-child"),
+                        )?
+                        .expect("child")
+                        .value();
+                        child["status"] = json!("completed");
+                        AgentRepository::put(tx, &AgentRecord::from_value(child)?)?;
+                    }
+                    "order" => {
+                        studio_runtime_store::ProjectsRepository::put_sidebar_order(
+                            tx,
+                            &json!({"revision":1,"groups":{}}),
+                        )?;
+                    }
+                    "project" => {
+                        studio_runtime_store::ProjectsRepository::put_project(
+                            tx,
+                            &json!({"id":"mark-project","path":"/fixture","name":"Later project"}),
+                        )?;
+                    }
+                    _ => unreachable!("fixture case"),
+                }
+                Ok(())
+            })
+            .await
+            .expect("overlapping commit");
+        let calls = store
+            .transaction(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM sidebar_mark_calls WHERE id=?1",
+                    [CHAT],
+                    |r| r.get::<_, i64>(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .await
+            .expect("mark count");
+        assert_eq!(
+            calls, 1,
+            "{change}: one mark across both namespaces per lead/commit"
+        );
+        let delta = store
+            .test_read_transaction(|tx| {
+                crate::entity_scope::resume(
+                    tx,
+                    Some(before),
+                    Some("[\"sidebarChatRow\"]"),
+                    None,
+                    None,
+                    false,
+                    100,
+                )
+            })
+            .expect("delta");
+        let row = delta
+            .rows
+            .iter()
+            .find(|r| r.id == CHAT && !r.deleted)
+            .expect("lead delivered despite skipped late mark");
+        assert!(
+            row.sequence < delta.max_sequence,
+            "later source changes share this atomic commit"
+        );
+        let payload: Value =
+            studio_json::from_str(row.payload.as_deref().expect("payload")).expect("JSON");
+        assert!(
+            payload["value"]["searchText"]
+                .as_str()
+                .expect("search")
+                .contains(&format!("tail {change}"))
+        );
+        if change == "child" {
+            assert_eq!(payload["value"]["indicator"]["kind"], "none");
+        }
+        if change == "project" {
+            assert!(
+                payload["value"]["searchText"]
+                    .as_str()
+                    .expect("search")
+                    .contains("later project")
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn sidebar_review_tail_and_child_only_changes_preserve_broad_summary_sequence() {
+    let (_directory, store) = store().await;
+    seed_chat(&store, chat(json!({"status":"waiting","autoWake":true}))).await;
+    seed_chat(&store,json!({"compactions":0,"accountKey":"default","provider":"codex","id":"scope-child","rootId":CHAT,"parentId":CHAT,"isLead":false,"epoch":1,"status":"waiting","autoWake":true})).await;
+    let summary_seq = || {
+        store
+            .test_read_transaction(|tx| {
+                Ok(
+                    crate::entity_scope::direct_document(tx, "agentSummary", CHAT)?
+                        .expect("summary")
+                        .sequence,
+                )
+            })
+            .expect("sequence")
+    };
+    let before = summary_seq();
+    store
+        .transaction(|tx| {
+            let mut lead = AgentRepository::get(tx, &studio_runtime_store::AgentId::from(CHAT))?
+                .expect("lead")
+                .value();
+            lead["tail"] = json!("search change");
+            AgentRepository::put(tx, &AgentRecord::from_value(lead)?)
+        })
+        .await
+        .expect("tail");
+    assert_eq!(
+        summary_seq(),
+        before,
+        "sidebar tail must not advance broad-state summary"
+    );
+    store
+        .transaction(|tx| {
+            let mut child =
+                AgentRepository::get(tx, &studio_runtime_store::AgentId::from("scope-child"))?
+                    .expect("child")
+                    .value();
+            child["status"] = json!("running");
+            AgentRepository::put(tx, &AgentRecord::from_value(child)?)
+        })
+        .await
+        .expect("child status in same team-count category");
+    assert_eq!(
+        summary_seq(),
+        before,
+        "sidebar wait reason must not advance identical broad-state summary"
+    );
+    assert_eq!(
+        client_entity(&store, "sidebarChatRow", CHAT)
+            .expect("sidebar")
+            .1["indicator"]["label"],
+        "Waiting for 1 agent"
+    );
+}

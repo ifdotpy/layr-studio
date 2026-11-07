@@ -25,3 +25,9 @@ Held malformed agents retain independently validated provider, name, and working
 folder path in the existing safe-view owner. A malformed provider cannot satisfy
 the row's required `ProviderKind`; that row is omitted, and its existing Studio
 error incident remains the diagnostic surface.
+
+Malformed child or process projections are skipped individually; they cannot remove
+a healthy lead from a baseline or suppress its later updates. Database read errors
+still propagate. Sidebar-only invalidation uses `sidebar_views` in the existing
+durable row journal; broad state continues to read only `agent_views` and agent
+rows. The transaction journal coalesces both namespaces to one mark per lead.

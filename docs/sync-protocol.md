@@ -228,7 +228,14 @@ their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
 agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that
 changes a view without a change of the agent row (team counts, attention, command
 progress, account state) writes a mark: a `durable_rows` entry with table `agent_views`
-and no payload. A view takes the higher number of the agent row and its mark. Team
+and no payload. A view takes the higher number of the agent row and its mark.
+The sidebar row also consumes the logical `sidebar_views` namespace in the same
+`durable_rows` table. Tail, child status, and sidebar structure changes use this
+namespace so unchanged broad state documents keep their sequence and identity.
+The existing writer journal coalesces view marks per lead per transaction:
+a successful `agent_views` mark covers a queued `sidebar_views` mark, and sidebar
+marks flush after publication. Both namespaces share the existing atomic commit
+and cursor; no persisted projection or second stream is introduced. Team
 visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
 triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the
 copies and the view log. An approval that is not open (or not a question) is a delete in a delta and

@@ -194,15 +194,67 @@ enum Event {
     SidebarRow(String),
 }
 
+/// Mark proofs survive source-event capture until publication finishes.
+#[derive(Default)]
+struct TransactionJournal {
+    events: Option<Vec<Event>>,
+    agent_view_marks: BTreeSet<String>,
+    sidebar_marks: BTreeSet<String>,
+}
+
+pub(crate) fn agent_view_marked(id: &str) -> bool {
+    JOURNAL.with(|j| {
+        j.borrow()
+            .as_ref()
+            .is_some_and(|j| j.agent_view_marks.contains(id))
+    })
+}
+
+pub(crate) fn note_agent_view_mark(id: &str) {
+    JOURNAL.with(|j| {
+        if let Some(j) = j.borrow_mut().as_mut() {
+            j.agent_view_marks.insert(id.to_owned());
+        }
+    });
+}
+
+/// Delay sidebar-only marks until broad publication has supplied its proofs.
+pub(crate) fn queue_sidebar_mark(id: &str) -> bool {
+    JOURNAL.with(|j| {
+        let mut j = j.borrow_mut();
+        let Some(j) = j.as_mut() else {
+            return false;
+        };
+        j.sidebar_marks.insert(id.to_owned());
+        true
+    })
+}
+
+/// Clear transaction-local proofs even on rollback; return only uncovered marks.
+pub(crate) fn end() -> BTreeSet<String> {
+    JOURNAL.with(|j| {
+        j.borrow_mut().take().map_or_else(BTreeSet::new, |j| {
+            j.sidebar_marks
+                .difference(&j.agent_view_marks)
+                .cloned()
+                .collect()
+        })
+    })
+}
+
 thread_local! {
     /// The journal of the writer transaction that runs on this thread, if any.
     /// The writer connection runs all its transactions on one thread.
-    static JOURNAL: RefCell<Option<Vec<Event>>> = const { RefCell::new(None) };
+    static JOURNAL: RefCell<Option<TransactionJournal>> = const { RefCell::new(None) };
 }
 
 fn push(event: Event) {
     JOURNAL.with(|journal| {
-        if let Some(events) = journal.borrow_mut().as_mut() {
+        if let Some(events) = journal
+            .borrow_mut()
+            .as_mut()
+            .and_then(|j| j.events.as_mut())
+        {
             events.push(event);
         }
     });
@@ -231,20 +283,36 @@ pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: 
 
 /// Start the journal of a writer transaction.
 pub(crate) fn begin() {
-    JOURNAL.with(|journal| *journal.borrow_mut() = Some(Vec::new()));
+    JOURNAL.with(|journal| {
+        *journal.borrow_mut() = Some(TransactionJournal {
+            events: Some(Vec::new()),
+            ..Default::default()
+        })
+    });
 }
 
 /// The events of one writer transaction, in write order.
 pub(crate) struct Journal(Vec<Event>);
 
-/// End the journal of the current writer transaction and return its events.
+/// Finish source capture, retaining mark proofs through publication.
 pub(crate) fn finish() -> Journal {
-    Journal(JOURNAL.with(|journal| journal.borrow_mut().take().unwrap_or_default()))
+    Journal(JOURNAL.with(|journal| {
+        journal
+            .borrow_mut()
+            .as_mut()
+            .and_then(|j| j.events.take())
+            .unwrap_or_default()
+    }))
 }
 
 /// Whether the current writer transaction publishes its changed rows before commit.
 pub(crate) fn active() -> bool {
-    JOURNAL.with(|journal| journal.borrow().is_some())
+    JOURNAL.with(|journal| {
+        journal
+            .borrow()
+            .as_ref()
+            .is_some_and(|j| j.events.is_some())
+    })
 }
 
 /// Journal a row write that the writer update hook reports.

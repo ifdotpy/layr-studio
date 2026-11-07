@@ -28,9 +28,13 @@ fn facts(
             detail.entry(key).or_insert(value);
         }
     }
-    studio_json::from_value(detail)
-        .map(Some)
-        .map_err(Into::into)
+    match studio_json::from_value(detail) {
+        Ok(facts) => Ok(Some(facts)),
+        Err(error) => {
+            eprintln!("Skipping unrepresentable sidebar agent {id}: {error}");
+            Ok(None)
+        }
+    }
 }
 
 pub(crate) fn row(
@@ -101,7 +105,16 @@ pub(crate) fn row(
         }
         let mut statement = connection.prepare_cached("SELECT record FROM runtime_tasks WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('starting','running','approval')")?;
         for raw in statement.query_map([&member_id], |r| r.get::<_, String>(0))? {
-            let task: studio_runtime_store::TaskRecord = studio_json::from_str(&raw?)?;
+            let raw = raw?;
+            let task: studio_runtime_store::TaskRecord = match studio_json::from_str(&raw) {
+                Ok(task) => task,
+                Err(error) => {
+                    eprintln!(
+                        "Skipping invalid task in sidebar projection for {member_id}: {error}"
+                    );
+                    continue;
+                }
+            };
             let display = crate::process_controls::task_record_display(&task);
             activities.push(WaitActivity {
                 owner: member_id.clone(),
@@ -118,7 +131,16 @@ pub(crate) fn row(
         }
         let mut statement = connection.prepare_cached("SELECT record FROM runtime_monitors WHERE json_extract(record,'$.agent')=?1 AND json_extract(record,'$.status') IN ('starting','running','approval')")?;
         for raw in statement.query_map([&member_id], |r| r.get::<_, String>(0))? {
-            let monitor: studio_runtime_store::MonitorRecord = studio_json::from_str(&raw?)?;
+            let raw = raw?;
+            let monitor: studio_runtime_store::MonitorRecord = match studio_json::from_str(&raw) {
+                Ok(monitor) => monitor,
+                Err(error) => {
+                    eprintln!(
+                        "Skipping invalid monitor in sidebar projection for {member_id}: {error}"
+                    );
+                    continue;
+                }
+            };
             let display = crate::process_controls::monitor_record_display(&monitor);
             if display.active {
                 activities.push(WaitActivity {
@@ -142,7 +164,7 @@ pub(crate) fn row(
     Ok(studio_read_models::sidebar::project(&source, &context))
 }
 
-/// Reuse agent view marks for every fact that a sidebar row reads. Ordinary
+/// Mark sidebar-only dependencies without advancing broad agent views. Ordinary
 /// agent writes already mark themselves; child attention/work also marks roots.
 pub(crate) fn publish_changes(
     transaction: &rusqlite::Transaction<'_>,
@@ -193,7 +215,7 @@ pub(crate) fn publish_changes(
     for id in owners {
         studio_runtime_store::durable_seq::mark(
             transaction,
-            studio_runtime_store::durable_seq::AGENT_VIEW_MARK,
+            studio_runtime_store::durable_seq::SIDEBAR_VIEW_MARK,
             &id,
         )?;
     }
@@ -207,7 +229,7 @@ pub(crate) fn invalidate_all(transaction: &rusqlite::Transaction<'_>) -> StoreRe
     for id in statement.query_map([], |r| r.get::<_, String>(0))? {
         studio_runtime_store::durable_seq::mark(
             transaction,
-            studio_runtime_store::durable_seq::AGENT_VIEW_MARK,
+            studio_runtime_store::durable_seq::SIDEBAR_VIEW_MARK,
             &id?,
         )?;
     }

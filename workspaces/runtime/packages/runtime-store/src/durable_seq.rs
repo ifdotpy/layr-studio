@@ -238,6 +238,9 @@ pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
 /// runtime-services).
 pub const AGENT_VIEW_MARK: &str = "agent_views";
 
+/// Sidebar-only dependencies; broad agent/state readers do not consume these marks.
+pub const SIDEBAR_VIEW_MARK: &str = "sidebar_views";
+
 /// The `durable_rows` table name of the chat views: a chat document reads its group,
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
@@ -294,6 +297,11 @@ pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bo
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.
 pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
+    if (tbl == AGENT_VIEW_MARK && crate::entity_publication::agent_view_marked(id))
+        || (tbl == SIDEBAR_VIEW_MARK && crate::entity_publication::queue_sidebar_mark(id))
+    {
+        return Ok(());
+    }
     connection.execute(
         &format!(
             "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
@@ -301,6 +309,9 @@ pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
         ),
         rusqlite::params![tbl, id],
     )?;
+    if tbl == AGENT_VIEW_MARK {
+        crate::entity_publication::note_agent_view_mark(id);
+    }
     Ok(())
 }
 

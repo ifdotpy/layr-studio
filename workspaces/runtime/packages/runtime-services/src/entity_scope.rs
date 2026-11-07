@@ -615,7 +615,7 @@ fn agent_units(
     let changed: Vec<(String, i64)> = connection
         .prepare_cached(
             "SELECT id,MAX(seq) AS last FROM durable_rows
-             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
+             WHERE tbl IN ('runtime_agents',?1,?7) AND seq>?2 AND seq<=?3
                AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
              GROUP BY id ORDER BY last LIMIT ?6",
         )?
@@ -626,7 +626,12 @@ fn agent_units(
                 through,
                 deletes_after,
                 id,
-                fetch
+                fetch,
+                if wanted.contains(SIDEBAR_COLLECTION) {
+                    durable_seq::SIDEBAR_VIEW_MARK
+                } else {
+                    durable_seq::AGENT_VIEW_MARK
+                }
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?
@@ -661,9 +666,9 @@ fn agent_docs(
         None => {
             let current: Option<i64> = connection
                 .prepare_cached(
-                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1) AND id=?2",
+                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1,?3) AND id=?2",
                 )?
-                .query_row(params![durable_seq::AGENT_VIEW_MARK, id], |row| row.get(0))?;
+                .query_row(params![durable_seq::AGENT_VIEW_MARK, id, if wanted.contains(SIDEBAR_COLLECTION) { durable_seq::SIDEBAR_VIEW_MARK } else { durable_seq::AGENT_VIEW_MARK }], |row| row.get(0))?;
             let Some(current) = current else {
                 return Ok(Vec::new());
             };

@@ -2094,6 +2094,14 @@ impl RuntimeStore {
                     .map_err(E::from),
                     (outcome, _) => outcome,
                 };
+                let sidebar_marks = entity_publication::end();
+                let outcome = outcome.and_then(|value| {
+                    for id in sidebar_marks {
+                        durable_seq::mark(&transaction, durable_seq::SIDEBAR_VIEW_MARK, &id)
+                            .map_err(E::from)?;
+                    }
+                    Ok(value)
+                });
                 match outcome {
                     Ok(value) => {
                         let final_changes = transaction.total_changes();
