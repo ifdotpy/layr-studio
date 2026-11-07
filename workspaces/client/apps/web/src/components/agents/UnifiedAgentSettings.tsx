@@ -56,18 +56,37 @@ export function UnifiedAgentSettings({
             onAccountChange={selectAccount}
             accountDisabled={disabled || exclusionsSaving}
             accountModalOpen={accountModalOpen}
-            excludedAccountKeys={
+            workerExcludedAccountKeys={
               showExclusions
-                ? settings.agent.excludedAccountKeys || []
+                ? settings.agent.workerExcludedAccountKeys || []
                 : undefined
             }
-            onExcludedAccountKeysChange={
+            reviewerExcludedAccountKeys={
+              showExclusions
+                ? settings.agent.reviewerExcludedAccountKeys || []
+                : undefined
+            }
+            onWorkerExcludedAccountKeysChange={
               showExclusions
                 ? (keys) => {
                     setExclusionsSaving(true);
                     void post("/api/conversation", {
                       id: settings.agent.id,
-                      excluded_account_keys: keys,
+                      worker_excluded_account_keys: keys,
+                    })
+                      .then(() => settings.refresh())
+                      .catch((error) => notify(errorText(error)))
+                      .finally(() => setExclusionsSaving(false));
+                  }
+                : undefined
+            }
+            onReviewerExcludedAccountKeysChange={
+              showExclusions
+                ? (keys) => {
+                    setExclusionsSaving(true);
+                    void post("/api/conversation", {
+                      id: settings.agent.id,
+                      reviewer_excluded_account_keys: keys,
                     })
                       .then(() => settings.refresh())
                       .catch((error) => notify(errorText(error)))

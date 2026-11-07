@@ -766,16 +766,19 @@ where
         let mut fork_at = None::<chrono::DateTime<chrono::FixedOffset>>;
         for line in BufReader::new(file).lines() {
             check_codex_scan(started, cancelled)?;
-            let Ok(row) = studio_json::from_str::<Value>(&line.map_err(|_| UsageError::Scan)?)
+            let Ok(row) =
+                crate::analytics_rollout::RolloutRow::parse(&line.map_err(|_| UsageError::Scan)?)
             else {
                 continue;
             };
+            let kind = row.kind;
+            let row = row.value;
             let at = row
                 .get("timestamp")
                 .and_then(Value::as_str)
                 .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
-            match row.get("type").and_then(Value::as_str) {
-                Some("session_meta") => {
+            match kind {
+                crate::analytics_rollout::RolloutKind::SessionMeta => {
                     let header = crate::analytics_history::SessionHeader::from_value(&row);
                     if header.as_ref().is_some_and(|header| header.is_fork()) {
                         fork_at = header
@@ -791,15 +794,19 @@ where
                             .map_err(|_| UsageError::Scan)?;
                     }
                 }
-                Some("turn_context" | "token_usage_record") => {}
+                crate::analytics_rollout::RolloutKind::TurnContext
+                | crate::analytics_rollout::RolloutKind::TokenUsageRecord => {}
                 // A snapshot carries no original response time. Its replay must
                 // never turn an old response into today's billable evidence.
-                _ => continue,
+                crate::analytics_rollout::RolloutKind::ResponseItem
+                | crate::analytics_rollout::RolloutKind::Compacted
+                | crate::analytics_rollout::RolloutKind::EventMsg
+                | crate::analytics_rollout::RolloutKind::Other => continue,
             }
             // Keep the scanner's older nested model context compatibility. Token
             // categories and recovered response semantics belong to the rollout owner.
             let mut row = row;
-            if row["type"] == "turn_context"
+            if kind == crate::analytics_rollout::RolloutKind::TurnContext
                 && row["payload"]["model"].is_null()
                 && row["payload"]["info"]["model"].is_string()
             {

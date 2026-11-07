@@ -17,13 +17,8 @@ pub fn target(args: &Value) -> Result<Value> {
     Ok(json!(typed_target(args)?))
 }
 fn typed_target(args: &Value) -> Result<ReviewTarget> {
+    let request: studio_runtime_schema::review::ReviewRequest = decode(args.clone(), "review")?;
     let object = args.as_object().ok_or(NativeError::Invalid("review"))?;
-    if object
-        .keys()
-        .any(|k| !matches!(k.as_str(), "target" | "request_id"))
-    {
-        return Err(NativeError::Invalid("review"));
-    }
     if let Some(value) = object.get("request_id") {
         let text = value
             .as_str()
@@ -36,11 +31,7 @@ fn typed_target(args: &Value) -> Result<ReviewTarget> {
             return Err(NativeError::Invalid("review.options"));
         }
     }
-    let raw = args
-        .get("target")
-        .cloned()
-        .ok_or(NativeError::Invalid("review.target"))?;
-    decode(raw, "review.target")
+    Ok(request.target)
 }
 pub fn worker_id(key: &str) -> String {
     uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_URL, key.as_bytes()).to_string()
@@ -196,6 +187,7 @@ impl ReviewPlan {
             return Err(NativeError::Invalid("review.identity"));
         }
         let typed_target = typed_target(&args)?;
+        let options: studio_runtime_schema::review::ReviewRequest = decode(args, "review")?;
         let target = json!(&typed_target);
         let assignment = ReviewAssignment::new(
             checked
@@ -215,9 +207,11 @@ impl ReviewPlan {
         let requested = studio_runtime_schema::creation_intent::CreationIntent {
             model: requested_model,
             effort: requested_effort,
+            prompt: options.instructions.map(|v| v.to_string()),
+            account_key: options.account.map(|v| v.to_string()),
             ..Default::default()
         };
-        let prompt = crate::managed_child_create::reviewer_brief(&assignment);
+        let prompt = review_prompt(&assignment, requested.prompt.as_deref());
         let spec = studio_runtime_schema::creation_intent::CreationIntent {
             id: Field::Value(worker_id(&key)),
             name: Some("Review".into()),
@@ -245,12 +239,15 @@ impl ReviewPlan {
         &self.assignment
     }
     pub fn set_prepared_assignment(&mut self, assignment: ReviewAssignment, base: ResolvedBase) {
-        self.spec.prompt = Some(crate::managed_child_create::reviewer_brief(&assignment));
+        self.spec.prompt = Some(review_prompt(&assignment, self.args.prompt.as_deref()));
         self.assignment = assignment;
         self.resolved_base = Some(base);
     }
     pub fn spec(&self) -> &studio_runtime_schema::creation_intent::CreationIntent {
         &self.spec
+    }
+    pub fn account(&self) -> Option<&str> {
+        self.args.account_key.as_deref()
     }
     pub fn existing(&self, child: &Value) -> Result<Value> {
         checked_agent(child)?;
@@ -271,7 +268,9 @@ impl ReviewPlan {
                     }
                 }
             }
-            matches(&self.args.model, child.get("model"))
+            self.args.prompt.is_none()
+                && self.args.account_key.is_none()
+                && matches(&self.args.model, child.get("model"))
                 && match &self.args.effort {
                     EffortSelection::Inherit => true,
                     EffortSelection::Clear => child.get("effort").is_some_and(Value::is_null),
@@ -310,6 +309,15 @@ impl ReviewPlan {
             .cloned()
             .ok_or(NativeError::Invalid("review.response"))
     }
+}
+
+fn review_prompt(assignment: &ReviewAssignment, instructions: Option<&str>) -> String {
+    let mut prompt = crate::managed_child_create::reviewer_brief(assignment);
+    if let Some(instructions) = instructions {
+        prompt.push_str("\n\nAdditional review instructions:\n");
+        prompt.push_str(instructions);
+    }
+    prompt
 }
 
 /// Ordinary creation validates frozen catalog/workspace evidence, actor account

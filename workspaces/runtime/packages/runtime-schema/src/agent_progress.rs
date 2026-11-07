@@ -401,8 +401,7 @@ mod tests {
             .to_value()
         }
         let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI source parses");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI source parses");
         for (name, schema) in [
             ("AgentCommandProgress", fragment::<AgentCommandProgress>()),
             ("AgentStall", fragment::<AgentStall>()),

@@ -95,7 +95,7 @@ fn observation() -> usage_resume::LimitsObservation {
 async fn usage_resume_allows_the_excluded_lead_account() {
     let (_dir, store) = seeded("usage").await;
     store.transaction_with(|tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.excludedAccountKeys',json('[\"default\"]')) WHERE id='a'", [])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workerExcludedAccountKeys',json('[\"default\"]')) WHERE id='a'", [])?;
         Ok::<_, studio_runtime_store::StoreError>(())
     }).await.unwrap();
     continuation_driver::drive(
@@ -585,7 +585,7 @@ async fn automatic_capacity_retry_allows_the_excluded_lead_account() {
                     |row| row.get::<_, String>(0),
                 )
                 .map(|raw| studio_json::from_str(&raw).expect("agent JSON"))?;
-            agent["excludedAccountKeys"] = json!(["default"]);
+            agent["workerExcludedAccountKeys"] = json!(["default"]);
             studio_runtime_store::ContinuationRepository::put_agent(tx, &agent)?;
             let stage = studio_runtime_services::continuation_runtime::stage_capacity_retry(
                 tx, "a", "retry", 1000.0, true,
@@ -610,7 +610,7 @@ async fn automatic_capacity_retry_stops_an_excluded_worker() {
         agent["parentId"] = json!("root");
         agent["isLead"] = json!(false);
         studio_runtime_store::ContinuationRepository::put_agent(tx, &agent)?;
-        let root = json!({"id":"root","rootId":"root","epoch":1,"status":"idle","compactions":0,"provider":"codex","accountKey":"default","isLead":true,"autoWake":true,"excludedAccountKeys":["default"]});
+        let root = json!({"id":"root","rootId":"root","epoch":1,"status":"idle","compactions":0,"provider":"codex","accountKey":"default","isLead":true,"autoWake":true,"workerExcludedAccountKeys":["default"]});
         studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(root)?)?;
         let stage = studio_runtime_services::continuation_runtime::stage_capacity_retry(tx, "a", "retry", 1000.0, true)
             .map_err(|error| studio_runtime_store::StoreError::SchemaMismatch(error.to_string()))?;

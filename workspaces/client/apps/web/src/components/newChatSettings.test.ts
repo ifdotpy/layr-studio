@@ -7,11 +7,41 @@ import {
   type NewChatWorkspaceMode,
 } from "./newChatSettings";
 import { isServerCommand } from "../servers/navigation";
+import { ACCOUNT_KEY_MAX_CHARS } from "../generated/sharedValues";
 
 test.each(["layr-native", "worktree"] satisfies NewChatWorkspaceMode[])(
   "accepts the generated new-chat workspace mode %s",
   (workspaceMode) => expect(isNewChatSettings({ workspaceMode })).toBe(true),
 );
+
+test("new chat preserves independent worker and reviewer exclusions", () => {
+  const worker_excluded_account_keys = ["worker"];
+  const reviewer_excluded_account_keys = ["reviewer"];
+  const settings = {
+    worker_excluded_account_keys,
+    reviewer_excluded_account_keys,
+  };
+  expect(isNewChatSettings({ ...settings, workspaceMode: "worktree" })).toBe(
+    true,
+  );
+  expect(
+    settingsForNewChatRequest(settings, "lead", "gpt-6-astra"),
+  ).toMatchObject(settings);
+  expect(
+    isNewChatSettings({
+      ...settings,
+      workspaceMode: "worktree",
+      reviewer_excluded_account_keys: [42],
+    }),
+  ).toBe(false);
+  expect(
+    isNewChatSettings({
+      ...settings,
+      workspaceMode: "worktree",
+      worker_excluded_account_keys: ["x".repeat(ACCOUNT_KEY_MAX_CHARS + 1)],
+    }),
+  ).toBe(false);
+});
 
 test.each([
   undefined,

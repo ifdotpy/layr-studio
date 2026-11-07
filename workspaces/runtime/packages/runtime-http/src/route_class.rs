@@ -69,6 +69,8 @@ const ROUTES: &[(&str, &str, CommandClass)] = &[
     ("POST", "/api/orchestration/settings", OwnerOnly),
     ("POST", "/api/organization", OwnerOnly),
     ("POST", "/api/peer-teams", Spawn),
+    #[cfg(feature = "perf-reporting")]
+    ("POST", "/api/perf-reporting/client", OwnerOnly),
     ("POST", "/api/processes/action", Host),
     ("POST", "/api/profiles", OwnerOnly),
     ("POST", "/api/projects", Host),

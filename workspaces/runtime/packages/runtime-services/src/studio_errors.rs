@@ -13,6 +13,7 @@
 //! later run of the same rule followed with a success is not on the list.
 mod causes;
 pub use causes::{json_cause, store_causes, store_error_kind};
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
@@ -205,9 +206,67 @@ fn invalid_monitor(id: &str, at: f64, pointer: Option<String>, cause: Cause) -> 
     incident
 }
 
+// Like TranscriptAgent, validate only consumed fields; unrelated malformed fields do not affect this view.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OwnerFields<'a> {
+    #[serde(borrow)]
+    id: Cow<'a, str>,
+    #[serde(borrow)]
+    name: Option<Cow<'a, str>>,
+    status: studio_runtime_store::AgentStatus,
+    deleted_at: Option<f64>,
+    epoch: i64,
+    #[serde(borrow)]
+    turn_id: Option<Cow<'a, str>>,
+    #[serde(default)]
+    last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
+    #[serde(default)]
+    error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
+    #[serde(default)]
+    created: studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
+    activity: Option<studio_runtime_store::AgentActivity>,
+}
+
+impl OwnerFields<'_> {
+    fn into_owned(self) -> OwnerFields<'static> {
+        OwnerFields {
+            id: Cow::Owned(self.id.into_owned()),
+            name: self.name.map(|value| Cow::Owned(value.into_owned())),
+            status: self.status,
+            deleted_at: self.deleted_at,
+            epoch: self.epoch,
+            turn_id: self.turn_id.map(|value| Cow::Owned(value.into_owned())),
+            last_completed_turn: self.last_completed_turn,
+            error: self.error,
+            created: self.created,
+            activity: self.activity,
+        }
+    }
+}
+
+impl From<studio_runtime_store::AgentRecord> for OwnerFields<'static> {
+    fn from(record: studio_runtime_store::AgentRecord) -> Self {
+        Self {
+            id: Cow::Owned(record.id.0),
+            name: record.name.map(Cow::Owned),
+            status: record.status,
+            deleted_at: record.deleted_at,
+            epoch: record.epoch,
+            turn_id: record.turn_id.map(Cow::Owned),
+            last_completed_turn: record.last_completed_turn,
+            error: record.error,
+            created: record.created,
+            activity: record.activity,
+        }
+    }
+}
+
 #[derive(Clone)]
 enum SourceOwner {
-    Live(std::sync::Arc<studio_runtime_store::AgentRecord>),
+    Live(std::sync::Arc<OwnerFields<'static>>),
     Deleted,
     Missing,
     Invalid(Vec<Cause>),
@@ -243,17 +302,97 @@ fn event_source(tx: &Transaction<'_>, id: &str) -> Result<EventSource, StoreErro
 }
 
 fn read_owner(tx: &Transaction<'_>, id: &str) -> Result<SourceOwner, StoreError> {
+    let mut statement = tx.prepare_cached(
+        "SELECT a.record,v.id IS NOT NULL,v.activity FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id WHERE a.id=?1",
+    )?;
+    let mut rows = statement.query([id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(SourceOwner::Missing);
+    };
+    if let Ok(raw) = row.get_ref(0)?.as_str()
+        && let Ok(record) = studio_json::from_str::<OwnerFields<'_>>(raw)
+        && record.id == id
+        && (0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&record.epoch)
+    {
+        let mut record = record.into_owned();
+        let activity = if row.get::<_, bool>(1)? {
+            row.get::<_, Option<String>>(2)?
+                .map(|raw| studio_json::from_str(&raw))
+                .transpose()
+                .map(Option::flatten)
+        } else {
+            Ok(record.activity.take())
+        };
+        if let Ok(activity) = activity {
+            record.activity = activity;
+            return Ok(if record.deleted_at.is_some_and(|at| at != 0.0) {
+                SourceOwner::Deleted
+            } else {
+                SourceOwner::Live(std::sync::Arc::new(record))
+            });
+        }
+    }
+    // Keep the complete decoder's existing diagnostics for malformed used fields.
     match studio_runtime_store::AgentRepository::get(tx, &studio_runtime_store::AgentId::from(id)) {
         Ok(Some(record)) if record.is_deleted() => Ok(SourceOwner::Deleted),
-        Ok(Some(record)) => Ok(SourceOwner::Live(std::sync::Arc::new(record))),
+        Ok(Some(record)) => Ok(SourceOwner::Live(std::sync::Arc::new(record.into()))),
         Ok(None) => Ok(SourceOwner::Missing),
         Err(error) if malformed_source(&error) => Ok(SourceOwner::Invalid(store_causes(&error))),
         Err(error) => Err(error),
     }
 }
 
-fn owner_name(record: &studio_runtime_store::AgentRecord) -> String {
+fn owner_name(record: &OwnerFields<'_>) -> String {
     record.name.as_deref().unwrap_or("Agent").to_owned()
+}
+
+/// The agent's error row, shared by publication and its input-change check.
+fn agent_error(id: &str, record: &OwnerFields<'_>) -> Option<StudioError> {
+    let error = record
+        .error
+        .value()
+        .map(|error| error.diagnostic_text())
+        .unwrap_or_default();
+    let kind = agent_kind(record.status.as_str(), &error)?;
+    let turn = record
+        .turn_id
+        .as_deref()
+        .or_else(|| record.last_completed_turn.value().map(String::as_str))
+        .map(str::to_owned);
+    let at = record
+        .activity
+        .as_ref()
+        .and_then(|activity| activity.at)
+        .or_else(|| {
+            record
+                .created
+                .value()
+                .and_then(|number| number.number().as_f64())
+        })
+        .unwrap_or(0.0);
+    Some(StudioError {
+        id: format!("agent:{id}:{}", turn.as_deref().unwrap_or_default()),
+        kind,
+        level: kind.level(),
+        reason: kind.reason().into(),
+        target: kind.target(id.into(), owner_name(record)),
+        monitor_id: None,
+        event_id: None,
+        detail: kind.reason().into(),
+        subject: String::new(),
+        at,
+        rule_id: None,
+        count: None,
+        first_at: None,
+        diagnostics: Diagnostics {
+            context: Context::Agent {
+                turn_id: turn,
+                epoch: Some(record.epoch),
+            },
+            certainty: kind.certainty(),
+            causes: retained_causes(kind, &error),
+        },
+    })
 }
 
 fn invalid_source(
@@ -594,56 +733,9 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
             }
             SourceOwner::Missing | SourceOwner::Deleted => continue,
         };
-        let error = record
-            .error
-            .value()
-            .map(|error| error.diagnostic_text())
-            .unwrap_or_default();
-        let Some(kind) = agent_kind(record.status.as_str(), &error) else {
-            continue;
-        };
-        let turn = record
-            .turn_id
-            .as_deref()
-            .or_else(|| record.last_completed_turn.value().map(String::as_str))
-            .map(str::to_owned);
-        let at = record
-            .activity
-            .as_ref()
-            .and_then(|activity| activity.at)
-            .or_else(|| {
-                record
-                    .created
-                    .value()
-                    .and_then(|number| number.number().as_f64())
-            })
-            .unwrap_or(0.0);
-        push(
-            &mut rows,
-            StudioError {
-                id: format!("agent:{id}:{}", turn.as_deref().unwrap_or_default()),
-                kind,
-                level: kind.level(),
-                reason: kind.reason().into(),
-                target: kind.target(id, owner_name(&record)),
-                monitor_id: None,
-                event_id: None,
-                detail: kind.reason().into(),
-                subject: String::new(),
-                at,
-                rule_id: None,
-                count: None,
-                first_at: None,
-                diagnostics: Diagnostics {
-                    context: Context::Agent {
-                        turn_id: turn,
-                        epoch: Some(record.epoch),
-                    },
-                    certainty: kind.certainty(),
-                    causes: retained_causes(kind, &error),
-                },
-            },
-        );
+        if let Some(row) = agent_error(&id, &record) {
+            push(&mut rows, row);
+        }
     }
 
     for finding in crate::liveness::findings(tx, now)? {
@@ -1017,33 +1109,51 @@ fn malformed_monitor_may_be_candidate(raw: &str, since: f64) -> bool {
 /// visibility of rows it hid at the last full build.
 fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> {
     let own_prefix = format!("agent:{id}:");
-    let own_published: bool = tx
-        .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='studioError' AND deleted=0 AND id>=?1 AND id<?2)",
-        )?
-        .query_row(
+    let mut statement = tx.prepare_cached(
+        "SELECT payload FROM sync_entities WHERE collection='studioError' AND deleted=0 AND id>=?1 AND id<?2",
+    )?;
+    let own_published = statement
+        .query_map(
             rusqlite::params![own_prefix, format!("agent:{id};")],
-            |row| row.get(0),
-        )?;
-    if own_published {
-        return Ok(true);
-    }
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<Result<Vec<_>, _>>()?;
+    drop(statement);
     if is_published(tx, &format!("stored:runtime_agents:{id}"))? {
         return Ok(true);
     }
-    let owner = match read_owner(tx, id)? {
+    let source = read_owner(tx, id)?;
+    let candidate = match &source {
+        SourceOwner::Live(record) => agent_error(id, record),
+        SourceOwner::Deleted | SourceOwner::Missing | SourceOwner::Invalid(_) => None,
+    };
+    #[derive(serde::Deserialize)]
+    struct PublishedError {
+        value: StudioError,
+    }
+    let published = own_published
+        .iter()
+        .map(|raw| studio_json::from_str::<PublishedError>(raw))
+        .collect::<Result<Vec<_>, _>>();
+    match published {
+        Ok(published) if candidate.iter().eq(published.iter().map(|row| &row.value)) => {}
+        _ => return Ok(true),
+    }
+    // An unchanged own error can still accompany a changed liveness finding.
+    // Keep conservative rebuilds for these dependencies instead of caching their inputs.
+    if candidate.is_some()
+        && (tx
+            .prepare_cached(AGENT_LIVENESS_DEPENDENCIES_SQL)?
+            .query_row([id], |row| row.get::<_, bool>(0))?
+            || tx
+                .prepare_cached(&crate::liveness::stalled_turn_candidate_sql())?
+                .query_row([id], |row| row.get::<_, bool>(0))?)
+    {
+        return Ok(true);
+    }
+    let owner = match source {
         SourceOwner::Invalid(_) => return Ok(true),
-        SourceOwner::Live(record) => {
-            let error = record
-                .error
-                .value()
-                .map(|error| error.diagnostic_text())
-                .unwrap_or_default();
-            if agent_kind(record.status.as_str(), &error).is_some() {
-                return Ok(true);
-            }
-            Some(owner_name(&record))
-        }
+        SourceOwner::Live(record) => Some(owner_name(&record)),
         SourceOwner::Missing | SourceOwner::Deleted => None,
     };
     let mut statement = tx.prepare_cached(
@@ -1064,6 +1174,12 @@ fn agent_may_change(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> 
                 .is_none_or(|baseline| baseline.hidden_owners.contains(id))
         }))
 }
+
+const AGENT_LIVENESS_DEPENDENCIES_SQL: &str = "SELECT \
+    EXISTS(SELECT 1 FROM runtime_events WHERE agent=?1 AND status='pending') OR \
+    EXISTS(SELECT 1 FROM runtime_agents WHERE id=?1 AND (json_extract(record,'$.usageResume.id') IS NOT NULL OR json_extract(record,'$.capacityRetry.id') IS NOT NULL)) OR \
+    EXISTS(SELECT 1 FROM sync_entities WHERE collection='studioError' AND id>='liveness:' AND id<'liveness;' AND deleted=0 AND json_extract(payload,'$.value.agentId')=?1) OR \
+    EXISTS(SELECT 1 FROM runtime_account_transfers WHERE json_extract(record,'$.status')='pending')";
 
 /// Whether row `id` of the list is published.
 fn is_published(tx: &Transaction<'_>, id: &str) -> Result<bool, StoreError> {
@@ -1168,6 +1284,127 @@ pub fn dismiss_many(tx: &Transaction<'_>, ids: &[String], now: f64) -> Result<Va
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn owner_fixture_document_matches_the_complete_record_read() {
+        let dir = tempfile::tempdir().expect("isolated state");
+        let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+            .await
+            .expect("store");
+        store.transaction(|tx| {
+            for (n, extra) in [
+                json!({"turnId":"current","lastCompletedTurn":"previous","activity":{"at":123.0},"created":12}),
+                json!({"turnId":null,"lastCompletedTurn":"previous","created":12}),
+                json!({"error":null,"name":null}),
+            ].into_iter().enumerate() {
+                let id = format!("fixture-{n}");
+                let mut raw = json!({"compactions":0,"id":id,"rootId":id,"epoch":2,"status":"failed",
+                    "accountKey":"default","provider":"codex","name":"Fixture","error":"fixture failure"});
+                raw.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+                let full = studio_runtime_store::AgentRecord::from_value(raw)?;
+                studio_runtime_store::AgentRepository::put(tx, &full)?;
+            }
+            let mut expected = Vec::new();
+            for n in 0..3 {
+                let id = format!("fixture-{n}");
+                let full = studio_runtime_store::AgentRepository::get(tx, &id.as_str().into())?.unwrap();
+                let fields = super::OwnerFields::from(full);
+                expected.push(super::agent_error(&id, &fields).unwrap());
+            }
+            expected.sort_by(|a, b| b.at.total_cmp(&a.at).then_with(|| a.id.cmp(&b.id)));
+            assert_eq!(super::list(tx, 1000.0)?, json!({"items":expected}));
+            // The volatile activity column takes precedence over the stored field.
+            tx.execute("UPDATE runtime_agent_volatile SET activity='{\"at\":456}' WHERE id='fixture-0'", [])?;
+            let full = studio_runtime_store::AgentRepository::get(tx, &"fixture-0".into())?.unwrap();
+            let super::SourceOwner::Live(narrow) = super::read_owner(tx, "fixture-0")? else { panic!("live owner") };
+            assert_eq!(super::agent_error("fixture-0", &narrow), super::agent_error("fixture-0", &full.into()));
+            // Malformed consumed fields retain the complete decoder's exact causes.
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.epoch','invalid') WHERE id='fixture-0'", [])?;
+            let error = studio_runtime_store::AgentRepository::get(tx, &"fixture-0".into()).unwrap_err();
+            let super::SourceOwner::Invalid(causes) = super::read_owner(tx, "fixture-0")? else { panic!("invalid owner") };
+            assert_eq!(causes, super::store_causes(&error));
+            Ok(())
+        }).await.expect("full document parity");
+    }
+
+    #[tokio::test]
+    async fn liveness_dependency_checks_use_indexes() {
+        let (_dir, store) = crate::entity_publication::test_support::store().await;
+        store
+            .transaction(|tx| {
+                for (sql, searches) in [
+                    (super::AGENT_LIVENESS_DEPENDENCIES_SQL.to_owned(), 4),
+                    (crate::liveness::stalled_turn_candidate_sql(), 3),
+                ] {
+                    let mut statement = tx.prepare(&format!("EXPLAIN QUERY PLAN {sql}"))?;
+                    let plan = statement
+                        .query_map(["owner"], |row| row.get::<_, String>(3))?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    eprintln!("liveness dependency plan: {plan:?}");
+                    assert_eq!(
+                        plan.iter()
+                            .filter(|step| step.starts_with("SEARCH "))
+                            .count(),
+                        searches,
+                        "{plan:?}"
+                    );
+                    assert!(
+                        plan.iter()
+                            .all(|step| !step.starts_with("SCAN ") || step == "SCAN CONSTANT ROW"),
+                        "{plan:?}"
+                    );
+                }
+                Ok(())
+            })
+            .await
+            .expect("indexed checks");
+    }
+
+    #[tokio::test]
+    async fn owner_lookup_does_not_decode_a_full_agent() {
+        let (_dir, store) = crate::entity_publication::test_support::store().await;
+        crate::entity_publication::test_support::seed_chat(&store, studio_json::json!({
+            "id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default",
+            "name":"Owner","provider":"codex","draft":{"text":"x".repeat(65536),"prefixText":"","assets":[]}
+        })).await;
+        store
+            .transaction(|tx| {
+                let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+                let started = std::time::Instant::now();
+                for _ in 0..100 {
+                    assert!(matches!(
+                        super::read_owner(tx, "owner")?,
+                        super::SourceOwner::Live(_)
+                    ));
+                }
+                let calls = studio_runtime_store::agent_volatile::publication_work::take();
+                let decodes = calls.get("owner").map_or(0, |calls| calls.decodes);
+                eprintln!(
+                    "owner fixture: 100 reads, {decodes} full decodes, {:?}",
+                    started.elapsed()
+                );
+                assert_eq!(decodes, 0);
+                Ok(())
+            })
+            .await
+            .expect("owner reads");
+    }
+
+    #[tokio::test]
+    async fn owner_lookup_ignores_unused_malformed_fields() {
+        let dir = tempfile::tempdir().expect("isolated state");
+        let store = studio_runtime_store::RuntimeStore::open(Some(dir.path()))
+            .await
+            .expect("store");
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)", [studio_json::json!({
+                "id":"owner","rootId":"owner","epoch":1,"status":"idle","accountKey":"default",
+                "name":"Owner","model":42,"provider":"codex"
+            }).to_string()])?;
+            assert!(matches!(super::read_owner(tx, "owner")?, super::SourceOwner::Live(_)));
+            Ok(())
+        }).await.expect("narrow owner fields");
+    }
+
     fn monitor(fields: studio_json::Value) -> studio_runtime_store::MonitorRecord {
         studio_json::from_value(crate::monitor_policy::complete_test_monitor(fields)).unwrap()
     }

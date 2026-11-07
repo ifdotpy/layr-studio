@@ -1180,7 +1180,11 @@ pub fn remove(state_dir: &Path, record: &Value, request_id: &str) -> Result<Valu
     )
 }
 
-pub fn evidence(state_dir: &Path, record: &Value, revision: &str) -> Result<Value> {
+pub fn evidence(
+    state_dir: &Path,
+    record: &Value,
+    revision: &str,
+) -> Result<studio_runtime_schema::layr_evidence::EvidenceResponse> {
     let cwd = associated_cwd(state_dir, record)?;
     let resolved = run(state_dir, &cwd, &["rev-parse", revision])?;
     if revision != resolved || run(state_dir, &cwd, &["rev-parse", "head"])? != resolved {
@@ -1188,13 +1192,11 @@ pub fn evidence(state_dir: &Path, record: &Value, revision: &str) -> Result<Valu
             "Submit the full Layr state ID".into(),
         ));
     }
-    Ok(json!(
-        studio_runtime_schema::layr_evidence::EvidenceResponse {
-            state_id: json!(resolved),
-            project_id: record["layrProjectId"].clone(),
-            line: record["layrLine"].clone(),
-        }
-    ))
+    Ok(studio_runtime_schema::layr_evidence::EvidenceResponse {
+        state_id: resolved,
+        project_id: record["layrProjectId"].as_str().map(str::to_owned),
+        line: record["layrLine"].as_str().map(str::to_owned),
+    })
 }
 
 pub fn merge(

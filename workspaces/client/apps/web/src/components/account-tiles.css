@@ -51,25 +51,6 @@
   height: 100%;
   border-radius: inherit;
 }
-/* A tile with a limit bar: the name line, then the bar below it, with the
-   same space above the text as below the bar. The bottom padding holds the
-   bar, so the text centers in the space above it and never meets the bar. */
-/* Mantine's button padding would start the name 2px right of the bar and of
-   the model names below; the tile keeps the shared inline inset. */
-.setup-accounts .setup-account:not(.setup-account-status) {
-  padding-inline: var(--mantine-spacing-xs);
-}
-.setup-account:not(.setup-account-status):has(.setup-limit) {
-  --setup-tile-inset: calc(var(--mantine-spacing-xs) * 0.6);
-  padding-top: var(--setup-tile-inset);
-  padding-bottom: calc(
-    var(--setup-tile-inset) + var(--studio-rail-size) +
-      var(--mantine-spacing-xs) * 0.5
-  );
-}
-.setup-account:not(.setup-account-status) .setup-limit {
-  bottom: var(--setup-tile-inset);
-}
 
 /* Phone and tablet controls stack at this content breakpoint. */
 @media (max-width: 47.5rem) {
@@ -158,10 +139,17 @@
 }
 
 .setup-account-choice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   background: var(--mantine-color-default-hover);
   border-radius: var(--studio-radius-control);
 }
 .setup-account-choice .setup-account {
+  flex: 1;
+  min-width: 0;
+}
+.setup-account-choice > small {
   width: 100%;
 }
 .setup-account-exclusion {
@@ -219,8 +207,25 @@
 .setup-accounts .setup-account:hover:not(:disabled, [data-selected]) {
   background: var(--hover);
 }
-.setup-account-status .setup-limit {
-  left: var(--mantine-spacing-sm);
-  right: var(--mantine-spacing-sm);
-  bottom: 0.1875rem;
+/* A tile with a limit bar, a choice or the read-only account: the name line,
+   then the bar below it, with the same space above the text as below the bar.
+   The bottom padding holds the bar, so the text never meets it. Name and bar
+   start at the inline inset of the model names below. These rules come last
+   so they hold over the shared tile padding above. */
+.setup-accounts .setup-account,
+.setup-accounts .setup-account-status[data-selected] {
+  padding-inline: var(--mantine-spacing-xs);
+}
+.setup-accounts .setup-account:has(.setup-limit) {
+  --setup-tile-inset: calc(var(--mantine-spacing-xs) * 0.6);
+  padding-top: var(--setup-tile-inset);
+  padding-bottom: calc(
+    var(--setup-tile-inset) + var(--studio-rail-size) +
+      var(--mantine-spacing-xs) * 0.5
+  );
+}
+.setup-accounts .setup-account .setup-limit {
+  left: var(--mantine-spacing-xs);
+  right: var(--mantine-spacing-xs);
+  bottom: var(--setup-tile-inset);
 }

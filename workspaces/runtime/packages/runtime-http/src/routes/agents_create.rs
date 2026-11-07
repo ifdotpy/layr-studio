@@ -50,11 +50,38 @@ fn review_defaults(value: &generated::ReviewDefaults) -> ReviewDefaults {
     }
 }
 
-fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
-    CreationIntent {
+fn account_exclusions(
+    keys: Option<&[String]>,
+    field: &str,
+) -> Result<Option<Vec<studio_runtime_schema::account_key::AccountKey>>, ApiError> {
+    keys.map(|keys| {
+        keys.iter()
+            .cloned()
+            .map(|key| {
+                key.try_into().map_err(|_| {
+                    ApiError::validation(vec![
+                        Value::String("body".into()),
+                        Value::String(field.into()),
+                    ])
+                })
+            })
+            .collect()
+    })
+    .transpose()
+}
+
+fn lead_intent(body: &generated::CreateLeadRequest) -> Result<CreationIntent, ApiError> {
+    Ok(CreationIntent {
         account_key: body.account_key.clone(),
         cwd: body.cwd.clone(),
-        excluded_account_keys: body.excluded_account_keys.clone(),
+        worker_excluded_account_keys: account_exclusions(
+            body.worker_excluded_account_keys.as_deref(),
+            "worker_excluded_account_keys",
+        )?,
+        reviewer_excluded_account_keys: account_exclusions(
+            body.reviewer_excluded_account_keys.as_deref(),
+            "reviewer_excluded_account_keys",
+        )?,
         layr_store_root: body.layr_store_root.clone(),
         daybreak_enabled: nullable_field!(body.daybreak_enabled),
         effort: match &body.effort {
@@ -86,7 +113,7 @@ fn lead_intent(body: &generated::CreateLeadRequest) -> CreationIntent {
         }),
         yolo_mode: body.yolo_mode,
         ..CreationIntent::default()
-    }
+    })
 }
 
 fn agent_intent(body: &generated::CreateAgentRequest) -> CreationIntent {
@@ -365,11 +392,24 @@ mod workspace_admission_tests {
     #[test]
     fn lead_request_keeps_chat_exclusions_in_creation_identity() {
         let request: generated::CreateLeadRequest =
-            studio_json::from_str(r#"{"account_key":"lead","excluded_account_keys":["lead"]}"#)
+            studio_json::from_str(r#"{"account_key":"lead","worker_excluded_account_keys":["lead"],"reviewer_excluded_account_keys":["other"]}"#)
                 .unwrap();
-        let intent = lead_intent(&request);
+        let intent = lead_intent(&request).unwrap();
         assert_eq!(intent.account_key.as_deref(), Some("lead"));
-        assert_eq!(intent.excluded_account_keys, Some(vec!["lead".into()]));
+        assert_eq!(
+            intent.worker_excluded_account_keys.unwrap()[0].as_str(),
+            "lead"
+        );
+        assert_eq!(
+            intent.reviewer_excluded_account_keys.unwrap()[0].as_str(),
+            "other"
+        );
+    }
+
+    #[test]
+    fn exclusion_request_rejects_an_invalid_account_key() {
+        let keys = vec!["x".repeat(studio_runtime_schema::account_key::ACCOUNT_KEY_MAX_CHARS + 1)];
+        assert!(super::account_exclusions(Some(&keys), "worker_excluded_account_keys").is_err());
     }
 
     #[test]
@@ -379,7 +419,7 @@ mod workspace_admission_tests {
             workspace_mode: Some(generated::CreateLeadRequestWorkspaceMode::LayrNative),
             ..Default::default()
         };
-        let intent = lead_intent(&request);
+        let intent = lead_intent(&request).unwrap();
         assert_eq!(intent.layr_store_root.as_deref(), Some("/store"));
         let persisted = studio_json::to_string(&intent).unwrap();
         let restored: CreationIntent = studio_json::from_str(&persisted).unwrap();
@@ -907,7 +947,7 @@ async fn create_lead_with_model(
         || body.review_defaults.is_some();
     let requested_model = body.model.as_ref().and_then(Option::as_deref);
     let request = Creation {
-        intent: lead_intent(&body),
+        intent: lead_intent(&body)?,
         catalog: body.effort.is_some()
             || body.fast_mode.is_some()
             || body.daybreak_enabled.is_some()
@@ -945,6 +985,7 @@ async fn create_lead_with_model(
     wait_for_agent_catalog(
         &state,
         AgentCatalogWaitRequest {
+            role: studio_runtime_schema::creation_intent::AgentRole::Orchestrator,
             parent_id: None,
             preferred_parent_account: None,
             draft_excluded: None,
@@ -961,9 +1002,18 @@ async fn create_lead_with_model(
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
+                role: studio_runtime_schema::creation_intent::AgentRole::Implementer,
                 parent_id: None,
                 preferred_parent_account: catalog_account.as_deref(),
-                draft_excluded: body.excluded_account_keys.as_deref(),
+                draft_excluded: Some(studio_runtime_schema::creation_intent::excluded_for(
+                    studio_runtime_schema::creation_intent::AgentRole::Implementer,
+                    body.worker_excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
+                    body.reviewer_excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
+                )),
                 requested_account: None,
                 requested_model: worker_model,
                 needs_catalog: true,
@@ -977,9 +1027,18 @@ async fn create_lead_with_model(
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
+                role: studio_runtime_schema::creation_intent::AgentRole::Reviewer,
                 parent_id: None,
                 preferred_parent_account: catalog_account.as_deref(),
-                draft_excluded: body.excluded_account_keys.as_deref(),
+                draft_excluded: Some(studio_runtime_schema::creation_intent::excluded_for(
+                    studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+                    body.worker_excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
+                    body.reviewer_excluded_account_keys
+                        .as_deref()
+                        .unwrap_or_default(),
+                )),
                 requested_account: None,
                 requested_model: review.model.as_deref(),
                 needs_catalog: true,
@@ -1045,6 +1104,7 @@ async fn create_agent(
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
+                role: studio_runtime_schema::creation_intent::AgentRole::Implementer,
                 parent_id: None,
                 preferred_parent_account: None,
                 draft_excluded: None,
@@ -1096,6 +1156,7 @@ fn catalog_admission_candidates(
 }
 
 struct AgentCatalogWaitRequest<'a> {
+    role: studio_runtime_schema::creation_intent::AgentRole,
     parent_id: Option<&'a str>,
     preferred_parent_account: Option<&'a str>,
     draft_excluded: Option<&'a [String]>,
@@ -1120,6 +1181,7 @@ fn stored_parent_defaults(
     connection: &studio_runtime_store::Connection,
     parent_id: &str,
     ignore_stored_worker_model: bool,
+    role: studio_runtime_schema::creation_intent::AgentRole,
 ) -> studio_runtime_store::StoreResult<Option<StoredParentDefaults>> {
     let Some(parent) =
         studio_runtime_store::WorkspaceViewsRepository::agent(connection, parent_id)?
@@ -1140,13 +1202,12 @@ fn stored_parent_defaults(
             .map(str::to_owned);
     }
     defaults.root_model = root.get("model").and_then(Value::as_str).map(str::to_owned);
+    let typed_root = studio_runtime_store::AgentRecord::from_value(root)?;
     defaults.excluded.extend(
-        root.get("excludedAccountKeys")
-            .and_then(Value::as_array)
-            .into_iter()
-            .flatten()
-            .filter_map(Value::as_str)
-            .map(str::to_owned),
+        typed_root
+            .exclusions_for(role)
+            .iter()
+            .map(|key| key.as_str().to_owned()),
     );
     Ok(Some(defaults))
 }
@@ -1159,7 +1220,12 @@ async fn wait_for_child_catalog(state: &HttpState, parent_id: &str) -> Result<()
     let parent_id = parent_id.to_owned();
     let defaults = store
         .read_async("runtime-http/routes/agents_create", move |read| {
-            stored_parent_defaults(read, &parent_id, false)
+            stored_parent_defaults(
+                read,
+                &parent_id,
+                false,
+                studio_runtime_schema::creation_intent::AgentRole::Implementer,
+            )
         })
         .await
         .map_err(|_| ApiError::internal())?
@@ -1212,13 +1278,14 @@ async fn wait_for_agent_catalog(
     let draft_excluded = request.draft_excluded.unwrap_or_default().to_vec();
     let ignore_stored_worker_model = request.ignore_stored_worker_model;
     let require_model_match = request.require_model_match;
+    let role = request.role;
     let candidate_data = tokio::time::timeout_at(deadline, async move {
         let stored = match parent_id {
             Some(parent_id) => {
                 let store = store.ok_or(())?;
                 store
                     .read_async("runtime-http/routes/agents_create", move |tx| {
-                        stored_parent_defaults(tx, &parent_id, ignore_stored_worker_model)
+                        stored_parent_defaults(tx, &parent_id, ignore_stored_worker_model, role)
                     })
                     .await
                     .map_err(|_| ())?
@@ -1464,8 +1531,20 @@ async fn conversation(
             .map(review_defaults),
         id: body.id.clone(),
         expected_account: body.expected_account_key.clone(),
-        excluded: body.excluded_account_keys.clone().map(|mut keys| {
-            keys.sort();
+        worker_excluded: account_exclusions(
+            body.worker_excluded_account_keys.as_deref(),
+            "worker_excluded_account_keys",
+        )?
+        .map(|mut keys| {
+            keys.sort_by(|a, b| a.as_str().cmp(b.as_str()));
+            keys
+        }),
+        reviewer_excluded: account_exclusions(
+            body.reviewer_excluded_account_keys.as_deref(),
+            "reviewer_excluded_account_keys",
+        )?
+        .map(|mut keys| {
+            keys.sort_by(|a, b| a.as_str().cmp(b.as_str()));
             keys
         }),
     };
@@ -1500,6 +1579,7 @@ async fn conversation(
     wait_for_agent_catalog(
         &state,
         AgentCatalogWaitRequest {
+            role: studio_runtime_schema::creation_intent::AgentRole::Orchestrator,
             parent_id,
             preferred_parent_account: None,
             draft_excluded: None,
@@ -1519,6 +1599,7 @@ async fn conversation(
             wait_for_agent_catalog(
                 &state,
                 AgentCatalogWaitRequest {
+                    role: studio_runtime_schema::creation_intent::AgentRole::Implementer,
                     parent_id: Some(&request.id),
                     preferred_parent_account: None,
                     draft_excluded: None,
@@ -1541,6 +1622,7 @@ async fn conversation(
         wait_for_agent_catalog(
             &state,
             AgentCatalogWaitRequest {
+                role: studio_runtime_schema::creation_intent::AgentRole::Reviewer,
                 parent_id: Some(&request.id),
                 preferred_parent_account: None,
                 draft_excluded: None,

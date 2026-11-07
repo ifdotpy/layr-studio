@@ -529,9 +529,7 @@ mod tests {
     }
     #[test]
     fn task_command_schema_matches_owner_and_transport_variants() {
-        let document: Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+        let document: Value = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         check_api_contract(&document).expect("generated request owner");
         let mut tool = json!({"type":"object","properties":{"action":{"type":"string"}},"required":["action"]}).as_object().expect("object").clone();
         apply_tool_contract("orchestration_task", &mut tool);

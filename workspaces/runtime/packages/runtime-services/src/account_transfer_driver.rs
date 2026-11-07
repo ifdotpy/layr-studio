@@ -260,11 +260,6 @@ struct ResumeIdentity<'a> {
     status: Option<ResumeString<'a>>,
 }
 
-/// The single compatibility accessor for per-chat account exclusions.
-pub(crate) fn account_is_excluded(exclusions: Option<&[String]>, target: &str) -> bool {
-    exclusions.is_some_and(|keys| keys.iter().any(|key| key == target))
-}
-
 /// Return a retained request before consulting mutable account eligibility.
 pub async fn replay(
     store: &RuntimeStore,
@@ -326,14 +321,6 @@ pub async fn request(
             if actor.is_lead != Some(true) {
                 return Err(TransferError::Refused(
                     "Choose the orchestrator to transfer its team",
-                ));
-            }
-            if account_is_excluded(
-                actor.excluded_account_keys.value().map(Vec::as_slice),
-                &target,
-            ) {
-                return Err(TransferError::Refused(
-                    "This account is excluded for this chat's agents. Include it first, or choose another account.",
                 ));
             }
             let summary = match actor.account_transfer.value() {
@@ -2106,15 +2093,17 @@ mod request_tests {
     }
 
     #[test]
-    fn exact_request_replays_after_target_becomes_excluded() {
+    fn exact_request_replays_after_worker_exclusions_change() {
         let (_root, store) = store_with_agents();
         let id = "5a300f72-4ea6-4d30-8a0e-9b2c13c4226a";
         let first = request(&store, id, "lead", "target", "team", "codex", 10.0)
             .expect("initial transfer succeeds");
         run_async(store.transaction_with_error(|tx| {
             let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?.unwrap();
-            lead.excluded_account_keys =
-                studio_runtime_schema::queue_command::Field::Value(vec!["target".into()]);
+            lead.worker_excluded_account_keys =
+                studio_runtime_schema::queue_command::Field::Value(vec![
+                    "target".to_owned().try_into().unwrap(),
+                ]);
             AgentRepository::put(tx, &lead)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         }))
@@ -2129,7 +2118,7 @@ mod request_tests {
     }
 
     #[test]
-    fn invalid_scope_and_excluded_account_refuse_without_writes() {
+    fn invalid_scope_refuses_and_lead_transfer_ignores_role_exclusions() {
         let (_root, store) = store_with_agents();
         let snapshot = || {
             let db = store.test_reader().expect("reader");
@@ -2162,32 +2151,28 @@ mod request_tests {
         run_async(store.transaction_with_error(|tx| {
             let mut lead = AgentRepository::get(tx, &AgentId::from("lead"))?
                 .expect("test fixture operation succeeds");
-            lead.excluded_account_keys =
-                studio_runtime_schema::queue_command::Field::Value(vec!["blocked".into()]);
+            lead.worker_excluded_account_keys =
+                studio_runtime_schema::queue_command::Field::Value(vec![
+                    "blocked".to_owned().try_into().unwrap(),
+                ]);
+            lead.reviewer_excluded_account_keys =
+                studio_runtime_schema::queue_command::Field::Value(vec![
+                    "blocked".to_owned().try_into().unwrap(),
+                ]);
             AgentRepository::put(tx, &lead)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         }))
         .expect("test fixture operation succeeds");
-        let before_blocked = snapshot();
-        assert_eq!(
-            request(
-                &store,
-                "5a300f72-4ea6-4d30-8a0e-9b2c13c4226f",
-                "lead",
-                "blocked",
-                "team",
-                "codex",
-                10.0
-            )
-            .unwrap_err()
-            .to_string(),
-            "This account is excluded for this chat's agents. Include it first, or choose another account."
-        );
-        assert_eq!(
-            snapshot(),
-            before_blocked,
-            "excluded account wrote durable state"
-        );
+        request(
+            &store,
+            "5a300f72-4ea6-4d30-8a0e-9b2c13c4226f",
+            "lead",
+            "blocked",
+            "team",
+            "codex",
+            10.0,
+        )
+        .expect("the lead may transfer to an account excluded for both roles");
     }
 }
 

@@ -131,8 +131,10 @@ type SettingsProps = {
   inline?: boolean;
   permissionsTargetId?: string;
   onAccountChange?: (key: string) => void;
-  excludedAccountKeys?: readonly string[] | undefined;
-  onExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  workerExcludedAccountKeys?: readonly string[] | undefined;
+  reviewerExcludedAccountKeys?: readonly string[] | undefined;
+  onWorkerExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  onReviewerExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
   accountDisabled?: boolean;
   accountModalOpen?: boolean;
   onDraftChange?: (patch: Partial<ConversationBody>) => void;
@@ -524,8 +526,10 @@ function ScopedExecutionSettings({
   extrasTargetId,
   permissionsTargetId,
   onAccountChange,
-  excludedAccountKeys,
-  onExcludedAccountKeysChange,
+  workerExcludedAccountKeys,
+  reviewerExcludedAccountKeys,
+  onWorkerExcludedAccountKeysChange,
+  onReviewerExcludedAccountKeysChange,
   accountDisabled = false,
   accountModalOpen = false,
   onDraftChange,
@@ -692,7 +696,9 @@ function ScopedExecutionSettings({
       ? inheritedCatalog
       : parentCatalog;
   const connectedAccounts = accounts.filter((account) =>
-    excludedAccountKeys !== undefined || role === "review"
+    workerExcludedAccountKeys !== undefined ||
+    reviewerExcludedAccountKeys !== undefined ||
+    role === "review"
       ? true
       : teamDefaults
         ? accountCanStart(account)
@@ -1329,8 +1335,20 @@ function ScopedExecutionSettings({
         }
         accountKey={accountOf(agent)}
         onAccount={chooseAccount}
-        excludedAccountKeys={excludedAccountKeys}
-        onExcludedAccountKeysChange={onExcludedAccountKeysChange}
+        excludedKeys={
+          role === "worker"
+            ? workerExcludedAccountKeys
+            : role === "review"
+              ? reviewerExcludedAccountKeys
+              : undefined
+        }
+        onExcludedKeysChange={
+          role === "worker"
+            ? onWorkerExcludedAccountKeysChange
+            : role === "review"
+              ? onReviewerExcludedAccountKeysChange
+              : undefined
+        }
         showAccountChooser={!teamDefaults}
         accountDisabled={
           !!readOnlyReason ||

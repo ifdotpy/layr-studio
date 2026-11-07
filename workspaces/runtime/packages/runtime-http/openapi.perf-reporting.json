@@ -1,0 +1,159 @@
+{
+  "components": {
+    "schemas": {
+      "PerfClientReport": {
+        "additionalProperties": false,
+        "properties": {
+          "interactions": {
+            "items": {
+              "$ref": "#/components/schemas/PerfInteraction"
+            },
+            "type": "array"
+          },
+          "longTasks": {
+            "$ref": "#/components/schemas/PerfLongTasks"
+          },
+          "renders": {
+            "items": {
+              "$ref": "#/components/schemas/PerfRender"
+            },
+            "type": "array"
+          },
+          "windowMs": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "windowMs",
+          "longTasks",
+          "interactions",
+          "renders"
+        ],
+        "type": "object"
+      },
+      "PerfInteraction": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxDurationMs": {
+            "type": "number"
+          },
+          "maxInputDelayMs": {
+            "type": "number"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "count",
+          "maxDurationMs",
+          "maxInputDelayMs"
+        ],
+        "type": "object"
+      },
+      "PerfLongTasks": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxMs": {
+            "type": "number"
+          },
+          "totalMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "count",
+          "totalMs",
+          "maxMs"
+        ],
+        "type": "object"
+      },
+      "PerfRender": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "type": "string"
+          },
+          "count": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxMs": {
+            "type": "number"
+          },
+          "totalMs": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "component",
+          "count",
+          "totalMs",
+          "maxMs"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "Performance reporting",
+    "version": "1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/perf-reporting": {
+      "get": {
+        "operationId": "get_perf_reporting",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Performance aggregates"
+          }
+        },
+        "summary": "Performance diagnostics"
+      }
+    },
+    "/api/perf-reporting/client": {
+      "post": {
+        "operationId": "post_perf_client_report",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PerfClientReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Report accepted"
+          }
+        },
+        "summary": "Client performance report"
+      }
+    }
+  }
+}

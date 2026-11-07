@@ -139,7 +139,11 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
     null,
   );
   const [accountKey, setAccountKey] = useState("");
-  const [excludedAccountKeys, setExcludedAccountKeys] = useState<string[]>([]);
+  const [workerExcludedAccountKeys, setWorkerExcludedAccountKeys] = useState<
+    string[]
+  >([]);
+  const [reviewerExcludedAccountKeys, setReviewerExcludedAccountKeys] =
+    useState<string[]>([]);
   const [settings, setSettings] = useState<
     Omit<NewChatSettings, "workspaceMode">
   >({});
@@ -255,7 +259,8 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
               accountKey,
               model,
             ),
-            excluded_account_keys: excludedAccountKeys,
+            worker_excluded_account_keys: workerExcludedAccountKeys,
+            reviewer_excluded_account_keys: reviewerExcludedAccountKeys,
           }
         : null,
     );
@@ -265,7 +270,8 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
     defaultEffort,
     accountKey,
     model,
-    excludedAccountKeys,
+    workerExcludedAccountKeys,
+    reviewerExcludedAccountKeys,
     onChange,
   ]);
   const patch = useCallback(
@@ -289,8 +295,10 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
         presentation="panel"
         settingsRow
         showAccountSummary
-        excludedAccountKeys={excludedAccountKeys}
-        onExcludedAccountKeysChange={setExcludedAccountKeys}
+        workerExcludedAccountKeys={workerExcludedAccountKeys}
+        reviewerExcludedAccountKeys={reviewerExcludedAccountKeys}
+        onWorkerExcludedAccountKeysChange={setWorkerExcludedAccountKeys}
+        onReviewerExcludedAccountKeysChange={setReviewerExcludedAccountKeys}
         onDraftChange={patch}
         onAccountChange={(key) => {
           setAccountKey(key);

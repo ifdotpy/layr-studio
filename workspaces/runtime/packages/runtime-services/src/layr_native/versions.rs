@@ -207,8 +207,10 @@ mod tests {
     #[test]
     fn native_layr_store_version_rejects_unknown_states() {
         for state in ["legacy", "current", "future", "Compatible"] {
-            let response = json!({"binary":{"format":1,"version":"0.36.0","build":"fixture"},"store":null,"compatible":true,"state":state});
-            let error = studio_json::from_value::<Inspection>(response)
+            let response = format!(
+                r#"{{"binary":{{"format":1,"version":"0.36.0","build":"fixture"}},"store":null,"compatible":true,"state":"{state}"}}"#
+            );
+            let error = studio_json::from_str::<Inspection>(&response)
                 .err()
                 .expect("unknown state must fail decoding");
             assert!(error.to_string().contains("unknown variant"), "{error}");
@@ -218,9 +220,11 @@ mod tests {
     #[test]
     fn native_layr_store_version_accepts_the_five_supported_states() {
         for state in ["absent", "empty", "unmarked", "compatible", "incompatible"] {
-            let response = json!({"binary":{"format":1,"version":"0.36.0","build":"fixture"},"store":null,"compatible":true,"state":state});
+            let response = format!(
+                r#"{{"binary":{{"format":1,"version":"0.36.0","build":"fixture"}},"store":null,"compatible":true,"state":"{state}"}}"#
+            );
             assert!(
-                studio_json::from_value::<Inspection>(response).is_ok(),
+                studio_json::from_str::<Inspection>(&response).is_ok(),
                 "{state}"
             );
         }

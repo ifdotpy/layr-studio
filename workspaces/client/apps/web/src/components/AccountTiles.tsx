@@ -12,6 +12,7 @@ import {
 import { accountDisplayName, accountTooltip } from "../accountName";
 import { formatPercent } from "./Usage";
 import type { Account } from "./Accounts";
+import type { SetupRole } from "./agents/AgentSetupPicker";
 import "./account-tiles.css";
 import { remainingLimitColor } from "./accountLimitColor";
 import {
@@ -304,15 +305,16 @@ type AccountTilesProps = {
   accountUnavailableReason?:
     | ((account: Account) => string | undefined)
     | undefined;
-  excludedAccountKeys?: readonly string[] | undefined;
-  onExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  excludedKeys?: readonly string[] | undefined;
+  onExcludedKeysChange?: ((keys: string[]) => void) | undefined;
+  exclusionRole?: Exclude<SetupRole, "orchestrator"> | undefined;
 } & (
   | { multiple?: false; value: string; onChange: (value: string) => void }
   | { multiple: true; value: string[]; onChange: (value: string[]) => void }
 );
 export function AccountTiles(p: AccountTilesProps) {
-  const excluded = p.excludedAccountKeys;
-  const onExcludedChange = p.onExcludedAccountKeysChange;
+  const excluded = p.excludedKeys;
+  const onExcludedChange = p.onExcludedKeysChange;
   const selected = p.multiple ? p.value[0] : p.value;
   const selectedProvider =
     p.accounts.find((account) => account.id === selected)?.provider || "";
@@ -377,6 +379,35 @@ export function AccountTiles(p: AccountTilesProps) {
               key={account.id}
               className={excluded ? "setup-account-choice" : undefined}
             >
+              {excluded && onExcludedChange && p.exclusionRole && (
+                <Tooltip
+                  label={
+                    p.exclusionRole === "worker"
+                      ? "Use for workers"
+                      : "Use for reviewers"
+                  }
+                  events={{ hover: true, focus: true, touch: false }}
+                >
+                  <Checkbox
+                    className="setup-account-exclusion"
+                    aria-label={`Use ${setupAccountName(account)} for ${p.exclusionRole === "worker" ? "workers" : "reviewers"}`}
+                    checked={!excluded.includes(account.id)}
+                    disabled={
+                      p.disabled ||
+                      (p.accounts.filter((item) => !excluded.includes(item.id))
+                        .length === 1 &&
+                        !excluded.includes(account.id))
+                    }
+                    onChange={(event) =>
+                      onExcludedChange(
+                        event.currentTarget.checked
+                          ? excluded.filter((key) => key !== account.id)
+                          : [...excluded, account.id],
+                      )
+                    }
+                  />
+                </Tooltip>
+              )}
               <AccountTile
                 account={account}
                 selected={
@@ -400,27 +431,6 @@ export function AccountTiles(p: AccountTilesProps) {
                 }
                 onSelect={() => select(account.id)}
               />
-              {excluded && onExcludedChange && (
-                <Checkbox
-                  className="setup-account-exclusion"
-                  label="Exclude for workers and reviewers"
-                  aria-label={`Exclude ${setupAccountName(account)} from workers and reviewers`}
-                  checked={excluded.includes(account.id)}
-                  disabled={
-                    p.disabled ||
-                    (p.accounts.filter((item) => !excluded.includes(item.id))
-                      .length === 1 &&
-                      !excluded.includes(account.id))
-                  }
-                  onChange={(event) =>
-                    onExcludedChange(
-                      event.currentTarget.checked
-                        ? [...excluded, account.id]
-                        : excluded.filter((key) => key !== account.id),
-                    )
-                  }
-                />
-              )}
               {p.accountUnavailableReason?.(account) && (
                 <small>{p.accountUnavailableReason(account)}</small>
               )}

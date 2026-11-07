@@ -4315,20 +4315,6 @@
             ],
             "title": "Error"
           },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Excludedaccountkeys"
-          },
           "executionMode": {
             "anyOf": [
               {
@@ -4709,6 +4695,22 @@
               }
             ]
           },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "reviewerExcludedAccountKeys"
+          },
           "startAttempt": {
             "anyOf": [
               {
@@ -4819,6 +4821,22 @@
                 "type": "null"
               }
             ]
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -5403,20 +5421,6 @@
               }
             ],
             "title": "Error"
-          },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Excludedaccountkeys"
           },
           "executionMode": {
             "anyOf": [
@@ -6092,6 +6096,22 @@
               }
             ]
           },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "reviewerExcludedAccountKeys"
+          },
           "role": {
             "anyOf": [
               {
@@ -6324,6 +6344,22 @@
                 "type": "null"
               }
             ]
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -7492,14 +7528,6 @@
             "title": "Events",
             "type": "integer"
           },
-          "excludedAccountKeys": {
-            "default": null,
-            "items": {
-              "type": "string"
-            },
-            "title": "Excludedaccountkeys",
-            "type": "array"
-          },
           "executionArchives": {
             "default": null,
             "items": {
@@ -8218,6 +8246,16 @@
             "$ref": "#/components/schemas/ReviewDefaultsRecordResponse",
             "default": null
           },
+          "reviewerExcludedAccountKeys": {
+            "default": null,
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "reviewerExcludedAccountKeys",
+            "type": "array"
+          },
           "role": {
             "default": null,
             "enum": [
@@ -8430,6 +8468,16 @@
           "workerDefaults": {
             "$ref": "#/components/schemas/WorkerDefaultsRecordResponse",
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "default": null,
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "workerExcludedAccountKeys",
+            "type": "array"
           },
           "workspaceInGit": {
             "default": null,
@@ -8902,21 +8950,6 @@
             ],
             "default": null,
             "title": "Error"
-          },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Excludedaccountkeys"
           },
           "executionMode": {
             "anyOf": [
@@ -9661,6 +9694,23 @@
             ],
             "default": null
           },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "reviewerExcludedAccountKeys"
+          },
           "role": {
             "anyOf": [
               {
@@ -9913,6 +9963,23 @@
               }
             ],
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -17422,21 +17489,6 @@
             "default": null,
             "title": "Error"
           },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Excludedaccountkeys"
-          },
           "executionMode": {
             "anyOf": [
               {
@@ -18142,6 +18194,23 @@
             ],
             "default": null
           },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "reviewerExcludedAccountKeys"
+          },
           "role": {
             "anyOf": [
               {
@@ -18378,6 +18447,23 @@
               }
             ],
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceMode": {
             "anyOf": [
@@ -19761,6 +19847,7 @@
       "ChatAccountExclusions": {
         "default": [],
         "items": {
+          "maxLength": 200,
           "minLength": 1,
           "pattern": "\\S",
           "type": "string"
@@ -24779,9 +24866,6 @@
             "default": null,
             "title": "Effort"
           },
-          "excluded_account_keys": {
-            "$ref": "#/components/schemas/ChatAccountExclusions"
-          },
           "expected_account_key": {
             "default": "default",
             "maxLength": 200,
@@ -24873,6 +24957,9 @@
             ],
             "default": null
           },
+          "reviewer_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
+          },
           "subagent_concurrency": {
             "default": 32,
             "maximum": 2048,
@@ -24890,6 +24977,9 @@
               }
             ],
             "default": null
+          },
+          "worker_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "yolo_mode": {
             "default": true,
@@ -25413,9 +25503,6 @@
             "default": null,
             "title": "Effort"
           },
-          "excluded_account_keys": {
-            "$ref": "#/components/schemas/ChatAccountExclusions"
-          },
           "fast_mode": {
             "anyOf": [
               {
@@ -25531,6 +25618,9 @@
             ],
             "default": null
           },
+          "reviewer_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
+          },
           "worker_defaults": {
             "anyOf": [
               {
@@ -25541,6 +25631,9 @@
               }
             ],
             "default": null
+          },
+          "worker_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "workspaceMode": {
             "description": "When omitted, the server selects native Layr when available; otherwise it selects worktree.",

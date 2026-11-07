@@ -285,8 +285,7 @@ mod tests {
     fn resource_ref_matches_schema_and_preserves_canonical_key() {
         let validator = crate::compiled_validator("ResourceRef").expect("resource schema");
         let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         for (path, limit) in [
             (
                 "/components/schemas/AuthProgressResource/properties/requestId/maxLength",

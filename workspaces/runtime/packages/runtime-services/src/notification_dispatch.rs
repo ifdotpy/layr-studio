@@ -2670,7 +2670,9 @@ mod tests {
                  CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT);
                  CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED);
                  CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);
+                 CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY,hash TEXT NOT NULL,size INTEGER NOT NULL);
                  CREATE TABLE runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT NOT NULL,record TEXT NOT NULL);
                  CREATE TABLE sync_entities(collection TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,hash TEXT NOT NULL,payload TEXT,deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(collection,id));

@@ -481,10 +481,7 @@ fn direct_units(
         return Ok(units);
     }
     for source in &DIRECT_SOURCES {
-        if !source.collections.iter().any(|c| wanted.contains(c))
-            || source.table != durable_seq::CHAT_VIEW_MARK
-                && !crate::sync_policy::table_exists(connection, source.table)?
-        {
+        if !source.collections.iter().any(|c| wanted.contains(c)) {
             continue;
         }
         let changed: Vec<(String, i64, bool)> = connection

@@ -106,10 +106,13 @@ For a worktree chat use `{"kind":"gitRange","base":"<ref>","head":"<full commit>
 The reviewer uses the team review default model and a read-only working copy of
 the target. Findings arrive as a child result. Recover a lost receipt with
 `orchestration_request`; do not repeat the request with a new identity.
+Optional `instructions` add context to the review brief, and `account` selects
+an eligible account that offers the review model.
 
 The same targets may be supplied as `review` when spawning a reviewer. A Layr
 reviewer receives `layr_read` for exact-state reads and checks; a Git reviewer
-uses the Git working copy. Shared workspaces do not accept review assignments.
+uses the Git working copy. Reviewers use `orchestration_read` to retrieve their
+own saved output when a response includes an outputRef. Shared workspaces do not accept review assignments.
 Leads using either provider receive `orchestration_review`. Voice is the only
 provider-specific difference in this tool matrix: `orchestration_speak` is
 available to Codex leads. Implementers and reviewers do not receive voice.

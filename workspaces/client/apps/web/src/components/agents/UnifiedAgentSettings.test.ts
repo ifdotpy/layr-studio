@@ -61,7 +61,8 @@ test("keeps exclusions locked through refresh so the next change retains the fir
       agent: {
         id: "lead",
         isLead: true,
-        excludedAccountKeys: excluded,
+        workerExcludedAccountKeys: excluded,
+        reviewerExcludedAccountKeys: [],
       } as ComponentProps<typeof UnifiedAgentSettings>["agent"],
       catalog: { models: [], loading: false, error: "", retry: () => {} },
       refresh,
@@ -70,7 +71,7 @@ test("keeps exclusions locked through refresh so the next change retains the fir
     const picker = component.props.renderPicker(() => {}, false);
     return picker.props.children.props;
   };
-  render().onExcludedAccountKeysChange(["A"]);
+  render().onWorkerExcludedAccountKeysChange(["A"]);
   await Promise.resolve();
   expect(refresh).toHaveBeenCalledOnce();
   expect(refresh).toHaveBeenCalledWith();
@@ -78,9 +79,14 @@ test("keeps exclusions locked through refresh so the next change retains the fir
   excluded = ["A"];
   completeRefresh();
   await vi.waitFor(() => expect(render().accountDisabled).toBe(false));
-  render().onExcludedAccountKeysChange([...excluded, "B"]);
+  render().onWorkerExcludedAccountKeysChange([...excluded, "B"]);
   expect(harness.post).toHaveBeenLastCalledWith("/api/conversation", {
     id: "lead",
-    excluded_account_keys: ["A", "B"],
+    worker_excluded_account_keys: ["A", "B"],
+  });
+  render().onReviewerExcludedAccountKeysChange(["B"]);
+  expect(harness.post).toHaveBeenLastCalledWith("/api/conversation", {
+    id: "lead",
+    reviewer_excluded_account_keys: ["B"],
   });
 });

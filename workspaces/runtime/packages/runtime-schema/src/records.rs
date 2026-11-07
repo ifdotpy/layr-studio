@@ -102,8 +102,7 @@ mod tests {
 
     #[test]
     fn stored_work_boundary_record_domains_have_one_generated_owner() {
-        let openapi = studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-            .expect("OpenAPI document");
+        let openapi = studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI document");
         check_schema_parity(&openapi)
             .expect("all record domain consumers are generated from this owner");
         for value in schema::<WorkStatus>()["enum"]

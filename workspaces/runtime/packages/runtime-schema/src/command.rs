@@ -457,8 +457,7 @@ mod tests {
         let wire = studio_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"restore_deleted_root","target":"chat","body":{}});
         let request: CommandRequest = studio_json::from_value(wire).expect("command owner");
         let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         let schemas = &openapi["components"]["schemas"];
         let kind = request.command.name();
         assert_eq!(

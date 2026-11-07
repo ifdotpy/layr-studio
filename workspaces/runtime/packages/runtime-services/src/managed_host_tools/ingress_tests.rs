@@ -2163,6 +2163,13 @@ impl crate::managed_child_create::ManagedCreationEnvironment for CreationEnviron
                 parent_account_key
             }
         });
+        if key == "incapable" {
+            return Err(
+                crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
+                    "This model is not available for the selected worker accounts",
+                ),
+            );
+        }
         if excluded_account_keys.iter().any(|excluded| excluded == key)
             || project_account_keys.is_some_and(|keys| {
                 !keys.is_empty() && !keys.iter().any(|candidate| candidate == key)
@@ -2510,6 +2517,33 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             "codex",
         ),
         (
+            "worker-ignores-reviewer-exclusions",
+            json!({"role":"implementer","workspace":"shared","model":"gpt-6.1-sol","account_key":"default"}),
+            configured.clone(),
+            "gpt-6.1-sol",
+            Some("high"),
+            false,
+            "codex",
+        ),
+        (
+            "reviewer-ignores-worker-exclusions",
+            json!({}),
+            json!({"model":"gpt-6-astra","effort":"high"}),
+            "gpt-6-astra",
+            Some("high"),
+            true,
+            "codex",
+        ),
+        (
+            "reviewer-respects-reviewer-exclusions",
+            json!({}),
+            json!({"model":"gpt-6-astra","effort":"high"}),
+            "gpt-6-astra",
+            Some("high"),
+            true,
+            "codex",
+        ),
+        (
             "nested-configured",
             json!({}),
             configured.clone(),
@@ -2591,11 +2625,19 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
                 } else {
                     "codex"
                 });
-                parent["excludedAccountKeys"] = json!(if label == "caller-account" {
+                parent["reviewerExcludedAccountKeys"] = json!(if label == "caller-account" {
                     vec!["default"]
                 } else {
                     vec![]
                 });
+                if label == "worker-ignores-reviewer-exclusions"
+                    || label == "reviewer-respects-reviewer-exclusions"
+                {
+                    parent["reviewerExcludedAccountKeys"] = json!(["default"]);
+                }
+                if label == "reviewer-ignores-worker-exclusions" {
+                    parent["workerExcludedAccountKeys"] = json!(["default"]);
+                }
                 parent["workerDefaults"]["fastMode"] = json!(true);
                 if defaults.is_null() {
                     parent.as_object_mut().unwrap().remove("reviewDefaults");
@@ -2695,7 +2737,10 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             assert_eq!(child["provider"], expected_provider, "{label}/{tool}");
             let expected_account = match label {
                 "claude-review-default" => "test-claude",
-                "caller-account" | "explicit-review-account" | "implementer" => "alternate",
+                "caller-account"
+                | "explicit-review-account"
+                | "implementer"
+                | "reviewer-respects-reviewer-exclusions" => "alternate",
                 _ => "default",
             };
             assert_eq!(child["accountKey"], expected_account, "{label}/{tool}");
@@ -2860,7 +2905,7 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
     let binary = directory.path().join("fake-layr");
     std::fs::write(
         &binary,
-        "#!/bin/sh\nif [ \"$4\" = missing ]; then exit 1; fi\nif [ \"$4\" = 01a1a137e46271908be93f0f87ff4514 ]; then\n  case \"$2\" in */project-b) printf '%s\\n' \"$4\";; *) exit 1;; esac\nelse\n  printf '01a1a137e46271908be93f0f87ff4513\\n'\nfi\n",
+        "#!/bin/sh\nif [ \"$4\" = origin/main ] && [ -f \"$2/no-origin\" ]; then exit 1; fi\nif [ \"$3\" = merge-base ] && [ \"$4\" = origin/main ]; then printf '01a1a137e46271908be93f0f87ff4515\\n'; exit; fi\nif [ \"$4\" = missing ]; then exit 1; fi\nif [ \"$4\" = 01a1a137e46271908be93f0f87ff4514 ]; then\n  case \"$2\" in */project-b) printf '%s\\n' \"$4\";; *) exit 1;; esac\nelse\n  printf '01a1a137e46271908be93f0f87ff4513\\n'\nfi\n",
     )
     .unwrap();
     std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -2916,6 +2961,21 @@ async fn managed_spawn_native_layr_lead_uses_project_binding() {
     );
     assert_eq!(
         record.value()["reviewAssignment"]["base"],
+        json!({"kind":"state","state":"01a1a137e46271908be93f0f87ff4515"})
+    );
+    std::fs::write(line.join("no-origin"), "").unwrap();
+    let local = crate::managed_child_create::spawn_agents(&store, &actor,
+        &json!({"agents":[{"name":"Reviewer","prompt":"Review","role":"reviewer","review_state":"01a1a137e46271908be93f0f87ff4513"}]}),
+        "native-review-local-main", 20.0, &CreationEnvironment).await.unwrap();
+    let local_id = local.result().test_value()["agents"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let local_record = AgentRepository::get(&reader, &AgentId::from(local_id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        local_record.value()["reviewAssignment"]["base"],
         json!({"kind":"state","state":"01a1a137e46271908be93f0f87ff4513"})
     );
     let other_project = directory.path().join("project-b");
@@ -3032,7 +3092,7 @@ async fn review_selects_an_account_that_offers_the_model() {
     let result = crate::managed_child_create::request_review(
         &store,
         &actor,
-        &json!({"target":{"kind":"gitRange","base":base,"head":head}}),
+        &json!({"target":{"kind":"gitRange","base":base,"head":head},"account":"chosen","instructions":"Focus on recovery."}),
         "review-model-account",
         21.0,
         &CreationEnvironment,
@@ -3047,7 +3107,50 @@ async fn review_selects_an_account_that_offers_the_model() {
     let record = AgentRepository::get(&store.test_reader().unwrap(), &AgentId::from(id.as_str()))
         .unwrap()
         .unwrap();
-    assert_eq!(record.account_key, "alternate");
+    assert_eq!(record.account_key, "chosen");
+    let brief: String = store
+        .test_reader()
+        .unwrap()
+        .query_row(
+            "SELECT text FROM runtime_events WHERE agent=?1 AND kind='user'",
+            [&id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(brief.contains("Focus on recovery."));
+    assert!(brief.contains("git diff"));
+    let changed = crate::managed_child_create::request_review(
+        &store, &actor,
+        &json!({"target":{"kind":"gitRange","base":base,"head":head},"account":"chosen","instructions":"Different."}),
+        "review-model-account", 22.0, &CreationEnvironment,
+    ).await;
+    assert!(changed.is_err(), "a request id cannot change instructions");
+    let incapable = crate::managed_child_create::request_review(
+        &store,
+        &actor,
+        &json!({"target":{"kind":"gitRange","base":base,"head":head},"account":"incapable"}),
+        "review-incapable-account",
+        22.0,
+        &CreationEnvironment,
+    )
+    .await;
+    assert!(incapable.is_err());
+    let mut excluded = value.clone();
+    excluded["workerExcludedAccountKeys"] = json!(["chosen"]);
+    store
+        .transaction(move |tx| AgentRepository::put(tx, &AgentRecord::from_value(excluded)?))
+        .await
+        .unwrap();
+    let denied = crate::managed_child_create::request_review(
+        &store,
+        &actor,
+        &json!({"target":{"kind":"gitRange","base":base,"head":head},"account":"chosen"}),
+        "review-excluded-account",
+        22.0,
+        &CreationEnvironment,
+    )
+    .await;
+    assert!(denied.is_err());
 }
 
 #[tokio::test]
@@ -3572,7 +3675,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         "removed workspace mode must be refused"
     );
 
-    actor_value["excludedAccountKeys"] = json!(["default"]);
+    actor_value["reviewerExcludedAccountKeys"] = json!(["default"]);
     let updated_actor = actor_value.clone();
     store
         .transaction_with::<_, StoreError>(move |tx| {
@@ -4679,7 +4782,7 @@ async fn reviewer_account_selection_uses_eligible_resolver() {
     let (_dir, store, _) = fixture().await;
     let load = std::collections::HashMap::new();
     let spec = studio_runtime_schema::creation_intent::CreationIntent::default();
-    let root: AgentRecord = studio_json::from_str(r#"{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","excludedAccountKeys":["default"],"workerDefaults":{},"reviewDefaults":{"model":"gpt-6-luna"}}"#).unwrap();
+    let root: AgentRecord = studio_json::from_str(r#"{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","reviewerExcludedAccountKeys":["default"],"workerDefaults":{},"reviewDefaults":{"model":"gpt-6-luna"}}"#).unwrap();
     let settings = crate::managed_child_create::resolve_worker_settings(
         &store,
         &CreationEnvironment,

@@ -274,15 +274,30 @@ fn capacity_exclusion_reason(snapshot: &Snapshot) -> Option<String> {
     if text(agent, "id") == root_id {
         return None;
     }
-    let root = snapshot
-        .ancestors
-        .iter()
-        .find(|ancestor| text(ancestor, "id") == root_id)?;
     let account_key = account(agent);
-    root.get("excludedAccountKeys")
-        .and_then(Value::as_array)
-        .filter(|keys| keys.iter().any(|key| key.as_str() == Some(account_key)))
-        .map(|_| format!("Account {account_key} is disabled for this chat"))
+    let view = snapshot.agent_view();
+    let root_view = snapshot
+        .ancestors_view()
+        .iter()
+        .find(|ancestor| ancestor.id.as_str() == root_id)?;
+    let excluded = studio_runtime_schema::creation_intent::excluded_for(
+        view.role
+            .unwrap_or(studio_runtime_schema::creation_intent::AgentRole::Implementer),
+        root_view
+            .worker_excluded_account_keys
+            .as_ref()
+            .map(|keys| keys.as_slice())
+            .unwrap_or_default(),
+        root_view
+            .reviewer_excluded_account_keys
+            .as_ref()
+            .map(|keys| keys.as_slice())
+            .unwrap_or_default(),
+    );
+    excluded
+        .iter()
+        .any(|key| key.as_str() == account_key)
+        .then(|| format!("Account {account_key} is disabled for this chat"))
 }
 
 /// The provider's outcome of a capacity retry's `turn/start`.

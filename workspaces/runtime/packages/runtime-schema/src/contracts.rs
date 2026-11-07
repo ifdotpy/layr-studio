@@ -115,6 +115,14 @@ fn shared_values_ts() -> String {
         &mut text,
         &[
             (
+                "ACCOUNT_KEY_MIN_CHARS",
+                crate::account_key::ACCOUNT_KEY_MIN_CHARS.to_string(),
+            ),
+            (
+                "ACCOUNT_KEY_MAX_CHARS",
+                crate::account_key::ACCOUNT_KEY_MAX_CHARS.to_string(),
+            ),
+            (
                 "CLAUDE_MCP_AUTO_BACKGROUND_MS",
                 values::CLAUDE_MCP_AUTO_BACKGROUND_MS.to_string(),
             ),
@@ -581,6 +589,73 @@ fn check_account_group_parity(openapi: &Value) -> Result<(), String> {
 
 /// Hold the committed OpenAPI document and persisted-state schemas to the Rust owners.
 pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<(), String> {
+    let snapshot: Value = studio_json::from_str(include_str!(
+        "schemas/persisted-continuation-snapshot.schema.json"
+    ))
+    .map_err(|e| e.to_string())?;
+    let agent: Value =
+        studio_json::from_str(include_str!("schemas/persisted-agent-record.schema.json"))
+            .map_err(|e| e.to_string())?;
+    for (bound, value) in [
+        ("minLength", crate::account_key::ACCOUNT_KEY_MIN_CHARS),
+        ("maxLength", crate::account_key::ACCOUNT_KEY_MAX_CHARS),
+    ] {
+        expect_number(
+            openapi,
+            &format!("/components/schemas/ChatAccountExclusions/items/{bound}"),
+            value as i64,
+        )?;
+        for field in ["workerExcludedAccountKeys", "reviewerExcludedAccountKeys"] {
+            let expected = format!(
+                "https://codex-studio.invalid/openapi.json#/components/schemas/AgentEntityDto/properties/{field}"
+            );
+            if agent
+                .pointer(&format!("/properties/{field}/$ref"))
+                .and_then(Value::as_str)
+                != Some(expected.as_str())
+            {
+                return Err(format!(
+                    "persisted agent {field} must use the generated API field contract"
+                ));
+            }
+            for schema in [
+                "AgentDetailEntityDto",
+                "AgentEntityDto",
+                "AgentResponse",
+                "BranchResponse",
+            ] {
+                expect_number(
+                    openapi,
+                    &format!(
+                        "/components/schemas/{schema}/properties/{field}/anyOf/0/items/{bound}"
+                    ),
+                    value as i64,
+                )?;
+            }
+            expect_number(
+                openapi,
+                &format!(
+                    "/components/schemas/AgentRecordResponse/properties/{field}/items/{bound}"
+                ),
+                value as i64,
+            )?;
+            expect_number(
+                &snapshot,
+                &format!("/$defs/ContinuationAgent/properties/{field}/items/{bound}"),
+                value as i64,
+            )?;
+        }
+    }
+    use crate::creation_intent::AgentRole;
+    if snapshot.pointer("/$defs/ContinuationAgent/properties/role/anyOf/0/enum")
+        != Some(&studio_json::json!([
+            AgentRole::Orchestrator.as_str(),
+            AgentRole::Implementer.as_str(),
+            AgentRole::Reviewer.as_str()
+        ]))
+    {
+        return Err("continuation role schema must match AgentRole".into());
+    }
     crate::event_metadata::check_schema_parity()?;
     crate::rule_record::check_schema_parity()?;
     crate::monitor_record::check_schema_parity()?;
@@ -1153,6 +1228,26 @@ fn supervisor_handshake_schema() -> Value {
         .to_value()
 }
 
+// Generated opt-in HTTP fragment; the matching Rust DTO is checked in feature tests.
+fn perf_reporting_document() -> Value {
+    let integer =
+        studio_json::json!({"type":"integer", "minimum":0, "maximum":values::MAX_SAFE_INTEGER});
+    let number = studio_json::json!({"type":"number"});
+    studio_json::json!({
+        "openapi":"3.1.0", "info":{"title":"Performance reporting", "version":"1"},
+        "paths": {
+            "/api/perf-reporting": {"get":{"operationId":"get_perf_reporting","summary":"Performance diagnostics","responses":{"200":{"description":"Performance aggregates","content":{"application/json":{"schema":{"type":"object","additionalProperties":true}}}}}}},
+            "/api/perf-reporting/client": {"post":{"operationId":"post_perf_client_report","summary":"Client performance report","requestBody":{"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/PerfClientReport"}}}},"responses":{"204":{"description":"Report accepted"}}}}
+        },
+        "components":{"schemas":{
+            "PerfClientReport":{"type":"object","additionalProperties":false,"required":["windowMs","longTasks","interactions","renders"],"properties":{"windowMs":integer,"longTasks":{"$ref":"#/components/schemas/PerfLongTasks"},"interactions":{"type":"array","items":{"$ref":"#/components/schemas/PerfInteraction"}},"renders":{"type":"array","items":{"$ref":"#/components/schemas/PerfRender"}}}},
+            "PerfLongTasks":{"type":"object","additionalProperties":false,"required":["count","totalMs","maxMs"],"properties":{"count":integer,"totalMs":number,"maxMs":number}},
+            "PerfInteraction":{"type":"object","additionalProperties":false,"required":["type","count","maxDurationMs","maxInputDelayMs"],"properties":{"type":{"type":"string"},"count":integer,"maxDurationMs":number,"maxInputDelayMs":number}},
+            "PerfRender":{"type":"object","additionalProperties":false,"required":["component","count","totalMs","maxMs"],"properties":{"component":{"type":"string"},"count":integer,"totalMs":number,"maxMs":number}}
+        }}
+    })
+}
+
 // Committed storage schemas annotate safe integers; HTTP schemas spell out the
 // same shared bound for validators and generated Rust consumers.
 fn materialize_safe_integers(schema: &mut Value) {
@@ -1184,12 +1279,14 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
     let mut schema = studio_json::Map::new();
     schema.insert("properties".into(), studio_json::json!({}));
     crate::review::apply_tool_contract("orchestration_review", &mut schema)?;
-    let value = studio_json::to_string_pretty(&schema["properties"]["target"])
-        .map_err(|error| error.to_string())?;
-    for (name, field) in [
-        ("orchestration_spawn", "review"),
-        ("orchestration_review", "target"),
+    for (name, field, owner) in [
+        ("orchestration_spawn", "review", "target"),
+        ("orchestration_review", "target", "target"),
+        ("orchestration_review", "instructions", "instructions"),
+        ("orchestration_review", "account", "account"),
     ] {
+        let value = studio_json::to_string_pretty(&schema["properties"][owner])
+            .map_err(|error| error.to_string())?;
         let start = text
             .find(&format!("\"name\": \"{name}\""))
             .ok_or("tool name")?;
@@ -1199,10 +1296,11 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
         let marker = format!("\"{field}\":");
         if let Some(relative) = text[start..end].find(&marker) {
             let value_start = start + relative + marker.len();
-            let object_start = value_start
-                + text[value_start..]
-                    .find('{')
-                    .ok_or("review schema object")?;
+            let object_start =
+                value_start + text[value_start..].len() - text[value_start..].trim_start().len();
+            if !text[object_start..].starts_with('{') {
+                return Err("review schema must be an object".into());
+            }
             let mut depth = 0usize;
             let mut quoted = false;
             let mut escape = false;
@@ -1229,12 +1327,16 @@ fn review_catalog_text(root: &Path, path: &str) -> Result<String, String> {
                 }
             }
             text.replace_range(object_start..object_end.ok_or("review schema end")?, &value);
-        } else if name == "orchestration_spawn" {
+        } else if name == "orchestration_spawn" || field != "target" {
             let insert = start
                 + text[start..end]
-                    .find("\"base_ref\":")
-                    .ok_or("spawn base_ref")?;
-            text.insert_str(insert, &format!("\"review\": {value},\n"));
+                    .find(if name == "orchestration_spawn" {
+                        "\"base_ref\":"
+                    } else {
+                        "\"target\":"
+                    })
+                    .ok_or("review schema insertion")?;
+            text.insert_str(insert, &format!("\"{field}\": {value},\n"));
         } else {
             return Err("missing review target".into());
         }
@@ -1252,6 +1354,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     check_backend_kind_parity(root)?;
     check_provider_sql_parity(root)?;
     let mut openapi = read_json(root, OPENAPI_PATH)?;
+    let perf_document = perf_reporting_document();
     openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
         values::SYNC_STREAM_EVENT_MAX_BYTES.into();
     *openapi
@@ -1769,6 +1872,17 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             ),
         },
     ];
+    rendered.push(Rendered {
+        path: "workspaces/runtime/packages/runtime-http/openapi.perf-reporting.json".into(),
+        text: studio_json::to_string_pretty(&perf_document).map_err(|error| error.to_string())?
+            + "\n",
+    });
+    if with_api_types {
+        rendered.push(Rendered {
+            path: web("perfReporting.ts"),
+            text: api_types(root, &perf_document, "--rust-owned")?,
+        });
+    }
     // The workspace envelope remains a legacy input; its eligibility leaf is
     // generated from the same Rust owner as the HTTP and SSE contracts.
     let usage_limits_path =

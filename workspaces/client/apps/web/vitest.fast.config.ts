@@ -7,6 +7,9 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/perf/collector.test.ts",
+      "src/perf/root.test.ts",
+      "src/perf/bundle.test.ts",
       "src/accountName.test.ts",
       "src/components/RadioChat.test.ts",
       "src/components/composerStyleInvalidation.test.ts",

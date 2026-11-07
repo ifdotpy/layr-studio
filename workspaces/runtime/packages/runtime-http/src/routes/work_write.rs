@@ -460,25 +460,7 @@ async fn prepare_layr_submission(
                     ));
                 }
             };
-            let response =
-                studio_runtime_schema::layr_evidence::EvidenceResponse::from_value(&response);
-            if response.as_ref().and_then(|r| r.state_id.0.as_deref())
-                != Some(expected_revision.as_str())
-            {
-                let task_id = input.task_id.clone();
-                let operation_id = call.request_id;
-                finish_layr_submission(&store, &task_id, &operation_id, Err(false))
-                    .await
-                    .map_err(write_error)?;
-                return Err(ApiError::new(
-                    StatusCode::BAD_REQUEST,
-                    "Submit the exact layr state ID",
-                ));
-            }
-            let evidence = match (
-                response.as_ref().and_then(|r| r.project_id.0.as_deref()),
-                response.as_ref().and_then(|r| r.line.0.as_deref()),
-            ) {
+            let evidence = match (response.project_id.as_deref(), response.line.as_deref()) {
                 (Some(project), Some(line)) => studio_runtime_store::work_intent::Evidence {
                     layr_project_id: project.to_owned(),
                     layr_line: line.to_owned(),

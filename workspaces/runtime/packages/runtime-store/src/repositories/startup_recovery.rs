@@ -187,7 +187,7 @@ impl Selection {
 }
 
 /// The predicate of the active-monitor partial index.
-pub(crate) fn active_monitor_predicate() -> String {
+pub fn active_monitor_predicate() -> String {
     MONITORS.predicate()
 }
 

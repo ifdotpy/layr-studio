@@ -2068,7 +2068,7 @@ mod resource_tests {
             .expect("runtime store opens");
         let resources = PreparationResources::bundled(String::new(), ModelCatalogService::new())
             .expect("runtime resources");
-        store
+        let tools = store
             .transaction_with(move |tx| {
                 let root = json!({"compactions":0,"id":"root","rootId":"root","epoch":1,"status":"completed",
                     "isLead":true,"name":"Lead","provider":"codex","accountKey":"default"});
@@ -2079,11 +2079,17 @@ mod resource_tests {
                     "nativeReview":{"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"requestId":"q"}});
                 let tools = actor_tool_definitions(tx, &resources, &review)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-                assert!(tools.as_array().is_some_and(Vec::is_empty));
-                Ok::<_, StoreError>(())
+                Ok::<_, StoreError>(tools)
             })
             .await
             .expect("a review object is read as a review child");
+        let names: Vec<_> = tools
+            .as_array()
+            .expect("reviewer tools are an array")
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("tool name"))
+            .collect();
+        assert_eq!(names, ["orchestration_read"]);
     }
 
     async fn legacy_vm_restore_refused(kind: &str) {

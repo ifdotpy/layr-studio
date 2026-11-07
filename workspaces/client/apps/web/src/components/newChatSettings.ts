@@ -16,6 +16,10 @@ import {
 } from "../generated/apiSchema";
 import { serverCredentialAdapter } from "../servers/transport";
 import type { StudioServer } from "../servers/registry";
+import {
+  ACCOUNT_KEY_MIN_CHARS,
+  ACCOUNT_KEY_MAX_CHARS,
+} from "../generated/sharedValues";
 
 export type NewChatWorkspaceMode = (typeof CHAT_WORKSPACE_MODES)[number];
 
@@ -30,7 +34,10 @@ export type NewChatSettings = Pick<
 > &
   Pick<
     PostBody<"/api/leads">,
-    "layrStoreRoot" | "excluded_account_keys" | "account_key"
+    | "layrStoreRoot"
+    | "worker_excluded_account_keys"
+    | "reviewer_excluded_account_keys"
+    | "account_key"
   > & {
     workspaceMode: NewChatWorkspaceMode;
   };
@@ -131,7 +138,8 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   const allowed = [
     "workspaceMode",
     "account_key",
-    "excluded_account_keys",
+    "worker_excluded_account_keys",
+    "reviewer_excluded_account_keys",
     "model",
     "effort",
     "fast_mode",
@@ -151,11 +159,25 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   )
     return false;
   if (
-    value.excluded_account_keys !== undefined &&
-    (!Array.isArray(value.excluded_account_keys) ||
-      value.excluded_account_keys.some(
-        (key) => typeof key !== "string" || !key.trim(),
-      ))
+    (
+      [
+        "worker_excluded_account_keys",
+        "reviewer_excluded_account_keys",
+      ] as const
+    ).some((name) => {
+      const keys = value[name];
+      return (
+        keys !== undefined &&
+        (!Array.isArray(keys) ||
+          keys.some(
+            (key) =>
+              typeof key !== "string" ||
+              !key.trim() ||
+              [...key].length < ACCOUNT_KEY_MIN_CHARS ||
+              [...key].length > ACCOUNT_KEY_MAX_CHARS,
+          ))
+      );
+    })
   )
     return false;
   if (
