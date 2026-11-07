@@ -1,6 +1,6 @@
 //! Opt-in, process-local, value-free performance aggregates.
 use std::collections::BTreeMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -50,7 +50,44 @@ pub struct Snapshot {
     pub sse_bytes: u64,
 }
 
-static AGGREGATES: OnceLock<Mutex<Snapshot>> = OnceLock::new();
+/// Perf state memo capacity, in distinct raw SQL texts, to bound retained entries.
+const NORMALIZED_SQL_MEMO_MAX_ENTRIES: usize = 4096;
+/// Perf state memo admission limit, in bytes of raw SQL, to bound retained text.
+const NORMALIZED_SQL_MEMO_MAX_TEXT_BYTES: usize = 8192;
+
+#[derive(Default)]
+struct State {
+    snapshot: Mutex<Snapshot>,
+    normalized_sql: Mutex<BTreeMap<String, Arc<str>>>,
+}
+
+impl State {
+    fn normalized_sql(&self, sql: &str) -> Arc<str> {
+        if sql.len() > NORMALIZED_SQL_MEMO_MAX_TEXT_BYTES {
+            return normalize_sql(sql).into();
+        }
+        if let Some(normalized) = self
+            .normalized_sql
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(sql)
+            .cloned()
+        {
+            return normalized;
+        }
+        let normalized: Arc<str> = normalize_sql(sql).into();
+        let mut memo = self
+            .normalized_sql
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if memo.len() < NORMALIZED_SQL_MEMO_MAX_ENTRIES {
+            memo.insert(sql.to_owned(), Arc::clone(&normalized));
+        }
+        normalized
+    }
+}
+
+static AGGREGATES: OnceLock<State> = OnceLock::new();
 
 fn limited_key(label: &str) -> String {
     if label.len() <= MAX_AGGREGATE_KEY_PREFIX_BYTES {
@@ -87,7 +124,8 @@ fn update(
     elapsed: Duration,
 ) {
     let mut data = AGGREGATES
-        .get_or_init(|| Mutex::new(Snapshot::default()))
+        .get_or_init(State::default)
+        .snapshot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     let entry = aggregate_entry(select(&mut data), label);
@@ -98,7 +136,7 @@ fn update(
 }
 
 pub fn record_sql(sql: &str, elapsed: Duration) {
-    let sql = normalize_sql(sql);
+    let sql = AGGREGATES.get_or_init(State::default).normalized_sql(sql);
     update(|data| &mut data.sql, &sql, elapsed);
     studio_json::perf_reporting::with_job_label(|job| {
         if let Some(label) = job {
@@ -111,16 +149,19 @@ pub fn record_sql(sql: &str, elapsed: Duration) {
     });
 }
 pub fn record_sql_row(sql: &str) {
+    let normalized = AGGREGATES.get_or_init(State::default).normalized_sql(sql);
     let mut data = AGGREGATES
-        .get_or_init(|| Mutex::new(Snapshot::default()))
+        .get_or_init(State::default)
+        .snapshot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let entry = aggregate_entry(&mut data.sql, &normalize_sql(sql));
+    let entry = aggregate_entry(&mut data.sql, &normalized);
     entry.rows = entry.rows.saturating_add(1);
 }
 #[cfg(test)]
 thread_local! {
     static SQL_TEXT_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static SQL_NORMALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Read and reset counters of statements still prepared on this connection.
@@ -162,9 +203,10 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
             #[cfg(test)]
             SQL_TEXT_CONVERSIONS.with(|count| count.set(count.get() + 1));
             let sql = std::ffi::CStr::from_ptr(sql).to_string_lossy();
-            let normalized = normalize_sql(&sql);
+            let normalized = AGGREGATES.get_or_init(State::default).normalized_sql(&sql);
             let mut data = AGGREGATES
-                .get_or_init(|| Mutex::new(Snapshot::default()))
+                .get_or_init(State::default)
+                .snapshot
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             let apply = |entry: &mut Aggregate| {
@@ -187,7 +229,8 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
             studio_json::perf_reporting::with_job_label(|job| {
                 if let Some(label) = job {
                     let mut data = AGGREGATES
-                        .get_or_init(|| Mutex::new(Snapshot::default()))
+                        .get_or_init(State::default)
+                        .snapshot
                         .lock()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     let entry = aggregate_entry(&mut data.sql_sweeps, label);
@@ -224,7 +267,8 @@ where
 }
 pub fn snapshot() -> Snapshot {
     let mut snapshot = AGGREGATES
-        .get_or_init(|| Mutex::new(Snapshot::default()))
+        .get_or_init(State::default)
+        .snapshot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .clone();
@@ -277,14 +321,16 @@ pub fn record_client(mut report: studio_runtime_schema::perf_reporting::PerfClie
         .renders
         .retain(|render| matches!(render.component.as_str(), "composer" | "history"));
     AGGREGATES
-        .get_or_init(|| Mutex::new(Snapshot::default()))
+        .get_or_init(State::default)
+        .snapshot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .client = Some(report);
 }
 pub fn record_sse(bytes: usize) {
     let mut data = AGGREGATES
-        .get_or_init(|| Mutex::new(Snapshot::default()))
+        .get_or_init(State::default)
+        .snapshot
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     data.sse_events = data.sse_events.saturating_add(1);
@@ -340,6 +386,8 @@ pub fn log_top() {
 
 /// Strip values before a statement can enter an aggregate or log.
 fn normalize_sql(sql: &str) -> String {
+    #[cfg(test)]
+    SQL_NORMALIZATIONS.with(|count| count.set(count.get() + 1));
     let mut chars = sql.chars().peekable();
     let mut result = String::new();
     while let Some(ch) = chars.next() {
@@ -465,6 +513,92 @@ fn collapse_in_lists(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sql_normalizes_once_across_profile_rows_and_sweeps() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let sql = "SELECT 'private normalization witness' AS normalization_memo_witness";
+        let normalized = "SELECT ? AS normalization_memo_witness";
+        SQL_NORMALIZATIONS.with(|count| count.set(0));
+        let mut statement = db.prepare_cached(sql).unwrap();
+        let mut expected_steps = 0;
+        for _ in 0..8 {
+            statement.query_row([], |_| Ok(())).unwrap();
+            expected_steps += statement.get_status(rusqlite::StatementStatus::VmStep) as u64;
+            record_sql(sql, Duration::from_nanos(7));
+            record_sql_row(sql);
+            sweep_sql(&db, true);
+        }
+        let normalizations = SQL_NORMALIZATIONS.with(std::cell::Cell::get);
+        let report = snapshot();
+        let entry = &report.sql[normalized];
+        assert_eq!(entry.count, 8);
+        assert_eq!(entry.rows, 8);
+        assert_eq!(entry.total_ns, 56);
+        assert_eq!(entry.max_ns, 7);
+        assert_eq!(entry.vm_steps, expected_steps);
+        assert!(
+            !studio_json::to_string(&report)
+                .unwrap()
+                .contains("private normalization witness")
+        );
+        assert_eq!(
+            normalizations, 1,
+            "one normalization per distinct raw SQL text"
+        );
+    }
+    #[test]
+    fn sql_normalization_memo_full_preserves_reports() {
+        let state = State::default();
+        for index in 0..NORMALIZED_SQL_MEMO_MAX_ENTRIES {
+            state.normalized_sql(&format!("SELECT {index} AS memo_capacity_witness"));
+        }
+        let sql = "SELECT 'private fallback witness' AS memo_capacity_witness";
+        let expected = normalize_sql(sql);
+        SQL_NORMALIZATIONS.with(|count| count.set(0));
+        let cached = state.normalized_sql("SELECT 0 AS memo_capacity_witness");
+        assert_eq!(&*cached, expected);
+        assert_eq!(SQL_NORMALIZATIONS.with(std::cell::Cell::get), 0);
+        for _ in 0..2 {
+            let normalized = state.normalized_sql(sql);
+            let mut snapshot = state.snapshot.lock().unwrap();
+            let entry = aggregate_entry(&mut snapshot.sql, &normalized);
+            entry.count += 1;
+            entry.rows += 1;
+        }
+        assert_eq!(SQL_NORMALIZATIONS.with(std::cell::Cell::get), 2);
+        let memo = state.normalized_sql.lock().unwrap();
+        assert_eq!(memo.len(), NORMALIZED_SQL_MEMO_MAX_ENTRIES);
+        assert!(!memo.contains_key(sql));
+        let mut direct = Snapshot::default();
+        let entry = aggregate_entry(&mut direct.sql, &expected);
+        entry.count = 2;
+        entry.rows = 2;
+        assert_eq!(
+            studio_json::to_string(&*state.snapshot.lock().unwrap()).unwrap(),
+            studio_json::to_string(&direct).unwrap()
+        );
+    }
+    #[test]
+    fn sql_normalization_memo_skips_long_text() {
+        let state = State::default();
+        let sql = format!(
+            "SELECT '{}'",
+            "x".repeat(NORMALIZED_SQL_MEMO_MAX_TEXT_BYTES)
+        );
+        SQL_NORMALIZATIONS.with(|count| count.set(0));
+        // Holding the report lock must not prevent memo lookups or normalization.
+        let _snapshot = state.snapshot.lock().unwrap();
+        for _ in 0..2 {
+            assert_eq!(&*state.normalized_sql(&sql), "SELECT ?");
+        }
+        assert_eq!(SQL_NORMALIZATIONS.with(std::cell::Cell::get), 2);
+        assert!(state.normalized_sql.lock().unwrap().is_empty());
+        let boundary = "x".repeat(NORMALIZED_SQL_MEMO_MAX_TEXT_BYTES);
+        state.normalized_sql(&boundary);
+        state.normalized_sql(&boundary);
+        assert_eq!(SQL_NORMALIZATIONS.with(std::cell::Cell::get), 3);
+        assert_eq!(state.normalized_sql.lock().unwrap().len(), 1);
+    }
     #[test]
     fn sql_sweep_converts_only_executed_statements() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
