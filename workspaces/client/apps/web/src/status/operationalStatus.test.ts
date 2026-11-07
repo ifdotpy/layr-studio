@@ -1,5 +1,10 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { describe, expect, it } from "vitest";
-import { formatOperationalStatus } from "./operationalStatus.ts";
+import {
+  formatOperationalStatus,
+  formatAgentStatus,
+  agentIndicators,
+} from "./operationalStatus.ts";
 
 describe("operational status presentation", () => {
   it("makes no status claim before the operational summary arrives", () => {
@@ -58,4 +63,46 @@ describe("operational status presentation", () => {
       }),
     ).toEqual({ kind: "working", label: "Waiting for 1 input" });
   });
+});
+
+it("sidebar and conversation trust the same supplied reason, not raw status flags", () => {
+  const agent = agentSummaryFixture("chat", {
+    status: "failed",
+    hasApproval: true,
+    operationalStatus: { reason: "working" },
+  });
+  expect(agentIndicators([agent]).get("chat")).toEqual(
+    formatAgentStatus(agent),
+  );
+  expect(formatAgentStatus(agent)).toEqual({
+    kind: "working",
+    label: "Working",
+  });
+  expect(
+    agentIndicators([{ id: "missing", source: "managed" }]).get("missing"),
+  ).toEqual({ kind: "loading", label: "" });
+});
+it("the pending read overlay applies only to the captured completed-result proof", () => {
+  const target = {
+    threadId: "thread",
+    turnId: "turn",
+    revision: 3,
+    read: false,
+  };
+  const agent = agentSummaryFixture("chat", {
+    operationalStatus: { reason: "unread_result" },
+    markRead: target,
+  });
+  expect(formatAgentStatus(agent, { ...target })).toEqual(
+    formatOperationalStatus({ reason: "read_result" }),
+  );
+  expect(formatAgentStatus(agent, { ...target, revision: 2 }).kind).toBe(
+    "unread",
+  );
+  expect(
+    formatAgentStatus(
+      { ...agent, markRead: { ...target, turnId: "next" } },
+      target,
+    ).kind,
+  ).toBe("unread");
 });

@@ -171,6 +171,15 @@ export function createSidebarViewModel(
       )
       .map((agent) => createSidebarRow(agent, { collections, ...identity }));
   });
+  return createSidebarList(() => rows.get(), getInputs);
+}
+
+/** The combined sidebar feeds native-fact facades through the same list policy. */
+export function createSidebarList(
+  getRows: () => readonly SidebarChatView[],
+  getInputs: () => SidebarInputs,
+) {
+  const rows = computed(getRows);
   const ordered = computed(() => {
     const { rank } = getInputs();
     return [...rows.get()].sort(
@@ -201,7 +210,7 @@ export function createSidebarViewModel(
   });
   const groups = computed(() => {
     const result = new Map<string, SidebarChatView[]>();
-    for (const row of visible.get()) {
+    for (const row of ordered.get()) {
       const group = result.get(row.projectPath);
       if (group) group.push(row);
       else result.set(row.projectPath, [row]);

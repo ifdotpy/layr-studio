@@ -1,15 +1,18 @@
-import {
-  AgentSource,
-  AgentStatus,
-  ChatOperationalKind,
-} from "../../generated/api";
-import { isDeferred, isPending, needsAnswer } from "../../approvals";
+import { AgentSource, AgentStatus } from "../../generated/api";
+import { needsAnswer } from "../../approvals";
 import type { Agent, Snapshot } from "../../types";
 import type { components } from "../../generated/api";
 import { isCommandTask } from "../backgroundTaskModel";
-import { DISK_FULL_WAIT_LABEL, diskFullHold } from "../../capacityRetry";
+import {
+  formatOperationalStatus,
+  waitLabel,
+} from "../../status/operationalStatus.ts";
+import type { ChatIndicatorKind } from "../../status/operationalStatus.ts";
+export type {
+  ChatIndicatorKind,
+  ChatIndicator,
+} from "../../status/operationalStatus.ts";
 
-export type ChatIndicatorKind = components["schemas"]["ChatOperationalKind"];
 /** Operator urgency, most urgent first. Owns ordering for the fleet board and the team panel. */
 export const CHAT_INDICATOR_URGENCY: readonly ChatIndicatorKind[] = [
   "answer",
@@ -18,8 +21,8 @@ export const CHAT_INDICATOR_URGENCY: readonly ChatIndicatorKind[] = [
   "unread",
   "paused",
   "none",
+  "loading",
 ];
-export type ChatIndicator = components["schemas"]["ChatOperationalStatus"];
 export type ReadState = components["schemas"]["ReadStateDto"];
 
 export interface ChatActivity {
@@ -36,7 +39,9 @@ export interface ChatActivity {
   commandTask?: boolean | undefined;
 }
 
-export const endedWaitLabel = "Turn ended. Send a message to continue.";
+export const endedWaitLabel = formatOperationalStatus({
+  reason: "turn_ended",
+}).label;
 
 function epochMatches(epoch: unknown, agentEpoch: number | null | undefined) {
   if (epoch == null) return true;
@@ -142,20 +147,23 @@ export function chatWaitState(
         epochMatches(request.epoch, agent.epoch),
     ).length ?? 0;
   const event = agent.parkedEvent || undefined;
-  const count = (value: number, name: string) =>
-    value ? `${value} ${name}${value === 1 ? "" : "s"}` : "";
-  const reasons = [
-    count(agents.length, "agent"),
-    count(commands.length, "command"),
-    count(monitors.length, "monitor"),
-    event ? `event ${event}` : "",
-    count(inputs, "input"),
-  ].filter(Boolean);
-  const label = reasons.length
-    ? `Waiting for ${reasons.slice(0, -1).join(", ")}${reasons.length > 1 ? " and " : ""}${reasons.at(-1)}`
-    : endedWaitLabel;
+  const live =
+    agents.length > 0 ||
+    commands.length > 0 ||
+    monitors.length > 0 ||
+    !!event ||
+    inputs > 0;
+  const label = live
+    ? waitLabel({
+        agents: agents.length,
+        commands: commands.length,
+        monitors: monitors.length,
+        inputs,
+        event: event ?? null,
+      })
+    : formatOperationalStatus({ reason: "turn_ended" }).label;
   return {
-    live: reasons.length > 0,
+    live,
     label,
     agents,
     commands,
@@ -290,123 +298,4 @@ export function unreadResult(
 
 function savedReadState(agent: Agent): ReadState | null {
   return agent.readState ?? null;
-}
-
-// Operational state and read receipts are separate: a question cannot disappear
-// merely because its conversation was opened or a background command is active.
-export function chatIndicators(
-  data: Snapshot,
-  readStateFor: (agent: Agent) => ReadState | null = savedReadState,
-  activities = chatActivities(data),
-): Map<string, ChatIndicator> {
-  const agents = data.threads.filter(
-    (agent) => agent.source === AgentSource.managed,
-  );
-  const byId = new Map(agents.map((agent) => [agent.id, agent]));
-  const children = chatChildren(data);
-  const answers = new Set<string>(),
-    deferred = new Set<string>(),
-    active = new Set<string>();
-  const includeLead = (set: Set<string>, id: string) => {
-    set.add(id);
-    const agent = byId.get(id)!;
-    if (agent.rootId) {
-      const root = byId.get(agent.rootId);
-      if (root) set.add(root.id);
-    }
-  };
-  const requests = data.runtime?.requests;
-  if (requests) {
-    for (const request of requests) {
-      if (!isPending(request)) continue;
-      const agent = byId.get(request.agent);
-      if (!agent || !epochMatches(request.epoch, agent.epoch)) continue;
-      if (isDeferred(request)) deferred.add(agent.id);
-      else includeLead(answers, agent.id);
-    }
-  }
-  for (const agent of agents) {
-    if (agent.hasQuestion || agent.hasApproval) includeLead(answers, agent.id);
-    if (agent.hasBackgroundWork) includeLead(active, agent.id);
-  }
-  for (const [id, entries] of activities) {
-    if (entries.length) active.add(id);
-  }
-  return new Map(
-    agents.map((agent) => {
-      let indicator: ChatIndicator;
-      const waiting = ["waiting", "parked", "waiting_on_monitor"].includes(
-        agent.status || "",
-      );
-      const getWait = () => chatWaitState(data, agent, activities, children);
-      if (answers.has(agent.id)) {
-        let label = "Needs your answer";
-        if (waiting) {
-          const wait = getWait();
-          if (wait.live) label = wait.label;
-        }
-        indicator = {
-          kind: ChatOperationalKind.answer,
-          label,
-        };
-      } else if (waiting && agent.hasBackgroundWork) {
-        indicator = {
-          kind: ChatOperationalKind.working,
-          label: "Waiting for background command",
-        };
-      } else if (waiting) {
-        const wait = getWait();
-        indicator = {
-          kind: wait.live
-            ? ChatOperationalKind.working
-            : ChatOperationalKind.none,
-          label: wait.label || endedWaitLabel,
-        };
-      } else if (active.has(agent.id)) {
-        let label = "Working";
-        if (!agent.inFlight) {
-          const wait = getWait();
-          if (wait.live) label = wait.label;
-        }
-        indicator = {
-          kind: ChatOperationalKind.working,
-          label,
-        };
-      } else if (agent.status === AgentStatus.failed)
-        // A turn that failed because the disk was full waits for free space.
-        indicator = diskFullHold(agent)
-          ? { kind: ChatOperationalKind.paused, label: DISK_FULL_WAIT_LABEL }
-          : { kind: ChatOperationalKind.error, label: "Failed" };
-      else if (
-        ["paused", "interrupted"].includes(agent.status || "") ||
-        (agent.autoWake === false && !agent.empty)
-      )
-        indicator = {
-          kind: ChatOperationalKind.paused,
-          label:
-            agent.status === AgentStatus.interrupted
-              ? "Interrupted"
-              : "Stopped",
-        };
-      else if (deferred.has(agent.id) && agent.status === AgentStatus.approval)
-        indicator = {
-          kind: ChatOperationalKind.paused,
-          label: "Question deferred",
-        };
-      else if (
-        agent.status === AgentStatus.completed &&
-        unreadResult(agent, readStateFor(agent) ?? null)
-      )
-        indicator = {
-          kind: ChatOperationalKind.unread,
-          label: "Unread result",
-        };
-      else
-        indicator = {
-          kind: ChatOperationalKind.none,
-          label: agent.status === AgentStatus.completed ? "Read" : "Ready",
-        };
-      return [agent.id, indicator];
-    }),
-  );
 }

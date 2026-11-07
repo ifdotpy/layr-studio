@@ -1,3 +1,4 @@
+import { agentIndicators } from "./status/operationalStatus.ts";
 import { MessageSendStatus } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
@@ -197,7 +198,6 @@ import {
 const emptyAgents: Agent[] = [];
 import {
   unreadResult,
-  chatIndicators,
   backgroundActivities,
   chatActivities,
   hasCompletedResult,
@@ -880,14 +880,9 @@ export default function App({ active = true }: { active?: boolean }) {
   const indicators = useMemo(
     () =>
       data
-        ? chatIndicators(data, readState.readStateFor, activities)
+        ? agentIndicators(data.threads, readState.pendingReadTargets)
         : new Map(),
-    [
-      data?.threads,
-      data?.runtime?.requests,
-      readState.readStateFor,
-      activities,
-    ],
+    [data?.threads, readState.pendingReadTargets, readState.readStateFor],
   );
   useEffect(() => {
     setWorkerQuery("");

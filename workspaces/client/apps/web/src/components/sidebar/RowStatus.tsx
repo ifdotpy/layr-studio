@@ -1,15 +1,15 @@
 import type { ReactNode } from "react";
 import { observer } from "mobx-react-lite";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
-import { ChatOperationalKind } from "../../generated/api.ts";
+import type { SidebarChatView } from "./viewModel.ts";
+import { ChatIndicatorKind as ChatOperationalKind } from "../../status/operationalStatus.ts";
 import ProjectStateCounts from "./ProjectStateCounts.tsx";
 
 export const SidebarAttention = observer(function SidebarAttention({
   rows,
   renderRow,
 }: {
-  rows: readonly SidebarChatRow[];
-  renderRow: (row: SidebarChatRow, priority: boolean) => ReactNode;
+  rows: readonly SidebarChatView[];
+  renderRow: (row: SidebarChatView, priority: boolean) => ReactNode;
 }) {
   const attention = rows.filter(
     (row) =>
@@ -39,12 +39,12 @@ export const SidebarProjectStates = observer(function SidebarProjectStates({
   rows,
   archived,
 }: {
-  rows: readonly SidebarChatRow[];
+  rows: readonly SidebarChatView[];
   archived: boolean;
 }) {
   const counts = { working: 0, answer: 0, error: 0 };
   for (const row of rows) {
-    if (row.archived !== archived) continue;
+    if (row.agent.archived !== archived) continue;
     const kind = row.indicator.kind;
     if (
       kind === ChatOperationalKind.working ||

@@ -1,8 +1,17 @@
 import { outboxRequests } from "../browserPersistence";
 import { observer } from "mobx-react-lite";
 import { useServerStore } from "../servers/ServerServicesContext.tsx";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { keepCompactSidebarChat } from "./sidebar/compact.ts";
+import {
+  createStateMirror,
+  type StateCollections,
+} from "../generated/observableResources.ts";
+import {
+  createSidebarViewModel,
+  createSidebarList,
+  type SidebarChatView,
+  type SidebarAgent,
+} from "./sidebar/viewModel.ts";
+import { computed } from "mobx";
 import {
   localSidebarServices,
   SidebarBackendProvider,
@@ -75,9 +84,9 @@ import {
 } from "../servers/serverAliases";
 import { serverViewId } from "../servers/environment";
 import { ChatServerLine } from "../servers/ProjectChatRows";
-import { countProjectChats, itemGroup } from "./sidebar/catalog";
+import { itemGroup } from "./sidebar/catalog";
 export { isVisibleSidebarAgent } from "./sidebar/catalog";
-import { sidebarRows } from "./sidebar/rows.ts";
+
 import {
   SidebarAttention,
   SidebarProjectStates,
@@ -96,7 +105,8 @@ export type SidebarProps = {
   settings?: () => void;
   notice?: string;
   data: Snapshot;
-  rows?: readonly SidebarChatRow[];
+  rows?: readonly SidebarChatView[];
+  collections?: StateCollections;
   /** Registered project paths when data also contains inferred view projects. */
   registeredProjectPaths?: ReadonlySet<string>;
   opened: string | null;
@@ -125,12 +135,12 @@ export type SidebarProps = {
   offlineServers?: ReadonlySet<string>;
   markUnread: (
     id: string,
-    target: NonNullable<SidebarChatRow["markRead"]>,
+    target: NonNullable<SidebarAgent["markRead"]>,
   ) => void;
   markingRead: Set<string>;
   pendingReadTargets?: ReadonlyMap<
     string,
-    NonNullable<SidebarChatRow["markRead"]>
+    NonNullable<SidebarAgent["markRead"]>
   >;
   hideOldChatsThreshold?: number;
 };
@@ -151,6 +161,8 @@ export function projectSearchLabel(
     (typeof legacyProjectName === "string" ? legacyProjectName : "")
   );
 }
+const emptyCollections = createStateMirror().current;
+
 export default function Sidebar(p: SidebarProps) {
   const services = p.services || localSidebarServices;
   return (
@@ -165,12 +177,15 @@ const SidebarContents = observer(function SidebarContents(
 ) {
   const services = p.services;
   const store = useServerStore();
-  const resource = p.rows === undefined ? store.sidebar().current : undefined;
-  const rows =
-    p.rows ??
+  const resource =
+    p.rows === undefined && p.collections === undefined
+      ? store.state().current
+      : undefined;
+  const collections =
+    p.collections ??
     (resource?.status === "live" || resource?.status === "stale"
-      ? resource.data.rows
-      : []);
+      ? resource.data
+      : emptyCollections);
   const lastOpened = useRef(p.opened);
   if (p.opened) lastOpened.current = p.opened;
   const canEdit = (target: SidebarTarget) =>
@@ -191,7 +206,7 @@ const SidebarContents = observer(function SidebarContents(
   ): Project => services.project?.(project.path, target) || project;
   const ownsFolder = (
     project: NavigableProject,
-    chat: SidebarChatRow,
+    chat: SidebarChatView,
     folder: ProjectFolder | null,
   ) => {
     if (!services.project || !folder) return true;
@@ -270,11 +285,23 @@ const SidebarContents = observer(function SidebarContents(
     services,
     p.data.token,
   );
+  const model = useMemo(() => {
+    const input = () => ({
+      query,
+      archived: archive,
+      opened: p.opened,
+      rank: sorting.rank,
+    });
+    return p.rows
+      ? createSidebarList(() => p.rows!, input)
+      : createSidebarViewModel(() => collections, input);
+  }, [collections, p.rows, query, archive, p.opened, sorting.order]);
+  const rows = model.rows;
   const [organizing, setOrganizing] = useState<string | null>(null);
   const organizationLock = useRef(false);
   type Conversion = {
-    source: SidebarChatRow;
-    target: SidebarChatRow;
+    source: SidebarChatView;
+    target: SidebarChatView;
     project: NavigableProject;
   };
   const [conversion, setConversion] = useState<Conversion | null>(null);
@@ -316,22 +343,34 @@ const SidebarContents = observer(function SidebarContents(
     action: "save" | "delete";
   } | null>(null);
   const peerTeams = useMemo(
-    () => (runtime?.peerTeamsVersion === 1 ? runtime.peerTeams || [] : []),
-    [runtime?.peerTeamsVersion, runtime?.peerTeams],
-  );
+    () =>
+      computed(() =>
+        p.rows
+          ? runtime?.peerTeamsVersion === 1
+            ? runtime.peerTeams || []
+            : []
+          : [...collections.peerTeams.values()],
+      ),
+    [collections, p.rows, runtime?.peerTeamsVersion, runtime?.peerTeams],
+  ).get();
   const projects = useMemo(
     () =>
-      (runtime?.projects ?? [])
-        .filter(
-          (project): project is Project & { path: string } =>
-            typeof project.path === "string",
+      computed(() =>
+        (p.rows
+          ? (runtime?.projects ?? [])
+          : [...collections.projects.values()]
         )
-        .map((project): NavigableProject => ({
-          ...project,
-          name: projectDisplayName(project),
-        })),
-    [runtime?.projects],
-  );
+          .filter(
+            (project): project is Project & { path: string } =>
+              typeof project.path === "string",
+          )
+          .map((project): NavigableProject => ({
+            ...project,
+            name: projectDisplayName(project),
+          })),
+      ),
+    [collections, p.rows, runtime?.projects],
+  ).get();
   const teamMove = usePeerTeamMove(p.refresh, p.notify, (path, member, team) =>
     services.owner(
       team
@@ -447,9 +486,10 @@ const SidebarContents = observer(function SidebarContents(
         const thread = rows.find((a) => a.id === id);
         if (
           !thread ||
-          ((values.pinned === undefined || thread.pinned === values.pinned) &&
+          ((values.pinned === undefined ||
+            thread.agent.pinned === values.pinned) &&
             (values.archived === undefined ||
-              thread.archived === values.archived))
+              thread.agent.archived === values.archived))
         ) {
           delete next[id];
           changed = true;
@@ -458,9 +498,16 @@ const SidebarContents = observer(function SidebarContents(
       return changed ? next : old;
     });
   }, [rows]);
-  const catalog = sidebarRows(rows, peerTeams);
-  const { agents, byProject, grouped } = catalog;
-  const teamFor = (id: string) => catalog.byTeam.get(id);
+  const findRow = (id: string) => rows.find((row) => row.id === id);
+  const agents = rows;
+  const byProject = model.groups;
+  const grouped = new Set(
+    rows
+      .filter((row) => row.team?.projectPath === row.agent.projectPath)
+      .map((row) => row.id),
+  );
+  const teamFor = (id: string) =>
+    peerTeams.find((team) => team.id === findRow(id)?.teamId);
   const sharedRooms = useMemo(
     () =>
       (runtime?.rooms || []).filter((r) => r.radio?.direct && !r.userHidden),
@@ -477,7 +524,7 @@ const SidebarContents = observer(function SidebarContents(
           ),
     [archive, sharedRooms, projects, query],
   );
-  const selectedFolder = catalog.byId.get(p.opened || "")?.projectFolder;
+  const selectedFolder = findRow(p.opened || "")?.projectFolder;
   const initialSelection = useRef<{
     opened: string;
     folder: typeof selectedFolder;
@@ -539,7 +586,7 @@ const SidebarContents = observer(function SidebarContents(
   }, [p.opened, selectedFolder, p.selectionIdentity]);
   const teamKey = (path: string, id: string) =>
     JSON.stringify([path, "team", id]);
-  const chatGroup = (agent: SidebarChatRow) => agent.groupKey;
+  const chatGroup = (agent: SidebarChatView) => agent.groupKey;
   const middleDrop = (event: React.DragEvent<HTMLElement>) => {
     const title = (event.target as Element).closest(
       ".peer-team-toggle, .project-tree-toggle",
@@ -558,7 +605,7 @@ const SidebarContents = observer(function SidebarContents(
     sorting.dropBindings(
       folder ? folderKey(project.path, folder.id) : project.path,
       (source, event) => {
-        const chat = catalog.byId.get(source.id);
+        const chat = findRow(source.id);
         return !!(
           ((!(event.target as Element).closest(
             ".peer-team-toggle, .project-tree-toggle",
@@ -578,7 +625,7 @@ const SidebarContents = observer(function SidebarContents(
         );
       },
       ({ id }) => {
-        const chat = catalog.byId.get(id)!;
+        const chat = findRow(id)!;
         if (!folder && teamFor(id)) {
           teamMove.move(project, id, null);
           return;
@@ -587,7 +634,7 @@ const SidebarContents = observer(function SidebarContents(
           project_path: project.path,
           project_folder: folder?.id || null,
           expected_folder: chat.projectFolder || null,
-          expected_revision: chat.projectFolderRevision || 0,
+          expected_revision: chat.agent.projectFolderRevision || 0,
         }).then((moved) => {
           if (!moved) return;
           setCollapsed((previous) => {
@@ -607,39 +654,14 @@ const SidebarContents = observer(function SidebarContents(
           });
           setCompactProject(project.path, false);
           sorting.announce(
-            `Moved ${chat.name} to ${folder?.name || project.name}`,
+            `Moved ${chat.agent.name} to ${folder?.name || project.name}`,
           );
         });
       },
       reorder,
     );
-  const orderedAgents = catalog.ordered;
-  const filtered = (() => {
-    const archived = orderedAgents.filter(
-      (row) => (overrides[row.id]?.archived ?? row.archived) === archive,
-    );
-    const needle = query.toLowerCase();
-    const matching = needle
-      ? archived.filter((row) =>
-          `${row.searchText} ${services.chatPath?.(row.id) || ""}`
-            .toLowerCase()
-            .includes(needle),
-        )
-      : archived;
-    // Keep the selected team member visible under a search, as before.
-    const selected = catalog.byId.get(p.opened || "");
-    if (
-      query &&
-      selected &&
-      !!selected.archived === archive &&
-      grouped.has(selected.id) &&
-      !matching.includes(selected)
-    ) {
-      const matches = new Set(matching);
-      return archived.filter((row) => row === selected || matches.has(row));
-    }
-    return matching;
-  })();
+  const orderedAgents = model.orderedRows;
+  const filtered = model.visibleRows;
   const rename = async (e: React.FormEvent, id: string) => {
     e.preventDefault();
     try {
@@ -653,80 +675,95 @@ const SidebarContents = observer(function SidebarContents(
     () => new Set(sharedRooms.map((room) => room.projectPath)),
     [sharedRooms],
   );
-  const keptInCompact = keepCompactSidebarChat;
+  const nowSeconds = Date.now() / 1000;
+  const keptInCompact = (row: SidebarChatView) =>
+    row.compactVisible(nowSeconds);
   const viewChatCounts = useMemo(
-    () => countProjectChats(agents, archive),
-    [agents, archive],
-  );
+    () =>
+      computed(() => {
+        const counts = new Map<string, number>();
+        for (const row of rows)
+          if (!!row.agent.archived === archive)
+            counts.set(row.projectPath, (counts.get(row.projectPath) || 0) + 1);
+        return counts;
+      }),
+    [rows, archive],
+  ).get();
   const isCompactProject = (path: string) =>
     compactProjects[path] !== false &&
     (viewChatCounts.get(path) || 0) >= hideOldChatsThreshold;
-  const groupMap = useMemo(() => {
-    const groups = new Map<
-      string,
-      NavigableProject & {
-        chats: SidebarChatRow[];
-        registered: boolean;
-        hasChats: boolean;
-      }
-    >();
-    for (const project of projects)
-      groups.set(project.path, {
-        ...project,
-        chats: [],
-        registered: p.registeredProjectPaths?.has(project.path) ?? true,
-        hasChats:
-          byProject.has(project.path) || sharedProjectPaths.has(project.path),
-      });
-    for (const a of agents) {
-      const path = a.projectPath || "";
-      if (!groups.has(path))
-        groups.set(path, {
-          id: path,
-          created: 0,
-          path,
-          name: path.split("/").filter(Boolean).at(-1) || "Other chats",
-          chats: [],
-          registered: false,
-          hasChats: true,
-        });
-    }
-    for (const room of sharedRooms) {
-      const path = room.projectPath || "";
-      if (!groups.has(path))
-        groups.set(path, {
-          id: path,
-          created: 0,
-          path,
-          name: path.split("/").filter(Boolean).at(-1) || "Other chats",
-          chats: [],
-          registered: false,
-          hasChats: true,
-        });
-    }
-    for (const a of filtered) {
-      if (
-        query ||
-        !isCompactProject(a.projectPath || "") ||
-        a.id === p.opened ||
-        keptInCompact(a)
-      )
-        groups.get(a.projectPath || "")!.chats.push(a);
-    }
-    return groups;
-  }, [
-    projects,
-    p.registeredProjectPaths,
-    agents,
-    sharedRooms,
-    sharedProjectPaths,
-    filtered,
-    query,
-    compactProjects,
-    viewChatCounts,
-    hideOldChatsThreshold,
-    p.opened,
-  ]);
+  const groupMap = useMemo(
+    () =>
+      computed(() => {
+        const groups = new Map<
+          string,
+          NavigableProject & {
+            chats: SidebarChatView[];
+            registered: boolean;
+            hasChats: boolean;
+          }
+        >();
+        for (const project of projects)
+          groups.set(project.path, {
+            ...project,
+            chats: [],
+            registered: p.registeredProjectPaths?.has(project.path) ?? true,
+            hasChats:
+              byProject.has(project.path) ||
+              sharedProjectPaths.has(project.path),
+          });
+        for (const a of agents) {
+          const path = a.projectPath || "";
+          if (!groups.has(path))
+            groups.set(path, {
+              id: path,
+              created: 0,
+              path,
+              name: path.split("/").filter(Boolean).at(-1) || "Other chats",
+              chats: [],
+              registered: false,
+              hasChats: true,
+            });
+        }
+        for (const room of sharedRooms) {
+          const path = room.projectPath || "";
+          if (!groups.has(path))
+            groups.set(path, {
+              id: path,
+              created: 0,
+              path,
+              name: path.split("/").filter(Boolean).at(-1) || "Other chats",
+              chats: [],
+              registered: false,
+              hasChats: true,
+            });
+        }
+        for (const a of filtered) {
+          if (
+            query ||
+            !isCompactProject(a.projectPath || "") ||
+            a.id === p.opened ||
+            keptInCompact(a)
+          )
+            groups.get(a.projectPath || "")!.chats.push(a);
+        }
+        return groups;
+      }),
+    [
+      projects,
+      p.registeredProjectPaths,
+      agents,
+      sharedRooms,
+      sharedProjectPaths,
+      filtered,
+      query,
+      compactProjects,
+      viewChatCounts,
+      hideOldChatsThreshold,
+      p.opened,
+      nowSeconds,
+    ],
+  ).get();
   const itemIds = (group: NavigableProject, parent: string | null = null) =>
     [
       ...(!parent
@@ -741,9 +778,9 @@ const SidebarContents = observer(function SidebarContents(
       ...(byProject.get(group.path) || [])
         .filter(
           (a) =>
-            !!a.archived === archive &&
+            !!a.agent.archived === archive &&
             !grouped.has(a.id) &&
-            !a.pinned &&
+            !a.agent.pinned &&
             (a.projectFolder || null) === parent,
         )
         .map((a) => a.id),
@@ -783,7 +820,7 @@ const SidebarContents = observer(function SidebarContents(
           .toLowerCase()
           .includes(query.toLowerCase())),
   );
-  const renderRow = (row: SidebarChatRow, priority = false) => (
+  const renderRow = (row: SidebarChatView, priority = false) => (
     <SidebarRow
       key={row.id}
       row={row}
@@ -809,7 +846,7 @@ const SidebarContents = observer(function SidebarContents(
         ...sorting.dropBindings(
           `convert:${row.id}`,
           (source, event) => {
-            const chat = catalog.byId.get(source.id);
+            const chat = findRow(source.id);
             const box = event.currentTarget.getBoundingClientRect();
             return !!(
               chat &&
@@ -830,14 +867,14 @@ const SidebarContents = observer(function SidebarContents(
           },
           ({ id }) =>
             setConversion({
-              source: catalog.byId.get(id)!,
+              source: findRow(id)!,
               target: row,
               project: groupMap.get(row.projectPath || "")!,
             }),
           sorting.bindings(
             chatGroup(row),
             row.id,
-            teamFor(row.id) || row.pinned
+            teamFor(row.id) || row.agent.pinned
               ? orderedAgents
                   .filter((a) => chatGroup(a) === chatGroup(row))
                   .map((a) => a.id)
@@ -853,7 +890,7 @@ const SidebarContents = observer(function SidebarContents(
         prepare: () => p.prepareChat?.(row.id),
         open: () => openChat(row.id),
         pin: () => {
-          void organize(row.id, { pinned: !row.pinned });
+          void organize(row.id, { pinned: !row.agent.pinned });
         },
         rename: (event) => {
           void rename(event, row.id);
@@ -861,12 +898,13 @@ const SidebarContents = observer(function SidebarContents(
         name: setName,
         cancelRename: () => setRenaming(null),
         beginRename: () => {
-          setName(row.name ?? "");
+          setName(row.agent.name ?? "");
           setRenameInPriority(priority);
           setRenaming(row.id);
         },
         unread: () => {
-          if (row.markRead) p.markUnread(row.id, { ...row.markRead });
+          if (row.agent.markRead)
+            p.markUnread(row.id, { ...row.agent.markRead });
         },
         move: () => {
           if (!requireProjectSupport()) return;
@@ -879,14 +917,14 @@ const SidebarContents = observer(function SidebarContents(
         },
         changeProject: () => p.changeProject(row.id),
         archive: () => {
-          void organize(row.id, { archived: !row.archived });
+          void organize(row.id, { archived: !row.agent.archived });
         },
         remove: () => p.remove(row.id, false),
       }}
     />
   );
   const renderPeerTeam = (
-    group: NavigableProject & { chats: SidebarChatRow[] },
+    group: NavigableProject & { chats: SidebarChatView[] },
     team: (typeof peerTeams)[number],
   ): ReactNode => {
     const teamMembers = team.members ?? [];
@@ -904,7 +942,7 @@ const SidebarContents = observer(function SidebarContents(
       sorting.dropBindings(
         `peer-team:${team.id}`,
         (source, event) => {
-          const chat = catalog.byId.get(source.id);
+          const chat = findRow(source.id);
           return !!(
             ((!(event.target as Element).closest(
               ".peer-team-toggle, .project-tree-toggle",
@@ -1003,7 +1041,7 @@ const SidebarContents = observer(function SidebarContents(
     );
   };
   const renderProjectChats = (
-    group: NavigableProject & { chats: SidebarChatRow[] },
+    group: NavigableProject & { chats: SidebarChatView[] },
     parent: ProjectFolder | null = null,
   ): ReactNode => {
     const folders = group.folders || [];
@@ -1192,7 +1230,7 @@ const SidebarContents = observer(function SidebarContents(
           }),
           ...chats.map((chat) => ({
             id: chat.id,
-            pinned: !!chat.pinned,
+            pinned: !!chat.agent.pinned,
             node: renderRow(chat),
           })),
         ]

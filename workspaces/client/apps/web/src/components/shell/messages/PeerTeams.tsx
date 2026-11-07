@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { randomUUID } from "../../../uuid";
 import {
   ActionIcon,
@@ -21,8 +22,9 @@ import type { CommandRequest } from "../../../commands";
 import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../generated/sharedValues.ts";
 import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
 import type { paths } from "../../../generated/api";
-import type { PeerTeam } from "../../../types";
-import type { SidebarChatRow } from "../../../generated/observableResources.ts";
+import type { PeerTeam as MutablePeerTeam, DeepReadonly } from "../../../types";
+type PeerTeam = DeepReadonly<MutablePeerTeam>;
+import type { SidebarChatView } from "../../sidebar/viewModel.ts";
 import type { Project } from "../../ProjectOrganization";
 import "./peer-teams.css";
 import { ChatServerLine } from "../../../servers/ProjectChatRows";
@@ -39,7 +41,7 @@ type RadioRequest = {
 export type PeerLeadSend = (request: CommandRequest) => Promise<unknown>;
 
 /** A lead of a paired project, shown in its team as a peer. Sends a message when `send` is set. */
-export function PeerLeadRows({
+export const PeerLeadRows = observer(function PeerLeadRows({
   leads,
   send,
 }: {
@@ -59,7 +61,7 @@ export function PeerLeadRows({
       )}
     </div>
   ));
-}
+});
 
 function PeerLeadMessage({
   label,
@@ -119,7 +121,7 @@ function PeerLeadMessage({
   );
 }
 
-export function PeerTeamGroup({
+export const PeerTeamGroup = observer(function PeerTeamGroup({
   team,
   closed,
   toggle,
@@ -302,9 +304,9 @@ export function PeerTeamGroup({
       />
     </section>
   );
-}
+});
 
-export function PeerTeamForm({
+export const PeerTeamForm = observer(function PeerTeamForm({
   project,
   team,
   teams,
@@ -315,8 +317,8 @@ export function PeerTeamForm({
 }: {
   project: Project;
   team?: PeerTeam | undefined;
-  teams: PeerTeam[];
-  agents: readonly SidebarChatRow[];
+  teams: readonly PeerTeam[];
+  agents: readonly SidebarChatView[];
   action: "save" | "delete";
   refresh?: (() => Promise<void>) | undefined;
   close: () => void;
@@ -324,7 +326,7 @@ export function PeerTeamForm({
   const backend = useRef(useSidebarBackend()).current;
   const { post } = backend;
   const [name, setName] = useState(team?.name || "");
-  const [members, setMembers] = useState(team?.members || []);
+  const [members, setMembers] = useState([...(team?.members || [])]);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [frozen, setFrozen] = useState(false);
@@ -425,7 +427,7 @@ export function PeerTeamForm({
             {available.map((a) => (
               <Checkbox
                 key={a.id}
-                label={a.name}
+                label={a.agent.name ?? ""}
                 checked={members.includes(a.id)}
                 disabled={frozen}
                 onChange={(e) =>
@@ -494,7 +496,7 @@ export function PeerTeamForm({
       </div>
     </form>
   );
-}
+});
 
 // Keep the exact mutation after a lost response. A new drag must not replace it.
 export function usePeerTeamMove(
