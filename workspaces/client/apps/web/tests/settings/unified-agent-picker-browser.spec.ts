@@ -252,7 +252,7 @@ test("unified agent picker roles, accounts and project/shared flows", async ({
         "Work 1",
       );
       await expect(reviewRow.locator(".execution-model")).toHaveText(
-        "Same as caller",
+        "Use caller’s model",
       );
       await expect(reviewRow.locator(".execution-effort")).toHaveCount(0);
       await expect(reviewRow.locator(".execution-selected > svg")).toHaveCount(

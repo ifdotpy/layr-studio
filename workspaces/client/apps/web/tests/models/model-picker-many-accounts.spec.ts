@@ -111,12 +111,16 @@ for (const device of [
       // AccountRemainingBar renders.
       const tile = await page.evaluate(() => {
         const tile = document.querySelector<HTMLElement>(
-          ".execution-dropdown .setup-account:not(.setup-account-automatic)",
+          ".execution-dropdown .setup-account",
         )!;
         const bar = document.createElement("span");
         bar.className = "setup-limit";
         bar.append(document.createElement("span"));
-        tile.querySelector(".mantine-Button-inner")!.after(bar);
+        // A selectable tile is a button; a status tile shows its label directly.
+        (
+          tile.querySelector(".mantine-Button-inner") ??
+          tile.querySelector(".setup-account-label")!
+        ).after(bar);
         const box = tile.getBoundingClientRect();
         const name = tile
           .querySelector(".setup-account-name")!
