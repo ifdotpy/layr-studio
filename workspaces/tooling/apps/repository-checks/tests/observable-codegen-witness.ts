@@ -14,11 +14,6 @@ import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "../../../../..");
 const web = join(root, "workspaces/client/apps/web");
-<<<<<<< head
-const input: { source: string; document: object } = JSON.parse(
-  await text(process.stdin),
-);
-=======
 const input: {
   source: string;
   document: object;
@@ -40,7 +35,6 @@ const input: {
       production: true,
     }
   : JSON.parse(await text(process.stdin));
->>>>>>> 0a6da4e
 const directory = mkdtempSync(join(web, ".observable-codegen-"));
 function write(path: string, source: string) {
   const destination = join(directory, path);
