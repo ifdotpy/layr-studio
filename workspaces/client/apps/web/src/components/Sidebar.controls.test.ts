@@ -5,7 +5,17 @@ import { afterEach, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../snapshotFixture";
 import Sidebar from "./Sidebar";
 import { AgentSource } from "../generated/api";
-import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
+import { createStateMirror } from "../generated/observableResources.ts";
+import { createSidebarRow, localSidebarIdentity } from "./sidebar/viewModel.ts";
+const rowFixture = (
+  id: string,
+  overrides: Parameters<typeof agentSummaryFixture>[1],
+) =>
+  createSidebarRow(agentSummaryFixture(id, overrides), {
+    ...localSidebarIdentity,
+    collections: createStateMirror().current,
+  });
 
 // Static markup has no layout, so the measured frame would start as a closed
 // drawer. The frame's geometry has its own tests; render its content inline here.
@@ -84,7 +94,7 @@ it("shows an upgraded chat at the project root without changing its old line fol
         data,
         opened: "",
         rows: [
-          sidebarRowFixture("lead", {
+          rowFixture("lead", {
             name: "Upgraded chat",
             projectPath: "/source",
             projectFolder: "old-folder",

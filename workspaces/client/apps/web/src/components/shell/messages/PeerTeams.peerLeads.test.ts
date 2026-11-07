@@ -1,6 +1,19 @@
 import { createElement } from "react";
 import { MantineProvider } from "@mantine/core";
-import { sidebarRowFixture } from "../../../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
+import { createStateMirror } from "../../../generated/observableResources.ts";
+import {
+  createSidebarRow,
+  localSidebarIdentity,
+} from "../../sidebar/viewModel.ts";
+const rowFixture = (
+  id: string,
+  overrides: Parameters<typeof agentSummaryFixture>[1],
+) =>
+  createSidebarRow(agentSummaryFixture(id, overrides), {
+    ...localSidebarIdentity,
+    collections: createStateMirror().current,
+  });
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PeerLeadRows, PeerTeamForm } from "./PeerTeams";
@@ -17,7 +30,7 @@ describe("peer leads in a team", () => {
           action: "save",
           close: () => {},
           agents: [
-            sidebarRowFixture("lead", {
+            rowFixture("lead", {
               name: "Line-backed lead",
               projectPath: "/source",
             }),

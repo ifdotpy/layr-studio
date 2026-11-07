@@ -82,3 +82,47 @@ it("updates observed membership and preserves surviving native model references"
   expect(model.rows[0]?.agent).toBe(native);
   stop();
 });
+
+it("owns compact recency, team membership, and summary visibility in the shared client facade", () => {
+  const mirror = createStateMirror();
+  const now = 200000;
+  const summaries = [
+    agentSummaryFixture("old", { updated: 1 }),
+    agentSummaryFixture("recent", { updated: now - 1 }),
+    agentSummaryFixture("pinned", { updated: 1, pinned: true }),
+    agentSummaryFixture("running", { updated: 1, status: "running" }),
+    agentSummaryFixture("unread", {
+      updated: 1,
+      operationalStatus: { reason: "unread_result" },
+    }),
+    agentSummaryFixture("team", { updated: 1 }),
+    agentSummaryFixture("worker", { isLead: false }),
+    agentSummaryFixture("moved", { movedTo: "remote" }),
+  ];
+  mirror.apply([
+    ...summaries.map((value) => ({
+      collection: "agentSummary" as const,
+      id: value.id,
+      value,
+    })),
+    {
+      collection: "peerTeam",
+      id: "t",
+      value: {
+        id: "t",
+        name: "Team",
+        projectPath: "/same/project",
+        members: ["team"],
+      },
+    },
+  ]);
+  const model = createSidebarViewModel(
+    () => mirror.current,
+    () => ({ query: "", archived: false, opened: null, rank: () => 0 }),
+  );
+  expect(model.rows.map((row) => row.id)).not.toContain("worker");
+  expect(model.rows.map((row) => row.id)).not.toContain("moved");
+  expect(
+    model.rows.filter((row) => row.compactVisible(now)).map((row) => row.id),
+  ).toEqual(["recent", "pinned", "running", "unread", "team"]);
+});
