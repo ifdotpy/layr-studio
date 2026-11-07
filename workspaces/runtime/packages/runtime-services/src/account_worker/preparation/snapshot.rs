@@ -1790,7 +1790,9 @@ mod resource_tests {
                 .find(|tool| tool.name == "orchestration_spawn")
                 .expect("spawn tool");
             assert!(
-                spawn.description.contains("review defaults"),
+                spawn
+                    .description
+                    .contains("explicit review model stored in chat settings"),
                 "{}",
                 spawn.description
             );
@@ -1802,7 +1804,10 @@ mod resource_tests {
             json!({"id":"legacy", "isLead":true, "threadId":"thread", "provider":"codex"}),
         ] {
             let text = role_guidance(&resources, &record).expect("emitted role guidance");
-            assert!(text.contains("review defaults"), "{text}");
+            assert!(
+                text.contains("explicit review model stored in chat settings"),
+                "{text}"
+            );
             assert!(!text.contains("Use `gpt-6-luna`"), "{text}");
         }
     }

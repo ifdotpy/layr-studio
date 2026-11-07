@@ -52,7 +52,6 @@ import {
   modelDisplayName,
   modelForValue,
   toModelOptions,
-  type ModelOption,
 } from "../models/modelOption";
 import { ProviderMark, setupAccountName } from "../AccountTiles";
 import { useMediaQuery } from "@mantine/hooks";
@@ -175,7 +174,10 @@ export const settingsFor = (
   };
 };
 const reviewSettingsFor = (agent: Agent): ReviewSettings => ({
-  model: agent.reviewDefaults?.model ?? null,
+  model:
+    agent.reviewDefaults?.model === DEFAULT
+      ? null
+      : (agent.reviewDefaults?.model ?? null),
   effort: agent.reviewDefaults?.effort ?? null,
   ...(agent.reviewDefaults?.fastMode != null
     ? { fast_mode: agent.reviewDefaults.fastMode }
@@ -830,16 +832,7 @@ function ScopedExecutionSettings({
   );
   const reviewInfo = modelForValue(reviewModels, reviewCurrent.model);
   const reviewFast = reviewCurrent.fast_mode ?? !!agent.fastMode;
-  const reviewOptions: ModelOption[] = [
-    {
-      value: DEFAULT,
-      label: "Use caller’s model",
-      provider: ProviderKind.Codex,
-      badges: [],
-      description: "Use the caller model and reasoning level.",
-    },
-    ...toModelOptions(reviewModels),
-  ];
+  const reviewOptions = toModelOptions(reviewModels);
   if (reviewCurrent.model && !modelForValue(reviewOptions, reviewCurrent.model))
     reviewOptions.push({
       value: reviewCurrent.model,
@@ -1116,9 +1109,13 @@ function ScopedExecutionSettings({
   ) => {
     if (disabled || saveLock.current) return;
     const next = { ...reviewCurrent, ...patch };
+    if (!next.model) {
+      setError("Select a review model");
+      return;
+    }
     if ("model" in patch && !prepared) {
       next.effort = null;
-      const nextInfo = modelForValue(reviewModels, next.model || agent.model);
+      const nextInfo = modelForValue(reviewModels, next.model);
       if (!fastTier(nextInfo) && (next.fast_mode ?? agent.fastMode))
         next.fast_mode = false;
     }
@@ -1223,17 +1220,14 @@ function ScopedExecutionSettings({
   };
   const selectedOptions = role === "review" ? reviewOptions : modelOptions;
   const storedPickerModel =
-    (role === "review" ? reviewCurrent.model : current.model) || DEFAULT;
+    role === "review" ? reviewCurrent.model || "" : current.model || DEFAULT;
   const pickerModel =
     modelForValue(selectedOptions, storedPickerModel)?.value ||
     storedPickerModel;
   const pickerModels = (role === "review" ? reviewOptions : modelOptions)
     .filter((row) => {
       if (row.value === DEFAULT)
-        return (
-          role === "review" ||
-          (role === "worker" && leadProvider === pickerProvider)
-        );
+        return role === "worker" && leadProvider === pickerProvider;
       const model = infoFor(catalog, row.value);
       if (!model)
         return !!row.disabledReason && row.provider === pickerProvider;
@@ -1251,9 +1245,7 @@ function ScopedExecutionSettings({
       ...row,
       label:
         row.value === DEFAULT
-          ? role === "review"
-            ? "Use caller’s model"
-            : "Same as main agent"
+          ? "Same as main agent"
           : displayModel(catalog, row.value),
     }))
     // One row per model name: a default alias and the model it resolves to
@@ -1300,6 +1292,11 @@ function ScopedExecutionSettings({
     ) : null;
   const controls = (
     <>
+      {role === "review" && !reviewCurrent.model && (
+        <Text size="sm" c="dimmed">
+          Select a review model
+        </Text>
+      )}
       <AgentSetupPicker
         retainCurrentModel={!onDraftChange}
         role={role}
@@ -1372,13 +1369,11 @@ function ScopedExecutionSettings({
             : pickerModels
         }
         model={inheritedUnavailable ? "unavailable" : pickerModel}
-        modelLabel={
-          role === "review" ? "Default review model" : prefix + " model"
-        }
+        modelLabel={role === "review" ? "Review model" : prefix + " model"}
         onModel={(value) => {
-          if (role === "review")
-            void changeReview({ model: value === DEFAULT ? null : value });
-          else void change({ model: value === DEFAULT ? null : value });
+          if (role === "review") {
+            if (value && value !== DEFAULT) void changeReview({ model: value });
+          } else void change({ model: value === DEFAULT ? null : value });
         }}
         efforts={inheritedUnavailable ? [] : pickerEfforts}
         effort={selectedEffort}
@@ -1389,15 +1384,13 @@ function ScopedExecutionSettings({
           if (role === "review") void changeReview({ effort: value });
           else void change({ effort: value });
         }}
-        effortDisabled={role !== "review" && !modeSupported}
+        effortDisabled={
+          role === "review" ? !reviewCurrent.model : !modeSupported
+        }
         disabled={disabled || catalog.loading || !!catalog.error}
         fastAvailable={
           !inheritedUnavailable &&
-          !!fastTier(
-            role === "review"
-              ? modelForValue(reviewModels, reviewCurrent.model || agent.model)
-              : info,
-          )
+          !!fastTier(role === "review" ? reviewInfo : info)
         }
         fast={role === "review" ? reviewFast : current.fast_mode}
         onFast={() => {
@@ -1587,7 +1580,6 @@ function ScopedExecutionSettings({
     summaryRole === "review"
       ? (summaryReview.fast_mode ?? mainSettings.fast_mode)
       : summary.fast_mode;
-  // Native reviews inherit the invoking Codex actor, which may be a child of this lead.
   const inheritedReview = summaryRole === "review" && !summaryReview.model;
   const summaryModel =
     summaryRole === "review"
@@ -1642,7 +1634,7 @@ function ScopedExecutionSettings({
       </span>
       <span className="execution-model">
         {inheritedReview
-          ? "Use caller’s model"
+          ? "Select a review model"
           : displayModel(summaryCatalog, summaryModel)}
       </span>
       {!inheritedReview && summaryEffort && (
@@ -1675,7 +1667,7 @@ function ScopedExecutionSettings({
               ? "Lead"
               : "Agent",
         inheritedReview
-          ? "Use caller’s model"
+          ? "Select a review model"
           : displayModel(summaryCatalog, summaryModel),
         !inheritedReview && summaryEffort ? title(summaryEffort) : "",
         !inheritedReview ? providerLabel(summaryProvider) : "",

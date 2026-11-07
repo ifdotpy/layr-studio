@@ -201,8 +201,18 @@ mod tests {
         store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES('agent',?1)", [r#"{"id":"agent","rootId":"agent","epoch":0,"status":"failed","accountKey":"default","provider":"codex","compactions":0,"error":{"message":"failed","data":{"id":1}}}"#])?;
                 super::super::normalize_agent_fixtures(tx)?;
+            tx.execute("DELETE FROM sync_entity_meta WHERE key='migration_catalog'", [])?;
             Ok(())
         }).await.unwrap();
+        let original: String = store
+            .test_reader()
+            .unwrap()
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
         drop(store);
         let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
         let before: String = store
@@ -215,6 +225,13 @@ mod tests {
             )
             .unwrap();
         let value: studio_json::Value = studio_json::from_str(&before).unwrap();
+        assert_eq!(
+            before,
+            format!(
+                "{},\"reviewDefaults\":{{\"model\":\"gpt-6-astra\"}}}}",
+                original.strip_suffix('}').expect("root object")
+            )
+        );
         assert_eq!(
             value["error"]["studioRawEvidence"],
             studio_json::json!({"message":"failed","data":{"id":1}})

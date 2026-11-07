@@ -515,9 +515,12 @@ for (const agent of unsupportedAgents) {
 
 test("chat settings retains the known Codex permission caller and the Claude settings branch", () => {
   expect(
-    children(chatSettings({ ...initial, permissionMode: AgentPermissionMode["default"] })).some(
-      (node) => node.type === ExecutionPermissions,
-    ),
+    children(
+      chatSettings({
+        ...initial,
+        permissionMode: AgentPermissionMode["default"],
+      }),
+    ).some((node) => node.type === ExecutionPermissions),
   ).toBe(true);
   const claude = children(
     chatSettings({ ...initial, provider: ProviderKind.claude }),
@@ -974,18 +977,18 @@ test("null review Fast inherits the agent setting", () => {
   const agent: Agent = {
     ...initial,
     fastMode: true,
-    reviewDefaults: { model: null, effort: null, fastMode: null },
+    reviewDefaults: { model: "gpt-6-astra", effort: null, fastMode: null },
   };
   const onDraftChange = vi.fn();
   render(agent, false, onDraftChange).picker.onRole("review");
   render(agent, false, onDraftChange).picker.onFast();
   expect(onDraftChange).toHaveBeenCalledWith({
-    review_defaults: { model: null, effort: null, fast_mode: false },
+    review_defaults: { model: "gpt-6-astra", effort: null, fast_mode: false },
   });
 });
 
 for (const draft of [false, true]) {
-  test(`inherited review reasoning stays hidden while Fast remains editable in ${draft ? "new chat drafts" : "saved settings"}`, async () => {
+  test(`review settings require a model before reasoning or Fast in ${draft ? "new chat drafts" : "saved settings"}`, () => {
     const agent: Agent = {
       ...initial,
       fastMode: true,
@@ -999,19 +1002,15 @@ for (const draft of [false, true]) {
     render(agent, false, onDraftChange).picker.onRole("review");
     const picker = render(agent, false, onDraftChange).picker;
     expect(picker.efforts).toEqual([]);
-    expect(picker.fastAvailable).toBe(true);
+    expect(picker.fastAvailable).toBe(false);
+    expect(picker.effortDisabled).toBe(true);
+    picker.onModel("");
+    picker.onEffort("high");
     picker.onFast();
     if (onDraftChange) {
-      expect(onDraftChange).toHaveBeenCalledWith({
-        review_defaults: { model: null, effort: null, fast_mode: false },
-      });
-      expect(h.post).not.toHaveBeenCalled();
-    } else {
-      await vi.waitFor(() => expect(h.post).toHaveBeenCalledOnce());
-      expect(required(required(h.post.mock.calls[0])[1])).toMatchObject({
-        review_defaults: { model: null, effort: null, fast_mode: false },
-      });
+      expect(onDraftChange).not.toHaveBeenCalled();
     }
+    expect(h.post).not.toHaveBeenCalled();
   });
 }
 

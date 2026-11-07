@@ -100,6 +100,7 @@ pub(crate) mod m2026_11_06_idle_unload;
 mod m2026_11_06_outbox_lookup;
 mod m2026_11_06_role_account_exclusions;
 mod m2026_11_07_attention_lookups;
+mod m2026_11_07_explicit_review_model;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1648,6 +1649,16 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_07_attention_lookups::apply(c.transaction),
     },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-07-explicit-review-model",
+            introduced: NOVEMBER_7,
+            target: MigrationTarget::Canvas,
+            supported_source: "Root chats without an explicit review model",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_07_explicit_review_model::apply(c.transaction),
+    },
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.
@@ -2776,5 +2787,53 @@ mod role_account_exclusions_regression {
             record["reviewerExcludedAccountKeys"],
             studio_json::json!(["valid", "\0b"])
         );
+    }
+}
+
+#[cfg(test)]
+mod explicit_review_model_regression {
+    use super::*;
+
+    #[test]
+    fn migration_fills_only_unset_root_review_models_once() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+          INSERT INTO runtime_agents VALUES('missing','{"id":"missing","isLead":true,"unknown":123456789012345678901234567890}');
+          INSERT INTO runtime_agents VALUES('null','{"id":"null","isLead":true,"reviewDefaults":{"model":null,"effort":"high","fastMode":true}}');
+          INSERT INTO runtime_agents VALUES('explicit','{"id":"explicit","isLead":true,"reviewDefaults":{"model":"gpt-6-luna"}}');
+          INSERT INTO runtime_agents VALUES('child','{"id":"child","rootId":"missing","isLead":false}');"#).unwrap();
+        let tx = db.transaction().unwrap();
+        let step = CATALOG
+            .iter()
+            .find(|step| step.definition().id == "2026-11-07-explicit-review-model")
+            .expect("explicit review migration");
+        step.apply(&Context::Sql(SqlContext { transaction: &tx }))
+            .unwrap();
+        let read = |id| {
+            tx.query_row(
+                "SELECT record FROM runtime_agents WHERE id=?1",
+                [id],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+        };
+        let raw = read("missing");
+        assert!(raw.contains("123456789012345678901234567890"));
+        let null: studio_json::Value = studio_json::from_str(&read("null")).unwrap();
+        assert_eq!(
+            null["reviewDefaults"],
+            studio_json::json!({"model":"gpt-6-astra","effort":"high","fastMode":true})
+        );
+        assert_eq!(
+            read("explicit"),
+            r#"{"id":"explicit","isLead":true,"reviewDefaults":{"model":"gpt-6-luna"}}"#
+        );
+        assert_eq!(
+            read("child"),
+            r#"{"id":"child","rootId":"missing","isLead":false}"#
+        );
+        step.apply(&Context::Sql(SqlContext { transaction: &tx }))
+            .unwrap();
+        assert_eq!(read("missing"), raw);
     }
 }

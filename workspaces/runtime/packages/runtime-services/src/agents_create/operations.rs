@@ -267,7 +267,8 @@ pub struct AgentAdmission {
     pub needs_catalog: bool,
 }
 
-pub(crate) const DEFAULT_LEAD_MODEL: &str = "gpt-6-astra";
+pub(crate) const DEFAULT_LEAD_MODEL: &str =
+    studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL;
 /// Resolve defaults through the shared contract; filesystem capability reads stay outside SQL.
 const DEFAULT_WORKSPACE_MODE: &str =
     studio_runtime_schema::workspace_modes::DEFAULT_AGENT_WORKSPACE_MODE;
@@ -1060,27 +1061,31 @@ async fn create(
                 .await?,
             ),
             Some(
-                resolve_review_defaults(
-                    context,
-                    request.intent.review_defaults.value(),
-                    &account,
-                    &identity,
-                    None,
-                    studio_runtime_schema::creation_intent::excluded_for(
-                        studio_runtime_schema::creation_intent::AgentRole::Reviewer,
-                        request
-                            .intent
-                            .worker_excluded_account_keys
-                            .as_deref()
-                            .unwrap_or_default(),
-                        request
-                            .intent
-                            .reviewer_excluded_account_keys
-                            .as_deref()
-                            .unwrap_or_default(),
-                    ),
-                )
-                .await?,
+                if let Some(review) = request.intent.review_defaults.value() {
+                    resolve_review_defaults(
+                        context,
+                        Some(review),
+                        &account,
+                        &identity,
+                        None,
+                        studio_runtime_schema::creation_intent::excluded_for(
+                            studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+                            request
+                                .intent
+                                .worker_excluded_account_keys
+                                .as_deref()
+                                .unwrap_or_default(),
+                            request
+                                .intent
+                                .reviewer_excluded_account_keys
+                                .as_deref()
+                                .unwrap_or_default(),
+                        ),
+                    )
+                    .await?
+                } else {
+                    initial_review_settings()
+                },
             ),
         )
     } else {
@@ -1937,7 +1942,7 @@ pub async fn conversation(
             },
         };
         let review_defaults = match request.review_defaults.as_ref() {
-            Some(value) => {
+            Some(value) => Some(
                 resolve_review_defaults(
                     context,
                     Some(value),
@@ -1946,19 +1951,9 @@ pub async fn conversation(
                     None,
                     reviewer_excluded,
                 )
-                .await?
-            }
-            None => initial.review_defaults.as_deref().cloned().unwrap_or(
-                resolve_review_defaults(
-                    context,
-                    None,
-                    account_key,
-                    &identity,
-                    None,
-                    reviewer_excluded,
-                )
                 .await?,
             ),
+            None => initial.review_defaults.as_deref().cloned(),
         };
         let account_key = account_key.to_owned();
         let validate = std::sync::Arc::clone(&validate);
@@ -1977,7 +1972,7 @@ pub async fn conversation(
                 return Err(MutationError::IdentityChanged.into());
             }
             target.worker_defaults = worker_defaults;
-            target.review_defaults = Some(Box::new(review_defaults));
+            target.review_defaults = review_defaults.map(Box::new);
             let value = target.value();
             if !validate("PersistedAgentRecord", &value) {
                 return Err(MutationError::InvalidStoredObject {
@@ -3088,28 +3083,22 @@ async fn resolve_review_defaults(
     _worker_account_key: Option<&str>,
     excluded_account_keys: &[studio_runtime_schema::account_key::AccountKey],
 ) -> Result<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto, OperationError> {
-    let Some(value) = value else {
-        return Ok(
-            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                model: None,
-                effort: None,
-                fast_mode: None,
-            },
-        );
-    };
+    let value = value.ok_or(OperationError::Invalid(
+        crate::native_review::REVIEW_MODEL_REQUIRED,
+    ))?;
     let mut defaults = studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
         model: None,
         effort: None,
         fast_mode: value.fast_mode,
     };
-    let Some(model) = value.model.value().map(String::as_str) else {
-        if value.effort.value().is_some() {
-            return Err(OperationError::Invalid(
-                "Select a review model before setting its effort",
-            ));
-        }
-        return Ok(defaults);
-    };
+    let model = value
+        .model
+        .value()
+        .map(String::as_str)
+        .filter(|model| !model.is_empty())
+        .ok_or(OperationError::Invalid(
+            crate::native_review::REVIEW_MODEL_REQUIRED,
+        ))?;
     if !model.starts_with("gpt-") {
         return Err(OperationError::Invalid("Native review needs a Codex model"));
     }
@@ -3170,6 +3159,14 @@ async fn resolve_review_defaults(
     defaults.model = Some(settings.model);
     defaults.effort = settings.effort;
     Ok(defaults)
+}
+
+fn initial_review_settings() -> studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+    studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+        model: Some(studio_runtime_schema::provider_kind::initial_review_model().into()),
+        effort: None,
+        fast_mode: None,
+    }
 }
 
 fn local_project_locations<'a>(
@@ -3488,13 +3485,7 @@ pub(crate) fn build_agent_record(
                 ..Default::default()
             },
         ));
-        record.review_defaults = Some(Box::new(
-            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
-                model: None,
-                effort: None,
-                fast_mode: None,
-            },
-        ));
+        record.review_defaults = Some(Box::new(initial_review_settings()));
     }
     if draft {
         record.quick_create = Some(true);
@@ -3512,6 +3503,37 @@ async fn mutate(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn new_root_chats_store_an_explicit_review_model() {
+        for draft in [true, false] {
+            let record = super::build_agent_record(
+                "root",
+                "Lead",
+                "",
+                "/project",
+                "default",
+                super::ProviderKind::Codex,
+                false,
+                "orchestrator",
+                true,
+                "idle",
+                "shared",
+                Some(1),
+                64,
+                draft,
+                0.0,
+                None,
+            )
+            .unwrap();
+            assert_eq!(
+                record
+                    .review_defaults
+                    .as_ref()
+                    .and_then(|settings| settings.model.as_deref()),
+                Some("gpt-6-astra")
+            );
+        }
+    }
     #[test]
     fn native_reuse_requires_the_same_store() {
         let mut prior = studio_runtime_store::AgentRecord::test_defaults();
@@ -4499,26 +4521,18 @@ mod tests {
             account_id: None,
             email: None,
         };
-        for model in [Field::Null, Field::Value("gpt-6-astra".to_owned())] {
-            for fast in [true, false] {
-                let payload = ReviewDefaults {
-                    account_key: Field::Missing,
-                    model: model.clone(),
-                    effort: Field::Null,
-                    fast_mode: Some(fast),
-                };
-                let resolved = resolve_review_defaults(
-                    &context,
-                    Some(&payload),
-                    "default",
-                    &account,
-                    None,
-                    &[],
-                )
-                .await
-                .expect("Fast review defaults validate");
-                assert_eq!(resolved.fast_mode, Some(fast));
-            }
+        for fast in [true, false] {
+            let payload = ReviewDefaults {
+                account_key: Field::Missing,
+                model: Field::Value("gpt-6-astra".to_owned()),
+                effort: Field::Null,
+                fast_mode: Some(fast),
+            };
+            let resolved =
+                resolve_review_defaults(&context, Some(&payload), "default", &account, None, &[])
+                    .await
+                    .expect("Fast review defaults validate");
+            assert_eq!(resolved.fast_mode, Some(fast));
         }
         let legacy = ReviewDefaults {
             account_key: Field::Missing,
@@ -4526,11 +4540,14 @@ mod tests {
             effort: Field::Null,
             fast_mode: None,
         };
-        let resolved =
-            resolve_review_defaults(&context, Some(&legacy), "default", &account, None, &[])
-                .await
-                .expect("legacy defaults validate");
-        assert!(resolved.fast_mode.is_none());
+        let refused =
+            resolve_review_defaults(&context, Some(&legacy), "default", &account, None, &[]).await;
+        assert!(matches!(
+            refused,
+            Err(OperationError::Invalid(
+                crate::native_review::REVIEW_MODEL_REQUIRED
+            ))
+        ));
     }
 
     #[tokio::test]

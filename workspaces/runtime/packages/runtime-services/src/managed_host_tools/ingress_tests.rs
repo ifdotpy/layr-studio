@@ -42,7 +42,8 @@ fn template() -> &'static Template {
     TEMPLATE.get_or_init(|| {
         let scratch = tempfile::tempdir().unwrap();
         let cwd = scratch.path().to_string_lossy().into_owned();
-        let base: Value = studio_json::from_str(&BASE_AGENT.replace("@cwd", &cwd)).unwrap();
+        let mut base: Value = studio_json::from_str(&BASE_AGENT.replace("@cwd", &cwd)).unwrap();
+        base["reviewDefaults"]["model"] = json!(studio_runtime_schema::provider_kind::initial_review_model());
         let actor = |index: usize, id: &str, name: &str, parent: Option<&str>, lead: bool| {
             let mut record = base.clone();
             record["id"] = json!(id);
@@ -2439,7 +2440,7 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             "profile-model",
             json!({"profile_id":"review-model-profile"}),
             configured.clone(),
-            "gpt-6-luna",
+            "gpt-6-astra",
             Some("high"),
             false,
             "codex",
@@ -2448,7 +2449,7 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             "profile-effort",
             json!({"profile_id":"review-effort-profile"}),
             configured.clone(),
-            "gpt-6-luna",
+            "gpt-6-astra",
             Some("low"),
             false,
             "codex",
@@ -2466,7 +2467,7 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             "profile-role",
             json!({"profile_id":"review-model-profile","role":null}),
             configured.clone(),
-            "gpt-6-luna",
+            "gpt-6-astra",
             Some("high"),
             false,
             "codex",
@@ -2716,6 +2717,19 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
                 .await
                 .unwrap(),
             );
+            if matches!(
+                label,
+                "missing-default" | "null-default" | "nested-fallback"
+            ) {
+                assert!(!success, "{label}/{tool}: {result}");
+                assert!(
+                    result
+                        .to_string()
+                        .contains(crate::native_review::REVIEW_MODEL_REQUIRED),
+                    "{label}/{tool}: {result}"
+                );
+                continue;
+            }
             assert!(success, "{label}/{tool}: {result}");
             let returned = &result["agents"][0];
             assert_eq!(returned["model"], model, "{label}/{tool}");
@@ -3721,7 +3735,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
             let mut root = AgentRepository::get(tx, &AgentId::from(root_id.as_str()))?
                 .unwrap()
                 .value();
-            root["reviewDefaults"] = json!({"model":null});
+            root["reviewDefaults"] = json!({"model":"gpt-6-astra"});
             AgentRepository::put(tx, &AgentRecord::from_value(root).unwrap())
         })
         .await

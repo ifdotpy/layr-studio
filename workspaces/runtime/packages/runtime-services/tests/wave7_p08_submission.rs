@@ -505,16 +505,67 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
                 .await
                 .expect("clear fault");
         }
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("simulate the previous migration catalog");
+        let original: String = store
+            .test_reader()
+            .expect("reader")
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("original root bytes");
         drop(store);
         let store = studio_runtime_store::RuntimeStore::open(Some(&path))
             .await
             .expect("restart");
+        let migrated: String = store
+            .test_reader()
+            .expect("reader")
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("migrated root bytes");
+        assert_eq!(
+            migrated,
+            format!(
+                "{},\"reviewDefaults\":{{\"model\":\"gpt-6-astra\"}}}}",
+                original.strip_suffix('}').expect("root object")
+            )
+        );
+        drop(store);
+        let store = studio_runtime_store::RuntimeStore::open(Some(&path))
+            .await
+            .expect("second restart");
+        let unchanged: String = store
+            .test_reader()
+            .expect("reader")
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='agent'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("second root bytes");
+        assert_eq!(unchanged, migrated);
         if !failed {
             assert_current_receipts(&store.test_reader().expect("reader"));
         }
+        let mut after = case.after;
+        after["runtime_agents"][0]["record"]["reviewDefaults"] = json!({"model":"gpt-6-astra"});
         compare(
             &store.test_reader().expect("reader"),
-            &case.after,
+            &after,
             &format!("fault={:?}", case.fault),
         );
     }

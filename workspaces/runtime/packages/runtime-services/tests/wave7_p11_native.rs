@@ -124,7 +124,7 @@ fn review_fast_mode_uses_optional_team_default_before_actor() {
             let mut actor = case["actor"].clone();
             actor["fastMode"] = json!(actor_fast);
             let mut root = actor.clone();
-            root["reviewDefaults"] = json!({"model":null,"effort":null});
+            root["reviewDefaults"] = json!({"model":"gpt-6-astra","effort":null});
             if let Some(fast) = default_fast {
                 root["reviewDefaults"]["fastMode"] = json!(fast);
             }

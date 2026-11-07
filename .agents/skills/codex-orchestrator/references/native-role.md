@@ -35,7 +35,7 @@ Resolve changes to shared contracts or task scope yourself.
 An explicit request to work without subagents takes precedence.
 
 Omit model and effort in `orchestration_spawn` to honor the user's settings:
-reviewers use the team review defaults; implementers use the worker defaults.
+reviewers use the explicit review model stored in chat settings; implementers use the worker defaults.
 Supply an override only when the user explicitly requests it. Codex and Claude
 workers can share a team. Honor the user's explicit model or account constraints.
 See the [execution contract](../../../../docs/orchestration.md) for fallback precedence.

@@ -11,6 +11,57 @@ use studio_runtime_store::{AgentRecord, AgentRepository, ContextRepairRepository
 
 const MAX_PROMPT: usize = 32_000;
 const DELIVERY: &str = "The review result wakes you automatically. Finish your turn while waiting.";
+/// Refusal shared by service and HTTP review-model validation.
+pub const REVIEW_MODEL_REQUIRED: &str = "Select a review model in chat settings";
+
+#[cfg(test)]
+mod explicit_review_model_tests {
+    use super::*;
+
+    #[test]
+    fn missing_review_model_refuses_instead_of_using_the_caller() {
+        let mut actor = AgentRecord::test_defaults();
+        actor.model = Some("gpt-6-luna".into());
+        actor.review_defaults = None;
+        let result = execution_settings(
+            &actor,
+            &actor,
+            &studio_runtime_schema::queue_command::Field::Missing,
+            &EffortSelection::Inherit,
+        );
+        assert_eq!(
+            result,
+            Err(
+                crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
+                    REVIEW_MODEL_REQUIRED
+                )
+            )
+        );
+    }
+
+    #[test]
+    fn requested_review_model_precedes_the_stored_chat_choice() {
+        use studio_runtime_schema::queue_command::Field;
+        let mut actor = AgentRecord::test_defaults();
+        actor.model = Some("gpt-6-luna".into());
+        let mut root = actor.clone();
+        root.review_defaults = Some(Box::new(
+            studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto {
+                model: Some("gpt-6-astra".into()),
+                effort: None,
+                fast_mode: None,
+            },
+        ));
+        for (requested, expected) in [
+            (Field::Missing, "gpt-6-astra"),
+            (Field::Value("gpt-6.1-sol".into()), "gpt-6.1-sol"),
+        ] {
+            let resolved =
+                execution_settings(&actor, &root, &requested, &EffortSelection::Inherit).unwrap();
+            assert_eq!(resolved.0, expected);
+        }
+    }
+}
 
 /// Validate and normalize the complete typed review target.
 pub fn target(args: &Value) -> Result<Value> {
@@ -68,35 +119,43 @@ pub(crate) fn git_read(
 
 /// Model and reasoning fallback for both managed reviewer spawns and native reviews.
 /// Explicit effort (including null) wins. A different explicit model uses its
-/// native effort; an omitted model uses the team's review default, then the caller.
+/// native effort; an omitted model uses only the chat's explicit review choice.
 pub(crate) fn execution_settings(
     actor: &AgentRecord,
     root: &AgentRecord,
     requested_model: &studio_runtime_schema::queue_command::Field<String>,
     requested_effort: &EffortSelection,
-) -> (Option<String>, Option<String>, Option<bool>) {
+) -> std::result::Result<
+    (String, Option<String>, Option<bool>),
+    crate::managed_child_create::ManagedCreationEnvironmentError,
+> {
     let defaults = root.review_defaults.as_deref();
     let default_model = defaults.and_then(|defaults| defaults.model.as_deref());
     let model = requested_model
         .value()
         .map(String::as_str)
         .or(default_model)
-        .or(actor.model.as_deref())
-        .map(str::to_owned);
+        .filter(|model| !model.is_empty())
+        .ok_or(
+            crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
+                REVIEW_MODEL_REQUIRED,
+            ),
+        )?
+        .to_owned();
     let effort = if !requested_effort.is_inherit() {
         requested_effort.selected().cloned()
     } else if requested_model.is_missing() && default_model.is_some() {
         defaults.and_then(|defaults| defaults.effort.clone())
-    } else if model.as_deref() == actor.model.as_deref() {
+    } else if Some(model.as_str()) == actor.model.as_deref() {
         actor.effort.value().cloned()
     } else {
         None
     };
-    (
+    Ok((
         model,
         effort,
         defaults.and_then(|defaults| defaults.fast_mode),
-    )
+    ))
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -200,7 +259,15 @@ impl ReviewPlan {
         let requested_model = Field::Missing;
         let requested_effort = EffortSelection::Inherit;
         let (model, effort, fast_mode) =
-            execution_settings(checked, checked_root, &requested_model, &requested_effort);
+            execution_settings(checked, checked_root, &requested_model, &requested_effort)
+                .map_err(|error| match error {
+                    crate::managed_child_create::ManagedCreationEnvironmentError::Invalid(
+                        message,
+                    ) => NativeError::Invalid(message),
+                    crate::managed_child_create::ManagedCreationEnvironmentError::Unavailable(
+                        name,
+                    ) => NativeError::Unavailable(name),
+                })?;
         let fast_mode = fast_mode
             .or_else(|| actor.get("fastMode").and_then(Value::as_bool))
             .unwrap_or(false);
@@ -218,7 +285,7 @@ impl ReviewPlan {
             cwd: Some(directory),
             role: Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
             prompt: Some(prompt.chars().take(MAX_PROMPT).collect()),
-            model: model.map_or(Field::Null, Field::Value),
+            model: Field::Value(model),
             effort: effort.map_or(EffortSelection::Clear, EffortSelection::Set),
             fast_mode: Field::Value(fast_mode),
             daybreak_enabled: Field::Value(false),

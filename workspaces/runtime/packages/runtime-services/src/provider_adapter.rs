@@ -354,7 +354,7 @@ impl ProviderAdapter for CodexAdapter {
     }
 
     fn default_model(&self) -> &'static str {
-        crate::agents_create::DEFAULT_LEAD_MODEL
+        studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL
     }
 
     fn pricing_vendor(&self) -> &'static str {

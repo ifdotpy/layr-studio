@@ -71,8 +71,9 @@ registry states before counting workers. Use a new spawn ID only after
 `not_applied` proves the earlier batch did not create workers.
 Queued cancellation prevents execution. Running cancellation requires receipt
 reconciliation; it does not authorize a second mutation.
-Omit model and effort to honor the user's settings. Reviewers use the team
-review defaults; implementers use the worker defaults. Supply an override only
+Omit model and effort to honor the user's settings. Reviewers use the explicit
+review model stored in chat settings; a missing choice refuses the review.
+Implementers use the worker defaults. Supply an override only
 when the user explicitly requests it.
 Codex and Claude can delegate to each other. Studio selects an account that
 offers the model. A user-selected subagent account applies to all new workers.

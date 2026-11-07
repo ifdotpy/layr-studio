@@ -255,6 +255,57 @@ fn actor(store: &RuntimeStore, id: &str) -> Value {
 }
 
 #[tokio::test]
+async fn unset_review_model_is_a_validation_error_with_account_sessions() {
+    for uri in ["/api/leads", "/api/conversation"] {
+        let fixture = Fixture::new(false).await;
+        fixture.session.release.add_permits(4);
+        let body = if uri == "/api/leads" {
+            json!({"account_key":LEAD_ACCOUNT,"cwd":fixture._root.path(),"workspaceMode":"worktree",
+                "review_defaults":{"model":null,"effort":null}})
+        } else {
+            json!({"id":LEAD,"expected_account_key":LEAD_ACCOUNT,
+                "review_defaults":{"model":null,"effort":null}})
+        };
+        let before = actor(&fixture.store, LEAD);
+        let (status, reply) = call(&fixture.app, "POST", uri, Some(body)).await;
+        expect_review_model_validation(status, &reply, uri);
+        assert_eq!(actor(&fixture.store, LEAD), before);
+        assert_eq!(fixture.session.reads.load(Ordering::SeqCst), 0);
+        fixture.catalog.shutdown().await.expect("catalog shutdown");
+    }
+}
+
+fn expect_review_model_validation(status: u16, reply: &Value, uri: &str) {
+    assert_eq!(status, 400, "{uri}: {reply}");
+    assert_eq!(
+        reply["error"], "Select a review model in chat settings",
+        "{uri}: {reply}"
+    );
+}
+
+#[tokio::test]
+async fn worker_only_settings_preserve_unset_review_settings() {
+    let fixture = Fixture::new(false).await;
+    let before = actor(&fixture.store, LEAD);
+    assert!(before.get("reviewDefaults").is_none());
+    fixture.session.release.add_permits(1);
+    let (status, models) = call(&fixture.app, "GET", &Fixture::selection_uri(), None).await;
+    assert_eq!(status, 200, "worker model catalog: {models}");
+    let (status, saved) = call(
+        &fixture.app,
+        "POST",
+        "/api/conversation",
+        Some(Fixture::settings()),
+    )
+    .await;
+    assert_eq!(status, 200, "worker-only update: {saved}");
+    let after = actor(&fixture.store, LEAD);
+    assert_eq!(after.get("reviewDefaults"), before.get("reviewDefaults"));
+    assert_eq!(after["workerDefaults"]["model"], MODEL);
+    fixture.catalog.shutdown().await.expect("catalog shutdown");
+}
+
+#[tokio::test]
 async fn fresh_get_then_real_future_worker_settings_post_preserves_existing_workers() {
     {
         let fixture = Fixture::new(false).await;

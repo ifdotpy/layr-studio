@@ -9,6 +9,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { beforeEach, expect, test, vi } from "vitest";
 import { ExecutionSettings } from "./ExecutionSettings";
+import { ExecutionSummaryTrigger } from "./ExecutionSummaryTrigger";
+import { INHERITED_MODEL } from "../models/modelOption";
 import type { AgentSetupPickerProps } from "./AgentSetupPicker";
 import type { Agent } from "../../types";
 
@@ -21,6 +23,108 @@ const choices = vi.hoisted(() => ({
 }));
 
 const capability = vi.hoisted(() => ({ priority: false }));
+
+test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
+  "review settings omit caller-model choices with stored model %s",
+  (model) => {
+    const agent: Agent = {
+      id: "review-picker",
+      isLead: true,
+      source: AgentSource.managed,
+      status: AgentStatus.idle,
+      provider: ProviderKind.codex,
+      model: "gpt-6.1-sol",
+      reviewDefaults: { model, effort: null },
+    };
+    const markup = renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSettings, {
+          presentation: "panel",
+          initialRole: "review",
+          agent,
+          catalog: { models: [], loading: false, error: "", retry: () => {} },
+          refresh: async () => {},
+        }),
+      ),
+    );
+    const picker = choices.pickers.at(-1);
+    expect(picker?.modelLabel).toBe("Review model");
+    expect
+      .soft(picker?.models.map((row) => row.value))
+      .not.toContain(INHERITED_MODEL);
+    expect.soft(markup).not.toMatch(/caller[’']s model/i);
+    if (model === "gpt-6-luna") {
+      expect(picker?.model).toBe(model);
+    } else {
+      expect.soft(picker?.model).toBe("");
+      expect.soft(markup).toContain("Select a review model");
+      expect.soft(markup).not.toContain('aria-selected="true"');
+    }
+    const summary = renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSummaryTrigger, {
+          agent,
+          team: [agent],
+          onOpen: () => {},
+        }),
+      ),
+    );
+    expect(summary).not.toMatch(/caller[’']s model/i);
+    expect(summary).toContain(
+      model === "gpt-6-luna" ? "Luna 6" : "Select a review model",
+    );
+    const row = renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSettings, {
+          settingsRow: true,
+          initialRole: "review",
+          agent,
+          catalog: { models: [], loading: false, error: "", retry: () => {} },
+          refresh: async () => {},
+        }),
+      ),
+    );
+    expect(row).not.toMatch(/caller[’']s model/i);
+    expect(row).toContain(
+      model === "gpt-6-luna" ? "Luna 6" : "Select a review model",
+    );
+  },
+);
+
+test("worker settings retain the same-as-main model option", () => {
+  renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(ExecutionSettings, {
+        presentation: "panel",
+        initialRole: "worker",
+        agent: {
+          id: "worker-picker",
+          isLead: true,
+          provider: ProviderKind.codex,
+          source: AgentSource.managed,
+          model: "gpt-6.1-sol",
+          status: AgentStatus.idle,
+        },
+        catalog: { models: [], loading: false, error: "", retry: () => {} },
+        refresh: async () => {},
+      }),
+    ),
+  );
+  expect(choices.pickers.at(-1)?.models).toContainEqual(
+    expect.objectContaining({
+      value: INHERITED_MODEL,
+      label: "Same as main agent",
+    }),
+  );
+});
 
 test("shows the server reason alongside an unavailable account", () => {
   const markup = renderToStaticMarkup(

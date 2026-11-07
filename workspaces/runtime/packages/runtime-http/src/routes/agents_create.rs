@@ -50,6 +50,15 @@ fn review_defaults(value: &generated::ReviewDefaults) -> ReviewDefaults {
     }
 }
 
+fn validate_review_model(defaults: Option<&generated::ReviewDefaults>) -> Result<(), ApiError> {
+    if defaults.is_some_and(|value| value.model.as_deref().is_none_or(str::is_empty)) {
+        return Err(operation_error(OperationError::Invalid(
+            studio_runtime_services::native_review::REVIEW_MODEL_REQUIRED,
+        )));
+    }
+    Ok(())
+}
+
 fn account_exclusions(
     keys: Option<&[String]>,
     field: &str,
@@ -973,6 +982,7 @@ async fn create_lead_with_model(
     {
         return Ok(replay);
     }
+    validate_review_model(body.review_defaults.as_ref().and_then(Option::as_ref))?;
     // Python resolves project binding/account after replay and before catalog
     // validation (`codex_runtime.py:5120-5130`).
     let catalog_account = if needs_catalog {
@@ -1195,13 +1205,21 @@ fn stored_parent_defaults(
     let root =
         studio_runtime_store::system_reads::get(connection, "runtime_agents", &parent.root_id.0)?
             .unwrap_or_else(|| parent.value());
-    if !ignore_stored_worker_model {
+    if !ignore_stored_worker_model
+        && role != studio_runtime_schema::creation_intent::AgentRole::Reviewer
+    {
         defaults.worker_model = root
             .pointer("/workerDefaults/model")
             .and_then(Value::as_str)
             .map(str::to_owned);
     }
-    defaults.root_model = root.get("model").and_then(Value::as_str).map(str::to_owned);
+    defaults.root_model = if role == studio_runtime_schema::creation_intent::AgentRole::Reviewer {
+        root.pointer("/reviewDefaults/model")
+    } else {
+        root.get("model")
+    }
+    .and_then(Value::as_str)
+    .map(str::to_owned);
     let typed_root = studio_runtime_store::AgentRecord::from_value(root)?;
     defaults.excluded.extend(
         typed_root
@@ -1309,10 +1327,14 @@ async fn wait_for_agent_catalog(
                 excluded.extend(draft_excluded);
                 let explicit_account = requested_account.is_some();
                 let explicit = requested_account;
-                let model = requested_model
-                    .or(worker_model)
-                    .or(root_model)
-                    .unwrap_or_else(|| "gpt-6-astra".to_owned());
+                let model = requested_model.or(worker_model).or(root_model);
+                let model = if role == studio_runtime_schema::creation_intent::AgentRole::Reviewer {
+                    model.ok_or(())?
+                } else {
+                    model.unwrap_or_else(|| {
+                        studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL.to_owned()
+                    })
+                };
                 let provider = model_provider(&model);
                 let pinned = explicit;
                 let mut keys = Vec::new();
@@ -1494,6 +1516,7 @@ async fn conversation(
             Value::String(field.to_owned()),
         ]));
     }
+    validate_review_model(body.review_defaults.as_ref().and_then(Option::as_ref))?;
     let request = agents_create::Conversation {
         non_defaults: body.next_turn.is_some() || body.request_id.is_some(),
         cwd: body.cwd.clone(),

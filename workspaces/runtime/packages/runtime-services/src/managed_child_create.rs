@@ -339,16 +339,19 @@ pub(crate) async fn resolve_worker_settings(
         });
     let profile_model = profile.map(|profile| profile.model.as_str());
     let review = (role == "reviewer")
-        .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort));
-    let requested_model = spec
-        .model
-        .value()
-        .map(String::as_str)
-        .or(profile_model)
-        .or_else(|| review.as_ref().and_then(|(model, _, _)| model.as_deref()))
-        .or(default_model)
-        .or(root.model.as_deref())
-        .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
+        .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort))
+        .transpose()?;
+    let requested_model = if let Some((model, _, _)) = &review {
+        model.as_str()
+    } else {
+        spec.model
+            .value()
+            .map(String::as_str)
+            .or(profile_model)
+            .or(default_model)
+            .or(root.model.as_deref())
+            .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL)
+    };
     let (account_key, account) = if role == "reviewer" {
         select_review_account(
             store,
@@ -1588,7 +1591,22 @@ pub(crate) async fn request_review(
         request_id.to_owned(),
         directory.clone(),
     )
-    .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid native review request"))?;
+    .map_err(|error| match error {
+        crate::native_actions::NativeError::Invalid(message) => {
+            crate::managed_host_tools::Error::Invalid(message)
+        }
+        crate::native_actions::NativeError::InvalidStored { .. }
+        | crate::native_actions::NativeError::Conflict
+        | crate::native_actions::NativeError::Changed
+        | crate::native_actions::NativeError::Unknown
+        | crate::native_actions::NativeError::Expired
+        | crate::native_actions::NativeError::Unavailable(_)
+        | crate::native_actions::NativeError::Store(_)
+        | crate::native_actions::NativeError::Json(_)
+        | crate::native_actions::NativeError::Sql(_) => {
+            crate::managed_host_tools::Error::Invalid("Invalid native review request")
+        }
+    })?;
     let child_id =
         plan.spec()
             .id

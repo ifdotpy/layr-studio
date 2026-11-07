@@ -10,6 +10,15 @@ use std::fmt;
 use std::str::FromStr;
 use studio_json::Value;
 
+/// Initial model identifier for a new Codex chat; provider policy owns this value.
+pub const CODEX_INITIAL_MODEL: &str = "gpt-6-astra";
+
+/// Initial explicit review choice for new and migrated root chats, never a runtime fallback.
+#[must_use]
+pub const fn initial_review_model() -> &'static str {
+    CODEX_INITIAL_MODEL
+}
+
 /// The provider that owns an account and every agent on it.
 #[derive(
     Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,

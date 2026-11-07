@@ -3,7 +3,11 @@ import { modelProvider } from "../accountPreference.ts";
 import type { Agent } from "../../types";
 import type { ComponentProps } from "react";
 import { ActionButton } from "../ui/primitives";
-import { modelDisplayName, modelForValue } from "../models/modelOption";
+import {
+  INHERITED_MODEL,
+  modelDisplayName,
+  modelForValue,
+} from "../models/modelOption";
 import { settingsFor } from "./ExecutionSettings";
 import { useWorkerModels } from "./WorkerModelPicker";
 import { subagentsOff } from "./SubagentConcurrencyControl";
@@ -64,14 +68,15 @@ export function ExecutionSummaryTrigger({
     defaults.effort ?? main.effort,
     true,
   );
-  const review = root.reviewDefaults?.model
-    ? summary(
-        root.reviewDefaults.model,
-        root.reviewDefaults.effort ?? main.effort,
-        true,
-        true,
-      )
-    : null;
+  const review =
+    root.reviewDefaults?.model && root.reviewDefaults.model !== INHERITED_MODEL
+      ? summary(
+          root.reviewDefaults.model,
+          root.reviewDefaults.effort ?? main.effort,
+          true,
+          true,
+        )
+      : null;
   const entries = [
     {
       role: "lead",
@@ -108,7 +113,7 @@ export function ExecutionSummaryTrigger({
         ({ label, value, fast }) =>
           (value
             ? `${label} ${value.name} ${value.effort} (${value.provider})`.trim()
-            : `${label} uses caller’s model`) + (fast ? " Fast" : ""),
+            : `${label}: Select a review model`) + (fast ? " Fast" : ""),
       )
       .join("; ");
   return (
@@ -134,7 +139,7 @@ export function ExecutionSummaryTrigger({
               <span className="execution-model">{value.name}</span>
             ) : (
               <span className="execution-inherited-label">
-                Use caller’s model
+                Select a review model
               </span>
             )}
             {fast && <span className="execution-effort">Fast</span>}
