@@ -994,7 +994,7 @@ export default function Usage({
           role="group"
           aria-label="Account weekly allowance"
         >
-          {/* Show the current chat lead account. */}
+          {/* One dot per role (Lead, Workers, Review), not one per account. */}
           {roleAccounts(agent, usageAccounts).map(
             ({ role, account: item, automatic }) => {
               const projection = item.runway?.current;
