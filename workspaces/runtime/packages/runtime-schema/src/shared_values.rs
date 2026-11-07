@@ -2,6 +2,9 @@
 //! rendered from it by `studio-contracts`
 //! (`pnpm run contracts:generate`), and `pnpm run contracts:check` rejects drift.
 
+/// Recent sidebar activity window, in seconds. Expiration is evaluated on the next render.
+pub const COMPACT_RECENT_WINDOW_SECONDS: u32 = 86400;
+
 /// Native MCP foreground wait before automatic background transfer, in milliseconds.
 pub const CLAUDE_MCP_AUTO_BACKGROUND_MS: u64 = 120_000;
 /// Account registry storage format requiring explicit provider identity; version number.

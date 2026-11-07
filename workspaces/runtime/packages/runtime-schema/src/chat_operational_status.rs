@@ -1,4 +1,4 @@
-//! The server-owned chat state; unread state belongs to the device.
+//! Server-owned chat indicator, including persisted unread receipt precedence.
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +8,7 @@ pub enum ChatOperationalKind {
     Answer,
     Error,
     Working,
+    Unread,
     Paused,
     None,
 }

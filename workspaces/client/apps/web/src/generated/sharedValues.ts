@@ -7,6 +7,7 @@ export const SHELL_POLICY_DEFAULTS = {
 };
 export const SHELL_PRESSURE_IDLE_MINUTES = 30;
 export const MAX_SAFE_INTEGER = 9007199254740991;
+export const COMPACT_RECENT_WINDOW_SECONDS = 86400;
 export const MODEL_CHOICES_PREFERENCE_KEY = "studio-model-choices-v1";
 export const RETIRED_MODEL_WHITELIST_KEY = "studio-model-whitelist-v1";
 export const SYNC_TERMINAL_STREAM_MAX_CHARS = 16384;

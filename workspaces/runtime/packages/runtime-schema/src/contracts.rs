@@ -135,6 +135,7 @@ fn shared_values_ts() -> String {
                 (crate::shell_policy::PRESSURE_IDLE_MS / 60_000).to_string(),
             ),
             ("MAX_SAFE_INTEGER", values::MAX_SAFE_INTEGER.to_string()),
+            ("COMPACT_RECENT_WINDOW_SECONDS", values::COMPACT_RECENT_WINDOW_SECONDS.to_string()),
             (
                 "MODEL_CHOICES_PREFERENCE_KEY",
                 json_string(values::MODEL_CHOICES_PREFERENCE_KEY),
@@ -1231,6 +1232,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in crate::sync_entity_payload::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
+    crate::sidebar::refresh_openapi(&mut openapi)?;
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);

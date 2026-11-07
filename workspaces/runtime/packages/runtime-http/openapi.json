@@ -19825,6 +19825,7 @@
           "answer",
           "error",
           "working",
+          "unread",
           "paused",
           "none"
         ],
@@ -24902,6 +24903,32 @@
         ],
         "title": "ConvertedFromLeadRecordResponse",
         "type": "object"
+      },
+      "CopyPhase": {
+        "enum": [
+          "sizing",
+          "staging",
+          "importing_commits",
+          "materializing",
+          "restoring_attributes",
+          "warming_caches",
+          "transferring",
+          "creating_line",
+          "archiving",
+          "uploading",
+          "importing_project",
+          "completed",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "CopyUnit": {
+        "enum": [
+          "files",
+          "bytes",
+          "commits"
+        ],
+        "type": "string"
       },
       "CostBreakdown": {
         "additionalProperties": false,
@@ -30840,6 +30867,16 @@
         ],
         "title": "ManualConnectionCheck",
         "type": "object"
+      },
+      "MarkUnreadEligibility": {
+        "description": "Server-owned reasons for an unavailable mark-unread action.",
+        "enum": [
+          "allowed",
+          "unsupported",
+          "no_completed_result",
+          "already_unread"
+        ],
+        "type": "string"
       },
       "McpReconnectRequest": {
         "additionalProperties": false,
@@ -43666,6 +43703,7 @@
             "rename-progress": "#/components/schemas/RenameProgressResource",
             "room": "#/components/schemas/RoomResource",
             "session-cost": "#/components/schemas/SessionCostResource",
+            "sidebar": "#/components/schemas/SidebarResource",
             "state": "#/components/schemas/StateResource",
             "task": "#/components/schemas/TaskResource",
             "tasks": "#/components/schemas/TasksResource",
@@ -43767,6 +43805,9 @@
           },
           {
             "$ref": "#/components/schemas/NativeLayrSettingsResource"
+          },
+          {
+            "$ref": "#/components/schemas/SidebarResource"
           }
         ],
         "title": "ResourceRef"
@@ -48758,6 +48799,212 @@
         "title": "SharedParticipantRequest",
         "type": "object"
       },
+      "SidebarChatList": {
+        "additionalProperties": false,
+        "properties": {
+          "rows": {
+            "description": "Visible managed lead chats; row order uses the sidebar source order.",
+            "items": {
+              "$ref": "#/components/schemas/SidebarChatRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rows"
+        ],
+        "type": "object"
+      },
+      "SidebarChatRow": {
+        "additionalProperties": false,
+        "properties": {
+          "activityAt": {
+            "description": "Latest activity timestamp, in seconds since Unix epoch.",
+            "format": "double",
+            "type": "number"
+          },
+          "archived": {
+            "description": "Whether the chat is archived.",
+            "type": "boolean"
+          },
+          "canArchive": {
+            "description": "Whether the chat has no in-flight turn.",
+            "type": "boolean"
+          },
+          "canChangeProject": {
+            "description": "Whether a threadless chat without an in-flight turn can move project.",
+            "type": "boolean"
+          },
+          "compactPinned": {
+            "description": "Non-time compact visibility reasons; recent activity is checked at render.",
+            "type": "boolean"
+          },
+          "copyProgress": {
+            "additionalProperties": false,
+            "description": "Current epoch workspace copy progress; counts use the progress owner unit.",
+            "properties": {
+              "done": {
+                "format": "uint64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "phase": {
+                "$ref": "#/components/schemas/CopyPhase"
+              },
+              "total": {
+                "format": "uint64",
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "unit": {
+                "$ref": "#/components/schemas/CopyUnit"
+              }
+            },
+            "required": [
+              "phase",
+              "done",
+              "unit"
+            ],
+            "type": "object"
+          },
+          "groupKey": {
+            "description": "Canonical saved sidebar ordering group key.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Stable chat identity, without units.",
+            "type": "string"
+          },
+          "indicator": {
+            "$ref": "#/components/schemas/ChatOperationalStatus",
+            "description": "Operational indicator, independent of the unread receipt."
+          },
+          "markRead": {
+            "additionalProperties": false,
+            "description": "Existing completed-result read CAS proof; null means no completed result.",
+            "properties": {
+              "read": {
+                "type": "boolean"
+              },
+              "revision": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "threadId": {
+                "type": "string"
+              },
+              "turnId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "threadId",
+              "turnId",
+              "read",
+              "revision"
+            ],
+            "type": "object"
+          },
+          "markUnread": {
+            "$ref": "#/components/schemas/MarkUnreadEligibility",
+            "description": "Eligibility of an explicit mark-unread action."
+          },
+          "model": {
+            "description": "Provider model identifier; null means not selected.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name, in Unicode text.",
+            "type": "string"
+          },
+          "orderRank": {
+            "description": "Zero-based saved position; null is unranked and sorts last.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "pinned": {
+            "description": "Whether the chat is pinned.",
+            "type": "boolean"
+          },
+          "projectFolder": {
+            "description": "Project folder identity; null means the project root.",
+            "type": "string"
+          },
+          "projectFolderRevision": {
+            "description": "Project organization revision, in monotonic changes.",
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "projectId": {
+            "description": "Existing project identity for binding across server path aliases.",
+            "type": "string"
+          },
+          "projectPath": {
+            "description": "Owning project path, in filesystem path text.",
+            "type": "string"
+          },
+          "projectServerId": {
+            "description": "Existing project owner server identity for binding across server path aliases.",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/ProviderKind",
+            "description": "Provider identity, owned by provider_kind."
+          },
+          "searchText": {
+            "description": "Lower-case searchable display text, in Unicode text.",
+            "type": "string"
+          },
+          "sortKey": {
+            "description": "Opaque lexicographic authoritative ordering key, computed by studio-read-models.",
+            "type": "string"
+          },
+          "teamId": {
+            "description": "Peer team identity; null means no team.",
+            "type": "string"
+          },
+          "waitingForLead": {
+            "description": "Whether the existing stall owner reports waiting for lead action.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "projectPath",
+          "projectId",
+          "projectServerId",
+          "projectFolder",
+          "projectFolderRevision",
+          "teamId",
+          "groupKey",
+          "orderRank",
+          "sortKey",
+          "activityAt",
+          "pinned",
+          "archived",
+          "provider",
+          "model",
+          "indicator",
+          "markRead",
+          "markUnread",
+          "canChangeProject",
+          "canArchive",
+          "compactPinned",
+          "searchText",
+          "copyProgress",
+          "waitingForLead"
+        ],
+        "type": "object"
+      },
       "SidebarOrderDto": {
         "additionalProperties": false,
         "properties": {
@@ -48877,6 +49124,24 @@
         ],
         "title": "SidebarReorderRequest",
         "type": "object"
+      },
+      "SidebarResource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "sidebar",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object",
+        "x-studio-entity-scope": {
+          "collections": [
+            "sidebarChatRow"
+          ]
+        }
       },
       "SignedEnvelope": {
         "additionalProperties": false,
@@ -51667,6 +51932,9 @@
           "session-cost": {
             "$ref": "#/components/schemas/SessionCostResponse"
           },
+          "sidebar": {
+            "$ref": "#/components/schemas/SidebarChatList"
+          },
           "state": {
             "items": {
               "$ref": "#/components/schemas/SyncEntityPayload"
@@ -51745,7 +52013,8 @@
           "work",
           "complaint",
           "terminal-output",
-          "native-layr-settings"
+          "native-layr-settings",
+          "sidebar"
         ],
         "type": "object"
       },
@@ -53216,7 +53485,8 @@
                   "workDetail",
                   "workResult",
                   "workDecision",
-                  "workRelease"
+                  "workRelease",
+                  "sidebarChatRow"
                 ],
                 "type": "string"
               },
@@ -53524,6 +53794,27 @@
               "value"
             ],
             "type": "object"
+          },
+          {
+            "properties": {
+              "collection": {
+                "const": "sidebarChatRow",
+                "type": "string"
+              },
+              "op": {
+                "const": "upsert",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/SidebarChatRow"
+              }
+            },
+            "required": [
+              "op",
+              "collection",
+              "value"
+            ],
+            "type": "object"
           }
         ],
         "properties": {
@@ -53585,6 +53876,7 @@
             "room": "#/components/schemas/SyncRoomEntityPayload",
             "rule": "#/components/schemas/SyncRuleEntityPayload",
             "sessionCost": "#/components/schemas/SyncSessionCostEntityPayload",
+            "sidebarChatRow": "#/components/schemas/SyncSidebarChatRowEntityPayload",
             "studioError": "#/components/schemas/SyncStudioErrorEntityPayload",
             "task": "#/components/schemas/SyncTaskEntityPayload",
             "terminal": "#/components/schemas/SyncTerminalEntityPayload",
@@ -53703,6 +53995,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncWorkReleaseEntityPayload"
+          },
+          {
+            "$ref": "#/components/schemas/SyncSidebarChatRowEntityPayload"
           }
         ]
       },
@@ -54385,6 +54680,27 @@
           "cachePolicies"
         ],
         "title": "SyncSessionEvent",
+        "type": "object"
+      },
+      "SyncSidebarChatRowEntityPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "const": "sidebarChatRow",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/SidebarChatRow"
+          }
+        },
+        "required": [
+          "collection",
+          "id",
+          "value"
+        ],
         "type": "object"
       },
       "SyncStudioErrorEntityPayload": {
