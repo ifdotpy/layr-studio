@@ -449,11 +449,12 @@ export function createObservableResources(
   let sidebarSlot: ResourceSlot<SidebarChatList> | undefined;
   return {
     sidebar() {
+      if (sidebarSlot !== undefined) return sidebarSlot;
       const ref: Extract<ResourceRef, { kind: "sidebar" }> = {
         kind: "sidebar",
       };
       const key = subscriptionKey(ref);
-      return (sidebarSlot ??= runtime.slot({
+      return (sidebarSlot = runtime.slot({
         key,
         ref,
         create: (dto) => new SidebarChatListModel(dto),

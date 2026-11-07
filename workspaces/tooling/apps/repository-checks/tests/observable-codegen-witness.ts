@@ -76,7 +76,10 @@ try {
     export type ResourceRef = components['schemas']['ResourceRef'];
     export type ResourceData<R extends ResourceRef> = components['schemas']['SubscriptionDataMap'][R['kind']];
     export type SubscriptionError = Error;
-    ${declarations("src/sync/subscriptions/contracts.ts", ["subscriptionKey"])}
+    ${declarations("src/sync/subscriptions/contracts.ts", ["subscriptionKey"]).replace("function subscriptionKey(", "function canonicalSubscriptionKey(")}
+    let keyCalls=0;
+    export function fixtureKeyComputations():number {return keyCalls;}
+    export function subscriptionKey(ref:ResourceRef):string { keyCalls+=1;return canonicalSubscriptionKey(ref); }
   `,
   );
   write(
@@ -92,6 +95,7 @@ try {
     `
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
+import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
 import { createObservableResources, createFixtureMirror, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
 import type { components } from './src/generated/api.ts';
 import type { DeepReadonly } from './src/deepReadonly.ts';
@@ -133,7 +137,8 @@ const runtime: ObservableResourceRuntime = {
 };
 const store = createObservableResources(runtime);
 const slot = store.fixture(a, t);
-assert.equal(slot, store.fixture(a, t)); assert.equal(opens, 1);
+const firstKeyComputations=fixtureKeyComputations();assert.equal(firstKeyComputations,1);
+assert.equal(slot, store.fixture(a, t)); assert.equal(opens, 1);assert.equal(fixtureKeyComputations(),firstKeyComputations);
 const state = slot.current; assert.equal(state.status, 'live');
 if (state.status !== 'live') throw new Error('expected live');
 const data = state.data;
