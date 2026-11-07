@@ -840,6 +840,19 @@ pub struct ExecutionSelection {
 }
 
 impl ExecutionSelection {
+    /// The catalog identity for the commit check. A selection that read a fresh
+    /// catalog has no generation to compare while that catalog is pending again
+    /// (a bridge restart), so the commit waits for it.
+    pub fn commit_identity(
+        &self,
+        (identity, observation): (CatalogIdentity, Option<CatalogObservation>),
+    ) -> Result<CatalogIdentity, ExecutionDenial> {
+        if observation.is_none() && self.catalog_precondition.is_some() {
+            return Err(ExecutionDenial::CatalogRequired);
+        }
+        Ok(identity)
+    }
+
     /// Apply to a cloned stored record, never a database. The caller still owns
     /// the attempt/epoch check and atomic write. Removal and settingsFixed follow
     /// from the patch; duplicated flags cannot contradict the selected settings.
