@@ -14,6 +14,7 @@
 //! `release_failed_work` in `codex_work.py:1313-1355`.
 
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
+use rusqlite::OptionalExtension;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1056,11 +1057,7 @@ fn cancel_resume(tx: &Transaction<'_>, effect: &LifecycleEffect) -> Result<(), M
                 rusqlite::params![id, agent_id],
                 |_| Ok(()),
             )
-            .map(Some)
-            .or_else(|error| match error {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                error => Err(error),
-            })
+            .optional()
             .map_err(studio_runtime_store::StoreError::from)?;
         let mut stored = if row.is_some() {
             ContinuationRepository::snapshot(tx, agent_id, table, Some(id))?
