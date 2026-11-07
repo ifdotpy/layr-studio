@@ -9,18 +9,15 @@ import {
 import { ChatRowActionMenu } from "./chat-row/ChatRowActions.tsx";
 import { ChatRowShell, ChatRowButton } from "./chat-row/ChatRowShell.tsx";
 import { ChatRowMeta } from "./chat-row/ChatRowMeta.tsx";
-import { useSidebarRowState } from "./chat-row/actions.ts";
+import { useSidebarRowState, type ChatRowProps } from "./chat-row/actions.ts";
 
 const SidebarRowIdentity = observer(function SidebarRowIdentity({
-  row,
-}: {
-  row: SidebarChatView;
-}) {
-  const state = useSidebarRowState(row);
+  state,
+}: ChatRowProps) {
   return (
     <span className="fleet-chat-heading">
-      <ChatIndicator row={row} pendingRead={state.pendingRead} />
-      <ChatTitle row={row} pinned={state.pinned} />
+      <ChatIndicator row={state.row} pendingRead={state.pendingRead} />
+      <ChatTitle row={state.row} pinned={state.pinned} />
     </span>
   );
 });
@@ -32,17 +29,18 @@ export default observer(function SidebarRow({
   row: SidebarChatView;
   priority?: boolean;
 }) {
+  const state = useSidebarRowState(row, priority);
   reportPromptComposerRender("sidebar-row", row.id);
   return (
-    <ChatRowShell row={row}>
-      <ChatRowButton row={row}>
+    <ChatRowShell state={state}>
+      <ChatRowButton state={state}>
         <span className="row-copy">
-          <SidebarRowIdentity row={row} />
+          <SidebarRowIdentity state={state} />
           <ChatCopyProgress row={row} />
-          <ChatRowMeta row={row} />
+          <ChatRowMeta state={state} />
         </span>
       </ChatRowButton>
-      <ChatRowActionMenu row={row} priority={priority} />
+      <ChatRowActionMenu state={state} />
     </ChatRowShell>
   );
 });

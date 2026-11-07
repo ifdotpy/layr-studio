@@ -71,13 +71,14 @@ it("isolates sibling rows from rename and pending-read UI changes", async () => 
     dropDestination: null as string | null,
     offline: new Set<string>(),
     opened: null,
+    pendingReadTargets: undefined,
     renaming: null as string | null,
     renameInPriority: false,
     name: "",
     organizing: null,
     compact: false,
     markingRead: new Set<string>(),
-    overrides: {},
+    overrides: new Map(),
   });
   let sorting: ReturnType<typeof useSidebarOrder>;
   const area: SidebarRowActions = {

@@ -61,7 +61,7 @@ export const SidebarContents = observer(function SidebarContents() {
             <Settings size={18} />
           </ActionIcon>
         )}
-        {sidebar.compact && (
+        {sidebar.ui.compact && (
           <ActionIcon
             aria-label="Close conversations"
             onClick={sidebar.closeSidebar}

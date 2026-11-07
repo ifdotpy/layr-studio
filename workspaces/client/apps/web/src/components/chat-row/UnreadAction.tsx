@@ -1,18 +1,16 @@
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Mail } from "lucide-react";
-import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
-import { useChatRowActions, useSidebarRowState } from "./actions.ts";
+import { type ChatRowProps } from "./actions.ts";
 
 export const UnreadAction = observer(function UnreadAction({
-  row,
-}: {
-  row: SidebarChatView;
-}) {
-  const disabled = useSidebarRowState(row).disabled;
-  const state = useSidebarRowState(row);
-  const actions = useChatRowActions(row);
+  state,
+}: ChatRowProps) {
+  const row = state.row;
+  const disabled = state.disabled;
+  const actions = state.actions;
   const unreadHelp = state.markingRead
     ? "The read status is changing."
     : markUnreadHelp(row.agent.markUnread);

@@ -43,7 +43,7 @@ export const ProjectHeading = observer(function ProjectHeading({
           archived={sidebar.archive}
         />
       </UnstyledButton>
-      {!sidebar.archive && (!sidebar.compact || !!group.path) && (
+      {!sidebar.archive && (!sidebar.ui.compact || !!group.path) && (
         <Tooltip label={blocked} disabled={!blocked} withinPortal>
           <ActionIcon
             className="project-tree-action"

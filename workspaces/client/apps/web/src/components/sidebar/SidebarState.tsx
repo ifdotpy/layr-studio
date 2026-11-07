@@ -1,4 +1,4 @@
-import { compareShallow, computed } from "mobx";
+import { compareShallow, computed, observable, runInAction } from "mobx";
 import {
   useCallback,
   useEffect,
@@ -13,7 +13,6 @@ import type { paths } from "../../generated/api";
 import { createStateMirror } from "../../generated/observableResources.ts";
 import { layoutQueries } from "../../layout/layout-contract.generated";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
-import type { ChatRowActions } from "../chat-row/actions.ts";
 import { type Project, type ProjectFolder } from "../ProjectOrganization";
 import { usePeerTeamMove } from "../shell/messages/PeerTeams";
 
@@ -103,27 +102,54 @@ export function useSidebarController(
   reportPromptComposerRender("sidebar");
   const runtime = p.data.runtime;
   const aliases = useServerAliases(readServerAliases);
-  const [compact, setCompact] = useState(
-    () =>
-      typeof window !== "undefined" &&
-      window.matchMedia(layoutQueries.navigationCompact).matches,
+  // Local controls have one observable owner; external inputs synchronize at the root.
+  const [ui] = useState(() =>
+    observable(
+      {
+        compact:
+          typeof window !== "undefined" &&
+          window.matchMedia(layoutQueries.navigationCompact).matches,
+        renaming: null as string | null,
+        renameInPriority: false,
+        name: "",
+        organizing: null as string | null,
+        overrides: observable.map<
+          string,
+          { pinned?: boolean; archived?: boolean }
+        >(),
+        opened: p.opened,
+        markingRead: p.markingRead,
+        pendingReadTargets: p.pendingReadTargets,
+        aliases: observable.map<string, string>(),
+        offline: observable.set<string>(),
+        services,
+        dragTarget: null as ReturnType<typeof useSidebarOrder>["target"],
+        dropDestination: null as ReturnType<
+          typeof useSidebarOrder
+        >["destination"],
+      },
+      {},
+      { deep: false },
+    ),
   );
   const reportCompact = useCallback(
     (value: boolean) => {
-      setCompact(value);
+      runInAction(() => {
+        ui.compact = value;
+      });
       p.onCompactChange?.(value);
     },
-    [p.onCompactChange],
+    [p.onCompactChange, ui],
   );
   const closeSidebar = () => {
     restoreSidebarFocus();
     p.close();
   };
   const openChat = (id: string) => {
-    if (compact) closeSidebar();
+    if (ui.compact) closeSidebar();
     commands.open(id);
   };
-  const inline = !compact && !p.collapsed;
+  const inline = !ui.compact && !p.collapsed;
   // Page layout rules read this flag. It replaces #root:has(#sidebar), which
   // the browser had to test against the whole tree after each DOM change.
   useLayoutEffect(() => {
@@ -135,7 +161,7 @@ export function useSidebarController(
     };
   }, [inline]);
   useEffect(() => {
-    if (!compact || !p.mobile) return;
+    if (!ui.compact || !p.mobile) return;
     const background =
       document.querySelector<HTMLElement>(".server-views") ||
       document.querySelector<HTMLElement>(".workspace-frame");
@@ -149,12 +175,9 @@ export function useSidebarController(
       if (wasHidden == null) background.removeAttribute("aria-hidden");
       else background.setAttribute("aria-hidden", wasHidden);
     };
-  }, [compact, p.mobile]);
-  const [query, setQuery] = useState(""),
-    [renaming, setRenaming] = useState<string | null>(null),
-    [name, setName] = useState(""),
-    [archive, setArchive] = useState(false);
-  const [renameInPriority, setRenameInPriority] = useState(false);
+  }, [ui.compact, p.mobile]);
+  const [query, setQuery] = useState("");
+  const [archive, setArchive] = useState(false);
   const hideOldChatsThreshold =
     p.hideOldChatsThreshold ?? DEFAULT_HIDE_OLD_CHATS_THRESHOLD;
   const workspace = p.rows
@@ -180,8 +203,20 @@ export function useSidebarController(
       ? createSidebarList(() => p.rows!, input)
       : createSidebarViewModel(() => collections, input);
   }, [collections, p.rows, query, archive, p.opened, sorting.order]);
-  const [organizing, setOrganizing] = useState<string | null>(null);
-  const organizationLock = useRef(false);
+  useLayoutEffect(() =>
+    runInAction(() => {
+      Object.assign(ui, {
+        opened: p.opened,
+        markingRead: p.markingRead,
+        pendingReadTargets: p.pendingReadTargets,
+        services,
+        dragTarget: sorting.target,
+        dropDestination: sorting.destination,
+      });
+      ui.aliases.replace(aliases);
+      ui.offline.replace([...(p.offlineServers || [])]);
+    }),
+  );
   type Conversion = {
     source: SidebarChatView;
     target: SidebarChatView;
@@ -307,18 +342,16 @@ export function useSidebarController(
     setCollapsed(writePreferenceEdit(projectKey, collapsed, next));
   };
 
-  // Pin and archive show at once; the next snapshot confirms them.
-  const [overrides, setOverrides] = useState<
-    Record<string, { pinned?: boolean; archived?: boolean }>
-  >({});
+  // Pin and archive show at once; generated model fields confirm the override.
   const organize = async (id: string, data: OrganizationData) => {
     if (!canEdit({ kind: "chat", id })) {
       commands.notify?.("The sidebar server is offline or unavailable.");
       return false;
     }
-    if (organizationLock.current) return false;
-    organizationLock.current = true;
-    setOrganizing(id);
+    if (ui.organizing !== null) return false;
+    runInAction(() => {
+      ui.organizing = id;
+    });
     const optimistic = Object.fromEntries(
       Object.entries(data).filter(
         ([key, value]) =>
@@ -328,7 +361,9 @@ export function useSidebarController(
     );
     const hasOptimistic = Object.keys(optimistic).length > 0;
     if (hasOptimistic)
-      setOverrides((old) => ({ ...old, [id]: { ...old[id], ...optimistic } }));
+      runInAction(() =>
+        ui.overrides.set(id, { ...ui.overrides.get(id), ...optimistic }),
+      );
     try {
       await services
         .owner({ kind: "chat", id })
@@ -337,25 +372,19 @@ export function useSidebarController(
       else await commands.refresh?.();
       return true;
     } catch (error) {
-      if (hasOptimistic)
-        setOverrides((old) => {
-          const next = { ...old };
-          delete next[id];
-          return next;
-        });
+      if (hasOptimistic) runInAction(() => ui.overrides.delete(id));
       commands.notify?.(errorText(error));
       return false;
     } finally {
-      organizationLock.current = false;
-      setOrganizing(null);
+      runInAction(() => {
+        ui.organizing = null;
+      });
     }
   };
   useEffect(() => {
-    // Drop an override once the snapshot shows the same value.
-    setOverrides((old) => {
-      const next = { ...old };
-      let changed = false;
-      for (const [id, values] of Object.entries(old)) {
+    // Retire each override once its generated model confirms it.
+    runInAction(() => {
+      for (const [id, values] of ui.overrides) {
         const thread = model.rows.find((a) => a.id === id);
         if (
           !thread ||
@@ -364,11 +393,9 @@ export function useSidebarController(
             (values.archived === undefined ||
               thread.agent.archived === values.archived))
         ) {
-          delete next[id];
-          changed = true;
+          ui.overrides.delete(id);
         }
       }
-      return changed ? next : old;
     });
   }, [model.rows]);
   const findRow = (id: string) => model.rows.find((row) => row.id === id);
@@ -493,7 +520,7 @@ export function useSidebarController(
             middleDrop(event)) &&
           (canOrganizeProjects || (!folder && teamFor(source.id))) &&
           !teamMove.blocked() &&
-          !organizationLock.current &&
+          ui.organizing === null &&
           chat &&
           canEdit({ kind: "chat", id: chat.id }) &&
           ownsFolder(project, chat, folder) &&
@@ -542,8 +569,10 @@ export function useSidebarController(
   const rename = async (e: React.FormEvent, id: string) => {
     e.preventDefault();
     try {
-      await commands.rename(id, name);
-      setRenaming(null);
+      await commands.rename(id, ui.name);
+      runInAction(() => {
+        ui.renaming = null;
+      });
     } catch {
       /* Keep the draft when the server rejects the name. */
     }
@@ -668,44 +697,6 @@ export function useSidebarController(
               .includes(query.toLowerCase())),
       ),
   );
-  const rowActions = (
-    row: SidebarChatView,
-    priority: boolean,
-  ): ChatRowActions => ({
-    prepare: () => commands.prepareChat?.(row.id),
-    open: () => openChat(row.id),
-    pin: () => {
-      void organize(row.id, { pinned: !row.agent.pinned });
-    },
-    rename: (event) => {
-      void rename(event, row.id);
-    },
-    name: setName,
-    cancelRename: () => setRenaming(null),
-    beginRename: () => {
-      setName(row.agent.name ?? "");
-      setRenameInPriority(priority);
-      setRenaming(row.id);
-    },
-    unread: () => {
-      if (row.agent.markRead)
-        commands.markUnread(row.id, { ...row.agent.markRead });
-    },
-    move: () => {
-      if (!requireProjectSupport()) return;
-      const project = groupMap.get().get(row.projectPath || "")!;
-      setDialog({
-        title: "Move chat",
-        path: project.path,
-        agentId: row.id,
-      });
-    },
-    changeProject: () => commands.changeProject(row.id),
-    archive: () => {
-      void organize(row.id, { archived: !row.agent.archived });
-    },
-    remove: () => commands.remove(row.id, false),
-  });
 
   const rowBindings = (row: SidebarChatView) => ({
     ...sorting.dropBindings(
@@ -723,7 +714,7 @@ export function useSidebarController(
           chat.projectPath === row.projectPath &&
           source.group === chatGroup(chat) &&
           !conversion &&
-          !organizationLock.current &&
+          ui.organizing === null &&
           !teamMove.blocked() &&
           event.clientY > box.top + box.height * 0.25 &&
           event.clientY < box.top + box.height * 0.75
@@ -762,18 +753,15 @@ export function useSidebarController(
     ownedProject,
     runtime,
     aliases,
-    compact,
+    ui,
     reportCompact,
     closeSidebar,
     openChat,
     query,
     setQuery,
-    renameInPriority,
     hideOldChatsThreshold,
     stateDir,
     sorting,
-    organizing,
-    organizationLock,
     conversion,
     setConversion,
     closeConversion,
@@ -793,7 +781,6 @@ export function useSidebarController(
     projectTreeKey,
     collapsed,
     toggleTree,
-    overrides,
     findRow,
     get grouped() {
       return grouped.get();
@@ -821,10 +808,9 @@ export function useSidebarController(
       return projectGroups.get();
     },
     model,
-    rowActions,
+    organize,
+    rename,
     rowBindings,
-    renaming,
-    name,
     archive,
     setArchive,
   };

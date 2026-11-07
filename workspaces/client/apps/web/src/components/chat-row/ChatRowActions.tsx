@@ -7,14 +7,15 @@ import { forwardRef, type ComponentPropsWithoutRef } from "react";
 import { observer } from "mobx-react-lite";
 import { ActionIcon, Button, Menu, TextInput } from "@mantine/core";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import type { SidebarChatView } from "../sidebar/viewModel.ts";
 
-import { useChatRowActions, useSidebarRowState } from "./actions.ts";
+import { type ChatRowProps, type SidebarRowState } from "./actions.ts";
 
 const RowActionTarget = observer(
   forwardRef<
     HTMLButtonElement,
-    { row: SidebarChatView } & ComponentPropsWithoutRef<typeof ActionIcon>
+    { row: SidebarRowState["row"] } & ComponentPropsWithoutRef<
+      typeof ActionIcon
+    >
   >(function RowActionTarget({ row, ...props }, ref) {
     return (
       <ActionIcon
@@ -30,15 +31,11 @@ const RowActionTarget = observer(
 );
 
 export const ChatRowActionMenu = observer(function ChatRowActionMenu({
-  row,
-  priority = false,
-}: {
-  row: SidebarChatView;
-  priority?: boolean;
-}) {
-  const state = useSidebarRowState(row, priority);
-  const disabled = useSidebarRowState(row).disabled;
-  const actions = useChatRowActions(row, priority);
+  state,
+}: ChatRowProps) {
+  const row = state.row;
+  const disabled = state.disabled;
+  const actions = state.actions;
   return state.renaming ? (
     <form className="inline-rename" onSubmit={(e) => actions.rename(e)}>
       <TextInput
@@ -70,13 +67,13 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
           Rename
         </Menu.Item>
         <Menu.Divider />
-        <UnreadAction row={row} />
-        <PinAction row={row} />
+        <UnreadAction state={state} />
+        <PinAction state={state} />
         <Menu.Divider />
-        <MoveAction row={row} />
-        <ProjectAction row={row} />
+        <MoveAction state={state} />
+        <ProjectAction state={state} />
         <Menu.Divider />
-        <ArchiveAction row={row} />
+        <ArchiveAction state={state} />
         <Menu.Divider />
         <Menu.Item
           disabled={disabled}

@@ -1,5 +1,5 @@
 import { rowArea } from "./actions.fixture.ts";
-import { SidebarRowActionsProvider } from "./actions.ts";
+import { SidebarRowActionsProvider, useSidebarRowState } from "./actions.ts";
 import { AgentStatus } from "../../generated/api.ts";
 import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
@@ -248,6 +248,13 @@ it("renders every server unread eligibility and pending-write menu state", async
   const { UnreadAction } = await import("./UnreadAction.tsx");
   const { actions } = await import("./testFixture.ts");
   const unread = vi.fn();
+  const Unread = observer(function Unread({
+    row,
+  }: {
+    row: ReturnType<typeof makeRow>;
+  }) {
+    return createElement(UnreadAction, { state: useSidebarRowState(row) });
+  });
   for (const eligibility of Object.values(MarkUnreadEligibility)) {
     for (const markingRead of [false, true]) {
       const row = makeRow(
@@ -269,7 +276,7 @@ it("renders every server unread eligibility and pending-write menu state", async
                     markingRead,
                   }),
                 },
-                createElement(UnreadAction, { row }),
+                createElement(Unread, { row }),
               ),
             ),
           ),

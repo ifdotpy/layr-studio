@@ -1,89 +1,31 @@
 import {
   useMemo,
-  type FormEvent,
   type DragEvent,
   type KeyboardEvent,
   type HTMLAttributes,
 } from "react";
 import { computed, compareShallow, makeAutoObservable } from "mobx";
-import type { SidebarDragTarget } from "../useSidebarOrder.ts";
 import { createArea } from "../area.ts";
-import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
-export type ChatRowActions = {
-  prepare: () => void;
-  open: () => void;
-  pin: () => void;
-  rename: (event: FormEvent) => void;
-  name: (value: string) => void;
-  cancelRename: () => void;
-  beginRename: () => void;
-  unread: () => void;
-  move: () => void;
-  changeProject: () => void;
-  archive: () => void;
-  remove: () => void;
-};
-
-export type SidebarRowBindings = HTMLAttributes<HTMLElement> & {
-  "data-sidebar-id"?: string | undefined;
-  "data-sidebar-group"?: string | undefined;
-  "data-drop-edge"?: string | undefined;
-  "data-folder-drop"?: string | undefined;
-};
-
-export type SidebarRowActions = {
-  commands(row: SidebarChatView, priority: boolean): ChatRowActions;
-  ui: {
-    readonly dragTarget?: SidebarDragTarget | null;
-    readonly dropDestination?: string | null;
-    readonly aliases: ReadonlyMap<string, string>;
-    readonly offline: ReadonlySet<string>;
-    readonly opened: string | null;
-    readonly renaming: string | null;
-    readonly renameInPriority: boolean;
-    readonly name: string;
-    readonly organizing: string | null;
-    readonly compact: boolean;
-    readonly markingRead: ReadonlySet<string>;
-    readonly pendingReadTargets?:
-      | ReadonlyMap<string, SidebarAgent["markRead"]>
-      | undefined;
-    readonly overrides: Readonly<
-      Record<string, { pinned?: boolean | undefined }>
+import type { SidebarChatView } from "../sidebar/viewModel.ts";
+type RowArea = ReturnType<
+  typeof import("../sidebar/sidebarActions.ts").useSidebarActions
+>["rows"];
+export type ChatRowActions = ReturnType<RowArea["commands"]>;
+export type SidebarRowActions = Omit<RowArea, "ui" | "bindings"> & {
+  bindings(row: SidebarChatView): HTMLAttributes<HTMLElement> & {
+    "data-sidebar-id"?: string;
+    "data-sidebar-group"?: string;
+  };
+  ui: Omit<RowArea["ui"], "services" | "aliases" | "offline" | "overrides"> & {
+    overrides: ReadonlyMap<
+      string,
+      ReturnType<RowArea["ui"]["overrides"]["get"]>
     >;
   };
-  server(row: SidebarChatView): {
-    alias: string;
-    show: boolean;
-    offline: boolean;
-  };
-  disabled(row: SidebarChatView): boolean;
-  bindings(row: SidebarChatView): SidebarRowBindings;
 };
 
 export const [SidebarRowActionsProvider, useSidebarRowActions] =
   createArea<SidebarRowActions>("SidebarRowActions");
-
-export function useChatRowActions(row: SidebarChatView, priority = false) {
-  const area = useSidebarRowActions();
-  return useMemo<ChatRowActions>(
-    () => ({
-      prepare: () => area.commands(row, priority).prepare(),
-      open: () => area.commands(row, priority).open(),
-      pin: () => area.commands(row, priority).pin(),
-      rename: (event) => area.commands(row, priority).rename(event),
-      name: (value) => area.commands(row, priority).name(value),
-      cancelRename: () => area.commands(row, priority).cancelRename(),
-      beginRename: () => area.commands(row, priority).beginRename(),
-      unread: () => area.commands(row, priority).unread(),
-      move: () => area.commands(row, priority).move(),
-      changeProject: () => area.commands(row, priority).changeProject(),
-      archive: () => area.commands(row, priority).archive(),
-      remove: () => area.commands(row, priority).remove(),
-    }),
-    [area, row, priority],
-  );
-}
 
 /** Computed booleans stop a different row's UI change at this boundary. */
 export function useSidebarRowState(row: SidebarChatView, priority = false) {
@@ -92,6 +34,8 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
     () =>
       makeAutoObservable(
         {
+          row,
+          actions: area.commands(row, priority),
           get bindings() {
             return {
               ...area.bindings(row),
@@ -150,11 +94,19 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
             return area.ui.pendingReadTargets?.get(row.id);
           },
           get pinned() {
-            return area.ui.overrides[row.id]?.pinned;
+            return area.ui.overrides.get(row.id)?.pinned;
           },
         },
-        { server: computed({ equals: compareShallow }) },
+        {
+          row: false,
+          actions: false,
+          server: computed({ equals: compareShallow }),
+        },
       ),
     [area, row, priority],
   );
 }
+
+export type SidebarRowState = ReturnType<typeof useSidebarRowState>;
+
+export type ChatRowProps = { state: SidebarRowState };

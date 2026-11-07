@@ -1,6 +1,7 @@
-import { observable, runInAction } from "mobx";
-import { useLayoutEffect, useRef, useState } from "react";
-import type { SidebarRowActions } from "../chat-row/actions.ts";
+import { runInAction } from "mobx";
+import { useRef, useState } from "react";
+import type { SidebarChatView } from "./viewModel.ts";
+import type { FormEvent } from "react";
 import type { PeerTeamActions } from "../shell/messages/PeerTeams";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../servers/serverAliases.ts";
 import type { useSidebarController } from "./SidebarState.tsx";
@@ -11,55 +12,59 @@ export function useSidebarActions(
 ) {
   const current = useRef(state);
   current.current = state;
-  const [ui] = useState(() =>
-    observable(
-      {
-        opened: state.p.opened,
-        renaming: state.renaming,
-        renameInPriority: state.renameInPriority,
-        name: state.name,
-        organizing: state.organizing,
-        compact: state.compact,
-        markingRead: state.p.markingRead,
-        pendingReadTargets: state.p.pendingReadTargets,
-        overrides: state.overrides,
-        aliases: observable.map<string, string>(),
-        offline: observable.set<string>(),
-        services: state.services,
-        dragTarget: state.sorting.target,
-        dropDestination: state.sorting.destination,
-      },
-      {},
-      { deep: false },
-    ),
-  );
-  useLayoutEffect(() =>
-    runInAction(() => {
-      Object.assign(ui, {
-        opened: state.p.opened,
-        renaming: state.renaming,
-        renameInPriority: state.renameInPriority,
-        name: state.name,
-        organizing: state.organizing,
-        compact: state.compact,
-        markingRead: state.p.markingRead,
-        pendingReadTargets: state.p.pendingReadTargets,
-        overrides: state.overrides,
-        services: state.services,
-        dragTarget: state.sorting.target,
-        dropDestination: state.sorting.destination,
-      });
-      ui.aliases.replace(state.aliases);
-      ui.offline.replace([...(state.p.offlineServers || [])]);
-    }),
-  );
-  const [rows] = useState<SidebarRowActions>(() => ({
+  const ui = state.ui;
+  const [rows] = useState(() => ({
     ui,
-    commands: (row, priority) => current.current.rowActions(row, priority),
-    disabled: (row) =>
+    commands: (row: SidebarChatView, priority: boolean) => ({
+      prepare: () => current.current.commands.prepareChat?.(row.id),
+      open: () => current.current.openChat(row.id),
+      pin: () => {
+        void current.current.organize(row.id, { pinned: !row.agent.pinned });
+      },
+      rename: (event: FormEvent) => {
+        void current.current.rename(event, row.id);
+      },
+      name: (value: string) =>
+        runInAction(() => {
+          ui.name = value;
+        }),
+      cancelRename: () =>
+        runInAction(() => {
+          ui.renaming = null;
+        }),
+      beginRename: () =>
+        runInAction(() => {
+          ui.name = row.agent.name ?? "";
+          ui.renameInPriority = priority;
+          ui.renaming = row.id;
+        }),
+      unread: () => {
+        if (row.agent.markRead)
+          current.current.commands.markUnread(row.id, {
+            ...row.agent.markRead,
+          });
+      },
+      move: () => {
+        const s = current.current;
+        if (s.requireProjectSupport())
+          s.setDialog({
+            title: "Move chat",
+            path: row.projectPath || "",
+            agentId: row.id,
+          });
+      },
+      changeProject: () => current.current.commands.changeProject(row.id),
+      archive: () => {
+        void current.current.organize(row.id, {
+          archived: !row.agent.archived,
+        });
+      },
+      remove: () => current.current.commands.remove(row.id, false),
+    }),
+    disabled: (row: SidebarChatView) =>
       !(ui.services.available?.({ kind: "chat", id: row.id }) ?? true),
-    bindings: (row) => current.current.rowBindings(row),
-    server: (row) => {
+    bindings: (row: SidebarChatView) => current.current.rowBindings(row),
+    server: (row: SidebarChatView) => {
       const services = current.current.services,
         owner = services.serverForChat(row.id);
       return {

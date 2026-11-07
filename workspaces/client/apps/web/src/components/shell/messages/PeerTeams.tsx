@@ -466,24 +466,15 @@ function usePeerTeamForm(
       draft.frozen = true;
     });
     void mutation.submit(
-      mutation.request.current ??
-        (action === "save"
-          ? {
-              action: "save",
-              path: project.path,
-              team_id: id.current,
-              expected_revision: revision.current,
-              request_id: randomUUID(),
-              name: draft.name.trim(),
-              members: [...draft.members],
-            }
-          : {
-              action: "delete",
-              path: project.path,
-              team_id: id.current,
-              expected_revision: revision.current,
-              request_id: randomUUID(),
-            }),
+      {
+        path: project.path,
+        team_id: id.current,
+        expected_revision: revision.current,
+        request_id: randomUUID(),
+        ...(action === "save"
+          ? { action, name: draft.name.trim(), members: [...draft.members] }
+          : { action }),
+      },
       backend,
     );
   };
@@ -577,12 +568,10 @@ export function usePeerTeamMove(
     clear();
     if (!reload) notify?.("Team membership updated.");
   });
-  const { request, committed, pending, error, rejected, submit, reload } =
-    mutation;
   const move = (project: Project, member: string, teamId: string | null) => {
-    if (request.current) return;
+    if (mutation.request.current) return;
     if (typeof project.path !== "string") return;
-    void submit(
+    void mutation.submit(
       {
         action: "move",
         path: project.path,
@@ -596,27 +585,31 @@ export function usePeerTeamMove(
   };
   return {
     move,
-    blocked: () => !!request.current,
+    blocked: () => !!mutation.request.current,
     feedback:
-      pending || error ? (
+      mutation.pending || mutation.error ? (
         <div className="peer-team-form">
-          {pending ? (
+          {mutation.pending ? (
             <p role="status">Updating team…</p>
           ) : (
             <>
               <p role="alert">
-                {error}{" "}
-                {committed.current
+                {mutation.error}{" "}
+                {mutation.committed.current
                   ? "The change was saved. Retry to refresh."
-                  : rejected
+                  : mutation.rejected
                     ? "Reload the project before another move."
                     : "The result is unknown. Retry the same move."}
               </p>
               <Button
                 size="compact-xs"
-                onClick={() => void (rejected ? reload() : submit())}
+                onClick={() =>
+                  void (mutation.rejected
+                    ? mutation.reload()
+                    : mutation.submit())
+                }
               >
-                {rejected ? "Reload project" : "Retry move"}
+                {mutation.rejected ? "Reload project" : "Retry move"}
               </Button>
             </>
           )}

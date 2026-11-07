@@ -1,19 +1,15 @@
-import type { ReactNode } from "react";
+import type { PropsWithChildren } from "react";
 import { observer } from "mobx-react-lite";
 import { UnstyledButton } from "@mantine/core";
-import type { SidebarChatView } from "../sidebar/viewModel.ts";
 import { displayedIndicator } from "./indicator.ts";
 import { offlineServerDescription } from "./ChatServerLine.tsx";
-import { useChatRowActions, useSidebarRowState } from "./actions.ts";
+import { type ChatRowProps } from "./actions.ts";
 
 export const ChatRowShell = observer(function ChatRowShell({
-  row,
+  state,
   children,
-}: {
-  row: SidebarChatView;
-  children: ReactNode;
-}) {
-  const state = useSidebarRowState(row);
+}: PropsWithChildren<ChatRowProps>) {
+  const row = state.row;
   return (
     <div
       className={`sidebar-row fleet-strip lead-row ${state.selected ? "selected" : ""}`}
@@ -26,14 +22,11 @@ export const ChatRowShell = observer(function ChatRowShell({
 });
 
 export const ChatRowButton = observer(function ChatRowButton({
-  row,
+  state,
   children,
-}: {
-  row: SidebarChatView;
-  children: ReactNode;
-}) {
-  const actions = useChatRowActions(row);
-  const state = useSidebarRowState(row);
+}: PropsWithChildren<ChatRowProps>) {
+  const row = state.row;
+  const actions = state.actions;
   const server = state.server;
   return (
     <UnstyledButton

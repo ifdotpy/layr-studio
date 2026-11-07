@@ -55,7 +55,7 @@ export const PeerTeamSection = observer(function PeerTeamSection({
           chat.projectPath === group.path &&
           !teamMembers.includes(chat.id) &&
           !sidebar.teamMove.blocked() &&
-          !sidebar.organizationLock.current
+          sidebar.ui.organizing === null
         );
       },
       ({ id }) => sidebar.teamMove.move(group.project, id, team.id),

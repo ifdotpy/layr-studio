@@ -1,3 +1,4 @@
+import { observable } from "mobx";
 import type { SidebarRowActions, ChatRowActions } from "./actions.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 
@@ -25,8 +26,8 @@ export function rowArea(
   return {
     commands,
     ui: {
-      aliases: new Map(),
-      offline: new Set(),
+      dragTarget: null,
+      dropDestination: null,
       opened: props.selected ? id : null,
       renaming: props.renaming ? id : null,
       renameInPriority: false,
@@ -35,9 +36,11 @@ export function rowArea(
       compact: props.compact || false,
       markingRead: new Set(props.markingRead ? [id] : []),
       pendingReadTargets: new Map(
-        props.pendingRead === undefined ? [] : [[id, props.pendingRead]],
+        props.pendingRead == null ? [] : [[id, props.pendingRead]],
       ),
-      overrides: { [id]: { pinned: props.pinned } },
+      overrides: observable.map(
+        props.pinned === undefined ? [] : [[id, { pinned: props.pinned }]],
+      ),
     },
     disabled: () => props.disabled || false,
     server: () => ({
