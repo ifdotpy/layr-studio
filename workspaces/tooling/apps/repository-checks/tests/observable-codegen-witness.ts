@@ -129,12 +129,14 @@ import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {createStateMirror} from './src/generated/observableResources.ts';
 import type {components} from './src/generated/api.ts';
+import type {DeepReadonly} from './src/deepReadonly.ts';
 type Payload=components['schemas']['SyncEntityPayload'];
 const summary={id:'lead',inFlight:false,markRead:null,markUnread:'unsupported',operationalStatus:{reason:'ready'},projectServerId:null} satisfies components['schemas']['AgentSummaryEntityDto'];
-const dto:Payload[]=[
+const readonlyMembers: readonly string[]=['lead'];
+const dto:DeepReadonly<Payload[]>=[
  {collection:'agentSummary',id:'lead',value:summary},
  {collection:'project',id:'project',value:{id:'project',path:'/project'}},
- {collection:'peerTeam',id:'team',value:{id:'team',members:['lead']}},
+ {collection:'peerTeam',id:'team',value:{id:'team',members:readonlyMembers}},
  {collection:'workspace',id:'root',value:{stateDir:'/fixture'}},
  {collection:'agentTail',id:'lead',value:{id:'lead',tail:'first'}}
 ];
