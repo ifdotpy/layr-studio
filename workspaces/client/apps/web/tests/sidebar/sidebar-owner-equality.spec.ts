@@ -1,3 +1,7 @@
+import {
+  storageFields,
+  type PreferenceFields,
+} from "../../src/sync/uiPreferenceMerge.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import assert from "node:assert/strict";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
@@ -194,7 +198,20 @@ test("the owner adapter preserves saved organization in standalone and classic s
 }, testInfo) => {
   test.setTimeout(90000);
   await page.setViewportSize({ width: 1440, height: 900 });
-  const local = await fixture("Local");
+  const serverPreferenceFields: PreferenceFields = {};
+  for (const [key, value] of [
+    [compactKey, compact],
+    [treeKey, tree],
+  ] as const)
+    for (const [field, entry] of Object.entries(
+      storageFields(key, JSON.stringify(value)),
+    ))
+      serverPreferenceFields[field] = {
+        value: entry,
+        timestamp: 1,
+        writer: "sidebar-owner-equality-fixture",
+      };
+  const local = await fixture("Local", false, { serverPreferenceFields });
   const remote = await fixture("Remote", true);
   seedFixture(local);
   try {

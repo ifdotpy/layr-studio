@@ -2095,12 +2095,15 @@ function createMutableEntityPullState(): MutableEntityPullState {
 function reconcileMutableEntityPullState(
   pullState: MutableEntityPullState,
   snapshot: EntityFixtureState,
+  additionalEntities: ProjectedFixtureEntity[] = [],
 ) {
   const nextById = new Map(
-    entityValuesFromSnapshot(snapshot).map((entity) => [
-      `entity:${entity.collection}:${entity.id}`,
-      structuredClone(entity),
-    ]),
+    [...entityValuesFromSnapshot(snapshot), ...additionalEntities].map(
+      (entity) => [
+        `entity:${entity.collection}:${entity.id}`,
+        structuredClone(entity),
+      ],
+    ),
   );
   for (const [key, previous] of pullState.documents) {
     if (previous.op === "delete") continue;
@@ -2147,6 +2150,7 @@ function reconcileMutableEntityPullState(
  */
 export function updateEntitySyncFixture(
   snapshot: EntityFixtureState,
+  additionalEntities: ProjectedFixtureEntity[] = [],
 ): FixtureSyncEntity[] {
   let pullState = nodeEntityPullStates.get(snapshot);
   if (!pullState) {
@@ -2154,7 +2158,7 @@ export function updateEntitySyncFixture(
     nodeEntityPullStates.set(snapshot, pullState);
   }
   const previousMaxSeq = pullState.maxSeq;
-  reconcileMutableEntityPullState(pullState, snapshot);
+  reconcileMutableEntityPullState(pullState, snapshot, additionalEntities);
   return [...pullState.documents.values()].filter(
     (document) => document.seq > previousMaxSeq,
   );
@@ -2205,6 +2209,7 @@ export function handleEntitySyncFixtureRequest(
     versionedResources?: boolean;
     /** The multi-server discovery snapshot the real server attaches to its resource version. */
     discoverySnapshot?: () => unknown;
+    additionalEntities?: () => ProjectedFixtureEntity[];
     epoch?: string | undefined;
     onPull?: () => void;
     subscriptionUpdate?:
@@ -2278,7 +2283,11 @@ export function handleEntitySyncFixtureRequest(
         pullState = createMutableEntityPullState();
         nodeEntityPullStates.set(fixture.snapshot, pullState);
       }
-      reconcileMutableEntityPullState(pullState, fixture.snapshot);
+      reconcileMutableEntityPullState(
+        pullState,
+        fixture.snapshot,
+        fixture.additionalEntities?.(),
+      );
       pullOptions = {
         ...validation.params,
         documents: [...pullState.documents.values()].filter(
@@ -2313,7 +2322,10 @@ export function handleEntitySyncFixtureRequest(
       resources: ResourceRef[],
       advance = false,
     ): FixtureResourceVersions => {
-      const changed = updateEntitySyncFixture(fixture.snapshot);
+      const changed = updateEntitySyncFixture(
+        fixture.snapshot,
+        fixture.additionalEntities?.(),
+      );
       const current = nodeEntityPullStates.get(fixture.snapshot);
       return resources.map((resource) => {
         const key = JSON.stringify(resource);

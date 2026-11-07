@@ -30,6 +30,7 @@ type Peer = Pick<
 type SyncFixture = Parameters<typeof handleEntitySyncFixtureRequest>[2];
 export type MultiServerFixtureOptions = {
   workspaceId?: string;
+  serverPreferenceFields?: PreferenceFields;
   accounts?: FixtureAccount[];
   dist?: string;
   entityFrames?: boolean;
@@ -151,7 +152,7 @@ export async function fixture(
   const notify: Parameters<NonNullable<SyncFixture["onStreamReady"]>>[0][] = [];
   const preferences: Record<"user" | "server", PreferenceFields> = {
     user: {},
-    server: {},
+    server: options.serverPreferenceFields || {},
   };
   const agent: AgentEntityDto = {
     id: "overlap",
@@ -355,6 +356,16 @@ export async function fixture(
     if (
       handleEntitySyncFixtureRequest(request, response, {
         discoverySnapshot: accessSnapshot,
+        additionalEntities: () =>
+          options.serverPreferenceFields
+            ? [
+                {
+                  collection: "uiPreferences",
+                  id: "server",
+                  value: { fields: preferences.server },
+                },
+              ]
+            : [],
         snapshot,
         workspaceId,
         processSnapshot: () => processListing,
