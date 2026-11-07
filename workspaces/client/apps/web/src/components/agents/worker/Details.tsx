@@ -1,8 +1,11 @@
+import { useServerStore } from "../../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
 import { CircleAlert, Terminal } from "lucide-react";
 import Disclosure from "../../ui/Disclosure.tsx";
 import { AgentProgress } from "../AgentProgress.tsx";
-import { useAgentDetail } from "../state.ts";
+
 import { useTeam } from "../TeamPanelContext.tsx";
 import { workerError } from "../workerPresentation.ts";
 import WorkerExcerpt from "../WorkerExcerpt.tsx";
@@ -11,7 +14,10 @@ import type { WorkerProps } from "../WorkerCard.tsx";
 export const WorkerError = observer(function WorkerError({
   agent,
 }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const { stopReason, errorView } = workerError(agent, detail);
   return detail?.error ? (
     <Disclosure
@@ -32,7 +38,10 @@ export const WorkerError = observer(function WorkerError({
 });
 
 const WorkerReport = observer(function WorkerReport({ agent }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const { open } = useTeam();
   const overview = detail?.overview;
   return overview?.result ? (
@@ -49,7 +58,10 @@ const WorkerReport = observer(function WorkerReport({ agent }: WorkerProps) {
 const WorkerProgress = observer(function WorkerProgress({
   agent,
 }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   return detail?.commandProgress?.length ? (
     <Disclosure
       className="worker-command-details"

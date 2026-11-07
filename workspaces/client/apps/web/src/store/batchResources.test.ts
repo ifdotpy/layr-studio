@@ -1,6 +1,6 @@
 import { autorun, toJS } from "mobx";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { TerminalState } from "../generated/api.ts";
+import { TerminalState, ProviderKind } from "../generated/api.ts";
 import { createServerStore } from "./server.ts";
 import { createWorkDataSelector } from "../sync/subscriptions/workData.ts";
 import type { ResourceRef } from "../sync/subscriptions/contracts.ts";
@@ -165,4 +165,46 @@ it("updates terminal metadata and the existing output window in place", () => {
   expect(output.current).toBe(model);
   expect(model.text).toBe("after");
   expect(model.offset).toBe(11);
+});
+
+it("delivers model catalogs through the shared state subscription", async () => {
+  const watch = vi.fn((_ref: ResourceRef) => () => {});
+  const subscriptions = createSubscriptions({
+    watchResourceChanges: watch,
+    watchResourceConnection: (accept) => {
+      accept("live", "open", {});
+      return () => {};
+    },
+  });
+  const store = createServerStore(subscriptions);
+  const seen: string[][] = [];
+  const stop = autorun(() => {
+    const current = store.models().current;
+    seen.push(
+      current.status === "live" || current.status === "stale"
+        ? [...current.data.modelsByAccount.values()].map((row) => row.model)
+        : [],
+    );
+    void store.state().current;
+  });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(watch.mock.calls.map(([ref]) => ref)).toEqual([{ kind: "state" }]);
+  subscriptions.publish({ kind: "state" }, [
+    {
+      collection: "model",
+      id: "default:model",
+      value: {
+        accountKey: "default",
+        model: "gpt-6-astra",
+        provider: ProviderKind.codex,
+        catalogPosition: 0,
+      },
+    },
+  ]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(seen.at(-1)).toEqual(["gpt-6-astra"]);
+  expect(store.models().current.status).not.toBe("loading");
+  stop();
+  store.dispose();
+  subscriptions.dispose();
 });

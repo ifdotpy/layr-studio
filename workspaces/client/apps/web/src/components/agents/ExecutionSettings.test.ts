@@ -349,6 +349,8 @@ vi.mock("./WorkerModelPicker", async (load) => ({
 
 vi.mock("../../servers/ServerServicesContext", async (load) => ({
   ...(await load<typeof import("../../servers/ServerServicesContext")>()),
+  useServerStore: () =>
+    generatedFixtures.at(-1)?.store ?? observableFixture().store,
   useServerApi: () => ({
     post: choices.post,
     saved: (_key: string, fallback: unknown) => fallback,

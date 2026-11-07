@@ -37,6 +37,11 @@ vi.mock("react", async (load) => ({
   useEffect: () => {},
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
+  useServerStore: () => ({
+    agentDetail: () => ({
+      current: { status: "live", data: initialConfirmedLead },
+    }),
+  }),
   useServerStorage: () => ({
     getItem: (key: string) => fixture.disk.get(key) ?? null,
     setItem: (key: string, value: string) => fixture.disk.set(key, value),

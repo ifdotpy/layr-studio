@@ -217,7 +217,16 @@ export function createTeamView(
 /** Membership depends on generated models, never a parallel App snapshot index. */
 export function useAgentCatalog() {
   const store = useServerStore();
-  return useMemo(() => createAgentCatalog(store), [store]);
+  return agentCatalog(store);
+}
+const catalogs = new WeakMap<Store, ReturnType<typeof createAgentCatalog>>();
+export function agentCatalog(store: Store) {
+  let view = catalogs.get(store);
+  if (!view) {
+    view = createAgentCatalog(store);
+    catalogs.set(store, view);
+  }
+  return view;
 }
 export function createAgentCatalog(store: Store) {
   const view = {

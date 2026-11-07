@@ -1,4 +1,6 @@
-import { AgentModelsFixture } from "../observableFixture.tsx";
+import { observableFixture } from "../observableFixture.tsx";
+import { createModelsMirror } from "../../generated/observableResources.ts";
+import type { ReactNode } from "react";
 import {
   ProviderKind as GeneratedApiProviderKind,
   AgentSource as GeneratedApiAgentSource,
@@ -6,15 +8,12 @@ import {
 } from "../../generated/api.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, within, waitFor } from "storybook/test";
-import { useState, type ContextType } from "react";
+import { useState } from "react";
 import { Paper, Stack } from "@mantine/core";
 import { AgentSetupPicker, type SetupRole } from "../agents/AgentSetupPicker";
 import { ExecutionSummaryTrigger } from "../agents/ExecutionSummaryTrigger";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../observableFixture.tsx";
-import {
-  ModelCatalogReader,
-  type WorkerModelInfo,
-} from "../agents/WorkerModelPicker";
+import { type WorkerModelInfo } from "../agents/WorkerModelPicker";
 import type { Agent } from "../../types";
 import "../agents/chat-settings-dialog.css";
 import { ModelField } from "./ModelField";
@@ -226,26 +225,6 @@ const previewCatalog = [
       serviceTiers: [{ id: "priority" }],
     }) satisfies WorkerModelInfo,
 );
-const previewReader: ContextType<typeof ModelCatalogReader> = {
-  scope: "execution-panel-story",
-  read: async () => ({ data: previewCatalog }),
-  subscribeState: (accept) => {
-    accept({
-      runtime: {
-        modelsByAccount: {
-          default: previewCatalog.map((model, catalogPosition) => ({
-            ...model,
-            accountKey: "default",
-            provider: "codex",
-            catalogPosition,
-          })),
-        },
-      },
-      entitiesComplete: true,
-    });
-    return () => {};
-  },
-};
 const previewAgent = {
   id: "execution-preview",
   name: "Preview",
@@ -259,15 +238,36 @@ const previewAgent = {
   workerDefaults: { model: "gpt-6-luna", effort: "high" },
   reviewDefaults: { model: null, effort: null },
 } as Agent;
+function PreviewModels({ children }: { children: ReactNode }) {
+  const [fixture] = useState(() => {
+    const fixture = observableFixture([
+      previewAgent,
+      { ...previewAgent, id: "worker-preview", isLead: false },
+    ]);
+    const models = createModelsMirror();
+    models.apply(
+      previewCatalog.map((row, catalogPosition) => ({
+        collection: "model",
+        id: row.model,
+        value: {
+          ...row,
+          accountKey: "default",
+          provider: "codex",
+          catalogPosition,
+        },
+      })),
+    );
+    fixture.store.models = () => ({
+      current: { status: "live", data: models.current },
+    });
+    return fixture;
+  });
+  return <fixture.Provider>{children}</fixture.Provider>;
+}
 function InlineSettings({ worker = false }: { worker?: boolean }) {
   return (
-    <ModelCatalogReader.Provider value={previewReader}>
-      <AgentModelsFixture
-        agents={[
-          previewAgent,
-          { ...previewAgent, id: "worker-preview", isLead: false },
-        ]}
-      >
+    <PreviewModels>
+      <>
         <Stack
           className="chat-execution-settings"
           gap="xs"
@@ -293,8 +293,8 @@ function InlineSettings({ worker = false }: { worker?: boolean }) {
             refresh={async () => {}}
           />
         </Stack>
-      </AgentModelsFixture>
-    </ModelCatalogReader.Provider>
+      </>
+    </PreviewModels>
   );
 }
 export const InlineAgentSettings: Story = {
@@ -337,13 +337,8 @@ export const WorkerChatSettings: Story = {
 
 export const ComposerRolePopover: Story = {
   render: () => (
-    <ModelCatalogReader.Provider value={previewReader}>
-      <AgentModelsFixture
-        agents={[
-          previewAgent,
-          { ...previewAgent, id: "worker-preview", isLead: false },
-        ]}
-      >
+    <PreviewModels>
+      <>
         <div style={{ padding: "var(--mantine-spacing-md)" }}>
           <ExecutionSettings
             agent={previewAgent}
@@ -376,8 +371,8 @@ export const ComposerRolePopover: Story = {
             )}
           />
         </div>
-      </AgentModelsFixture>
-    </ModelCatalogReader.Provider>
+      </>
+    </PreviewModels>
   ),
   play: async ({ canvasElement, userEvent }) => {
     const canvas = within(canvasElement);

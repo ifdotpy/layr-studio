@@ -73,6 +73,75 @@ export function transcriptTail(value: number): TranscriptTail;
 export function transcriptTail(value: number): number {
   return value;
 }
+type AccountsSummaryDtoDto = DeepReadonly<
+  components["schemas"]["AccountsSummaryDto"]
+>;
+class AccountsSummaryDtoModel {
+  accounts: AccountsSummaryDtoDto["accounts"];
+  archivedAccounts: AccountsSummaryDtoDto["archivedAccounts"];
+  defaultAccountGroups: AccountsSummaryDtoDto["defaultAccountGroups"];
+  defaultAccountKey: AccountsSummaryDtoDto["defaultAccountKey"];
+  supportsDelete: AccountsSummaryDtoDto["supportsDelete"];
+  supportsDisconnect: AccountsSummaryDtoDto["supportsDisconnect"];
+  constructor(dto: AccountsSummaryDtoDto) {
+    this.accounts = freezePlain(structuredClone(dto.accounts));
+    this.archivedAccounts = freezePlain(structuredClone(dto.archivedAccounts));
+    this.defaultAccountGroups = freezePlain(
+      structuredClone(dto.defaultAccountGroups),
+    );
+    this.defaultAccountKey = dto.defaultAccountKey;
+    this.supportsDelete = dto.supportsDelete;
+    this.supportsDisconnect = dto.supportsDisconnect;
+    makeObservable(this, {
+      accounts: observableRef,
+      archivedAccounts: observableRef,
+      defaultAccountGroups: observableRef,
+      defaultAccountKey: observableRef,
+      supportsDelete: observableRef,
+      supportsDisconnect: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountsSummaryDtoDto): this {
+    {
+      const next = compareStructural(this.accounts, dto.accounts)
+        ? this.accounts
+        : freezePlain(structuredClone(dto.accounts));
+      if (this.accounts !== next) this.accounts = next;
+    }
+    {
+      const next = compareStructural(
+        this.archivedAccounts,
+        dto.archivedAccounts,
+      )
+        ? this.archivedAccounts
+        : freezePlain(structuredClone(dto.archivedAccounts));
+      if (this.archivedAccounts !== next) this.archivedAccounts = next;
+    }
+    {
+      const next = compareStructural(
+        this.defaultAccountGroups,
+        dto.defaultAccountGroups,
+      )
+        ? this.defaultAccountGroups
+        : freezePlain(structuredClone(dto.defaultAccountGroups));
+      if (this.defaultAccountGroups !== next) this.defaultAccountGroups = next;
+    }
+    {
+      const next = dto.defaultAccountKey;
+      if (this.defaultAccountKey !== next) this.defaultAccountKey = next;
+    }
+    {
+      const next = dto.supportsDelete;
+      if (this.supportsDelete !== next) this.supportsDelete = next;
+    }
+    {
+      const next = dto.supportsDisconnect;
+      if (this.supportsDisconnect !== next) this.supportsDisconnect = next;
+    }
+    return this;
+  }
+}
 type ActiveToolDtoDto = DeepReadonly<components["schemas"]["ActiveToolDto"]>;
 class ActiveToolDtoModel {
   id: ActiveToolDtoDto["id"];
@@ -6917,6 +6986,233 @@ function reconcileMessageRecord(
     ? data
     : next;
 }
+type ModelEntityDtoDto = DeepReadonly<
+  import("./observableFieldTypes.ts").ModelEntityDtoFields
+>;
+class ModelEntityDtoModel {
+  accountKey: ModelEntityDtoDto["accountKey"];
+  availableAccessPrograms:
+    | ModelEntityDtoDto["availableAccessPrograms"]
+    | undefined;
+  catalogPosition: ModelEntityDtoDto["catalogPosition"];
+  defaultReasoningEffort:
+    | NonNullable<ModelEntityDtoDto["defaultReasoningEffort"]>
+    | null
+    | undefined;
+  description: NonNullable<ModelEntityDtoDto["description"]> | null | undefined;
+  displayName: NonNullable<ModelEntityDtoDto["displayName"]> | null | undefined;
+  hidden: ModelEntityDtoDto["hidden"] | undefined;
+  isDefault: ModelEntityDtoDto["isDefault"] | undefined;
+  model: ModelEntityDtoDto["model"];
+  provider: ModelEntityDtoDto["provider"];
+  resolvedModel:
+    | NonNullable<ModelEntityDtoDto["resolvedModel"]>
+    | null
+    | undefined;
+  serviceTiers: ModelEntityDtoDto["serviceTiers"] | undefined;
+  supportedReasoningEfforts:
+    | ModelEntityDtoDto["supportedReasoningEfforts"]
+    | undefined;
+  constructor(dto: ModelEntityDtoDto) {
+    this.accountKey = dto.accountKey;
+    this.availableAccessPrograms =
+      dto.availableAccessPrograms === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.availableAccessPrograms));
+    this.catalogPosition = dto.catalogPosition;
+    this.defaultReasoningEffort =
+      dto.defaultReasoningEffort === undefined
+        ? undefined
+        : dto.defaultReasoningEffort === null
+          ? null
+          : dto.defaultReasoningEffort;
+    this.description =
+      dto.description === undefined
+        ? undefined
+        : dto.description === null
+          ? null
+          : dto.description;
+    this.displayName =
+      dto.displayName === undefined
+        ? undefined
+        : dto.displayName === null
+          ? null
+          : dto.displayName;
+    this.hidden = dto.hidden === undefined ? undefined : dto.hidden;
+    this.isDefault = dto.isDefault === undefined ? undefined : dto.isDefault;
+    this.model = dto.model;
+    this.provider = dto.provider;
+    this.resolvedModel =
+      dto.resolvedModel === undefined
+        ? undefined
+        : dto.resolvedModel === null
+          ? null
+          : dto.resolvedModel;
+    this.serviceTiers =
+      dto.serviceTiers === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.serviceTiers));
+    this.supportedReasoningEfforts =
+      dto.supportedReasoningEfforts === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.supportedReasoningEfforts));
+    makeObservable(this, {
+      accountKey: observableRef,
+      availableAccessPrograms: observableRef,
+      catalogPosition: observableRef,
+      defaultReasoningEffort: observableRef,
+      description: observableRef,
+      displayName: observableRef,
+      hidden: observableRef,
+      isDefault: observableRef,
+      model: observableRef,
+      provider: observableRef,
+      resolvedModel: observableRef,
+      serviceTiers: observableRef,
+      supportedReasoningEfforts: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ModelEntityDtoDto): this {
+    {
+      const next = dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next =
+        dto.availableAccessPrograms === undefined
+          ? undefined
+          : this.availableAccessPrograms === undefined
+            ? freezePlain(structuredClone(dto.availableAccessPrograms))
+            : compareStructural(
+                  this.availableAccessPrograms,
+                  dto.availableAccessPrograms,
+                )
+              ? this.availableAccessPrograms
+              : freezePlain(structuredClone(dto.availableAccessPrograms));
+      if (this.availableAccessPrograms !== next)
+        this.availableAccessPrograms = next;
+    }
+    {
+      const next = dto.catalogPosition;
+      if (this.catalogPosition !== next) this.catalogPosition = next;
+    }
+    {
+      const next =
+        dto.defaultReasoningEffort === undefined
+          ? undefined
+          : this.defaultReasoningEffort === undefined
+            ? dto.defaultReasoningEffort === null
+              ? null
+              : dto.defaultReasoningEffort
+            : dto.defaultReasoningEffort === null
+              ? null
+              : this.defaultReasoningEffort === null
+                ? dto.defaultReasoningEffort
+                : dto.defaultReasoningEffort;
+      if (this.defaultReasoningEffort !== next)
+        this.defaultReasoningEffort = next;
+    }
+    {
+      const next =
+        dto.description === undefined
+          ? undefined
+          : this.description === undefined
+            ? dto.description === null
+              ? null
+              : dto.description
+            : dto.description === null
+              ? null
+              : this.description === null
+                ? dto.description
+                : dto.description;
+      if (this.description !== next) this.description = next;
+    }
+    {
+      const next =
+        dto.displayName === undefined
+          ? undefined
+          : this.displayName === undefined
+            ? dto.displayName === null
+              ? null
+              : dto.displayName
+            : dto.displayName === null
+              ? null
+              : this.displayName === null
+                ? dto.displayName
+                : dto.displayName;
+      if (this.displayName !== next) this.displayName = next;
+    }
+    {
+      const next =
+        dto.hidden === undefined
+          ? undefined
+          : this.hidden === undefined
+            ? dto.hidden
+            : dto.hidden;
+      if (this.hidden !== next) this.hidden = next;
+    }
+    {
+      const next =
+        dto.isDefault === undefined
+          ? undefined
+          : this.isDefault === undefined
+            ? dto.isDefault
+            : dto.isDefault;
+      if (this.isDefault !== next) this.isDefault = next;
+    }
+    {
+      const next = dto.model;
+      if (this.model !== next) this.model = next;
+    }
+    {
+      const next = dto.provider;
+      if (this.provider !== next) this.provider = next;
+    }
+    {
+      const next =
+        dto.resolvedModel === undefined
+          ? undefined
+          : this.resolvedModel === undefined
+            ? dto.resolvedModel === null
+              ? null
+              : dto.resolvedModel
+            : dto.resolvedModel === null
+              ? null
+              : this.resolvedModel === null
+                ? dto.resolvedModel
+                : dto.resolvedModel;
+      if (this.resolvedModel !== next) this.resolvedModel = next;
+    }
+    {
+      const next =
+        dto.serviceTiers === undefined
+          ? undefined
+          : this.serviceTiers === undefined
+            ? freezePlain(structuredClone(dto.serviceTiers))
+            : compareStructural(this.serviceTiers, dto.serviceTiers)
+              ? this.serviceTiers
+              : freezePlain(structuredClone(dto.serviceTiers));
+      if (this.serviceTiers !== next) this.serviceTiers = next;
+    }
+    {
+      const next =
+        dto.supportedReasoningEfforts === undefined
+          ? undefined
+          : this.supportedReasoningEfforts === undefined
+            ? freezePlain(structuredClone(dto.supportedReasoningEfforts))
+            : compareStructural(
+                  this.supportedReasoningEfforts,
+                  dto.supportedReasoningEfforts,
+                )
+              ? this.supportedReasoningEfforts
+              : freezePlain(structuredClone(dto.supportedReasoningEfforts));
+      if (this.supportedReasoningEfforts !== next)
+        this.supportedReasoningEfforts = next;
+    }
+    return this;
+  }
+}
 type MonitorEntityDtoDto = DeepReadonly<
   components["schemas"]["MonitorEntityDto"]
 >;
@@ -9998,6 +10294,35 @@ class RadioControlsModel {
     {
       const next = dto.stopping;
       if (this.stopping !== next) this.stopping = next;
+    }
+    return this;
+  }
+}
+type RateLimitViewDto = DeepReadonly<components["schemas"]["RateLimitView"]>;
+class RateLimitViewModel {
+  observation: RateLimitViewDto["observation"];
+  projection: RateLimitViewDto["projection"];
+  constructor(dto: RateLimitViewDto) {
+    this.observation = freezePlain(structuredClone(dto.observation));
+    this.projection = freezePlain(structuredClone(dto.projection));
+    makeObservable(this, {
+      observation: observableRef,
+      projection: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RateLimitViewDto): this {
+    {
+      const next = compareStructural(this.observation, dto.observation)
+        ? this.observation
+        : freezePlain(structuredClone(dto.observation));
+      if (this.observation !== next) this.observation = next;
+    }
+    {
+      const next = compareStructural(this.projection, dto.projection)
+        ? this.projection
+        : freezePlain(structuredClone(dto.projection));
+      if (this.projection !== next) this.projection = next;
     }
     return this;
   }
@@ -17786,6 +18111,15 @@ function updateRpcId(
         : new RpcIdVariant1Model(dto);
   }
 }
+export type AccountsSummaryDto = DeepReadonly<
+  components["schemas"]["AccountsSummaryDto"]
+>;
+export type ModelEntityDto = DeepReadonly<
+  import("./observableFieldTypes.ts").ModelEntityDtoFields
+>;
+export type RateLimitView = DeepReadonly<
+  components["schemas"]["RateLimitView"]
+>;
 export type AgentSummaryEntityDto = DeepReadonly<
   components["schemas"]["AgentSummaryEntityDto"]
 >;
@@ -17876,6 +18210,12 @@ export type SidebarOrderDto = DeepReadonly<
   components["schemas"]["SidebarOrderDto"]
 >;
 export type AgentTail = DeepReadonly<components["schemas"]["AgentTail"]>;
+export type SessionCostData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "session-cost" }>>>
+>;
+export type CostsData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "costs" }>>>
+>;
 export type AgentDetailEntityDto = DeepReadonly<
   components["schemas"]["AgentDetailEntityDto"]
 >;
@@ -17935,6 +18275,23 @@ export type AnalyticsTurnRecord = DeepReadonly<
 >;
 export type StateEntity =
   | {
+      readonly collection: "accounts";
+      readonly id: string;
+      readonly value: DeepReadonly<components["schemas"]["AccountsSummaryDto"]>;
+    }
+  | {
+      readonly collection: "model";
+      readonly id: string;
+      readonly value: DeepReadonly<
+        import("./observableFieldTypes.ts").ModelEntityDtoFields
+      >;
+    }
+  | {
+      readonly collection: "rateLimit";
+      readonly id: string;
+      readonly value: DeepReadonly<components["schemas"]["RateLimitView"]>;
+    }
+  | {
       readonly collection: "agentSummary";
       readonly id: string;
       readonly value: DeepReadonly<
@@ -17989,6 +18346,12 @@ export function serializeStateCollections(
   collections: StateCollections,
 ): readonly StateEntity[] {
   const entities: StateEntity[] = [];
+  for (const [id, value] of collections.accountsSummary)
+    entities.push({ collection: "accounts", id, value: toJS(value) });
+  for (const [id, value] of collections.modelsByAccount)
+    entities.push({ collection: "model", id, value: toJS(value) });
+  for (const [id, value] of collections.rateLimitsByAccount)
+    entities.push({ collection: "rateLimit", id, value: toJS(value) });
   for (const [id, value] of collections.agents)
     entities.push({ collection: "agentSummary", id, value: toJS(value) });
   for (const [id, value] of collections.projects)
@@ -18010,6 +18373,18 @@ export function serializeStateCollections(
   return entities;
 }
 export interface StateCollections {
+  readonly accountsSummary: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["AccountsSummaryDto"]>
+  >;
+  readonly modelsByAccount: ReadonlyMap<
+    string,
+    DeepReadonly<import("./observableFieldTypes.ts").ModelEntityDtoFields>
+  >;
+  readonly rateLimitsByAccount: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["RateLimitView"]>
+  >;
   readonly agents: ReadonlyMap<
     string,
     DeepReadonly<components["schemas"]["AgentSummaryEntityDto"]>
@@ -18052,6 +18427,9 @@ type StateCollectionsDto = readonly (
   | StateEntity
 )[];
 class StateCollectionsModel {
+  readonly accountsSummary = new Map<string, AccountsSummaryDtoModel>();
+  readonly modelsByAccount = new Map<string, ModelEntityDtoModel>();
+  readonly rateLimitsByAccount = new Map<string, RateLimitViewModel>();
   readonly agents = new Map<string, AgentSummaryEntityDtoModel>();
   readonly projects = new Map<string, ProjectEntityDtoModel>();
   readonly peerTeams = new Map<string, PeerTeamEntityDtoModel>();
@@ -18063,6 +18441,9 @@ class StateCollectionsModel {
   readonly agentTail = new Map<string, AgentTailModel>();
   constructor(dto: StateCollectionsDto) {
     makeObservable(this, {
+      accountsSummary: observableShallow,
+      modelsByAccount: observableShallow,
+      rateLimitsByAccount: observableShallow,
       agents: observableShallow,
       projects: observableShallow,
       peerTeams: observableShallow,
@@ -18077,6 +18458,9 @@ class StateCollectionsModel {
     this.apply(dto);
   }
   apply(dto: StateCollectionsDto): void {
+    const accountsSummaryIds = new Set<string>();
+    const modelsByAccountIds = new Set<string>();
+    const rateLimitsByAccountIds = new Set<string>();
     const agentsIds = new Set<string>();
     const projectsIds = new Set<string>();
     const peerTeamsIds = new Set<string>();
@@ -18088,6 +18472,21 @@ class StateCollectionsModel {
     const agentTailIds = new Set<string>();
     for (const entity of dto) {
       switch (entity.collection) {
+        case "accounts":
+          if (accountsSummaryIds.has(entity.id))
+            throw new Error("Duplicate identity in accounts");
+          accountsSummaryIds.add(entity.id);
+          break;
+        case "model":
+          if (modelsByAccountIds.has(entity.id))
+            throw new Error("Duplicate identity in model");
+          modelsByAccountIds.add(entity.id);
+          break;
+        case "rateLimit":
+          if (rateLimitsByAccountIds.has(entity.id))
+            throw new Error("Duplicate identity in rateLimit");
+          rateLimitsByAccountIds.add(entity.id);
+          break;
         case "agentSummary":
           if (agentsIds.has(entity.id))
             throw new Error("Duplicate identity in agentSummary");
@@ -18135,6 +18534,15 @@ class StateCollectionsModel {
           break;
       }
     }
+    for (const id of this.accountsSummary.keys()) {
+      if (!accountsSummaryIds.has(id)) this.accountsSummary.delete(id);
+    }
+    for (const id of this.modelsByAccount.keys()) {
+      if (!modelsByAccountIds.has(id)) this.modelsByAccount.delete(id);
+    }
+    for (const id of this.rateLimitsByAccount.keys()) {
+      if (!rateLimitsByAccountIds.has(id)) this.rateLimitsByAccount.delete(id);
+    }
     for (const id of this.agents.keys()) {
       if (!agentsIds.has(id)) this.agents.delete(id);
     }
@@ -18164,6 +18572,36 @@ class StateCollectionsModel {
     }
     for (const entity of dto) {
       switch (entity.collection) {
+        case "accounts": {
+          const previous = this.accountsSummary.get(entity.id);
+          if (previous === undefined)
+            this.accountsSummary.set(
+              entity.id,
+              new AccountsSummaryDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "model": {
+          const previous = this.modelsByAccount.get(entity.id);
+          if (previous === undefined)
+            this.modelsByAccount.set(
+              entity.id,
+              new ModelEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "rateLimit": {
+          const previous = this.rateLimitsByAccount.get(entity.id);
+          if (previous === undefined)
+            this.rateLimitsByAccount.set(
+              entity.id,
+              new RateLimitViewModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
         case "agentSummary": {
           const previous = this.agents.get(entity.id);
           if (previous === undefined)
@@ -18409,6 +18847,133 @@ export function createQuestionHistoryMirror(): {
       return model;
     },
     apply(dto: QuestionHistoryCollectionsDto): void {
+      runInAction(() => {
+        model.apply(dto);
+      });
+    },
+  };
+}
+export function createSessionCostMirror(dto: SessionCostData): {
+  readonly current: SessionCostData;
+  apply(dto: SessionCostData): void;
+} {
+  const model = observable.box<SessionCostData>(
+    freezePlain(structuredClone(dto)),
+    { deep: false },
+  );
+  return {
+    get current(): SessionCostData {
+      return model.get();
+    },
+    apply(dto: SessionCostData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export function createCostsMirror(dto: CostsData): {
+  readonly current: CostsData;
+  apply(dto: CostsData): void;
+} {
+  const model = observable.box<CostsData>(freezePlain(structuredClone(dto)), {
+    deep: false,
+  });
+  return {
+    get current(): CostsData {
+      return model.get();
+    },
+    apply(dto: CostsData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export type ModelsEntity = {
+  readonly collection: "model";
+  readonly id: string;
+  readonly value: DeepReadonly<
+    import("./observableFieldTypes.ts").ModelEntityDtoFields
+  >;
+};
+export function serializeModelsCollections(
+  collections: ModelsCollections,
+): readonly ModelsEntity[] {
+  const entities: ModelsEntity[] = [];
+  for (const [id, value] of collections.modelsByAccount)
+    entities.push({ collection: "model", id, value: toJS(value) });
+  return entities;
+}
+export interface ModelsCollections {
+  readonly modelsByAccount: ReadonlyMap<
+    string,
+    DeepReadonly<import("./observableFieldTypes.ts").ModelEntityDtoFields>
+  >;
+}
+type ModelsCollectionsDto = readonly (
+  | DeepReadonly<components["schemas"]["SyncEntityPayload"]>
+  | ModelsEntity
+)[];
+class ModelsCollectionsModel {
+  readonly modelsByAccount = new Map<string, ModelEntityDtoModel>();
+  constructor(dto: ModelsCollectionsDto) {
+    makeObservable(this, {
+      modelsByAccount: observableShallow,
+      apply: action,
+    });
+    this.apply(dto);
+  }
+  apply(dto: ModelsCollectionsDto): void {
+    const modelsByAccountIds = new Set<string>();
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "model":
+          if (modelsByAccountIds.has(entity.id))
+            throw new Error("Duplicate identity in model");
+          modelsByAccountIds.add(entity.id);
+          break;
+      }
+    }
+    for (const id of this.modelsByAccount.keys()) {
+      if (!modelsByAccountIds.has(id)) this.modelsByAccount.delete(id);
+    }
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "model": {
+          const previous = this.modelsByAccount.get(entity.id);
+          if (previous === undefined)
+            this.modelsByAccount.set(
+              entity.id,
+              new ModelEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+      }
+    }
+  }
+}
+export function createModelsMirror(): {
+  readonly current: ModelsCollections;
+  apply(dto: ModelsCollectionsDto): void;
+} {
+  const model = new ModelsCollectionsModel([]);
+  return {
+    get current(): ModelsCollections {
+      return model;
+    },
+    apply(dto: ModelsCollectionsDto): void {
       runInAction(() => {
         model.apply(dto);
       });
@@ -18901,6 +19466,9 @@ export interface ObservableResources {
   state(): ResourceSlot<StateCollections>;
   requests(): ResourceSlot<RequestsCollections>;
   questionHistory(): ResourceSlot<QuestionHistoryCollections>;
+  sessionCost(agentId: AgentId): ResourceSlot<SessionCostData>;
+  costs(): ResourceSlot<CostsData>;
+  models(): ResourceSlot<ModelsCollections>;
   agentDetail(agentId: AgentId): ResourceSlot<AgentDetailEntityDto>;
   processes(agentId: AgentId): ResourceSlot<ProcessList>;
   taskDetail(taskId: TaskId): ResourceSlot<TaskDetailResponse>;
@@ -18924,6 +19492,16 @@ export function createObservableResources(
   let stateSlot: ResourceSlot<StateCollections> | undefined;
   let requestsSlot: ResourceSlot<RequestsCollections> | undefined;
   let questionHistorySlot: ResourceSlot<QuestionHistoryCollections> | undefined;
+  const sessionCostSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "session-cost" }>,
+    SessionCostData
+  >({
+    create: (dto) => freezePlain(structuredClone(dto)),
+    apply: (data, dto) =>
+      compareStructural(data, dto) ? data : freezePlain(structuredClone(dto)),
+  });
+  let costsSlot: ResourceSlot<CostsData> | undefined;
+  let modelsSlot: ResourceSlot<ModelsCollections> | undefined;
   const agentDetailSlots = runtime.keyed<
     Extract<ResourceRef, { kind: "agentDetail" }>,
     AgentDetailEntityDtoModel
@@ -19214,6 +19792,38 @@ export function createObservableResources(
         key,
         ref,
         create: (dto) => new QuestionHistoryCollectionsModel(dto),
+        apply: (data, dto) => data.apply(dto),
+      }));
+    },
+    sessionCost(agentId: AgentId) {
+      const ref: Extract<ResourceRef, { kind: "session-cost" }> = {
+        kind: "session-cost",
+        agentId,
+      };
+      return sessionCostSlots(ref);
+    },
+    costs() {
+      if (costsSlot !== undefined) return costsSlot;
+      const ref: Extract<ResourceRef, { kind: "costs" }> = { kind: "costs" };
+      const key = subscriptionKey(ref);
+      return (costsSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => freezePlain(structuredClone(dto)),
+        apply: (data, dto) =>
+          compareStructural(data, dto)
+            ? data
+            : freezePlain(structuredClone(dto)),
+      }));
+    },
+    models() {
+      if (modelsSlot !== undefined) return modelsSlot;
+      const ref: Extract<ResourceRef, { kind: "state" }> = { kind: "state" };
+      const key = JSON.stringify(["models", subscriptionKey(ref)]);
+      return (modelsSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => new ModelsCollectionsModel(dto),
         apply: (data, dto) => data.apply(dto),
       }));
     },

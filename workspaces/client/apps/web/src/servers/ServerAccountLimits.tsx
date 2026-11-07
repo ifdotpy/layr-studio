@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../deepReadonly.ts";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { errorText } from "../api";
 import AccountStartThrottle from "../components/AccountStartThrottle";
@@ -8,7 +9,7 @@ import {
 } from "../components/AccountTiles";
 import type { components } from "../generated/api";
 import { AccountCapacityView, type Account } from "../components/Accounts";
-import type { AccountLimitsSnapshot } from "../usage/accountUsage";
+import type { AccountLimitsData } from "../usage/accountUsage";
 import { ServerServicesProvider, useServerSync } from "./ServerServicesContext";
 import type { ServerAccount } from "./navigation";
 import type { ServerServices } from "./serverServices";
@@ -114,8 +115,8 @@ export type AccountSource = {
   services?: ServerServices | undefined;
 };
 type ReadingValue = {
-  limits: AccountLimitsSnapshot | null;
-  projection: components["schemas"]["RateLimitView"] | null;
+  limits: AccountLimitsData | null;
+  projection: DeepReadonly<components["schemas"]["RateLimitView"]> | null;
 };
 type Reading = AccountSource & ReadingValue;
 
@@ -123,9 +124,9 @@ type Reading = AccountSource & ReadingValue;
  * provider account, so every server reads the same limit: the card shows the
  * reading with data whose `at` (epoch seconds) is newest. Without any data it
  * shows a read in progress, then a read error, then an answer without data. */
-export function newestReading<
-  T extends { limits: AccountLimitsSnapshot | null },
->(readings: T[]): T | undefined {
+export function newestReading<T extends { limits: AccountLimitsData | null }>(
+  readings: T[],
+): T | undefined {
   let newest: T | undefined;
   for (const reading of readings)
     if (

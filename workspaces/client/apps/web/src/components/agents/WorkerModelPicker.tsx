@@ -1,35 +1,28 @@
-import { useServerServices } from "../../servers/ServerServicesContext";
+import type { ServerServices } from "../../servers/serverServices.ts";
 import {
-  useCallback,
-  createContext,
-  useContext,
-  useMemo,
-  useSyncExternalStore,
-  type ContextType,
-} from "react";
-import {
-  ApiError,
-  get,
-  errorText,
-  type GetResult,
-  type GetOptions,
-} from "../../api";
+  useServerStore,
+  useServerModelReader,
+} from "../../servers/ServerServicesContext";
+import { makeAutoObservable, runInAction } from "mobx";
+import { resourceData } from "../../store/runtime.ts";
+import type { DeepReadonly } from "../../deepReadonly.ts";
+import { ApiError, get, errorText } from "../../api";
 import { serverResourceScope } from "../../servers/registry";
-import type { Snapshot } from "../../types";
-import { subscribeStateProjection } from "../../sync/client";
 
 import type { components } from "../../generated/api";
 import type { KnownApiFields } from "../../apiTypes";
 
 type ProviderModel = KnownApiFields<components["schemas"]["ProviderModel"]>;
-export type WorkerModelInfo = ProviderModel & {
-  serviceTiers: NonNullable<ProviderModel["serviceTiers"]>;
-  supportedReasoningEfforts: NonNullable<
-    ProviderModel["supportedReasoningEfforts"]
-  >;
-};
+export type WorkerModelInfo = DeepReadonly<
+  ProviderModel & {
+    serviceTiers: NonNullable<ProviderModel["serviceTiers"]>;
+    supportedReasoningEfforts: NonNullable<
+      ProviderModel["supportedReasoningEfforts"]
+    >;
+  }
+>;
 
-const modelInfo = (value: ProviderModel): WorkerModelInfo => ({
+const modelInfo = (value: DeepReadonly<ProviderModel>): WorkerModelInfo => ({
   ...value,
   serviceTiers: value.serviceTiers ?? [],
   supportedReasoningEfforts: value.supportedReasoningEfforts ?? [],
@@ -40,7 +33,7 @@ export const isDaybreakAlias = (model: string) =>
 
 const cyberAccessPrograms = (
   info?: WorkerModelInfo,
-): string[] | null | undefined => {
+): readonly string[] | null | undefined => {
   if (!info || !Object.hasOwn(info, "availableAccessPrograms"))
     return undefined;
   const access = info.availableAccessPrograms;
@@ -69,261 +62,19 @@ export function supportsDaybreakMode(
   );
 }
 
-type ModelCatalogSource = {
-  scope: string;
-  cacheOwner?: object | undefined;
-  read: (
-    options: Pick<GetOptions<"/api/models">, "query" | "signal">,
-  ) => Promise<GetResult<"/api/models">>;
-  subscribeState: (
-    accept: (snapshot: ModelCatalogProjection) => void,
-    fail: (error: unknown | null) => void,
-  ) => () => void;
-};
-type ModelCatalogProjection = Pick<Snapshot, "entitiesComplete"> & {
-  runtime: Pick<Snapshot["runtime"], "modelsByAccount">;
-};
-const defaultModelCatalogReader: ModelCatalogSource = {
+type Store = ReturnType<typeof useServerStore>;
+export type ModelCatalogSource = ServerServices["modelReader"];
+const localReader: ModelCatalogSource = {
   scope: serverResourceScope(),
   read: (options) => get("/api/models", options),
-  subscribeState: (accept, fail) =>
-    subscribeStateProjection((snapshot) => {
-      if (snapshot) accept(snapshot);
-    }, fail),
 };
-export const ModelCatalogReader = createContext(defaultModelCatalogReader);
-
 export function useModelCatalogReader() {
-  const configured = useContext(ModelCatalogReader);
-  const services = useServerServices();
-  const owned = useMemo<ModelCatalogSource | undefined>(
-    () =>
-      services
-        ? {
-            cacheOwner: services,
-            scope: JSON.stringify([
-              services.owner.id,
-              services.owner.origin,
-              services.owner.credentialId,
-            ]),
-            read: (options) => services.api.get("/api/models", options),
-            subscribeState: (accept, fail) =>
-              services.sync.subscribeStateProjection((snapshot) => {
-                if (snapshot) accept(snapshot);
-              }, fail),
-          }
-        : undefined,
-    [services],
-  );
-  return configured === defaultModelCatalogReader
-    ? (owned ?? configured)
-    : configured;
+  return useServerModelReader() ?? localReader;
 }
 
-type ModelCatalogRead = NonNullable<
-  ContextType<typeof ModelCatalogReader>
->["read"];
-
-type ModelCatalogSnapshot = {
-  models: WorkerModelInfo[];
-  error: string;
-  pending: boolean;
-  loaded: boolean;
-};
-type ModelCatalogEntry = {
-  snapshot: ModelCatalogSnapshot;
-  inFlight?: Promise<void> | undefined;
-  listeners: Set<() => void>;
-  stopWatching?: (() => void) | undefined;
-};
-
-const emptyModelCatalog: ModelCatalogSnapshot = {
-  models: [],
-  error: "",
-  pending: false,
-  loaded: false,
-};
-const catalogsByOwner = new WeakMap<object, Map<string, ModelCatalogEntry>>();
-function ownerCatalogs(owner: object) {
-  let catalogs = catalogsByOwner.get(owner);
-  if (!catalogs) {
-    catalogs = new Map();
-    catalogsByOwner.set(owner, catalogs);
-  }
-  return catalogs;
-}
-
-function catalogEntry(
-  modelCatalogs: Map<string, ModelCatalogEntry>,
-  key: string,
-): ModelCatalogEntry {
-  let entry = modelCatalogs.get(key);
-  if (!entry) {
-    entry = {
-      snapshot: emptyModelCatalog,
-      listeners: new Set(),
-    };
-    modelCatalogs.set(key, entry);
-  }
-  return entry;
-}
-
-function publishCatalog(
-  entry: ModelCatalogEntry,
-  snapshot: ModelCatalogSnapshot,
-) {
-  if (
-    entry.snapshot.models === snapshot.models &&
-    entry.snapshot.error === snapshot.error &&
-    entry.snapshot.pending === snapshot.pending &&
-    entry.snapshot.loaded === snapshot.loaded
-  )
-    return;
-  entry.snapshot = snapshot;
-  for (const listener of entry.listeners) listener();
-}
-
-function modelRows(data: GetResult<"/api/models">): WorkerModelInfo[] {
-  return Array.isArray(data.data) ? data.data.map(modelInfo) : [];
-}
-
-function readModelCatalog(
-  entry: ModelCatalogEntry,
-  read: ModelCatalogRead,
-  accountKey: string,
-  workers: boolean,
-  retry = false,
-): Promise<void> {
-  if (entry.inFlight) return entry.inFlight;
-  if (!retry && entry.snapshot.loaded) return Promise.resolve();
-
-  const previous = entry.snapshot;
-  const request = (async () => {
-    try {
-      const data = await read({
-        query: {
-          account_key: accountKey,
-          workers: workers ? "1" : undefined,
-          retry: retry ? "1" : undefined,
-        },
-      });
-      const pending =
-        data.catalogPending === true &&
-        Array.isArray(data.unavailableAccounts) &&
-        data.unavailableAccounts.some(
-          (item) =>
-            item?.catalogPending === true &&
-            typeof item.accountKey === "string" &&
-            typeof item.error === "string",
-        );
-      const models = modelRows(data);
-      publishCatalog(entry, {
-        models:
-          pending && previous.models.length
-            ? Array.from(
-                new Map(
-                  [...previous.models, ...models].map((row) => [
-                    row.model,
-                    row,
-                  ]),
-                ).values(),
-              )
-            : models,
-        error: "",
-        pending,
-        loaded: true,
-      });
-    } catch (error) {
-      const pending =
-        error instanceof ApiError &&
-        error.status === 503 &&
-        error.catalogPending === true;
-      publishCatalog(entry, {
-        models: previous.models,
-        error: pending ? "" : errorText(error),
-        pending,
-        loaded: pending,
-      });
-      if (!pending) throw error;
-    }
-  })();
-  entry.inFlight = request;
-  void request
-    .finally(() => {
-      if (entry.inFlight === request) entry.inFlight = undefined;
-    })
-    .catch(() => {});
-  return request;
-}
-
-function projectedModelRows(
-  snapshot: ModelCatalogProjection,
-  accountKey: string,
-  workers: boolean,
-): NonNullable<Snapshot["runtime"]["modelsByAccount"]>[string] {
-  const all = Object.values(snapshot.runtime.modelsByAccount ?? {}).flat();
-  let rows = workers
-    ? all
-        .filter((row) => !row.hidden)
-        .sort((left, right) => {
-          const rank = (key: string) =>
-            key === accountKey ? 0 : key === "default" ? 1 : 2;
-          return (
-            rank(left.accountKey) - rank(right.accountKey) ||
-            left.catalogPosition - right.catalogPosition ||
-            left.accountKey.localeCompare(right.accountKey)
-          );
-        })
-    : (snapshot.runtime.modelsByAccount?.[accountKey] ?? []);
-  if (workers) {
-    const seen = new Set<string>();
-    rows = rows.filter((row) => {
-      if (seen.has(row.model)) return false;
-      seen.add(row.model);
-      return true;
-    });
-  }
-  return rows;
-}
-
-function subscribeModelCatalog(
-  modelCatalogs: Map<string, ModelCatalogEntry>,
-  key: string,
-  listener: () => void,
-  accountKey: string,
-  workers: boolean,
-  subscribeState: ModelCatalogSource["subscribeState"],
-) {
-  const entry = catalogEntry(modelCatalogs, key);
-  entry.listeners.add(listener);
-  if (!entry.stopWatching) {
-    const stop = subscribeState(
-      (snapshot) => {
-        const rows = projectedModelRows(snapshot, accountKey, workers);
-        const models = rows.map(modelInfo);
-        const loaded = snapshot.entitiesComplete === true;
-        publishCatalog(entry, { models, error: "", pending: !loaded, loaded });
-      },
-      (error) =>
-        publishCatalog(entry, {
-          ...entry.snapshot,
-          error: error === null ? "" : errorText(error),
-        }),
-    );
-    entry.stopWatching = stop;
-  }
-  return () => {
-    entry.listeners.delete(listener);
-    if (!entry.listeners.size && entry.stopWatching) {
-      entry.stopWatching();
-      entry.stopWatching = undefined;
-    }
-  };
-}
-
-/** Fresh metadata for an account choice, not the display's stale fallback. */
+/** Fresh metadata is an explicit read, distinct from the streamed display catalog. */
 export async function readWorkerModels(
-  reader: ContextType<typeof ModelCatalogReader>,
+  reader: ModelCatalogSource,
   accountKey: string,
   workers = false,
 ): Promise<WorkerModelInfo[]> {
@@ -334,60 +85,124 @@ export async function readWorkerModels(
       fresh: "1",
     },
   });
-  return modelRows(data);
+  return (data.data ?? []).map(modelInfo);
 }
-
+const catalogsByOwner = new WeakMap<
+  Store,
+  Map<string, ReturnType<typeof createWorkerCatalog>>
+>();
+export function workerCatalog(
+  store: Store,
+  reader: ModelCatalogSource,
+  accountKey: string,
+  workers = false,
+) {
+  let catalogs = catalogsByOwner.get(store);
+  if (!catalogs) {
+    catalogs = new Map();
+    catalogsByOwner.set(store, catalogs);
+  }
+  const key = JSON.stringify([reader.scope, accountKey, workers]);
+  let view = catalogs.get(key);
+  if (!view) {
+    view = createWorkerCatalog(store, reader, accountKey, workers);
+    catalogs.set(key, view);
+  }
+  return view;
+}
+export function createWorkerCatalog(
+  store: Store,
+  reader: ModelCatalogSource,
+  accountKey: string,
+  workers: boolean,
+) {
+  const view = {
+    readError: "",
+    get error() {
+      const current = store.models().current;
+      return (
+        this.readError || ("error" in current ? errorText(current.error) : "")
+      );
+    },
+    pending: false,
+    get models(): WorkerModelInfo[] {
+      const data = resourceData(store.models().current);
+      let rows = [...(data?.modelsByAccount.values() ?? [])].filter(
+        (row) =>
+          !row.hidden &&
+          !!row.model &&
+          (workers || row.accountKey === accountKey),
+      );
+      const rank = (key: string) =>
+        key === accountKey ? 0 : key === "default" ? 1 : 2;
+      rows.sort(
+        (a, b) =>
+          (workers ? rank(a.accountKey) - rank(b.accountKey) : 0) ||
+          a.catalogPosition - b.catalogPosition ||
+          a.accountKey.localeCompare(b.accountKey),
+      );
+      if (workers) {
+        const seen = new Set<string>();
+        rows = rows.filter((row) => {
+          if (seen.has(row.model)) return false;
+          seen.add(row.model);
+          return true;
+        });
+      }
+      return rows.map(modelInfo);
+    },
+    get loading() {
+      return (
+        !resourceData(store.models().current) ||
+        (this.pending && !this.models.length)
+      );
+    },
+    async retry() {
+      if (this.pending) return;
+      this.pending = true;
+      try {
+        await reader.read({
+          query: {
+            account_key: accountKey,
+            workers: workers ? "1" : undefined,
+            retry: "1",
+          },
+        });
+        runInAction(() => {
+          this.readError = "";
+        });
+      } catch (error) {
+        runInAction(() => {
+          this.readError =
+            error instanceof ApiError &&
+            error.status === 503 &&
+            error.catalogPending
+              ? ""
+              : errorText(error);
+        });
+      } finally {
+        runInAction(() => {
+          this.pending = false;
+        });
+      }
+    },
+  };
+  return makeAutoObservable(view);
+}
+const emptyCatalog = {
+  models: [] as WorkerModelInfo[],
+  loading: false,
+  error: "",
+  retry: () => {},
+};
 export function useWorkerModels(
   accountKey: string,
   enabled: boolean,
   workers = false,
 ) {
+  const store = useServerStore();
   const reader = useModelCatalogReader();
-  const modelCatalogs = ownerCatalogs(reader.cacheOwner ?? reader);
-  const catalogKey = JSON.stringify([reader.scope, accountKey, workers]);
-  const read = reader.read;
-  const subscribe = useCallback(
-    (listener: () => void) =>
-      enabled
-        ? subscribeModelCatalog(
-            modelCatalogs,
-            catalogKey,
-            listener,
-            accountKey,
-            workers,
-            reader.subscribeState,
-          )
-        : () => {},
-    [
-      accountKey,
-      catalogKey,
-      enabled,
-      read,
-      workers,
-      reader.subscribeState,
-      modelCatalogs,
-    ],
-  );
-  const getSnapshot = useCallback(
-    () => modelCatalogs.get(catalogKey)?.snapshot || emptyModelCatalog,
-    [catalogKey, modelCatalogs],
-  );
-  const current = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-  const models = useMemo(
-    () => current.models.filter((model) => model.model && !model.hidden),
-    [current.models],
-  );
-  return {
-    models,
-    loading:
-      !current.loaded || Boolean(current.pending && !current.models.length),
-    error: current.error,
-    retry: () => {
-      if (!enabled) return;
-      const entry = catalogEntry(modelCatalogs, catalogKey);
-      void readModelCatalog(entry, read, accountKey, workers, true).catch(
-        () => {},
-      );
-    },
-  };
+  return enabled
+    ? workerCatalog(store, reader, accountKey, workers)
+    : emptyCatalog;
 }

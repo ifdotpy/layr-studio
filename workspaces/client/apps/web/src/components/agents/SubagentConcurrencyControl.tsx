@@ -1,5 +1,8 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./state.ts";
+
 import { outboxRequests } from "../../browserPersistence";
 import { AgentMode } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -166,6 +169,7 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   storageKey,
   refresh,
 }: Props & { storageKey: string }) {
+  const store = useServerStore();
   const storage = useServerStorage();
   const outbox = outboxRequests(storage);
   const prefix = outbox.key("agentMode", "");
@@ -181,7 +185,9 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   };
   const { post } = useServerApi();
 
-  const detail = useAgentDetail(lead);
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(lead.id)).current,
+  );
   const snapshot = stateOf(detail || {});
   const supported = snapshot !== undefined;
   const [initial, setInitial] = useState(() => {

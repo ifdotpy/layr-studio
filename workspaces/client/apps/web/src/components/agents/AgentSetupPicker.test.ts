@@ -1,3 +1,5 @@
+import { ServerStoreProvider } from "../../servers/ServerServicesContext.tsx";
+import { observableFixture } from "../observableFixture.tsx";
 import { AccountStatus, ProviderKind } from "../../generated/api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -39,7 +41,11 @@ function render(patch: Partial<AgentSetupPickerProps>): string {
     createElement(
       MantineProvider,
       null,
-      createElement(AgentSetupPicker, { ...base, ...patch }),
+      createElement(
+        ServerStoreProvider,
+        { value: observableFixture().store },
+        createElement(AgentSetupPicker, { ...base, ...patch }),
+      ),
     ),
   );
 }

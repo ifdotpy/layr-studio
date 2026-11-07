@@ -1,7 +1,10 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
 import ErrorDescription from "../ErrorDescription";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
-import { useAgentDetail, useAgentSummary } from "./state.ts";
+
 import { phasePresentation } from "./phasePresentation.ts";
 import { PhaseWaitDetails } from "./PhaseWaitDetails.tsx";
 import { useVisualActivityRef } from "../../hooks/useVisualActivity";
@@ -21,8 +24,11 @@ const AgentPhase = observer(function AgentPhase({
   connectionDetails,
   phaseOverride,
 }: PresentationProps & { agent: SidebarAgent }) {
+  const store = useServerStore();
   const visualRef = useVisualActivityRef<HTMLDivElement>();
-  const detail = useAgentDetail(agent);
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const view = phasePresentation(
     agent,
     detail,
@@ -110,6 +116,7 @@ export const LiveAgentPhase = observer(function LiveAgentPhase({
   agentId,
   ...props
 }: PresentationProps & { agentId?: string | undefined }) {
-  const agent = useAgentSummary(agentId || "");
+  const store = useServerStore();
+  const agent = resourceData(store.state().current)?.agents.get(agentId || "");
   return agent ? <AgentPhase agent={agent} {...props} /> : null;
 });

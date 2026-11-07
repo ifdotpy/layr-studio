@@ -1,5 +1,8 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./state.ts";
+
 import { AgentSource } from "../../generated/api";
 import { ProviderKind } from "../../generated/providerKind.ts";
 import { lazy, Suspense } from "react";
@@ -40,10 +43,15 @@ type Props = {
 export const ChatSettingsDialog = observer(function ChatSettingsDialog(
   p: Props,
 ) {
+  const store = useServerStore();
   const mobile = useMediaQuery("(max-width: 48em)");
   const root = p.lead || p.agent;
-  const detail = useAgentDetail(p.agent || undefined);
-  const rootDetail = useAgentDetail(root || undefined);
+  const detail = p.agent
+    ? resourceData(store.agentDetail(observableAgentId(p.agent.id)).current)
+    : undefined;
+  const rootDetail = root
+    ? resourceData(store.agentDetail(observableAgentId(root.id)).current)
+    : undefined;
   return (
     <Modal
       opened={p.settingsOpen}

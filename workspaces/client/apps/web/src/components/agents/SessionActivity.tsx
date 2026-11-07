@@ -1,8 +1,10 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
 import { useConversationActions } from "../conversation/navigation.ts";
 import { ChevronRight, Clock3, Terminal, Users } from "lucide-react";
 import { useEffect, useState } from "react";
 import { observer } from "mobx-react-lite";
-import { useActivityView, useAgentSummary } from "./state.ts";
+import { useActivityView } from "./state.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import "./session-activity.css";
 import { useVisualActivity } from "../../hooks/useVisualActivity";
@@ -34,7 +36,8 @@ export const LiveSessionActivity = observer(function LiveSessionActivity({
   agentId: string;
   compact: boolean;
 }) {
-  const agent = useAgentSummary(agentId);
+  const store = useServerStore();
+  const agent = resourceData(store.state().current)?.agents.get(agentId);
   return agent ? (
     <AgentSessionActivity agent={agent} compact={compact} />
   ) : null;

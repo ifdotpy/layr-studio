@@ -1,14 +1,17 @@
+import {
+  ModelCatalogFixture,
+  type ModelCatalogFixtureSource,
+} from "../../src/components/agents/modelCatalogFixture.tsx";
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { observer } from "mobx-react-lite";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import {
-  ModelCatalogReader,
-  useWorkerModels,
-} from "../../src/components/agents/WorkerModelPicker.tsx";
+import { useWorkerModels } from "../../src/components/agents/WorkerModelPicker.tsx";
 import { get } from "../../src/api.ts";
 
-type Reader = React.ContextType<typeof ModelCatalogReader>;
+type Reader = ModelCatalogFixtureSource;
 export type ModelSnapshot = Parameters<
   Parameters<Reader["subscribeState"]>[0]
 >[0];
@@ -40,19 +43,27 @@ const reader: Reader = {
     };
   },
 };
-function Fixture({ account, workers }: { account: string; workers: boolean }) {
+const Fixture = observer(function Fixture({
+  account,
+  workers,
+}: {
+  account: string;
+  workers: boolean;
+}) {
   const result = useWorkerModels(account, true, workers);
   window.catalogResult = result;
   return <pre>{JSON.stringify(result)}</pre>;
-}
+});
 window.mountCatalog = (account = "default", workers = false) => {
   const element = document.getElementById("app")!;
   const root = (window.catalogRoot ||= createRoot(element));
   flushSync(() =>
     root.render(
-      <ModelCatalogReader.Provider value={reader}>
-        <Fixture account={account} workers={workers} />
-      </ModelCatalogReader.Provider>,
+      <ServerViewStoreProvider>
+        <ModelCatalogFixture value={reader}>
+          <Fixture account={account} workers={workers} />
+        </ModelCatalogFixture>
+      </ServerViewStoreProvider>,
     ),
   );
 };

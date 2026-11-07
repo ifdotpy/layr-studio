@@ -1,11 +1,17 @@
+import { useServerStore } from "../../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
 import { useTeam } from "../TeamPanelContext.tsx";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "../state.ts";
+
 import { workerActivity } from "../workerPresentation.ts";
 import type { WorkerProps } from "../WorkerCard.tsx";
 
 const WorkerTask = observer(function WorkerTask({ agent }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   return detail?.overview?.task ? (
     <span className="worker-task" title={detail.overview.task}>
       {detail.overview.task}
@@ -16,7 +22,10 @@ const WorkerTask = observer(function WorkerTask({ agent }: WorkerProps) {
 export const WorkerActivity = observer(function WorkerActivity({
   agent,
 }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const {
     ActivityIcon,
     error,

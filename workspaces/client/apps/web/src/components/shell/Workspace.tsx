@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { ApiError } from "../../api";
 import { serverMutationResponseIsUncertain } from "../../servers/mutationIdentity";
 import {
@@ -1055,7 +1056,7 @@ function inventoryName(value: unknown): string | undefined {
   return undefined;
 }
 
-function Profiles(c: Context) {
+const Profiles = observer(function Profiles(c: Context) {
   const state = useResource("/api/profiles", c.revision),
     [draft, setDraft, clearDraft] = useFormDraft(
       `studio-profile-draft:${c.data.stateDir}`,
@@ -1333,7 +1334,7 @@ function Profiles(c: Context) {
       )}
     </>
   );
-}
+});
 
 function Rules(c: Context) {
   const state = useResource("/api/rules", c.revision, {

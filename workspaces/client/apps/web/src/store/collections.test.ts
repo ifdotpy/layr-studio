@@ -61,3 +61,15 @@ it("dispatches typed payloads into their generated collection maps", () => {
   expect(values.agentTail.get("lead")).toEqual({ id: "lead", tail: "text" });
   expect(values.agent.size).toBe(0);
 });
+
+it("generates account summaries, model rows and rate limits on the shared state resource", () => {
+  const state = createStateMirror().current;
+  for (const name of [
+    "accountsSummary",
+    "modelsByAccount",
+    "rateLimitsByAccount",
+  ] as const) {
+    expect(state[name]).toBeDefined();
+    expect(state[name].size).toBe(0);
+  }
+});

@@ -1,3 +1,5 @@
+import { observable, runInAction } from "mobx";
+import { createModelsMirror } from "../generated/observableResources.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
   observer: <T>(component: T) => component,
@@ -7,10 +9,7 @@ vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useAgentDetail: () => undefined,
 }));
-import {
-  MessageSendStatus,
-  ProviderKind as GeneratedApiProviderKind,
-} from "../generated/api.ts";
+import { MessageSendStatus, ProviderKind } from "../generated/api.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, Snapshot } from "../types";
 
@@ -203,13 +202,38 @@ import {
   type MessageReceiptEntityDto,
 } from "../generated/observableResources";
 const nativeState = createStateMirror();
+const modelState = createModelsMirror();
+let modelReader = { scope: "fixture", read: get };
+const costsState = observable.box<
+  import("../store/runtime.ts").ResourceStatus<
+    import("../generated/observableResources.ts").CostsData
+  >
+>({ status: "loading" }, { deep: false });
+const sessionState = observable.box<
+  import("../store/runtime.ts").ResourceStatus<
+    import("../generated/observableResources.ts").SessionCostData
+  >
+>({ status: "loading" }, { deep: false });
 const reconnect = vi.fn();
 const nativeStore = {
   state: () => ({ current: { status: "live", data: nativeState.current } }),
+  agentDetail: () => ({ current: { status: "loading" } }),
+  models: () => ({ current: { status: "live", data: modelState.current } }),
+  costs: () => ({
+    get current() {
+      return costsState.get();
+    },
+  }),
+  sessionCost: () => ({
+    get current() {
+      return sessionState.get();
+    },
+  }),
 };
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
   useServerStore: () => nativeStore,
+  useServerModelReader: () => modelReader,
   useServerResources: () => ({ replaceStream: reconnect }),
 }));
 function receiveReceipts(receipts: MessageReceiptEntityDto[]) {
@@ -249,11 +273,7 @@ function publishQueue(revision: string, text: string | null) {
 import { useMessageReceipts } from "./useMessageReceipts";
 import { useMessageQueue } from "./useMessageQueue";
 import { ApiError } from "../api";
-import {
-  useWorkerModels,
-  readWorkerModels,
-  ModelCatalogReader,
-} from "./agents/WorkerModelPicker";
+import { useWorkerModels, readWorkerModels } from "./agents/WorkerModelPicker";
 import { useAccounts } from "./Accounts";
 import Usage from "./Usage";
 
@@ -273,6 +293,31 @@ describe("resource read callers", () => {
   beforeEach(() => {
     projectionListeners.clear();
     nativeState.apply([]);
+    modelState.apply([]);
+    runInAction(() => {
+      costsState.set({ status: "loading" });
+      sessionState.set({ status: "loading" });
+    });
+    modelReader = { scope: "fixture", read: get };
+    projectionListeners.add((snapshot) => {
+      const runtime = (snapshot as Snapshot).runtime;
+      if (runtime.accountsSummary)
+        nativeState.apply([
+          {
+            collection: "accounts",
+            id: "current",
+            value: runtime.accountsSummary,
+          },
+        ]);
+      runInAction(() => {
+        costsState.set({
+          status: "live",
+          data: Object.values(runtime.accountCostsByAccount ?? {}),
+        });
+        const cost = runtime.sessionCostsByAgent?.lead;
+        if (cost) sessionState.set({ status: "live", data: cost });
+      });
+    });
     reconnect.mockClear();
     vi.useFakeTimers();
     get.mockReset();
@@ -346,7 +391,7 @@ describe("resource read callers", () => {
   });
 
   it("applies safe account summaries without baseline or update GETs", async () => {
-    mount(() => useAccounts("workspace"));
+    const accountView = mount(() => useAccounts("workspace"));
     const initial = {
       accounts: [{ id: "connected", email: "person@example.test" }],
       archivedAccounts: [],
@@ -357,7 +402,7 @@ describe("resource read callers", () => {
     };
     for (const accept of projectionListeners)
       accept({ runtime: { accountsSummary: initial } });
-    expect(states[0]?.value).toEqual({ ...initial, logins: [] });
+    expect(accountView.data).toEqual({ ...initial, logins: [] });
     const changed = {
       ...initial,
       accounts: [{ id: "connected", disconnected: true }],
@@ -365,7 +410,7 @@ describe("resource read callers", () => {
     for (const accept of projectionListeners)
       accept({ runtime: { accountsSummary: changed } });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(states[0]?.value).toEqual({ ...changed, logins: [] });
+    expect(accountView.data).toEqual({ ...changed, logins: [] });
     expect(get).not.toHaveBeenCalled();
     expect(watchers.size).toBe(0);
   });
@@ -384,7 +429,7 @@ describe("resource read callers", () => {
     });
     await accounts.refresh();
     expect(get).toHaveBeenCalledExactlyOnceWith("/api/accounts");
-    expect(states[0]?.value).toEqual(response);
+    expect(accounts.data).toEqual(response);
   });
 
   it("applies queue projections without GETs at baseline, update, and idle", async () => {
@@ -468,156 +513,36 @@ describe("resource read callers", () => {
     expect(localStorage.getItem(key)).toBeNull();
   });
 
-  it("uses streamed model lists for display and fresh metadata for account selection", async () => {
-    const row = (
-      accountKey: string,
-      model: string,
-      hidden: boolean,
-      catalogPosition: number,
-    ): NonNullable<Snapshot["runtime"]["modelsByAccount"]>[string][number] => ({
-      accountKey,
-      model,
-      hidden,
-      provider: accountKey === "default" ? "codex" : "claude",
-      catalogPosition,
-      serviceTiers: [],
-      supportedReasoningEfforts: [],
-    });
-    const snapshot = (
-      modelsByAccount: NonNullable<Snapshot["runtime"]["modelsByAccount"]>,
-    ) => ({
-      runtime: { modelsByAccount },
-      entitiesComplete: true,
-    });
-    let current = snapshot({
-      default: [
-        row("default", "shared-model", false, 0),
-        row("default", "hidden-model", true, 1),
-      ],
-      secondary: [
-        row("secondary", "other-model", false, 0),
-        row("secondary", "shared-model", false, 1),
-      ],
-    });
-    const listeners: Array<(value: typeof current) => void> = [];
-    const reader = {
-      scope: "model-entities",
-      cacheOwner: {},
-      read: get,
-      subscribeState: (
-        accept: (value: typeof current) => void,
-        _fail: (error: unknown | null) => void,
-      ) => {
-        listeners.push(accept);
-        accept(current);
-        return vi.fn();
-      },
-    };
-    contexts.set(ModelCatalogReader, reader);
-
-    mount(() => useWorkerModels("default", true));
-    const accountView = mount(() => useWorkerModels("default", true));
-    expect(accountView.models).toMatchObject([{ model: "shared-model" }]);
-    expect(states[0]!.value).toMatchObject({
-      models: [{ model: "shared-model" }, { model: "hidden-model" }],
-      pending: false,
-      loaded: true,
-    });
-    expect(get).not.toHaveBeenCalled();
-
-    current = snapshot({
-      default: [row("default", "updated-model", false, 0)],
-      secondary: [row("secondary", "other-model", false, 0)],
-    });
-    listeners[0]!(current);
-    const updatedAccountView = mount(() => useWorkerModels("default", true));
-    expect(updatedAccountView.models).toMatchObject([
-      { model: "updated-model" },
+  it("uses streamed models for display and a fresh owner read for selection", async () => {
+    const publish = (model: string) =>
+      modelState.apply([
+        {
+          collection: "model",
+          id: "default:" + model,
+          value: {
+            accountKey: "default",
+            model,
+            provider: ProviderKind.codex,
+            catalogPosition: 0,
+          },
+        },
+      ]);
+    publish("streamed");
+    expect(mount(() => useWorkerModels("default", true)).models).toMatchObject([
+      { model: "streamed" },
     ]);
-    expect(states[0]!.value).toMatchObject({
-      models: [{ model: "updated-model" }],
-    });
-    expect(get).not.toHaveBeenCalled();
-
-    cursor.state = 0;
-    cursor.ref = 0;
-    cursor.memo = 0;
-    states.length = 0;
-    memos.length = 0;
-    contexts.set(ModelCatalogReader, reader);
-    mount(() => useWorkerModels("default", true, true));
-    const workerView = mount(() => useWorkerModels("default", true, true));
-    expect(workerView.models).toMatchObject([
-      { model: "updated-model" },
-      { model: "other-model" },
+    publish("updated");
+    expect(mount(() => useWorkerModels("default", true)).models).toMatchObject([
+      { model: "updated" },
     ]);
     expect(get).not.toHaveBeenCalled();
-    get.mockResolvedValueOnce({
-      data: [row("default", "fresh-model", false, 0)],
-    });
-    await expect(
-      readWorkerModels(reader, "default", true),
-    ).resolves.toMatchObject([{ model: "fresh-model" }]);
+    get.mockResolvedValueOnce({ data: [{ model: "fresh" }] });
+    expect(await readWorkerModels(modelReader, "default", true)).toMatchObject([
+      { model: "fresh" },
+    ]);
     expect(get).toHaveBeenCalledExactlyOnceWith({
       query: { account_key: "default", workers: "1", fresh: "1" },
     });
-    expect(states[0]!.value).toMatchObject({
-      models: [{ model: "updated-model" }, { model: "other-model" }],
-      pending: false,
-    });
-  });
-
-  it("keeps the model picker loading until the streamed entity baseline completes", () => {
-    let snapshot: {
-      runtime: {
-        modelsByAccount: NonNullable<Snapshot["runtime"]["modelsByAccount"]>;
-      };
-      entitiesComplete?: boolean;
-    } = { runtime: { modelsByAccount: {} }, entitiesComplete: false };
-    let acceptSnapshot!: (value: typeof snapshot) => void;
-    const reader = {
-      scope: "pending-model-entities",
-      cacheOwner: {},
-      read: get,
-      subscribeState: (accept: typeof acceptSnapshot) => {
-        acceptSnapshot = accept;
-        accept(snapshot);
-        return vi.fn();
-      },
-    };
-    contexts.set(ModelCatalogReader, reader);
-    const pendingView = mount(() => useWorkerModels("default", true));
-    expect(pendingView.loading).toBe(true);
-    expect(states[0]!.value).toMatchObject({
-      models: [],
-      pending: true,
-    });
-    snapshot = {
-      runtime: {
-        modelsByAccount: {
-          default: [
-            {
-              accountKey: "default",
-              model: "ready-model",
-              provider: GeneratedApiProviderKind.codex,
-              hidden: false,
-              catalogPosition: 0,
-              serviceTiers: [],
-              supportedReasoningEfforts: [],
-            },
-          ],
-        },
-      },
-      entitiesComplete: true,
-    };
-    acceptSnapshot(snapshot);
-    const loadedView = mount(() => useWorkerModels("default", true));
-    expect(loadedView.loading).toBe(false);
-    expect(states[0]!.value).toMatchObject({
-      models: [{ model: "ready-model" }],
-      pending: false,
-    });
-    expect(get).not.toHaveBeenCalled();
   });
 
   it("releases cost interest when the mounted footer is hidden", () => {
@@ -924,10 +849,7 @@ describe("resource read callers", () => {
         reload: vi.fn(),
       }),
     );
-    expect(subscription).toHaveBeenCalledWith({
-      kind: "session-cost",
-      agentId: "lead",
-    });
+
     expect(subscription).not.toHaveBeenCalledWith({ kind: "costs" });
     for (const accept of projectionListeners)
       accept({
@@ -936,14 +858,11 @@ describe("resource read callers", () => {
           accountCostsByAccount: { default: account },
         },
       });
-    expect(
-      states.some(
-        (entry) =>
-          (entry.value as { value?: { totalUSD?: number } } | null)?.value
-            ?.totalUSD === 0.5,
-      ),
-    ).toBe(true);
-    expect(states.some((entry) => entry.value === account)).toBe(true);
+    expect(sessionState.get()).toMatchObject({
+      status: "live",
+      data: { totalUSD: 0.5 },
+    });
+    expect(costsState.get()).toMatchObject({ status: "live", data: [account] });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(get).not.toHaveBeenCalled();
     expect(syncPost).not.toHaveBeenCalled();

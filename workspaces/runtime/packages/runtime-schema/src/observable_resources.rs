@@ -5,6 +5,11 @@ pub use studio_observable_codegen::{
 
 pub fn models() -> Vec<ObservableModel> {
     vec![
+        ObservableModel::named("AccountsSummaryDto").track_nested(&[]),
+        ObservableModel::named("ModelEntityDto")
+            .declared_fields()
+            .track_nested(&[]),
+        ObservableModel::named("RateLimitView").track_nested(&[]),
         ObservableModel::named("AgentSummaryEntityDto")
             .identity("id")
             .track_nested(&["operationalStatus", "markRead", "startWait"]),
@@ -121,6 +126,9 @@ pub fn resources() -> Vec<ObservableResource> {
             "state",
             "SyncEntityPayload",
             vec![
+                ObservableCollection::named("accounts", "accountsSummary", "AccountsSummaryDto"),
+                ObservableCollection::named("model", "modelsByAccount", "ModelEntityDto"),
+                ObservableCollection::named("rateLimit", "rateLimitsByAccount", "RateLimitView"),
                 ObservableCollection::named("agentSummary", "agents", "AgentSummaryEntityDto"),
                 ObservableCollection::named("project", "projects", "ProjectEntityDto"),
                 ObservableCollection::named("peerTeam", "peerTeams", "PeerTeamEntityDto"),
@@ -152,6 +160,26 @@ pub fn resources() -> Vec<ObservableResource> {
                 "questionHistory",
                 "questionHistory",
                 "Approval",
+            )],
+        ),
+        ObservableResource::mapped(
+            "session-cost",
+            "sessionCost",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        )
+        .opaque(),
+        ObservableResource::mapped("costs", "costs", vec![]).opaque(),
+        ObservableResource::collections(
+            "state",
+            "models",
+            "SyncEntityPayload",
+            vec![ObservableCollection::named(
+                "model",
+                "modelsByAccount",
+                "ModelEntityDto",
             )],
         ),
         ObservableResource::named(
@@ -300,7 +328,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 20);
+        assert_eq!(resources.len(), 23);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]
@@ -309,6 +337,9 @@ mod tests {
                 .map(|item| item.collection.as_str())
                 .collect::<Vec<_>>(),
             [
+                "accounts",
+                "model",
+                "rateLimit",
                 "agentSummary",
                 "project",
                 "peerTeam",

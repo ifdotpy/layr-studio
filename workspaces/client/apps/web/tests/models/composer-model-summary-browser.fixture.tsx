@@ -15,7 +15,10 @@ import "../../src/components/conversation/empty-chat-settings.css";
 import { theme } from "../../src/theme.ts";
 import { ExecutionSummaryTrigger } from "../../src/components/agents/ExecutionSummaryTrigger.tsx";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
-import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
+import {
+  ModelCatalogFixture,
+  type ModelCatalogFixtureSource,
+} from "../../src/components/agents/modelCatalogFixture.tsx";
 const query = new URLSearchParams(location.search);
 const name =
   query.get("long") === "word"
@@ -47,7 +50,7 @@ const models = [
     serviceTiers: [],
   },
 ] satisfies components["schemas"]["ProviderModel"][];
-const reader: React.ContextType<typeof ModelCatalogReader> = {
+const reader: ModelCatalogFixtureSource = {
   scope: "composer-model-summary",
   read: async () => ({ data: models }),
   subscribeState: (accept) => {
@@ -97,7 +100,7 @@ function Fixture() {
       <AgentModelsFixture
         agents={agent.id === lead.id ? [lead] : [lead, agent]}
       >
-        <ModelCatalogReader.Provider value={reader}>
+        <ModelCatalogFixture value={reader}>
           <main
             style={{
               padding: 8,
@@ -167,7 +170,7 @@ function Fixture() {
               </div>
             </form>
           </main>
-        </ModelCatalogReader.Provider>
+        </ModelCatalogFixture>
       </AgentModelsFixture>
     </MantineProvider>
   );

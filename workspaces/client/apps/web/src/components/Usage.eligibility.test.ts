@@ -25,6 +25,11 @@ vi.mock("@mantine/core", async (importOriginal) => {
   };
 });
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => ({
+    agentDetail: () => ({ current: { status: "loading" } }),
+    sessionCost: () => ({ current: { status: "loading" } }),
+    costs: () => ({ current: { status: "loading" } }),
+  }),
   useServerServices: () => null,
   useServerApi: () => ({ get: vi.fn(), post: vi.fn(), saved: () => "" }),
   useServerSync: () => ({ subscribeStateProjection: vi.fn(() => () => {}) }),

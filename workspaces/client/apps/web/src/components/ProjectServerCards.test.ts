@@ -1,3 +1,5 @@
+import { observableFixture } from "./observableFixture.tsx";
+import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
 import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,28 +12,32 @@ describe("new chat actions", () => {
   it("offers Cancel and a primary Start chat action", () => {
     const markup = renderToStaticMarkup(
       createElement(
-        MantineProvider,
-        { theme },
-        createElement(ProjectServerCards, {
-          project: {
-            id: "logical",
-            path: "logical",
-            name: "Project",
-            locations: [
-              { serverId: "local", path: "/folder", projectId: "/folder" },
-            ],
-          },
-          servers: [
-            {
-              id: "local",
-              label: "This computer",
-              system: "Darwin",
+        ServerStoreProvider,
+        { value: observableFixture().store },
+        createElement(
+          MantineProvider,
+          { theme },
+          createElement(ProjectServerCards, {
+            project: {
+              id: "logical",
+              path: "logical",
+              name: "Project",
+              locations: [
+                { serverId: "local", path: "/folder", projectId: "/folder" },
+              ],
             },
-          ],
-          onChoose: () => {},
-          onAdd: () => {},
-          onCancel: () => {},
-        }),
+            servers: [
+              {
+                id: "local",
+                label: "This computer",
+                system: "Darwin",
+              },
+            ],
+            onChoose: () => {},
+            onAdd: () => {},
+            onCancel: () => {},
+          }),
+        ),
       ),
     );
     expect(markup).toContain("Workspace");
@@ -53,34 +59,38 @@ describe("new chat actions", () => {
 it("allows a store override when the default store is unavailable", () => {
   const markup = renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      { theme },
-      createElement(ProjectServerCards, {
-        project: {
-          id: "linux",
-          name: "Linux",
-          path: "/folder",
-          locations: [
-            { serverId: "linux", projectId: "linux", path: "/folder" },
-          ],
-        },
-        servers: [
-          {
+      ServerStoreProvider,
+      { value: observableFixture().store },
+      createElement(
+        MantineProvider,
+        { theme },
+        createElement(ProjectServerCards, {
+          project: {
             id: "linux",
-            label: "Linux",
-            system: "Linux",
-            nativeLayr: {
-              status: "notReady",
-              reason: "A btrfs store is required.",
-            },
-            nativeLayrMessage: "A btrfs store is required.",
-            defaultWorkspaceMode: ChatWorkspaceMode.worktree,
+            name: "Linux",
+            path: "/folder",
+            locations: [
+              { serverId: "linux", projectId: "linux", path: "/folder" },
+            ],
           },
-        ],
-        onChoose: () => {},
-        onAdd: () => {},
-        onCancel: () => {},
-      }),
+          servers: [
+            {
+              id: "linux",
+              label: "Linux",
+              system: "Linux",
+              nativeLayr: {
+                status: "notReady",
+                reason: "A btrfs store is required.",
+              },
+              nativeLayrMessage: "A btrfs store is required.",
+              defaultWorkspaceMode: ChatWorkspaceMode.worktree,
+            },
+          ],
+          onChoose: () => {},
+          onAdd: () => {},
+          onCancel: () => {},
+        }),
+      ),
     ),
   );
   expect(markup).toContain("A btrfs store is required.");
@@ -98,24 +108,28 @@ it("allows a store override when the default store is unavailable", () => {
 it("shows the server's install message on the disabled Layr option", () => {
   const markup = renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      { theme },
-      createElement(ProjectServerCards, {
-        project: { id: "p", name: "P", path: "/p" },
-        servers: [
-          {
-            id: "local",
-            label: "Server",
-            system: "Darwin",
-            nativeLayr: { status: "notInstalled" },
-            nativeLayrMessage: "Install layr",
-            defaultWorkspaceMode: ChatWorkspaceMode.worktree,
-          },
-        ],
-        onChoose: () => {},
-        onAdd: () => {},
-        onCancel: () => {},
-      }),
+      ServerStoreProvider,
+      { value: observableFixture().store },
+      createElement(
+        MantineProvider,
+        { theme },
+        createElement(ProjectServerCards, {
+          project: { id: "p", name: "P", path: "/p" },
+          servers: [
+            {
+              id: "local",
+              label: "Server",
+              system: "Darwin",
+              nativeLayr: { status: "notInstalled" },
+              nativeLayrMessage: "Install layr",
+              defaultWorkspaceMode: ChatWorkspaceMode.worktree,
+            },
+          ],
+          onChoose: () => {},
+          onAdd: () => {},
+          onCancel: () => {},
+        }),
+      ),
     ),
   );
   expect(markup).toContain('class="native-layr-error" title="Install layr"');
@@ -127,23 +141,27 @@ it("shows the server's install message on the disabled Layr option", () => {
 it("selects the server's default when Layr is ready", () => {
   const markup = renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      { theme },
-      createElement(ProjectServerCards, {
-        project: { id: "p", name: "P", path: "/p" },
-        servers: [
-          {
-            id: "local",
-            label: "Server",
-            system: "Linux",
-            nativeLayr: { status: "ready" },
-            defaultWorkspaceMode: ChatWorkspaceMode["layr-native"],
-          },
-        ],
-        onChoose: () => {},
-        onAdd: () => {},
-        onCancel: () => {},
-      }),
+      ServerStoreProvider,
+      { value: observableFixture().store },
+      createElement(
+        MantineProvider,
+        { theme },
+        createElement(ProjectServerCards, {
+          project: { id: "p", name: "P", path: "/p" },
+          servers: [
+            {
+              id: "local",
+              label: "Server",
+              system: "Linux",
+              nativeLayr: { status: "ready" },
+              defaultWorkspaceMode: ChatWorkspaceMode["layr-native"],
+            },
+          ],
+          onChoose: () => {},
+          onAdd: () => {},
+          onCancel: () => {},
+        }),
+      ),
     ),
   );
   const option = markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0];

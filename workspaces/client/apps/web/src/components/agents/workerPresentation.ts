@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "../../deepReadonly.ts";
 import { CircleAlert } from "lucide-react";
 import {
   formatAgentStatus,
@@ -18,8 +19,8 @@ import type { WorkerModelInfo } from "./WorkerModelPicker.tsx";
 export function workerMeta(
   agent: SidebarAgent,
   detail: Agent | undefined,
-  catalog: WorkerModelInfo[],
-  accounts: Account[],
+  catalog: readonly WorkerModelInfo[],
+  accounts: DeepReadonly<Account[]>,
 ) {
   const provider = agent.provider || "";
   const models = catalog.filter(

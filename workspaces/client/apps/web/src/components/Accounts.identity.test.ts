@@ -1,3 +1,6 @@
+vi.mock("mobx-react-lite", () => ({
+  observer: <T>(component: T) => component,
+}));
 import {
   ProviderKind as GeneratedApiProviderKind,
   AccountStatus as GeneratedApiAccountStatus,

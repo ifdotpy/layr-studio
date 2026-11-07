@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { AccountsState } from "../../src/components/Accounts.tsx";
 const initial: AccountsState = await (await fetch("/fixture-data")).json();
 declare global {
@@ -35,4 +36,8 @@ function Fixture() {
     </MantineProvider>
   );
 }
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+  <AgentModelsFixture agents={[]}>
+    <Fixture />
+  </AgentModelsFixture>,
+);

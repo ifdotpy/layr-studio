@@ -15,7 +15,6 @@ it.each([false, true])(
       {
         scope: "account-choice",
         read,
-        subscribeState: vi.fn(),
       },
       "selected-account",
       workers,

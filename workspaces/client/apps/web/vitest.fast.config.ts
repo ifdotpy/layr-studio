@@ -241,6 +241,7 @@ export default {
       "src/servers/ServerServices.owners.test.ts",
       "src/components/useAttachmentDrafts.render.test.ts",
       "src/components/BrowserDictation.languages.test.ts",
+      "src/components/accountModelProjections.render.test.ts",
     ],
   },
 };

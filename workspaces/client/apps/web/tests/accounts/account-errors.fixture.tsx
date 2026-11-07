@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -102,4 +103,8 @@ function Harness() {
     </MantineProvider>
   );
 }
-createRoot(document.getElementById("root")!).render(<Harness />);
+createRoot(document.getElementById("root")!).render(
+  <AgentModelsFixture agents={[]}>
+    <Harness />
+  </AgentModelsFixture>,
+);

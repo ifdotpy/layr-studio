@@ -146,6 +146,17 @@ vi.mock("react", async (load) => ({
 }));
 vi.mock("../../appLog", () => ({ appendAppLog: h.report }));
 vi.mock("../../servers/ServerServicesContext", () => ({
+  useServerStore: () => ({
+    state: () => ({
+      current: { status: "live", data: observableFixture().mirror.current },
+    }),
+    agentDetail: (id: string) => {
+      const data = generatedAgents.get(id)?.details.get(id)?.current;
+      return {
+        current: data ? { status: "live", data } : { status: "loading" },
+      };
+    },
+  }),
   useServerStorage: () => ({
     setItem: (key: string, raw: string) => h.storage.set(key, JSON.parse(raw)),
     removeItem: (key: string) => h.storage.delete(key),

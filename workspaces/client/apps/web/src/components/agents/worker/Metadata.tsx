@@ -1,9 +1,12 @@
+import { useServerStore } from "../../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useContext } from "react";
 import { accountDisplayName } from "../../../accountName.ts";
 import TokenRate from "../../TokenRate.tsx";
-import { TeamModelCatalog, TeamAccountCatalog } from "../WorkerOverview.tsx";
-import { useAgentDetail } from "../state.ts";
+import { useWorkerModels } from "../WorkerModelPicker.tsx";
+import { useTeam } from "../TeamPanelContext.tsx";
+
 import { workerMeta } from "../workerPresentation.ts";
 import type { WorkerProps } from "../WorkerCard.tsx";
 
@@ -16,12 +19,23 @@ const WorkerTokenRate = observer(function WorkerTokenRate({
 export const WorkerMetadata = observer(function WorkerMetadata({
   agent,
 }: WorkerProps) {
-  const detail = useAgentDetail(agent);
-  const accounts = useContext(TeamAccountCatalog);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
+  const { view } = useTeam();
+  const accounts =
+    resourceData(store.state().current)?.accountsSummary.get("current")
+      ?.accounts ?? [];
+  const catalog = useWorkerModels(
+    view.lead?.accountKey || "default",
+    true,
+    true,
+  );
   const { meta, modelName, effort, connected, account } = workerMeta(
     agent,
     detail,
-    useContext(TeamModelCatalog),
+    catalog.models,
     accounts,
   );
   return (

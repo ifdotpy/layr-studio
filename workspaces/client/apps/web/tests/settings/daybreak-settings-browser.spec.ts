@@ -259,13 +259,14 @@ test("Daybreak settings", async ({ context }) => {
     );
 
     await reset({
-      // Partial fixture view: this negative model fixture omits serviceTiers.
+      // No service tiers or provider capability metadata are available.
       models: [
         {
           model: "gpt-6-astra",
+          serviceTiers: [],
           supportedReasoningEfforts: [{ reasoningEffort: "high" }],
         },
-      ] as import("../../src/components/agents/WorkerModelPicker.tsx").WorkerModelInfo[],
+      ],
     });
     assert.equal(await mode().count(), 0);
     assert.equal(await modelOptionDisabled(model(), "gpt-6-astra"), false);

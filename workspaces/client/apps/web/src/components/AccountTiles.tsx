@@ -1,6 +1,9 @@
+import type { DeepReadonly } from "../deepReadonly.ts";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
 import { LimitColor } from "../generated/api.ts";
 import type { components } from "../generated/api";
-import { useServerSync } from "../servers/ServerServicesContext";
+import { useServerStore } from "../servers/ServerServicesContext";
 import { Checkbox, SegmentedControl, Tooltip } from "@mantine/core";
 import { Check } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
@@ -125,40 +128,7 @@ export const remainingText = (remaining: number) =>
 type LimitAccount = Pick<Account, "id" | "accountId" | "status">;
 /** What one limits reading of one account shows. A provider limit belongs to
  * the provider account, so every view of an account reads it through here. */
-type AccountProjection = components["schemas"]["RateLimitView"];
-
-export function useAccountLimitProjection(account: LimitAccount) {
-  const { subscribeStateProjection } = useServerSync();
-  const scope = JSON.stringify([account.id, account.accountId]);
-  const [state, setState] = useState<{
-    scope: string;
-    source: typeof subscribeStateProjection;
-    value: AccountProjection | null;
-  } | null>(null);
-  useEffect(() => {
-    let active = true;
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        if (!active) return;
-        const entity = snapshot?.runtime.rateLimitsByAccount?.[account.id];
-        const value =
-          entity &&
-          accountLimits(entity.observation, account.id, account.accountId)
-            ? entity
-            : null;
-        setState({ scope, source: subscribeStateProjection, value });
-      },
-      () => {},
-    );
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [scope, account.id, account.accountId, subscribeStateProjection]);
-  return state?.scope === scope && state.source === subscribeStateProjection
-    ? state.value
-    : null;
-}
+type AccountProjection = DeepReadonly<components["schemas"]["RateLimitView"]>;
 
 export function accountLimitView(
   account: LimitAccount,
@@ -183,6 +153,16 @@ export function accountLimitView(
 }
 export type AccountLimitView = ReturnType<typeof accountLimitView>;
 /** The limits of one account on the server of the surrounding scope. */
+export function useAccountLimitProjection(account: LimitAccount) {
+  const store = useServerStore();
+  const entity = resourceData(store.state().current)?.rateLimitsByAccount.get(
+    account.id,
+  );
+  return entity &&
+    accountLimits(entity.observation, account.id, account.accountId)
+    ? entity
+    : null;
+}
 export function useAccountLimitView(
   account: LimitAccount,
   { signedInOnly = true } = {},
@@ -192,14 +172,18 @@ export function useAccountLimitView(
   return accountLimitView(account, limits, signedInOnly, projection);
 }
 /** The remaining limit of an account as short text, for account lists. */
-export function AccountRemainingText({ account }: { account: LimitAccount }) {
+export const AccountRemainingText = observer(function AccountRemainingText({
+  account,
+}: {
+  account: LimitAccount;
+}) {
   const { remaining } = useAccountLimitView(account);
   return remaining === null ? null : (
     <small className="account-remaining" data-exhausted={remaining === 0}>
       {remainingText(remaining)}
     </small>
   );
-}
+});
 /** The name and remaining limit inside an account tile. */
 export function AccountTileLabel({
   name,
@@ -223,7 +207,7 @@ export function AccountTileLabel({
     </span>
   );
 }
-function AccountTile({
+const AccountTile = observer(function AccountTile({
   account,
   selected,
   disabled,
@@ -286,7 +270,7 @@ function AccountTile({
       </ActionButton>
     </Tooltip>
   );
-}
+});
 
 type AccountTilesProps = {
   label: string;

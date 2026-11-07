@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -12,17 +13,13 @@ import {
   createServerServices,
   type ServerServices,
 } from "../servers/serverServices";
-import { subscribeStateProjection } from "../sync/client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Stack } from "@mantine/core";
 import { errorText, type GetResult } from "../api";
-import type { Agent, Snapshot } from "../types";
-import { serverResourceScope, type StudioServer } from "../servers/registry";
+import type { Agent } from "../types";
+import { type StudioServer } from "../servers/registry";
 import { ExecutionSettings, settingsFor } from "./agents/ExecutionSettings";
-import {
-  ModelCatalogReader,
-  useWorkerModels,
-} from "./agents/WorkerModelPicker";
+import { useWorkerModels } from "./agents/WorkerModelPicker";
 import {
   DEFAULT_CLAUDE_LEAD_EFFORT,
   DEFAULT_CLAUDE_LEAD_MODEL,
@@ -69,62 +66,7 @@ export default function NewChatModelSettings(props: Props) {
     },
     [services, inherited, props.serverServices],
   );
-  const server = useRef(owner);
-  server.current = owner;
-  const reader = useMemo(() => {
-    // Several pickers read the same catalog. One read per query keeps the slow server and
-    // the browser's few connections for each server free for other requests.
-    type Options = Parameters<typeof readNewChatResource<"/api/models">>[2];
-    type Catalog = ReturnType<typeof readNewChatResource<"/api/models">>;
-    const reads = new Map<string, Catalog>();
-    return {
-      cacheOwner: services,
-      scope: services
-        ? JSON.stringify([
-            services.owner.id,
-            services.owner.origin,
-            services.owner.credentialId,
-          ])
-        : serverResourceScope(server.current),
-      subscribeState: (
-        accept: (snapshot: Snapshot) => void,
-        fail: (error: unknown | null) => void,
-      ) =>
-        services
-          ? services.sync.subscribeStateProjection((snapshot) => {
-              if (snapshot) accept(snapshot);
-            }, fail)
-          : subscribeStateProjection((snapshot) => {
-              if (snapshot) accept(snapshot);
-            }, fail),
-      read: (options: Options) => {
-        const key = JSON.stringify(options?.query ?? {});
-        let shared = reads.get(key);
-        if (!shared) {
-          shared = services
-            ? services.api.get("/api/models", { query: options?.query })
-            : readNewChatResource(server.current, "/api/models", {
-                query: options?.query,
-              });
-          reads.set(key, shared);
-          void shared.catch(() => {}).finally(() => reads.delete(key));
-        }
-        const signal = options?.signal;
-        if (!signal) return shared;
-        return new Promise((resolve, reject) => {
-          const abort = () => reject(new DOMException("Aborted", "AbortError"));
-          if (signal.aborted) return abort();
-          signal.addEventListener("abort", abort, { once: true });
-          shared.then(resolve, reject);
-        }) as Catalog;
-      },
-    };
-  }, [serverKey, services]);
-  const content = (
-    <ModelCatalogReader.Provider value={reader}>
-      <ModelDraft {...props} server={owner} />
-    </ModelCatalogReader.Provider>
-  );
+  const content = <ModelDraft {...props} server={owner} />;
   return services ? (
     <ServerServicesProvider services={services}>
       {content}
@@ -134,7 +76,12 @@ export default function NewChatModelSettings(props: Props) {
   );
 }
 
-function ModelDraft({ server, projectId, path, onChange }: Props) {
+const ModelDraft = observer(function ModelDraft({
+  server,
+  projectId,
+  path,
+  onChange,
+}: Props) {
   const [accounts, setAccounts] = useState<GetResult<"/api/accounts"> | null>(
     null,
   );
@@ -321,4 +268,4 @@ function ModelDraft({ server, projectId, path, onChange }: Props) {
       )}
     </Stack>
   );
-}
+});

@@ -1,3 +1,12 @@
+import { observer } from "mobx-react-lite";
+import {
+  makeAutoObservable,
+  observable,
+  runInAction,
+  computedStruct,
+  compareStructural,
+} from "mobx";
+import { resourceData } from "../store/runtime.ts";
 import { ACCOUNT_NAME_MAX_CHARS } from "../generated/sharedValues";
 import { appendAppLog } from "../appLog";
 import DirectoryField from "./DirectoryField";
@@ -7,7 +16,7 @@ import ClaudeOrganization from "./ClaudeOrganization";
 import Disclosure from "./ui/Disclosure";
 import {
   useServerApi,
-  useServerSync,
+  useServerStore,
   useServerStorage,
 } from "../servers/ServerServicesContext";
 import { accountDisplayName, accountCanStart } from "../accountName";
@@ -50,7 +59,6 @@ import {
   AlertCircle,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -86,67 +94,93 @@ import {
 
 export type AccountsState = GetResult<"/api/accounts">;
 export type Account = AccountsState["accounts"][number];
-export function useAccounts(stateDir?: string) {
+export function useAccounts(
+  stateDir?: string,
+): Pick<
+  ReturnType<typeof createAccountsView>,
+  "data" | "setData" | "error" | "refresh" | "scope"
+> {
   const { get } = useServerApi();
-  const { subscribeStateProjection } = useServerSync();
-
-  const [data, setAccountsData] = useState<AccountsState>({
-    accounts: [],
-    archivedAccounts: [],
-    defaultAccountKey: "default",
-    defaultAccountGroups: [],
-    logins: [],
-    supportsDelete: true,
-    supportsDisconnect: true,
-  });
-  const [error, setError] = useState("");
-  const latestRead = useRef(0);
-  const scope = useRef(stateDir);
-  scope.current = stateDir;
-  const setData = useCallback((value: SetStateAction<AccountsState>) => {
-    latestRead.current++;
-    setAccountsData(value);
-    setError("");
-  }, []);
-  const refresh = useCallback(async () => {
-    const read = ++latestRead.current;
-    try {
-      const result = await get("/api/accounts");
-      if (read !== latestRead.current || scope.current !== stateDir)
+  const store = useServerStore();
+  const view = useMemo(
+    () => createAccountsView(store, get, stateDir),
+    [store, get, stateDir],
+  );
+  useEffect(() => () => view.invalidate(), [view]);
+  return view;
+}
+/** Full login readbacks remain local; replicated summaries keep their generated identity. */
+export function createAccountsView(
+  store: ReturnType<typeof useServerStore>,
+  get: ReturnType<typeof useServerApi>["get"],
+  stateDir?: string,
+) {
+  const readback = observable.box<AccountsState>(
+    {
+      accounts: [],
+      archivedAccounts: [],
+      defaultAccountKey: "default",
+      defaultAccountGroups: [],
+      logins: [],
+      supportsDelete: true,
+      supportsDisconnect: true,
+    },
+    { deep: false, equals: compareStructural },
+  );
+  const readError = observable.box("");
+  let latestRead = 0;
+  const view = {
+    scope: stateDir,
+    get accountSummary(): Omit<AccountsState, "logins"> | undefined {
+      const summary = stateDir
+        ? resourceData(store.state().current)?.accountsSummary.get("current")
+        : undefined;
+      return summary
+        ? (structuredClone({ ...summary }) as Omit<AccountsState, "logins">)
+        : undefined;
+    },
+    get data(): AccountsState {
+      const summary = view.accountSummary;
+      return summary
+        ? { ...summary, logins: readback.get().logins }
+        : readback.get();
+    },
+    get error() {
+      const current = stateDir ? store.state().current : undefined;
+      return (
+        readError.get() ||
+        (current && "error" in current ? errorText(current.error) : "")
+      );
+    },
+    setData(value: SetStateAction<AccountsState>) {
+      latestRead++;
+      readback.set(typeof value === "function" ? value(view.data) : value);
+      readError.set("");
+    },
+    invalidate() {
+      latestRead++;
+    },
+    async refresh() {
+      const read = ++latestRead;
+      try {
+        const result = await get("/api/accounts");
+        if (read !== latestRead) return null;
+        runInAction(() => {
+          readback.set(result);
+          readError.set("");
+        });
+        return result;
+      } catch (error) {
+        if (read === latestRead)
+          runInAction(() => readError.set(errorText(error)));
         return null;
-      setAccountsData(result);
-      setError("");
-      return result;
-    } catch (e) {
-      if (read === latestRead.current && scope.current === stateDir)
-        setError(errorText(e));
-      return null;
-    }
-  }, [stateDir, get]);
-  useEffect(() => {
-    if (!stateDir) return;
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        const summary = snapshot?.runtime.accountsSummary;
-        if (summary)
-          setAccountsData((previous) => ({
-            ...summary,
-            logins: previous.logins,
-          }));
-      },
-      (failure) => {
-        if (failure) setError(errorText(failure));
-      },
-    );
-    return () => {
-      latestRead.current++;
-      stop();
-    };
-  }, [stateDir, subscribeStateProjection]);
-
-  return useMemo(
-    () => ({ data, setData, error, refresh, scope: stateDir }),
-    [data, setData, error, refresh, stateDir],
+      }
+    },
+  };
+  return makeAutoObservable(
+    view,
+    { accountSummary: computedStruct, data: computedStruct },
+    { autoBind: true },
   );
 }
 
@@ -265,7 +299,7 @@ function AccountNameEditor({
   );
 }
 
-export function AccountCapacity({
+export const AccountCapacity = observer(function AccountCapacity({
   account,
   card = false,
   extraDetails,
@@ -287,7 +321,7 @@ export function AccountCapacity({
       facts={facts}
     />
   );
-}
+});
 
 /** One reading of an account's provider limits. `note` says where and when
  * the reading came from when the account has more than one source. */
@@ -652,7 +686,7 @@ export function AccountTransferConfirmation({
   );
 }
 
-export default function Accounts({
+const Accounts = observer(function Accounts({
   state,
   agent,
   accountKey,
@@ -1645,4 +1679,5 @@ export default function Accounts({
       </Modal>
     </>
   );
-}
+});
+export default Accounts;

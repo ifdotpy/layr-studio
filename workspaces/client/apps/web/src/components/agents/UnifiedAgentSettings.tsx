@@ -1,5 +1,8 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./state.ts";
+
 import type { Agent } from "../../types";
 import { useServerApi } from "../../servers/ServerServicesContext";
 import "../../api";
@@ -27,8 +30,17 @@ export function UnifiedAgentSettingsView({
   showAccountExclusions?: boolean;
   showTransferStatus?: boolean;
 }) {
-  const detail = useAgentDetail(settings.agent);
-  const leadDetail = useAgentDetail(settings.lead);
+  const store = useServerStore();
+  const detail = settings.agent
+    ? resourceData(
+        store.agentDetail(observableAgentId(settings.agent!.id)).current,
+      )
+    : undefined;
+  const leadDetail = settings.lead
+    ? resourceData(
+        store.agentDetail(observableAgentId(settings.lead!.id)).current,
+      )
+    : undefined;
   const { post } = useServerApi();
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);

@@ -1,6 +1,9 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { useServerApi } from "../../servers/ServerServicesContext.tsx";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./state.ts";
+
 import { useTeam } from "./TeamPanelContext.tsx";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { TeamRetainedWorktrees } from "./RetainedWorktrees";
@@ -9,7 +12,7 @@ import { ArrowLeft, Search, X } from "lucide-react";
 import UIErrorBoundary from "../UIErrorBoundary";
 import WorkerCard from "./WorkerCard";
 import Disclosure from "../ui/Disclosure";
-import { TeamModels, TeamSummary, TeamGroupLabel } from "./WorkerOverview";
+import { TeamSummary, TeamGroupLabel } from "./WorkerOverview";
 
 export const TeamPanelView = observer(function TeamPanelView() {
   const {
@@ -35,7 +38,7 @@ export const TeamPanelView = observer(function TeamPanelView() {
     </UIErrorBoundary>
   );
   return (
-    <TeamModels>
+    <>
       <aside
         id="team"
         aria-label="Team"
@@ -140,7 +143,7 @@ export const TeamPanelView = observer(function TeamPanelView() {
           )}
         </div>
       </aside>
-    </TeamModels>
+    </>
   );
 });
 
@@ -149,7 +152,10 @@ const LeadReport = observer(function LeadReport({
 }: {
   agent: SidebarAgent;
 }) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const { open, previewResult } = useTeam();
   const lead = agent;
   return (

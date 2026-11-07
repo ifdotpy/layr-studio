@@ -26,6 +26,9 @@ vi.mock("react", async (load) => ({
   useCallback: (callback: unknown) => callback,
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
+  useServerStore: () => ({
+    agentDetail: () => ({ current: { status: "loading" } }),
+  }),
   useServerApi: () => ({ post: harness.post }),
 }));
 

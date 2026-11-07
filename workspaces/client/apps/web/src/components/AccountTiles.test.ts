@@ -1,3 +1,6 @@
+import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
+import { createServerStore } from "../store/server.ts";
+import { createSubscriptions } from "../sync/subscriptions/module.ts";
 import {
   AccountStatus as GeneratedApiAccountStatus,
   ProviderKind,
@@ -65,15 +68,26 @@ test("account tiles show an allow checkbox for workers", () => {
     createElement(
       MantineProvider,
       null,
-      createElement(AccountTiles, {
-        label: "Chat accounts",
-        accounts,
-        value: "lead",
-        onChange: () => {},
-        excludedKeys: ["lead"],
-        onExcludedKeysChange: onExcludedChange,
-        exclusionRole: "worker",
-      }),
+      createElement(
+        ServerStoreProvider,
+        {
+          value: createServerStore(
+            createSubscriptions({
+              watchResourceChanges: () => () => {},
+              watchResourceConnection: () => () => {},
+            }),
+          ),
+        },
+        createElement(AccountTiles, {
+          label: "Chat accounts",
+          accounts,
+          value: "lead",
+          onChange: () => {},
+          excludedKeys: ["lead"],
+          onExcludedKeysChange: onExcludedChange,
+          exclusionRole: "worker",
+        }),
+      ),
     ),
   );
   expect(html).toContain('aria-label="Use Lead for workers"');

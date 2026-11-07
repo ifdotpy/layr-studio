@@ -1,32 +1,3 @@
-import { useAccounts, type Account } from "../Accounts.tsx";
-import { useWorkspace } from "./state.ts";
-import { createContext, type ReactNode } from "react";
-import { useWorkerModels, type WorkerModelInfo } from "./WorkerModelPicker";
-
-export const TeamModelCatalog = createContext<WorkerModelInfo[]>([]);
-
-export const TeamAccountCatalog = createContext<Account[]>([]);
-export const TeamModels = observer(function TeamModels({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  const { view } = useTeam();
-  const catalog = useWorkerModels(
-    view.lead?.accountKey || "default",
-    true,
-    true,
-  );
-  const accounts = useAccounts(useWorkspace()?.stateDir ?? undefined);
-  return (
-    <TeamModelCatalog.Provider value={catalog.models}>
-      <TeamAccountCatalog.Provider value={accounts.data.accounts}>
-        {children}
-      </TeamAccountCatalog.Provider>
-    </TeamModelCatalog.Provider>
-  );
-});
-
 import { observer } from "mobx-react-lite";
 import { useTeam } from "./TeamPanelContext.tsx";
 import { TeamStateIcon } from "./TeamFacts";

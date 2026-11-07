@@ -1,3 +1,6 @@
+import { useServerStore } from "../../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
 import { useTeam } from "../TeamPanelContext.tsx";
 import { observer } from "mobx-react-lite";
 import { providerLabel } from "../../../generated/providerKind.ts";
@@ -7,7 +10,7 @@ import { ChatTitle } from "../../chat-row/ChatTitle.tsx";
 import { TeamRoleIcon, TeamStateIcon } from "../TeamFacts.tsx";
 import ChatStatus from "../ChatStatus.tsx";
 import { AgentElapsed } from "../AgentProgress.tsx";
-import { useAgentDetail } from "../state.ts";
+
 import type { WorkerProps } from "../WorkerCard.tsx";
 
 export const WorkerIndicator = observer(function WorkerIndicator({
@@ -42,7 +45,10 @@ const WorkerProvider = observer(function WorkerProvider({
 });
 
 const WorkerElapsed = observer(function WorkerElapsed({ agent }: WorkerProps) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   return <AgentElapsed agent={agent} detail={detail} />;
 });
 

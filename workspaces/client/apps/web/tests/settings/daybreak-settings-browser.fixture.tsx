@@ -1,7 +1,10 @@
 import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { WorkerModelInfo } from "../../src/components/agents/WorkerModelPicker.tsx";
-import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
+import {
+  ModelCatalogFixture,
+  type ModelCatalogFixtureSource,
+} from "../../src/components/agents/modelCatalogFixture.tsx";
 import type { PostBody } from "../../src/apiTypes.ts";
 import { fixtureFetchInput, fixturePostBody } from "./fixture-helpers.ts";
 export type DaybreakReset = {
@@ -172,7 +175,7 @@ function Fixture() {
       window.hold = false;
       window.retries = 0;
     });
-  const reader: React.ContextType<typeof ModelCatalogReader> = {
+  const reader: ModelCatalogFixtureSource = {
     scope: "daybreak-settings",
     read: async () => {
       throw new Error("Unexpected model catalog retry");
@@ -185,7 +188,7 @@ function Fixture() {
             default: models.map((model, catalogPosition) => ({
               ...model,
               availableAccessPrograms: model.availableAccessPrograms?.cyber
-                ? { cyber: model.availableAccessPrograms.cyber }
+                ? { cyber: [...model.availableAccessPrograms.cyber] }
                 : undefined,
               serviceTiers: model.serviceTiers.map(({ id }) => ({ id })),
               supportedReasoningEfforts: model.supportedReasoningEfforts.map(
@@ -204,7 +207,7 @@ function Fixture() {
   return (
     <MantineProvider>
       <AgentModelsFixture agents={[agent]}>
-        <ModelCatalogReader.Provider value={reader}>
+        <ModelCatalogFixture value={reader}>
           <ExecutionSettings
             key={mount}
             agent={agent}
@@ -217,7 +220,7 @@ function Fixture() {
             }}
             refresh={async () => {}}
           />
-        </ModelCatalogReader.Provider>
+        </ModelCatalogFixture>
       </AgentModelsFixture>
     </MantineProvider>
   );

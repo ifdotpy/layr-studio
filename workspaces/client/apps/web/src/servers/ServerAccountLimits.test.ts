@@ -1,3 +1,5 @@
+import { observableFixture } from "../components/observableFixture.tsx";
+import { ServerStoreProvider } from "./ServerServicesContext.tsx";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { Accordion, MantineProvider } from "@mantine/core";
@@ -33,12 +35,16 @@ const limits = (accountKey: string, at: number, usedPercent: number) =>
 const render = (element: ReturnType<typeof createElement>) =>
   renderToStaticMarkup(
     createElement(
-      MantineProvider,
-      null,
+      ServerStoreProvider,
+      { value: observableFixture().store },
       createElement(
-        Accordion,
-        { keepMounted: false },
-        createElement(Accordion.Item, { value: "account" }, element),
+        MantineProvider,
+        null,
+        createElement(
+          Accordion,
+          { keepMounted: false },
+          createElement(Accordion.Item, { value: "account" }, element),
+        ),
       ),
     ),
   );

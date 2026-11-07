@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
 declare global {
   interface Window {
@@ -65,4 +66,8 @@ function Fixture() {
     </MantineProvider>
   );
 }
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+  <AgentModelsFixture agents={[]}>
+    <Fixture />
+  </AgentModelsFixture>,
+);

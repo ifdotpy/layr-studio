@@ -1,5 +1,8 @@
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./state.ts";
+
 import { ProviderKind } from "../../generated/providerKind.ts";
 import { modelProvider } from "../accountPreference.ts";
 import type { Agent } from "../../types";
@@ -35,13 +38,18 @@ export const ExecutionSummaryTrigger = observer(
     lead?: Agent | null | undefined;
     onOpen: () => void;
   }) {
+    const store = useServerStore();
     const root = agent.isLead
       ? agent
       : teamLead ||
         team.find((row) => row.id === agent.rootId && row.isLead) ||
         agent;
-    const stored = useAgentDetail(agent);
-    const rootDetail = useAgentDetail(root);
+    const stored = resourceData(
+      store.agentDetail(observableAgentId(agent.id)).current,
+    );
+    const rootDetail = resourceData(
+      store.agentDetail(observableAgentId(root.id)).current,
+    );
     const main = settingsFor(agent, false, receipt || stored || {});
     const defaults = settingsFor(root, true, workerDetail || rootDetail || {});
     const reviewer = reviewDetail || rootDetail;

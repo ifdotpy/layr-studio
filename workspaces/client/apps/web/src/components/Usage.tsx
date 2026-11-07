@@ -1,8 +1,11 @@
+import { useServerSync } from "../servers/ServerServicesContext";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import { resourceData } from "../store/runtime.ts";
+import { agentId as observableAgentId } from "../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./agents/state.ts";
+
 import { LimitColor, RunwayColor } from "../generated/api";
 import { PassiveUsage } from "../hooks/BottomInsetBand";
-import { useSubscription } from "../sync/subscriptions";
 import { randomUUID } from "../uuid";
 import { ProviderKind, providerLabel } from "../generated/providerKind.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
@@ -32,10 +35,9 @@ import {
   RefreshCw,
   CircleDollarSign,
 } from "lucide-react";
-import type { Agent, Snapshot } from "../types";
-import { errorText, type GetResult } from "../api";
+import type { Agent } from "../types";
+import { errorText } from "../api";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
-import { useServerSync } from "../servers/ServerServicesContext";
 import "./Usage.css";
 import { remainingLimitColor } from "./accountLimitColor";
 import TokenRate from "./TokenRate";
@@ -93,14 +95,13 @@ const number = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 export const formatPercent = (value: number) =>
   value > 0 && value < 1 ? "<1%" : `${Math.floor(value)}%`;
+const dollarFormatter = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
 const dollars = (value: unknown) =>
-  number(value)
-    ? new Intl.NumberFormat(undefined, {
-        style: "currency",
-        currency: "USD",
-        maximumFractionDigits: 2,
-      }).format(value)
-    : "Unavailable";
+  number(value) ? dollarFormatter.format(value) : "Unavailable";
 function Usage({
   agent,
   stateDir,
@@ -124,9 +125,12 @@ function Usage({
   accounts?: UsageAccount[] | undefined;
   visible?: boolean;
 }) {
-  const detail = useAgentDetail(agent);
-  const { subscribeStateProjection } = useServerSync();
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const { post } = useServerApi();
+  const { subscribeStateProjection } = useServerSync();
 
   const [localOpened, setLocalOpened] = useState(false);
   const limitsOpened = opened ?? localOpened;
@@ -244,12 +248,18 @@ function Usage({
     }
   };
   const accountKey = selectedAccountKey;
-  const [costs, setCosts] = useState<
-    (Partial<GetResult<"/api/costs">> & { error?: string | null }) | null
-  >(null);
   const rootId = agent.rootId || agent.id;
-  useSubscription(visible ? { kind: "session-cost", agentId: rootId } : null);
-  useSubscription(visible && limitsOpened ? { kind: "costs" } : null);
+  const sessionCost = visible
+    ? (resourceData(store.sessionCost(observableAgentId(rootId)).current) ??
+      null)
+    : null;
+  const costs =
+    visible && limitsOpened
+      ? (resourceData(store.costs().current)?.find(
+          (row) => row.accountKey === accountKey,
+        ) ?? null)
+      : null;
+  const sessionCostUpdating = sessionCost === null || sessionCost.refreshing;
   const costObservation = useRef<{
     scope: string;
     signature: string | null;
@@ -296,41 +306,7 @@ function Usage({
     // of this opening, including when switching accounts while already open.
     if (observation) sendCostInterest(attempt);
   }, [visible, limitsOpened, stateDir, accountKey, sendCostInterest]);
-  const costScope = JSON.stringify([stateDir, rootId]);
-  const [sessionCostState, setSessionCostState] = useState<{
-    scope: string;
-    source: typeof subscribeStateProjection;
-    value:
-      | NonNullable<Snapshot["runtime"]["sessionCostsByAgent"]>[string]
-      | null;
-  } | null>(null);
-  const sessionCost =
-    sessionCostState?.scope === costScope &&
-    sessionCostState.source === subscribeStateProjection
-      ? sessionCostState.value
-      : null;
-  const sessionCostUpdating = sessionCost === null || sessionCost.refreshing;
   useEffect(() => {
-    let active = true;
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        if (!active) return;
-        const value = snapshot?.runtime.sessionCostsByAgent?.[rootId];
-        setSessionCostState({
-          scope: costScope,
-          source: subscribeStateProjection,
-          value: value?.rootId === rootId ? value : null,
-        });
-      },
-      () => {},
-    );
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [costScope, rootId, subscribeStateProjection]);
-  useEffect(() => {
-    setCosts(null);
     const stop = subscribeStateProjection(
       (snapshot) => {
         const value = snapshot?.runtime.accountCostsByAccount?.[accountKey];
@@ -351,7 +327,6 @@ function Usage({
             setCostInterestError("");
           }
         }
-        setCosts(value || null);
       },
       () => {},
     );

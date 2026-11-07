@@ -1,5 +1,8 @@
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import { resourceData } from "../store/runtime.ts";
+import { agentId as observableAgentId } from "../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./agents/state.ts";
+
 import { clearSettingsRequest, settingsRequestId } from "./settingsRequestId";
 import ClaudeFileBackups from "./ClaudeFileBackups";
 import { useServerApi } from "../servers/ServerServicesContext";
@@ -123,7 +126,10 @@ export const ClaudeSettingsView = function ClaudeSettings({
     mode: ClaudeValues["permissionMode"] | null,
   ) => void;
 }) {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(agent.id)).current,
+  );
   const { post, saved, save } = useServerApi();
 
   const permissionsTarget = permissionsTargetId

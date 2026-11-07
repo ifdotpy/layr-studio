@@ -73,13 +73,15 @@ const fixtureSchemaHeaders = {
   [API_SCHEMA_HASH_HEADER]: API_SCHEMA_HASH,
 };
 import React, { useState } from "react";
-import type { ContextType } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
-import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
+import {
+  ModelCatalogFixture,
+  type ModelCatalogFixtureSource,
+} from "../../src/components/agents/modelCatalogFixture.tsx";
 import { get } from "../../src/api.ts";
 const fixtureModelRead = (
   options: Pick<GetOptions<"/api/models">, "query" | "signal">,
@@ -272,7 +274,7 @@ function Fixture() {
       window.transferRelease = null;
       window.serverAccount = null;
     });
-  const catalogSource: NonNullable<ContextType<typeof ModelCatalogReader>> = {
+  const catalogSource: ModelCatalogFixtureSource = {
     scope: "settings-canonical-" + mount,
     read: fixtureModelRead,
     subscribeState: (accept) => {
@@ -298,7 +300,7 @@ function Fixture() {
   return (
     <MantineProvider>
       <AgentModelsFixture agents={[agent]}>
-        <ModelCatalogReader.Provider value={catalogSource}>
+        <ModelCatalogFixture value={catalogSource}>
           <ExecutionSettings
             key={mount}
             settingsRow={defaults}
@@ -365,7 +367,7 @@ function Fixture() {
               }}
             />
           )}
-        </ModelCatalogReader.Provider>
+        </ModelCatalogFixture>
       </AgentModelsFixture>
     </MantineProvider>
   );

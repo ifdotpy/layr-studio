@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { emitRuntimeChange } from "./native-runtime-resource-events.fixture.ts";
 import { fixtureAccount } from "./fixture-helpers.ts";
@@ -100,4 +101,8 @@ function Fixture() {
     </MantineProvider>
   );
 }
-createRoot(fixtureRoot!).render(<Fixture />);
+createRoot(fixtureRoot!).render(
+  <AgentModelsFixture agents={[]}>
+    <Fixture />
+  </AgentModelsFixture>,
+);
