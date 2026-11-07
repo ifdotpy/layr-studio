@@ -112,9 +112,19 @@ macro_rules! truthy {
 const PROVIDER_COLUMN: AgentColumn =
     column("provider", "TEXT", "record->>'$.provider'", "NOT NULL");
 
+/// Indexed predicate for an agent with unfinished authentication proof fanout.
+/// Both server queries and the migration index consume this owner.
+pub const AUTH_RESUME_PROOF_PENDING_PREDICATE: &str = "auth_resume_proof_pending=1";
+
+pub(crate) const AUTH_RESUME_PROOF_COLUMN: AgentColumn = virtual_column(
+    "auth_resume_proof_pending",
+    "CASE WHEN json_valid(record) THEN CASE WHEN json_type(record,'$.authResumeProofPending')='object' AND json(json_extract(record,'$.authResumeProofPending')) <> '{}' THEN 1 ELSE 0 END ELSE 0 END",
+);
+
 /// The indexed agent fields; see the module documentation. Changing this list
 /// changes the table and needs a new dated migration.
-pub const AGENT_COLUMNS: [AgentColumn; 34] = [
+pub const AGENT_COLUMNS: [AgentColumn; 35] = [
+    AUTH_RESUME_PROOF_COLUMN,
     virtual_column("account_transfer_id", "record->>'$.accountTransferId'"),
     virtual_column(
         "native_release_reset_pending",

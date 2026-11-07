@@ -31,6 +31,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Duration;
+use studio_runtime_store::agent_columns::AUTH_RESUME_PROOF_PENDING_PREDICATE;
 use studio_runtime_store::path_identity::CanonicalPath;
 
 use axum::Extension;
@@ -58,7 +59,6 @@ const CONTINUATION_FAILURE_RETRY_SECONDS: f64 = 60.0;
 const CONTINUATION_LIMIT_READ_CONCURRENCY: usize = 4;
 // Maximum agents staged per continuation tick, shared by all continuation kinds.
 const CONTINUATION_TICK_AGENT_LIMIT: i64 = 32;
-const AUTH_RESUME_PROOF_PENDING_PREDICATE: &str = "json_type(record,'$.authResumeProofPending')='object' AND json(json_extract(record,'$.authResumeProofPending')) <> '{}'";
 const CURRENT_USAGE_RESUME_DUE_ROWS: &str = "SELECT resume.agent AS agent,CAST(json_extract(resume.record,'$.dueAt') AS REAL) AS due FROM runtime_usage_resumes AS resume JOIN runtime_agents AS owner ON owner.id=resume.agent AND json_extract(owner.record,'$.usageResume.id')=resume.id WHERE json_extract(resume.record,'$.status')='scheduled' AND json_type(resume.record,'$.dueAt') IN ('integer','real')";
 const CURRENT_CAPACITY_RETRY_DUE_ROWS: &str = "SELECT retry.agent AS agent,CAST(json_extract(retry.record,'$.dueAt') AS REAL) AS due FROM runtime_capacity_retries AS retry JOIN runtime_agents AS owner ON owner.id=retry.agent AND json_extract(owner.record,'$.capacityRetry.id')=retry.id WHERE json_extract(retry.record,'$.status')='scheduled' AND json_type(retry.record,'$.dueAt') IN ('integer','real')";
 const EXIT_ON_STDIN_CLOSE_ENV: &str = "CODEX_AGENTS_SERVER_EXIT_ON_STDIN_CLOSE";
@@ -2998,6 +2998,43 @@ mod exit_logging_tests {
             "failure cooldown leaves the queued work notification for the regular wait"
         );
         drop((shutdown_tx, shutdown_tx2));
+    }
+
+    #[test]
+    fn auth_resume_proof_lookup_is_bounded_without_pending_proofs() {
+        thread_local! {
+            static STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+        }
+        let connection = studio_runtime_store::test_canvas();
+        for index in 0..500 {
+            connection
+                .execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES (?1,?2)",
+                    rusqlite::params![
+                        format!("proof-idle-{index}"),
+                        studio_json::json!({"provider":"codex","authResumeProofPending":{}})
+                            .to_string()
+                    ],
+                )
+                .unwrap();
+        }
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    STEPS.with(|count| {
+                        count.set(statement.get_status(rusqlite::StatementStatus::VmStep))
+                    });
+                }
+            }),
+        );
+        assert!(!auth_resume_proof_exists(&connection).unwrap());
+        let steps = STEPS.with(std::cell::Cell::get);
+        eprintln!("proof lookup with 500 idle agents: {steps} VM steps");
+        assert!(
+            steps < 100,
+            "proof existence must scan only pending cursors: {steps}"
+        );
     }
 
     #[test]

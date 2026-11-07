@@ -100,6 +100,7 @@ pub(crate) mod m2026_11_06_idle_unload;
 mod m2026_11_06_outbox_lookup;
 mod m2026_11_06_role_account_exclusions;
 mod m2026_11_07_attention_lookups;
+mod m2026_11_07_auth_resume_proof;
 mod m2026_11_07_explicit_review_model;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1648,6 +1649,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_07_attention_lookups::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-07-auth-resume-proof",
+            introduced: NOVEMBER_7,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with authentication proof fanout cursors",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_07_auth_resume_proof::apply(c.transaction),
     },
     &SqlMigration {
         definition: MigrationDefinition {
