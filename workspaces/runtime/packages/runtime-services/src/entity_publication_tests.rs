@@ -1575,7 +1575,7 @@ async fn studio_error_rows_are_published_as_entities_with_their_source_write() {
 }
 
 /// An asynchronous question with one choice, as the typed table stores it.
-fn new_question(id: &str) -> studio_runtime_store::approvals::NewApproval {
+pub(crate) fn new_question(id: &str) -> studio_runtime_store::approvals::NewApproval {
     use studio_runtime_schema::approvals::{
         AgentId, ApprovalId, Detail, ProviderObject, Question, QuestionOption, Request,
     };

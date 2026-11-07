@@ -183,4 +183,4 @@ pub(crate) mod test_support {
 
 #[cfg(test)]
 #[path = "entity_publication_tests.rs"]
-mod tests;
+pub(crate) mod tests;

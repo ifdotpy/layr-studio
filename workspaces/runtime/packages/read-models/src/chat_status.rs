@@ -242,3 +242,55 @@ mod receipt_and_deferral_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod receipt_matrix {
+    use super::*;
+    use studio_runtime_schema::{AgentCounter, agent_entity_nested_extra::ReadStateDto};
+    #[test]
+    fn v5_receipt_identity_read_revision_and_completion_matrix() {
+        let receipts = [
+            None,
+            Some(("t", "r", true, 0)),
+            Some(("t", "r", true, 7)),
+            Some(("t", "r", false, 7)),
+            Some(("other", "r", true, 4)),
+            Some(("t", "other", true, 4)),
+        ];
+        for thread in [None, Some(""), Some("t"), Some("other")] {
+            for turn in [None, Some(""), Some("r"), Some("other")] {
+                for status in [None, Some("completed"), Some("failed"), Some("interrupted")] {
+                    for receipt in receipts {
+                        let saved = receipt.map(|(t, r, read, revision)| ReadStateDto {
+                            thread_id: t.into(),
+                            turn_id: r.into(),
+                            read,
+                            revision: AgentCounter::from_i64(revision).expect("revision"),
+                        });
+                        let target = mark_read_target(thread, turn, status, saved.as_ref());
+                        let valid = matches!(thread, Some("t" | "other"))
+                            && matches!(turn, Some("r" | "other"))
+                            && status == Some("completed");
+                        assert_eq!(
+                            target.is_some(),
+                            valid,
+                            "thread={thread:?} turn={turn:?} status={status:?}"
+                        );
+                        if let Some(target) = target {
+                            assert_eq!(
+                                target.revision.as_i64(),
+                                saved.as_ref().map_or(0, |r| r.revision.as_i64())
+                            );
+                            assert_eq!(
+                                target.read,
+                                saved.as_ref().is_some_and(|r| r.read
+                                    && Some(r.thread_id.as_str()) == thread
+                                    && Some(r.turn_id.as_str()) == turn)
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
