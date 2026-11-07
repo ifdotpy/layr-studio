@@ -1,3 +1,4 @@
+import { createRequestsView } from "./questions/requestView";
 import { createRetainedWorktreesMirror } from "../generated/observableResources";
 import { requestFixture } from "./questions/requestFixtures";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture";
@@ -69,7 +70,7 @@ vi.mock("../servers/ServerServicesContext", () => ({
   }),
 }));
 import { useTeamArea } from "./agents/TeamPanelContext";
-import { useQuestionCards } from "./questions/useQuestionCards";
+import { createQuestionCards } from "./questions/useQuestionCards";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 
 function render<T>(fn: () => T) {
@@ -133,7 +134,12 @@ it("question history follows projected answers without a request-triggered HTTP 
       })),
     );
   });
-  const read = () => useQuestionCards("lead");
+  const requests = createRequestsView(h.questions.store, {
+    agentId: "lead",
+    includeTeam: true,
+  });
+  const select = createQuestionCards(h.questions.store, requests, "lead");
+  const read = () => select;
   render(read);
   expect(h.get).not.toHaveBeenCalled();
   expect(h.projections.size).toBe(1);

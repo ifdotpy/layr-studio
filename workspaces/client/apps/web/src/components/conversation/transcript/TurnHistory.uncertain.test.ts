@@ -1,6 +1,11 @@
-vi.mock("../../agents/state.ts", async (original) => ({
-  ...(await original<typeof import("../../agents/state.ts")>()),
-  useAgentDetail: <T>(agent: T) => agent,
+vi.mock("../../../servers/ServerServicesContext", async (original) => ({
+  ...(await original<
+    typeof import("../../../servers/ServerServicesContext")
+  >()),
+  useServerStore: () => ({
+    state: () => ({ current: { status: "loading" } }),
+    agentDetail: () => ({ current: { status: "loading" } }),
+  }),
 }));
 import {
   ProviderKind as GeneratedApiProviderKind,

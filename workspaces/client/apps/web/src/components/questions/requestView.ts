@@ -11,58 +11,63 @@ export type RequestScope = {
   turnId?: string | null | undefined;
   pendingOnly?: boolean;
 };
+export function createRequestsView(
+  store: ReturnType<typeof useServerStore>,
+  { agentId, familyId, includeTeam, all, turnId, pendingOnly }: RequestScope,
+) {
+  return makeAutoObservable(
+    {
+      get current() {
+        return store.requests().current;
+      },
+      get allRequests(): readonly RequestModel[] {
+        const current = this.current;
+        return current.status === "live" || current.status === "stale"
+          ? [...current.data.requests.values()]
+          : [];
+      },
+      get agents() {
+        const current = store.state().current;
+        return current.status === "live" || current.status === "stale"
+          ? current.data.agents
+          : undefined;
+      },
+      get owner() {
+        return agentId ? this.agents?.get(agentId) : undefined;
+      },
+      get rootId() {
+        return familyId || this.owner?.rootId || agentId;
+      },
+      get familyRequests() {
+        return this.allRequests.filter((request) => {
+          const owner = this.agents?.get(request.agent);
+          return (owner?.rootId || request.agent) === this.rootId;
+        });
+      },
+      get requests() {
+        return this.allRequests.filter((request) => {
+          if (pendingOnly && request.state.kind !== "pending") return false;
+          if (turnId && request.turn && request.turn !== turnId) return false;
+          if (all || !request.agent) return true;
+          if (request.agent === agentId) return true;
+          if (!includeTeam) return false;
+          const owner = this.agents?.get(request.agent);
+          return owner?.rootId === this.rootId;
+        });
+      },
+    },
+    {
+      familyRequests: computed({ equals: compareShallow }),
+      requests: computed({ equals: compareShallow }),
+    },
+  );
+}
+
 export function useRequestsView(scope: RequestScope) {
   const store = useServerStore();
   const { agentId, familyId, includeTeam, all, turnId, pendingOnly } = scope;
   return useMemo(
-    () =>
-      makeAutoObservable(
-        {
-          get current() {
-            return store.requests().current;
-          },
-          get allRequests(): readonly RequestModel[] {
-            const current = this.current;
-            return current.status === "live" || current.status === "stale"
-              ? [...current.data.requests.values()]
-              : [];
-          },
-          get agents() {
-            const current = store.state().current;
-            return current.status === "live" || current.status === "stale"
-              ? current.data.agents
-              : undefined;
-          },
-          get owner() {
-            return agentId ? this.agents?.get(agentId) : undefined;
-          },
-          get rootId() {
-            return familyId || this.owner?.rootId || agentId;
-          },
-          get familyRequests() {
-            return this.allRequests.filter((request) => {
-              const owner = this.agents?.get(request.agent);
-              return (owner?.rootId || request.agent) === this.rootId;
-            });
-          },
-          get requests() {
-            return this.allRequests.filter((request) => {
-              if (pendingOnly && request.state.kind !== "pending") return false;
-              if (turnId && request.turn && request.turn !== turnId)
-                return false;
-              if (all || !request.agent) return true;
-              if (request.agent === agentId) return true;
-              if (!includeTeam) return false;
-              const owner = this.agents?.get(request.agent);
-              return owner?.rootId === this.rootId;
-            });
-          },
-        },
-        {
-          familyRequests: computed({ equals: compareShallow }),
-          requests: computed({ equals: compareShallow }),
-        },
-      ),
+    () => createRequestsView(store, scope),
     [store, agentId, familyId, includeTeam, all, turnId, pendingOnly],
   );
 }

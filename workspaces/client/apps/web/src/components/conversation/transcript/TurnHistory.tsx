@@ -635,8 +635,12 @@ function TurnHistory({
           cwd={agent?.cwd ?? undefined}
           storageKey={storageKey}
 
-          failurePending={typeof turnId === "string" && loading.has(turnId)}
-          failureLookupFailed={typeof turnId === "string" && failed.has(turnId)}
+          failurePending={
+            typeof turnId === "string" && loading.includes(turnId)
+          }
+          failureLookupFailed={
+            typeof turnId === "string" && failed.includes(turnId)
+          }
           failureReason={
             typeof turnId === "string" ? failureReasons.get(turnId) || "" : ""
           }

@@ -20,6 +20,8 @@ const h = vi.hoisted(() => ({
   receipts: new Map(),
   liveText: new Map(),
   hidden: () => false,
+  withdrawalPending: false,
+  withdrawalReads: 0,
   get: vi.fn(async () => ({})),
   post: vi.fn(async () => ({})),
   storage: new Storage(),
@@ -92,7 +94,17 @@ vi.mock("../agents/WorkerModelPicker", () => ({
   useWorkerModels: () => ({ models: h.empty }),
 }));
 vi.mock("../useMessageQueue", () => ({
-  useMessageQueue: () => ({ items: h.empty }),
+  useMessageQueue: () => {
+    if (h.withdrawalPending) {
+      h.withdrawalReads++;
+      // Match the real queue hook's fresh filter while a withdrawal is pending.
+      // Bound the reproduction so a regression fails without an endless render loop.
+      return {
+        items: h.withdrawalReads < 12 ? h.empty.filter(() => true) : h.empty,
+      };
+    }
+    return { items: h.empty };
+  },
 }));
 vi.mock("../useSendingMessageRemoval", () => ({
   useSendingMessageRemoval: () => ({}),
@@ -115,6 +127,8 @@ requestTestEnvironment();
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   delete window.__studioPromptComposerRenderProbe;
+  h.withdrawalPending = false;
+  h.withdrawalReads = 0;
   vi.useRealTimers();
 });
 
@@ -225,3 +239,56 @@ it.each(["add", "remove"] as const)(
     }
   },
 );
+
+it("a pending withdrawal causes no repeated partition invalidation across renders", async () => {
+  const f = requestFixture(
+    [],
+    [agentSummaryFixture("lead", { rootId: "lead", isLead: true })],
+    [{ id: "lead", canSend: true }],
+  );
+  const agent = f.state.current.agents.get("lead");
+  const root = createRoot(
+    document.body.appendChild(document.createElement("div")),
+  );
+  const actions = conversationActionsFixture();
+  const render = (sending: boolean) =>
+    act(async () => {
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ServerStoreProvider,
+            { value: f.store },
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(Conversation, {
+                id: "lead",
+                agent,
+                detail: { id: "lead", canSend: true },
+                sending,
+                limits: null,
+              }),
+            ),
+          ),
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  try {
+    await render(false);
+    h.withdrawalPending = true;
+    for (const sending of [true, false, true]) {
+      const before = h.withdrawalReads;
+      await render(sending);
+      expect(
+        h.withdrawalReads - before,
+        "each explicit render computes the queue once and commits without re-invalidating its partition",
+      ).toBe(1);
+    }
+  } finally {
+    await act(async () => root.unmount());
+    f.store.dispose();
+  }
+});

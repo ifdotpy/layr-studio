@@ -1,6 +1,4 @@
-import { autorun } from "mobx";
 import { selectMessageConnection } from "./hooks/messageConnection";
-import { useConversationHistory } from "./conversation/historySession";
 import { useCacheAfterPaint } from "./sync/subscriptions/useCacheAfterPaint";
 import {
   useServerApi,
@@ -375,44 +373,4 @@ export function useSnapshot(
     creationScope: scope,
   };
 }
-// Compatibility callers outside W3 retain an immutable hook result. W3 roots
-// consume the scoped session directly and observe model fields only in leaves.
 export { transcriptMessages } from "./conversation/messageView";
-export function useMessages(
-  id: string | null,
-  kind: "agent" | "room" | "legacy",
-  managed = false,
-  workspace = "",
-  syncWorkspaceId = "",
-  enabled = true,
-) {
-  const session = useConversationHistory(
-    id,
-    kind,
-    managed,
-    workspace,
-    syncWorkspaceId,
-    enabled,
-  );
-  const read = () => ({
-    session,
-    loaded: session.loaded,
-    items: session.items.map((item) => ({ ...item })),
-    notice: session.notice,
-    before: session.before,
-    after: session.after,
-    historyVersion: session.historyVersion,
-    historical: session.historical,
-    pageLoading: session.pageLoading,
-    connection: session.connection,
-    older: session.older,
-    newer: session.newer,
-    setPageAnchor: session.setPageAnchor,
-    showLatest: session.showLatest,
-    ensureMessage: session.ensureMessage,
-    reload: session.reload,
-  });
-  const [snapshot, setSnapshot] = useState(read);
-  useEffect(() => autorun(() => setSnapshot(read())), [session]);
-  return snapshot.session === session ? snapshot : read();
-}

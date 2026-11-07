@@ -1,4 +1,6 @@
-import { useAgentDetail } from "../agents/state.ts";
+import { resourceData } from "../../store/runtime.ts";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { agentId as resourceAgentId } from "../../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Minimize2, ShieldCheck } from "lucide-react";
@@ -12,7 +14,11 @@ export const NativeModelActions = observer(function NativeModelActions({
   agent: SidebarAgent;
 }) {
   const actions = useConversationActions();
-  const disabled = nativeActionDisabled(agent, useAgentDetail(agent));
+  const store = useServerStore();
+  const disabled = nativeActionDisabled(
+    agent,
+    resourceData(store.agentDetail(resourceAgentId(agent.id)).current),
+  );
   return (
     <>
       {(

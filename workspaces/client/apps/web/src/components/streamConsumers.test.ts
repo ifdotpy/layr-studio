@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,7 +17,7 @@ import {
 import { ConversationProvider } from "./conversation/navigation";
 import { requestTestEnvironment } from "./questions/requestTestFixture";
 import { UserMessage } from "./shell/messages/UserMessages";
-import { useMessages } from "../hooks";
+import { useConversationHistory } from "../conversation/historySession";
 
 const h = vi.hoisted(() => ({ get: vi.fn(), connection: vi.fn() }));
 vi.mock("../unsent/useUnsentText", async () => {
@@ -136,17 +137,23 @@ it("complaint version changes consume generated detail through the real message 
 });
 
 it.each(["agent", "room"] as const)(
-  "%s updates reach the compatibility caller without a resource GET",
+  "%s updates reach the observer leaf without a resource GET",
   async (kind) => {
     const f = fixture();
-    function View() {
-      const messages = useMessages("team", kind, false, "scope", "workspace");
+    const View = observer(function View() {
+      const messages = useConversationHistory(
+        "team",
+        kind,
+        false,
+        "scope",
+        "workspace",
+      );
       return createElement(
         "output",
         null,
         messages.items.map((item) => item.text).join("|"),
       );
-    }
+    });
     try {
       await f.render(createElement(View));
       await act(async () => {
@@ -182,10 +189,16 @@ it.each(["agent", "room"] as const)(
 
 it("restores agent transport after visiting a room in the same caller", async () => {
   const f = fixture();
-  function View({ kind }: { kind: "agent" | "room" }) {
-    const messages = useMessages("team", kind, true, "scope", "workspace");
+  const View = observer(function View({ kind }: { kind: "agent" | "room" }) {
+    const messages = useConversationHistory(
+      "team",
+      kind,
+      true,
+      "scope",
+      "workspace",
+    );
     return createElement("output", null, messages.connection?.health ?? "room");
-  }
+  });
   try {
     await f.render(createElement(View, { kind: "agent" }));
     expect(f.host.querySelector("output")?.textContent).toBe("live");

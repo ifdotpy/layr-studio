@@ -1,10 +1,11 @@
+import { resourceData } from "../../store/runtime.ts";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { KeyRound } from "lucide-react";
 import { observer } from "mobx-react-lite";
 import type { RequestView } from "./requestActions";
 import { useServerServices } from "../../servers/ServerServicesContext";
-import { useStateCollections } from "../agents/state";
 import { canForwardSignIn } from "./openSignIn";
 import {
   RESULT_SENT_NOTE,
@@ -46,7 +47,8 @@ export default observer(function SignInCard({ view }: { view: RequestView }) {
     error = view.error;
   const services = useServerServices();
   const serverName = services?.owner.alias || services?.owner.label;
-  const agents = useStateCollections()?.agents;
+  const store = useServerStore();
+  const agents = resourceData(store.state().current)?.agents;
   const now = useNow();
   const flow = signInFlow(details);
   const state = signInState(details, sending);

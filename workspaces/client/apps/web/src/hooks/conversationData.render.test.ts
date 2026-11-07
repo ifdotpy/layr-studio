@@ -1,10 +1,11 @@
+import { resourceData } from "../store/runtime.ts";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { observable, runInAction } from "mobx";
 import { observer } from "mobx-react-lite";
 import { expect, it, vi } from "vitest";
-import { useStateCollections } from "../components/agents/state.ts";
 import { observableFixture } from "../components/observableFixture.tsx";
 import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
 
@@ -28,7 +29,8 @@ it("waits for the generated state slot before reading conversation models", asyn
     }),
   };
   const Caller = observer(function Caller() {
-    const data = useStateCollections();
+    const store = useServerStore();
+    const data = resourceData(store.state().current);
     return createElement(
       "output",
       null,

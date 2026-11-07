@@ -1,7 +1,8 @@
 import { ServerViewStoreProvider } from "../servers/ServerServicesContext";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { useMessages } from "../hooks";
+import { observer } from "mobx-react-lite";
+import { useConversationHistory } from "../conversation/historySession";
 import {
   useConversationScroll,
   TRANSCRIPT_HISTORY_START_PX,
@@ -12,8 +13,14 @@ declare global {
   }
 }
 const workspaceId = document.documentElement.dataset.workspaceId!;
-function History() {
-  const history = useMessages("open", "agent", true, "fixture", workspaceId);
+const History = observer(function History() {
+  const history = useConversationHistory(
+    "open",
+    "agent",
+    true,
+    "fixture",
+    workspaceId,
+  );
   const scrolling = useConversationScroll("window-check", history.loaded);
   return React.createElement(
     "section",
@@ -63,7 +70,7 @@ function History() {
       history.items.map((item) => item.id).join(","),
     ),
   );
-}
+});
 window.historyRoot = createRoot(document.querySelector("main")!);
 window.historyRoot.render(
   React.createElement(

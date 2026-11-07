@@ -1,6 +1,8 @@
+import { resourceData } from "../../store/runtime.ts";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
 import "./conversation-chrome.css";
 import { observer } from "mobx-react-lite";
-import { useAgentSummary, useConversationStartView } from "../agents/state.ts";
+import { useConversationStartView } from "../agents/state.ts";
 import { useConversationActions } from "./navigation.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { formatAgentStatus } from "../../status/operationalStatus.ts";
@@ -87,7 +89,8 @@ export const LiveConversationStart = observer(function LiveConversationStart({
 }: {
   agentId: string;
 }) {
-  const agent = useAgentSummary(agentId);
+  const store = useServerStore();
+  const agent = resourceData(store.state().current)?.agents.get(agentId);
   return agent ? <AgentConversationStart agent={agent} /> : null;
 });
 

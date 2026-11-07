@@ -1,6 +1,8 @@
+import { resourceData } from "../store/runtime.ts";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import { agentId as resourceAgentId } from "../generated/observableResources.ts";
 import { computed } from "mobx";
 import { createTurnErrorMirror } from "../generated/observableResources";
-import { useAgentDetail } from "./agents/state.ts";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
@@ -29,8 +31,22 @@ export function failedTurnsNeedingLookup(
 
 // Old servers saved terminal errors in analytics without transcript notices.
 // The compact view also works with their full analytics response.
+function createEmptyLookup(scope = "") {
+  return {
+    scope,
+    checked: [] as string[],
+    failed: [] as string[],
+    errors: {} as Record<string, DeepReadonly<JsonInput>>,
+    loading: [] as string[],
+  };
+}
+const emptyLookup = createEmptyLookup();
+
 export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
-  const detail = useAgentDetail(agent);
+  const store = useServerStore();
+  const detail = agent
+    ? resourceData(store.agentDetail(resourceAgentId(agent.id)).current)
+    : undefined;
   const { get } = useServerApi();
   // Historical fallbacks belong to this mounted server owner, even when ids
   // and workspace names collide with another authenticated server.
@@ -47,20 +63,8 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
 
   const scope = `${workspace}:${agent?.id}:${agent?.threadId}`;
   const [lookupAttempt, setLookupAttempt] = useState(0);
-  const [result, setResult] = useState<{
-    scope: string;
-    checked: string[];
-    failed: string[];
-    errors: Record<string, DeepReadonly<JsonInput>>;
-    loading: string[];
-  }>({ scope, checked: [], failed: [], errors: {}, loading: [] });
-  const current = useMemo(
-    () =>
-      result.scope === scope
-        ? result
-        : { scope, checked: [], failed: [], errors: {}, loading: [] },
-    [result, scope],
-  );
+  const [result, setResult] = useState(() => createEmptyLookup(scope));
+  const current = result.scope === scope ? result : emptyLookup;
   const cached = cachedErrors.get(scope);
   const { errors, resolved, existing, turns } = useMemo(
     () =>
@@ -118,6 +122,7 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     const requested = requestKey.split(",");
     setResult((old) => ({
       ...(old.scope === scope ? old : current),
+      scope,
       loading: requested,
     }));
     const agentId = agent.id;
@@ -257,12 +262,10 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     },
     [scope],
   );
-  const loading = useMemo(() => new Set(current.loading), [current.loading]);
-  const failed = useMemo(() => new Set(current.failed), [current.failed]);
   return {
     items: enriched,
-    loading,
-    failed,
+    loading: current.loading,
+    failed: current.failed,
     retry,
   };
 }

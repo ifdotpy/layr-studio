@@ -1,5 +1,6 @@
+import { createRequestsView } from "./requestView";
 // @vitest-environment happy-dom
-import { act, createElement } from "react";
+import { act, createElement, useMemo } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createSubscriptions } from "../../sync/subscriptions/module";
 import { createServerStore } from "../../store";
@@ -8,7 +9,7 @@ import { approval, question } from "../../approvalFixtures";
 import type { Approval } from "../../approvals";
 import Requests from "./Requests";
 import { requestTestEnvironment, requestTestRoot } from "./requestTestFixture";
-import { useQuestionCards } from "./useQuestionCards";
+import { createQuestionCards } from "./useQuestionCards";
 import { observer } from "mobx-react-lite";
 import { requestRenderProbe } from "./requestActions";
 import TurnHistory from "../conversation/transcript/TurnHistory.fixture";
@@ -68,7 +69,7 @@ async function fixture(onLoading?: () => void) {
   const Answer = observer(function Answer({
     select,
   }: {
-    select: ReturnType<typeof useQuestionCards>;
+    select: ReturnType<typeof createQuestionCards>;
   }) {
     return createElement(
       "output",
@@ -78,7 +79,15 @@ async function fixture(onLoading?: () => void) {
   });
   const History = observer(function QuestionHistoryHarness() {
     requestRenderProbe("question-history");
-    const select = useQuestionCards("lead");
+    const select = useMemo(
+      () =>
+        createQuestionCards(
+          h.store!,
+          createRequestsView(h.store!, { agentId: "lead", includeTeam: true }),
+          "lead",
+        ),
+      [h.store],
+    );
     return createElement(
       "div",
       null,

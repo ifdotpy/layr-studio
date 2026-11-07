@@ -1,4 +1,4 @@
-import type { useAgentDetail } from "../../agents/state.ts";
+import type { AgentDetailEntityDto } from "../../../generated/observableResources.ts";
 import { NativeSafetyStage as GeneratedApiNativeSafetyStage } from "../../../generated/api.ts";
 import { useServerApi } from "../../../servers/ServerServicesContext";
 import ErrorDescription from "../../ErrorDescription";
@@ -13,7 +13,7 @@ export default function SafetyBuffering({
   detail = agent,
 }: {
   agent: Agent;
-  detail?: ReturnType<typeof useAgentDetail> | Agent;
+  detail?: AgentDetailEntityDto | undefined | Agent;
 }) {
   const { post } = useServerApi();
 

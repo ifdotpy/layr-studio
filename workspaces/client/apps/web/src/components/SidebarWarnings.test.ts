@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import type { Agent, Snapshot } from "../types";
 const read = vi.hoisted(() => vi.fn(() => ({ items: [] })));
-vi.mock("../hooks", () => ({ useMessages: read }));
+vi.mock("../conversation/historySession", () => ({ useConversationHistory: read }));
 import SidebarWarnings from "./SidebarWarnings";
 
 test("imported agents read the agent transcript that preserves native warnings", () => {

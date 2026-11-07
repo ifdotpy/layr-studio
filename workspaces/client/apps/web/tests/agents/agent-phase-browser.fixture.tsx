@@ -5,7 +5,8 @@ import { observableFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { useMessages } from "../../src/hooks.ts";
+import { observer } from "mobx-react-lite";
+import { useConversationHistory } from "../../src/conversation/historySession.ts";
 import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
@@ -276,9 +277,15 @@ function liveAgentView(
   // the same stored value; unifying their wire contracts is a post-migration follow-up.
   return agent as Agent;
 }
-function Chat({ id, visible }: { id: string; visible: boolean }) {
+const Chat = observer(function Chat({
+  id,
+  visible,
+}: {
+  id: string;
+  visible: boolean;
+}) {
   window.chatRenders[id] = (window.chatRenders[id] ?? 0) + 1;
-  const messages = useMessages(
+  const messages = useConversationHistory(
     id,
     "agent",
     true,
@@ -312,7 +319,7 @@ function Chat({ id, visible }: { id: string; visible: boolean }) {
       </fixture.Provider>
     </section>
   );
-}
+});
 function Harness() {
   const [selected, select] = useState("first");
   const [other, selectServer] = useState(false);

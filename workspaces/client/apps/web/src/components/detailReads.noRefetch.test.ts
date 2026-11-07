@@ -68,6 +68,9 @@ vi.mock("react", async (original) => ({
   },
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => ({
+    agentDetail: () => ({ current: { status: "loading" } }),
+  }),
   useServerApi: () => ({ get: h.get, post: h.post, saved: () => null }),
   useServerStorage: () => ({}),
   useServerSync: () => ({ subscribeStateProjection: h.subscribe }),
@@ -159,7 +162,7 @@ it("new failed and uncertain turns use inline errors without analytics reads", a
     ];
     const result = render(() => useTurnErrors(items, agent, "live-turns"));
     await settle();
-    expect(result.loading.size).toBe(0);
+    expect(result.loading.length).toBe(0);
     expect(h.get).not.toHaveBeenCalled();
     const inline = render(() =>
       useTurnErrors(
@@ -202,8 +205,8 @@ it("historical error first load and an explicit retry still read once each", asy
   render(read);
   await settle();
   const result = render(read);
-  expect(result.loading.size).toBe(0);
-  expect(result.failed.has("past")).toBe(true);
+  expect(result.loading.length).toBe(0);
+  expect(result.failed.includes("past")).toBe(true);
   result.retry("past");
   render(read);
   await settle();

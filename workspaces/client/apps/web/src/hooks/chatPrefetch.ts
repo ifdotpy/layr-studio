@@ -1,14 +1,2 @@
-import { useMemo } from "react";
-import type { Snapshot } from "../types";
-
-/** Hover preparation no longer owns transcript subscriptions. The mounted chat
- * owns its resource through useSubscription; existing local history stays cached.
- * Keep the UI's preparation/delete callbacks stable without warming hidden chats. */
-export function useChatPrefetch(
-  _data: Snapshot | null,
-  _opened: string | null,
-  _workspaceId: string,
-  _enabled = true,
-) {
-  return useMemo(() => (_id: string) => {}, []);
-}
+/** The mounted conversation owns transcript interest; hover preparation stays inert. */
+export const prepareChat = (_id: string): void => {};

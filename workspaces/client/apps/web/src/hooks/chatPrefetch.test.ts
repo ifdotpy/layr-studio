@@ -1,6 +1,4 @@
-import { AgentSource } from "../generated/api";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
 
 const mocks = vi.hoisted(() => ({
   effects: [] as (() => void | (() => void))[],
@@ -43,7 +41,7 @@ vi.mock("../servers/ServerServicesContext", () => ({
     subscribeTranscript: () => () => {},
   }),
 }));
-import { useChatPrefetch } from "./chatPrefetch";
+import { prepareChat } from "./chatPrefetch";
 
 let cleanup: (() => void) | undefined;
 afterEach(() => {
@@ -74,20 +72,12 @@ it.each([false, true])(
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
     });
-    const data = {
-      stateDir: "workspace",
-      threads: [
-        { id: "open", source: AgentSource.managed },
-        { id: "invisible-one", source: AgentSource.managed },
-        { id: "invisible-two", source: AgentSource.managed },
-      ],
-    } as Snapshot;
-    const prepare = useChatPrefetch(data, "open", "workspace");
+
     for (const effect of mocks.effects) {
       const stop = effect();
       if (stop) cleanup = stop;
     }
-    prepare("invisible-one");
+    prepareChat("invisible-one");
     await vi.advanceTimersByTimeAsync(1000);
     expect([...mocks.resources]).toEqual([]);
     expect(mocks.prefetch).not.toHaveBeenCalled();

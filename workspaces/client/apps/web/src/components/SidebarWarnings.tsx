@@ -1,7 +1,8 @@
 import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
 import { createContext, useContext, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useMessages } from "../hooks";
+import { observer } from "mobx-react-lite";
+import { useConversationHistory } from "../conversation/historySession";
 import type { Agent, Snapshot } from "../types";
 import ConversationWarnings from "./ConversationWarnings";
 
@@ -23,7 +24,9 @@ export function SidebarWarningsTarget() {
   return <span className="sidebar-warnings-target" ref={setTarget} />;
 }
 
-export default function SidebarWarnings({
+const ObservedWarnings = observer(ConversationWarnings);
+
+export default observer(function SidebarWarnings({
   data,
   agent,
   opened,
@@ -42,7 +45,7 @@ export default function SidebarWarnings({
 }) {
   const target = useContext(Target);
   // Reuse the transcript projection so existing chat warnings remain available in the sidebar.
-  const { items } = useMessages(
+  const { items } = useConversationHistory(
     agent ? opened : null,
     "agent",
     agent?.source === GeneratedApiAgentSource.managed,
@@ -52,7 +55,7 @@ export default function SidebarWarnings({
   );
   return target
     ? createPortal(
-        <ConversationWarnings
+        <ObservedWarnings
           key={`${data.stateDir}:${opened}:${accountKey}`}
           scope={`${data.stateDir}:${opened}:${accountKey}`}
           notices={data.runtime.nativeNotices ?? []}
@@ -63,4 +66,4 @@ export default function SidebarWarnings({
         target,
       )
     : null;
-}
+});

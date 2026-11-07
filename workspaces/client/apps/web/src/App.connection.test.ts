@@ -59,6 +59,7 @@ vi.mock("./components/useSendingMessageRemoval", () => ({
   useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("./servers/ServerServicesContext", () => ({
+  useServerStore: () => ({}),
   useServerApi: () => ({
     saved: (_key: string, initial: unknown) => initial,
     onApiSchemaMismatch: () => () => {},

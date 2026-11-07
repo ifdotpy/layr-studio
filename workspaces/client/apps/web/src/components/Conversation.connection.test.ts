@@ -5,11 +5,10 @@ vi.mock("./conversation/navigation.ts", async (original) => ({
   useConversationActions: vi.fn(),
 }));
 vi.mock("./questions/requestView", () => ({
-  useRequestsView: () => ({ requests: [] }),
+  createRequestsView: () => ({ requests: [] }),
 }));
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
-  useWorkspace: () => ({ stateDir: "fixture" }),
   useAgentCatalog: () => ({ agents: [] }),
 }));
 import type {
@@ -27,6 +26,9 @@ const h = vi.hoisted(() => ({
   detail: {} as ResourceConnectionDetail,
   online: false,
   feedback: false,
+  store: undefined as
+    | ReturnType<typeof import("../store").createServerStore>
+    | undefined,
   cursor: 0,
   state: [] as unknown[],
   effects: [] as Array<() => unknown>,
@@ -60,6 +62,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
+  useServerStore: () => h.store!,
   useServerApi: () => ({ get: vi.fn(), post: vi.fn() }),
   useServerOutbox: () => ({}),
   useServerUploads: () => ({}),
@@ -92,7 +95,7 @@ vi.mock("./useMessageReceipts", () => ({
   useMessageReceipts: () => new Map(),
 }));
 vi.mock("./questions/useQuestionCards", () => ({
-  useQuestionCards: () => () => undefined,
+  createQuestionCards: () => () => undefined,
 }));
 vi.mock("./removedMessages", () => ({
   useRemovedMessages: () => ({ restored: [], hidden: () => false }),
@@ -178,6 +181,8 @@ function renderActivity(pending: boolean, currentAgent = agent) {
   vi.mocked(useConversationActions).mockReturnValue({
     ...conversationActionsFixture(),
   });
+  const fixture = observableFixture(currentAgent ? [currentAgent] : []);
+  h.store = fixture.store;
   const tree = Conversation({
     id: "lead",
     agent: currentAgent,
@@ -191,7 +196,6 @@ function renderActivity(pending: boolean, currentAgent = agent) {
   expect(phases).toHaveLength(1);
   expect(required(phases[0]).props.savedMessagePending).toBe(pending);
   expect(required(phases[0]).props.connectionDetails).toBe("Failed to fetch");
-  const fixture = observableFixture(currentAgent ? [currentAgent] : []);
   return renderToStaticMarkup(
     createElement(
       fixture.Provider,

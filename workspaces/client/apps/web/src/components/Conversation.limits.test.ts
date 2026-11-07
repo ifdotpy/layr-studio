@@ -5,14 +5,13 @@ vi.mock("./conversation/navigation.ts", async (original) => ({
   useConversationActions: vi.fn(),
 }));
 vi.mock("./questions/requestView", () => ({
-  useRequestsView: () => ({ requests: [] }),
+  createRequestsView: () => ({ requests: [] }),
 }));
 import { required } from "./componentTestFixtures.ts";
 import { observableFixture } from "./observableFixture.tsx";
 import PromptInput from "./prompt-composer/PromptInput.tsx";
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
-  useWorkspace: () => ({ stateDir: "fixture" }),
   useAgentCatalog: () => ({ agents: [] }),
 }));
 import {
@@ -45,6 +44,17 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
+  useServerStore: () => ({
+    state: () => ({
+      current: {
+        status: "live",
+        data: {
+          agents: new Map(),
+          workspaces: new Map([["workspace", { stateDir: "fixture" }]]),
+        },
+      },
+    }),
+  }),
   useServerApi: () => ({ get: vi.fn(), post: vi.fn() }),
   useServerOutbox: () => ({}),
   useServerUploads: () => ({}),
@@ -68,7 +78,7 @@ vi.mock("./useMessageReceipts", () => ({
   useMessageReceipts: () => new Map(),
 }));
 vi.mock("./questions/useQuestionCards", () => ({
-  useQuestionCards: () => () => undefined,
+  createQuestionCards: () => () => undefined,
 }));
 vi.mock("./removedMessages", () => ({
   useRemovedMessages: () => ({ restored: [], hidden: () => false }),

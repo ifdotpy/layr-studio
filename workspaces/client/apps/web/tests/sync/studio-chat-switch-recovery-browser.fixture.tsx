@@ -3,7 +3,8 @@ import { fixtureElement } from "./browser-helpers.ts";
 
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { useMessages } from "../../src/hooks.ts";
+import { observer } from "mobx-react-lite";
+import { useConversationHistory } from "../../src/conversation/historySession.ts";
 import { createServerServices } from "../../src/servers/serverServices.ts";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
 const services = createServerServices({
@@ -36,8 +37,14 @@ services.resources.watchResourceConnection((status, stream) =>
     at: performance.now(),
   }),
 );
-function Panel({ id, selected }: { id: string; selected: boolean }) {
-  const messages = useMessages(
+const Panel = observer(function Panel({
+  id,
+  selected,
+}: {
+  id: string;
+  selected: boolean;
+}) {
+  const messages = useConversationHistory(
     id,
     "agent",
     true,
@@ -67,7 +74,7 @@ function Panel({ id, selected }: { id: string; selected: boolean }) {
       messages.items.map((item) => item.text).join("\n"),
     ),
   );
-}
+});
 function Fixture() {
   const [selected, setSelected] = useState("first");
   return React.createElement(
@@ -127,7 +134,7 @@ declare global {
       id: string;
       selected: boolean;
       connection: ReturnType<
-        typeof import("../../src/hooks.ts").useMessages
+        typeof import("../../src/conversation/historySession.ts").useConversationHistory
       >["connection"];
       at: number;
     }[];

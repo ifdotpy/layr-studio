@@ -1,6 +1,9 @@
+import { resourceData } from "./store/runtime.ts";
+import { useServerStore } from "./servers/ServerServicesContext.tsx";
+import { agentId as resourceAgentId } from "./generated/observableResources.ts";
 import { NativeModelActions } from "./components/conversation/NativeModelActions.tsx";
 import { observer, Observer } from "mobx-react-lite";
-import { useAgentCatalog, useAgentDetail } from "./components/agents/state.ts";
+import { useAgentCatalog } from "./components/agents/state.ts";
 import { SidebarCommandsProvider } from "./components/sidebar/commands.ts";
 import { MarkChatUnreadItem } from "./components/ChatReadActions.tsx";
 import {
@@ -15,7 +18,6 @@ import {
   AgentRole as GeneratedApiAgentRole,
   WorkspaceMode as GeneratedApiWorkspaceMode,
 } from "./generated/api.ts";
-import { useSubscription } from "./sync/subscriptions";
 import { ProviderKind } from "./generated/providerKind.ts";
 import { submitRename, watchRenameResult } from "./renameRequest";
 import { randomUUID } from "./uuid";
@@ -87,7 +89,7 @@ import { modalSizes } from "./theme";
 import { renameCommand, studioCommand } from "./nativeCommands";
 import { useDesktopNotifications } from "./hooks/desktopNotifications";
 import { useNativeAction } from "./useNativeAction";
-import { useChatPrefetch } from "./hooks/chatPrefetch";
+import { prepareChat } from "./hooks/chatPrefetch";
 import { useProjectDelete } from "./useProjectDelete";
 import { ProjectDeleteDialog } from "./components/ProjectDeleteDialog";
 import { deleteConversation, definiteDeleteRejection } from "./chatDeleteScope";
@@ -245,10 +247,13 @@ import {
 import FilePreview, { type PreviewTarget } from "./components/FilePreview";
 const TerminalDock = lazy(() => import("./components/TerminalDock"));
 import Workspace from "./components/shell/DeferredWorkspace";
+
 const BackgroundTasks = lazy(
   () => import("./components/shell/BackgroundTasks"),
 );
+
 export default observer(function App({ active = true }: { active?: boolean }) {
+  const store = useServerStore();
   const activeScreen = useRef(active);
   activeScreen.current = active;
   const {
@@ -277,6 +282,7 @@ export default observer(function App({ active = true }: { active?: boolean }) {
   const { useServerActivity, serverActivityActive, subscribeServerActivity } =
     useServerActivityScope();
   const { editOutboxDisplay, durableSend, useOutbox } = useServerOutbox();
+  const projectApi = useServerApi();
   const {
     get,
     post,
@@ -288,11 +294,10 @@ export default observer(function App({ active = true }: { active?: boolean }) {
     schemaUpdateFailedAfterReload,
     updateRendererAndReload,
     automaticallyUpdateRenderer,
-  } = useServerApi();
+  } = projectApi;
 
   const serverStorageEventKey = useServerStorageEventKey();
   const projectStorage = useServerStorage();
-  const projectApi = useServerApi();
   const projectServices = { ...projectApi, storage: projectStorage };
   reportPromptComposerRender("app");
   const [schemaMismatch, setSchemaMismatch] = useState(false);
@@ -683,7 +688,6 @@ export default observer(function App({ active = true }: { active?: boolean }) {
     if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
       setSharedCreate({});
   }, [data?.stateDir]);
-  const prepareChat = useChatPrefetch(data, opened, workspaceId, active);
   useEffect(() => {
     if (tasksOpen) setTasksRendered(true);
     if (workspaceOpen) setWorkspaceRendered(true);
@@ -826,15 +830,6 @@ export default observer(function App({ active = true }: { active?: boolean }) {
   const agents = catalog.agents;
   const leads = catalog.leads;
   const agent = catalog.get(opened || "");
-  const agentDetail = useAgentDetail(agent);
-  useSubscription(
-    active &&
-      agent &&
-      !projectDeleteScope.has(agent.id) &&
-      !(mobileClient && sidebar)
-      ? { kind: "agentDetail", agentId: agent.id }
-      : null,
-  );
   const room = data?.runtime?.rooms?.find((r) => r.id === opened);
   const railGeometry = useEdgeRail(undefined, active && !!data && !room?.radio);
   const [railTools] = useState(createConversationMenuTools);
@@ -944,10 +939,6 @@ export default observer(function App({ active = true }: { active?: boolean }) {
       ? ""
       : error;
   const attentionCount = messageAttentionCount(chatData);
-  const taskCount =
-    useSubscription(
-      readableLeadId ? { kind: "processes", agentId: readableLeadId } : null,
-    ).data?.activities.length ?? 0;
   const setDraft = useCallback(
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
@@ -2227,17 +2218,28 @@ export default observer(function App({ active = true }: { active?: boolean }) {
           {label}
         </Menu.Item>
       ))}
-      <Menu.Item
-        id="tasks-toggle"
-        aria-label={`Current activity${taskCount ? `, ${taskCount} active` : ""}`}
-        leftSection={<Activity size={14} />}
-        onClick={() => {
-          setTaskFocus(undefined);
-          setTasksOpen(true);
+      <Observer>
+        {() => {
+          const taskCount = readableLeadId
+            ? (resourceData(
+                store.processes(resourceAgentId(readableLeadId)).current,
+              )?.activities.length ?? 0)
+            : 0;
+          return (
+            <Menu.Item
+              id="tasks-toggle"
+              aria-label={`Current activity${taskCount ? `, ${taskCount} active` : ""}`}
+              leftSection={<Activity size={14} />}
+              onClick={() => {
+                setTaskFocus(undefined);
+                setTasksOpen(true);
+              }}
+            >
+              Background activity {taskCount || ""}
+            </Menu.Item>
+          );
         }}
-      >
-        Background activity {taskCount || ""}
-      </Menu.Item>
+      </Observer>
       {menuHeaderTools && !mobileClient && (
         <Menu.Item
           aria-label="Terminals"
@@ -2296,30 +2298,45 @@ export default observer(function App({ active = true }: { active?: boolean }) {
               )
             }
           </Observer>
-          {agentDetail?.workspaceMode === GeneratedApiWorkspaceMode.worktree &&
-            (agent.isLead ||
-              agent.role === GeneratedApiAgentRole.implementer) && (
-              <Menu.Item
-                data-action="switch-to-layr"
-                leftSection={<Layers size={14} />}
-                disabled={busy.has(agent.status ?? "") || !!agent.inFlight}
-                onClick={() => {
-                  void run(() =>
-                    post(
-                      "/api/agents/workspace-mode",
-                      { id: agent.id, workspaceMode: "layr-native" },
-                      { timeoutMs: 300000 },
-                    ),
-                  );
-                }}
-              >
-                Switch to Layr
-                <small className="menu-action-help">
-                  Keeps this chat and its history. Commit and push worktree
-                  changes first.
-                </small>
-              </Menu.Item>
-            )}
+          <Observer>
+            {() => {
+              const agentDetail =
+                active &&
+                !projectDeleteScope.has(agent.id) &&
+                !(mobileClient && sidebar)
+                  ? resourceData(
+                      store.agentDetail(resourceAgentId(agent.id)).current,
+                    )
+                  : undefined;
+              return (
+                agentDetail?.workspaceMode ===
+                  GeneratedApiWorkspaceMode.worktree &&
+                (agent.isLead ||
+                  agent.role === GeneratedApiAgentRole.implementer) && (
+                  <Menu.Item
+                    data-action="switch-to-layr"
+                    leftSection={<Layers size={14} />}
+                    disabled={busy.has(agent.status ?? "") || !!agent.inFlight}
+                    onClick={() => {
+                      void run(() =>
+                        post(
+                          "/api/agents/workspace-mode",
+                          { id: agent.id, workspaceMode: "layr-native" },
+                          { timeoutMs: 300000 },
+                        ),
+                      );
+                    }}
+                  >
+                    Switch to Layr
+                    <small className="menu-action-help">
+                      Keeps this chat and its history. Commit and push worktree
+                      changes first.
+                    </small>
+                  </Menu.Item>
+                )
+              );
+            }}
+          </Observer>
           <Menu.Divider />
           <Menu.Label>Model actions</Menu.Label>
           <NativeModelActions agent={agent} />
