@@ -336,8 +336,13 @@ mod unix {
     /// drains for up to `grace` and then exits by force.
     pub fn take(state_dir: &Path, grace: Duration) -> std::io::Result<Taken> {
         let (listener, mut old) = request(state_dir)?;
-        // The old server ends this connection when it exits.
-        old.set_read_timeout(Some(grace * 2))?;
+        // The old server ends this connection when it exits. On macOS the timeout cannot
+        // be set once the old server has already closed its end (EINVAL); the read below
+        // then sees the end at once.
+        match old.set_read_timeout(Some(grace * 2)) {
+            Err(error) if error.kind() == std::io::ErrorKind::InvalidInput => {}
+            other => other?,
+        }
         std::io::copy(&mut old, &mut std::io::sink())?;
         let deadline = std::time::Instant::now() + STANDBY_WAIT;
         let standby = loop {
