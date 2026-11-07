@@ -500,6 +500,7 @@ platform = 'cfg(target_os = "linux")'
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 default-filter = '''
+    package(=studio-observable-codegen) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
     (package(=studio-runtime-store) & kind(lib) & test(native_layr_line_preserves_presence_and_rejects_invalid_type)) |

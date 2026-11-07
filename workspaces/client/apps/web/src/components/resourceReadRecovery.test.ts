@@ -149,7 +149,8 @@ vi.mock("../usePendingCommands", () => ({ usePendingCommands: () => [] }));
 vi.mock("../sync/subscriptions", () => ({
   useSubscription: subscription,
 }));
-vi.mock("../sync/subscriptions/events", () => ({
+vi.mock("../sync/subscriptions/events", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../sync/subscriptions/events")>()),
   watchResourceChanges: (
     resource: unknown,
     callback: (version?: unknown) => void,
