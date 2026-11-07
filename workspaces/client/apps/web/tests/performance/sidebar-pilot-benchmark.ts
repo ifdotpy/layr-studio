@@ -95,15 +95,20 @@ for (const label of ["base", "integrated"]) {
           }));
           builder.onLoad(
             { filter: /sidebar-pilot-model\.ts$/ },
-            async (args) => ({
-              contents: await readFile(
+            async (args) => {
+              let contents = await readFile(
                 baseline
                   ? join(import.meta.dirname, "sidebar-pilot-base.ts")
                   : args.path,
                 "utf8",
-              ),
-              loader: "ts",
-            }),
+              );
+              if (baseline)
+                contents = contents.replace(
+                  /declare const baselineChatIndicators:[\s\S]*?;/,
+                  'import { chatIndicators as baselineChatIndicators } from "/src/components/chat-status/chatStatusModel.ts";',
+                );
+              return { contents, loader: "ts" };
+            },
           );
           builder.onLoad({ filter: /\/src\/.*\.(tsx?|css)$/ }, async (args) => {
             if (!args.path.startsWith(join(web, "src/"))) return undefined;

@@ -7,8 +7,13 @@ import Sidebar from "../../src/components/Sidebar.tsx";
 import SidebarRow from "../../src/components/SidebarRow.tsx";
 import { useSnapshot } from "../../src/hooks.ts";
 import { syncDatabase, persistProjection } from "../../src/sync/client.ts";
-import { createSidebarMirror } from "../../src/generated/observableResources.ts";
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { createStateMirror } from "../../src/generated/observableResources.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
+import {
+  createSidebarRow,
+  localSidebarIdentity,
+} from "../../src/components/sidebar/viewModel.ts";
+import { pilotEntities } from "./sidebar-pilot-model.ts";
 const noop = () => {};
 window.fixtureRows = 0;
 window.fixtureJsonReads = 0;
@@ -84,27 +89,18 @@ window.readyAgain = () =>
     seq: 2,
     payload: "ready",
   });
-const mirror = createSidebarMirror();
-const keyRow = sidebarRowFixture(agents[0]!.id);
+const mirror = createStateMirror();
+const keyRow = createSidebarRow(agentSummaryFixture(agents[0]!.id), {
+  collections: mirror.current,
+  ...localSidebarIdentity,
+});
 function Harness() {
   const { data } = useSnapshot();
   window.fixtureRenders++;
-  const rows = useMemo(() => {
+  const collections = useMemo(() => {
     // Explicit read-model fixtures; production status policy stays on the server.
-    mirror.apply({
-      rows: (data?.threads || []).map((agent) =>
-        sidebarRowFixture(agent.id, {
-          name: agent.name || "",
-          projectPath: agent.cwd || "/fixture",
-          groupKey: JSON.stringify(["items", agent.cwd || "/fixture", null]),
-          indicator:
-            agent.status === "running"
-              ? { kind: "working", label: "Working" }
-              : { kind: "none", label: "Read" },
-        }),
-      ),
-    });
-      return mirror.current.rows;
+    mirror.apply(pilotEntities(data?.threads || []));
+    return mirror.current;
   }, [data]);
   window.fixtureData = data;
   const checks =
@@ -134,7 +130,7 @@ function Harness() {
         mobile={false}
         onSearch={noop}
         close={noop}
-        rows={rows}
+        collections={collections}
         markUnread={(id) => window.fixtureActions.push(["unread", id, checks])}
         markingRead={new Set()}
       />

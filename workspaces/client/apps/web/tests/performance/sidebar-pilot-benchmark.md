@@ -45,8 +45,11 @@ after every sample. `results.json` reports per phase:
 - Final retained JS heap bytes after Chromium's explicit full GC, and emitted
   bundle byte sizes. Each variant uses a fresh browser context.
 
-The integrated adapter applies the actual generated `createSidebarMirror`; the
-baseline adapter updates agent snapshots and runs its actual `chatIndicators`.
+The integrated adapter applies `agentSummaryFixture` facts through the generated
+`createStateMirror` collections. The actual Sidebar creates the shared computed
+view-model over those collections. The baseline adapter updates agent snapshots
+and runs its exact Git baseline `chatIndicators`, injected at a typed virtual
+boundary inside this benchmark. No production compatibility export is added.
 The fixture isolates rendering/read-model application; it does not measure SSE,
 server computation or transport. The conversation counter is explicitly named
 `conversationGuard`: it is a memoized sibling, **not the actual Conversation**.
