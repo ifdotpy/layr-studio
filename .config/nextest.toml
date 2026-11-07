@@ -79,6 +79,7 @@ inherits = "ci"
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
     (package(=studio-runtime-http) & kind(lib) & test(retained_worktrees_include_deleted_members_and_stream_cleanup_deletes)) |
@@ -529,6 +530,7 @@ platform = 'cfg(target_os = "linux")'
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
     (package(=studio-runtime-http) & kind(lib) & test(retained_worktrees_include_deleted_members_and_stream_cleanup_deletes)) |

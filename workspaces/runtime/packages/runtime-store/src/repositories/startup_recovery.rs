@@ -40,8 +40,8 @@ fn cleanup_intent_predicate(_exact: bool) -> String {
 
 /// SQL predicate: a deleted agent that may still hold an active turn, the
 /// rows whose deletion settlement a restart must finish. The index predicate is
-/// the deleted flag alone. `exact` (the query) adds the busy chat, the unfinished
-/// turn, the chat status and the reservation flag from the chat and turn rows.
+/// the deleted flag alone. `exact` (the query) seeks the small liveness sets
+/// before reading deleted records, independent of agent and turn history size.
 fn deleted_unsettled_predicate(exact: bool) -> String {
     let deleted = nonfalsy("deleted_at");
     if !exact {
@@ -52,11 +52,18 @@ fn deleted_unsettled_predicate(exact: bool) -> String {
         .map(|status| format!("'{status}'"))
         .collect::<Vec<_>>()
         .join(",");
+    let unfinished = crate::domain::unfinished_turn_sql("");
+    // The UNION arms replace, in order: chat_busy_sql, a non-null
+    // unfinished_provider_turn_sql, an active chat_status_sql, and the reserved
+    // attempt EXISTS probe. The provider arm overlaps the busy arm; UNION keeps
+    // one id. A reservation flag can be true only when attempt is non-null,
+    // which lets its arm use turns_one_attempt instead of reading turn history.
     format!(
-        "{deleted} AND ({} OR {} IS NOT NULL OR {} IN ({statuses}) OR EXISTS(SELECT 1 FROM turns t WHERE t.chat=runtime_agents.id AND t.attempt_active_at_reservation=1))",
-        crate::domain::chat_busy_sql("runtime_agents.id"),
-        crate::domain::unfinished_provider_turn_sql("runtime_agents.id"),
-        crate::domain::chat_status_sql("runtime_agents.id"),
+        "{deleted} AND id IN (
+            SELECT chat FROM turns WHERE {unfinished}
+            UNION SELECT chat FROM turns WHERE {unfinished} AND provider_turn IS NOT NULL
+            UNION SELECT id FROM chats WHERE status IN ({statuses})
+            UNION SELECT chat FROM turns WHERE attempt IS NOT NULL AND attempt_active_at_reservation=1)"
     )
 }
 
@@ -311,6 +318,101 @@ impl StartupRecoveryRepository {
 mod tests {
     use super::{MONITORS, REQUESTS, StartupRecoveryRepository, TOOL_REQUESTS};
     use rusqlite::Connection;
+
+    thread_local! {
+        static DELETED_SELECTION_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn deleted_agent_selection_seeks_liveness_sets_instead_of_history() {
+        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        connection
+            .execute_batch(crate::agent_columns::agent_table_sql())
+            .expect("agents");
+        connection
+            .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
+            .expect("domain");
+        StartupRecoveryRepository::prepare_indexes(&connection).expect("indexes");
+        // Live-shaped history: about 1,000 deleted agents and 14,000 finished turns.
+        connection.execute_batch(
+            r#"WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<1000)
+             INSERT INTO runtime_agents(id,record)
+             SELECT printf('history-%04d',x),json_object('provider','codex','deletedAt',5,
+                 'history',hex(zeroblob(2048))) FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<14000)
+             INSERT INTO turns(id,chat,state)
+             SELECT printf('turn-%d',x),printf('history-%04d',1+x%1000),'completed' FROM n;
+             INSERT INTO runtime_agents(id,record) VALUES
+                 ('a-busy','{"provider":"codex","deletedAt":5}'),
+                 ('b-provider','{"provider":"codex","deletedAt":5}'),
+                 ('c-status','{"provider":"codex","deletedAt":5}'),
+                 ('d-reserved','{"provider":"codex","deletedAt":5}'),
+                 ('e-overlap','{"provider":"codex","deletedAt":5}'),
+                 ('f-none','{"provider":"codex","deletedAt":5}'),
+                 ('g-live','{"provider":"codex"}');
+             INSERT INTO chats(id,state,status) VALUES
+                 ('c-status','active','approval'),('e-overlap','active','running'),
+                 ('g-live','active','running');
+             INSERT INTO turns(id,chat,state,session,provider_turn,attempt) VALUES
+                 ('busy','a-busy','starting',NULL,NULL,NULL),
+                 ('provider','b-provider','running','session','provider-turn',NULL),
+                 ('reserved','d-reserved','completed',NULL,NULL,'{"activeAtReservation":true}'),
+                 ('overlap','e-overlap','running','session','provider-turn','{"activeAtReservation":true}'),
+                 ('inactive','f-none','completed',NULL,'old-provider','{"activeAtReservation":false}');"#
+        ).expect("history and each liveness probe");
+        // A non-null unfinished provider turn necessarily also satisfies the busy
+        // probe. The provider case covers it; the busy case has no provider turn.
+        let old_sql = format!(
+            "SELECT id,record FROM runtime_agents WHERE COALESCE(deleted_at,0)!=0 AND
+             ({} OR {} IS NOT NULL OR {} IN ('running','starting','approval') OR
+              EXISTS(SELECT 1 FROM turns t WHERE t.chat=runtime_agents.id AND t.attempt_active_at_reservation=1)) ORDER BY id",
+            crate::domain::chat_busy_sql("runtime_agents.id"),
+            crate::domain::unfinished_provider_turn_sql("runtime_agents.id"),
+            crate::domain::chat_status_sql("runtime_agents.id"),
+        );
+        let mut old = connection.prepare(&old_sql).expect("old query");
+        let expected = old
+            .query_map([], |row| row.get::<_, String>(0))
+            .expect("old rows")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("old ids");
+        let before = old.get_status(rusqlite::StatementStatus::VmStep);
+        assert_eq!(
+            expected,
+            [
+                "a-busy",
+                "b-provider",
+                "c-status",
+                "d-reserved",
+                "e-overlap"
+            ]
+        );
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    DELETED_SELECTION_STEPS.with(|steps| {
+                        steps.set(
+                            steps.get() + statement.get_status(rusqlite::StatementStatus::VmStep),
+                        )
+                    });
+                }
+            }),
+        );
+        DELETED_SELECTION_STEPS.with(|steps| steps.set(0));
+        let selected = StartupRecoveryRepository::deleted_agents_maybe_unsettled(&connection)
+            .expect("production selection")
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect::<Vec<_>>();
+        let after = DELETED_SELECTION_STEPS.with(std::cell::Cell::get);
+        assert_eq!(selected, expected, "same ids, deduplication and order");
+        eprintln!("deleted agent selection VM steps: before={before}, after={after}");
+        assert!(
+            after < 5_000 && after * 10 < before,
+            "liveness sets must avoid agent and turn history: {before} -> {after}"
+        );
+    }
 
     fn database() -> Connection {
         let connection = Connection::open_in_memory().expect("memory SQLite opens");
