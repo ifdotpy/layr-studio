@@ -9723,7 +9723,13 @@ export interface components {
       text: string;
     };
     /** @enum {string} */
-    ChatOperationalKind: "answer" | "error" | "working" | "paused" | "none";
+    ChatOperationalKind:
+      | "answer"
+      | "error"
+      | "working"
+      | "unread"
+      | "paused"
+      | "none";
     ChatOperationalStatus: {
       kind: components["schemas"]["ChatOperationalKind"];
       label: string;
@@ -11968,6 +11974,23 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** @enum {string} */
+    CopyPhase:
+      | "sizing"
+      | "staging"
+      | "importing_commits"
+      | "materializing"
+      | "restoring_attributes"
+      | "warming_caches"
+      | "transferring"
+      | "creating_line"
+      | "archiving"
+      | "uploading"
+      | "importing_project"
+      | "completed"
+      | "failed";
+    /** @enum {string} */
+    CopyUnit: "files" | "bytes" | "commits";
     /** CostBreakdown */
     CostBreakdown: {
       /** Models */
@@ -14325,6 +14348,15 @@ export interface components {
       available: boolean;
       receipt: components["schemas"]["ConnectionCheckDto"] | null;
     };
+    /**
+     * @description Server-owned reasons for an unavailable mark-unread action.
+     * @enum {string}
+     */
+    MarkUnreadEligibility:
+      | "allowed"
+      | "unsupported"
+      | "no_completed_result"
+      | "already_unread";
     McpReconnectRequest: {
       id: string;
       name: string;
@@ -19520,7 +19552,8 @@ export interface components {
       | components["schemas"]["WorkResource"]
       | components["schemas"]["ComplaintResource"]
       | components["schemas"]["TerminalOutputResource"]
-      | components["schemas"]["NativeLayrSettingsResource"];
+      | components["schemas"]["NativeLayrSettingsResource"]
+      | components["schemas"]["SidebarResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -21437,6 +21470,83 @@ export interface components {
       /** Model */
       model: string;
     };
+    SidebarChatList: {
+      /** @description Visible managed lead chats; row order uses the sidebar source order. */
+      rows: components["schemas"]["SidebarChatRow"][];
+    };
+    SidebarChatRow: {
+      /**
+       * Format: double
+       * @description Latest activity timestamp, in seconds since Unix epoch.
+       */
+      activityAt: number;
+      /** @description Whether the chat is archived. */
+      archived: boolean;
+      /** @description Whether the chat has no in-flight turn. */
+      canArchive: boolean;
+      /** @description Whether a threadless chat without an in-flight turn can move project. */
+      canChangeProject: boolean;
+      /** @description Non-time compact visibility reasons; recent activity is checked at render. */
+      compactPinned: boolean;
+      /** @description Current epoch workspace copy progress; counts use the progress owner unit. */
+      copyProgress: {
+        /** Format: uint64 */
+        done: number;
+        phase: components["schemas"]["CopyPhase"];
+        /** Format: uint64 */
+        total?: number | null | undefined;
+        unit: components["schemas"]["CopyUnit"];
+      };
+      /** @description Canonical saved sidebar ordering group key. */
+      groupKey: string;
+      /** @description Stable chat identity, without units. */
+      id: string;
+      /** @description Operational indicator, independent of the unread receipt. */
+      indicator: components["schemas"]["ChatOperationalStatus"];
+      /** @description Existing completed-result read CAS proof; null means no completed result. */
+      markRead: {
+        read: boolean;
+        revision: number;
+        threadId: string;
+        turnId: string;
+      };
+      /** @description Eligibility of an explicit mark-unread action. */
+      markUnread: components["schemas"]["MarkUnreadEligibility"];
+      /** @description Provider model identifier; null means not selected. */
+      model: string;
+      /** @description Display name, in Unicode text. */
+      name: string;
+      /**
+       * Format: uint32
+       * @description Zero-based saved position; null is unranked and sorts last.
+       */
+      orderRank: number;
+      /** @description Whether the chat is pinned. */
+      pinned: boolean;
+      /** @description Project folder identity; null means the project root. */
+      projectFolder: string;
+      /**
+       * Format: uint32
+       * @description Project organization revision, in monotonic changes.
+       */
+      projectFolderRevision: number;
+      /** @description Existing project identity for binding across server path aliases. */
+      projectId: string;
+      /** @description Owning project path, in filesystem path text. */
+      projectPath: string;
+      /** @description Existing project owner server identity for binding across server path aliases. */
+      projectServerId: string;
+      /** @description Provider identity, owned by provider_kind. */
+      provider: components["schemas"]["ProviderKind"];
+      /** @description Lower-case searchable display text, in Unicode text. */
+      searchText: string;
+      /** @description Opaque lexicographic authoritative ordering key, computed by studio-read-models. */
+      sortKey: string;
+      /** @description Peer team identity; null means no team. */
+      teamId: string;
+      /** @description Whether the existing stall owner reports waiting for lead action. */
+      waitingForLead: boolean;
+    };
     /** SidebarOrderDto */
     SidebarOrderDto: {
       /** Groups */
@@ -21475,6 +21585,13 @@ export interface components {
       migration?: boolean | null | undefined;
       /** Request Id */
       request_id: string;
+    };
+    SidebarResource: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "sidebar";
     };
     /** SignedEnvelope */
     SignedEnvelope: {
@@ -22585,6 +22702,7 @@ export interface components {
         | components["schemas"]["ChatRead"]
         | components["schemas"]["MessageHistory"];
       "session-cost": components["schemas"]["SessionCostResponse"];
+      sidebar: components["schemas"]["SidebarChatList"];
       state: components["schemas"]["SyncEntityPayload"][];
       task: components["schemas"]["TaskEntityDto"];
       tasks: components["schemas"]["TaskEntityDto"][];
@@ -23204,7 +23322,8 @@ export interface components {
             | "workDetail"
             | "workResult"
             | "workDecision"
-            | "workRelease";
+            | "workRelease"
+            | "sidebarChatRow";
           /** @constant */
           op: "delete";
         }
@@ -23306,6 +23425,13 @@ export interface components {
           op: "upsert";
           value: components["schemas"]["WorkReleaseEntityDto"];
         }
+      | {
+          /** @constant */
+          collection: "sidebarChatRow";
+          /** @constant */
+          op: "upsert";
+          value: components["schemas"]["SidebarChatRow"];
+        }
     );
     SyncEntityPayload:
       | components["schemas"]["SyncAgentEntityPayload"]
@@ -23342,7 +23468,8 @@ export interface components {
       | components["schemas"]["SyncWorkDetailEntityPayload"]
       | components["schemas"]["SyncWorkResultEntityPayload"]
       | components["schemas"]["SyncWorkDecisionEntityPayload"]
-      | components["schemas"]["SyncWorkReleaseEntityPayload"];
+      | components["schemas"]["SyncWorkReleaseEntityPayload"]
+      | components["schemas"]["SyncSidebarChatRowEntityPayload"];
     /** SyncEventEntityPayload */
     SyncEventEntityPayload: {
       /**
@@ -23614,6 +23741,15 @@ export interface components {
       sessionId: string;
       token?: string | undefined;
       workspaceId: string;
+    };
+    SyncSidebarChatRowEntityPayload: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      collection: "sidebarChatRow";
+      id: string;
+      value: components["schemas"]["SidebarChatRow"];
     };
     /** SyncStudioErrorEntityPayload */
     SyncStudioErrorEntityPayload: {
@@ -37413,6 +37549,7 @@ export const ChatOperationalKind = {
   answer: "answer",
   error: "error",
   working: "working",
+  unread: "unread",
   paused: "paused",
   none: "none",
 } as const;
@@ -37458,6 +37595,28 @@ export const ComplaintStatus = {
   stopped: "stopped",
 } as const;
 export type ComplaintStatus = components["schemas"]["ComplaintStatus"];
+export const CopyPhase = {
+  sizing: "sizing",
+  staging: "staging",
+  importing_commits: "importing_commits",
+  materializing: "materializing",
+  restoring_attributes: "restoring_attributes",
+  warming_caches: "warming_caches",
+  transferring: "transferring",
+  creating_line: "creating_line",
+  archiving: "archiving",
+  uploading: "uploading",
+  importing_project: "importing_project",
+  completed: "completed",
+  failed: "failed",
+} as const;
+export type CopyPhase = components["schemas"]["CopyPhase"];
+export const CopyUnit = {
+  files: "files",
+  bytes: "bytes",
+  commits: "commits",
+} as const;
+export type CopyUnit = components["schemas"]["CopyUnit"];
 export const Decision = {
   accept: "accept",
   accept_for_session: "accept_for_session",
@@ -37586,6 +37745,14 @@ export const LiveUpdateState = {
   failed: "failed",
 } as const;
 export type LiveUpdateState = components["schemas"]["LiveUpdateState"];
+export const MarkUnreadEligibility = {
+  allowed: "allowed",
+  unsupported: "unsupported",
+  no_completed_result: "no_completed_result",
+  already_unread: "already_unread",
+} as const;
+export type MarkUnreadEligibility =
+  components["schemas"]["MarkUnreadEligibility"];
 export const MessageKind = {
   "chat-message": "chat-message",
   "room-invite": "room-invite",
