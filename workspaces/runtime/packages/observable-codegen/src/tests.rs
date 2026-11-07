@@ -47,21 +47,15 @@ fn selected_collections_use_the_existing_array_resource() {
         "type":"object","additionalProperties":false,"required":["kind"],
         "properties":{"kind":{"type":"string","const":"state"}}
     }]});
-<<<<<<< head
     document["components"]["schemas"]["Tail"] = json!({"type":"object","additionalProperties":false,"required":["tail"],"properties":{"tail":{"type":"string"}}});
-=======
->>>>>>> 0243a5f
     document["components"]["schemas"]["Payload"] = json!({"oneOf":[
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
             "collection":{"type":"string","const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}
         }},
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
-<<<<<<< head
             "collection":{"type":"string","const":"tail"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Tail"}
         }},
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
-=======
->>>>>>> 0243a5f
             "collection":{"type":"string","const":"ignored"},"id":{"type":"string"},"value":{"type":"object","additionalProperties":true}
         }}
     ]});
@@ -72,14 +66,10 @@ fn selected_collections_use_the_existing_array_resource() {
         "state",
         "state",
         "Payload",
-<<<<<<< head
         vec![
             ObservableCollection::named("row", "rows", "Row"),
             ObservableCollection::named("tail", "tails", "Tail"),
         ],
-=======
-        vec![ObservableCollection::named("row", "rows", "Row")],
->>>>>>> 0243a5f
     )];
     let generated =
         render(&document, &models(), &resources).expect("selected state collections render");
@@ -104,7 +94,6 @@ fn selected_collections_use_the_existing_array_resource() {
         UnsupportedShape::Identifier
     );
 }
-<<<<<<< head
 
 #[test]
 fn object_validation_alternatives_do_not_create_union_models() {
@@ -143,8 +132,6 @@ fn component_aliases_resolve_and_cycles_fail_with_the_schema_path() {
         UnsupportedShape::Recursive
     );
 }
-=======
->>>>>>> 0243a5f
 fn resources() -> Vec<ObservableResource> {
     vec![ObservableResource {
         kind: "fixture".into(),
