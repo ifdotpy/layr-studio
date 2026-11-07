@@ -81,6 +81,7 @@ inherits = "ci"
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
+    (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
@@ -536,6 +537,7 @@ platform = 'cfg(target_os = "linux")'
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
+    (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |

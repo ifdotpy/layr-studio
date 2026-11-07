@@ -665,15 +665,7 @@ fn agent_units(
     // Cleanup uses soft deletion, retaining the root until its tombstone is emitted.
     // Arbitrary hard deletes have no scoped provenance; only snapshots reconcile them.
     // The agent row and its view mark both name the agent: one unit at the later one.
-    let changed: Vec<(String, i64)> = connection
-        .prepare_cached(
-            "SELECT id,MAX(seq) AS last FROM durable_rows
-             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
-               AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
-               AND (?7 IS NULL OR id=?7 OR id IN
-                 (SELECT id FROM runtime_agents WHERE root_id=?7))
-             GROUP BY id ORDER BY last LIMIT ?6",
-        )?
+    let changed: Vec<(String, i64)> = prepare_agent_changes(connection, after, through)?
         .query_map(
             params![
                 durable_seq::AGENT_VIEW_MARK,
@@ -715,6 +707,33 @@ fn agent_units(
         units.push(Unit { seq, rows });
     }
     Ok(units)
+}
+
+// Owner: entity_scope. Maximum narrow range in durable_rows sequence numbers;
+// larger ranges retain the planner's table-key scan for broad snapshots.
+const SEQ_INDEX_RANGE_MAX: i64 = 1024;
+
+const AGENT_CHANGES_SQL: &str = "SELECT id,MAX(seq) AS last FROM durable_rows
+             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
+               AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
+               AND (?7 IS NULL OR id=?7 OR id IN
+                 (SELECT id FROM runtime_agents WHERE root_id=?7))
+             GROUP BY id ORDER BY last LIMIT ?6";
+
+/// Prepare the grouped agent change read used by every entity page.
+fn prepare_agent_changes(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+) -> StoreResult<rusqlite::CachedStatement<'_>> {
+    if through.saturating_sub(after) <= SEQ_INDEX_RANGE_MAX {
+        return Ok(connection.prepare_cached(&AGENT_CHANGES_SQL.replacen(
+            "FROM durable_rows",
+            "FROM durable_rows INDEXED BY durable_rows_seq",
+            1,
+        ))?);
+    }
+    Ok(connection.prepare_cached(AGENT_CHANGES_SQL)?)
 }
 
 /// Only lead tails. Four scalar columns from owner tables; no summary/domain aggregation.
@@ -1247,5 +1266,179 @@ fn work_error(error: WorkWriteError) -> StoreError {
         other @ (WorkWriteError::Event(_)
         | WorkWriteError::NotImplemented(_)
         | WorkWriteError::PreparationWorker) => StoreError::SchemaValidation(other.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod catch_up_query_tests {
+    use super::*;
+    use rusqlite::StatementStatus;
+
+    fn fixture() -> Connection {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE durable_rows(tbl TEXT NOT NULL,id TEXT NOT NULL,seq INTEGER NOT NULL,
+                 deleted INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(tbl,id));
+             CREATE INDEX durable_rows_seq ON durable_rows(seq);
+             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,root_id TEXT);
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300000)
+             INSERT INTO durable_rows SELECT 'unrelated',CAST(x AS TEXT),x,0 FROM n;
+             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+             INSERT INTO durable_rows SELECT 'runtime_agents',CAST(x AS TEXT),x,0 FROM n;
+             INSERT INTO durable_rows VALUES
+                 ('runtime_agents','a',300001,0),('runtime_agents','b',300003,1),
+                 ('runtime_agents','c',300004,0),('runtime_agents','outside',300011,0);
+             INSERT INTO runtime_agents VALUES('a','root'),('b','root'),('c','other');",
+        )
+        .unwrap();
+        db.execute(
+            "INSERT INTO durable_rows VALUES(?1,'a',300002,0)",
+            [durable_seq::AGENT_VIEW_MARK],
+        )
+        .unwrap();
+        db
+    }
+
+    #[test]
+    fn narrow_agent_changes_seek_sequence_range() {
+        let db = fixture();
+        for (deletes_after, id, root, limit, expected) in [
+            (
+                0,
+                None,
+                None,
+                100,
+                vec![("a", 300002), ("b", 300003), ("c", 300004)],
+            ),
+            (
+                i64::MAX,
+                None,
+                None,
+                100,
+                vec![("a", 300002), ("c", 300004)],
+            ),
+            (0, Some("a"), None, 100, vec![("a", 300002)]),
+            (
+                0,
+                None,
+                Some("root"),
+                100,
+                vec![("a", 300002), ("b", 300003)],
+            ),
+            (0, None, None, 1, vec![("a", 300002)]),
+        ] {
+            let mut query = prepare_agent_changes(&db, 300000, 300010).unwrap();
+            let rows = query
+                .query_map(
+                    params![
+                        durable_seq::AGENT_VIEW_MARK,
+                        300000,
+                        300010,
+                        deletes_after,
+                        id,
+                        limit,
+                        root
+                    ],
+                    |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(
+                rows,
+                expected
+                    .into_iter()
+                    .map(|(id, seq)| (id.to_owned(), seq))
+                    .collect::<Vec<_>>()
+            );
+            let steps = query.reset_status(StatementStatus::VmStep);
+            eprintln!("narrow agent changes id={id:?} root={root:?} VM steps={steps}");
+            assert!(
+                steps < 2000,
+                "a ten-number delta must avoid historical agents: {steps}"
+            );
+        }
+    }
+
+    #[test]
+    fn agent_changes_range_plan_boundaries() {
+        let db = fixture();
+        for (after, through, indexed, empty) in [
+            (298986, 300010, true, false),  // Exactly 1024 sequence numbers.
+            (298985, 300010, false, false), // Exactly 1025 sequence numbers.
+            (300010, 300010, true, true),
+            (300010, 300009, true, true),
+        ] {
+            let mut query = prepare_agent_changes(&db, after, through).unwrap();
+            assert_eq!(
+                query.expanded_sql().unwrap().contains("INDEXED BY"),
+                indexed
+            );
+            let parameters = params![
+                durable_seq::AGENT_VIEW_MARK,
+                after,
+                through,
+                0,
+                None::<&str>,
+                100,
+                None::<&str>
+            ];
+            let read =
+                |row: &rusqlite::Row<'_>| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?));
+            let actual = query
+                .query_map(parameters, read)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            let mut original = db.prepare(AGENT_CHANGES_SQL).unwrap();
+            let expected = original
+                .query_map(parameters, read)
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(actual.is_empty(), empty);
+            let steps = query.reset_status(StatementStatus::VmStep);
+            let before = original.get_status(StatementStatus::VmStep);
+            eprintln!("range=({after},{through}] indexed={indexed} VM steps={before}->{steps}");
+            if indexed {
+                assert!(steps < 8000);
+            } else {
+                assert_eq!(steps, before);
+            }
+        }
+    }
+
+    #[test]
+    fn broad_agent_changes_keep_table_plan() {
+        let db = fixture();
+        let mut query = prepare_agent_changes(&db, 0, 300010).unwrap();
+        let rows = query
+            .query_map(
+                params![
+                    durable_seq::AGENT_VIEW_MARK,
+                    0,
+                    300010,
+                    i64::MAX,
+                    None::<&str>,
+                    i64::MAX,
+                    None::<&str>
+                ],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(rows.len(), 10002);
+        assert_eq!(
+            &rows[rows.len() - 2..],
+            &[("a".to_owned(), 300002), ("c".to_owned(), 300004)]
+        );
+        let steps = query.reset_status(StatementStatus::VmStep);
+        eprintln!("broad agent changes 300000 unrelated rows VM steps={steps}");
+        assert!(
+            steps < 500000,
+            "broad snapshots must avoid unrelated sequence history: {steps}"
+        );
     }
 }
