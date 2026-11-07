@@ -223,3 +223,50 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
   expect(nextOpen).toHaveBeenCalledTimes(1);
   await f.close();
 });
+
+it("renders every server unread eligibility and pending-write menu state", async () => {
+  const f = fixture();
+  const { Menu } = await import("@mantine/core");
+  const { MarkUnreadEligibility } = await import("../../generated/api.ts");
+  const { UnreadAction } = await import("./UnreadAction.tsx");
+  const { actions } = await import("./testFixture.ts");
+  const unread = vi.fn();
+  for (const eligibility of Object.values(MarkUnreadEligibility)) {
+    for (const markingRead of [false, true]) {
+      const row = sidebarRowFixture("a", { markUnread: eligibility });
+      await act(async () =>
+        f.root.render(
+          createElement(
+            MantineProvider,
+            null,
+            createElement(
+              Menu,
+              null,
+              createElement(UnreadAction, {
+                row,
+                disabled: false,
+                markingRead,
+                actions: { ...actions, unread },
+              }),
+            ),
+          ),
+        ),
+      );
+      const button = document.querySelector<HTMLButtonElement>(
+        '[aria-label="Mark unread"]',
+      );
+      expect(button?.disabled).toBe(
+        markingRead || eligibility !== MarkUnreadEligibility.allowed,
+      );
+      unread.mockClear();
+      await act(async () => button?.click());
+      expect(unread).toHaveBeenCalledTimes(
+        markingRead || eligibility !== MarkUnreadEligibility.allowed ? 0 : 1,
+      );
+      expect(document.querySelector(".menu-action-help") !== null).toBe(
+        markingRead || eligibility !== MarkUnreadEligibility.allowed,
+      );
+    }
+  }
+  await f.close();
+});
