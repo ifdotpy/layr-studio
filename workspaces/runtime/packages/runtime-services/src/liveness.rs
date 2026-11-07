@@ -355,6 +355,11 @@ fn stalled_turn_candidates_sql() -> String {
     )
 }
 
+/// The same conservative candidate predicate for one source-write invalidation.
+pub(crate) fn stalled_turn_candidate_sql() -> String {
+    format!("SELECT EXISTS({} AND id=?1)", stalled_turn_candidates_sql())
+}
+
 fn stalled_turns(
     tx: &Transaction<'_>,
     now: f64,

@@ -272,9 +272,15 @@ function Fixture() {
           <ExecutionSettings
             agent={agent}
             accounts={accounts}
-            excludedAccountKeys={agent.excludedAccountKeys ?? []}
-            onExcludedAccountKeysChange={(keys) =>
-              setAgent({ ...agent, excludedAccountKeys: keys })
+            workerExcludedAccountKeys={agent.workerExcludedAccountKeys ?? []}
+            reviewerExcludedAccountKeys={
+              agent.reviewerExcludedAccountKeys ?? []
+            }
+            onWorkerExcludedAccountKeysChange={(keys) =>
+              setAgent({ ...agent, workerExcludedAccountKeys: keys })
+            }
+            onReviewerExcludedAccountKeysChange={(keys) =>
+              setAgent({ ...agent, reviewerExcludedAccountKeys: keys })
             }
             catalog={{
               models: agent.provider === "claude" ? claude : codex,

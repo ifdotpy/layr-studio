@@ -9,7 +9,6 @@ use studio_runtime_store::CachedSql;
 use studio_runtime_store::{StoreResult, system_reads as records};
 
 use crate::submit_gates::{AgentAuthorityRow, Deletion, ProjectAuthorityRow};
-use crate::sync_policy::table_exists;
 use crate::sync_views::{AgentViewContext, RoomViewContext, TransferObservation};
 use studio_runtime_store::{AgentRecord, AgentStatus};
 
@@ -75,9 +74,6 @@ fn account_destinations(
     struct Account {
         id: studio_runtime_schema::account_key::AccountKey,
         eligibility: studio_runtime_schema::agent_progress::AccountEligibility,
-    }
-    if !table_exists(transaction, "sync_entities")? {
-        return Ok(Vec::new());
     }
     let raw: Option<String> = transaction.query_row(
         "SELECT payload FROM sync_entities WHERE collection='accounts' AND id='current' AND deleted=0",
@@ -259,9 +255,6 @@ fn exists_for_agent(
     agent_column: &str,
     agent_id: &str,
 ) -> StoreResult<bool> {
-    if !table_exists(transaction, table)? {
-        return Ok(false);
-    }
     let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE {agent_column}=?1)");
     Ok(transaction.query_row(&sql, [agent_id], |row| row.get(0))?)
 }
@@ -505,9 +498,6 @@ fn pending_attention(
     id: &str,
     record: &AgentRecord,
 ) -> StoreResult<(bool, bool)> {
-    if !table_exists(transaction, "approvals")? {
-        return Ok((false, false));
-    }
     let epoch = record.epoch;
     transaction.query_row_cached(
         "SELECT EXISTS(SELECT 1 FROM approvals WHERE agent=?1 AND (epoch IS NULL OR epoch=?2) AND state='pending' AND COALESCE(deferral_active,0)=0 AND kind IN ('question','elicitation')), \

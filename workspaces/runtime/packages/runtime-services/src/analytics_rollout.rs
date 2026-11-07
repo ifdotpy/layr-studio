@@ -6,6 +6,70 @@ use studio_runtime_schema::provider_kind::ProviderKind;
 use studio_runtime_schema::usage::parse_token_usage;
 use studio_runtime_store::truthy;
 
+/// The known top-level rollout kinds. Other or malformed kinds are ignored.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RolloutKind {
+    SessionMeta,
+    TurnContext,
+    TokenUsageRecord,
+    ResponseItem,
+    Compacted,
+    EventMsg,
+    Other,
+}
+
+/// Decode a row once, then classify its head before passing its body to consumers.
+/// The value remains available for the existing per-kind translator.
+pub(crate) struct RolloutRow {
+    pub(crate) kind: RolloutKind,
+    pub(crate) value: Value,
+}
+
+impl RolloutRow {
+    pub(crate) fn parse(raw: &str) -> studio_json::Result<Self> {
+        let value: Value = studio_json::from_str(raw)?;
+        let kind = match value.get("type").and_then(Value::as_str) {
+            Some("session_meta") => RolloutKind::SessionMeta,
+            Some("turn_context") => RolloutKind::TurnContext,
+            Some("token_usage_record") => RolloutKind::TokenUsageRecord,
+            Some("response_item") => RolloutKind::ResponseItem,
+            Some("compacted") => RolloutKind::Compacted,
+            Some("event_msg") => RolloutKind::EventMsg,
+            _ => RolloutKind::Other,
+        };
+        Ok(Self { kind, value })
+    }
+}
+
+#[cfg(test)]
+mod row_tests {
+    use super::{RolloutKind, RolloutRow};
+
+    #[test]
+    fn row_head_keeps_permissive_json_semantics() {
+        for (raw, expected) in [
+            (r#"{"type":"session_meta"}"#, RolloutKind::SessionMeta),
+            (r#"{"type":"turn_context"}"#, RolloutKind::TurnContext),
+            (
+                r#"{"type":"token_usage_record"}"#,
+                RolloutKind::TokenUsageRecord,
+            ),
+            (r#"{"type":"response_item"}"#, RolloutKind::ResponseItem),
+            (r#"{"type":"compacted"}"#, RolloutKind::Compacted),
+            (r#"{"type":"event_msg"}"#, RolloutKind::EventMsg),
+            (r#"{"type":7}"#, RolloutKind::Other),
+            (r#"{}"#, RolloutKind::Other),
+            (
+                r#"{"type":"other","type":"turn_context"}"#,
+                RolloutKind::TurnContext,
+            ),
+        ] {
+            assert_eq!(RolloutRow::parse(raw).expect("valid JSON").kind, expected);
+        }
+        assert!(RolloutRow::parse("{").is_err());
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum RolloutAction {
     Event {

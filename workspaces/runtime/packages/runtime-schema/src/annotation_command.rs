@@ -77,8 +77,7 @@ mod tests {
 
     #[test]
     fn annotation_command_enums_match_the_rust_owners() {
-        let doc: Document =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: Document = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         assert_eq!(
             doc.components.schemas.annotation.properties.status.values,
             super::RequestResultStatus::VARIANTS

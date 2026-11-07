@@ -660,8 +660,6 @@ struct AccountChangeAgent {
     thread_id: Option<String>,
     #[serde(default)]
     in_flight: Option<bool>,
-    #[serde(default)]
-    excluded_account_keys: Option<Vec<String>>,
 }
 
 /// Minimal displayable record for an agent whose stored schema failed. Keep
@@ -881,24 +879,6 @@ fn bound_stall(
     })
 }
 
-fn projected_account_destinations(
-    context: &AgentViewContext,
-    excluded: Option<&[String]>,
-    thread_id: Option<&str>,
-    in_flight: Option<bool>,
-) -> Vec<studio_runtime_schema::account_destination::AccountDestination> {
-    context.account_destinations.iter().cloned().map(|mut destination| {
-        if !(context.empty_lead && thread_id.is_none_or(str::is_empty) && in_flight != Some(true))
-            && crate::account_transfer_driver::account_is_excluded(excluded, destination.account_key.as_str())
-        {
-            destination.eligibility = studio_runtime_schema::agent_progress::AccountEligibility::Unavailable {
-                reason: "This account is excluded for this chat's agents. Include it first, or choose another account.".into(),
-            };
-        }
-        destination
-    }).collect()
-}
-
 pub(crate) fn agent_entity_from_record(
     record: studio_runtime_store::AgentRecord,
     context: &AgentViewContext,
@@ -980,12 +960,7 @@ pub(crate) fn agent_entity_from_record(
         )),
     };
     let account_destinations = if is_lead {
-        let destinations = projected_account_destinations(
-            context,
-            record.excluded_account_keys.value().map(Vec::as_slice),
-            record.thread_id.as_deref(),
-            record.in_flight,
-        );
+        let destinations = &context.account_destinations;
         Some(project_agent_legacy_field(&destinations, "accountDestinations").ok()?)
     } else {
         extra
@@ -1151,13 +1126,24 @@ pub(crate) fn agent_entity_from_record(
         environment: filtered_field(&record.environment, "environment").ok()?,
         epoch: Some(Some(record.epoch)),
         error: filtered_field(&record.error, "error").ok()?,
-        excluded_account_keys: nullable_field(record.excluded_account_keys.clone().map(|items| {
-            items
-                .into_iter()
-                .take(SYNC_ARRAY_ITEMS)
-                .map(|text| bound_sync_text(&text, ""))
-                .collect()
-        })),
+        worker_excluded_account_keys: nullable_field(
+            record.worker_excluded_account_keys.clone().map(|items| {
+                items
+                    .into_iter()
+                    .take(SYNC_ARRAY_ITEMS)
+                    .map(|text| bound_sync_text(text.as_str(), ""))
+                    .collect()
+            }),
+        ),
+        reviewer_excluded_account_keys: nullable_field(
+            record.reviewer_excluded_account_keys.clone().map(|items| {
+                items
+                    .into_iter()
+                    .take(SYNC_ARRAY_ITEMS)
+                    .map(|text| bound_sync_text(text.as_str(), ""))
+                    .collect()
+            }),
+        ),
         execution_mode: filtered_option(record.execution_mode.as_ref(), "executionMode").ok()?,
         fast_mode: record.fast_mode.map(Some),
         has_approval: context.has_approval.then_some(Some(true)),
@@ -1464,12 +1450,7 @@ pub fn agent_entity_view(record: &Value, context: &AgentViewContext) -> Option<V
     }
     let source = <AccountChangeAgent as serde::Deserialize>::deserialize(record).ok()?;
     if source.is_lead == Some(true) {
-        let destinations = projected_account_destinations(
-            context,
-            source.excluded_account_keys.as_deref(),
-            source.thread_id.as_deref(),
-            source.in_flight,
-        );
+        let destinations = &context.account_destinations;
         view.insert(
             "accountDestinations".into(),
             serde::Serialize::serialize(&destinations, studio_json::value::Serializer).ok()?,
@@ -2203,7 +2184,7 @@ mod projection_plan_tests {
         for raw in [
             json!({"id":"lead", "rootId":"lead", "epoch":2, "status":"queued",
                 "accountKey":"default", "isLead":true, "autoWake":true,
-                "excludedAccountKeys":["blocked"], "turnStatus":null}),
+                "workerExcludedAccountKeys":["blocked"], "turnStatus":null}),
             json!({"id":"worker", "rootId":"lead", "epoch":2, "status":"completed",
                 "accountKey":"default", "isLead":false, "prompt":"task", "lastAnswer":"done",
                 "lastCompletedTurn":"turn", "activity":{"phase":"working", "tools":[{"name":"tool"}]}}),
@@ -2380,9 +2361,9 @@ mod projection_plan_tests {
     }
 
     #[test]
-    fn destination_eligibility_includes_chat_exclusions() {
+    fn lead_destination_eligibility_ignores_worker_exclusions() {
         let lead = json!({"id":"lead","rootId":"lead","epoch":1,"isLead":true,
-            "provider":"codex","status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked"]});
+            "provider":"codex","status":"idle","accountKey":"default","compactions":0,"workerExcludedAccountKeys":["blocked"]});
         let context = super::AgentViewContext {
             account_destinations: studio_json::from_str(
                 r#"[
@@ -2396,7 +2377,7 @@ mod projection_plan_tests {
         let view = super::agent_entity_view(&lead, &context).unwrap();
         assert_eq!(
             view["accountDestinations"][0]["eligibility"]["kind"],
-            "unavailable"
+            "available"
         );
         assert_eq!(
             view["accountDestinations"][1]["eligibility"]["kind"],

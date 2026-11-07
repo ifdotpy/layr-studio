@@ -61,16 +61,6 @@
           "title": "Epoch",
           "type": "integer"
         },
-        "excludedAccountKeys": {
-          "items": {
-            "maxLength": 4096,
-            "minLength": 1,
-            "type": "string"
-          },
-          "maxItems": 4096,
-          "title": "Excludedaccountkeys",
-          "type": "array"
-        },
         "id": {
           "maxLength": 4096,
           "minLength": 1,
@@ -124,6 +114,31 @@
         },
         "provider": {
           "$ref": "#/$defs/ProviderKind"
+        },
+        "reviewerExcludedAccountKeys": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "reviewerExcludedAccountKeys",
+          "type": "array"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "enum": [
+                "orchestrator",
+                "implementer",
+                "reviewer"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "rootId": {
           "maxLength": 4096,
@@ -189,6 +204,16 @@
         "usageResumeEnabled": {
           "title": "Usageresumeenabled",
           "type": "boolean"
+        },
+        "workerExcludedAccountKeys": {
+          "items": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 4096,
+          "title": "workerExcludedAccountKeys",
+          "type": "array"
         }
       },
       "required": [

@@ -12,6 +12,71 @@ use studio_runtime_store::{
 pub const PAGE_SIZE: i64 = 120;
 const MAX_PAGE_SIZE: i64 = 500;
 
+// This view validates only fields used by transcript projection.
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscriptAgent<'a> {
+    #[serde(borrow)]
+    id: std::borrow::Cow<'a, str>,
+    status: studio_runtime_store::AgentStatus,
+    deleted_at: Option<f64>,
+    auto_wake: Option<bool>,
+    #[serde(borrow)]
+    thread_id: Option<std::borrow::Cow<'a, str>>,
+    #[serde(borrow)]
+    turn_id: Option<std::borrow::Cow<'a, str>>,
+    in_flight: Option<bool>,
+    compactions: Option<u64>,
+    activity: Option<studio_runtime_store::AgentActivity>,
+    context_usage: Option<studio_runtime_store::AgentContextUsage>,
+    restored_checkpoint: Option<Value>,
+    #[serde(default)]
+    native_turn_error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_store::StoredTransferObject<studio_runtime_store::NativeTurnError>,
+    >,
+}
+
+fn transcript_agent(
+    connection: &Connection,
+    id: &str,
+) -> Result<Option<(bool, Value)>, TranscriptError> {
+    let row = connection.query_row(
+        "SELECT a.record,v.id IS NOT NULL,v.activity,v.contextUsage FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id WHERE a.id=?1",
+        [id], |row| Ok((row.get::<_, String>(0)?, row.get::<_, bool>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?)),
+    ).optional()?;
+    let Some((raw, has_volatile, activity, context_usage)) = row else {
+        return Ok(None);
+    };
+    let mut agent: TranscriptAgent<'_> =
+        studio_json::from_str(&raw).map_err(|_| TranscriptError::Store)?;
+    if agent.id != id
+        || agent
+            .compactions
+            .is_some_and(|n| n > studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64)
+    {
+        return Err(TranscriptError::Store);
+    }
+    if has_volatile {
+        agent.activity = activity
+            .map(|raw| studio_json::from_str(&raw).map_err(|_| TranscriptError::Store))
+            .transpose()?
+            .flatten();
+        agent.context_usage = context_usage
+            .map(|raw| studio_json::from_str(&raw).map_err(|_| TranscriptError::Store))
+            .transpose()?
+            .flatten();
+    }
+    let deleted = agent.deleted_at.is_some_and(|at| at != 0.0);
+    let value = json!({
+        "id": agent.id, "status": agent.status, "autoWake": agent.auto_wake,
+        "threadId": agent.thread_id, "turnId": agent.turn_id, "inFlight": agent.in_flight,
+        "compactions": agent.compactions, "activity": agent.activity,
+        "contextUsage": agent.context_usage, "restoredCheckpoint": agent.restored_checkpoint,
+        "nativeTurnError": agent.native_turn_error,
+    });
+    Ok(Some((deleted, value)))
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct PageRequest {
     pub before: Option<String>,
@@ -214,12 +279,11 @@ pub(crate) fn project(
     request: &PageRequest,
     now: f64,
 ) -> Result<Value, TranscriptError> {
-    let actor =
-        TranscriptRepository::agent(connection, agent)?.ok_or(TranscriptError::UnknownMessage)?;
-    if actor.is_deleted() {
+    let (deleted, actor) =
+        transcript_agent(connection, agent)?.ok_or(TranscriptError::UnknownMessage)?;
+    if deleted {
         return Err(TranscriptError::DeletedConversation);
     }
-    let actor = actor.into_value();
     let (rows, mut items): (Vec<_>, Vec<_>) = rows(connection, agent, request)?.into_iter().unzip();
     let has_cursor = [&request.before, &request.around, &request.after]
         .into_iter()
@@ -228,7 +292,8 @@ pub(crate) fn project(
     let mut next_after = None;
     if let Some(row) = rows.first() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)<(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next=Some(row.id.clone()); }
     if has_cursor && let Some(row)=rows.last() && connection.query_row("SELECT EXISTS(SELECT 1 FROM runtime_items WHERE agent=?1 AND json_extract(record,'$.afterRestore') IS NULL AND (created,id)>(?2,?3))",params![agent,row.created,row.id],|r|r.get::<_,bool>(0))? { next_after=Some(row.id.clone()); }
-    receipts(connection, agent, &mut items, !has_cursor)?;
+    let mut owners = BTreeMap::from([(agent.to_owned(), false)]);
+    receipts(connection, agent, &mut items, !has_cursor, &mut owners)?;
     let live = matches!(
         actor["status"].as_str(),
         Some("running" | "starting" | "approval")
@@ -361,6 +426,7 @@ fn receipts(
     agent: &str,
     items: &mut Vec<Value>,
     outstanding: bool,
+    owners: &mut BTreeMap<String, bool>,
 ) -> Result<(), TranscriptError> {
     let mut locations = represented(items, agent);
     if outstanding {
@@ -408,9 +474,16 @@ fn receipts(
                 let owner_id = asset["agent"]
                     .as_str()
                     .ok_or_else(|| invalid("runtime_assets", asset_id))?;
-                let owner = TranscriptRepository::agent(connection, owner_id)?
-                    .ok_or(TranscriptError::UnknownAssetOwner)?;
-                if owner.is_deleted() {
+                let deleted = match owners.get(owner_id) {
+                    Some(deleted) => *deleted,
+                    None => {
+                        let (deleted, _) = transcript_agent(connection, owner_id)?
+                            .ok_or(TranscriptError::UnknownAssetOwner)?;
+                        owners.insert(owner_id.to_owned(), deleted);
+                        deleted
+                    }
+                };
+                if deleted {
                     return Err(TranscriptError::DeletedAssetOwner);
                 }
                 asset
@@ -755,6 +828,13 @@ mod delivery_tests {
     use super::*;
 
     #[test]
+    fn transcript_agent_rejects_malformed_json() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT); CREATE TABLE runtime_agent_volatile(id TEXT,activity TEXT,contextUsage TEXT); INSERT INTO runtime_agents VALUES('a','{');").unwrap();
+        assert!(transcript_agent(&db, "a").is_err());
+    }
+
+    #[test]
     fn tool_result_projection_uses_compact_json() {
         let mut item = json!({"text":"{}"});
         apply_tool_result(
@@ -901,7 +981,8 @@ mod delivery_tests {
             json!({"id":"agent:promoted","role":"user"}),
             json!({"id":"agent:historical","role":"user"}),
         ];
-        receipts(&db, "agent", &mut items, false).expect("receipt projection");
+        receipts(&db, "agent", &mut items, false, &mut BTreeMap::new())
+            .expect("receipt projection");
         assert_eq!(
             items[0]["requestedDelivery"],
             json!(DeliveryMoment::NextTurn)
@@ -914,5 +995,49 @@ mod delivery_tests {
             items[2]["requestedDelivery"],
             json!(DeliveryMoment::CurrentTurn)
         );
+    }
+
+    #[test]
+    fn transcript_receipts_read_each_asset_owner_once() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let db = Connection::open_in_memory().unwrap();
+        let reads = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&reads);
+        db.create_scalar_function(
+            "observe_owner",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8,
+            move |ctx| {
+                observed.fetch_add(1, Ordering::SeqCst);
+                ctx.get::<String>(0)
+            },
+        )
+        .unwrap();
+        db.execute_batch("CREATE TABLE agent_source(id TEXT,record TEXT);
+            CREATE VIEW runtime_agents AS SELECT id,observe_owner(record) AS record FROM agent_source;
+            CREATE TABLE runtime_agent_volatile(id TEXT,activity TEXT,contextUsage TEXT);
+            CREATE TABLE runtime_events(id TEXT,agent TEXT,kind TEXT,status TEXT,error TEXT,text TEXT,created REAL);
+            CREATE TABLE runtime_event_meta(id TEXT,record TEXT);
+            CREATE TABLE runtime_assets(id TEXT,record TEXT);
+            CREATE TABLE runtime_items(id TEXT,agent TEXT);
+            INSERT INTO agent_source VALUES('owner','{\"id\":\"owner\",\"status\":\"idle\"}');
+            INSERT INTO runtime_events VALUES('event','agent','user','pending',NULL,'hello',1);
+            INSERT INTO runtime_event_meta VALUES('event','{\"assets\":[\"a\",\"b\",\"c\"]}');").unwrap();
+        for (id, owner) in [("a", "owner"), ("b", "owner"), ("c", "agent")] {
+            let asset = json!({"id":id,"agent":owner,"name":"file","path":"/file","mime":"text/plain","image":false,"size":1,"hash":"hash","created":1});
+            db.execute(
+                "INSERT INTO runtime_assets VALUES(?1,?2)",
+                params![id, asset.to_string()],
+            )
+            .unwrap();
+        }
+        let mut items = Vec::new();
+        let mut owners = BTreeMap::from([("agent".to_owned(), false)]);
+        receipts(&db, "agent", &mut items, true, &mut owners).unwrap();
+        assert_eq!(items[0]["assets"].as_array().unwrap().len(), 3);
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
     }
 }

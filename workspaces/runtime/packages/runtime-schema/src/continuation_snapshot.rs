@@ -264,7 +264,11 @@ pub struct ContinuationAgent {
     pub deleted_at: Option<BoundedNumber>,
     pub epoch: SafeInteger,
     #[serde(default, deserialize_with = "optional_nonnull")]
-    pub excluded_account_keys: Option<BoundedVec<BoundedString<1, 4096>, 4096>>,
+    pub worker_excluded_account_keys: Option<BoundedVec<crate::account_key::AccountKey, 4096>>,
+    #[serde(default, deserialize_with = "optional_nonnull")]
+    pub reviewer_excluded_account_keys: Option<BoundedVec<crate::account_key::AccountKey, 4096>>,
+    #[serde(default)]
+    pub role: Option<crate::creation_intent::AgentRole>,
     pub id: BoundedString<1, 4096>,
     #[serde(default, deserialize_with = "optional_nonnull")]
     pub in_flight: Option<bool>,

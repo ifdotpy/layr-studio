@@ -97,6 +97,8 @@ mod m2026_11_04_work_read_time;
 mod m2026_11_05_chat_account_defaults;
 mod m2026_11_05_repair_event_order;
 pub(crate) mod m2026_11_06_idle_unload;
+mod m2026_11_06_outbox_lookup;
+mod m2026_11_06_role_account_exclusions;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1610,6 +1612,26 @@ static CATALOG: &[&dyn Migration] = &[
         },
         apply: |c| m2026_11_06_idle_unload::apply(c.transaction),
     },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-role-account-exclusions",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Agent records with shared account exclusions",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_role_account_exclusions::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-outbox-lookup",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the shared runtime outbox",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_outbox_lookup::apply(c.transaction),
+    },
 ];
 
 /// Operator-facing catalog; implementation and metadata have one owner.
@@ -2660,6 +2682,83 @@ mod chat_account_defaults_regression {
         assert_eq!(
             record,
             studio_json::json!({"id":"implicit","workerDefaults":{},"reviewDefaults":{}})
+        );
+    }
+}
+
+#[cfg(test)]
+mod role_account_exclusions_regression {
+    use super::*;
+
+    #[test]
+    fn migration_copies_exclusions_for_both_roles() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+            INSERT INTO runtime_agents VALUES('lead','{"id":"lead","excludedAccountKeys":["one","two"],"other":{"keep":true},"unknown":123456789012345678901234567890}');
+            INSERT INTO runtime_agents VALUES('plain','{"id":"plain"}');"#).unwrap();
+        let tx = db.transaction().unwrap();
+        let step = CATALOG
+            .iter()
+            .find(|step| step.definition().id == "2026-11-06-role-account-exclusions")
+            .expect("migration");
+        let context = Context::Sql(SqlContext { transaction: &tx });
+        step.apply(&context).unwrap();
+        step.apply(&context).unwrap();
+        let raw: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='lead'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(raw.contains("123456789012345678901234567890"));
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record["workerExcludedAccountKeys"],
+            studio_json::json!(["one", "two"])
+        );
+        assert_eq!(
+            record["reviewerExcludedAccountKeys"],
+            studio_json::json!(["one", "two"])
+        );
+        assert_eq!(record["other"], studio_json::json!({"keep": true}));
+        assert!(record.get("excludedAccountKeys").is_none());
+        let plain: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='plain'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(plain, r#"{"id":"plain"}"#);
+    }
+
+    #[test]
+    fn migration_discards_keys_outside_account_key_bounds() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);")
+            .unwrap();
+        let record = studio_json::json!({"id":"lead", "excludedAccountKeys":["valid", "\0b", "", "x".repeat(studio_runtime_schema::account_key::ACCOUNT_KEY_MAX_CHARS + 1)]}).to_string();
+        db.execute("INSERT INTO runtime_agents VALUES('lead',?1)", [&record])
+            .unwrap();
+        let tx = db.transaction().unwrap();
+        let step = CATALOG
+            .iter()
+            .find(|step| step.definition().id == "2026-11-06-role-account-exclusions")
+            .unwrap();
+        step.apply(&Context::Sql(SqlContext { transaction: &tx }))
+            .unwrap();
+        let raw: String = tx
+            .query_row("SELECT record FROM runtime_agents", [], |row| row.get(0))
+            .unwrap();
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record["workerExcludedAccountKeys"],
+            studio_json::json!(["valid", "\0b"])
+        );
+        assert_eq!(
+            record["reviewerExcludedAccountKeys"],
+            studio_json::json!(["valid", "\0b"])
         );
     }
 }

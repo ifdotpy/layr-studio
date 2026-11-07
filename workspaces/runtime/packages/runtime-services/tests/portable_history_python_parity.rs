@@ -199,7 +199,10 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
             .expect("fixture database opens")
             .execute_batch(&format!(
                 "PRAGMA journal_mode=WAL; {}",
-                sql.replace("<fixture-root>", &root.path().to_string_lossy())
+                sql.replace("<fixture-root>", &root.path().to_string_lossy()).replace(
+                    r#"{"id": "fixture-restored-empty-1", "role": "assistant", "text": "empty afterRestore fixture 1", "afterRestore": []}"#,
+                    concat!("{\r\n", r#"  "id":"fixture-restored-empty-1", "role":"assistant", "text":"empty afterRestore fixture 1", "afterRestore":[],"#, "\r\n", r#"  "provider":{"decimal": 1e400, "text": "line\nnext"}"#, "\r\n}"),
+                )
             ))
             .expect("frozen Python state loads");
     }
@@ -242,7 +245,7 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
         "stale source refused"
     );
     let mut stale_settings = base_input();
-    stale_settings.source_settings["role"] = json!("changed-after-capture");
+    stale_settings.source_settings["role"] = json!("implementer");
     assert!(
         matches!(
             export_history(&store, stale_settings).await,
@@ -365,6 +368,7 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
     assert!(archive.contains("Python-written full transcript 😀"));
     assert!(archive.contains("Python-written original input"));
     assert!(archive.contains("archive-fixture \\\"日本語.png"));
+    assert!(archive.contains(r#""decimal": 1e400, "text": "line\nnext""#));
     let context = history_context(root.path(), &descriptor).expect("bounded context");
     assert!(
         !context.contains("restored content must stay out of context"),

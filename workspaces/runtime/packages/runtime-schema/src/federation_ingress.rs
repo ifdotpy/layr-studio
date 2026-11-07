@@ -158,8 +158,7 @@ mod tests {
 
     #[test]
     fn federation_limits_match_openapi() {
-        let doc: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let schemas = &doc["components"]["schemas"];
         assert_eq!(
             schemas["CreateRoomRequest"]["properties"]["local_members"]["maxItems"],

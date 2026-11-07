@@ -594,7 +594,7 @@ pub fn publish_entity_changes(
             "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1 AND in_flight=1)",
             [&row.id], |row| row.get(0),
         )?;
-        if !was_in_flight || !table_exists(transaction, "runtime_account_transfers")? {
+        if !was_in_flight {
             continue;
         }
         let is_member: bool = transaction.query_row(
@@ -669,7 +669,7 @@ pub fn publish_entity_changes(
         )?;
     }
     let mut owned_work = Vec::new();
-    if table_exists(transaction, "runtime_work")? {
+    {
         // The runtime_work_owner_status index serves this owner lookup.
         let mut statement = transaction.prepare_cached(
             "SELECT id,record FROM runtime_work WHERE json_extract(record,'$.owner')=?1 ORDER BY rowid",
@@ -755,11 +755,6 @@ pub(crate) fn publish_summary_changes(
     }
     if events.is_empty() {
         return Ok(());
-    }
-    for table in ["runtime_agents", "runtime_event_meta", "runtime_items"] {
-        if !table_exists(transaction, table)? {
-            return Ok(());
-        }
     }
     for id in events {
         let agent = transaction
@@ -880,7 +875,7 @@ fn rows_by_id(
     table: &str,
     ids: &BTreeSet<String>,
 ) -> StoreResult<Vec<(i64, String, String)>> {
-    if ids.is_empty() || !table_exists(transaction, table)? {
+    if ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut statement =
@@ -1372,18 +1367,6 @@ pub(crate) fn table_exists(connection: &Connection, name: &str) -> StoreResult<b
         [name],
         |row| row.get(0),
     )?)
-}
-
-/// Whether `runtime_monitors` has its owner expression index. Its indexed JSON
-/// expressions reject malformed rows at write time, so a query bounded by that
-/// index needs no per-row `json_valid` guard. Legacy and test schemas without
-/// it may hold malformed rows and keep their guarded scans.
-pub(crate) fn monitor_owner_index_exists(connection: &Connection) -> StoreResult<bool> {
-    Ok(connection
-        .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='runtime_monitor_agent_status')",
-        )?
-        .query_row([], |row| row.get(0))?)
 }
 
 pub(crate) fn projection_records(

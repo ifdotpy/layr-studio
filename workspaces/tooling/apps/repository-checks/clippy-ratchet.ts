@@ -171,6 +171,9 @@ export async function run(
   );
   const args = [
     ...cargoArgs,
+    ...(process.env.STUDIO_PERF_REPORTING === "1"
+      ? ["--features", "studio-runtime-server/perf-reporting"]
+      : []),
     "-j",
     // The gate (facade.ts) sets CARGO_BUILD_JOBS to the gate count; just exports the focused count.
     process.env.CARGO_BUILD_JOBS ?? String(CARGO_BUILD_JOBS),

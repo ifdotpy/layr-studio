@@ -94,7 +94,7 @@ test("Chat settings is one compact Team panel with account eligibility and no ta
     await modal.getByRole("checkbox", { name: "Work 2", exact: true }).click();
     await page.waitForFunction(() =>
       window.settingsCalls.some((call) =>
-        call.excluded_account_keys?.includes("account-1"),
+        call.worker_excluded_account_keys?.includes("account-1"),
       ),
     );
     await expect(modal.locator(".execution-accounts")).toContainText(

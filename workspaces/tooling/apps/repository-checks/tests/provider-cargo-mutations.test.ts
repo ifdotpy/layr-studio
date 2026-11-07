@@ -183,97 +183,66 @@ test(
       const stale = check();
       assert.notEqual(stale.status, 0);
       assert.match(stale.stdout + stale.stderr, /Stale Codex contract/);
-      generate();
-      const variant = check();
-      assert.notEqual(variant.status, 0);
-      assert.match(variant.stderr, /provider_lifecycle\.rs/);
-      assert.match(variant.stderr, /FutureStatus.*not covered/);
-      writeFileSync(lifecycle, originalLifecycle);
+      // The vendor changes below go into one regenerated contract and one check: a check of
+      // this large crate takes about a minute, and each change names its own item in the
+      // errors, so every witness below still fails alone when its consumer stops rejecting it.
+      changed.definitions.ThreadStatus.oneOf.push({
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["futureActivity"] },
+        },
+        required: ["type"],
+      });
+      writeFileSync(lifecycle, JSON.stringify(changed));
       const usage = path.join(
         copy,
         "workspaces/runtime/packages/runtime-schema/src/schemas/codex/ThreadTokenUsageUpdatedNotification.json",
       );
       const originalUsage = readFileSync(usage, "utf8");
-      const added = JSON.parse(originalUsage);
-      added.definitions.TokenUsageBreakdown.properties.futureTokens = {
+      const usageChange = JSON.parse(originalUsage);
+      usageChange.definitions.TokenUsageBreakdown.properties.futureTokens = {
         type: "integer",
         format: "int64",
       };
-      added.definitions.TokenUsageBreakdown.required.push("futureTokens");
-      writeFileSync(usage, JSON.stringify(added));
-      generate();
-      const field = check();
-      assert.notEqual(field.status, 0);
-      assert.match(field.stderr, /usage\.rs/);
-      assert.match(
-        field.stderr,
-        /pattern does not mention field `future_tokens`/,
-      );
-      const typed = JSON.parse(originalUsage);
-      typed.definitions.TokenUsageBreakdown.properties.inputTokens = {
+      usageChange.definitions.TokenUsageBreakdown.required.push("futureTokens");
+      usageChange.definitions.TokenUsageBreakdown.properties.inputTokens = {
         type: "string",
       };
-      writeFileSync(usage, JSON.stringify(typed));
+      usageChange.definitions.ThreadTokenUsage.properties.modelContextWindow = {
+        type: ["string", "null"],
+      };
+      writeFileSync(usage, JSON.stringify(usageChange));
       generate();
-      const incompatible = check();
-      assert.notEqual(incompatible.status, 0);
-      assert.match(incompatible.stderr, /usage\.rs/);
+      const drift = check();
+      assert.notEqual(drift.status, 0);
+      for (const [witness, pattern] of [
+        [
+          "the lifecycle mapping covers every vendor turn status",
+          /`CodexTurnStatus::FutureStatus` not covered/,
+        ],
+        [
+          "the real idle decision rejects an added vendor activity discriminator",
+          /`CodexThreadActivity::FutureActivity` not covered/,
+        ],
+        [
+          "the usage reader names every vendor token field",
+          /pattern does not mention field `future_tokens`/,
+        ],
+        [
+          "the usage reader rejects an incompatible token count type",
+          /`u64: TryFrom<std::string::String>` is not satisfied/,
+        ],
+        [
+          "the real usage reader rejects a changed model context window type",
+          /`u64: From<std::string::String>` is not satisfied/,
+        ],
+      ] as const)
+        assert.match(drift.stderr, pattern, witness);
+      writeFileSync(lifecycle, originalLifecycle);
       writeFileSync(usage, originalUsage);
       generate();
       const restored = check();
       assert.equal(restored.status, 0, restored.stdout + restored.stderr);
-      await context.test(
-        "the real usage reader rejects a changed model context window type",
-        () => {
-          try {
-            const window = JSON.parse(originalUsage);
-            window.definitions.ThreadTokenUsage.properties.modelContextWindow =
-              { type: ["string", "null"] };
-            writeFileSync(usage, JSON.stringify(window));
-            generate();
-            const result = check();
-            assert.notEqual(
-              result.status,
-              0,
-              "The real usage reader must consume its generated window field",
-            );
-            assert.match(result.stderr, /usage\.rs/);
-          } finally {
-            writeFileSync(usage, originalUsage);
-            generate();
-          }
-        },
-      );
-      await context.test(
-        "the real idle decision rejects an added vendor activity discriminator",
-        () => {
-          try {
-            const status = JSON.parse(originalLifecycle);
-            status.definitions.ThreadStatus.oneOf.push({
-              type: "object",
-              properties: {
-                type: { type: "string", enum: ["futureActivity"] },
-              },
-              required: ["type"],
-            });
-            writeFileSync(lifecycle, JSON.stringify(status));
-            generate();
-            const result = check();
-            assert.notEqual(
-              result.status,
-              0,
-              "Recovery must consume the vendor-owned activity discriminators",
-            );
-            assert.match(result.stderr, /provider_lifecycle\.rs/);
-            assert.match(result.stderr, /FutureActivity.*not covered/);
-          } finally {
-            writeFileSync(lifecycle, originalLifecycle);
-            generate();
-          }
-        },
-      );
-      const final = check();
-      assert.equal(final.status, 0, final.stdout + final.stderr);
     } finally {
       rmSync(copy, { recursive: true, force: true });
     }

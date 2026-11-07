@@ -47,7 +47,7 @@ test("composer model summary wraps on phones and opens the role settings", async
           name: /^Execution settings:/,
         });
         await expect(trigger).toBeVisible();
-        await expect(trigger).toHaveAccessibleName(/Review same as caller/);
+        await expect(trigger).toHaveAccessibleName(/Review uses caller’s model/);
         const filename = `composer-${width}-${scenario.replaceAll(/[^a-z]/g, "") || "normal"}.png`;
         await page.screenshot({
           path: screenshots

@@ -3510,7 +3510,7 @@
           "agentMode": "multi",
           "agentModeRevision": 0,
           "agentModeSupported": true,
-          "excludedAccountKeys": ["default"]
+          "workerExcludedAccountKeys": ["default"]
         }
       },
       "messages": [],
@@ -3646,7 +3646,7 @@
               "environment": "host",
               "epoch": 0,
               "error": null,
-              "excludedAccountKeys": ["default"],
+              "workerExcludedAccountKeys": ["default"],
               "executionMode": "native",
               "fastMode": false,
               "hostProjectPath": "__INGRESS_WORKSPACE__",

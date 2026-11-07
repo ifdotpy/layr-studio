@@ -24,8 +24,8 @@ export type AgentSetupPickerProps = {
   accountKey: string;
   accountLabel?: string;
   onAccount: (key: string | null) => void;
-  excludedAccountKeys?: readonly string[] | undefined;
-  onExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  excludedKeys?: readonly string[] | undefined;
+  onExcludedKeysChange?: ((keys: string[]) => void) | undefined;
   showAccountChooser?: boolean;
   isAccountDisabled?: (account: Account) => boolean;
   accountUnavailableReason?:
@@ -97,8 +97,9 @@ export function AgentSetupPicker(p: AgentSetupPickerProps) {
         disabled={!!p.readOnlyReason || p.accountDisabled}
         accountDisabled={p.isAccountDisabled}
         accountUnavailableReason={p.accountUnavailableReason}
-        excludedAccountKeys={p.excludedAccountKeys}
-        onExcludedAccountKeysChange={p.onExcludedAccountKeysChange}
+        excludedKeys={p.excludedKeys}
+        onExcludedKeysChange={p.onExcludedKeysChange}
+        exclusionRole={p.role === "orchestrator" ? undefined : p.role}
       />
       {gated("model_change") && (
         <ModelField

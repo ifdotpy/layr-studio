@@ -146,8 +146,10 @@ window.fetch = async (input, options) => {
         fastMode: body.worker_defaults.fast_mode,
       };
     else if (body.review_defaults) next.reviewDefaults = body.review_defaults;
-    else if (body.excluded_account_keys)
-      next.excludedAccountKeys = body.excluded_account_keys;
+    else if (body.worker_excluded_account_keys)
+      next.workerExcludedAccountKeys = body.worker_excluded_account_keys;
+    else if (body.reviewer_excluded_account_keys)
+      next.reviewerExcludedAccountKeys = body.reviewer_excluded_account_keys;
     else if ("subagent_concurrency" in body) {
       next.concurrency = body.subagent_concurrency;
       next.agentModeRevision!++;

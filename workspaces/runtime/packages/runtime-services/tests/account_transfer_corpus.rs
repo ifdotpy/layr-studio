@@ -309,7 +309,7 @@ fn selection_rejects_account_published_as_unavailable() {
 
 #[test]
 fn empty_lead_can_select_an_account_excluded_for_workers() {
-    let agent = json!({"compactions":0,"provider":"codex","id":"lead","rootId":"lead","epoch":0,"status":"idle","isLead":true,"accountKey":"source","cwd":"/project","excludedAccountKeys":["target"]});
+    let agent = json!({"compactions":0,"provider":"codex","id":"lead","rootId":"lead","epoch":0,"status":"idle","isLead":true,"accountKey":"source","cwd":"/project","workerExcludedAccountKeys":["target"]});
     let snapshot =
         studio_runtime_services::account_selection::SelectionSnapshot::read(&agent.to_string())
             .unwrap();
@@ -322,7 +322,7 @@ fn empty_lead_can_select_an_account_excluded_for_workers() {
         )
         .unwrap();
     assert_eq!(selected["accountKey"], "target");
-    assert_eq!(selected["excludedAccountKeys"], json!(["target"]));
+    assert_eq!(selected["workerExcludedAccountKeys"], json!(["target"]));
 }
 
 #[test]

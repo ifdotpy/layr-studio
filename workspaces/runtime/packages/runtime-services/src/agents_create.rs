@@ -587,7 +587,8 @@ fn update_exclusions(
     transaction: &Transaction<'_>,
     id: &str,
     expected_account: Option<&str>,
-    excluded: Option<&[String]>,
+    worker_excluded: Option<&[studio_runtime_schema::account_key::AccountKey]>,
+    reviewer_excluded: Option<&[studio_runtime_schema::account_key::AccountKey]>,
     non_defaults: bool,
     validate: impl Fn(&str, &Value) -> bool,
 ) -> Result<Value, SettingsError> {
@@ -608,7 +609,7 @@ fn update_exclusions(
     }) {
         return Err(SettingsError::Stale);
     }
-    if (excluded.is_none() || non_defaults)
+    if ((worker_excluded.is_none() && reviewer_excluded.is_none()) || non_defaults)
         && (crate::event_write::truthy(record.get("inFlight"))
             || matches!(
                 record.get("status").and_then(Value::as_str),
@@ -617,13 +618,18 @@ fn update_exclusions(
     {
         return Err(SettingsError::InFlight);
     }
-    let Some(excluded) = excluded else {
+    if worker_excluded.is_none() && reviewer_excluded.is_none() {
         return Ok(sync_projection(transaction, &record)?);
-    };
+    }
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
         return Err(SettingsError::LeadRequired);
     }
-    record["excludedAccountKeys"] = json!(excluded);
+    if let Some(excluded) = worker_excluded {
+        record["workerExcludedAccountKeys"] = json!(excluded);
+    }
+    if let Some(excluded) = reviewer_excluded {
+        record["reviewerExcludedAccountKeys"] = json!(excluded);
+    }
     save_agent(transaction, &record, &validate)
 }
 
@@ -793,7 +799,7 @@ mod tests {
                  CREATE TABLE runtime_lead_requests(id TEXT PRIMARY KEY,agent TEXT NOT NULL,signature TEXT NOT NULL);
                  CREATE TABLE runtime_projects(id TEXT PRIMARY KEY,record TEXT NOT NULL);
                  CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,record TEXT);
-                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL);
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
                  CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id));
                  CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER);
@@ -803,6 +809,7 @@ mod tests {
         connection
             .execute_batch(studio_runtime_store::agent_volatile::agent_volatile_table_sql())
             .expect("volatile agent table creates");
+        studio_runtime_store::approvals::create_schema(connection).expect("approval schema");
     }
 
     #[test]
@@ -820,12 +827,13 @@ mod tests {
             &tx,
             "lead",
             None,
-            Some(&["lead-account".into()]),
+            Some(&["lead-account".to_owned().try_into().unwrap()]),
+            None,
             false,
             |_, _| true,
         )
         .unwrap();
-        assert_eq!(result["excludedAccountKeys"], json!(["lead-account"]));
+        assert_eq!(result["workerExcludedAccountKeys"], json!(["lead-account"]));
     }
 
     #[test]

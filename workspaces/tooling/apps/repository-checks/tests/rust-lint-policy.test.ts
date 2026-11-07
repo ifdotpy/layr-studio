@@ -43,6 +43,17 @@ const rootUrl = new URL("../../../../../", import.meta.url);
 const root = fileURLToPath(rootUrl);
 const read = (file: string) => readFileSync(new URL(file, rootUrl), "utf8");
 
+test("the default server dependency graph excludes performance reporting", () => {
+  const openapi = read("workspaces/runtime/packages/runtime-http/openapi.json");
+  assert.doesNotMatch(openapi, /PerfClientReport|\/api\/perf-reporting/);
+  const tree = execFileSync(
+    "cargo",
+    ["tree", "--locked", "-e", "features", "-p", "studio-runtime-server"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.doesNotMatch(tree, /feature "perf-reporting"/);
+});
+
 function section(document: string, name: string): string {
   const header = `[${name}]`;
   const start = document.indexOf(header);

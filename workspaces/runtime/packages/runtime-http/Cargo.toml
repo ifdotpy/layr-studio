@@ -57,3 +57,4 @@ required-features = ["bench-support"]
 
 [features]
 bench-support = []
+perf-reporting = ["studio-runtime-store/perf-reporting", "studio-runtime-services/perf-reporting"]

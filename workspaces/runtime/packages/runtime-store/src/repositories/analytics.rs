@@ -44,9 +44,13 @@ impl RuntimeStore {
         operation: impl FnOnce(&mut Connection) -> Result<T, E> + Send + 'static,
     ) -> Result<T, E> {
         let (sender, receiver) = tokio::sync::oneshot::channel();
+        #[cfg(feature = "perf-reporting")]
+        let queued_at = std::time::Instant::now();
         self.cost_reader
             .0
             .send(Box::new(move |db| {
+                #[cfg(feature = "perf-reporting")]
+                crate::perf_reporting::record_wait("sqlite cost reader queue", queued_at.elapsed());
                 let _undelivered = sender.send(operation(db));
             }))
             .map_err(|_| AnalyticsStoreError::CostReaderClosed)?;
@@ -61,9 +65,13 @@ impl RuntimeStore {
         operation: impl FnOnce(&mut Connection) -> Result<T, E> + Send + 'static,
     ) -> Result<T, E> {
         let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        #[cfg(feature = "perf-reporting")]
+        let queued_at = std::time::Instant::now();
         self.cost_reader
             .0
             .send(Box::new(move |db| {
+                #[cfg(feature = "perf-reporting")]
+                crate::perf_reporting::record_wait("sqlite cost reader queue", queued_at.elapsed());
                 #[cfg(any(test, feature = "test-support"))]
                 take_cost_read_witness();
                 let result = operation(db);
@@ -174,6 +182,8 @@ impl AnalyticsRepository {
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | OpenFlags::SQLITE_OPEN_URI,
         )?;
+        #[cfg(feature = "perf-reporting")]
+        crate::install_profile(&connection, crate::StoreDatabaseKind::Analytics);
         #[cfg(any(test, feature = "test-support"))]
         COST_READ_WITNESS.update(|mut counts| {
             counts.opens += 1;

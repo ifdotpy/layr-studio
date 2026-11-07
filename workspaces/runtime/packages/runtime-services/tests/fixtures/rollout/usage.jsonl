@@ -1,0 +1,3 @@
+{"type":"token_usage_record","timestamp":10,"payload":{"response_id":"response","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":13}}}
+{"type":"event_msg","timestamp":11,"payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":13},"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":13},"model_context_window":8192}}}
+{"type":"compacted","timestamp":12,"payload":{"latest_token_usage_record":{"response_id":"replayed","usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":3,"reasoning_output_tokens":1,"total_tokens":13}}}}

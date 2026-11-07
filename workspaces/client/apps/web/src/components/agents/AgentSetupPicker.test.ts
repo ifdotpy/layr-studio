@@ -95,10 +95,35 @@ test("workers can browse Claude models with a Codex lead", () => {
         status: AccountStatus.ready,
       },
     ],
-    excludedAccountKeys: [],
-    onExcludedAccountKeysChange: () => {},
+    excludedKeys: [],
+    onExcludedKeysChange: () => {},
   });
   expect(markup).toContain('aria-label="Subagent account provider"');
   expect(markup).toContain("Claude");
-  expect(markup).toContain("Exclude Lead from workers and reviewers");
+  expect(markup).toContain("Use Lead for workers");
+});
+
+test("the lead has no account checkboxes and reviewers have their own", () => {
+  const accounts: AgentSetupPickerProps["accounts"] = [
+    {
+      id: "one",
+      label: "One",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: AccountStatus.ready,
+    },
+  ];
+  const props = {
+    provider: "codex",
+    accounts,
+    excludedKeys: [],
+    onExcludedKeysChange: () => {},
+  };
+  expect(render({ ...props, role: "orchestrator" })).not.toContain(
+    "Use One for",
+  );
+  const reviewer = render({ ...props, role: "review" });
+  expect(reviewer).toContain("Use One for reviewers");
+  expect(reviewer).toContain("disabled");
 });

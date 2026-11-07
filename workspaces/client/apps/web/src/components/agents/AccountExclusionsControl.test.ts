@@ -45,8 +45,10 @@ test("new chat renders the shared chooser with lead and exclusion handlers", () 
   );
   expect(chooser).toHaveBeenCalledWith(
     expect.objectContaining({
-      excludedAccountKeys: [],
-      onExcludedAccountKeysChange: expect.any(Function),
+      workerExcludedAccountKeys: [],
+      reviewerExcludedAccountKeys: [],
+      onWorkerExcludedAccountKeysChange: expect.any(Function),
+      onReviewerExcludedAccountKeysChange: expect.any(Function),
       onAccountChange: expect.any(Function),
     }),
   );

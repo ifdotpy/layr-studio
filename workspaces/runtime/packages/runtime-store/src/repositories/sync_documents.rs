@@ -744,6 +744,25 @@ impl SyncDocumentsRepository {
         Self::drafts_after(connection, after, limit.clamp(1, SYNC_BATCH_LIMIT))
     }
 
+    /// Read up to `limit` live drafts in sequence order, for an initial snapshot. Deletion marks
+    /// stay for change replay, but a snapshot is the whole current set and does not need them.
+    pub fn live_drafts(connection: &Connection, limit: i64) -> StoreResult<Vec<SyncDocument>> {
+        let mut statement = connection.prepare_cached(
+            "SELECT seq,id,payload,deleted FROM sync_documents \
+             WHERE scope='drafts' AND deleted=0 ORDER BY seq LIMIT ?1",
+        )?;
+        let rows = statement.query_map(params![limit], |row| {
+            Ok(SyncDocument {
+                sequence: row.get(0)?,
+                id: row.get(1)?,
+                payload: row.get(2)?,
+                deleted: row.get::<_, i64>(3)? != 0,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StoreError::from)
+    }
+
     /// Read a caller-bounded draft interval, shared by pull pages and stream batches.
     pub fn drafts_after(
         connection: &Connection,

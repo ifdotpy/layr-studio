@@ -100,17 +100,62 @@ test("the agent settings chooser shows exclusions even without transfer destinat
             status: AccountStatus.ready,
           },
         ],
-        excludedAccountKeys: ["lead"],
-        onExcludedAccountKeysChange: () => {},
+        workerExcludedAccountKeys: ["lead"],
+        reviewerExcludedAccountKeys: [],
+        onWorkerExcludedAccountKeysChange: () => {},
+        onReviewerExcludedAccountKeysChange: () => {},
         catalog: { models: [], loading: false, error: "", retry: () => {} },
         refresh: async () => {},
         onAccountChange: () => {},
       }),
     ),
   );
-  expect(html).toContain("Exclude Lead from workers and reviewers");
-  expect(html).toContain("Exclude Other from workers and reviewers");
+  expect(html).not.toContain('type="checkbox"');
 });
+
+test.each(["worker", "review"] as const)(
+  "%s tab reads and updates only its own exclusions",
+  (role) => {
+    const workers = vi.fn();
+    const reviewers = vi.fn();
+    choices.pickers.length = 0;
+    renderToStaticMarkup(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(ExecutionSettings, {
+          presentation: "panel",
+          initialRole: role,
+          agent: {
+            id: "lead",
+            isLead: true,
+            source: AgentSource.managed,
+            status: AgentStatus.idle,
+            provider: ProviderKind.codex,
+            accountKey: "lead",
+          },
+          accounts: [],
+          workerExcludedAccountKeys: ["worker-only"],
+          reviewerExcludedAccountKeys: ["review-only"],
+          onWorkerExcludedAccountKeysChange: workers,
+          onReviewerExcludedAccountKeysChange: reviewers,
+          catalog: { models: [], loading: false, error: "", retry: () => {} },
+          refresh: async () => {},
+          onAccountChange: () => {},
+        }),
+      ),
+    );
+    const picker = choices.pickers.at(-1);
+    expect(picker?.excludedKeys).toEqual([
+      role === "worker" ? "worker-only" : "review-only",
+    ]);
+    picker?.onExcludedKeysChange?.(["changed"]);
+    expect(role === "worker" ? workers : reviewers).toHaveBeenCalledWith([
+      "changed",
+    ]);
+    expect(role === "worker" ? reviewers : workers).not.toHaveBeenCalled();
+  },
+);
 
 vi.mock("react", async (load) => {
   const actual = await load<typeof import("react")>();

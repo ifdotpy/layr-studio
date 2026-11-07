@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::StoreResult;
 use crate::records::{MonitorRecord, Table};
-use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
+use crate::schema::{SchemaRequirements, TableRequirement};
 
 pub use studio_runtime_schema::monitor_record::{
     MonitorOperationEvidence, MonitorOperationRecord as MonitorOperation,
@@ -19,11 +19,8 @@ const MONITOR_TABLE: TableRequirement = TableRequirement {
 };
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
-    tables: &[],
-    conditional_tables: &[ConditionalTableRequirement {
-        table_exists: "runtime_monitors",
-        tables: &[MONITOR_TABLE],
-    }],
+    tables: &[MONITOR_TABLE],
+    conditional_tables: &[],
     triggers: &[],
     conditional_triggers: &[],
     connection_functions: &[],
@@ -86,12 +83,6 @@ pub struct MonitorsRepository;
 
 impl MonitorsRepository {
     pub fn get(connection: &Connection, id: &str) -> StoreResult<Option<MonitorRecord>> {
-        let has_table: bool = connection
-            .prepare_cached("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_monitors')")?
-            .query_row([], |row| row.get(0))?;
-        if !has_table {
-            return Ok(None);
-        }
         Table::<MonitorRecord>::new(connection).get(&id.to_owned())
     }
 
@@ -162,17 +153,20 @@ mod tests {
     use super::{MonitorsRepository, QUEUED_STREAM_INDEX, STUDIO_ERROR_INDEX};
     use rusqlite::Connection;
 
-    #[test]
-    fn cached_table_check_tracks_schema_changes() {
-        let db = Connection::open_in_memory().unwrap();
-        assert!(MonitorsRepository::get(&db, "missing").unwrap().is_none());
-        db.execute_batch(
-            "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
-        )
-        .unwrap();
-        assert!(MonitorsRepository::get(&db, "missing").unwrap().is_none());
+    #[tokio::test]
+    async fn store_open_rejects_a_missing_monitor_table() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = crate::RuntimeStore::open(Some(directory.path()))
+            .await
+            .unwrap();
+        drop(store);
+        let db = Connection::open(directory.path().join("canvas.sqlite3")).unwrap();
         db.execute_batch("DROP TABLE runtime_monitors").unwrap();
-        assert!(MonitorsRepository::get(&db, "missing").unwrap().is_none());
+        drop(db);
+        assert!(matches!(
+            crate::RuntimeStore::open(Some(directory.path())).await,
+            Err(crate::StoreError::SchemaObjectMismatch { object, .. }) if object == "runtime_monitors"
+        ));
     }
 
     #[tokio::test]

@@ -500,6 +500,12 @@
         }
       ],
       "title": "Worktreeready"
+    },
+    "workerExcludedAccountKeys": {
+      "$ref": "https://codex-studio.invalid/openapi.json#/components/schemas/AgentEntityDto/properties/workerExcludedAccountKeys"
+    },
+    "reviewerExcludedAccountKeys": {
+      "$ref": "https://codex-studio.invalid/openapi.json#/components/schemas/AgentEntityDto/properties/reviewerExcludedAccountKeys"
     }
   },
   "required": ["id", "rootId", "epoch", "status", "compactions"],
