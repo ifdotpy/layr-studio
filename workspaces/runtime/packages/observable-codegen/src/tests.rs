@@ -38,6 +38,88 @@ fn models() -> Vec<ObservableModel> {
         opaque: vec!["opaque".into()],
     }]
 }
+<<<<<<< head
+=======
+
+#[test]
+fn selected_collections_use_the_existing_array_resource() {
+    let mut document = fixture();
+    document["components"]["schemas"]["ResourceRef"] = json!({"oneOf":[{
+        "type":"object","additionalProperties":false,"required":["kind"],
+        "properties":{"kind":{"type":"string","const":"state"}}
+    }]});
+    document["components"]["schemas"]["Payload"] = json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
+            "collection":{"type":"string","const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}
+        }},
+        {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
+            "collection":{"type":"string","const":"ignored"},"id":{"type":"string"},"value":{"type":"object","additionalProperties":true}
+        }}
+    ]});
+    document["components"]["schemas"]["SubscriptionDataMap"] = json!({
+        "type":"object","required":["state"],"properties":{"state":{"type":"array","items":{"$ref":"#/components/schemas/Payload"}}}
+    });
+    let resources = vec![ObservableResource::collections(
+        "state",
+        "state",
+        "Payload",
+        vec![ObservableCollection::named("row", "rows", "Row")],
+    )];
+    let generated =
+        render(&document, &models(), &resources).expect("selected state collections render");
+    assert!(generated.contains("state(): ResourceSlot<StateCollections>"));
+    assert!(!generated.contains("ignoredModel"));
+    assert_witness(&document, &generated, true);
+    let mut bad = resources.clone();
+    bad[0].collections[0].schema = "List".into();
+    assert_eq!(
+        render(&document, &models(), &bad)
+            .expect_err("mismatched selected value")
+            .kind,
+        UnsupportedShape::Resource
+    );
+    bad = resources.clone();
+    let duplicate = bad[0].collections[0].clone();
+    bad[0].collections.push(duplicate);
+    assert_eq!(
+        render(&document, &models(), &bad)
+            .expect_err("duplicate facade")
+            .kind,
+        UnsupportedShape::Identifier
+    );
+}
+
+#[test]
+fn object_validation_alternatives_do_not_create_union_models() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["nested"]["anyOf"] =
+        json!([{"properties":{"count":{"minimum":1}}}]);
+    render(&document, &models(), &resources()).expect("validation narrows existing fields");
+    document["components"]["schemas"]["Row"]["properties"]["nested"]["anyOf"] =
+        json!([{"properties":{"extra":{"type":"string"}}}]);
+    assert!(
+        render(&document, &models(), &resources()).is_err(),
+        "alternatives cannot add fields"
+    );
+}
+
+#[test]
+fn component_aliases_resolve_and_cycles_fail_with_the_schema_path() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["title"] =
+        json!({"$ref":"#/components/schemas/Alias"});
+    document["components"]["schemas"]["Alias"] = json!({"$ref":"#/components/schemas/Scalar"});
+    document["components"]["schemas"]["Scalar"] = json!({"type":"string"});
+    render(&document, &models(), &resources()).expect("named scalar alias");
+    document["components"]["schemas"]["Scalar"] = json!({"$ref":"#/components/schemas/Alias"});
+    assert_eq!(
+        render(&document, &models(), &resources())
+            .expect_err("alias cycle")
+            .kind,
+        UnsupportedShape::Recursive
+    );
+}
+>>>>>>> 160a9ce
 fn resources() -> Vec<ObservableResource> {
     vec![ObservableResource {
         kind: "fixture".into(),

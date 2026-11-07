@@ -59,6 +59,14 @@ impl<'a> Parser<'a> {
                 .strip_prefix("#/components/schemas/")
                 .ok_or_else(|| fail(path, UnsupportedShape::MissingSchema))?;
             let target_schema = schema(self.document, target)?.clone();
+            if target_schema.get("$ref").is_some() {
+                if !self.visiting.insert(target.into()) {
+                    return Err(fail(reference, UnsupportedShape::Recursive));
+                }
+                let result = self.parse(&target_schema, target, dto, reference);
+                self.visiting.remove(target);
+                return result;
+            }
             return self.parse_named(
                 &target_schema,
                 target,
@@ -93,9 +101,30 @@ impl<'a> Parser<'a> {
         if self.visiting.contains(name) {
             return Err(fail(path, UnsupportedShape::Recursive));
         }
+        // Constraints on already-declared fields do not introduce another model shape.
+        let validation_alternatives = value["type"] == "object" && value["anyOf"].is_array();
+        if validation_alternatives {
+            let properties = value["properties"]
+                .as_object()
+                .ok_or_else(|| fail(path, UnsupportedShape::Shape))?;
+            for variant in value["anyOf"].as_array().expect("checked array") {
+                let constraints = variant
+                    .as_object()
+                    .ok_or_else(|| fail(path, UnsupportedShape::Composition))?;
+                if constraints.keys().any(|key| key != "properties")
+                    || constraints
+                        .get("properties")
+                        .and_then(Value::as_object)
+                        .is_none_or(|fields| fields.keys().any(|key| !properties.contains_key(key)))
+                {
+                    return Err(fail(path, UnsupportedShape::Composition));
+                }
+            }
+        }
         if let Some(variants) = value["anyOf"]
             .as_array()
             .or_else(|| value["oneOf"].as_array())
+            .filter(|_| !validation_alternatives)
         {
             let properties = variants
                 .first()

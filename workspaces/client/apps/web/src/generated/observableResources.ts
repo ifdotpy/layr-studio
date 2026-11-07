@@ -14,40 +14,743 @@ import type {
   ObservableResourceRuntime,
 } from "../store/index.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
-type ChatOperationalStatusDto = DeepReadonly<
-  components["schemas"]["ChatOperationalStatus"]
+type AccountChangeVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountChange"]>,
+  { kind: "select" }
 >;
-class ChatOperationalStatusModel {
-  kind: ChatOperationalStatusDto["kind"];
-  label: ChatOperationalStatusDto["label"];
-  constructor(dto: ChatOperationalStatusDto) {
+class AccountChangeVariant0Model {
+  kind: AccountChangeVariant0Dto["kind"];
+  constructor(dto: AccountChangeVariant0Dto) {
     this.kind = dto.kind;
-    this.label = dto.label;
     makeObservable(this, {
       kind: observableRef,
-      label: observableRef,
       apply: action,
     });
   }
-  apply(dto: ChatOperationalStatusDto): this {
+  apply(dto: AccountChangeVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AccountChangeVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountChange"]>,
+  { kind: "transfer" }
+>;
+class AccountChangeVariant1Model {
+  kind: AccountChangeVariant1Dto["kind"];
+  constructor(dto: AccountChangeVariant1Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountChangeVariant1Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AccountChangeVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountChange"]>,
+  { kind: "unavailable" }
+>;
+class AccountChangeVariant2Model {
+  kind: AccountChangeVariant2Dto["kind"];
+  reason: AccountChangeVariant2Dto["reason"];
+  constructor(dto: AccountChangeVariant2Dto) {
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountChangeVariant2Dto): this {
     {
       const next = dto.kind;
       if (this.kind !== next) this.kind = next;
     }
     {
-      const next = dto.label;
-      if (this.label !== next) this.label = next;
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
     }
     return this;
   }
 }
-type CopyProgressDto = DeepReadonly<components["schemas"]["CopyProgress"]>;
-class CopyProgressModel {
-  done: CopyProgressDto["done"];
-  phase: CopyProgressDto["phase"];
-  total: NonNullable<CopyProgressDto["total"]> | null | undefined;
-  unit: CopyProgressDto["unit"];
-  constructor(dto: CopyProgressDto) {
+type AccountDestinationDto = DeepReadonly<
+  components["schemas"]["AccountDestination"]
+>;
+class AccountDestinationModel {
+  accountKey: AccountDestinationDto["accountKey"];
+  eligibility: AccountEligibilityModel;
+  constructor(dto: AccountDestinationDto) {
+    this.accountKey = dto.accountKey;
+    this.eligibility = createAccountEligibility(dto.eligibility);
+    makeObservable(this, {
+      accountKey: observableRef,
+      eligibility: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountDestinationDto): this {
+    {
+      const next = dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next = updateAccountEligibility(this.eligibility, dto.eligibility);
+      if (this.eligibility !== next) this.eligibility = next;
+    }
+    return this;
+  }
+}
+type AccountEligibilityVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountEligibility"]>,
+  { kind: "available" }
+>;
+class AccountEligibilityVariant0Model {
+  kind: AccountEligibilityVariant0Dto["kind"];
+  constructor(dto: AccountEligibilityVariant0Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountEligibilityVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AccountEligibilityVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountEligibility"]>,
+  { kind: "unavailable" }
+>;
+class AccountEligibilityVariant1Model {
+  kind: AccountEligibilityVariant1Dto["kind"];
+  reason: AccountEligibilityVariant1Dto["reason"];
+  constructor(dto: AccountEligibilityVariant1Dto) {
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountEligibilityVariant1Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "none" }
+>;
+class AccountTransferProgressVariant0Model {
+  kind: AccountTransferProgressVariant0Dto["kind"];
+  constructor(dto: AccountTransferProgressVariant0Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "unreadable" }
+>;
+class AccountTransferProgressVariant1Model {
+  kind: AccountTransferProgressVariant1Dto["kind"];
+  reason: AccountTransferProgressVariant1Dto["reason"];
+  constructor(dto: AccountTransferProgressVariant1Dto) {
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant1Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "waiting" }
+>;
+class AccountTransferProgressVariant2Model {
+  actions: AccountTransferProgressVariant2Dto["actions"];
+  id: AccountTransferProgressVariant2Dto["id"];
+  kind: AccountTransferProgressVariant2Dto["kind"];
+  reason: AccountTransferProgressVariant2Dto["reason"];
+  targetAccountKey: AccountTransferProgressVariant2Dto["targetAccountKey"];
+  constructor(dto: AccountTransferProgressVariant2Dto) {
+    this.actions = dto.actions;
+    this.id = dto.id;
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    this.targetAccountKey = dto.targetAccountKey;
+    makeObservable(this, {
+      actions: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      reason: observableRef,
+      targetAccountKey: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant2Dto): this {
+    {
+      const next = dto.actions;
+      if (this.actions !== next) this.actions = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = dto.targetAccountKey;
+      if (this.targetAccountKey !== next) this.targetAccountKey = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "moving" }
+>;
+class AccountTransferProgressVariant3Model {
+  actions: AccountTransferProgressVariant3Dto["actions"];
+  id: AccountTransferProgressVariant3Dto["id"];
+  kind: AccountTransferProgressVariant3Dto["kind"];
+  targetAccountKey: AccountTransferProgressVariant3Dto["targetAccountKey"];
+  constructor(dto: AccountTransferProgressVariant3Dto) {
+    this.actions = dto.actions;
+    this.id = dto.id;
+    this.kind = dto.kind;
+    this.targetAccountKey = dto.targetAccountKey;
+    makeObservable(this, {
+      actions: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      targetAccountKey: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant3Dto): this {
+    {
+      const next = dto.actions;
+      if (this.actions !== next) this.actions = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.targetAccountKey;
+      if (this.targetAccountKey !== next) this.targetAccountKey = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "blocked" }
+>;
+class AccountTransferProgressVariant4Model {
+  actions: AccountTransferProgressVariant4Dto["actions"];
+  id: AccountTransferProgressVariant4Dto["id"];
+  kind: AccountTransferProgressVariant4Dto["kind"];
+  reason: AccountTransferProgressVariant4Dto["reason"];
+  targetAccountKey: AccountTransferProgressVariant4Dto["targetAccountKey"];
+  constructor(dto: AccountTransferProgressVariant4Dto) {
+    this.actions = dto.actions;
+    this.id = dto.id;
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    this.targetAccountKey = dto.targetAccountKey;
+    makeObservable(this, {
+      actions: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      reason: observableRef,
+      targetAccountKey: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant4Dto): this {
+    {
+      const next = dto.actions;
+      if (this.actions !== next) this.actions = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = dto.targetAccountKey;
+      if (this.targetAccountKey !== next) this.targetAccountKey = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant5Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "completed" }
+>;
+class AccountTransferProgressVariant5Model {
+  id: AccountTransferProgressVariant5Dto["id"];
+  kind: AccountTransferProgressVariant5Dto["kind"];
+  targetAccountKey: AccountTransferProgressVariant5Dto["targetAccountKey"];
+  constructor(dto: AccountTransferProgressVariant5Dto) {
+    this.id = dto.id;
+    this.kind = dto.kind;
+    this.targetAccountKey = dto.targetAccountKey;
+    makeObservable(this, {
+      id: observableRef,
+      kind: observableRef,
+      targetAccountKey: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant5Dto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.targetAccountKey;
+      if (this.targetAccountKey !== next) this.targetAccountKey = next;
+    }
+    return this;
+  }
+}
+type AccountTransferProgressVariant6Dto = Extract<
+  DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+  { kind: "cancelled" }
+>;
+class AccountTransferProgressVariant6Model {
+  id: AccountTransferProgressVariant6Dto["id"];
+  kind: AccountTransferProgressVariant6Dto["kind"];
+  targetAccountKey: AccountTransferProgressVariant6Dto["targetAccountKey"];
+  constructor(dto: AccountTransferProgressVariant6Dto) {
+    this.id = dto.id;
+    this.kind = dto.kind;
+    this.targetAccountKey = dto.targetAccountKey;
+    makeObservable(this, {
+      id: observableRef,
+      kind: observableRef,
+      targetAccountKey: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AccountTransferProgressVariant6Dto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.targetAccountKey;
+      if (this.targetAccountKey !== next) this.targetAccountKey = next;
+    }
+    return this;
+  }
+}
+type AgentEntityCapacityRetryDtoDto = DeepReadonly<
+  components["schemas"]["AgentEntityCapacityRetryDto"]
+>;
+class AgentEntityCapacityRetryDtoModel {
+  acceptedTurnId:
+    | NonNullable<AgentEntityCapacityRetryDtoDto["acceptedTurnId"]>
+    | null
+    | undefined;
+  accountKey: NonNullable<AgentEntityCapacityRetryDtoDto["accountKey"]> | null;
+  cause:
+    | NonNullable<AgentEntityCapacityRetryDtoDto["cause"]>
+    | null
+    | undefined;
+  claimedAt:
+    | NonNullable<AgentEntityCapacityRetryDtoDto["claimedAt"]>
+    | null
+    | undefined;
+  dueAt: NonNullable<AgentEntityCapacityRetryDtoDto["dueAt"]> | null;
+  epoch: NonNullable<AgentEntityCapacityRetryDtoDto["epoch"]> | null;
+  id: AgentEntityCapacityRetryDtoDto["id"];
+  reason:
+    | NonNullable<AgentEntityCapacityRetryDtoDto["reason"]>
+    | null
+    | undefined;
+  status: AgentEntityCapacityRetryDtoDto["status"];
+  threadId: NonNullable<AgentEntityCapacityRetryDtoDto["threadId"]> | null;
+  updatedAt: AgentEntityCapacityRetryDtoDto["updatedAt"];
+  constructor(dto: AgentEntityCapacityRetryDtoDto) {
+    this.acceptedTurnId =
+      dto.acceptedTurnId === undefined
+        ? undefined
+        : dto.acceptedTurnId === null
+          ? null
+          : dto.acceptedTurnId;
+    this.accountKey = dto.accountKey === null ? null : dto.accountKey;
+    this.cause =
+      dto.cause === undefined
+        ? undefined
+        : dto.cause === null
+          ? null
+          : dto.cause;
+    this.claimedAt =
+      dto.claimedAt === undefined
+        ? undefined
+        : dto.claimedAt === null
+          ? null
+          : dto.claimedAt;
+    this.dueAt = dto.dueAt === null ? null : dto.dueAt;
+    this.epoch = dto.epoch === null ? null : dto.epoch;
+    this.id = dto.id;
+    this.reason =
+      dto.reason === undefined
+        ? undefined
+        : dto.reason === null
+          ? null
+          : dto.reason;
+    this.status = dto.status;
+    this.threadId = dto.threadId === null ? null : dto.threadId;
+    this.updatedAt = dto.updatedAt;
+    makeObservable(this, {
+      acceptedTurnId: observableRef,
+      accountKey: observableRef,
+      cause: observableRef,
+      claimedAt: observableRef,
+      dueAt: observableRef,
+      epoch: observableRef,
+      id: observableRef,
+      reason: observableRef,
+      status: observableRef,
+      threadId: observableRef,
+      updatedAt: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityCapacityRetryDtoDto): this {
+    {
+      const next =
+        dto.acceptedTurnId === undefined
+          ? undefined
+          : this.acceptedTurnId === undefined
+            ? dto.acceptedTurnId === null
+              ? null
+              : dto.acceptedTurnId
+            : dto.acceptedTurnId === null
+              ? null
+              : this.acceptedTurnId === null
+                ? dto.acceptedTurnId
+                : dto.acceptedTurnId;
+      if (this.acceptedTurnId !== next) this.acceptedTurnId = next;
+    }
+    {
+      const next =
+        dto.accountKey === null
+          ? null
+          : this.accountKey === null
+            ? dto.accountKey
+            : dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next =
+        dto.cause === undefined
+          ? undefined
+          : this.cause === undefined
+            ? dto.cause === null
+              ? null
+              : dto.cause
+            : dto.cause === null
+              ? null
+              : this.cause === null
+                ? dto.cause
+                : dto.cause;
+      if (this.cause !== next) this.cause = next;
+    }
+    {
+      const next =
+        dto.claimedAt === undefined
+          ? undefined
+          : this.claimedAt === undefined
+            ? dto.claimedAt === null
+              ? null
+              : dto.claimedAt
+            : dto.claimedAt === null
+              ? null
+              : this.claimedAt === null
+                ? dto.claimedAt
+                : dto.claimedAt;
+      if (this.claimedAt !== next) this.claimedAt = next;
+    }
+    {
+      const next =
+        dto.dueAt === null ? null : this.dueAt === null ? dto.dueAt : dto.dueAt;
+      if (this.dueAt !== next) this.dueAt = next;
+    }
+    {
+      const next =
+        dto.epoch === null ? null : this.epoch === null ? dto.epoch : dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.reason === undefined
+          ? undefined
+          : this.reason === undefined
+            ? dto.reason === null
+              ? null
+              : dto.reason
+            : dto.reason === null
+              ? null
+              : this.reason === null
+                ? dto.reason
+                : dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.threadId === null
+          ? null
+          : this.threadId === null
+            ? dto.threadId
+            : dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next = dto.updatedAt;
+      if (this.updatedAt !== next) this.updatedAt = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "slot" }
+>;
+class AgentEntityStartWaitDtoVariant0Model {
+  epoch: AgentEntityStartWaitDtoVariant0Dto["epoch"];
+  maxRunningTurns: AgentEntityStartWaitDtoVariant0Dto["maxRunningTurns"];
+  reason: AgentEntityStartWaitDtoVariant0Dto["reason"];
+  runningTurns: AgentEntityStartWaitDtoVariant0Dto["runningTurns"];
+  constructor(dto: AgentEntityStartWaitDtoVariant0Dto) {
+    this.epoch = dto.epoch;
+    this.maxRunningTurns = dto.maxRunningTurns;
+    this.reason = dto.reason;
+    this.runningTurns = dto.runningTurns;
+    makeObservable(this, {
+      epoch: observableRef,
+      maxRunningTurns: observableRef,
+      reason: observableRef,
+      runningTurns: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant0Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.maxRunningTurns;
+      if (this.maxRunningTurns !== next) this.maxRunningTurns = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = dto.runningTurns;
+      if (this.runningTurns !== next) this.runningTurns = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "pause" }
+>;
+class AgentEntityStartWaitDtoVariant1Model {
+  epoch: AgentEntityStartWaitDtoVariant1Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant1Dto["reason"];
+  until: AgentEntityStartWaitDtoVariant1Dto["until"];
+  constructor(dto: AgentEntityStartWaitDtoVariant1Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    this.until = dto.until;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      until: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant1Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = dto.until;
+      if (this.until !== next) this.until = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant10Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "account_transfer" }
+>;
+class AgentEntityStartWaitDtoVariant10Model {
+  epoch: AgentEntityStartWaitDtoVariant10Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant10Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant10Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant10Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant11Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "workspace_copy" }
+>;
+class AgentEntityStartWaitDtoVariant11Model {
+  epoch: AgentEntityStartWaitDtoVariant11Dto["epoch"];
+  progress: AgentEntityStartWaitDtoVariant11_progressModel;
+  reason: AgentEntityStartWaitDtoVariant11Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant11Dto) {
+    this.epoch = dto.epoch;
+    this.progress = new AgentEntityStartWaitDtoVariant11_progressModel(
+      dto.progress,
+    );
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      progress: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant11Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = this.progress.apply(dto.progress);
+      if (this.progress !== next) this.progress = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant11_progressDto = NonNullable<
+  AgentEntityStartWaitDtoVariant11Dto["progress"]
+>;
+class AgentEntityStartWaitDtoVariant11_progressModel {
+  done: AgentEntityStartWaitDtoVariant11_progressDto["done"];
+  phase: AgentEntityStartWaitDtoVariant11_progressDto["phase"];
+  total:
+    | NonNullable<AgentEntityStartWaitDtoVariant11_progressDto["total"]>
+    | null
+    | undefined;
+  unit: AgentEntityStartWaitDtoVariant11_progressDto["unit"];
+  constructor(dto: AgentEntityStartWaitDtoVariant11_progressDto) {
     this.done = dto.done;
     this.phase = dto.phase;
     this.total =
@@ -65,7 +768,7 @@ class CopyProgressModel {
       apply: action,
     });
   }
-  apply(dto: CopyProgressDto): this {
+  apply(dto: AgentEntityStartWaitDtoVariant11_progressDto): this {
     {
       const next = dto.done;
       if (this.done !== next) this.done = next;
@@ -92,6 +795,3310 @@ class CopyProgressModel {
     {
       const next = dto.unit;
       if (this.unit !== next) this.unit = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "start_queue" }
+>;
+class AgentEntityStartWaitDtoVariant2Model {
+  epoch: AgentEntityStartWaitDtoVariant2Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant2Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant2Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant2Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "disk" }
+>;
+class AgentEntityStartWaitDtoVariant3Model {
+  epoch: AgentEntityStartWaitDtoVariant3Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant3Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant3Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant3Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "model_catalog" }
+>;
+class AgentEntityStartWaitDtoVariant4Model {
+  epoch: AgentEntityStartWaitDtoVariant4Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant4Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant4Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant4Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant5Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "provider_session" }
+>;
+class AgentEntityStartWaitDtoVariant5Model {
+  epoch: AgentEntityStartWaitDtoVariant5Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant5Dto["reason"];
+  until:
+    | NonNullable<AgentEntityStartWaitDtoVariant5Dto["until"]>
+    | null
+    | undefined;
+  constructor(dto: AgentEntityStartWaitDtoVariant5Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    this.until =
+      dto.until === undefined
+        ? undefined
+        : dto.until === null
+          ? null
+          : dto.until;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      until: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant5Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next =
+        dto.until === undefined
+          ? undefined
+          : this.until === undefined
+            ? dto.until === null
+              ? null
+              : dto.until
+            : dto.until === null
+              ? null
+              : this.until === null
+                ? dto.until
+                : dto.until;
+      if (this.until !== next) this.until = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant6Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "dependency" }
+>;
+class AgentEntityStartWaitDtoVariant6Model {
+  epoch: AgentEntityStartWaitDtoVariant6Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant6Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant6Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant6Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant7Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "dispatch_pending" }
+>;
+class AgentEntityStartWaitDtoVariant7Model {
+  epoch: AgentEntityStartWaitDtoVariant7Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant7Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant7Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant7Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant8Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "paused" }
+>;
+class AgentEntityStartWaitDtoVariant8Model {
+  epoch: AgentEntityStartWaitDtoVariant8Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant8Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant8Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant8Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentEntityStartWaitDtoVariant9Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+  { reason: "native_failure" }
+>;
+class AgentEntityStartWaitDtoVariant9Model {
+  epoch: AgentEntityStartWaitDtoVariant9Dto["epoch"];
+  reason: AgentEntityStartWaitDtoVariant9Dto["reason"];
+  constructor(dto: AgentEntityStartWaitDtoVariant9Dto) {
+    this.epoch = dto.epoch;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      epoch: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentEntityStartWaitDtoVariant9Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "needs_input" }
+>;
+class AgentOperationalStatusVariant0Model {
+  reason: AgentOperationalStatusVariant0Dto["reason"];
+  wait: AgentWaitReasonsModel | null;
+  constructor(dto: AgentOperationalStatusVariant0Dto) {
+    this.reason = dto.reason;
+    this.wait = dto.wait === null ? null : new AgentWaitReasonsModel(dto.wait);
+    makeObservable(this, {
+      reason: observableRef,
+      wait: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant0Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next =
+        dto.wait === null
+          ? null
+          : this.wait === null
+            ? new AgentWaitReasonsModel(dto.wait)
+            : this.wait.apply(dto.wait);
+      if (this.wait !== next) this.wait = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "waiting" }
+>;
+class AgentOperationalStatusVariant1Model {
+  reason: AgentOperationalStatusVariant1Dto["reason"];
+  wait: AgentWaitReasonsModel;
+  constructor(dto: AgentOperationalStatusVariant1Dto) {
+    this.reason = dto.reason;
+    this.wait = new AgentWaitReasonsModel(dto.wait);
+    makeObservable(this, {
+      reason: observableRef,
+      wait: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant1Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    {
+      const next = this.wait.apply(dto.wait);
+      if (this.wait !== next) this.wait = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant10Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "unread_result" }
+>;
+class AgentOperationalStatusVariant10Model {
+  reason: AgentOperationalStatusVariant10Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant10Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant10Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant11Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "read_result" }
+>;
+class AgentOperationalStatusVariant11Model {
+  reason: AgentOperationalStatusVariant11Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant11Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant11Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant12Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "ready" }
+>;
+class AgentOperationalStatusVariant12Model {
+  reason: AgentOperationalStatusVariant12Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant12Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant12Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "waiting_background_command" }
+>;
+class AgentOperationalStatusVariant2Model {
+  reason: AgentOperationalStatusVariant2Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant2Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant2Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "working" }
+>;
+class AgentOperationalStatusVariant3Model {
+  reason: AgentOperationalStatusVariant3Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant3Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant3Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "turn_ended" }
+>;
+class AgentOperationalStatusVariant4Model {
+  reason: AgentOperationalStatusVariant4Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant4Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant4Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant5Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "disk_space" }
+>;
+class AgentOperationalStatusVariant5Model {
+  reason: AgentOperationalStatusVariant5Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant5Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant5Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant6Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "failed" }
+>;
+class AgentOperationalStatusVariant6Model {
+  reason: AgentOperationalStatusVariant6Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant6Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant6Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant7Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "interrupted" }
+>;
+class AgentOperationalStatusVariant7Model {
+  reason: AgentOperationalStatusVariant7Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant7Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant7Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant8Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "stopped" }
+>;
+class AgentOperationalStatusVariant8Model {
+  reason: AgentOperationalStatusVariant8Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant8Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant8Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentOperationalStatusVariant9Dto = Extract<
+  DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+  { reason: "question_deferred" }
+>;
+class AgentOperationalStatusVariant9Model {
+  reason: AgentOperationalStatusVariant9Dto["reason"];
+  constructor(dto: AgentOperationalStatusVariant9Dto) {
+    this.reason = dto.reason;
+    makeObservable(this, {
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentOperationalStatusVariant9Dto): this {
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type AgentStallDto = DeepReadonly<components["schemas"]["AgentStall"]>;
+class AgentStallModel {
+  since: AgentStallDto["since"];
+  taskId: AgentStallDto["taskId"];
+  constructor(dto: AgentStallDto) {
+    this.since = dto.since;
+    this.taskId = dto.taskId;
+    makeObservable(this, {
+      since: observableRef,
+      taskId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentStallDto): this {
+    {
+      const next = dto.since;
+      if (this.since !== next) this.since = next;
+    }
+    {
+      const next = dto.taskId;
+      if (this.taskId !== next) this.taskId = next;
+    }
+    return this;
+  }
+}
+type AgentSummaryEntityDtoDto = DeepReadonly<
+  components["schemas"]["AgentSummaryEntityDto"]
+>;
+class AgentSummaryEntityDtoModel {
+  accountChange: AccountChangeModel | undefined;
+  accountDestinations: AccountDestinationModel[] | undefined;
+  accountKey:
+    | NonNullable<AgentSummaryEntityDtoDto["accountKey"]>
+    | null
+    | undefined;
+  accountTransferProgress: AccountTransferProgressModel | undefined;
+  archived:
+    | NonNullable<AgentSummaryEntityDtoDto["archived"]>
+    | null
+    | undefined;
+  autoWake:
+    | NonNullable<AgentSummaryEntityDtoDto["autoWake"]>
+    | null
+    | undefined;
+  capacityRetry: AgentEntityCapacityRetryDtoModel | null | undefined;
+  created: NonNullable<AgentSummaryEntityDtoDto["created"]> | null | undefined;
+  cwd: NonNullable<AgentSummaryEntityDtoDto["cwd"]> | null | undefined;
+  empty: NonNullable<AgentSummaryEntityDtoDto["empty"]> | null | undefined;
+  epoch: NonNullable<AgentSummaryEntityDtoDto["epoch"]> | null | undefined;
+  hasApproval:
+    | NonNullable<AgentSummaryEntityDtoDto["hasApproval"]>
+    | null
+    | undefined;
+  hasBackgroundWork: AgentSummaryEntityDtoDto["hasBackgroundWork"] | undefined;
+  hasQuestion:
+    | NonNullable<AgentSummaryEntityDtoDto["hasQuestion"]>
+    | null
+    | undefined;
+  hasUnread:
+    | NonNullable<AgentSummaryEntityDtoDto["hasUnread"]>
+    | null
+    | undefined;
+  id: AgentSummaryEntityDtoDto["id"];
+  inFlight: AgentSummaryEntityDtoDto["inFlight"];
+  isLead: NonNullable<AgentSummaryEntityDtoDto["isLead"]> | null | undefined;
+  kind: NonNullable<AgentSummaryEntityDtoDto["kind"]> | null | undefined;
+  lastCompletedTurn:
+    | NonNullable<AgentSummaryEntityDtoDto["lastCompletedTurn"]>
+    | null
+    | undefined;
+  lastCompletedTurnStatus:
+    | NonNullable<AgentSummaryEntityDtoDto["lastCompletedTurnStatus"]>
+    | null
+    | undefined;
+  lastReadAt:
+    | NonNullable<AgentSummaryEntityDtoDto["lastReadAt"]>
+    | null
+    | undefined;
+  manualConnectionCheck: ManualConnectionCheckModel | undefined;
+  markRead: ReadStateDtoModel | null;
+  markUnread: AgentSummaryEntityDtoDto["markUnread"];
+  model: NonNullable<AgentSummaryEntityDtoDto["model"]> | null | undefined;
+  moveImportPending: AgentSummaryEntityDtoDto["moveImportPending"] | undefined;
+  movedTo: MovePointerDtoModel | null | undefined;
+  name: NonNullable<AgentSummaryEntityDtoDto["name"]> | null | undefined;
+  operationalStatus: AgentOperationalStatusModel;
+  parentId:
+    | NonNullable<AgentSummaryEntityDtoDto["parentId"]>
+    | null
+    | undefined;
+  parkedEvent:
+    | NonNullable<AgentSummaryEntityDtoDto["parkedEvent"]>
+    | null
+    | undefined;
+  pinned: NonNullable<AgentSummaryEntityDtoDto["pinned"]> | null | undefined;
+  project: NonNullable<AgentSummaryEntityDtoDto["project"]> | null | undefined;
+  projectFolder:
+    | NonNullable<AgentSummaryEntityDtoDto["projectFolder"]>
+    | null
+    | undefined;
+  projectFolderRevision:
+    | NonNullable<AgentSummaryEntityDtoDto["projectFolderRevision"]>
+    | null
+    | undefined;
+  projectId:
+    | NonNullable<AgentSummaryEntityDtoDto["projectId"]>
+    | null
+    | undefined;
+  projectPath:
+    | NonNullable<AgentSummaryEntityDtoDto["projectPath"]>
+    | null
+    | undefined;
+  projectServerId: NonNullable<
+    AgentSummaryEntityDtoDto["projectServerId"]
+  > | null;
+  provider:
+    | NonNullable<AgentSummaryEntityDtoDto["provider"]>
+    | null
+    | undefined;
+  readState: ReadStateDtoModel | null | undefined;
+  readStateSupported:
+    | NonNullable<AgentSummaryEntityDtoDto["readStateSupported"]>
+    | null
+    | undefined;
+  remoteAnchor: RemoteParentLinkDtoModel | null | undefined;
+  remoteOrigin: RemoteParentLinkDtoModel | null | undefined;
+  remoteWorker: RemoteWorkerLinkDtoModel | null | undefined;
+  role: NonNullable<AgentSummaryEntityDtoDto["role"]> | null | undefined;
+  rootId: NonNullable<AgentSummaryEntityDtoDto["rootId"]> | null | undefined;
+  serverId:
+    | NonNullable<AgentSummaryEntityDtoDto["serverId"]>
+    | null
+    | undefined;
+  sharedRoomId:
+    | NonNullable<AgentSummaryEntityDtoDto["sharedRoomId"]>
+    | null
+    | undefined;
+  source: NonNullable<AgentSummaryEntityDtoDto["source"]> | null | undefined;
+  stall: AgentStallModel | null | undefined;
+  startWait: AgentEntityStartWaitDtoModel | null | undefined;
+  status: NonNullable<AgentSummaryEntityDtoDto["status"]> | null | undefined;
+  teamCounts: AgentSummaryEntityDtoDto["teamCounts"] | undefined;
+  threadId:
+    | NonNullable<AgentSummaryEntityDtoDto["threadId"]>
+    | null
+    | undefined;
+  turnId: NonNullable<AgentSummaryEntityDtoDto["turnId"]> | null | undefined;
+  unreadCount:
+    | NonNullable<AgentSummaryEntityDtoDto["unreadCount"]>
+    | null
+    | undefined;
+  updated: NonNullable<AgentSummaryEntityDtoDto["updated"]> | null | undefined;
+  constructor(dto: AgentSummaryEntityDtoDto) {
+    this.accountChange =
+      dto.accountChange === undefined
+        ? undefined
+        : createAccountChange(dto.accountChange);
+    this.accountDestinations =
+      dto.accountDestinations === undefined
+        ? undefined
+        : dto.accountDestinations.map(
+            (item) => new AccountDestinationModel(item),
+          );
+    this.accountKey =
+      dto.accountKey === undefined
+        ? undefined
+        : dto.accountKey === null
+          ? null
+          : dto.accountKey;
+    this.accountTransferProgress =
+      dto.accountTransferProgress === undefined
+        ? undefined
+        : createAccountTransferProgress(dto.accountTransferProgress);
+    this.archived =
+      dto.archived === undefined
+        ? undefined
+        : dto.archived === null
+          ? null
+          : dto.archived;
+    this.autoWake =
+      dto.autoWake === undefined
+        ? undefined
+        : dto.autoWake === null
+          ? null
+          : dto.autoWake;
+    this.capacityRetry =
+      dto.capacityRetry === undefined
+        ? undefined
+        : dto.capacityRetry === null
+          ? null
+          : new AgentEntityCapacityRetryDtoModel(dto.capacityRetry);
+    this.created =
+      dto.created === undefined
+        ? undefined
+        : dto.created === null
+          ? null
+          : dto.created;
+    this.cwd =
+      dto.cwd === undefined ? undefined : dto.cwd === null ? null : dto.cwd;
+    this.empty =
+      dto.empty === undefined
+        ? undefined
+        : dto.empty === null
+          ? null
+          : dto.empty;
+    this.epoch =
+      dto.epoch === undefined
+        ? undefined
+        : dto.epoch === null
+          ? null
+          : dto.epoch;
+    this.hasApproval =
+      dto.hasApproval === undefined
+        ? undefined
+        : dto.hasApproval === null
+          ? null
+          : dto.hasApproval;
+    this.hasBackgroundWork =
+      dto.hasBackgroundWork === undefined ? undefined : dto.hasBackgroundWork;
+    this.hasQuestion =
+      dto.hasQuestion === undefined
+        ? undefined
+        : dto.hasQuestion === null
+          ? null
+          : dto.hasQuestion;
+    this.hasUnread =
+      dto.hasUnread === undefined
+        ? undefined
+        : dto.hasUnread === null
+          ? null
+          : dto.hasUnread;
+    this.id = dto.id;
+    this.inFlight = dto.inFlight;
+    this.isLead =
+      dto.isLead === undefined
+        ? undefined
+        : dto.isLead === null
+          ? null
+          : dto.isLead;
+    this.kind =
+      dto.kind === undefined ? undefined : dto.kind === null ? null : dto.kind;
+    this.lastCompletedTurn =
+      dto.lastCompletedTurn === undefined
+        ? undefined
+        : dto.lastCompletedTurn === null
+          ? null
+          : dto.lastCompletedTurn;
+    this.lastCompletedTurnStatus =
+      dto.lastCompletedTurnStatus === undefined
+        ? undefined
+        : dto.lastCompletedTurnStatus === null
+          ? null
+          : dto.lastCompletedTurnStatus;
+    this.lastReadAt =
+      dto.lastReadAt === undefined
+        ? undefined
+        : dto.lastReadAt === null
+          ? null
+          : dto.lastReadAt;
+    this.manualConnectionCheck =
+      dto.manualConnectionCheck === undefined
+        ? undefined
+        : new ManualConnectionCheckModel(dto.manualConnectionCheck);
+    this.markRead =
+      dto.markRead === null ? null : new ReadStateDtoModel(dto.markRead);
+    this.markUnread = dto.markUnread;
+    this.model =
+      dto.model === undefined
+        ? undefined
+        : dto.model === null
+          ? null
+          : dto.model;
+    this.moveImportPending =
+      dto.moveImportPending === undefined ? undefined : dto.moveImportPending;
+    this.movedTo =
+      dto.movedTo === undefined
+        ? undefined
+        : dto.movedTo === null
+          ? null
+          : new MovePointerDtoModel(dto.movedTo);
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.operationalStatus = createAgentOperationalStatus(
+      dto.operationalStatus,
+    );
+    this.parentId =
+      dto.parentId === undefined
+        ? undefined
+        : dto.parentId === null
+          ? null
+          : dto.parentId;
+    this.parkedEvent =
+      dto.parkedEvent === undefined
+        ? undefined
+        : dto.parkedEvent === null
+          ? null
+          : dto.parkedEvent;
+    this.pinned =
+      dto.pinned === undefined
+        ? undefined
+        : dto.pinned === null
+          ? null
+          : dto.pinned;
+    this.project =
+      dto.project === undefined
+        ? undefined
+        : dto.project === null
+          ? null
+          : dto.project;
+    this.projectFolder =
+      dto.projectFolder === undefined
+        ? undefined
+        : dto.projectFolder === null
+          ? null
+          : dto.projectFolder;
+    this.projectFolderRevision =
+      dto.projectFolderRevision === undefined
+        ? undefined
+        : dto.projectFolderRevision === null
+          ? null
+          : dto.projectFolderRevision;
+    this.projectId =
+      dto.projectId === undefined
+        ? undefined
+        : dto.projectId === null
+          ? null
+          : dto.projectId;
+    this.projectPath =
+      dto.projectPath === undefined
+        ? undefined
+        : dto.projectPath === null
+          ? null
+          : dto.projectPath;
+    this.projectServerId =
+      dto.projectServerId === null ? null : dto.projectServerId;
+    this.provider =
+      dto.provider === undefined
+        ? undefined
+        : dto.provider === null
+          ? null
+          : dto.provider;
+    this.readState =
+      dto.readState === undefined
+        ? undefined
+        : dto.readState === null
+          ? null
+          : new ReadStateDtoModel(dto.readState);
+    this.readStateSupported =
+      dto.readStateSupported === undefined
+        ? undefined
+        : dto.readStateSupported === null
+          ? null
+          : dto.readStateSupported;
+    this.remoteAnchor =
+      dto.remoteAnchor === undefined
+        ? undefined
+        : dto.remoteAnchor === null
+          ? null
+          : new RemoteParentLinkDtoModel(dto.remoteAnchor);
+    this.remoteOrigin =
+      dto.remoteOrigin === undefined
+        ? undefined
+        : dto.remoteOrigin === null
+          ? null
+          : new RemoteParentLinkDtoModel(dto.remoteOrigin);
+    this.remoteWorker =
+      dto.remoteWorker === undefined
+        ? undefined
+        : dto.remoteWorker === null
+          ? null
+          : new RemoteWorkerLinkDtoModel(dto.remoteWorker);
+    this.role =
+      dto.role === undefined ? undefined : dto.role === null ? null : dto.role;
+    this.rootId =
+      dto.rootId === undefined
+        ? undefined
+        : dto.rootId === null
+          ? null
+          : dto.rootId;
+    this.serverId =
+      dto.serverId === undefined
+        ? undefined
+        : dto.serverId === null
+          ? null
+          : dto.serverId;
+    this.sharedRoomId =
+      dto.sharedRoomId === undefined
+        ? undefined
+        : dto.sharedRoomId === null
+          ? null
+          : dto.sharedRoomId;
+    this.source =
+      dto.source === undefined
+        ? undefined
+        : dto.source === null
+          ? null
+          : dto.source;
+    this.stall =
+      dto.stall === undefined
+        ? undefined
+        : dto.stall === null
+          ? null
+          : new AgentStallModel(dto.stall);
+    this.startWait =
+      dto.startWait === undefined
+        ? undefined
+        : dto.startWait === null
+          ? null
+          : createAgentEntityStartWaitDto(dto.startWait);
+    this.status =
+      dto.status === undefined
+        ? undefined
+        : dto.status === null
+          ? null
+          : dto.status;
+    this.teamCounts = dto.teamCounts === undefined ? undefined : dto.teamCounts;
+    this.threadId =
+      dto.threadId === undefined
+        ? undefined
+        : dto.threadId === null
+          ? null
+          : dto.threadId;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    this.unreadCount =
+      dto.unreadCount === undefined
+        ? undefined
+        : dto.unreadCount === null
+          ? null
+          : dto.unreadCount;
+    this.updated =
+      dto.updated === undefined
+        ? undefined
+        : dto.updated === null
+          ? null
+          : dto.updated;
+    makeObservable(this, {
+      accountChange: observableRef,
+      accountDestinations: observableRef,
+      accountKey: observableRef,
+      accountTransferProgress: observableRef,
+      archived: observableRef,
+      autoWake: observableRef,
+      capacityRetry: observableRef,
+      created: observableRef,
+      cwd: observableRef,
+      empty: observableRef,
+      epoch: observableRef,
+      hasApproval: observableRef,
+      hasBackgroundWork: observableRef,
+      hasQuestion: observableRef,
+      hasUnread: observableRef,
+      id: observableRef,
+      inFlight: observableRef,
+      isLead: observableRef,
+      kind: observableRef,
+      lastCompletedTurn: observableRef,
+      lastCompletedTurnStatus: observableRef,
+      lastReadAt: observableRef,
+      manualConnectionCheck: observableRef,
+      markRead: observableRef,
+      markUnread: observableRef,
+      model: observableRef,
+      moveImportPending: observableRef,
+      movedTo: observableRef,
+      name: observableRef,
+      operationalStatus: observableRef,
+      parentId: observableRef,
+      parkedEvent: observableRef,
+      pinned: observableRef,
+      project: observableRef,
+      projectFolder: observableRef,
+      projectFolderRevision: observableRef,
+      projectId: observableRef,
+      projectPath: observableRef,
+      projectServerId: observableRef,
+      provider: observableRef,
+      readState: observableRef,
+      readStateSupported: observableRef,
+      remoteAnchor: observableRef,
+      remoteOrigin: observableRef,
+      remoteWorker: observableRef,
+      role: observableRef,
+      rootId: observableRef,
+      serverId: observableRef,
+      sharedRoomId: observableRef,
+      source: observableRef,
+      stall: observableRef,
+      startWait: observableRef,
+      status: observableRef,
+      teamCounts: observableRef,
+      threadId: observableRef,
+      turnId: observableRef,
+      unreadCount: observableRef,
+      updated: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentSummaryEntityDtoDto): this {
+    {
+      const next =
+        dto.accountChange === undefined
+          ? undefined
+          : this.accountChange === undefined
+            ? createAccountChange(dto.accountChange)
+            : updateAccountChange(this.accountChange, dto.accountChange);
+      if (this.accountChange !== next) this.accountChange = next;
+    }
+    {
+      const next =
+        dto.accountDestinations === undefined
+          ? undefined
+          : this.accountDestinations === undefined
+            ? dto.accountDestinations.map(
+                (item) => new AccountDestinationModel(item),
+              )
+            : this.accountDestinations.length ===
+                  dto.accountDestinations.length &&
+                this.accountDestinations.every((leftItem0, index) => {
+                  const rightItem0 = dto.accountDestinations[index];
+                  return (
+                    rightItem0 !== undefined &&
+                    leftItem0.accountKey === rightItem0.accountKey &&
+                    ((leftItem0.eligibility.kind === "available" &&
+                      rightItem0.eligibility.kind === "available" &&
+                      leftItem0.eligibility.kind ===
+                        rightItem0.eligibility.kind) ||
+                      (leftItem0.eligibility.kind === "unavailable" &&
+                        rightItem0.eligibility.kind === "unavailable" &&
+                        leftItem0.eligibility.kind ===
+                          rightItem0.eligibility.kind &&
+                        leftItem0.eligibility.reason ===
+                          rightItem0.eligibility.reason))
+                  );
+                })
+              ? this.accountDestinations
+              : dto.accountDestinations.map(
+                  (item) => new AccountDestinationModel(item),
+                );
+      if (this.accountDestinations !== next) this.accountDestinations = next;
+    }
+    {
+      const next =
+        dto.accountKey === undefined
+          ? undefined
+          : this.accountKey === undefined
+            ? dto.accountKey === null
+              ? null
+              : dto.accountKey
+            : dto.accountKey === null
+              ? null
+              : this.accountKey === null
+                ? dto.accountKey
+                : dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next =
+        dto.accountTransferProgress === undefined
+          ? undefined
+          : this.accountTransferProgress === undefined
+            ? createAccountTransferProgress(dto.accountTransferProgress)
+            : updateAccountTransferProgress(
+                this.accountTransferProgress,
+                dto.accountTransferProgress,
+              );
+      if (this.accountTransferProgress !== next)
+        this.accountTransferProgress = next;
+    }
+    {
+      const next =
+        dto.archived === undefined
+          ? undefined
+          : this.archived === undefined
+            ? dto.archived === null
+              ? null
+              : dto.archived
+            : dto.archived === null
+              ? null
+              : this.archived === null
+                ? dto.archived
+                : dto.archived;
+      if (this.archived !== next) this.archived = next;
+    }
+    {
+      const next =
+        dto.autoWake === undefined
+          ? undefined
+          : this.autoWake === undefined
+            ? dto.autoWake === null
+              ? null
+              : dto.autoWake
+            : dto.autoWake === null
+              ? null
+              : this.autoWake === null
+                ? dto.autoWake
+                : dto.autoWake;
+      if (this.autoWake !== next) this.autoWake = next;
+    }
+    {
+      const next =
+        dto.capacityRetry === undefined
+          ? undefined
+          : this.capacityRetry === undefined
+            ? dto.capacityRetry === null
+              ? null
+              : new AgentEntityCapacityRetryDtoModel(dto.capacityRetry)
+            : dto.capacityRetry === null
+              ? null
+              : this.capacityRetry === null
+                ? new AgentEntityCapacityRetryDtoModel(dto.capacityRetry)
+                : this.capacityRetry.apply(dto.capacityRetry);
+      if (this.capacityRetry !== next) this.capacityRetry = next;
+    }
+    {
+      const next =
+        dto.created === undefined
+          ? undefined
+          : this.created === undefined
+            ? dto.created === null
+              ? null
+              : dto.created
+            : dto.created === null
+              ? null
+              : this.created === null
+                ? dto.created
+                : dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.cwd === undefined
+          ? undefined
+          : this.cwd === undefined
+            ? dto.cwd === null
+              ? null
+              : dto.cwd
+            : dto.cwd === null
+              ? null
+              : this.cwd === null
+                ? dto.cwd
+                : dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next =
+        dto.empty === undefined
+          ? undefined
+          : this.empty === undefined
+            ? dto.empty === null
+              ? null
+              : dto.empty
+            : dto.empty === null
+              ? null
+              : this.empty === null
+                ? dto.empty
+                : dto.empty;
+      if (this.empty !== next) this.empty = next;
+    }
+    {
+      const next =
+        dto.epoch === undefined
+          ? undefined
+          : this.epoch === undefined
+            ? dto.epoch === null
+              ? null
+              : dto.epoch
+            : dto.epoch === null
+              ? null
+              : this.epoch === null
+                ? dto.epoch
+                : dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next =
+        dto.hasApproval === undefined
+          ? undefined
+          : this.hasApproval === undefined
+            ? dto.hasApproval === null
+              ? null
+              : dto.hasApproval
+            : dto.hasApproval === null
+              ? null
+              : this.hasApproval === null
+                ? dto.hasApproval
+                : dto.hasApproval;
+      if (this.hasApproval !== next) this.hasApproval = next;
+    }
+    {
+      const next =
+        dto.hasBackgroundWork === undefined
+          ? undefined
+          : this.hasBackgroundWork === undefined
+            ? dto.hasBackgroundWork
+            : dto.hasBackgroundWork;
+      if (this.hasBackgroundWork !== next) this.hasBackgroundWork = next;
+    }
+    {
+      const next =
+        dto.hasQuestion === undefined
+          ? undefined
+          : this.hasQuestion === undefined
+            ? dto.hasQuestion === null
+              ? null
+              : dto.hasQuestion
+            : dto.hasQuestion === null
+              ? null
+              : this.hasQuestion === null
+                ? dto.hasQuestion
+                : dto.hasQuestion;
+      if (this.hasQuestion !== next) this.hasQuestion = next;
+    }
+    {
+      const next =
+        dto.hasUnread === undefined
+          ? undefined
+          : this.hasUnread === undefined
+            ? dto.hasUnread === null
+              ? null
+              : dto.hasUnread
+            : dto.hasUnread === null
+              ? null
+              : this.hasUnread === null
+                ? dto.hasUnread
+                : dto.hasUnread;
+      if (this.hasUnread !== next) this.hasUnread = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.inFlight;
+      if (this.inFlight !== next) this.inFlight = next;
+    }
+    {
+      const next =
+        dto.isLead === undefined
+          ? undefined
+          : this.isLead === undefined
+            ? dto.isLead === null
+              ? null
+              : dto.isLead
+            : dto.isLead === null
+              ? null
+              : this.isLead === null
+                ? dto.isLead
+                : dto.isLead;
+      if (this.isLead !== next) this.isLead = next;
+    }
+    {
+      const next =
+        dto.kind === undefined
+          ? undefined
+          : this.kind === undefined
+            ? dto.kind === null
+              ? null
+              : dto.kind
+            : dto.kind === null
+              ? null
+              : this.kind === null
+                ? dto.kind
+                : dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.lastCompletedTurn === undefined
+          ? undefined
+          : this.lastCompletedTurn === undefined
+            ? dto.lastCompletedTurn === null
+              ? null
+              : dto.lastCompletedTurn
+            : dto.lastCompletedTurn === null
+              ? null
+              : this.lastCompletedTurn === null
+                ? dto.lastCompletedTurn
+                : dto.lastCompletedTurn;
+      if (this.lastCompletedTurn !== next) this.lastCompletedTurn = next;
+    }
+    {
+      const next =
+        dto.lastCompletedTurnStatus === undefined
+          ? undefined
+          : this.lastCompletedTurnStatus === undefined
+            ? dto.lastCompletedTurnStatus === null
+              ? null
+              : dto.lastCompletedTurnStatus
+            : dto.lastCompletedTurnStatus === null
+              ? null
+              : this.lastCompletedTurnStatus === null
+                ? dto.lastCompletedTurnStatus
+                : dto.lastCompletedTurnStatus;
+      if (this.lastCompletedTurnStatus !== next)
+        this.lastCompletedTurnStatus = next;
+    }
+    {
+      const next =
+        dto.lastReadAt === undefined
+          ? undefined
+          : this.lastReadAt === undefined
+            ? dto.lastReadAt === null
+              ? null
+              : dto.lastReadAt
+            : dto.lastReadAt === null
+              ? null
+              : this.lastReadAt === null
+                ? dto.lastReadAt
+                : dto.lastReadAt;
+      if (this.lastReadAt !== next) this.lastReadAt = next;
+    }
+    {
+      const next =
+        dto.manualConnectionCheck === undefined
+          ? undefined
+          : this.manualConnectionCheck === undefined
+            ? new ManualConnectionCheckModel(dto.manualConnectionCheck)
+            : this.manualConnectionCheck.apply(dto.manualConnectionCheck);
+      if (this.manualConnectionCheck !== next)
+        this.manualConnectionCheck = next;
+    }
+    {
+      const next =
+        dto.markRead === null
+          ? null
+          : this.markRead === null
+            ? new ReadStateDtoModel(dto.markRead)
+            : this.markRead.apply(dto.markRead);
+      if (this.markRead !== next) this.markRead = next;
+    }
+    {
+      const next = dto.markUnread;
+      if (this.markUnread !== next) this.markUnread = next;
+    }
+    {
+      const next =
+        dto.model === undefined
+          ? undefined
+          : this.model === undefined
+            ? dto.model === null
+              ? null
+              : dto.model
+            : dto.model === null
+              ? null
+              : this.model === null
+                ? dto.model
+                : dto.model;
+      if (this.model !== next) this.model = next;
+    }
+    {
+      const next =
+        dto.moveImportPending === undefined
+          ? undefined
+          : this.moveImportPending === undefined
+            ? dto.moveImportPending
+            : dto.moveImportPending;
+      if (this.moveImportPending !== next) this.moveImportPending = next;
+    }
+    {
+      const next =
+        dto.movedTo === undefined
+          ? undefined
+          : this.movedTo === undefined
+            ? dto.movedTo === null
+              ? null
+              : new MovePointerDtoModel(dto.movedTo)
+            : dto.movedTo === null
+              ? null
+              : this.movedTo === null
+                ? new MovePointerDtoModel(dto.movedTo)
+                : this.movedTo.apply(dto.movedTo);
+      if (this.movedTo !== next) this.movedTo = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next = updateAgentOperationalStatus(
+        this.operationalStatus,
+        dto.operationalStatus,
+      );
+      if (this.operationalStatus !== next) this.operationalStatus = next;
+    }
+    {
+      const next =
+        dto.parentId === undefined
+          ? undefined
+          : this.parentId === undefined
+            ? dto.parentId === null
+              ? null
+              : dto.parentId
+            : dto.parentId === null
+              ? null
+              : this.parentId === null
+                ? dto.parentId
+                : dto.parentId;
+      if (this.parentId !== next) this.parentId = next;
+    }
+    {
+      const next =
+        dto.parkedEvent === undefined
+          ? undefined
+          : this.parkedEvent === undefined
+            ? dto.parkedEvent === null
+              ? null
+              : dto.parkedEvent
+            : dto.parkedEvent === null
+              ? null
+              : this.parkedEvent === null
+                ? dto.parkedEvent
+                : dto.parkedEvent;
+      if (this.parkedEvent !== next) this.parkedEvent = next;
+    }
+    {
+      const next =
+        dto.pinned === undefined
+          ? undefined
+          : this.pinned === undefined
+            ? dto.pinned === null
+              ? null
+              : dto.pinned
+            : dto.pinned === null
+              ? null
+              : this.pinned === null
+                ? dto.pinned
+                : dto.pinned;
+      if (this.pinned !== next) this.pinned = next;
+    }
+    {
+      const next =
+        dto.project === undefined
+          ? undefined
+          : this.project === undefined
+            ? dto.project === null
+              ? null
+              : dto.project
+            : dto.project === null
+              ? null
+              : this.project === null
+                ? dto.project
+                : dto.project;
+      if (this.project !== next) this.project = next;
+    }
+    {
+      const next =
+        dto.projectFolder === undefined
+          ? undefined
+          : this.projectFolder === undefined
+            ? dto.projectFolder === null
+              ? null
+              : dto.projectFolder
+            : dto.projectFolder === null
+              ? null
+              : this.projectFolder === null
+                ? dto.projectFolder
+                : dto.projectFolder;
+      if (this.projectFolder !== next) this.projectFolder = next;
+    }
+    {
+      const next =
+        dto.projectFolderRevision === undefined
+          ? undefined
+          : this.projectFolderRevision === undefined
+            ? dto.projectFolderRevision === null
+              ? null
+              : dto.projectFolderRevision
+            : dto.projectFolderRevision === null
+              ? null
+              : this.projectFolderRevision === null
+                ? dto.projectFolderRevision
+                : dto.projectFolderRevision;
+      if (this.projectFolderRevision !== next)
+        this.projectFolderRevision = next;
+    }
+    {
+      const next =
+        dto.projectId === undefined
+          ? undefined
+          : this.projectId === undefined
+            ? dto.projectId === null
+              ? null
+              : dto.projectId
+            : dto.projectId === null
+              ? null
+              : this.projectId === null
+                ? dto.projectId
+                : dto.projectId;
+      if (this.projectId !== next) this.projectId = next;
+    }
+    {
+      const next =
+        dto.projectPath === undefined
+          ? undefined
+          : this.projectPath === undefined
+            ? dto.projectPath === null
+              ? null
+              : dto.projectPath
+            : dto.projectPath === null
+              ? null
+              : this.projectPath === null
+                ? dto.projectPath
+                : dto.projectPath;
+      if (this.projectPath !== next) this.projectPath = next;
+    }
+    {
+      const next =
+        dto.projectServerId === null
+          ? null
+          : this.projectServerId === null
+            ? dto.projectServerId
+            : dto.projectServerId;
+      if (this.projectServerId !== next) this.projectServerId = next;
+    }
+    {
+      const next =
+        dto.provider === undefined
+          ? undefined
+          : this.provider === undefined
+            ? dto.provider === null
+              ? null
+              : dto.provider
+            : dto.provider === null
+              ? null
+              : this.provider === null
+                ? dto.provider
+                : dto.provider;
+      if (this.provider !== next) this.provider = next;
+    }
+    {
+      const next =
+        dto.readState === undefined
+          ? undefined
+          : this.readState === undefined
+            ? dto.readState === null
+              ? null
+              : new ReadStateDtoModel(dto.readState)
+            : dto.readState === null
+              ? null
+              : this.readState === null
+                ? new ReadStateDtoModel(dto.readState)
+                : this.readState.apply(dto.readState);
+      if (this.readState !== next) this.readState = next;
+    }
+    {
+      const next =
+        dto.readStateSupported === undefined
+          ? undefined
+          : this.readStateSupported === undefined
+            ? dto.readStateSupported === null
+              ? null
+              : dto.readStateSupported
+            : dto.readStateSupported === null
+              ? null
+              : this.readStateSupported === null
+                ? dto.readStateSupported
+                : dto.readStateSupported;
+      if (this.readStateSupported !== next) this.readStateSupported = next;
+    }
+    {
+      const next =
+        dto.remoteAnchor === undefined
+          ? undefined
+          : this.remoteAnchor === undefined
+            ? dto.remoteAnchor === null
+              ? null
+              : new RemoteParentLinkDtoModel(dto.remoteAnchor)
+            : dto.remoteAnchor === null
+              ? null
+              : this.remoteAnchor === null
+                ? new RemoteParentLinkDtoModel(dto.remoteAnchor)
+                : this.remoteAnchor.apply(dto.remoteAnchor);
+      if (this.remoteAnchor !== next) this.remoteAnchor = next;
+    }
+    {
+      const next =
+        dto.remoteOrigin === undefined
+          ? undefined
+          : this.remoteOrigin === undefined
+            ? dto.remoteOrigin === null
+              ? null
+              : new RemoteParentLinkDtoModel(dto.remoteOrigin)
+            : dto.remoteOrigin === null
+              ? null
+              : this.remoteOrigin === null
+                ? new RemoteParentLinkDtoModel(dto.remoteOrigin)
+                : this.remoteOrigin.apply(dto.remoteOrigin);
+      if (this.remoteOrigin !== next) this.remoteOrigin = next;
+    }
+    {
+      const next =
+        dto.remoteWorker === undefined
+          ? undefined
+          : this.remoteWorker === undefined
+            ? dto.remoteWorker === null
+              ? null
+              : new RemoteWorkerLinkDtoModel(dto.remoteWorker)
+            : dto.remoteWorker === null
+              ? null
+              : this.remoteWorker === null
+                ? new RemoteWorkerLinkDtoModel(dto.remoteWorker)
+                : this.remoteWorker.apply(dto.remoteWorker);
+      if (this.remoteWorker !== next) this.remoteWorker = next;
+    }
+    {
+      const next =
+        dto.role === undefined
+          ? undefined
+          : this.role === undefined
+            ? dto.role === null
+              ? null
+              : dto.role
+            : dto.role === null
+              ? null
+              : this.role === null
+                ? dto.role
+                : dto.role;
+      if (this.role !== next) this.role = next;
+    }
+    {
+      const next =
+        dto.rootId === undefined
+          ? undefined
+          : this.rootId === undefined
+            ? dto.rootId === null
+              ? null
+              : dto.rootId
+            : dto.rootId === null
+              ? null
+              : this.rootId === null
+                ? dto.rootId
+                : dto.rootId;
+      if (this.rootId !== next) this.rootId = next;
+    }
+    {
+      const next =
+        dto.serverId === undefined
+          ? undefined
+          : this.serverId === undefined
+            ? dto.serverId === null
+              ? null
+              : dto.serverId
+            : dto.serverId === null
+              ? null
+              : this.serverId === null
+                ? dto.serverId
+                : dto.serverId;
+      if (this.serverId !== next) this.serverId = next;
+    }
+    {
+      const next =
+        dto.sharedRoomId === undefined
+          ? undefined
+          : this.sharedRoomId === undefined
+            ? dto.sharedRoomId === null
+              ? null
+              : dto.sharedRoomId
+            : dto.sharedRoomId === null
+              ? null
+              : this.sharedRoomId === null
+                ? dto.sharedRoomId
+                : dto.sharedRoomId;
+      if (this.sharedRoomId !== next) this.sharedRoomId = next;
+    }
+    {
+      const next =
+        dto.source === undefined
+          ? undefined
+          : this.source === undefined
+            ? dto.source === null
+              ? null
+              : dto.source
+            : dto.source === null
+              ? null
+              : this.source === null
+                ? dto.source
+                : dto.source;
+      if (this.source !== next) this.source = next;
+    }
+    {
+      const next =
+        dto.stall === undefined
+          ? undefined
+          : this.stall === undefined
+            ? dto.stall === null
+              ? null
+              : new AgentStallModel(dto.stall)
+            : dto.stall === null
+              ? null
+              : this.stall === null
+                ? new AgentStallModel(dto.stall)
+                : this.stall.apply(dto.stall);
+      if (this.stall !== next) this.stall = next;
+    }
+    {
+      const next =
+        dto.startWait === undefined
+          ? undefined
+          : this.startWait === undefined
+            ? dto.startWait === null
+              ? null
+              : createAgentEntityStartWaitDto(dto.startWait)
+            : dto.startWait === null
+              ? null
+              : this.startWait === null
+                ? createAgentEntityStartWaitDto(dto.startWait)
+                : updateAgentEntityStartWaitDto(this.startWait, dto.startWait);
+      if (this.startWait !== next) this.startWait = next;
+    }
+    {
+      const next =
+        dto.status === undefined
+          ? undefined
+          : this.status === undefined
+            ? dto.status === null
+              ? null
+              : dto.status
+            : dto.status === null
+              ? null
+              : this.status === null
+                ? dto.status
+                : dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.teamCounts === undefined
+          ? undefined
+          : this.teamCounts === undefined
+            ? dto.teamCounts
+            : dto.teamCounts;
+      if (this.teamCounts !== next) this.teamCounts = next;
+    }
+    {
+      const next =
+        dto.threadId === undefined
+          ? undefined
+          : this.threadId === undefined
+            ? dto.threadId === null
+              ? null
+              : dto.threadId
+            : dto.threadId === null
+              ? null
+              : this.threadId === null
+                ? dto.threadId
+                : dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    {
+      const next =
+        dto.unreadCount === undefined
+          ? undefined
+          : this.unreadCount === undefined
+            ? dto.unreadCount === null
+              ? null
+              : dto.unreadCount
+            : dto.unreadCount === null
+              ? null
+              : this.unreadCount === null
+                ? dto.unreadCount
+                : dto.unreadCount;
+      if (this.unreadCount !== next) this.unreadCount = next;
+    }
+    {
+      const next =
+        dto.updated === undefined
+          ? undefined
+          : this.updated === undefined
+            ? dto.updated === null
+              ? null
+              : dto.updated
+            : dto.updated === null
+              ? null
+              : this.updated === null
+                ? dto.updated
+                : dto.updated;
+      if (this.updated !== next) this.updated = next;
+    }
+    return this;
+  }
+}
+function reconcileAgentSummaryEntityDto(
+  data: AgentSummaryEntityDtoModel[],
+  dto: readonly AgentSummaryEntityDtoDto[],
+): AgentSummaryEntityDtoModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in AgentSummaryEntityDto");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: AgentSummaryEntityDtoModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new AgentSummaryEntityDtoModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type AgentTailDto = DeepReadonly<components["schemas"]["AgentTail"]>;
+class AgentTailModel {
+  id: AgentTailDto["id"];
+  tail: AgentTailDto["tail"];
+  constructor(dto: AgentTailDto) {
+    this.id = dto.id;
+    this.tail = dto.tail;
+    makeObservable(this, {
+      id: observableRef,
+      tail: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentTailDto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    return this;
+  }
+}
+function reconcileAgentTail(
+  data: AgentTailModel[],
+  dto: readonly AgentTailDto[],
+): AgentTailModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id)) throw new Error("Duplicate identity in AgentTail");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: AgentTailModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined ? new AgentTailModel(item) : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type AgentWaitReasonsDto = DeepReadonly<
+  components["schemas"]["AgentWaitReasons"]
+>;
+class AgentWaitReasonsModel {
+  agents: AgentWaitReasonsDto["agents"];
+  commands: AgentWaitReasonsDto["commands"];
+  event: NonNullable<AgentWaitReasonsDto["event"]> | null;
+  inputs: AgentWaitReasonsDto["inputs"];
+  monitors: AgentWaitReasonsDto["monitors"];
+  constructor(dto: AgentWaitReasonsDto) {
+    this.agents = dto.agents;
+    this.commands = dto.commands;
+    this.event = dto.event === null ? null : dto.event;
+    this.inputs = dto.inputs;
+    this.monitors = dto.monitors;
+    makeObservable(this, {
+      agents: observableRef,
+      commands: observableRef,
+      event: observableRef,
+      inputs: observableRef,
+      monitors: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AgentWaitReasonsDto): this {
+    {
+      const next = dto.agents;
+      if (this.agents !== next) this.agents = next;
+    }
+    {
+      const next = dto.commands;
+      if (this.commands !== next) this.commands = next;
+    }
+    {
+      const next =
+        dto.event === null ? null : this.event === null ? dto.event : dto.event;
+      if (this.event !== next) this.event = next;
+    }
+    {
+      const next = dto.inputs;
+      if (this.inputs !== next) this.inputs = next;
+    }
+    {
+      const next = dto.monitors;
+      if (this.monitors !== next) this.monitors = next;
+    }
+    return this;
+  }
+}
+type ConnectionCheckDtoDto = DeepReadonly<
+  components["schemas"]["ConnectionCheckDto"]
+>;
+class ConnectionCheckDtoModel {
+  accountKey:
+    | NonNullable<ConnectionCheckDtoDto["accountKey"]>
+    | null
+    | undefined;
+  at: ConnectionCheckDtoDto["at"];
+  epoch: NonNullable<ConnectionCheckDtoDto["epoch"]> | null | undefined;
+  nativeState:
+    | NonNullable<ConnectionCheckDtoDto["nativeState"]>
+    | null
+    | undefined;
+  previousError:
+    | NonNullable<ConnectionCheckDtoDto["previousError"]>
+    | null
+    | undefined;
+  readError: NonNullable<ConnectionCheckDtoDto["readError"]> | null | undefined;
+  restartTurnStatus:
+    | NonNullable<ConnectionCheckDtoDto["restartTurnStatus"]>
+    | null
+    | undefined;
+  threadId: NonNullable<ConnectionCheckDtoDto["threadId"]> | null | undefined;
+  turnId: NonNullable<ConnectionCheckDtoDto["turnId"]> | null | undefined;
+  constructor(dto: ConnectionCheckDtoDto) {
+    this.accountKey =
+      dto.accountKey === undefined
+        ? undefined
+        : dto.accountKey === null
+          ? null
+          : dto.accountKey;
+    this.at = dto.at;
+    this.epoch =
+      dto.epoch === undefined
+        ? undefined
+        : dto.epoch === null
+          ? null
+          : dto.epoch;
+    this.nativeState =
+      dto.nativeState === undefined
+        ? undefined
+        : dto.nativeState === null
+          ? null
+          : dto.nativeState;
+    this.previousError =
+      dto.previousError === undefined
+        ? undefined
+        : dto.previousError === null
+          ? null
+          : dto.previousError;
+    this.readError =
+      dto.readError === undefined
+        ? undefined
+        : dto.readError === null
+          ? null
+          : dto.readError;
+    this.restartTurnStatus =
+      dto.restartTurnStatus === undefined
+        ? undefined
+        : dto.restartTurnStatus === null
+          ? null
+          : dto.restartTurnStatus;
+    this.threadId =
+      dto.threadId === undefined
+        ? undefined
+        : dto.threadId === null
+          ? null
+          : dto.threadId;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    makeObservable(this, {
+      accountKey: observableRef,
+      at: observableRef,
+      epoch: observableRef,
+      nativeState: observableRef,
+      previousError: observableRef,
+      readError: observableRef,
+      restartTurnStatus: observableRef,
+      threadId: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ConnectionCheckDtoDto): this {
+    {
+      const next =
+        dto.accountKey === undefined
+          ? undefined
+          : this.accountKey === undefined
+            ? dto.accountKey === null
+              ? null
+              : dto.accountKey
+            : dto.accountKey === null
+              ? null
+              : this.accountKey === null
+                ? dto.accountKey
+                : dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next =
+        dto.epoch === undefined
+          ? undefined
+          : this.epoch === undefined
+            ? dto.epoch === null
+              ? null
+              : dto.epoch
+            : dto.epoch === null
+              ? null
+              : this.epoch === null
+                ? dto.epoch
+                : dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next =
+        dto.nativeState === undefined
+          ? undefined
+          : this.nativeState === undefined
+            ? dto.nativeState === null
+              ? null
+              : dto.nativeState
+            : dto.nativeState === null
+              ? null
+              : this.nativeState === null
+                ? dto.nativeState
+                : dto.nativeState;
+      if (this.nativeState !== next) this.nativeState = next;
+    }
+    {
+      const next =
+        dto.previousError === undefined
+          ? undefined
+          : this.previousError === undefined
+            ? dto.previousError === null
+              ? null
+              : dto.previousError
+            : dto.previousError === null
+              ? null
+              : this.previousError === null
+                ? dto.previousError
+                : dto.previousError;
+      if (this.previousError !== next) this.previousError = next;
+    }
+    {
+      const next =
+        dto.readError === undefined
+          ? undefined
+          : this.readError === undefined
+            ? dto.readError === null
+              ? null
+              : dto.readError
+            : dto.readError === null
+              ? null
+              : this.readError === null
+                ? dto.readError
+                : dto.readError;
+      if (this.readError !== next) this.readError = next;
+    }
+    {
+      const next =
+        dto.restartTurnStatus === undefined
+          ? undefined
+          : this.restartTurnStatus === undefined
+            ? dto.restartTurnStatus === null
+              ? null
+              : dto.restartTurnStatus
+            : dto.restartTurnStatus === null
+              ? null
+              : this.restartTurnStatus === null
+                ? dto.restartTurnStatus
+                : dto.restartTurnStatus;
+      if (this.restartTurnStatus !== next) this.restartTurnStatus = next;
+    }
+    {
+      const next =
+        dto.threadId === undefined
+          ? undefined
+          : this.threadId === undefined
+            ? dto.threadId === null
+              ? null
+              : dto.threadId
+            : dto.threadId === null
+              ? null
+              : this.threadId === null
+                ? dto.threadId
+                : dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    return this;
+  }
+}
+type ManualConnectionCheckDto = DeepReadonly<
+  components["schemas"]["ManualConnectionCheck"]
+>;
+class ManualConnectionCheckModel {
+  available: ManualConnectionCheckDto["available"];
+  receipt: ConnectionCheckDtoModel | null;
+  constructor(dto: ManualConnectionCheckDto) {
+    this.available = dto.available;
+    this.receipt =
+      dto.receipt === null ? null : new ConnectionCheckDtoModel(dto.receipt);
+    makeObservable(this, {
+      available: observableRef,
+      receipt: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ManualConnectionCheckDto): this {
+    {
+      const next = dto.available;
+      if (this.available !== next) this.available = next;
+    }
+    {
+      const next =
+        dto.receipt === null
+          ? null
+          : this.receipt === null
+            ? new ConnectionCheckDtoModel(dto.receipt)
+            : this.receipt.apply(dto.receipt);
+      if (this.receipt !== next) this.receipt = next;
+    }
+    return this;
+  }
+}
+type MovePointerDtoDto = DeepReadonly<components["schemas"]["MovePointerDto"]>;
+class MovePointerDtoModel {
+  agentId: NonNullable<MovePointerDtoDto["agentId"]> | null | undefined;
+  move: MovePointerDtoDto["move"];
+  server: MovePointerDtoDto["server"];
+  constructor(dto: MovePointerDtoDto) {
+    this.agentId =
+      dto.agentId === undefined
+        ? undefined
+        : dto.agentId === null
+          ? null
+          : dto.agentId;
+    this.move = dto.move;
+    this.server = dto.server;
+    makeObservable(this, {
+      agentId: observableRef,
+      move: observableRef,
+      server: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: MovePointerDtoDto): this {
+    {
+      const next =
+        dto.agentId === undefined
+          ? undefined
+          : this.agentId === undefined
+            ? dto.agentId === null
+              ? null
+              : dto.agentId
+            : dto.agentId === null
+              ? null
+              : this.agentId === null
+                ? dto.agentId
+                : dto.agentId;
+      if (this.agentId !== next) this.agentId = next;
+    }
+    {
+      const next = dto.move;
+      if (this.move !== next) this.move = next;
+    }
+    {
+      const next = dto.server;
+      if (this.server !== next) this.server = next;
+    }
+    return this;
+  }
+}
+type PeerTeamEntityDtoDto = DeepReadonly<
+  components["schemas"]["PeerTeamEntityDto"]
+>;
+class PeerTeamEntityDtoModel {
+  id: PeerTeamEntityDtoDto["id"];
+  members:
+    | NonNullable<NonNullable<PeerTeamEntityDtoDto["members"]>>[number][]
+    | null
+    | undefined;
+  name: NonNullable<PeerTeamEntityDtoDto["name"]> | null | undefined;
+  peerLeads: PeerTeamEntityDto_peerLeadsItemModel[] | undefined;
+  projectPath:
+    | NonNullable<PeerTeamEntityDtoDto["projectPath"]>
+    | null
+    | undefined;
+  revision: NonNullable<PeerTeamEntityDtoDto["revision"]> | null | undefined;
+  constructor(dto: PeerTeamEntityDtoDto) {
+    this.id = dto.id;
+    this.members =
+      dto.members === undefined
+        ? undefined
+        : dto.members === null
+          ? null
+          : dto.members.map((item) => item);
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.peerLeads =
+      dto.peerLeads === undefined
+        ? undefined
+        : dto.peerLeads.map(
+            (item) => new PeerTeamEntityDto_peerLeadsItemModel(item),
+          );
+    this.projectPath =
+      dto.projectPath === undefined
+        ? undefined
+        : dto.projectPath === null
+          ? null
+          : dto.projectPath;
+    this.revision =
+      dto.revision === undefined
+        ? undefined
+        : dto.revision === null
+          ? null
+          : dto.revision;
+    makeObservable(this, {
+      id: observableRef,
+      members: observableRef,
+      name: observableRef,
+      peerLeads: observableRef,
+      projectPath: observableRef,
+      revision: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PeerTeamEntityDtoDto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.members === undefined
+          ? undefined
+          : this.members === undefined
+            ? dto.members === null
+              ? null
+              : dto.members.map((item) => item)
+            : dto.members === null
+              ? null
+              : this.members === null
+                ? dto.members.map((item) => item)
+                : this.members.length === dto.members.length &&
+                    this.members.every((leftItem0, index) => {
+                      const rightItem0 = dto.members[index];
+                      return (
+                        rightItem0 !== undefined && leftItem0 === rightItem0
+                      );
+                    })
+                  ? this.members
+                  : dto.members.map((item) => item);
+      if (this.members !== next) this.members = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.peerLeads === undefined
+          ? undefined
+          : this.peerLeads === undefined
+            ? dto.peerLeads.map(
+                (item) => new PeerTeamEntityDto_peerLeadsItemModel(item),
+              )
+            : this.peerLeads.length === dto.peerLeads.length &&
+                this.peerLeads.every((leftItem0, index) => {
+                  const rightItem0 = dto.peerLeads[index];
+                  return (
+                    rightItem0 !== undefined &&
+                    leftItem0.grant === rightItem0.grant &&
+                    leftItem0.label === rightItem0.label &&
+                    leftItem0.remoteProject === rightItem0.remoteProject &&
+                    leftItem0.server === rightItem0.server
+                  );
+                })
+              ? this.peerLeads
+              : dto.peerLeads.map(
+                  (item) => new PeerTeamEntityDto_peerLeadsItemModel(item),
+                );
+      if (this.peerLeads !== next) this.peerLeads = next;
+    }
+    {
+      const next =
+        dto.projectPath === undefined
+          ? undefined
+          : this.projectPath === undefined
+            ? dto.projectPath === null
+              ? null
+              : dto.projectPath
+            : dto.projectPath === null
+              ? null
+              : this.projectPath === null
+                ? dto.projectPath
+                : dto.projectPath;
+      if (this.projectPath !== next) this.projectPath = next;
+    }
+    {
+      const next =
+        dto.revision === undefined
+          ? undefined
+          : this.revision === undefined
+            ? dto.revision === null
+              ? null
+              : dto.revision
+            : dto.revision === null
+              ? null
+              : this.revision === null
+                ? dto.revision
+                : dto.revision;
+      if (this.revision !== next) this.revision = next;
+    }
+    return this;
+  }
+}
+function reconcilePeerTeamEntityDto(
+  data: PeerTeamEntityDtoModel[],
+  dto: readonly PeerTeamEntityDtoDto[],
+): PeerTeamEntityDtoModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in PeerTeamEntityDto");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: PeerTeamEntityDtoModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new PeerTeamEntityDtoModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type PeerTeamEntityDto_peerLeadsItemDto = NonNullable<
+  PeerTeamEntityDtoDto["peerLeads"]
+>[number];
+class PeerTeamEntityDto_peerLeadsItemModel {
+  grant: PeerTeamEntityDto_peerLeadsItemDto["grant"];
+  label: PeerTeamEntityDto_peerLeadsItemDto["label"];
+  remoteProject: PeerTeamEntityDto_peerLeadsItemDto["remoteProject"];
+  server: PeerTeamEntityDto_peerLeadsItemDto["server"];
+  constructor(dto: PeerTeamEntityDto_peerLeadsItemDto) {
+    this.grant = dto.grant;
+    this.label = dto.label;
+    this.remoteProject = dto.remoteProject;
+    this.server = dto.server;
+    makeObservable(this, {
+      grant: observableRef,
+      label: observableRef,
+      remoteProject: observableRef,
+      server: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PeerTeamEntityDto_peerLeadsItemDto): this {
+    {
+      const next = dto.grant;
+      if (this.grant !== next) this.grant = next;
+    }
+    {
+      const next = dto.label;
+      if (this.label !== next) this.label = next;
+    }
+    {
+      const next = dto.remoteProject;
+      if (this.remoteProject !== next) this.remoteProject = next;
+    }
+    {
+      const next = dto.server;
+      if (this.server !== next) this.server = next;
+    }
+    return this;
+  }
+}
+type ProjectAliasDtoDto = DeepReadonly<
+  components["schemas"]["ProjectAliasDto"]
+>;
+class ProjectAliasDtoModel {
+  name: ProjectAliasDtoDto["name"];
+  projectId: ProjectAliasDtoDto["projectId"];
+  serverId: ProjectAliasDtoDto["serverId"];
+  constructor(dto: ProjectAliasDtoDto) {
+    this.name = dto.name;
+    this.projectId = dto.projectId;
+    this.serverId = dto.serverId;
+    makeObservable(this, {
+      name: observableRef,
+      projectId: observableRef,
+      serverId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProjectAliasDtoDto): this {
+    {
+      const next = dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next = dto.projectId;
+      if (this.projectId !== next) this.projectId = next;
+    }
+    {
+      const next = dto.serverId;
+      if (this.serverId !== next) this.serverId = next;
+    }
+    return this;
+  }
+}
+type ProjectEntityDtoDto = DeepReadonly<
+  components["schemas"]["ProjectEntityDto"]
+>;
+class ProjectEntityDtoModel {
+  accountGroups:
+    | NonNullable<NonNullable<ProjectEntityDtoDto["accountGroups"]>>[number][]
+    | null
+    | undefined;
+  accountGroupsRevision:
+    | NonNullable<ProjectEntityDtoDto["accountGroupsRevision"]>
+    | null
+    | undefined;
+  accountKey: NonNullable<ProjectEntityDtoDto["accountKey"]> | null | undefined;
+  accountKeys:
+    | NonNullable<NonNullable<ProjectEntityDtoDto["accountKeys"]>>[number][]
+    | null
+    | undefined;
+  accountRevision:
+    | NonNullable<ProjectEntityDtoDto["accountRevision"]>
+    | null
+    | undefined;
+  created: NonNullable<ProjectEntityDtoDto["created"]> | null | undefined;
+  folders: ProjectEntityDtoDto["folders"] | undefined;
+  homeServerId:
+    | NonNullable<ProjectEntityDtoDto["homeServerId"]>
+    | null
+    | undefined;
+  id: ProjectEntityDtoDto["id"];
+  locations: ProjectLocationDtoModel[] | null | undefined;
+  locationsRevision:
+    | NonNullable<ProjectEntityDtoDto["locationsRevision"]>
+    | null
+    | undefined;
+  name: NonNullable<ProjectEntityDtoDto["name"]> | null | undefined;
+  organizationRevision:
+    | NonNullable<ProjectEntityDtoDto["organizationRevision"]>
+    | null
+    | undefined;
+  path: NonNullable<ProjectEntityDtoDto["path"]> | null | undefined;
+  peerTeams: ProjectPeerTeamDtoModel[] | null | undefined;
+  peerTeamsRevision:
+    | NonNullable<ProjectEntityDtoDto["peerTeamsRevision"]>
+    | null
+    | undefined;
+  projectAliases: ProjectAliasDtoModel[] | null | undefined;
+  serverLabel:
+    | NonNullable<ProjectEntityDtoDto["serverLabel"]>
+    | null
+    | undefined;
+  updated: NonNullable<ProjectEntityDtoDto["updated"]> | null | undefined;
+  workerBaseRef:
+    | NonNullable<ProjectEntityDtoDto["workerBaseRef"]>
+    | null
+    | undefined;
+  workerBaseRevision:
+    | NonNullable<ProjectEntityDtoDto["workerBaseRevision"]>
+    | null
+    | undefined;
+  workerEnvironment:
+    | NonNullable<ProjectEntityDtoDto["workerEnvironment"]>
+    | null
+    | undefined;
+  workerEnvironmentRevision:
+    | NonNullable<ProjectEntityDtoDto["workerEnvironmentRevision"]>
+    | null
+    | undefined;
+  constructor(dto: ProjectEntityDtoDto) {
+    this.accountGroups =
+      dto.accountGroups === undefined
+        ? undefined
+        : dto.accountGroups === null
+          ? null
+          : dto.accountGroups.map((item) => item);
+    this.accountGroupsRevision =
+      dto.accountGroupsRevision === undefined
+        ? undefined
+        : dto.accountGroupsRevision === null
+          ? null
+          : dto.accountGroupsRevision;
+    this.accountKey =
+      dto.accountKey === undefined
+        ? undefined
+        : dto.accountKey === null
+          ? null
+          : dto.accountKey;
+    this.accountKeys =
+      dto.accountKeys === undefined
+        ? undefined
+        : dto.accountKeys === null
+          ? null
+          : dto.accountKeys.map((item) => item);
+    this.accountRevision =
+      dto.accountRevision === undefined
+        ? undefined
+        : dto.accountRevision === null
+          ? null
+          : dto.accountRevision;
+    this.created =
+      dto.created === undefined
+        ? undefined
+        : dto.created === null
+          ? null
+          : dto.created;
+    this.folders = dto.folders === undefined ? undefined : dto.folders;
+    this.homeServerId =
+      dto.homeServerId === undefined
+        ? undefined
+        : dto.homeServerId === null
+          ? null
+          : dto.homeServerId;
+    this.id = dto.id;
+    this.locations =
+      dto.locations === undefined
+        ? undefined
+        : dto.locations === null
+          ? null
+          : dto.locations.map((item) => new ProjectLocationDtoModel(item));
+    this.locationsRevision =
+      dto.locationsRevision === undefined
+        ? undefined
+        : dto.locationsRevision === null
+          ? null
+          : dto.locationsRevision;
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.organizationRevision =
+      dto.organizationRevision === undefined
+        ? undefined
+        : dto.organizationRevision === null
+          ? null
+          : dto.organizationRevision;
+    this.path =
+      dto.path === undefined ? undefined : dto.path === null ? null : dto.path;
+    this.peerTeams =
+      dto.peerTeams === undefined
+        ? undefined
+        : dto.peerTeams === null
+          ? null
+          : dto.peerTeams.map((item) => new ProjectPeerTeamDtoModel(item));
+    this.peerTeamsRevision =
+      dto.peerTeamsRevision === undefined
+        ? undefined
+        : dto.peerTeamsRevision === null
+          ? null
+          : dto.peerTeamsRevision;
+    this.projectAliases =
+      dto.projectAliases === undefined
+        ? undefined
+        : dto.projectAliases === null
+          ? null
+          : dto.projectAliases.map((item) => new ProjectAliasDtoModel(item));
+    this.serverLabel =
+      dto.serverLabel === undefined
+        ? undefined
+        : dto.serverLabel === null
+          ? null
+          : dto.serverLabel;
+    this.updated =
+      dto.updated === undefined
+        ? undefined
+        : dto.updated === null
+          ? null
+          : dto.updated;
+    this.workerBaseRef =
+      dto.workerBaseRef === undefined
+        ? undefined
+        : dto.workerBaseRef === null
+          ? null
+          : dto.workerBaseRef;
+    this.workerBaseRevision =
+      dto.workerBaseRevision === undefined
+        ? undefined
+        : dto.workerBaseRevision === null
+          ? null
+          : dto.workerBaseRevision;
+    this.workerEnvironment =
+      dto.workerEnvironment === undefined
+        ? undefined
+        : dto.workerEnvironment === null
+          ? null
+          : dto.workerEnvironment;
+    this.workerEnvironmentRevision =
+      dto.workerEnvironmentRevision === undefined
+        ? undefined
+        : dto.workerEnvironmentRevision === null
+          ? null
+          : dto.workerEnvironmentRevision;
+    makeObservable(this, {
+      accountGroups: observableRef,
+      accountGroupsRevision: observableRef,
+      accountKey: observableRef,
+      accountKeys: observableRef,
+      accountRevision: observableRef,
+      created: observableRef,
+      folders: observableRef,
+      homeServerId: observableRef,
+      id: observableRef,
+      locations: observableRef,
+      locationsRevision: observableRef,
+      name: observableRef,
+      organizationRevision: observableRef,
+      path: observableRef,
+      peerTeams: observableRef,
+      peerTeamsRevision: observableRef,
+      projectAliases: observableRef,
+      serverLabel: observableRef,
+      updated: observableRef,
+      workerBaseRef: observableRef,
+      workerBaseRevision: observableRef,
+      workerEnvironment: observableRef,
+      workerEnvironmentRevision: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProjectEntityDtoDto): this {
+    {
+      const next =
+        dto.accountGroups === undefined
+          ? undefined
+          : this.accountGroups === undefined
+            ? dto.accountGroups === null
+              ? null
+              : dto.accountGroups.map((item) => item)
+            : dto.accountGroups === null
+              ? null
+              : this.accountGroups === null
+                ? dto.accountGroups.map((item) => item)
+                : this.accountGroups.length === dto.accountGroups.length &&
+                    this.accountGroups.every((leftItem0, index) => {
+                      const rightItem0 = dto.accountGroups[index];
+                      return (
+                        rightItem0 !== undefined && leftItem0 === rightItem0
+                      );
+                    })
+                  ? this.accountGroups
+                  : dto.accountGroups.map((item) => item);
+      if (this.accountGroups !== next) this.accountGroups = next;
+    }
+    {
+      const next =
+        dto.accountGroupsRevision === undefined
+          ? undefined
+          : this.accountGroupsRevision === undefined
+            ? dto.accountGroupsRevision === null
+              ? null
+              : dto.accountGroupsRevision
+            : dto.accountGroupsRevision === null
+              ? null
+              : this.accountGroupsRevision === null
+                ? dto.accountGroupsRevision
+                : dto.accountGroupsRevision;
+      if (this.accountGroupsRevision !== next)
+        this.accountGroupsRevision = next;
+    }
+    {
+      const next =
+        dto.accountKey === undefined
+          ? undefined
+          : this.accountKey === undefined
+            ? dto.accountKey === null
+              ? null
+              : dto.accountKey
+            : dto.accountKey === null
+              ? null
+              : this.accountKey === null
+                ? dto.accountKey
+                : dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next =
+        dto.accountKeys === undefined
+          ? undefined
+          : this.accountKeys === undefined
+            ? dto.accountKeys === null
+              ? null
+              : dto.accountKeys.map((item) => item)
+            : dto.accountKeys === null
+              ? null
+              : this.accountKeys === null
+                ? dto.accountKeys.map((item) => item)
+                : this.accountKeys.length === dto.accountKeys.length &&
+                    this.accountKeys.every((leftItem0, index) => {
+                      const rightItem0 = dto.accountKeys[index];
+                      return (
+                        rightItem0 !== undefined && leftItem0 === rightItem0
+                      );
+                    })
+                  ? this.accountKeys
+                  : dto.accountKeys.map((item) => item);
+      if (this.accountKeys !== next) this.accountKeys = next;
+    }
+    {
+      const next =
+        dto.accountRevision === undefined
+          ? undefined
+          : this.accountRevision === undefined
+            ? dto.accountRevision === null
+              ? null
+              : dto.accountRevision
+            : dto.accountRevision === null
+              ? null
+              : this.accountRevision === null
+                ? dto.accountRevision
+                : dto.accountRevision;
+      if (this.accountRevision !== next) this.accountRevision = next;
+    }
+    {
+      const next =
+        dto.created === undefined
+          ? undefined
+          : this.created === undefined
+            ? dto.created === null
+              ? null
+              : dto.created
+            : dto.created === null
+              ? null
+              : this.created === null
+                ? dto.created
+                : dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.folders === undefined
+          ? undefined
+          : this.folders === undefined
+            ? dto.folders
+            : dto.folders;
+      if (this.folders !== next) this.folders = next;
+    }
+    {
+      const next =
+        dto.homeServerId === undefined
+          ? undefined
+          : this.homeServerId === undefined
+            ? dto.homeServerId === null
+              ? null
+              : dto.homeServerId
+            : dto.homeServerId === null
+              ? null
+              : this.homeServerId === null
+                ? dto.homeServerId
+                : dto.homeServerId;
+      if (this.homeServerId !== next) this.homeServerId = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.locations === undefined
+          ? undefined
+          : this.locations === undefined
+            ? dto.locations === null
+              ? null
+              : dto.locations.map((item) => new ProjectLocationDtoModel(item))
+            : dto.locations === null
+              ? null
+              : this.locations === null
+                ? dto.locations.map((item) => new ProjectLocationDtoModel(item))
+                : this.locations.length === dto.locations.length &&
+                    this.locations.every((leftItem0, index) => {
+                      const rightItem0 = dto.locations[index];
+                      return (
+                        rightItem0 !== undefined &&
+                        (leftItem0.gitOrigin === undefined ||
+                        rightItem0.gitOrigin === undefined
+                          ? leftItem0.gitOrigin === rightItem0.gitOrigin
+                          : leftItem0.gitOrigin === null ||
+                              rightItem0.gitOrigin === null
+                            ? leftItem0.gitOrigin === rightItem0.gitOrigin
+                            : leftItem0.gitOrigin === rightItem0.gitOrigin) &&
+                        leftItem0.path === rightItem0.path &&
+                        leftItem0.projectId === rightItem0.projectId &&
+                        (leftItem0.requestedPath === undefined ||
+                        rightItem0.requestedPath === undefined
+                          ? leftItem0.requestedPath === rightItem0.requestedPath
+                          : leftItem0.requestedPath === null ||
+                              rightItem0.requestedPath === null
+                            ? leftItem0.requestedPath ===
+                              rightItem0.requestedPath
+                            : leftItem0.requestedPath ===
+                              rightItem0.requestedPath) &&
+                        leftItem0.serverId === rightItem0.serverId
+                      );
+                    })
+                  ? this.locations
+                  : dto.locations.map(
+                      (item) => new ProjectLocationDtoModel(item),
+                    );
+      if (this.locations !== next) this.locations = next;
+    }
+    {
+      const next =
+        dto.locationsRevision === undefined
+          ? undefined
+          : this.locationsRevision === undefined
+            ? dto.locationsRevision === null
+              ? null
+              : dto.locationsRevision
+            : dto.locationsRevision === null
+              ? null
+              : this.locationsRevision === null
+                ? dto.locationsRevision
+                : dto.locationsRevision;
+      if (this.locationsRevision !== next) this.locationsRevision = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.organizationRevision === undefined
+          ? undefined
+          : this.organizationRevision === undefined
+            ? dto.organizationRevision === null
+              ? null
+              : dto.organizationRevision
+            : dto.organizationRevision === null
+              ? null
+              : this.organizationRevision === null
+                ? dto.organizationRevision
+                : dto.organizationRevision;
+      if (this.organizationRevision !== next) this.organizationRevision = next;
+    }
+    {
+      const next =
+        dto.path === undefined
+          ? undefined
+          : this.path === undefined
+            ? dto.path === null
+              ? null
+              : dto.path
+            : dto.path === null
+              ? null
+              : this.path === null
+                ? dto.path
+                : dto.path;
+      if (this.path !== next) this.path = next;
+    }
+    {
+      const next =
+        dto.peerTeams === undefined
+          ? undefined
+          : this.peerTeams === undefined
+            ? dto.peerTeams === null
+              ? null
+              : dto.peerTeams.map((item) => new ProjectPeerTeamDtoModel(item))
+            : dto.peerTeams === null
+              ? null
+              : this.peerTeams === null
+                ? dto.peerTeams.map((item) => new ProjectPeerTeamDtoModel(item))
+                : this.peerTeams.length === dto.peerTeams.length &&
+                    this.peerTeams.every((leftItem0, index) => {
+                      const rightItem0 = dto.peerTeams[index];
+                      return (
+                        rightItem0 !== undefined &&
+                        leftItem0.id === rightItem0.id &&
+                        leftItem0.members.length ===
+                          rightItem0.members.length &&
+                        leftItem0.members.every((leftItem1, index) => {
+                          const rightItem1 = rightItem0.members[index];
+                          return (
+                            rightItem1 !== undefined && leftItem1 === rightItem1
+                          );
+                        }) &&
+                        leftItem0.name === rightItem0.name
+                      );
+                    })
+                  ? this.peerTeams
+                  : dto.peerTeams.map(
+                      (item) => new ProjectPeerTeamDtoModel(item),
+                    );
+      if (this.peerTeams !== next) this.peerTeams = next;
+    }
+    {
+      const next =
+        dto.peerTeamsRevision === undefined
+          ? undefined
+          : this.peerTeamsRevision === undefined
+            ? dto.peerTeamsRevision === null
+              ? null
+              : dto.peerTeamsRevision
+            : dto.peerTeamsRevision === null
+              ? null
+              : this.peerTeamsRevision === null
+                ? dto.peerTeamsRevision
+                : dto.peerTeamsRevision;
+      if (this.peerTeamsRevision !== next) this.peerTeamsRevision = next;
+    }
+    {
+      const next =
+        dto.projectAliases === undefined
+          ? undefined
+          : this.projectAliases === undefined
+            ? dto.projectAliases === null
+              ? null
+              : dto.projectAliases.map((item) => new ProjectAliasDtoModel(item))
+            : dto.projectAliases === null
+              ? null
+              : this.projectAliases === null
+                ? dto.projectAliases.map(
+                    (item) => new ProjectAliasDtoModel(item),
+                  )
+                : this.projectAliases.length === dto.projectAliases.length &&
+                    this.projectAliases.every((leftItem0, index) => {
+                      const rightItem0 = dto.projectAliases[index];
+                      return (
+                        rightItem0 !== undefined &&
+                        leftItem0.name === rightItem0.name &&
+                        leftItem0.projectId === rightItem0.projectId &&
+                        leftItem0.serverId === rightItem0.serverId
+                      );
+                    })
+                  ? this.projectAliases
+                  : dto.projectAliases.map(
+                      (item) => new ProjectAliasDtoModel(item),
+                    );
+      if (this.projectAliases !== next) this.projectAliases = next;
+    }
+    {
+      const next =
+        dto.serverLabel === undefined
+          ? undefined
+          : this.serverLabel === undefined
+            ? dto.serverLabel === null
+              ? null
+              : dto.serverLabel
+            : dto.serverLabel === null
+              ? null
+              : this.serverLabel === null
+                ? dto.serverLabel
+                : dto.serverLabel;
+      if (this.serverLabel !== next) this.serverLabel = next;
+    }
+    {
+      const next =
+        dto.updated === undefined
+          ? undefined
+          : this.updated === undefined
+            ? dto.updated === null
+              ? null
+              : dto.updated
+            : dto.updated === null
+              ? null
+              : this.updated === null
+                ? dto.updated
+                : dto.updated;
+      if (this.updated !== next) this.updated = next;
+    }
+    {
+      const next =
+        dto.workerBaseRef === undefined
+          ? undefined
+          : this.workerBaseRef === undefined
+            ? dto.workerBaseRef === null
+              ? null
+              : dto.workerBaseRef
+            : dto.workerBaseRef === null
+              ? null
+              : this.workerBaseRef === null
+                ? dto.workerBaseRef
+                : dto.workerBaseRef;
+      if (this.workerBaseRef !== next) this.workerBaseRef = next;
+    }
+    {
+      const next =
+        dto.workerBaseRevision === undefined
+          ? undefined
+          : this.workerBaseRevision === undefined
+            ? dto.workerBaseRevision === null
+              ? null
+              : dto.workerBaseRevision
+            : dto.workerBaseRevision === null
+              ? null
+              : this.workerBaseRevision === null
+                ? dto.workerBaseRevision
+                : dto.workerBaseRevision;
+      if (this.workerBaseRevision !== next) this.workerBaseRevision = next;
+    }
+    {
+      const next =
+        dto.workerEnvironment === undefined
+          ? undefined
+          : this.workerEnvironment === undefined
+            ? dto.workerEnvironment === null
+              ? null
+              : dto.workerEnvironment
+            : dto.workerEnvironment === null
+              ? null
+              : this.workerEnvironment === null
+                ? dto.workerEnvironment
+                : dto.workerEnvironment;
+      if (this.workerEnvironment !== next) this.workerEnvironment = next;
+    }
+    {
+      const next =
+        dto.workerEnvironmentRevision === undefined
+          ? undefined
+          : this.workerEnvironmentRevision === undefined
+            ? dto.workerEnvironmentRevision === null
+              ? null
+              : dto.workerEnvironmentRevision
+            : dto.workerEnvironmentRevision === null
+              ? null
+              : this.workerEnvironmentRevision === null
+                ? dto.workerEnvironmentRevision
+                : dto.workerEnvironmentRevision;
+      if (this.workerEnvironmentRevision !== next)
+        this.workerEnvironmentRevision = next;
+    }
+    return this;
+  }
+}
+function reconcileProjectEntityDto(
+  data: ProjectEntityDtoModel[],
+  dto: readonly ProjectEntityDtoDto[],
+): ProjectEntityDtoModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in ProjectEntityDto");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: ProjectEntityDtoModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new ProjectEntityDtoModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type ProjectLocationDtoDto = DeepReadonly<
+  components["schemas"]["ProjectLocationDto"]
+>;
+class ProjectLocationDtoModel {
+  gitOrigin: NonNullable<ProjectLocationDtoDto["gitOrigin"]> | null | undefined;
+  path: ProjectLocationDtoDto["path"];
+  projectId: ProjectLocationDtoDto["projectId"];
+  requestedPath:
+    | NonNullable<ProjectLocationDtoDto["requestedPath"]>
+    | null
+    | undefined;
+  serverId: ProjectLocationDtoDto["serverId"];
+  constructor(dto: ProjectLocationDtoDto) {
+    this.gitOrigin =
+      dto.gitOrigin === undefined
+        ? undefined
+        : dto.gitOrigin === null
+          ? null
+          : dto.gitOrigin;
+    this.path = dto.path;
+    this.projectId = dto.projectId;
+    this.requestedPath =
+      dto.requestedPath === undefined
+        ? undefined
+        : dto.requestedPath === null
+          ? null
+          : dto.requestedPath;
+    this.serverId = dto.serverId;
+    makeObservable(this, {
+      gitOrigin: observableRef,
+      path: observableRef,
+      projectId: observableRef,
+      requestedPath: observableRef,
+      serverId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProjectLocationDtoDto): this {
+    {
+      const next =
+        dto.gitOrigin === undefined
+          ? undefined
+          : this.gitOrigin === undefined
+            ? dto.gitOrigin === null
+              ? null
+              : dto.gitOrigin
+            : dto.gitOrigin === null
+              ? null
+              : this.gitOrigin === null
+                ? dto.gitOrigin
+                : dto.gitOrigin;
+      if (this.gitOrigin !== next) this.gitOrigin = next;
+    }
+    {
+      const next = dto.path;
+      if (this.path !== next) this.path = next;
+    }
+    {
+      const next = dto.projectId;
+      if (this.projectId !== next) this.projectId = next;
+    }
+    {
+      const next =
+        dto.requestedPath === undefined
+          ? undefined
+          : this.requestedPath === undefined
+            ? dto.requestedPath === null
+              ? null
+              : dto.requestedPath
+            : dto.requestedPath === null
+              ? null
+              : this.requestedPath === null
+                ? dto.requestedPath
+                : dto.requestedPath;
+      if (this.requestedPath !== next) this.requestedPath = next;
+    }
+    {
+      const next = dto.serverId;
+      if (this.serverId !== next) this.serverId = next;
+    }
+    return this;
+  }
+}
+type ProjectPeerTeamDtoDto = DeepReadonly<
+  components["schemas"]["ProjectPeerTeamDto"]
+>;
+class ProjectPeerTeamDtoModel {
+  id: ProjectPeerTeamDtoDto["id"];
+  members: NonNullable<ProjectPeerTeamDtoDto["members"]>[number][];
+  name: ProjectPeerTeamDtoDto["name"];
+  constructor(dto: ProjectPeerTeamDtoDto) {
+    this.id = dto.id;
+    this.members = dto.members.map((item) => item);
+    this.name = dto.name;
+    makeObservable(this, {
+      id: observableRef,
+      members: observableRef,
+      name: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProjectPeerTeamDtoDto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        this.members.length === dto.members.length &&
+        this.members.every((leftItem0, index) => {
+          const rightItem0 = dto.members[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.members
+          : dto.members.map((item) => item);
+      if (this.members !== next) this.members = next;
+    }
+    {
+      const next = dto.name;
+      if (this.name !== next) this.name = next;
     }
     return this;
   }
@@ -135,337 +4142,745 @@ class ReadStateDtoModel {
     return this;
   }
 }
-type SidebarChatListDto = DeepReadonly<
-  components["schemas"]["SidebarChatList"]
+type RemoteParentLinkDtoDto = DeepReadonly<
+  components["schemas"]["RemoteParentLinkDto"]
 >;
-class SidebarChatListModel {
-  rows: SidebarChatRowModel[];
-  constructor(dto: SidebarChatListDto) {
-    this.rows = reconcileSidebarChatRow([], dto.rows);
+class RemoteParentLinkDtoModel {
+  home: RemoteParentLinkDtoDto["home"];
+  link: RemoteParentLinkDtoDto["link"];
+  constructor(dto: RemoteParentLinkDtoDto) {
+    this.home = dto.home;
+    this.link = dto.link;
     makeObservable(this, {
-      rows: observableShallow,
+      home: observableRef,
+      link: observableRef,
       apply: action,
     });
   }
-  apply(dto: SidebarChatListDto): this {
+  apply(dto: RemoteParentLinkDtoDto): this {
     {
-      const next = reconcileSidebarChatRow(this.rows, dto.rows);
-      if (this.rows !== next) this.rows = next;
+      const next = dto.home;
+      if (this.home !== next) this.home = next;
+    }
+    {
+      const next = dto.link;
+      if (this.link !== next) this.link = next;
     }
     return this;
   }
 }
-type SidebarChatRowDto = DeepReadonly<components["schemas"]["SidebarChatRow"]>;
-class SidebarChatRowModel {
-  activityAt: SidebarChatRowDto["activityAt"];
-  archived: SidebarChatRowDto["archived"];
-  canArchive: SidebarChatRowDto["canArchive"];
-  canChangeProject: SidebarChatRowDto["canChangeProject"];
-  compactPinned: SidebarChatRowDto["compactPinned"];
-  copyProgress: CopyProgressModel | null;
-  groupKey: SidebarChatRowDto["groupKey"];
-  id: SidebarChatRowDto["id"];
-  inFlight: SidebarChatRowDto["inFlight"];
-  indicator: ChatOperationalStatusModel;
-  markRead: ReadStateDtoModel | null;
-  markUnread: SidebarChatRowDto["markUnread"];
-  model: NonNullable<SidebarChatRowDto["model"]> | null;
-  name: SidebarChatRowDto["name"];
-  orderRank: NonNullable<SidebarChatRowDto["orderRank"]> | null;
-  pinned: SidebarChatRowDto["pinned"];
-  projectFolder: NonNullable<SidebarChatRowDto["projectFolder"]> | null;
-  projectFolderRevision: SidebarChatRowDto["projectFolderRevision"];
-  projectId: NonNullable<SidebarChatRowDto["projectId"]> | null;
-  projectPath: SidebarChatRowDto["projectPath"];
-  projectServerId: NonNullable<SidebarChatRowDto["projectServerId"]> | null;
-  provider: SidebarChatRowDto["provider"];
-  searchText: SidebarChatRowDto["searchText"];
-  sortKey: SidebarChatRowDto["sortKey"];
-  teamId: NonNullable<SidebarChatRowDto["teamId"]> | null;
-  waitingForLead: SidebarChatRowDto["waitingForLead"];
-  constructor(dto: SidebarChatRowDto) {
-    this.activityAt = dto.activityAt;
-    this.archived = dto.archived;
-    this.canArchive = dto.canArchive;
-    this.canChangeProject = dto.canChangeProject;
-    this.compactPinned = dto.compactPinned;
-    this.copyProgress =
-      dto.copyProgress === null
-        ? null
-        : new CopyProgressModel(dto.copyProgress);
-    this.groupKey = dto.groupKey;
-    this.id = dto.id;
-    this.inFlight = dto.inFlight;
-    this.indicator = new ChatOperationalStatusModel(dto.indicator);
-    this.markRead =
-      dto.markRead === null ? null : new ReadStateDtoModel(dto.markRead);
-    this.markUnread = dto.markUnread;
-    this.model = dto.model === null ? null : dto.model;
-    this.name = dto.name;
-    this.orderRank = dto.orderRank === null ? null : dto.orderRank;
-    this.pinned = dto.pinned;
-    this.projectFolder = dto.projectFolder === null ? null : dto.projectFolder;
-    this.projectFolderRevision = dto.projectFolderRevision;
-    this.projectId = dto.projectId === null ? null : dto.projectId;
-    this.projectPath = dto.projectPath;
-    this.projectServerId =
-      dto.projectServerId === null ? null : dto.projectServerId;
-    this.provider = dto.provider;
-    this.searchText = dto.searchText;
-    this.sortKey = dto.sortKey;
-    this.teamId = dto.teamId === null ? null : dto.teamId;
-    this.waitingForLead = dto.waitingForLead;
+type RemoteWorkerLinkDtoDto = DeepReadonly<
+  components["schemas"]["RemoteWorkerLinkDto"]
+>;
+class RemoteWorkerLinkDtoModel {
+  link: RemoteWorkerLinkDtoDto["link"];
+  server: RemoteWorkerLinkDtoDto["server"];
+  constructor(dto: RemoteWorkerLinkDtoDto) {
+    this.link = dto.link;
+    this.server = dto.server;
     makeObservable(this, {
-      activityAt: observableRef,
-      archived: observableRef,
-      canArchive: observableRef,
-      canChangeProject: observableRef,
-      compactPinned: observableRef,
-      copyProgress: observableRef,
-      groupKey: observableRef,
-      id: observableRef,
-      inFlight: observableRef,
-      indicator: observableRef,
-      markRead: observableRef,
-      markUnread: observableRef,
-      model: observableRef,
-      name: observableRef,
-      orderRank: observableRef,
-      pinned: observableRef,
-      projectFolder: observableRef,
-      projectFolderRevision: observableRef,
-      projectId: observableRef,
-      projectPath: observableRef,
-      projectServerId: observableRef,
-      provider: observableRef,
-      searchText: observableRef,
-      sortKey: observableRef,
-      teamId: observableRef,
-      waitingForLead: observableRef,
+      link: observableRef,
+      server: observableRef,
       apply: action,
     });
   }
-  apply(dto: SidebarChatRowDto): this {
+  apply(dto: RemoteWorkerLinkDtoDto): this {
     {
-      const next = dto.activityAt;
-      if (this.activityAt !== next) this.activityAt = next;
+      const next = dto.link;
+      if (this.link !== next) this.link = next;
     }
     {
-      const next = dto.archived;
-      if (this.archived !== next) this.archived = next;
-    }
-    {
-      const next = dto.canArchive;
-      if (this.canArchive !== next) this.canArchive = next;
-    }
-    {
-      const next = dto.canChangeProject;
-      if (this.canChangeProject !== next) this.canChangeProject = next;
-    }
-    {
-      const next = dto.compactPinned;
-      if (this.compactPinned !== next) this.compactPinned = next;
-    }
-    {
-      const next =
-        dto.copyProgress === null
-          ? null
-          : this.copyProgress === null
-            ? new CopyProgressModel(dto.copyProgress)
-            : this.copyProgress.apply(dto.copyProgress);
-      if (this.copyProgress !== next) this.copyProgress = next;
-    }
-    {
-      const next = dto.groupKey;
-      if (this.groupKey !== next) this.groupKey = next;
-    }
-    {
-      const next = dto.id;
-      if (this.id !== next) this.id = next;
-    }
-    {
-      const next = dto.inFlight;
-      if (this.inFlight !== next) this.inFlight = next;
-    }
-    {
-      const next = this.indicator.apply(dto.indicator);
-      if (this.indicator !== next) this.indicator = next;
-    }
-    {
-      const next =
-        dto.markRead === null
-          ? null
-          : this.markRead === null
-            ? new ReadStateDtoModel(dto.markRead)
-            : this.markRead.apply(dto.markRead);
-      if (this.markRead !== next) this.markRead = next;
-    }
-    {
-      const next = dto.markUnread;
-      if (this.markUnread !== next) this.markUnread = next;
-    }
-    {
-      const next =
-        dto.model === null ? null : this.model === null ? dto.model : dto.model;
-      if (this.model !== next) this.model = next;
-    }
-    {
-      const next = dto.name;
-      if (this.name !== next) this.name = next;
-    }
-    {
-      const next =
-        dto.orderRank === null
-          ? null
-          : this.orderRank === null
-            ? dto.orderRank
-            : dto.orderRank;
-      if (this.orderRank !== next) this.orderRank = next;
-    }
-    {
-      const next = dto.pinned;
-      if (this.pinned !== next) this.pinned = next;
-    }
-    {
-      const next =
-        dto.projectFolder === null
-          ? null
-          : this.projectFolder === null
-            ? dto.projectFolder
-            : dto.projectFolder;
-      if (this.projectFolder !== next) this.projectFolder = next;
-    }
-    {
-      const next = dto.projectFolderRevision;
-      if (this.projectFolderRevision !== next)
-        this.projectFolderRevision = next;
-    }
-    {
-      const next =
-        dto.projectId === null
-          ? null
-          : this.projectId === null
-            ? dto.projectId
-            : dto.projectId;
-      if (this.projectId !== next) this.projectId = next;
-    }
-    {
-      const next = dto.projectPath;
-      if (this.projectPath !== next) this.projectPath = next;
-    }
-    {
-      const next =
-        dto.projectServerId === null
-          ? null
-          : this.projectServerId === null
-            ? dto.projectServerId
-            : dto.projectServerId;
-      if (this.projectServerId !== next) this.projectServerId = next;
-    }
-    {
-      const next = dto.provider;
-      if (this.provider !== next) this.provider = next;
-    }
-    {
-      const next = dto.searchText;
-      if (this.searchText !== next) this.searchText = next;
-    }
-    {
-      const next = dto.sortKey;
-      if (this.sortKey !== next) this.sortKey = next;
-    }
-    {
-      const next =
-        dto.teamId === null
-          ? null
-          : this.teamId === null
-            ? dto.teamId
-            : dto.teamId;
-      if (this.teamId !== next) this.teamId = next;
-    }
-    {
-      const next = dto.waitingForLead;
-      if (this.waitingForLead !== next) this.waitingForLead = next;
+      const next = dto.server;
+      if (this.server !== next) this.server = next;
     }
     return this;
   }
 }
-function reconcileSidebarChatRow(
-  data: SidebarChatRowModel[],
-  dto: readonly SidebarChatRowDto[],
-): SidebarChatRowModel[] {
-  const incoming = new Map<string, SidebarChatRowDto>();
-  for (const item of dto) {
-    if (incoming.has(item.id))
-      throw new Error("Duplicate identity in SidebarChatRow");
-    incoming.set(item.id, item);
+type SidebarOrderDtoDto = DeepReadonly<
+  components["schemas"]["SidebarOrderDto"]
+>;
+class SidebarOrderDtoModel {
+  groups: SidebarOrderDtoDto["groups"];
+  revision: SidebarOrderDtoDto["revision"];
+  constructor(dto: SidebarOrderDtoDto) {
+    this.groups = dto.groups;
+    this.revision = dto.revision;
+    makeObservable(this, {
+      groups: observableRef,
+      revision: observableRef,
+      apply: action,
+    });
   }
-  if (data.length === 0 && dto.length > 0) {
-    const rows = dto
-      .map((item) => new SidebarChatRowModel(item))
-      .sort((left, right) =>
-        left.sortKey < right.sortKey
-          ? -1
-          : left.sortKey > right.sortKey
-            ? 1
-            : left.id < right.id
-              ? -1
-              : 1,
-      );
-    data.push(...rows);
-    return data;
-  }
-  const previous = new Map(data.map((item) => [item.id, item]));
-  for (let index = data.length - 1; index >= 0; index -= 1) {
-    const row = data[index];
-    if (row === undefined) throw new Error("Invalid removal index");
-    const item = incoming.get(row.id);
-    if (item === undefined || row.sortKey !== item.sortKey)
-      data.splice(index, 1);
-  }
-  for (const item of dto) {
-    const existing = previous.get(item.id);
-    if (existing !== undefined && existing.sortKey === item.sortKey) {
-      existing.apply(item);
-      continue;
+  apply(dto: SidebarOrderDtoDto): this {
+    {
+      const next = dto.groups;
+      if (this.groups !== next) this.groups = next;
     }
-    const row =
-      existing === undefined
-        ? new SidebarChatRowModel(item)
-        : existing.apply(item);
-    let low = 0;
-    let high = data.length;
-    while (low < high) {
-      const middle = Math.floor((low + high) / 2);
-      const candidate = data[middle];
-      if (candidate === undefined) throw new Error("Invalid insertion index");
-      if (
-        candidate.sortKey < row.sortKey ||
-        (candidate.sortKey === row.sortKey && candidate.id < row.id)
-      )
-        low = middle + 1;
-      else high = middle;
+    {
+      const next = dto.revision;
+      if (this.revision !== next) this.revision = next;
     }
-    data.splice(low, 0, row);
+    return this;
   }
-  return data;
 }
-export type SidebarChatRow = DeepReadonly<
-  components["schemas"]["SidebarChatRow"]
+type WorkspaceEntityDtoDto = DeepReadonly<
+  components["schemas"]["WorkspaceEntityDto"]
 >;
-export type SidebarChatList = DeepReadonly<
-  components["schemas"]["SidebarChatList"]
+class WorkspaceEntityDtoModel {
+  connected: NonNullable<WorkspaceEntityDtoDto["connected"]> | null | undefined;
+  nativeNotices: WorkspaceEntityDtoDto["nativeNotices"] | undefined;
+  peerTeamsVersion:
+    | NonNullable<WorkspaceEntityDtoDto["peerTeamsVersion"]>
+    | null
+    | undefined;
+  projectOrganizationVersion:
+    | NonNullable<WorkspaceEntityDtoDto["projectOrganizationVersion"]>
+    | null
+    | undefined;
+  sidebarOrder: SidebarOrderDtoModel | null | undefined;
+  stateDir: NonNullable<WorkspaceEntityDtoDto["stateDir"]> | null | undefined;
+  tasksHistoryLimit:
+    | NonNullable<WorkspaceEntityDtoDto["tasksHistoryLimit"]>
+    | null
+    | undefined;
+  constructor(dto: WorkspaceEntityDtoDto) {
+    this.connected =
+      dto.connected === undefined
+        ? undefined
+        : dto.connected === null
+          ? null
+          : dto.connected;
+    this.nativeNotices =
+      dto.nativeNotices === undefined ? undefined : dto.nativeNotices;
+    this.peerTeamsVersion =
+      dto.peerTeamsVersion === undefined
+        ? undefined
+        : dto.peerTeamsVersion === null
+          ? null
+          : dto.peerTeamsVersion;
+    this.projectOrganizationVersion =
+      dto.projectOrganizationVersion === undefined
+        ? undefined
+        : dto.projectOrganizationVersion === null
+          ? null
+          : dto.projectOrganizationVersion;
+    this.sidebarOrder =
+      dto.sidebarOrder === undefined
+        ? undefined
+        : dto.sidebarOrder === null
+          ? null
+          : new SidebarOrderDtoModel(dto.sidebarOrder);
+    this.stateDir =
+      dto.stateDir === undefined
+        ? undefined
+        : dto.stateDir === null
+          ? null
+          : dto.stateDir;
+    this.tasksHistoryLimit =
+      dto.tasksHistoryLimit === undefined
+        ? undefined
+        : dto.tasksHistoryLimit === null
+          ? null
+          : dto.tasksHistoryLimit;
+    makeObservable(this, {
+      connected: observableRef,
+      nativeNotices: observableRef,
+      peerTeamsVersion: observableRef,
+      projectOrganizationVersion: observableRef,
+      sidebarOrder: observableRef,
+      stateDir: observableRef,
+      tasksHistoryLimit: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: WorkspaceEntityDtoDto): this {
+    {
+      const next =
+        dto.connected === undefined
+          ? undefined
+          : this.connected === undefined
+            ? dto.connected === null
+              ? null
+              : dto.connected
+            : dto.connected === null
+              ? null
+              : this.connected === null
+                ? dto.connected
+                : dto.connected;
+      if (this.connected !== next) this.connected = next;
+    }
+    {
+      const next =
+        dto.nativeNotices === undefined
+          ? undefined
+          : this.nativeNotices === undefined
+            ? dto.nativeNotices
+            : dto.nativeNotices;
+      if (this.nativeNotices !== next) this.nativeNotices = next;
+    }
+    {
+      const next =
+        dto.peerTeamsVersion === undefined
+          ? undefined
+          : this.peerTeamsVersion === undefined
+            ? dto.peerTeamsVersion === null
+              ? null
+              : dto.peerTeamsVersion
+            : dto.peerTeamsVersion === null
+              ? null
+              : this.peerTeamsVersion === null
+                ? dto.peerTeamsVersion
+                : dto.peerTeamsVersion;
+      if (this.peerTeamsVersion !== next) this.peerTeamsVersion = next;
+    }
+    {
+      const next =
+        dto.projectOrganizationVersion === undefined
+          ? undefined
+          : this.projectOrganizationVersion === undefined
+            ? dto.projectOrganizationVersion === null
+              ? null
+              : dto.projectOrganizationVersion
+            : dto.projectOrganizationVersion === null
+              ? null
+              : this.projectOrganizationVersion === null
+                ? dto.projectOrganizationVersion
+                : dto.projectOrganizationVersion;
+      if (this.projectOrganizationVersion !== next)
+        this.projectOrganizationVersion = next;
+    }
+    {
+      const next =
+        dto.sidebarOrder === undefined
+          ? undefined
+          : this.sidebarOrder === undefined
+            ? dto.sidebarOrder === null
+              ? null
+              : new SidebarOrderDtoModel(dto.sidebarOrder)
+            : dto.sidebarOrder === null
+              ? null
+              : this.sidebarOrder === null
+                ? new SidebarOrderDtoModel(dto.sidebarOrder)
+                : this.sidebarOrder.apply(dto.sidebarOrder);
+      if (this.sidebarOrder !== next) this.sidebarOrder = next;
+    }
+    {
+      const next =
+        dto.stateDir === undefined
+          ? undefined
+          : this.stateDir === undefined
+            ? dto.stateDir === null
+              ? null
+              : dto.stateDir
+            : dto.stateDir === null
+              ? null
+              : this.stateDir === null
+                ? dto.stateDir
+                : dto.stateDir;
+      if (this.stateDir !== next) this.stateDir = next;
+    }
+    {
+      const next =
+        dto.tasksHistoryLimit === undefined
+          ? undefined
+          : this.tasksHistoryLimit === undefined
+            ? dto.tasksHistoryLimit === null
+              ? null
+              : dto.tasksHistoryLimit
+            : dto.tasksHistoryLimit === null
+              ? null
+              : this.tasksHistoryLimit === null
+                ? dto.tasksHistoryLimit
+                : dto.tasksHistoryLimit;
+      if (this.tasksHistoryLimit !== next) this.tasksHistoryLimit = next;
+    }
+    return this;
+  }
+}
+type AccountChangeModel =
+  | AccountChangeVariant0Model
+  | AccountChangeVariant1Model
+  | AccountChangeVariant2Model;
+function createAccountChange(
+  dto: DeepReadonly<components["schemas"]["AccountChange"]>,
+): AccountChangeModel {
+  switch (dto.kind) {
+    case "select":
+      return new AccountChangeVariant0Model(dto);
+    case "transfer":
+      return new AccountChangeVariant1Model(dto);
+    case "unavailable":
+      return new AccountChangeVariant2Model(dto);
+  }
+}
+function updateAccountChange(
+  data: AccountChangeModel,
+  dto: DeepReadonly<components["schemas"]["AccountChange"]>,
+): AccountChangeModel {
+  switch (dto.kind) {
+    case "select":
+      return data.kind === "select"
+        ? data.apply(dto)
+        : new AccountChangeVariant0Model(dto);
+    case "transfer":
+      return data.kind === "transfer"
+        ? data.apply(dto)
+        : new AccountChangeVariant1Model(dto);
+    case "unavailable":
+      return data.kind === "unavailable"
+        ? data.apply(dto)
+        : new AccountChangeVariant2Model(dto);
+  }
+}
+type AccountEligibilityModel =
+  | AccountEligibilityVariant0Model
+  | AccountEligibilityVariant1Model;
+function createAccountEligibility(
+  dto: DeepReadonly<components["schemas"]["AccountEligibility"]>,
+): AccountEligibilityModel {
+  switch (dto.kind) {
+    case "available":
+      return new AccountEligibilityVariant0Model(dto);
+    case "unavailable":
+      return new AccountEligibilityVariant1Model(dto);
+  }
+}
+function updateAccountEligibility(
+  data: AccountEligibilityModel,
+  dto: DeepReadonly<components["schemas"]["AccountEligibility"]>,
+): AccountEligibilityModel {
+  switch (dto.kind) {
+    case "available":
+      return data.kind === "available"
+        ? data.apply(dto)
+        : new AccountEligibilityVariant0Model(dto);
+    case "unavailable":
+      return data.kind === "unavailable"
+        ? data.apply(dto)
+        : new AccountEligibilityVariant1Model(dto);
+  }
+}
+type AccountTransferProgressModel =
+  | AccountTransferProgressVariant0Model
+  | AccountTransferProgressVariant1Model
+  | AccountTransferProgressVariant2Model
+  | AccountTransferProgressVariant3Model
+  | AccountTransferProgressVariant4Model
+  | AccountTransferProgressVariant5Model
+  | AccountTransferProgressVariant6Model;
+function createAccountTransferProgress(
+  dto: DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+): AccountTransferProgressModel {
+  switch (dto.kind) {
+    case "none":
+      return new AccountTransferProgressVariant0Model(dto);
+    case "unreadable":
+      return new AccountTransferProgressVariant1Model(dto);
+    case "waiting":
+      return new AccountTransferProgressVariant2Model(dto);
+    case "moving":
+      return new AccountTransferProgressVariant3Model(dto);
+    case "blocked":
+      return new AccountTransferProgressVariant4Model(dto);
+    case "completed":
+      return new AccountTransferProgressVariant5Model(dto);
+    case "cancelled":
+      return new AccountTransferProgressVariant6Model(dto);
+  }
+}
+function updateAccountTransferProgress(
+  data: AccountTransferProgressModel,
+  dto: DeepReadonly<components["schemas"]["AccountTransferProgress"]>,
+): AccountTransferProgressModel {
+  switch (dto.kind) {
+    case "none":
+      return data.kind === "none"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant0Model(dto);
+    case "unreadable":
+      return data.kind === "unreadable"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant1Model(dto);
+    case "waiting":
+      return data.kind === "waiting"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant2Model(dto);
+    case "moving":
+      return data.kind === "moving"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant3Model(dto);
+    case "blocked":
+      return data.kind === "blocked"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant4Model(dto);
+    case "completed":
+      return data.kind === "completed"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant5Model(dto);
+    case "cancelled":
+      return data.kind === "cancelled"
+        ? data.apply(dto)
+        : new AccountTransferProgressVariant6Model(dto);
+  }
+}
+type AgentEntityStartWaitDtoModel =
+  | AgentEntityStartWaitDtoVariant0Model
+  | AgentEntityStartWaitDtoVariant1Model
+  | AgentEntityStartWaitDtoVariant2Model
+  | AgentEntityStartWaitDtoVariant3Model
+  | AgentEntityStartWaitDtoVariant4Model
+  | AgentEntityStartWaitDtoVariant5Model
+  | AgentEntityStartWaitDtoVariant6Model
+  | AgentEntityStartWaitDtoVariant7Model
+  | AgentEntityStartWaitDtoVariant8Model
+  | AgentEntityStartWaitDtoVariant9Model
+  | AgentEntityStartWaitDtoVariant10Model
+  | AgentEntityStartWaitDtoVariant11Model;
+function createAgentEntityStartWaitDto(
+  dto: DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+): AgentEntityStartWaitDtoModel {
+  switch (dto.reason) {
+    case "slot":
+      return new AgentEntityStartWaitDtoVariant0Model(dto);
+    case "pause":
+      return new AgentEntityStartWaitDtoVariant1Model(dto);
+    case "start_queue":
+      return new AgentEntityStartWaitDtoVariant2Model(dto);
+    case "disk":
+      return new AgentEntityStartWaitDtoVariant3Model(dto);
+    case "model_catalog":
+      return new AgentEntityStartWaitDtoVariant4Model(dto);
+    case "provider_session":
+      return new AgentEntityStartWaitDtoVariant5Model(dto);
+    case "dependency":
+      return new AgentEntityStartWaitDtoVariant6Model(dto);
+    case "dispatch_pending":
+      return new AgentEntityStartWaitDtoVariant7Model(dto);
+    case "paused":
+      return new AgentEntityStartWaitDtoVariant8Model(dto);
+    case "native_failure":
+      return new AgentEntityStartWaitDtoVariant9Model(dto);
+    case "account_transfer":
+      return new AgentEntityStartWaitDtoVariant10Model(dto);
+    case "workspace_copy":
+      return new AgentEntityStartWaitDtoVariant11Model(dto);
+  }
+}
+function updateAgentEntityStartWaitDto(
+  data: AgentEntityStartWaitDtoModel,
+  dto: DeepReadonly<components["schemas"]["AgentEntityStartWaitDto"]>,
+): AgentEntityStartWaitDtoModel {
+  switch (dto.reason) {
+    case "slot":
+      return data.reason === "slot"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant0Model(dto);
+    case "pause":
+      return data.reason === "pause"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant1Model(dto);
+    case "start_queue":
+      return data.reason === "start_queue"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant2Model(dto);
+    case "disk":
+      return data.reason === "disk"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant3Model(dto);
+    case "model_catalog":
+      return data.reason === "model_catalog"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant4Model(dto);
+    case "provider_session":
+      return data.reason === "provider_session"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant5Model(dto);
+    case "dependency":
+      return data.reason === "dependency"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant6Model(dto);
+    case "dispatch_pending":
+      return data.reason === "dispatch_pending"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant7Model(dto);
+    case "paused":
+      return data.reason === "paused"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant8Model(dto);
+    case "native_failure":
+      return data.reason === "native_failure"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant9Model(dto);
+    case "account_transfer":
+      return data.reason === "account_transfer"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant10Model(dto);
+    case "workspace_copy":
+      return data.reason === "workspace_copy"
+        ? data.apply(dto)
+        : new AgentEntityStartWaitDtoVariant11Model(dto);
+  }
+}
+type AgentOperationalStatusModel =
+  | AgentOperationalStatusVariant0Model
+  | AgentOperationalStatusVariant1Model
+  | AgentOperationalStatusVariant2Model
+  | AgentOperationalStatusVariant3Model
+  | AgentOperationalStatusVariant4Model
+  | AgentOperationalStatusVariant5Model
+  | AgentOperationalStatusVariant6Model
+  | AgentOperationalStatusVariant7Model
+  | AgentOperationalStatusVariant8Model
+  | AgentOperationalStatusVariant9Model
+  | AgentOperationalStatusVariant10Model
+  | AgentOperationalStatusVariant11Model
+  | AgentOperationalStatusVariant12Model;
+function createAgentOperationalStatus(
+  dto: DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+): AgentOperationalStatusModel {
+  switch (dto.reason) {
+    case "needs_input":
+      return new AgentOperationalStatusVariant0Model(dto);
+    case "waiting":
+      return new AgentOperationalStatusVariant1Model(dto);
+    case "waiting_background_command":
+      return new AgentOperationalStatusVariant2Model(dto);
+    case "working":
+      return new AgentOperationalStatusVariant3Model(dto);
+    case "turn_ended":
+      return new AgentOperationalStatusVariant4Model(dto);
+    case "disk_space":
+      return new AgentOperationalStatusVariant5Model(dto);
+    case "failed":
+      return new AgentOperationalStatusVariant6Model(dto);
+    case "interrupted":
+      return new AgentOperationalStatusVariant7Model(dto);
+    case "stopped":
+      return new AgentOperationalStatusVariant8Model(dto);
+    case "question_deferred":
+      return new AgentOperationalStatusVariant9Model(dto);
+    case "unread_result":
+      return new AgentOperationalStatusVariant10Model(dto);
+    case "read_result":
+      return new AgentOperationalStatusVariant11Model(dto);
+    case "ready":
+      return new AgentOperationalStatusVariant12Model(dto);
+  }
+}
+function updateAgentOperationalStatus(
+  data: AgentOperationalStatusModel,
+  dto: DeepReadonly<components["schemas"]["AgentOperationalStatus"]>,
+): AgentOperationalStatusModel {
+  switch (dto.reason) {
+    case "needs_input":
+      return data.reason === "needs_input"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant0Model(dto);
+    case "waiting":
+      return data.reason === "waiting"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant1Model(dto);
+    case "waiting_background_command":
+      return data.reason === "waiting_background_command"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant2Model(dto);
+    case "working":
+      return data.reason === "working"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant3Model(dto);
+    case "turn_ended":
+      return data.reason === "turn_ended"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant4Model(dto);
+    case "disk_space":
+      return data.reason === "disk_space"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant5Model(dto);
+    case "failed":
+      return data.reason === "failed"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant6Model(dto);
+    case "interrupted":
+      return data.reason === "interrupted"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant7Model(dto);
+    case "stopped":
+      return data.reason === "stopped"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant8Model(dto);
+    case "question_deferred":
+      return data.reason === "question_deferred"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant9Model(dto);
+    case "unread_result":
+      return data.reason === "unread_result"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant10Model(dto);
+    case "read_result":
+      return data.reason === "read_result"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant11Model(dto);
+    case "ready":
+      return data.reason === "ready"
+        ? data.apply(dto)
+        : new AgentOperationalStatusVariant12Model(dto);
+  }
+}
+export interface StateCollections {
+  readonly agents: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["AgentSummaryEntityDto"]>
+  >;
+  readonly projects: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["ProjectEntityDto"]>
+  >;
+  readonly peerTeams: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["PeerTeamEntityDto"]>
+  >;
+  readonly workspaces: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["WorkspaceEntityDto"]>
+  >;
+  readonly agentTail: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["AgentTail"]>
+  >;
+}
+type StateCollectionsDto = DeepReadonly<
+  components["schemas"]["SyncEntityPayload"][]
 >;
-export function createSidebarMirror(): {
-  readonly current: SidebarChatList;
-  apply(dto: SidebarChatList): void;
+class StateCollectionsModel {
+  readonly agents = new Map<string, AgentSummaryEntityDtoModel>();
+  readonly projects = new Map<string, ProjectEntityDtoModel>();
+  readonly peerTeams = new Map<string, PeerTeamEntityDtoModel>();
+  readonly workspaces = new Map<string, WorkspaceEntityDtoModel>();
+  readonly agentTail = new Map<string, AgentTailModel>();
+  constructor(dto: StateCollectionsDto) {
+    makeObservable(this, {
+      agents: observableShallow,
+      projects: observableShallow,
+      peerTeams: observableShallow,
+      workspaces: observableShallow,
+      agentTail: observableShallow,
+      apply: action,
+    });
+    this.apply(dto);
+  }
+  apply(dto: StateCollectionsDto): void {
+    const agentsIds = new Set<string>();
+    const projectsIds = new Set<string>();
+    const peerTeamsIds = new Set<string>();
+    const workspacesIds = new Set<string>();
+    const agentTailIds = new Set<string>();
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "agentSummary":
+          if (agentsIds.has(entity.id))
+            throw new Error("Duplicate identity in agentSummary");
+          agentsIds.add(entity.id);
+          break;
+        case "project":
+          if (projectsIds.has(entity.id))
+            throw new Error("Duplicate identity in project");
+          projectsIds.add(entity.id);
+          break;
+        case "peerTeam":
+          if (peerTeamsIds.has(entity.id))
+            throw new Error("Duplicate identity in peerTeam");
+          peerTeamsIds.add(entity.id);
+          break;
+        case "workspace":
+          if (workspacesIds.has(entity.id))
+            throw new Error("Duplicate identity in workspace");
+          workspacesIds.add(entity.id);
+          break;
+        case "agentTail":
+          if (agentTailIds.has(entity.id))
+            throw new Error("Duplicate identity in agentTail");
+          agentTailIds.add(entity.id);
+          break;
+      }
+    }
+    for (const id of this.agents.keys()) {
+      if (!agentsIds.has(id)) this.agents.delete(id);
+    }
+    for (const id of this.projects.keys()) {
+      if (!projectsIds.has(id)) this.projects.delete(id);
+    }
+    for (const id of this.peerTeams.keys()) {
+      if (!peerTeamsIds.has(id)) this.peerTeams.delete(id);
+    }
+    for (const id of this.workspaces.keys()) {
+      if (!workspacesIds.has(id)) this.workspaces.delete(id);
+    }
+    for (const id of this.agentTail.keys()) {
+      if (!agentTailIds.has(id)) this.agentTail.delete(id);
+    }
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "agentSummary": {
+          const previous = this.agents.get(entity.id);
+          if (previous === undefined)
+            this.agents.set(
+              entity.id,
+              new AgentSummaryEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "project": {
+          const previous = this.projects.get(entity.id);
+          if (previous === undefined)
+            this.projects.set(
+              entity.id,
+              new ProjectEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "peerTeam": {
+          const previous = this.peerTeams.get(entity.id);
+          if (previous === undefined)
+            this.peerTeams.set(
+              entity.id,
+              new PeerTeamEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "workspace": {
+          const previous = this.workspaces.get(entity.id);
+          if (previous === undefined)
+            this.workspaces.set(
+              entity.id,
+              new WorkspaceEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "agentTail": {
+          const previous = this.agentTail.get(entity.id);
+          if (previous === undefined)
+            this.agentTail.set(entity.id, new AgentTailModel(entity.value));
+          else previous.apply(entity.value);
+          break;
+        }
+      }
+    }
+  }
+}
+export function createStateMirror(): {
+  readonly current: StateCollections;
+  apply(dto: StateCollectionsDto): void;
 } {
-  const model = new SidebarChatListModel({ rows: [] });
+  const model = new StateCollectionsModel([]);
   return {
-    get current(): SidebarChatList {
+    get current(): StateCollections {
       return model;
     },
-    apply(dto: SidebarChatList): void {
+    apply(dto: StateCollectionsDto): void {
       runInAction(() => {
         model.apply(dto);
       });
@@ -473,23 +4888,20 @@ export function createSidebarMirror(): {
   };
 }
 export interface ObservableResources {
-  sidebar(): ResourceSlot<SidebarChatList>;
+  state(): ResourceSlot<StateCollections>;
 }
 export function createObservableResources(
   runtime: ObservableResourceRuntime,
 ): ObservableResources {
-  let sidebarSlot: ResourceSlot<SidebarChatList> | undefined;
+  let slot: ResourceSlot<StateCollections> | undefined;
   return {
-    sidebar() {
-      if (sidebarSlot !== undefined) return sidebarSlot;
-      const ref: Extract<ResourceRef, { kind: "sidebar" }> = {
-        kind: "sidebar",
-      };
-      const key = subscriptionKey(ref);
-      return (sidebarSlot = runtime.slot({
-        key,
+    state() {
+      if (slot !== undefined) return slot;
+      const ref: Extract<ResourceRef, { kind: "state" }> = { kind: "state" };
+      return (slot = runtime.slot({
+        key: subscriptionKey(ref),
         ref,
-        create: (dto) => new SidebarChatListModel(dto),
+        create: (dto) => new StateCollectionsModel(dto),
         apply: (data, dto) => {
           data.apply(dto);
         },
