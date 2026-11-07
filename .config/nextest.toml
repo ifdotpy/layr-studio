@@ -19,6 +19,7 @@ junit.path = "junit.xml"
 # Single owner of fast Rust witnesses. Cargo still builds the complete workspace;
 # this nextest execution profile changes selection only, never Cargo's feature graph.
 [profile.fast]
+# Idle unload query counts and compaction deadline parity cover repeated reconciliation.
 # Idle compaction lookup searches its deadline index; upgrades retain episodes and roll back atomically.
 # Supervisor admission witnesses cover typed capabilities and exact operator recovery.
 # T17 clauses cover transactional errors, startup readiness, and native delivery.
@@ -343,6 +344,8 @@ default-filter = '''
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(unchanged_drafts_ignore_unrelated_commits_and_publications)))
     | ((package(=studio-runtime-process)) & ((kind(lib) | kind(bin) | kind(test))) & (binary(studio_runtime_process) & test(/^provider_task::tests::(shutdown_waits_for_supervisor_detach_on_both_connections|shutdown_reports_control_detach_timeout|shutdown_reports_event_detach_timeout|shutdown_reports_both_detach_timeouts_within_one_budget)$/) | binary(integration) & test(/^wave7_p01_factory::(prepare_reports_handshake_error_and_unconfirmed_detach|prepare_preserves_handshake_error_after_confirmed_detach)$/)))
     | ((package(=studio-runtime-server)) & ((kind(test) & binary(=integration))) & (test(/^wave7_p01_registry::backend_shutdown_reports_both_supervisor_detach_timeouts$/)))
+    | (package(=studio-runtime-store) & kind(lib) & test(repositories::scheduler::idle_unload::tests::))
+    | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
     | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
@@ -780,6 +783,8 @@ default-filter = '''
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(unchanged_drafts_ignore_unrelated_commits_and_publications)))
     | ((package(=studio-runtime-process)) & ((kind(lib) | kind(bin) | kind(test))) & (binary(studio_runtime_process) & test(/^provider_task::tests::(shutdown_waits_for_supervisor_detach_on_both_connections|shutdown_reports_control_detach_timeout|shutdown_reports_event_detach_timeout|shutdown_reports_both_detach_timeouts_within_one_budget)$/) | binary(integration) & test(/^wave7_p01_factory::(prepare_reports_handshake_error_and_unconfirmed_detach|prepare_preserves_handshake_error_after_confirmed_detach)$/)))
     | ((package(=studio-runtime-server)) & ((kind(test) & binary(=integration))) & (test(/^wave7_p01_registry::backend_shutdown_reports_both_supervisor_detach_timeouts$/)))
+    | (package(=studio-runtime-store) & kind(lib) & test(repositories::scheduler::idle_unload::tests::))
+    | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
     | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))

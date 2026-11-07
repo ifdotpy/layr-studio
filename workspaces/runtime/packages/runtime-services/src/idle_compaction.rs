@@ -291,9 +291,24 @@ pub fn sync_unload_deadlines(
     deadlines: &BTreeMap<String, f64>,
     now: f64,
 ) -> Result<(), StoreError> {
-    let mut statement = connection.prepare("SELECT id,record FROM runtime_agents INDEXED BY runtime_idle_compaction_deadline WHERE idle_episode_type='object' AND provider='claude' AND account_key=?1 AND coalesce(json_extract(record,'$.accountKey'),'default')=?1")?;
+    // Most reconciliations leave every deadline unchanged. Filter those rows
+    // and settled receipts in SQLite before transferring or decoding records.
+    let encoded_deadlines = studio_json::to_string(deadlines)?;
+    let mut statement = connection.prepare_cached(
+        "WITH deadlines AS MATERIALIZED (SELECT key,value FROM json_each(?2)), \
+         changed AS MATERIALIZED ( \
+         SELECT a.id,a.record,a.idle_episode_id FROM runtime_agents a INDEXED BY runtime_idle_compaction_deadline \
+         LEFT JOIN deadlines d ON d.key=CASE WHEN json_type(a.record,'$.threadId')='text' THEN json_extract(a.record,'$.threadId') END \
+         WHERE a.idle_episode_type='object' AND a.provider='claude' AND a.account_key=?1 \
+         AND coalesce(json_extract(a.record,'$.accountKey'),'default')=?1 \
+         AND json_extract(a.record,'$.idleCompactionEpisode.unloadAt') IS NOT d.value) \
+         SELECT changed.id,changed.record FROM changed \
+         WHERE NOT EXISTS(SELECT 1 FROM runtime_agents receipt WHERE receipt.idle_episode_type='object' \
+           AND receipt.idle_episode_id=changed.idle_episode_id \
+           AND json_extract(receipt.record,'$.idleCompactionEpisode.fired')=1)",
+    )?;
     let records = statement
-        .query_map([account], |row| {
+        .query_map([account, &encoded_deadlines], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?
         .collect::<Result<Vec<_>, _>>()?;
@@ -301,9 +316,6 @@ pub fn sync_unload_deadlines(
         let mut agent: Value = studio_json::from_str(&raw)?;
         let mut episode: Episode = Episode::deserialize(&agent["idleCompactionEpisode"])
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-        if settled(connection, &episode.id)? {
-            continue;
-        }
         let unload_at = agent["threadId"]
             .as_str()
             .and_then(|thread| deadlines.get(thread))
@@ -686,6 +698,80 @@ pub async fn run(
 mod tests {
     use super::*;
 
+    thread_local! {
+        static DEADLINE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static DEADLINE_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static DEADLINE_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn unload_deadline_sync_reads_no_unchanged_episodes_or_per_agent_receipts() {
+        let (reads, rows, _) = deadline_sync_counts(100);
+        assert_eq!(
+            (reads, rows),
+            (1, 0),
+            "unchanged episodes need no decoding or receipt queries"
+        );
+    }
+
+    #[test]
+    fn unload_deadline_sync_work_is_linear_for_unchanged_episodes() {
+        let (_, _, small) = deadline_sync_counts(100);
+        let (_, _, large) = deadline_sync_counts(200);
+        assert!(
+            large * 4 < small * 9,
+            "doubling unchanged episodes must stay near linear: {small} -> {large}"
+        );
+    }
+
+    fn deadline_sync_counts(agents: usize) -> (usize, usize, i32) {
+        let db = studio_runtime_store::test_canvas();
+        let (_, episode, mut agent, _) = fixture();
+        agent["idleCompactionEpisode"] = json!(episode);
+        for n in 0..agents {
+            let id = format!("agent-{n}");
+            agent["id"] = json!(id);
+            agent["rootId"] = json!(id);
+            agent["idleCompactionEpisode"]["id"] = json!(format!("episode-{n}"));
+            AgentRepository::put(&db, &AgentRecord::from_value(agent.clone()).unwrap()).unwrap();
+        }
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT
+                | rusqlite::trace::TraceEventCodes::SQLITE_TRACE_ROW
+                | rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| match event {
+                rusqlite::trace::TraceEvent::Stmt(_, _) => {
+                    DEADLINE_READS.with(|count| count.set(count.get() + 1))
+                }
+                rusqlite::trace::TraceEvent::Row(_) => {
+                    DEADLINE_ROWS.with(|count| count.set(count.get() + 1))
+                }
+                rusqlite::trace::TraceEvent::Profile(statement, _) => {
+                    DEADLINE_STEPS.with(|count| {
+                        count.set(
+                            count.get() + statement.get_status(rusqlite::StatementStatus::VmStep),
+                        )
+                    });
+                }
+                rusqlite::trace::TraceEvent::Close(_) => {}
+                _ => {}
+            }),
+        );
+        DEADLINE_READS.with(|count| count.set(0));
+        DEADLINE_ROWS.with(|count| count.set(0));
+        DEADLINE_STEPS.with(|count| count.set(0));
+        let start = std::time::Instant::now();
+        sync_unload_deadlines(&db, "default", &BTreeMap::new(), 10.0).unwrap();
+        let reads = DEADLINE_READS.with(std::cell::Cell::get);
+        let rows = DEADLINE_ROWS.with(std::cell::Cell::get);
+        let steps = DEADLINE_STEPS.with(std::cell::Cell::get);
+        eprintln!(
+            "deadline sync: agents={agents} reads={reads} rows={rows} steps={steps} elapsed={:?}",
+            start.elapsed()
+        );
+        (reads, rows, steps)
+    }
+
     #[test]
     fn repeated_idle_observation_preserves_persisted_legacy_bytes() {
         let db = studio_runtime_store::test_canvas();
@@ -777,6 +863,70 @@ mod tests {
         .unwrap();
         sync_unload_deadlines(&db, "default", &BTreeMap::new(), 0.0).unwrap();
         assert_eq!(calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn unload_deadline_sync_preserves_clears_clamps_and_shared_receipts() {
+        for fired in [false, true] {
+            for previous in [None, Some(900.0), Some(1200.0)] {
+                for next in [None, Some(900.0), Some(1200.0)] {
+                    let db = studio_runtime_store::test_canvas();
+                    let (_, mut episode, mut agent, _) = fixture();
+                    episode.unload_at = previous;
+                    agent["rootId"] = json!("agent");
+                    agent["idleCompactionEpisode"] = json!(episode);
+                    agent["unrelated"] = json!({"retained":[null,1,"opaque"]});
+                    AgentRepository::put(&db, &AgentRecord::from_value(agent.clone()).unwrap())
+                        .unwrap();
+                    // A receipt can live on a different account with the same episode id.
+                    let mut receipt = agent.clone();
+                    receipt["id"] = json!("receipt");
+                    receipt["rootId"] = json!("receipt");
+                    receipt["accountKey"] = json!("another-account");
+                    receipt["idleCompactionEpisode"]["fired"] = json!(fired);
+                    AgentRepository::put(&db, &AgentRecord::from_value(receipt).unwrap()).unwrap();
+                    let before = AgentRepository::get_raw(&db, &"agent".into()).unwrap();
+                    let deadlines = next
+                        .map(|at| BTreeMap::from([("thread".into(), at)]))
+                        .unwrap_or_default();
+                    sync_unload_deadlines(&db, "default", &deadlines, 1000.0).unwrap();
+                    if fired || previous == next {
+                        assert_eq!(
+                            AgentRepository::get_raw(&db, &"agent".into()).unwrap(),
+                            before
+                        );
+                    } else {
+                        let saved = AgentRepository::get(&db, &"agent".into())
+                            .unwrap()
+                            .unwrap()
+                            .value();
+                        assert_eq!(saved["unrelated"], agent["unrelated"]);
+                        let actual: Episode =
+                            Episode::deserialize(&saved["idleCompactionEpisode"]).unwrap();
+                        let cache_fire = fire_at(
+                            episode.cache.last_activity_at / 1000.0,
+                            episode.expires_at,
+                            IDLE_COMPACTION_FIRE_FRACTION,
+                        );
+                        assert_eq!(actual.unload_at, next);
+                        assert_eq!(
+                            actual.fire_at,
+                            next.map_or(cache_fire, |at| cache_fire
+                                .min((at - IDLE_COMPACTION_UNLOAD_LEAD_SECONDS).max(1000.0)))
+                        );
+                        assert_eq!(actual.id, episode.id);
+                        assert!(!actual.fired);
+                        let once = AgentRepository::get_raw(&db, &"agent".into()).unwrap();
+                        sync_unload_deadlines(&db, "default", &deadlines, 2000.0).unwrap();
+                        assert_eq!(
+                            AgentRepository::get_raw(&db, &"agent".into()).unwrap(),
+                            once,
+                            "unchanged deadline cannot move fire time with wall time"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

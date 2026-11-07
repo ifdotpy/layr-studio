@@ -123,6 +123,16 @@ fn finished_worker_sql() -> String {
 
 const ACCOUNT_AGENT_SQL: &str = "SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload WHERE account_key=?1 AND deleted_at IS NULL";
 
+/// Find session owners by primary key rather than scanning every account agent
+/// for each loaded thread. CROSS JOIN keeps the indexed session lookup first.
+fn thread_agent_sql(thread: &str) -> String {
+    format!(
+        "SELECT 1 FROM sessions s CROSS JOIN runtime_agents \
+         WHERE s.thread_id={thread} AND s.state<>'ended' AND runtime_agents.id=s.chat \
+         AND runtime_agents.account_key=?1 AND runtime_agents.deleted_at IS NULL"
+    )
+}
+
 impl SchedulerRepository {
     /// Read the durable status of known loaded threads and the account in one
     /// bounded query. The candidate list comes from one provider snapshot.
@@ -141,19 +151,19 @@ impl SchedulerRepository {
         let transfer = transfer_pending_predicate();
         let in_use = agent_in_use();
         let source_monitor = monitor_source_in_use();
+        let thread_agents = thread_agent_sql("c.thread_id");
         let account_in_use = format!(
             "({transfer} OR {source_monitor} OR EXISTS({ACCOUNT_AGENT_SQL} AND ({in_use})))"
         );
         let thread_in_use = format!(
-            "({transfer} OR EXISTS({ACCOUNT_AGENT_SQL} \
-               AND id IN (SELECT chat FROM sessions WHERE thread_id=c.thread_id AND state<>'ended') AND ({in_use})) \
-             OR EXISTS(SELECT 1 FROM runtime_agents WHERE \
-               source_cleanup_phase IN ({ACTIVE_SOURCE_CLEANUP_PHASES}) \
-               AND source_cleanup_account_key=?1 AND source_cleanup_thread_id=c.thread_id))"
+            "({transfer} OR EXISTS({thread_agents} AND ({in_use})) \
+             OR c.thread_id IN (SELECT thread_id FROM cleanup_threads))"
         );
         let sql = format!(
             "WITH candidates(thread_id) AS (SELECT value FROM json_each(?2)), \
-             account_usage(in_use) AS (SELECT {account_in_use}), \
+             account_usage(in_use) AS MATERIALIZED (SELECT {account_in_use}), \
+             cleanup_threads(thread_id) AS MATERIALIZED (SELECT source_cleanup_thread_id FROM runtime_agents \
+               WHERE source_cleanup_phase IN ({ACTIVE_SOURCE_CLEANUP_PHASES}) AND source_cleanup_account_key=?1), \
              candidate_usage AS (SELECT c.thread_id, \
                CASE WHEN {thread_in_use} THEN 1 ELSE 0 END AS busy \
                FROM candidates c) \
@@ -199,10 +209,9 @@ impl SchedulerRepository {
     ) -> StoreResult<std::collections::BTreeSet<String>> {
         let encoded_threads = studio_json::to_string(threads)?;
         let finished = finished_worker_sql();
+        let thread_agents = thread_agent_sql("c.value");
         let mut statement = connection.prepare_cached(&format!(
-            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS(SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload \
-             WHERE account_key=?1 AND deleted_at IS NULL AND NOT ({finished}) \
-             AND id IN (SELECT chat FROM sessions WHERE thread_id=c.value AND state<>'ended'))"
+            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS({thread_agents} AND NOT ({finished}))"
         ))?;
         let rows = statement.query_map([account, &encoded_threads], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -270,6 +279,60 @@ mod tests {
 
     thread_local! {
         static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static SNAPSHOT_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn idle_unload_snapshot_work_is_linear_in_loaded_threads() {
+        let small = snapshot_steps(50);
+        let large = snapshot_steps(100);
+        assert!(
+            large < 40_000,
+            "100 loaded threads must use indexed owner lookups, got {large} VM steps"
+        );
+        assert!(
+            large * 4 < small * 9,
+            "doubling agents and threads must stay near linear: {small} -> {large}"
+        );
+    }
+
+    fn snapshot_steps(agents: usize) -> i32 {
+        let connection = database();
+        let mut threads = std::collections::BTreeSet::new();
+        for n in 0..agents {
+            let thread = format!("thread-{n}");
+            agent(
+                &connection,
+                &format!("agent-{n}"),
+                json!({"threadId":thread,"isLead":true}),
+            );
+            threads.insert(thread);
+        }
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    SNAPSHOT_STEPS.with(|count| {
+                        count.set(
+                            count.get() + statement.get_status(rusqlite::StatementStatus::VmStep),
+                        )
+                    });
+                }
+            }),
+        );
+        SNAPSHOT_STEPS.with(|count| count.set(0));
+        let start = std::time::Instant::now();
+        let (busy, immediate, account_busy) =
+            SchedulerRepository::idle_unload_usage_snapshot(&connection, "acct", &threads).unwrap();
+        let steps = SNAPSHOT_STEPS.with(std::cell::Cell::get);
+        eprintln!(
+            "idle snapshot: agents={agents} threads={agents} steps={steps} elapsed={:?}",
+            start.elapsed()
+        );
+        assert!(busy.is_empty());
+        assert!(immediate.is_empty());
+        assert!(!account_busy);
+        steps
     }
 
     #[test]
@@ -504,6 +567,19 @@ mod tests {
             agent(&connection, "a", fields.clone());
             assert!(thread_in_use(&connection), "{fields} holds the thread");
             assert!(account_in_use(&connection), "{fields} holds the account");
+            let (busy, immediate, account_busy) = SchedulerRepository::idle_unload_usage_snapshot(
+                &connection,
+                "acct",
+                &std::collections::BTreeSet::from(["thread".into(), "other".into()]),
+            )
+            .unwrap();
+            assert_eq!(
+                busy,
+                std::collections::BTreeSet::from(["thread".into()]),
+                "snapshot parity: {fields}"
+            );
+            assert!(account_busy, "snapshot account parity: {fields}");
+            assert!(immediate.contains("other"));
             assert!(
                 !SchedulerRepository::idle_unload_thread_in_use(&connection, "acct", "other")
                     .expect("reads"),
@@ -629,6 +705,25 @@ mod tests {
             thread_in_use(&connection),
             "source cleanup still owns the thread"
         );
+        for phase in ["planned", "submitted", "completed"] {
+            for account in ["acct", "another-account"] {
+                agent(
+                    &connection,
+                    "repair",
+                    json!({"threadId":"new","deletedAt":1.0,
+                    "contextRepair":{"sourceCleanup":{"phase":phase,"accountKey":account,"threadId":"thread"}}}),
+                );
+                let (busy, _, account_busy) = SchedulerRepository::idle_unload_usage_snapshot(
+                    &connection,
+                    "acct",
+                    &std::collections::BTreeSet::from(["thread".into(), "cold".into()]),
+                )
+                .unwrap();
+                assert_eq!(busy.contains("thread"), thread_in_use(&connection));
+                assert!(!busy.contains("cold"));
+                assert_eq!(account_busy, account_in_use(&connection));
+            }
+        }
     }
 
     #[test]
