@@ -258,7 +258,7 @@ export default function CombinedServerSidebar({
         void executeCommand(reference.owner, {
           action: "mark-unread",
           id: reference.id,
-          target,
+          target: { ...target },
         })
           .then(refresh)
           .catch((failure) => notify(errorText(failure)))
