@@ -75,6 +75,10 @@ fn selected_collections_use_the_existing_array_resource() {
         render(&document, &models(), &resources).expect("selected state collections render");
     assert!(generated.contains("state(): ResourceSlot<StateCollections>"));
     assert!(!generated.contains("ignoredModel"));
+    assert!(
+        !generated.contains("function reconcileRow("),
+        "map-only models need no array helper"
+    );
     assert_witness(&document, &generated, true);
     let mut bad = resources.clone();
     bad[0].collections[0].schema = "List".into();
@@ -155,6 +159,10 @@ fn resources() -> Vec<ObservableResource> {
 fn deterministic_fixture_and_typed_path_failures() {
     let document = fixture();
     let generated = render(&document, &models(), &resources()).expect("fixture renders");
+    assert!(
+        generated.contains("function reconcileRow("),
+        "identified array fields retain their helper"
+    );
     assert_eq!(
         generated,
         render(&document, &models(), &resources()).expect("repeat")

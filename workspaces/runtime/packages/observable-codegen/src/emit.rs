@@ -340,6 +340,16 @@ fn apply(shape: &Shape, left: &str, right: &str, parser: &Parser<'_>) -> String 
         Shape::Union { name, .. } => format!("update{name}({left}, {right})"),
     }
 }
+fn array_uses_model(shape: &Shape, name: &str) -> bool {
+    match shape {
+        Shape::Array(item) => {
+            matches!(item.as_ref(), Shape::Object(model) if model == name)
+                || array_uses_model(item, name)
+        }
+        Shape::Nullable(item) => array_uses_model(item, name),
+        Shape::Leaf | Shape::Object(_) | Shape::Union { .. } => false,
+    }
+}
 pub(crate) fn emit_model(out: &mut String, model: &Model, parser: &Parser<'_>) {
     let name = &model.name;
     let dto = &model.dto;
@@ -405,7 +415,14 @@ pub(crate) fn emit_model(out: &mut String, model: &Model, parser: &Parser<'_>) {
         .expect("string");
     }
     out.push_str("return this;\n}\n}\n");
-    if let Some(id) = &model.identity {
+    if let Some(id) = &model.identity
+        && parser.models.values().any(|owner| {
+            owner
+                .fields
+                .iter()
+                .any(|field| array_uses_model(&field.shape, name))
+        })
+    {
         if let Some(order) = &model.ordered_by {
             writeln!(out, "function reconcile{name}(data: {name}Model[], dto: readonly {name}Dto[]): {name}Model[] {{
 const incoming = new Map<string, {name}Dto>();
