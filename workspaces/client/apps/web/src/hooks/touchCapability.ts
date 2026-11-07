@@ -11,6 +11,8 @@ export function hasTouchCapability(
 }
 
 /** Owner of primary touch input for mobile layout and keyboard gestures. */
+export const PRIMARY_TOUCH_POINTER_QUERY = "(pointer: coarse)";
+
 export function primaryTouchPointerMedia() {
-  return window.matchMedia("(pointer: coarse)");
+  return window.matchMedia(PRIMARY_TOUCH_POINTER_QUERY);
 }
