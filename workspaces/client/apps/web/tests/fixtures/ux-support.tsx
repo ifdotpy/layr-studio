@@ -1,3 +1,5 @@
+import { theme } from "../../src/theme";
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext";
 import { backgroundDisplay } from "./background.ts";
 import React, { useEffect, useState } from "react";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
@@ -75,7 +77,7 @@ function Fixture() {
     },
   };
   return (
-    <MantineProvider>
+    <MantineProvider theme={theme}>
       <button onClick={() => setOpened(true)}>Tasks</button>
       <BackgroundTasks
         opened={opened}
@@ -118,4 +120,8 @@ function Fixture() {
     </MantineProvider>
   );
 }
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+  <ServerViewStoreProvider>
+    <Fixture />
+  </ServerViewStoreProvider>,
+);

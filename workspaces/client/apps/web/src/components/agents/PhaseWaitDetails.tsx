@@ -1,3 +1,4 @@
+import { resourceData } from "../../store/runtime.ts";
 import { observer } from "mobx-react-lite";
 import { useMemo } from "react";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
@@ -16,9 +17,7 @@ export const PhaseWaitDetails = observer(function PhaseWaitDetails({
     () =>
       createWaitingChildren(() => {
         const current = store.state().current;
-        return current.status === "live" || current.status === "stale"
-          ? current.data.agents.values()
-          : [];
+        return resourceData(current)?.agents.values() ?? [];
       }, agent.id),
     [store, agent],
   );

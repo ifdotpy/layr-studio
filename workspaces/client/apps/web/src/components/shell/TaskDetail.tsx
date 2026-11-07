@@ -1,3 +1,4 @@
+import { resourceData } from "../../store/runtime.ts";
 import { BackgroundTaskKind } from "../../generated/api";
 import { observer, Observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
@@ -152,18 +153,19 @@ export const TaskDetail = observer(function TaskDetail({ task }: TaskProps) {
       </div>
       <Observer>
         {() => {
-          const current = store.requests().current;
-          const request =
-            current.status === "live" || current.status === "stale"
-              ? [...current.data.requests.values()].find(
-                  (r) =>
-                    r.request.kind === "monitor_start" &&
-                    r.request.monitor === task.id,
-                )
-              : undefined;
+          const current = task.display.actions.includes("approve")
+            ? resourceData(store.requests().current)
+            : undefined;
+          const request = current
+            ? [...current.requests.values()].find(
+                (r) =>
+                  r.request.kind === "monitor_start" &&
+                  r.request.monitor === task.id,
+              )
+            : undefined;
           return (
             <div className="task-actions">
-              {request && task.display.actions.includes("approve") && (
+              {request && (
                 <Button
                   size="xs"
                   variant="light"

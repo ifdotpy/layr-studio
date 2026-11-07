@@ -1,3 +1,6 @@
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext";
+import { ApiError } from "../../src/api";
+import { flushSync } from "react-dom";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import type { components } from "../../src/generated/api";
@@ -58,7 +61,7 @@ class Boundary extends React.Component<React.PropsWithChildren> {
   }
 }
 window.renderCase = async (which, value) => {
-  let component;
+  let component: React.ReactNode;
   if (which === "request") {
     const request = approval({
       id: "approval",
@@ -188,12 +191,23 @@ window.renderCase = async (which, value) => {
       onInsert: noop,
     });
   }
-  root.render(
-    React.createElement(
-      MantineProvider,
-      null,
-      React.createElement(Boundary, { key: ++renderId }, component),
+  flushSync(() =>
+    root.render(
+      React.createElement(
+        MantineProvider,
+        null,
+        React.createElement(
+          ServerViewStoreProvider,
+          null,
+          React.createElement(Boundary, { key: ++renderId }, component),
+        ),
+      ),
     ),
   );
+  if (which === "message")
+    defaultSubscriptions.fail(
+      { kind: "complaint", complaintId: "message" },
+      new ApiError(value, 503, value),
+    );
 };
 window.crashes = [];

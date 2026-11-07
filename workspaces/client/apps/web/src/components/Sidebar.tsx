@@ -88,7 +88,7 @@ import {
   useServerAliases,
 } from "../servers/serverAliases";
 import { serverViewId } from "../servers/environment";
-import { ChatServerLine } from "../servers/ProjectChatRows";
+import { ChatServerLine } from "./chat-row/index.ts";
 import { itemGroup } from "./sidebar/catalog";
 export { isVisibleSidebarAgent } from "./sidebar/catalog";
 

@@ -1,12 +1,11 @@
+import { autorun, computed } from "mobx";
+import { createProcessesMirror } from "../../generated/observableResources.ts";
 import { unreadResult } from "./readReceiptFixture.ts";
 import {
   waitLabel,
   formatOperationalStatus,
 } from "../../status/operationalStatus.ts";
-import {
-  chatActivities as mapActivities,
-  type ActivityEntry,
-} from "./chatActivity.ts";
+import { chatActivities as mapActivities } from "./chatActivity.ts";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { CHAT_INDICATOR_URGENCY } from "../../status/operationalStatus.ts";
@@ -18,6 +17,7 @@ import {
 } from "../../generated/api";
 import { backgroundDisplay, required } from "../componentTestFixtures";
 
+import type { ProcessList } from "../../generated/observableResources.ts";
 import type { Agent, Snapshot } from "../../types";
 
 import { componentSnapshot } from "../componentTestFixtures";
@@ -30,11 +30,43 @@ import { readFileSync } from "node:fs";
 import { PROVIDER_KINDS } from "../../generated/providerKind.ts";
 import ChatStatus from "../agents/ChatStatus";
 function chatActivities(data: Snapshot) {
-  const entries: ActivityEntry[] = [
-    ...data.runtime.tasks.map((record) => ({ kind: "task" as const, record })),
+  const entries: ProcessList["activities"] = [
+    ...data.runtime.tasks.map((record) => ({
+      source: "task" as const,
+      value: {
+        ...record,
+        agent: record.agent || "",
+        name: record.name || "",
+        created: record.created ?? 0,
+        turnId: record.turnId || "",
+        kind:
+          record.kind ||
+          (record.command ? ("command" as const) : ("tool" as const)),
+        status: record.status || ("running" as const),
+      },
+    })),
     ...data.runtime.monitors.map((record) => ({
-      kind: "monitor" as const,
-      record,
+      source: "process" as const,
+      value: {
+        ...record,
+        agent: record.agent || "",
+        created: record.created ?? 0,
+        name: record.name || "",
+        status: record.status || ("running" as const),
+        key: record.id,
+        generation: "generation",
+        accountKey: "default",
+        epoch: 1,
+        source: "monitor" as const,
+        display:
+          record.display ??
+          backgroundDisplay({ kind: "monitor", kindLabel: "monitor" }),
+        bytes: 0,
+        cancelRequested: false,
+        outputTruncated: false,
+        outputPatterns: [],
+        tail: "",
+      },
     })),
   ];
   return mapActivities(data.threads, entries);
@@ -659,4 +691,56 @@ it("orders every indicator kind once by operator urgency", () => {
     "none",
     "loading",
   ]);
+});
+
+it("keeps generated activity membership and derived activities stable for tail-only updates", () => {
+  const agent = makeAgent({ inFlight: true, turnId: "current" });
+  const listing: ProcessList = {
+    processes: [],
+    activities: [
+      {
+        source: "task",
+        value: {
+          id: "tool",
+          agent: agent.id,
+          created: 1,
+          name: "Search",
+          kind: TaskKind.tool,
+          status: TaskStatus.running,
+          turnId: "current",
+          tail: "before",
+          display: backgroundDisplay({ kind: "tool" }),
+        },
+      },
+    ],
+  };
+  const mirror = createProcessesMirror(listing);
+  const membership = mirror.current.activities;
+  const entry = required(membership[0]);
+  const view = computed(() =>
+    mapActivities([agent], mirror.current.activities),
+  );
+  let updates = 0;
+  const stop = autorun(() => {
+    void view.get();
+    updates++;
+  });
+  try {
+    const before = view.get();
+    mirror.apply({
+      ...listing,
+      activities: listing.activities.map((entry) =>
+        entry.source === "task"
+          ? { ...entry, value: { ...entry.value, tail: "after" } }
+          : { ...entry, value: { ...entry.value, tail: "after" } },
+      ),
+    });
+    assert.equal(mirror.current.activities, membership);
+    assert.equal(mirror.current.activities[0], entry);
+    assert.equal(entry.value.tail, "after");
+    assert.equal(view.get(), before);
+    assert.equal(updates, 1);
+  } finally {
+    stop();
+  }
 });

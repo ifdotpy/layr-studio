@@ -20,6 +20,12 @@ export type ResourceStatus<T> =
       readonly error?: SubscriptionError;
     };
 
+export function resourceData<T>(current: ResourceStatus<T>): T | undefined {
+  return current.status === "live" || current.status === "stale"
+    ? current.data
+    : undefined;
+}
+
 export interface ResourceSlot<T> {
   readonly current: ResourceStatus<T>;
 }

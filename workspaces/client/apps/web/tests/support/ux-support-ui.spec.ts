@@ -38,7 +38,9 @@ test("ux support ui", async ({ page: runnerPage }) => {
       stateDir: "fixture",
       chats: [],
       edges: [],
-      runtime: {},
+      runtime: {
+        terminals: [] as components["schemas"]["TerminalEntityDto"][],
+      },
     },
     workspaceId: syncIdentityFixture().workspaceId,
   };
@@ -98,6 +100,7 @@ test("ux support ui", async ({ page: runnerPage }) => {
       status: "running",
       created: 1,
     };
+    syncFixture.snapshot.runtime.terminals = [shell];
     await page.addInitScript(
       ({ open, selected }) => {
         localStorage.setItem("codex.terminal.open", open);
@@ -166,6 +169,7 @@ test("ux support ui", async ({ page: runnerPage }) => {
     });
     await page.clock.install();
     await page.goto(fixtureServerOrigin(server));
+    await expect(page.locator(".terminal-dock")).toContainText("Fixture shell");
     await page
       .getByRole("button", { name: "End session", exact: true })
       .waitFor();
@@ -180,7 +184,7 @@ test("ux support ui", async ({ page: runnerPage }) => {
         color: getComputedStyle(element).color,
         background: getComputedStyle(element).backgroundColor,
       })),
-      { color: "rgb(24, 32, 42)", background: "rgb(255, 255, 255)" },
+      { color: "rgb(23, 23, 23)", background: "rgb(255, 255, 255)" },
     );
     await page.getByRole("button", { name: "Hide panel", exact: true }).click();
     assert.equal(

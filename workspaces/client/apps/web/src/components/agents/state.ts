@@ -1,3 +1,4 @@
+import { resourceData } from "../../store/runtime.ts";
 import { useMemo } from "react";
 import { makeAutoObservable } from "mobx";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
@@ -14,7 +15,6 @@ import {
   filterTeamWorkers,
 } from "./teamModel.ts";
 import {
-  activityEntries,
   chatActivities,
   backgroundActivities,
 } from "../chat-status/chatActivity.ts";
@@ -22,9 +22,7 @@ import {
 type Store = ReturnType<typeof useServerStore>;
 function collections(store: Store) {
   const current = store.state().current;
-  return current.status === "live" || current.status === "stale"
-    ? current.data
-    : undefined;
+  return resourceData(current);
 }
 export function useStateCollections() {
   return collections(useServerStore());
@@ -37,9 +35,7 @@ export function useAgentDetail(agent: Pick<SidebarAgent, "id"> | undefined) {
   const store = useServerStore();
   if (!agent) return undefined;
   const current = store.agentDetail(agentId(agent.id)).current;
-  return current.status === "live" || current.status === "stale"
-    ? current.data
-    : undefined;
+  return resourceData(current);
 }
 export function useWorkspace() {
   return useStateCollections()?.workspaces.values().next().value;
@@ -63,10 +59,7 @@ export function useActivityView(agent: SidebarAgent) {
           (a) => a.id === agent.id || a.rootId === (agent.rootId || agent.id),
         );
         return (
-          chatActivities(
-            members,
-            activityEntries(processes.data.activities),
-          ).get(agent.id) || []
+          chatActivities(members, processes.data.activities).get(agent.id) || []
         );
       },
       get background() {
@@ -145,7 +138,9 @@ export function createTeamView(
   filter = "all",
   pendingReads?: ReadonlyMap<string, ReadState>,
 ) {
+  const normalizedQuery = query.trim().toLowerCase();
   const view = {
+    query: normalizedQuery,
     indicator: (agent: SidebarAgent) =>
       formatAgentStatus(agent, pendingReads?.get(agent.id)),
     pendingRead: (agent: SidebarAgent) => pendingReads?.get(agent.id),
@@ -177,9 +172,6 @@ export function createTeamView(
     get byId() {
       return new Map(this.members.map((agent) => [agent.id, agent]));
     },
-    get query() {
-      return query.trim().toLowerCase();
-    },
     get smallTeam() {
       return this.workers.length <= 3;
     },
@@ -187,16 +179,13 @@ export function createTeamView(
       return this.workers.length > 3 || !!query || filter !== "all";
     },
     get shown(): SidebarAgent[] {
-      return this.query
+      return normalizedQuery
         ? this.workers.filter((agent) => {
             const current = store.agentDetail(agentId(agent.id)).current;
-            const overview =
-              current.status === "live" || current.status === "stale"
-                ? current.data.overview
-                : undefined;
+            const overview = resourceData(current)?.overview;
             return `${agent.name} ${agent.status} ${agent.role || ""} ${overview?.task || ""} ${overview?.result || ""}`
               .toLowerCase()
-              .includes(this.query);
+              .includes(normalizedQuery);
           })
         : this.filter(filter);
     },
@@ -255,10 +244,11 @@ export function createAgentCatalog(store: Store) {
         )
         .flatMap((agent) => {
           const detail = store.agentDetail(agentId(agent.id)).current;
-          if (detail.status !== "live" && detail.status !== "stale") return [];
-          const native = detail.data.nativeStatus;
+          const data = resourceData(detail);
+          if (!data) return [];
+          const native = data.nativeStatus;
           return [
-            detail.data.error,
+            data.error,
             native && typeof native === "object" && "error" in native
               ? native.error
               : undefined,

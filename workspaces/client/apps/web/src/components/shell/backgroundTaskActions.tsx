@@ -1,3 +1,4 @@
+import { resourceData } from "../../store/runtime.ts";
 import { ProcessActionStatus } from "../../generated/api";
 import { useMemo } from "react";
 import { makeAutoObservable, runInAction } from "mobx";
@@ -82,9 +83,7 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
       }
       get listing(): ProcessList | undefined {
         const slot = this.current;
-        return slot.status === "live" || slot.status === "stale"
-          ? slot.data
-          : undefined;
+        return resourceData(slot);
       }
       get activities(): ProcessList["activities"] {
         return this.listing?.activities ?? [];
@@ -100,9 +99,7 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
       }
       owner(id: string) {
         const slot = store.state().current;
-        return slot.status === "live" || slot.status === "stale"
-          ? slot.data.agents.get(id)
-          : undefined;
+        return resourceData(slot)?.agents.get(id);
       }
       get filtered() {
         return this.activities.filter(
@@ -243,14 +240,7 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
             ? await api.apiDownload("/api/monitor/log", { id: task.id })
             : {
                 blob: new Blob(
-                  [
-                    fileText ??
-                      (detail.status === "live" || detail.status === "stale"
-                        ? detail.data.tail
-                        : undefined) ??
-                      task.tail ??
-                      "",
-                  ],
+                  [fileText ?? resourceData(detail)?.tail ?? task.tail ?? ""],
                   { type: "text/plain" },
                 ),
                 name: `command-${task.id}.log`,

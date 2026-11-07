@@ -1,3 +1,4 @@
+import { resourceData } from "../../store/runtime.ts";
 import type { TaskProps } from "./backgroundTaskPresentation";
 import { observer } from "mobx-react-lite";
 import { useBackgroundTaskActions } from "./backgroundTaskActions";
@@ -173,8 +174,7 @@ export const TaskToolInput = observer(function TaskToolInput({
   const slot = requested
     ? store.taskDetail(taskId(task.id)).current
     : undefined;
-  const detail =
-    slot?.status === "live" || slot?.status === "stale" ? slot.data : undefined;
+  const detail = slot ? resourceData(slot) : undefined;
   return (
     <>
       {task.display.kind !== BackgroundTaskKind.monitor && !detail && (

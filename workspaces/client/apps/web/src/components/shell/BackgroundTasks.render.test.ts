@@ -1,3 +1,7 @@
+import { resourceData } from "../../store/runtime";
+import { autorun } from "mobx";
+import { approval } from "../../approvalFixtures";
+import { DEFAULT_SUBSCRIPTION_GRACE_MS } from "../../sync/subscriptions/contracts";
 import { ProcessSourceKind } from "../../generated/api";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
@@ -16,11 +20,17 @@ const h = vi.hoisted(() => ({
   store: null as ReturnType<typeof createServerStore> | null,
   post: vi.fn(async () => ({ status: "completed", processes: [] })),
   get: vi.fn(async () => ({})),
+  answer: vi.fn(async () => ({})),
 }));
 vi.mock("../../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../../servers/ServerServicesContext")>()),
   useServerStore: () => h.store,
-  useServerApi: () => ({ ...defaultApi, post: h.post, get: h.get }),
+  useServerApi: () => ({
+    ...defaultApi,
+    post: h.post,
+    get: h.get,
+    command: { ...defaultApi.command, answer: h.answer },
+  }),
   useServerServices: () => null,
 }));
 beforeEach(() => {
@@ -40,6 +50,7 @@ beforeEach(() => {
   }));
   h.post.mockClear();
   h.get.mockClear();
+  h.answer.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -72,9 +83,10 @@ function process(id = "command"): components["schemas"]["ProcessView"] {
   };
 }
 async function fixture(records = [process()]) {
+  const removed = vi.fn();
   const added = vi.fn(
-    (_ref: import("../../sync/subscriptions/contracts").ResourceRef) =>
-      () => {},
+    (ref: import("../../sync/subscriptions/contracts").ResourceRef) => () =>
+      removed(ref),
   );
   const subscriptions = createSubscriptions({
     watchResourceChanges: added,
@@ -85,18 +97,19 @@ async function fixture(records = [process()]) {
   });
   const store = createServerStore(subscriptions);
   h.store = store;
+  const requestReads = vi.spyOn(store, "requests");
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
   const notify = vi.fn();
-  const render = async (leadId = "lead") =>
+  const render = async (leadId = "lead", opened = true) =>
     act(async () =>
       root.render(
         createElement(
           MantineProvider,
-          null,
+          { env: "test" },
           createElement(BackgroundTasks, {
-            opened: true,
+            opened,
             close() {},
             leadId,
             openAgent() {},
@@ -146,8 +159,10 @@ async function fixture(records = [process()]) {
   await owners();
   return {
     store,
+    requestReads,
     subscriptions,
     added,
+    removed,
     host,
     root,
     render,
@@ -459,6 +474,122 @@ it("updates monitor wake budgets from its process subscription alone", async () 
       false,
     );
   } finally {
+    await f.close();
+  }
+});
+
+it("never acquires requests for a non-approvable task footer", async () => {
+  const f = await fixture();
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  try {
+    expect(f.requestReads).not.toHaveBeenCalled();
+    f.requestReads.mockClear();
+    await act(async () => {
+      f.subscriptions.publish({ kind: "state" }, []);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(f.requestReads).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
+});
+
+it("still finds and answers the approvable monitor request", async () => {
+  const task = {
+    ...process(),
+    display: backgroundDisplay({ kind: "monitor", actions: ["approve"] }),
+  };
+  const f = await fixture([task]);
+  try {
+    await act(async () => {
+      f.subscriptions.publish({ kind: "state" }, [
+        {
+          collection: "request",
+          id: "approval",
+          value: approval({
+            request: {
+              kind: "monitor_start",
+              monitor: task.id,
+              command: "pwd",
+            },
+          }),
+        },
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await act(async () => button("Approve command").click());
+    expect(h.answer).toHaveBeenCalledExactlyOnceWith("approval", {
+      decision: "accept",
+    });
+  } finally {
+    await f.close();
+  }
+});
+
+it("releases switched detail and closed drawer interests while another store observer stays alive", async () => {
+  const f = await fixture([process(), process("other")]);
+  let states = 0;
+  const keep = autorun(() => {
+    void resourceData(f.store.state().current)?.agents.get("lead")?.name;
+    states++;
+  });
+  try {
+    await act(async () => button("Read tool input").click());
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(
+      f.added.mock.calls.some(
+        ([r]) => r.kind === "taskDetail" && r.taskId === "command",
+      ),
+    ).toBe(true);
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>('[data-task="other"]')!.click(),
+    );
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(DEFAULT_SUBSCRIPTION_GRACE_MS),
+    );
+    expect(f.removed).toHaveBeenCalledWith({
+      kind: "taskDetail",
+      taskId: "command",
+    });
+    await act(async () => button("Read tool input").click());
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(
+      f.added.mock.calls.some(
+        ([r]) => r.kind === "taskDetail" && r.taskId === "other",
+      ),
+    ).toBe(true);
+    await f.render("lead", false);
+    await act(async () =>
+      vi.advanceTimersByTimeAsync(DEFAULT_SUBSCRIPTION_GRACE_MS),
+    );
+    expect(f.removed).toHaveBeenCalledWith({
+      kind: "taskDetail",
+      taskId: "other",
+    });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(f.removed).toHaveBeenCalledWith({
+      kind: "processes",
+      agentId: "lead",
+    });
+    expect(f.removed).not.toHaveBeenCalledWith({ kind: "state" });
+    const clock = vi.fn();
+    window.__studioBackgroundTaskRenderProbe = clock;
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(clock).not.toHaveBeenCalled();
+    const before = states;
+    await f.owners("Still alive");
+    expect(states).toBeGreaterThan(before);
+    await f.render();
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    await f.publish([process(), process("other")]);
+    expect(document.querySelector("[data-task-detail]")).not.toBeNull();
+    await act(async () => button("Read tool input").click());
+    await act(async () => vi.advanceTimersByTimeAsync(100));
+    expect(
+      f.added.mock.calls.filter(([r]) => r.kind === "taskDetail"),
+    ).toHaveLength(3);
+  } finally {
+    keep();
     await f.close();
   }
 });

@@ -1,4 +1,4 @@
-import { NativeReleasePhase, AgentStatus } from "./generated/api";
+import { AgentStatus } from "./generated/api";
 import { nativeErrorView } from "./nativeErrors";
 import type { GetResult } from "./api";
 import type { Approval } from "./approvals";
@@ -161,26 +161,6 @@ export type Message = Omit<
   timestamp?: number | string | undefined;
 };
 export const busy = new Set(["running", "starting", "approval"]);
-export const nativeReleaseLabel = (agent: Agent) => {
-  const release = agent.nativeRelease;
-  if (
-    agent.inFlight ||
-    !release ||
-    release.phase !== NativeReleasePhase.released
-  )
-    return null;
-  return release.resetPending
-    ? "Tool reset waits for Codex to close the native session"
-    : "Native thread released";
-};
-export const complaintLabel = (status: string) =>
-  ({
-    open: "Awaiting response",
-    in_progress: "In progress",
-    resolved: "Resolved",
-    declined: "Declined",
-  })[status] || status;
-
 // A stored turn failure is not the current health of the account connection.
 export function agentErrorLabel(agent: Agent, error = agent.error): string {
   if (

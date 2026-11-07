@@ -32,7 +32,7 @@ import {
 export function operationalWait(agent: SidebarAgent) {
   const status = agent.operationalStatus;
   const reasons =
-    status?.reason === "waiting" || status?.reason === "needs_input"
+    status.reason === "waiting" || status.reason === "needs_input"
       ? status.wait
       : null;
   return {
@@ -113,7 +113,7 @@ export function phasePresentation(
             ? phaseOverride || detail?.activity?.phase || status
             : status;
   const phase =
-    wait?.live && ["idle", "completed"].includes(currentPhase)
+    wait.live && ["idle", "completed"].includes(currentPhase)
       ? "waiting"
       : currentPhase;
   const names: Record<string, string> = {
@@ -134,9 +134,9 @@ export function phasePresentation(
     safety: "Codex is checking this request",
     error: "Codex reported an error",
     queued: startWaitLabel(agent) || "Queued",
-    waiting: wait?.label || endedWaitLabel,
+    waiting: wait.label || endedWaitLabel,
     waiting_on_monitor: commandWaitLabel(detail || {}),
-    parked: wait?.label || endedWaitLabel,
+    parked: wait.label || endedWaitLabel,
     approval: "Waiting for your answer",
     failed: "Failed",
     paused: "Stopped",
@@ -169,7 +169,7 @@ export function phasePresentation(
   };
   const Icon = notice?.Icon || icons[phase] || Circle;
   const waiting = ["waiting", "parked"].includes(phase);
-  const liveWait = waiting && wait?.live && !notice;
+  const liveWait = waiting && wait.live && !notice;
   const native = ["retrying", "auth", "safety"].includes(phase)
     ? typeof detail?.nativeStatus === "object"
       ? detail?.nativeStatus

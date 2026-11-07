@@ -27,7 +27,7 @@ type PeerTeam = DeepReadonly<MutablePeerTeam>;
 import type { SidebarChatView } from "../../sidebar/viewModel.ts";
 import type { Project } from "../../ProjectOrganization";
 import "./peer-teams.css";
-import { ChatServerLine } from "../../../servers/ProjectChatRows";
+import { ChatServerLine } from "../../chat-row/index.ts";
 
 type PeerTeamRequest =
   paths["/api/peer-teams"]["post"]["requestBody"]["content"]["application/json"];

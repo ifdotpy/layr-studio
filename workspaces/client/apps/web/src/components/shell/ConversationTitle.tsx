@@ -1,8 +1,9 @@
+import { resourceData } from "../../store/runtime.ts";
 import { observer } from "mobx-react-lite";
 import { ActionButton } from "../ui/primitives";
 import { ArrowLeft } from "lucide-react";
 import { AgentWorkspaceBadge } from "./WorkspaceBadge";
-import { ChatServerLine } from "../../servers/ProjectChatRows";
+import { ChatServerLine } from "../chat-row/index.ts";
 import { useAgentSummary } from "../agents/state.ts";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
 import { useConversationActions } from "../conversation/navigation.ts";
@@ -58,10 +59,7 @@ const ProjectName = observer(function ProjectName({
   agent: SidebarAgent;
 }) {
   const current = useServerStore().state().current;
-  const projects =
-    current.status === "live" || current.status === "stale"
-      ? current.data.projects
-      : undefined;
+  const projects = resourceData(current)?.projects;
   const name =
     [...(projects?.values() || [])].find(
       (project) => project.path === agent.projectPath,

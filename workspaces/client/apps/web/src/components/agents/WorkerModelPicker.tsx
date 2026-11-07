@@ -345,7 +345,7 @@ export function useWorkerModels(
   const reader = useModelCatalogReader();
   const modelCatalogs = ownerCatalogs(reader.cacheOwner ?? reader);
   const catalogKey = JSON.stringify([reader.scope, accountKey, workers]);
-  const read = useMemo<ModelCatalogRead>(() => reader.read, [reader.read]);
+  const read = reader.read;
   const subscribe = useCallback(
     (listener: () => void) =>
       enabled

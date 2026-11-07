@@ -9,6 +9,8 @@ import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
 import type { ResourceRef } from "../sync/subscriptions/contracts.ts";
 import {
   createObservableResourceRuntime,
+  resourceData,
+  type ResourceStatus,
   MAX_INACTIVE_RESOURCE_FACADES,
 } from "./runtime.ts";
 
@@ -531,4 +533,26 @@ describe("independent request projections over one state subscription", () => {
       f.close();
     }
   });
+});
+
+it("unwraps only live and stale resource data, including stale errors", () => {
+  const data = { value: "retained" };
+  const error = new Error("Disconnected");
+  const cases: ResourceStatus<typeof data>[] = [
+    { status: "loading" },
+    { status: "absent" },
+    { status: "error", error },
+    { status: "live", data },
+    { status: "stale", data },
+    { status: "stale", data, error },
+  ];
+  expect(cases.map(resourceData)).toEqual([
+    undefined,
+    undefined,
+    undefined,
+    data,
+    data,
+    data,
+  ]);
+  expect(resourceData(cases[5]!)).toBe(data);
 });

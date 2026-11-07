@@ -1,3 +1,5 @@
+import { initSync } from "../../wasm/generated/client";
+// @vitest-environment happy-dom
 import {
   ProcessSourceKind,
   BackgroundTaskKind,
@@ -9,44 +11,29 @@ import {
 import { TaskStatus as GeneratedApiTaskStatus } from "../../generated/api.ts";
 import { webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { isValidElement, type ReactElement, type ReactNode } from "react";
+import { join } from "node:path";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { createSubscriptions } from "../../sync/subscriptions/module";
+import { createServerStore } from "../../store";
+import { ServerStoreProvider } from "../../servers/ServerServicesContext";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
+import {
+  useBackgroundTaskArea,
+  BackgroundTaskActionsProvider,
+  type BackgroundTaskActions,
+} from "./backgroundTaskActions";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApiScope, type ServerApi } from "../../api";
 import { createMutationJournal } from "../../servers/mutationIdentity";
 import { monitorInputStoreFixture } from "../../servers/monitorInputStore.fixture";
-import type { Agent } from "../../types";
 
-vi.mock("mobx-react-lite", () => ({
-  observer: (component: unknown) => component,
-}));
-const hooks = vi.hoisted(() => ({
-  values: [] as unknown[],
-  cursor: 0,
-  api: undefined as ServerApi | undefined,
-  actions: {} as Record<string, unknown>,
-}));
-vi.mock("../../servers/ServerServicesContext", () => ({
+const hooks = vi.hoisted(() => ({ api: undefined as ServerApi | undefined }));
+vi.mock("../../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../../servers/ServerServicesContext")>()),
   useServerApi: () => hooks.api,
   useServerServices: () => null,
-  useServerResourceReads: () => () => () => {},
-}));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => {
-    const index = hooks.cursor++;
-    if (!(index in hooks.values))
-      hooks.values[index] = typeof initial === "function" ? initial() : initial;
-    return [
-      hooks.values[index],
-      (next: unknown) => {
-        hooks.values[index] =
-          typeof next === "function" ? next(hooks.values[index]) : next;
-      },
-    ];
-  },
-}));
-vi.mock("./backgroundTaskActions", () => ({
-  useBackgroundTaskActions: () => hooks.actions,
 }));
 import { ProcessInput } from "./ProcessInput";
 
@@ -68,32 +55,19 @@ function memoryStorage(): Storage {
   };
 }
 
-function find(
-  tree: ReactNode,
-  predicate: (node: ReactElement<Record<string, unknown>>) => boolean,
-): ReactElement<Record<string, unknown>> | undefined {
-  if (Array.isArray(tree))
-    return tree.map((child) => find(child, predicate)).find(Boolean);
-  if (!isValidElement<Record<string, unknown>>(tree)) return;
-  if (predicate(tree)) return tree;
-  return find(tree.props.children as ReactNode, predicate);
-}
-
-function fixture() {
+async function fixture() {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   // LAN HTTP has secure randomness but no SubtleCrypto.
   vi.stubGlobal("crypto", {
     getRandomValues: webcrypto.getRandomValues.bind(webcrypto),
   });
-  vi.stubGlobal(
-    "fetch",
-    async () =>
-      new Response(
-        readFileSync(
-          new URL("../../wasm/generated/client_bg.wasm", import.meta.url),
-        ),
-        { headers: { "Content-Type": "application/wasm" } },
+  initSync({
+    module: new Uint8Array(
+      readFileSync(
+        join(import.meta.dirname, "../../wasm/generated/client_bg.wasm"),
       ),
-  );
+    ),
+  });
   const storage = memoryStorage();
   const journal = monitorInputStoreFixture();
   const writes = new Map<string, string>();
@@ -171,61 +145,118 @@ function fixture() {
       stdinState: ProcessStdinState.open,
     },
   } as const;
-  const owner = { id: "owner", accountKey: "target", epoch: 3 } as Agent;
-  const actions: Promise<boolean>[] = [];
-  const render = () => {
-    hooks.cursor = 0;
-    hooks.actions = {
-      api: hooks.api,
-      owner: () => owner,
-      pending: false,
-      checkInputReceipt: () =>
-        hooks.api!.checkMonitorInputReceipt(task.id, {
-          agent: owner.id,
-          accountKey: owner.accountKey || "default",
-          epoch: owner.epoch!,
-        }),
-      act: (
-        path: import("../../api").ApiPostPath,
-        body: import("../../api").PostInput<import("../../api").ApiPostPath>,
-      ) => {
-        const action = hooks.api!.post(path, body).then(
-          () => true,
-          () => false,
-        );
-        actions.push(action);
-        return action;
+  const subscriptions = createSubscriptions({
+    watchResourceChanges: () => () => {},
+    watchResourceConnection: (accept) => {
+      accept("live", "open", {});
+      return () => {};
+    },
+  });
+  const store = createServerStore(subscriptions);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  let area: BackgroundTaskActions;
+  const notify = vi.fn();
+  function Area() {
+    area = useBackgroundTaskArea({
+      opened: true,
+      leadId: "owner",
+      close() {},
+      openAgent() {},
+      refresh: async () => {},
+      notify,
+    });
+    return createElement(
+      BackgroundTaskActionsProvider,
+      { value: area },
+      createElement(ProcessInput, {
+        task: receiptOnly
+          ? { ...task, display: { ...task.display, actions: ["readOutput"] } }
+          : task,
+      }),
+    );
+  }
+  let generation = 0;
+  const render = () =>
+    act(async () =>
+      root.render(
+        createElement(
+          ServerStoreProvider,
+          { value: store },
+          createElement(
+            MantineProvider,
+            { env: "test" },
+            createElement(Area, { key: generation }),
+          ),
+        ),
+      ),
+    );
+  await render();
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 100)));
+  await act(async () => {
+    subscriptions.publish({ kind: "state" }, [
+      {
+        collection: "agentSummary",
+        id: "owner",
+        value: agentSummaryFixture("owner", { accountKey: "target", epoch: 3 }),
       },
-    };
-    return ProcessInput({
-      task: receiptOnly
-        ? { ...task, display: { ...task.display, actions: ["readOutput"] } }
-        : task,
-    }) as ReactElement;
-  };
-  const send = async () => {
-    const submit = find(render(), (node) => node.type === "form")?.props
-      .onSubmit;
-    if (typeof submit !== "function")
-      throw new Error("Real input form is missing");
-    submit({ preventDefault() {} });
-    await Promise.all(actions);
+    ]);
     await Promise.resolve();
+  });
+  const input = () =>
+    host.querySelector<HTMLInputElement>("input[aria-label='Terminal input']")!;
+  const type = async (text: string) =>
+    act(async () => {
+      const field = input();
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )!.set!.call(field, text);
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+  const settle = async () =>
+    act(async () => {
+      await vi.waitFor(() => expect(area.pending).toBe(false));
+    });
+  const send = async () => {
+    await act(async () =>
+      host
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    await settle();
   };
-  const check = () => {
-    const click = find(
-      render(),
-      (node) => node.props.children === "Check input receipt",
-    )?.props.onClick;
-    if (typeof click !== "function")
-      throw new Error("Real receipt button is missing");
-    click();
+  const check = async () => {
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((button) => button.textContent === "Check input receipt")!
+        .click(),
+    );
+  };
+  cleanup = async () => {
+    await act(async () => root.unmount());
+    store.dispose();
+    subscriptions.dispose();
+    host.remove();
   };
   return {
     storage,
+    notify,
     writes,
     requests,
     open,
+    reload: async () => {
+      hooks.api = open();
+      generation++;
+      await render();
+    },
+    type,
+    input,
+    render,
+    status: () => host.querySelector('[role="status"]')?.textContent,
     send,
     check,
     setReceipt: (status: string) => {
@@ -238,35 +269,36 @@ function fixture() {
     receiptOnly: () => {
       receiptOnly = true;
     },
-    hasForm: () => !!find(render(), (node) => node.type === "form"),
+    hasForm: () => !!host.querySelector("form"),
   };
 }
 
-afterEach(() => {
-  hooks.values = [];
-  hooks.cursor = 0;
+let cleanup: (() => Promise<void>) | undefined;
+afterEach(async () => {
+  await cleanup?.();
+  cleanup = undefined;
   vi.unstubAllGlobals();
 });
 
 it("the real Send line handler retries a lost success with the same ID and permits a fresh deliberate identical line", async () => {
-  const f = fixture();
-  hooks.values[0] = "private stdin";
+  const f = await fixture();
+  await f.type("private stdin");
   await f.send();
-  expect(hooks.values[0]).toBe("private stdin");
-  expect(f.writes.size).toBe(1);
+  expect(f.input().value).toBe("private stdin");
+  expect(f.writes.size, JSON.stringify(f.notify.mock.calls)).toBe(1);
   expect(f.storage.length).toBe(0);
   expect(JSON.stringify(f.metadata())).not.toContain("private stdin");
-  hooks.values[0] = "different input";
+  await f.type("different input");
   await f.send();
   expect(f.requests).toHaveLength(1);
-  hooks.values[0] = "private stdin";
+  await f.type("private stdin");
   await f.send();
   expect(f.requests[1]?.headers.get("X-Studio-Request-Id")).toBe(
     f.requests[0]?.headers.get("X-Studio-Request-Id"),
   );
   expect(f.writes.size).toBe(1);
-  expect(hooks.values[0]).toBe("");
-  hooks.values[0] = "private stdin";
+  expect(f.input().value).toBe("");
+  await f.type("private stdin");
   await f.send();
   expect(f.writes.size).toBe(2);
   expect(f.requests[2]?.headers.get("X-Studio-Request-Id")).not.toBe(
@@ -275,40 +307,42 @@ it("the real Send line handler retries a lost success with the same ID and permi
 });
 
 it("the real receipt button recovers after reload without the secret and never clears an unknown result", async () => {
-  const f = fixture();
-  hooks.values[0] = "private stdin";
+  const f = await fixture();
+  await f.type("private stdin");
   await f.send();
-  hooks.values = [];
-  hooks.api = f.open();
+  await f.reload();
+  expect(f.input().value).toBe("");
   f.receiptOnly();
+  await f.render();
   expect(f.hasForm()).toBe(false);
   f.setReceipt("unknown");
-  f.check();
+  await f.check();
   await vi.waitFor(() =>
-    expect(hooks.values[4]).toBe(
+    expect(f.status()).toBe(
       "The input result is unknown. Do not send different input.",
     ),
   );
-  expect(await hooks.api.pendingMonitorInput("monitor-one")).not.toBeNull();
-  expect(hooks.values[0]).toBe("");
+  expect(await hooks.api!.pendingMonitorInput("monitor-one")).not.toBeNull();
   f.setReceipt("acknowledged");
-  f.check();
+  await f.check();
   await vi.waitFor(() =>
-    expect(hooks.values[4]).toBe("The process acknowledged the input."),
+    expect(f.status()).toBe("The process acknowledged the input."),
   );
-  expect(await hooks.api.pendingMonitorInput("monitor-one")).toBeNull();
+  expect(await hooks.api!.pendingMonitorInput("monitor-one")).toBeNull();
   expect(f.writes.size).toBe(1);
   const checks = f.requests.filter((request) => request.method === "GET");
   expect(checks).toHaveLength(2);
   expect(new URL(checks[0]!.url).searchParams.get("accountKey")).toBe("target");
+  expect(new URL(checks[0]!.url).searchParams.get("agent")).toBe("owner");
+  expect(new URL(checks[0]!.url).searchParams.get("epoch")).toBe("3");
   expect(checks.every((request) => !request.url.includes("private"))).toBe(
     true,
   );
 });
 
 it("the receipt reader keeps a pending identity for missing or mismatched evidence and releases an exact rejection", async () => {
-  const f = fixture();
-  hooks.values[0] = "private stdin";
+  const f = await fixture();
+  await f.type("private stdin");
   await f.send();
   const pending = await hooks.api!.pendingMonitorInput("monitor-one");
   const requestId = pending!.requestId;
@@ -342,13 +376,14 @@ it("the receipt reader keeps a pending identity for missing or mismatched eviden
     },
   ]) {
     f.setReceiptObject(receipt);
-    expect(
-      await hooks.api!.checkMonitorInputReceipt("monitor-one", {
-        agent: "owner",
-        accountKey: "target",
-        epoch: 3,
-      }),
-    ).toBe("unknown");
+    await f.check();
+    await act(async () => {
+      await vi.waitFor(() =>
+        expect(f.status()).toBe(
+          "The input result is unknown. Do not send different input.",
+        ),
+      );
+    });
     expect(await hooks.api!.pendingMonitorInput("monitor-one")).toEqual(
       pending,
     );
@@ -357,13 +392,12 @@ it("the receipt reader keeps a pending identity for missing or mismatched eviden
     found: true,
     result: { ...exact, response: { ...exact.response, status: "rejected" } },
   });
-  expect(
-    await hooks.api!.checkMonitorInputReceipt("monitor-one", {
-      agent: "owner",
-      accountKey: "target",
-      epoch: 3,
-    }),
-  ).toBe("rejected");
+  await f.check();
+  await act(async () => {
+    await vi.waitFor(() =>
+      expect(f.status()).toBe("The process rejected the input."),
+    );
+  });
   expect(await hooks.api!.pendingMonitorInput("monitor-one")).toBeNull();
   expect(f.writes.size).toBe(1);
 });

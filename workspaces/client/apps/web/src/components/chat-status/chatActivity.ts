@@ -1,7 +1,7 @@
 import { BackgroundTaskKind } from "../../generated/api.ts";
 import { AgentSource, AgentStatus } from "../../generated/api.ts";
-import type { Agent, DeepReadonly } from "../../types.ts";
-import type { components } from "../../generated/api.ts";
+import type { Agent } from "../../types.ts";
+import type { ProcessList } from "../../generated/observableResources.ts";
 import { isCommandTask } from "../backgroundTaskModel.ts";
 
 export interface ChatActivity {
@@ -18,26 +18,6 @@ export interface ChatActivity {
   commandTask?: boolean | undefined;
 }
 
-export type ActivityEntry = {
-  kind: "task" | "monitor";
-  record: DeepReadonly<
-    | components["schemas"]["TaskRecordView"]
-    | components["schemas"]["TaskProjection"]
-    | components["schemas"]["ProcessView"]
-  >;
-};
-export function activityEntries(
-  activities: DeepReadonly<components["schemas"]["BackgroundTaskView"][]>,
-): ActivityEntry[] {
-  return activities.map((activity) => ({
-    kind:
-      activity.value.display.kind === BackgroundTaskKind["monitor"]
-        ? "monitor"
-        : "task",
-    record: activity.value,
-  }));
-}
-
 export function backgroundActivities(activities: ChatActivity[]) {
   return activities.filter(
     (activity) =>
@@ -48,7 +28,7 @@ export function backgroundActivities(activities: ChatActivity[]) {
 
 export function chatActivities(
   source: readonly Agent[],
-  entries: readonly ActivityEntry[],
+  entries: ProcessList["activities"],
 ): Map<string, ChatActivity[]> {
   const agents = source.filter((agent) => agent.source === AgentSource.managed);
   const byId = new Map(agents.map((agent) => [agent.id, agent]));
@@ -61,7 +41,9 @@ export function chatActivities(
       result.set(id, [...(result.get(id) || []), activity]);
     }
   };
-  for (const { kind, record } of entries) {
+  for (const { value: record } of entries) {
+    const kind =
+      record.display.kind === BackgroundTaskKind.monitor ? "monitor" : "task";
     const agent = byId.get(record.agent || "");
     if (
       !agent ||
@@ -69,10 +51,7 @@ export function chatActivities(
     )
       continue;
     concrete.add(agent.id);
-    const turnId =
-      "turnId" in record && typeof record.turnId === "string"
-        ? record.turnId
-        : undefined;
+    const turnId = record.turnId;
     const background =
       kind === "monitor" ||
       agent.inFlight === false ||
