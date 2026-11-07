@@ -873,3 +873,18 @@ describe("original saved sidebar state", () => {
     ).toThrow("offline");
   });
 });
+
+it("preserves source order when server sort keys overlap", () => {
+  const local = source("local"),
+    remote = source("remote");
+  local.sidebar.rows = [agent("a", { sortKey: "same" })];
+  remote.sidebar.rows = [agent("a", { sortKey: "same" })];
+  const select = createMergedSidebarSelector();
+  const model = select([local, remote]);
+  expect(model.rows.map((row) => row.id)).toEqual([
+    model.chatKey("local", "a"),
+    model.chatKey("remote", "a"),
+  ]);
+  expect(model.rows[0]?.sortKey).toBe("0000000000\u0000same");
+  expect(model.rows[1]?.sortKey).toBe("0000000001\u0000same");
+});

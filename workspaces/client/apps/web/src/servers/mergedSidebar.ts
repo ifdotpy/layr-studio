@@ -1,6 +1,9 @@
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
 import type { PeerTeam, Project, Room, Snapshot } from "../types";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
+import {
+  createSidebarMirror,
+  type SidebarChatRow,
+} from "../generated/observableResources.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
 import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
 
@@ -259,10 +262,10 @@ export function mergeSidebar(
     }
     return chatKey(owner, value);
   };
-  const rows: SidebarChatRow[] = [];
+  const rowValues: SidebarChatRow[] = [];
   const peerTeams: PeerTeam[] = [];
   const rooms: Room[] = [];
-  for (const source of sources) {
+  for (const [position, source] of sources.entries()) {
     for (const chat of source.sidebar.rows) {
       const id = chatKey(source.id, chat.id);
       const path = boundProject(source, chat);
@@ -282,13 +285,14 @@ export function mergeSidebar(
           folders: [],
         });
       }
-      rows.push(
+      rowValues.push(
         single
           ? chat
           : {
               ...chat,
               id,
               projectPath: path,
+              sortKey: `${String(position).padStart(10, "0")}\u0000${chat.sortKey}`,
               groupKey: mapOrderGroup(source.id, chat.groupKey),
               teamId: chat.teamId ? teamKey(source.id, chat.teamId) : null,
               projectFolder: chat.projectFolder
@@ -587,6 +591,7 @@ export function mergeSidebar(
         : { revision, groups: order },
     },
   };
+  const rows: readonly SidebarChatRow[] = rowValues;
   return {
     data,
     sources,
@@ -642,6 +647,7 @@ export function createSidebarSourceStore() {
 }
 
 export function createMergedSidebarSelector(combined = true) {
+  const mirror = createSidebarMirror();
   let previous: MergedSidebar | undefined;
   let revision = 0;
   return (sources: readonly SidebarSource[]) => {
@@ -659,6 +665,8 @@ export function createMergedSidebarSelector(combined = true) {
     )
       return previous;
     const next = mergeSidebar(sources, revision + 1, combined);
+    mirror.apply({ rows: next.rows });
+    next.rows = mirror.current.rows;
     // The merged order revision grows only when the merged order changes. A snapshot for
     // another reason must not replace an order move that waits for its server.
     const previousOrder = previous?.data.runtime.sidebarOrder;
@@ -683,7 +691,6 @@ export function createMergedSidebarSelector(combined = true) {
             : row;
         });
       };
-      next.rows = retain(next.rows, previous.rows);
       next.data.runtime.projects = retain(
         next.data.runtime.projects,
         previous.data.runtime.projects,

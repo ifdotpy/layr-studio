@@ -160,6 +160,12 @@ function Fixture() {
     },
   });
   const logical = location.search.includes("logical");
+  const rows = data.threads.map((chat) =>
+    sidebarRowFixture(chat.id, {
+      name: chat.name || "Chat",
+      projectPath: chat.projectPath || chat.cwd || "",
+    }),
+  );
   return React.createElement(
     React.Fragment,
     null,
@@ -167,17 +173,7 @@ function Fixture() {
       ? React.createElement(ProjectGroupsSidebar, {
           navigation: {
             owner: {
-              ...navigationSnapshot(
-                data,
-                "lead",
-                "",
-                data.threads.map((chat) =>
-                  sidebarRowFixture(chat.id, {
-                    name: chat.name || "Chat",
-                    projectPath: chat.projectPath || chat.cwd || "",
-                  }),
-                ),
-              ),
+              ...navigationSnapshot(data, "lead", "", rows),
               projects: data.runtime.projects.map((project) => ({
                 ...project,
                 ...(location.search.includes("legacy") ? { id: "" } : {}),
@@ -205,7 +201,7 @@ function Fixture() {
           services,
           data,
           opened: "lead",
-          indicators: new Map(),
+          rows,
           markingRead: new Set<string>(),
           creating: false,
           mobile: true,
