@@ -104,9 +104,6 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
   );
   write(
     "witness.ts",
-<<<<<<< head
-    `
-=======
     input.collections
       ? `
 import assert from 'node:assert/strict';
@@ -169,7 +166,6 @@ stopMembers(); stopTitle(); stopSpy();
 console.log('selected collection facade witnesses passed');
 `
       : `
->>>>>>> 270f99e
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
