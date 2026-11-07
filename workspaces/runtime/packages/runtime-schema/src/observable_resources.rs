@@ -42,6 +42,24 @@ pub fn models() -> Vec<ObservableModel> {
         ObservableModel::named("Question").identity("id"),
         ObservableModel::named("QuestionAnswer").identity("id"),
         ObservableModel::named("TaskDetailResponse"),
+        ObservableModel::named("WorkSubscriptionData").declared_fields(),
+        ObservableModel::named("WorkDetail")
+            .declared_fields()
+            .identity("id")
+            .opaque("resultSchema")
+            .opaque("gate")
+            .track_nested(&["results", "decisions", "submissionRefusal", "policy"]),
+        ObservableModel::named("WorkResultRecord")
+            .declared_fields()
+            .identity("id")
+            .opaque("result")
+            .track_nested(&["gate"]),
+        ObservableModel::named("WorkDecisionRecord").declared_fields(),
+        ObservableModel::named("TaskGateEvidence").track_nested(&[]),
+        ObservableModel::named("TerminalRecord")
+            .declared_fields()
+            .identity("id"),
+        ObservableModel::named("RetainedWorktreeEntityDto").identity("id"),
         ObservableModel::named("MonitorEntityDto").identity("id"),
         ObservableModel::named("TranscriptData"),
         ObservableModel::named("TranscriptMessageRecord")
@@ -127,6 +145,49 @@ pub fn resources() -> Vec<ObservableResource> {
                 brand: "AgentId".into(),
             }],
         ),
+        ObservableResource::named(
+            "work",
+            "work",
+            "WorkSubscriptionData",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        ),
+        ObservableResource::mapped(
+            "tasks",
+            "tasks",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        ),
+        ObservableResource::named(
+            "terminal",
+            "terminal",
+            "TerminalRecord",
+            vec![ObservableArg {
+                name: "terminalId".into(),
+                brand: "TerminalId".into(),
+            }],
+        ),
+        ObservableResource::named(
+            "terminal-output",
+            "terminalOutput",
+            "TerminalOutput",
+            vec![ObservableArg {
+                name: "terminalId".into(),
+                brand: "TerminalId".into(),
+            }],
+        ),
+        ObservableResource::mapped(
+            "retained-worktrees",
+            "retainedWorktrees",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        ),
         ObservableResource::mapped(
             "transcript",
             "transcript",
@@ -147,9 +208,27 @@ pub fn resources() -> Vec<ObservableResource> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn task_terminal_and_retained_resources_are_generated_and_scoped() {
+        let resources = super::resources();
+        for kind in [
+            "work",
+            "tasks",
+            "terminal",
+            "terminal-output",
+            "retained-worktrees",
+        ] {
+            let resource = resources
+                .iter()
+                .find(|resource| resource.kind == kind)
+                .unwrap_or_else(|| panic!("missing generated resource: {kind}"));
+            assert!(!resource.args.is_empty(), "{kind} must be scoped");
+        }
+    }
+
+    #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 8);
+        assert_eq!(resources.len(), 13);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]

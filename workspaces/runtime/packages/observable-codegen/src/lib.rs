@@ -1,6 +1,7 @@
 //! Pure metadata and TypeScript generation for the observable sidebar pilot.
 mod collections;
 mod emit;
+mod inventory;
 mod metadata;
 mod shape;
 
@@ -8,6 +9,7 @@ use schemars::JsonSchema;
 use studio_json::Value;
 
 pub use emit::{render, render_fields};
+pub use inventory::render_entity_collections;
 
 /// A model's Rust schema owner and field-level observation metadata.
 #[derive(Clone, Debug)]

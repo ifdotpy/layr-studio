@@ -636,8 +636,8 @@ fn direct_docs(
 
 /// Units of the agent views in `(after, through]`: one per agent row change or view
 /// mark, at most `fetch`, with the delete rule of [`work_units`]. `id` selects one
-/// agent. These collections belong to the global list and the id-scoped detail, so an
-/// agent-scoped reader gets none of them.
+/// agent. Only retained cleanup records also permit a root-scoped team read;
+/// deleted members retain their root identity until cleanup finishes.
 #[allow(clippy::too_many_arguments)]
 fn agent_units(
     connection: &Connection,
@@ -657,15 +657,21 @@ fn agent_units(
     if wanted.iter().all(|kind| *kind == "agentTail") {
         return Ok(units);
     }
-    if agent.is_some() || !AGENT_VIEW_COLLECTIONS.iter().any(|c| wanted.contains(c)) {
+    if (agent.is_some() && wanted.iter().any(|kind| *kind != "retainedWorktree"))
+        || !AGENT_VIEW_COLLECTIONS.iter().any(|c| wanted.contains(c))
+    {
         return Ok(units);
     }
+    // Cleanup uses soft deletion, retaining the root until its tombstone is emitted.
+    // Arbitrary hard deletes have no scoped provenance; only snapshots reconcile them.
     // The agent row and its view mark both name the agent: one unit at the later one.
     let changed: Vec<(String, i64)> = connection
         .prepare_cached(
             "SELECT id,MAX(seq) AS last FROM durable_rows
              WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
                AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
+               AND (?7 IS NULL OR id=?7 OR id IN
+                 (SELECT id FROM runtime_agents WHERE root_id=?7))
              GROUP BY id ORDER BY last LIMIT ?6",
         )?
         .query_map(
@@ -675,7 +681,8 @@ fn agent_units(
                 through,
                 deletes_after,
                 id,
-                fetch
+                fetch,
+                agent
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?

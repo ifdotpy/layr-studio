@@ -19,6 +19,10 @@ type Selection = {
 };
 const selectors: Required<Pick<ResourceDataSelectors<Selection>, ScopeKind>> = {
   work: (ref, { entities, selectWork }) => selectWork(entities, ref.agentId),
+  "retained-worktrees": (_ref, { entities }) =>
+    entities
+      .filter((row) => row.collection === "retainedWorktree")
+      .map((row) => row.value),
   agentDetail: (_ref, { entities }) =>
     entities.find((row) => row.collection === "agentDetail")?.value,
   taskDetail: (_ref, { entities }) =>

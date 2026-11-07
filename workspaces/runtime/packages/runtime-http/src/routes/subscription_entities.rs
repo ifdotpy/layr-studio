@@ -27,6 +27,9 @@ pub(super) fn selection(
         ResourceRef::TerminalResource(r) => ("terminal", Some(r.terminal_id.as_str()), None),
         ResourceRef::TasksResource(r) => ("tasks", None, r.agent_id.as_deref()),
         ResourceRef::MonitorsResource(r) => ("monitors", None, r.agent_id.as_deref()),
+        ResourceRef::RetainedWorktreesResource(r) => {
+            ("retained-worktrees", None, Some(r.agent_id.as_str()))
+        }
         ResourceRef::WorkResource(r) => ("work", None, Some(r.agent_id.as_str())),
         ResourceRef::AccountsResource(_)
         | ResourceRef::DraftsResource(_)
@@ -163,6 +166,119 @@ mod tests {
                 "{kind} agent owner"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn retained_worktrees_include_deleted_members_and_stream_cleanup_deletes() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        studio_runtime_services::entity_publication::install(&store)
+            .await
+            .unwrap();
+        store.transaction_with(|tx| {
+            for (id, root, deleted) in [("lead", "lead", false), ("deleted-worker", "lead", true),
+                ("hard-worker", "lead", true), ("other-worker", "other-lead", true),
+                ("other-soft", "other-lead", true)] {
+                let mut value = json!({"id":id,"rootId":root,"accountKey":"default","provider":"codex","epoch":1,"status":"completed","compactions":0,
+                    "workspaceCleanupIntent":{"phase":"unknown","effect":{"kind":"remove_worktree","identity":{"cwd":"/fixture/retained"}},"receipt":{"reason":"Modified files"},"requestId":"private"}});
+                if deleted { value["deletedAt"] = json!(1); }
+                AgentRepository::put(tx, &AgentRecord::from_value(value)?)?;
+            }
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+        let workspace = store
+            .test_read_transaction(|tx| SyncDocumentsRepository::workspace_id(tx))
+            .unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            workspace,
+            directory.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let resource = ResourceRef::RetainedWorktreesResource(
+            studio_runtime_schema::resource_ref::AgentResource {
+                agent_id: String::from("lead").try_into().unwrap(),
+            },
+        );
+        let initial = initial_snapshot(state.clone(), resource.clone(), None)
+            .await
+            .unwrap();
+        let cursor = initial.cursor.clone();
+        let frame = studio_json::to_value(initial).unwrap();
+        let rows = frame["entityChanges"]["documents"].as_array().unwrap();
+        let mut ids = rows
+            .iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        ids.sort_unstable();
+        assert_eq!(ids, ["deleted-worker", "hard-worker", "lead"]);
+        assert!(
+            rows.iter()
+                .all(|row| row["collection"] == "retainedWorktree")
+        );
+        assert!(!frame.to_string().contains("private"));
+        store
+            .transaction_with(|tx| {
+                tx.execute(
+                    "DELETE FROM runtime_agents WHERE id IN ('hard-worker','other-worker')",
+                    [],
+                )?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
+        let hard_delete = initial_snapshot(state.clone(), resource.clone(), cursor)
+            .await
+            .unwrap();
+        let cursor = hard_delete.cursor.clone();
+        let frame = studio_json::to_value(hard_delete).unwrap();
+        let documents = frame["entityChanges"]["documents"].as_array().unwrap();
+        assert!(
+            !documents.iter().any(|row| row["id"] == "hard-worker"),
+            "arbitrary hard deletes reconcile only by snapshot"
+        );
+        assert!(
+            !documents.iter().any(|row| row["id"] == "other-worker"),
+            "another root's hard-delete identity must never enter this feed"
+        );
+        let snapshot = initial_snapshot(state.clone(), resource.clone(), None)
+            .await
+            .unwrap();
+        let snapshot = studio_json::to_value(snapshot).unwrap();
+        assert!(
+            !snapshot["entityChanges"]["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == "hard-worker")
+        );
+        store.transaction_with(|tx| {
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceCleanupIntent.phase','confirmed') WHERE id IN ('deleted-worker','other-soft')", [])?;
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+        let change = initial_snapshot(state, resource, cursor).await.unwrap();
+        let frame = studio_json::to_value(change).unwrap();
+        assert_eq!(
+            frame["replyKind"], "delta",
+            "valid reconnect cursor keeps the cleanup tombstone incremental"
+        );
+        assert!(
+            !frame["entityChanges"]["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == "other-soft")
+        );
+        assert!(
+            frame["entityChanges"]["documents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|row| row["id"] == "deleted-worker" && row["op"] == "delete")
+        );
     }
 
     #[tokio::test]

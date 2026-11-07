@@ -81,6 +81,8 @@ inherits = "ci"
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
+    (package(=studio-runtime-http) & kind(lib) & test(retained_worktrees_include_deleted_members_and_stream_cleanup_deletes)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(observable_resources::tests::)) |
     (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
@@ -528,6 +530,8 @@ platform = 'cfg(target_os = "linux")'
 default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
+    (package(=studio-runtime-http) & kind(lib) & test(retained_worktrees_include_deleted_members_and_stream_cleanup_deletes)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(observable_resources::tests::)) |
     (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |

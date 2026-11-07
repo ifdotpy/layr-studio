@@ -44606,6 +44606,7 @@
             "queue": "#/components/schemas/QueueResource",
             "receipts": "#/components/schemas/ReceiptsResource",
             "rename-progress": "#/components/schemas/RenameProgressResource",
+            "retained-worktrees": "#/components/schemas/RetainedWorktreesResource",
             "room": "#/components/schemas/RoomResource",
             "session-cost": "#/components/schemas/SessionCostResource",
             "state": "#/components/schemas/StateResource",
@@ -44713,6 +44714,9 @@
           },
           {
             "$ref": "#/components/schemas/TaskDetailResource"
+          },
+          {
+            "$ref": "#/components/schemas/RetainedWorktreesResource"
           }
         ],
         "title": "ResourceRef"
@@ -45167,6 +45171,34 @@
           "rootId"
         ],
         "type": "object"
+      },
+      "RetainedWorktreesResource": {
+        "additionalProperties": false,
+        "properties": {
+          "agentId": {
+            "minLength": 1,
+            "title": "Agentid",
+            "type": "string"
+          },
+          "kind": {
+            "const": "retained-worktrees",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agentId",
+          "kind"
+        ],
+        "title": "RetainedWorktreesResource",
+        "type": "object",
+        "x-studio-entity-scope": {
+          "agentField": "agentId",
+          "collections": [
+            "retainedWorktree"
+          ],
+          "idField": null,
+          "includeTeamMembers": false
+        }
       },
       "RetainedWorktreesResponse": {
         "additionalProperties": false,
@@ -52641,6 +52673,12 @@
               }
             ]
           },
+          "retained-worktrees": {
+            "items": {
+              "$ref": "#/components/schemas/RetainedWorktreeEntityDto"
+            },
+            "type": "array"
+          },
           "room": {
             "anyOf": [
               {
@@ -52697,7 +52735,7 @@
             "$ref": "#/components/schemas/VoiceRecordBatch"
           },
           "work": {
-            "$ref": "#/components/schemas/WorkList"
+            "$ref": "#/components/schemas/WorkSubscriptionData"
           },
           "workspace": {
             "items": {
@@ -52736,7 +52774,8 @@
           "complaint",
           "terminal-output",
           "native-layr-settings",
-          "taskDetail"
+          "taskDetail",
+          "retained-worktrees"
         ],
         "type": "object"
       },
@@ -64542,6 +64581,32 @@
           "cancelled"
         ],
         "type": "string"
+      },
+      "WorkSubscriptionData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkDetail"
+            },
+            "type": "array"
+          },
+          "rootId": {
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/WorkDetail"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "rootId",
+          "items",
+          "tasks"
+        ],
+        "type": "object"
       },
       "WorkViewRecordResponse": {
         "additionalProperties": {

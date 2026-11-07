@@ -77,6 +77,8 @@ fn selected_collections_use_the_existing_array_resource() {
     let generated =
         render(&document, &models(), &resources).expect("selected state collections render");
     assert!(generated.contains("state(): ResourceSlot<StateCollections>"));
+    assert!(generated.contains("export function serializeStateCollections("));
+    assert!(generated.contains("export type StateEntity ="));
     assert!(!generated.contains("ignoredModel"));
     assert!(
         !generated.contains("function reconcileRow("),
@@ -505,4 +507,56 @@ fn union_opaque_fields_follow_declared_variant_properties() {
     )
     .unwrap_err();
     assert_eq!(error.kind, UnsupportedShape::UnknownField);
+}
+
+#[test]
+fn string_enum_without_explicit_type_is_a_scalar() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["title"] =
+        json!({"enum":["passed", "failed"]});
+    render(&document, &models(), &resources())
+        .expect("string-only enum fixes its scalar representation");
+}
+
+#[test]
+fn all_of_objects_merge_properties_and_required_and_reject_conflicts() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["nested"] = json!({"allOf":[
+        {"type":"object","additionalProperties":false,"properties":{"count":{"type":"number"}},"required":["count"]},
+        {"type":"object","properties":{"title":{"type":"string"}},"required":["title"]}
+    ]});
+    let generated = render(&document, &models(), &resources()).expect("merged object members");
+    assert!(generated.contains("this.title = dto.title"));
+    document["components"]["schemas"]["Row"]["properties"]["nested"]["allOf"][1]["properties"]["count"] =
+        json!({"type":"string"});
+    let error =
+        render(&document, &models(), &resources()).expect_err("incompatible property declarations");
+    assert_eq!(error.kind, UnsupportedShape::Composition);
+    assert!(error.path.ends_with("/allOf/1/properties/count"));
+}
+
+#[test]
+fn collection_inventory_is_derived_from_payload_tags_and_rejects_duplicates() {
+    let payload = json!({"type":"object","properties":{"collection":{"const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}}});
+    let mut document = fixture();
+    document["components"]["schemas"]["SyncEntityPayload"] = json!({"oneOf":[payload.clone()]});
+    let generated = render_entity_collections(&document).expect("payload inventory");
+    assert!(generated.contains("\"row\": new Map()"));
+    document["components"]["schemas"]["SyncEntityPayload"]["oneOf"] =
+        json!([payload.clone(), payload]);
+    assert_eq!(
+        render_entity_collections(&document).unwrap_err().kind,
+        UnsupportedShape::Union
+    );
+}
+
+#[test]
+fn all_of_reference_siblings_are_not_silently_discarded() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Base"] = json!({"type":"object","additionalProperties":false,"properties":{"count":{"type":"number"}},"required":["count"]});
+    document["components"]["schemas"]["Row"]["properties"]["nested"] = json!({"allOf":[{"$ref":"#/components/schemas/Base","properties":{"count":{"type":"string"}}}]});
+    let error = render(&document, &models(), &resources())
+        .expect_err("reference sibling constraints must be merged or rejected");
+    assert_eq!(error.kind, UnsupportedShape::Composition);
+    assert!(error.path.ends_with("/allOf/0/properties"));
 }

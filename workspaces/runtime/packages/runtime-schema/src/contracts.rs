@@ -1598,6 +1598,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     }
     crate::process_controls::apply_background_views(&mut openapi);
     crate::resource_ref::refresh_task_detail(&mut openapi);
+    crate::resource_ref::refresh_retained_worktrees(&mut openapi);
     for (name, schema) in crate::approvals::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }
@@ -2211,6 +2212,16 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 json_string(crate::provider_diagnostics::STDIN_TIMING_DIAGNOSTIC_PREFIX),
                 json_string(crate::provider_diagnostics::REPLY_TIMING_DIAGNOSTIC_PREFIX),
             ),
+        });
+        rendered.push(Rendered {
+            path: web("entityCollections.ts"),
+            text: run_node(
+                root,
+                "node_modules/oxfmt/bin/oxfmt",
+                "--stdin-filepath=entityCollections.ts",
+                &studio_observable_codegen::render_entity_collections(&openapi)
+                    .map_err(|error| error.to_string())?,
+            )?,
         });
         let observable = studio_observable_codegen::render(
             &openapi,

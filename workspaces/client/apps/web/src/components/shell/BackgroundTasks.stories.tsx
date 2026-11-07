@@ -84,7 +84,13 @@ const meta = {
           },
         ]);
         const model = context.args.task;
+        const services = createServerServices({
+          id: "story",
+          label: "Story",
+          origin: "http://127.0.0.1:4620",
+        });
         const store: ObservableResources = {
+          ...services.store,
           state: () => ({ current: { status: "live", data: state.current } }),
           requests: () => ({ current: { status: "loading" } }),
           questionHistory: () => ({ current: { status: "loading" } }),
@@ -106,11 +112,6 @@ const meta = {
           taskDetail: () => ({ current: { status: "loading" } }),
           transcript: () => ({ current: { status: "loading" } }),
         };
-        const services = createServerServices({
-          id: "story",
-          label: "Story",
-          origin: "http://127.0.0.1:4620",
-        });
         Object.defineProperty(services, "store", {
           value: { ...store, dispose() {} },
         });

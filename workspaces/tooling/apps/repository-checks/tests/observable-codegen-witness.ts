@@ -129,6 +129,7 @@ ${declarations("src/apiTypes.ts", ["KnownApiFields", "TranscriptApiItem", "Trans
     ${
       input.production
         ? `import type { KnownApiFields, TranscriptProjectionPayload } from '../../apiTypes.ts';
+import type { WorkDetailFields, WorkSubscriptionDataFields } from '../../generated/observableFieldTypes.ts';
 ${declarations("src/sync/subscriptions/contracts.ts", ["ReviewTask", "WorkList", "SubscriptionDataMap"])}
 export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']];`
         : "export type ResourceData<R extends ResourceRef> = components['schemas']['SubscriptionDataMap'][R['kind']];"

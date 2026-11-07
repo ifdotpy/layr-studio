@@ -187,15 +187,18 @@ it("work changes consume the stream without GET /api/work", () => {
       gateOverrideRequired: false,
     },
   } as ResourceData<Extract<ResourceRef, { kind: "work" }>>["items"][number];
-  h.data.set("work", { items: [task], tasks: [] } satisfies ResourceData<
-    Extract<ResourceRef, { kind: "work" }>
-  >);
+  h.data.set("work", {
+    rootId: "lead",
+    items: [task],
+    tasks: [],
+  } satisfies ResourceData<Extract<ResourceRef, { kind: "work" }>>);
   const titles = () =>
     elements(render(() => Tasks({ agentId: "lead" })))
       .filter((node) => node.type === "strong")
       .map((node) => node.props.children);
   expect(titles()).toContain("Before");
   h.data.set("work", {
+    rootId: "lead",
     items: [{ ...task, title: "After" } as typeof task],
     tasks: [],
   } satisfies ResourceData<Extract<ResourceRef, { kind: "work" }>>);

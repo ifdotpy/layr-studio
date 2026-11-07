@@ -1,19 +1,14 @@
 import type { components } from "../../generated/api.ts";
 import type { DeepReadonly } from "../../deepReadonly.ts";
 import type { SUBSCRIPTION_ENTITY_SCOPES } from "../../generated/subscriptionEntities.ts";
-import type {
-  KnownApiFields,
-  TranscriptProjectionPayload,
-} from "../../apiTypes.ts";
+import type { TranscriptProjectionPayload } from "../../apiTypes.ts";
 
-export type ReviewTask = DeepReadonly<
-  KnownApiFields<components["schemas"]["WorkDetail"]>
->;
-export type WorkList = Omit<
-  DeepReadonly<components["schemas"]["WorkList"]>,
-  "items" | "tasks"
-> &
-  Record<"items" | "tasks", ReviewTask[]>;
+import type {
+  WorkDetailFields,
+  WorkSubscriptionDataFields,
+} from "../../generated/observableFieldTypes.ts";
+export type ReviewTask = DeepReadonly<WorkDetailFields>;
+export type WorkList = DeepReadonly<WorkSubscriptionDataFields>;
 
 export type ResourceVersion = {
   viewSnapshot?: components["schemas"]["SubscriptionViewSnapshot"] | undefined;

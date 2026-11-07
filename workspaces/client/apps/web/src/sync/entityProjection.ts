@@ -1,27 +1,8 @@
 import { compareStructural } from "mobx";
-import type {
-  AgentEntityDto,
-  ChatEntityDto,
-  ComplaintEntityDto,
-  EdgeEntityDto,
-  EventEntityDto,
-  MonitorEntityDto,
-  ModelEntityDto,
-  PeerTeamEntityDto,
-  ProjectEntityDto,
-  RoomEntityDto,
-  RuleEntityDto,
-  SyncEntityPayload,
-  TaskEntityDto,
-  WorkEntityDto,
-  WorkspaceEntityDto,
-} from "../generated/api";
+import type { SyncEntityPayload, ModelEntityDto } from "../generated/api";
 import type { components } from "../generated/api";
-type RateLimitView = components["schemas"]["RateLimitView"];
-type StudioError = components["schemas"]["StudioError"];
 export type UiPreferencesDto = components["schemas"]["UiPreferencesDto"];
 import type { Snapshot } from "../types";
-import type { Approval } from "../approvals";
 
 export const UI_PREFERENCE_SCOPES = ["user", "server"] as const;
 export type UiPreferenceScope = (typeof UI_PREFERENCE_SCOPES)[number];
@@ -43,62 +24,17 @@ export type EntityRow = Omit<
   evicted?: boolean;
 };
 
-type EntityCollection = SyncEntityPayload["collection"];
-const ENTITY_COLLECTIONS = [
-  "agent",
-  "agentSummary",
-  "agentDetail",
-  "room",
-  "task",
-  "taskDetail",
-  "monitor",
-  "complaint",
-  "request",
-  "rule",
-  "project",
-  "peerTeam",
-  "chat",
-  "edge",
-  "event",
-  "work",
-  "workDetail",
-  "workResult",
-  "workDecision",
-  "workRelease",
-  "workspace",
-  "rateLimit",
-  "model",
-  "studioError",
-  "accounts",
-  "accountCost",
-  "sessionCost",
-  "desktop",
-  "terminal",
-  "queue",
-  "uiPreferences",
-  "retainedWorktree",
-  "questionHistory",
-  "messageReceipt",
-  "plan",
-  "annotation",
-  "agentTail",
-] as const satisfies readonly EntityCollection[];
-type Assert<T extends true> = T;
-type EntityCollectionsAreComplete = Assert<
-  Exclude<EntityCollection, (typeof ENTITY_COLLECTIONS)[number]> extends never
-    ? true
-    : false
->;
-const entityCollections = new Set<string>(
-  ENTITY_COLLECTIONS satisfies EntityCollectionsAreComplete extends true
-    ? readonly EntityCollection[]
-    : never,
-);
-type EntityFor<C extends EntityCollection> = Extract<
-  SyncEntityPayload,
-  { collection: C }
->["value"];
-type EntityValues = { [C in EntityCollection]: Map<string, EntityFor<C>> };
+import {
+  ENTITY_COLLECTIONS,
+  emptyEntityValues,
+  setEntityValue,
+} from "../generated/entityCollections.ts";
+import type {
+  EntityCollection,
+  EntityFor,
+  EntityValues,
+} from "../generated/entityCollections.ts";
+const entityCollections = new Set<string>(ENTITY_COLLECTIONS);
 type MergedAgentCache = WeakMap<
   EntityFor<"agentSummary">,
   {
@@ -124,54 +60,6 @@ export type EntityProjection = {
   agentSummarySeen: boolean;
   mergedAgents: MergedAgentCache;
 };
-
-function emptyEntityValues(): EntityValues {
-  return {
-    retainedWorktree: new Map(),
-    questionHistory: new Map(),
-    messageReceipt: new Map(),
-    plan: new Map(),
-    annotation: new Map(),
-    agentTail: new Map(),
-    agent: new Map<string, AgentEntityDto>(),
-    agentSummary: new Map(),
-    agentDetail: new Map(),
-    room: new Map<string, RoomEntityDto>(),
-    task: new Map<string, TaskEntityDto>(),
-    taskDetail: new Map(),
-    monitor: new Map<string, MonitorEntityDto>(),
-    complaint: new Map<string, ComplaintEntityDto>(),
-    request: new Map<string, Approval>(),
-    rule: new Map<string, RuleEntityDto>(),
-    project: new Map<string, ProjectEntityDto>(),
-    peerTeam: new Map<string, PeerTeamEntityDto>(),
-    chat: new Map<string, ChatEntityDto>(),
-    edge: new Map<string, EdgeEntityDto>(),
-    event: new Map<string, EventEntityDto>(),
-    work: new Map<string, WorkEntityDto>(),
-    workDetail: new Map(),
-    workResult: new Map(),
-    workDecision: new Map(),
-    workRelease: new Map(),
-    workspace: new Map<string, WorkspaceEntityDto>(),
-    accounts: new Map<string, components["schemas"]["AccountsSummaryDto"]>(),
-    accountCost: new Map<
-      string,
-      components["schemas"]["AccountCostResponse"]
-    >(),
-    sessionCost: new Map<
-      string,
-      components["schemas"]["SessionCostResponse"]
-    >(),
-    desktop: new Map<string, components["schemas"]["DesktopResponse"]>(),
-    terminal: new Map<string, components["schemas"]["TerminalRecord"]>(),
-    queue: new Map<string, components["schemas"]["QueueView"]>(),
-    rateLimit: new Map<string, RateLimitView>(),
-    model: new Map<string, ModelEntityDto>(),
-    studioError: new Map<string, StudioError>(),
-    uiPreferences: new Map<string, UiPreferencesDto>(),
-  };
-}
 
 /**
  * The schema-versioned cache contains payloads from this renderer contract.
@@ -506,125 +394,14 @@ export function applyEntityChanges(
       if (payload.collection === "project") changed.add("project");
       continue;
     }
-    switch (payload.collection) {
-      case "retainedWorktree":
-        state.values.retainedWorktree.set(payload.id, payload.value);
-        break;
-      case "questionHistory":
-        state.values.questionHistory.set(payload.id, payload.value);
-        break;
-      case "messageReceipt":
-        state.values.messageReceipt.set(payload.id, payload.value);
-        break;
-      case "plan":
-        state.values.plan.set(payload.id, payload.value);
-        break;
-      case "annotation":
-        state.values.annotation.set(payload.id, payload.value);
-        break;
-      case "agentSummary":
-        state.agentSummarySeen = true;
-        state.values.agentSummary.set(payload.id, payload.value);
-        break;
-      case "agentDetail":
-        state.values.agentDetail.set(payload.id, payload.value);
-        break;
-      case "agent":
-        state.values.agent.set(payload.id, payload.value);
-        break;
-      case "room":
-        state.values.room.set(payload.id, payload.value);
-        break;
-      case "task":
-        state.values.task.set(payload.id, payload.value);
-        break;
-      case "monitor":
-        state.values.monitor.set(payload.id, payload.value);
-        break;
-      case "complaint":
-        state.values.complaint.set(payload.id, payload.value);
-        break;
-      case "request":
-        state.values.request.set(payload.id, payload.value);
-        break;
-      case "rule":
-        state.values.rule.set(payload.id, payload.value);
-        break;
-      case "project":
-        state.values.project.set(payload.id, payload.value);
-        break;
-      case "peerTeam":
-        state.values.peerTeam.set(payload.id, payload.value);
-        break;
-      case "chat":
-        state.values.chat.set(payload.id, payload.value);
-        break;
-      case "edge":
-        state.values.edge.set(payload.id, payload.value);
-        break;
-      case "event":
-        state.values.event.set(payload.id, payload.value);
-        break;
-      case "work":
-        state.values.work.set(payload.id, payload.value);
-        break;
-      case "workDetail":
-        state.values.workDetail.set(payload.id, payload.value);
-        break;
-      case "workResult":
-        state.values.workResult.set(payload.id, payload.value);
-        break;
-      case "workDecision":
-        state.values.workDecision.set(payload.id, payload.value);
-        break;
-      case "workRelease":
-        state.values.workRelease.set(payload.id, payload.value);
-        break;
-      case "uiPreferences":
-        state.values.uiPreferences.set(payload.id, payload.value);
-        break;
-      case "accounts":
-        state.values.accounts.set(payload.id, payload.value);
-        break;
-      case "accountCost":
-        state.values.accountCost.set(payload.id, payload.value);
-        break;
-      case "sessionCost":
-        state.values.sessionCost.set(payload.id, payload.value);
-        break;
-      case "desktop":
-        state.values.desktop.set(payload.id, payload.value);
-        break;
-      case "terminal":
-        state.values.terminal.set(payload.id, payload.value);
-        break;
-      case "queue":
-        state.values.queue.set(payload.id, payload.value);
-        break;
-      case "rateLimit":
-        state.values.rateLimit.set(payload.id, payload.value);
-        break;
-      case "model":
-        state.values.model.set(payload.id, payload.value);
-        break;
-      case "studioError":
-        state.values.studioError.set(payload.id, payload.value);
-        break;
-      case "workspace":
-        state.values.workspace.set(payload.id, payload.value);
-        break;
-      case "taskDetail":
-        // Full inputs belong only to the scoped generated facade.
-        continue;
-      case "agentTail":
-        // Tails are consumed by the generated state facade, never merged into detail.
-        continue;
-      default: {
-        const exhaustive: never = payload;
-        void exhaustive;
-        continue;
-      }
-    }
+    // Scoped details and tails remain owned by their generated facades.
+    if (
+      payload.collection === "taskDetail" ||
+      payload.collection === "agentTail"
+    )
+      continue;
+    if (payload.collection === "agentSummary") state.agentSummarySeen = true;
+    setEntityValue(state.values, payload);
     state.rows.set(row.id, {
       seq: row.seq,
       collection: payload.collection,

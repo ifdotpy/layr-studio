@@ -62,13 +62,25 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
     dependencies: [],
     decisions: [],
     results: [],
+    policy: {
+      blockedBy: [],
+      displayStatus: "ready" as const,
+      acceptAvailable: false,
+      gateOverrideRequired: false,
+    },
   };
-  const tasks: components["schemas"]["WorkItem"][] = [
+  const tasks: components["schemas"]["WorkDetail"][] = [
     {
       ...common,
       id: "review-task",
       title: "Review the release",
       status: "review",
+      policy: {
+        blockedBy: [],
+        displayStatus: "review",
+        acceptAvailable: true,
+        gateOverrideRequired: true,
+      },
       description:
         "Inspect the failed check and the submitted result before acceptance.",
       gate,
@@ -125,6 +137,12 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
       title: "Publish after review",
       status: "ready",
       displayStatus: "blocked",
+      policy: {
+        blockedBy: ["ready-task"],
+        displayStatus: "blocked",
+        acceptAvailable: false,
+        gateOverrideRequired: false,
+      },
       owner: null,
       dependencies: ["ready-task"],
     },
@@ -141,7 +159,7 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
       error: null,
     },
     work: {
-      data: { rootId: "lead", taskDefaultGate, items: tasks, tasks },
+      data: { rootId: "lead", items: tasks, tasks },
       status: "live",
       error: null,
     },
@@ -179,6 +197,12 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
           });
         }
         reviewTask.status = "accepted";
+        reviewTask.policy = {
+          ...reviewTask.policy,
+          displayStatus: "accepted",
+          acceptAvailable: false,
+          gateOverrideRequired: false,
+        };
         reviewTask.version++;
         assert.ok(reviewTask.decisions);
         reviewTask.decisions.push({
@@ -230,6 +254,12 @@ test("Tasks show gate evidence and schema refusals and require an override reaso
         tasks.push(JSON.parse(JSON.stringify(created)));
       } else if (body.action === "reject") {
         reviewTask.status = "ready";
+        reviewTask.policy = {
+          ...reviewTask.policy,
+          displayStatus: "ready",
+          acceptAvailable: false,
+          gateOverrideRequired: false,
+        };
         reviewTask.version++;
       }
       await page.evaluate((json) => {

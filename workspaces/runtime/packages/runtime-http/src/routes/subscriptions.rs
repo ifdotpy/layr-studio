@@ -155,6 +155,7 @@ async fn transcript_initial(
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
+        | ResourceRef::RetainedWorktreesResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
         | ResourceRef::ProcessesResource(_)
@@ -283,6 +284,7 @@ async fn view_value(
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::AuthProgressResource(_)
         | ResourceRef::RenameProgressResource(_)
+        | ResourceRef::RetainedWorktreesResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
         | ResourceRef::WorkResource(_) => Err(ApiError::internal()),
@@ -435,6 +437,7 @@ resource_handlers! {
     ComplaintResourceHandler => ComplaintResource, view_initial, NoCache;
     TerminalOutputResourceHandler => TerminalOutputResource, view_initial, NoCache;
     AgentDetailResourceHandler => AgentDetailResource, entity_initial, Cache;
+    RetainedWorktreesResourceHandler => RetainedWorktreesResource, entity_initial, NoCache;
     MonitorsResourceHandler => MonitorsResource, entity_initial, NoCache;
     AccountsResourceHandler => AccountsResource, passive_initial, NoCache;
     AuthProgressResourceHandler => AuthProgressResource, passive_initial, NoCache;
@@ -668,6 +671,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
         | ResourceRef::TerminalResource(_)
         | ResourceRef::TranscriptsResource(_)
         | ResourceRef::WorkspaceResource(_)
+        | ResourceRef::RetainedWorktreesResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
         | ResourceRef::ProcessesResource(_)

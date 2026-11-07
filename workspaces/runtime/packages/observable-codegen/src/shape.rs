@@ -97,6 +97,10 @@ impl<'a> Parser<'a> {
         dto: &str,
         path: &str,
     ) -> Result<Shape, GenerationError> {
+        if value.get("allOf").is_some() {
+            let merged = merge_object(self.document, value, path, &mut BTreeSet::new())?;
+            return self.parse_named(&merged, name, dto, path);
+        }
         // Normalize the outer wrapper on every reference, including cache hits.
         if let Some(base) = nullable_base(value) {
             return Ok(Shape::Nullable(Box::new(self.parse(
@@ -264,6 +268,13 @@ impl<'a> Parser<'a> {
         }
         if value.get("prefixItems").is_some() {
             return Err(fail(path, UnsupportedShape::Tuple));
+        }
+        if value.get("type").is_none()
+            && value["enum"]
+                .as_array()
+                .is_some_and(|values| !values.is_empty() && values.iter().all(Value::is_string))
+        {
+            return Ok(Shape::Leaf);
         }
         match value["type"].as_str() {
             Some("string" | "number" | "integer" | "boolean" | "null") => Ok(Shape::Leaf),
@@ -477,4 +488,88 @@ fn identity_path(document: &Value, value: &Value, path: &[&str]) -> bool {
         .as_array()
         .is_some_and(|fields| fields.iter().any(|f| f.as_str() == Some(path[0])))
         && identity_path(document, &value["properties"][path[0]], &path[1..])
+}
+
+/// Merge object intersections without silently choosing between conflicting owners.
+fn merge_object(
+    document: &Value,
+    value: &Value,
+    path: &str,
+    visiting: &mut BTreeSet<String>,
+) -> Result<Value, GenerationError> {
+    let conflict = |path: &str| fail(path, UnsupportedShape::Composition);
+    if let Some(reference) = value["$ref"].as_str() {
+        if let Some(key) = value.as_object().and_then(|fields| {
+            fields
+                .keys()
+                .find(|key| !matches!(key.as_str(), "$ref" | "title" | "description" | "$schema"))
+        }) {
+            return Err(conflict(&format!("{path}/{key}")));
+        }
+        if !visiting.insert(reference.into()) {
+            return Err(fail(path, UnsupportedShape::Recursive));
+        }
+        let name = reference
+            .strip_prefix("#/components/schemas/")
+            .ok_or_else(|| fail(path, UnsupportedShape::MissingSchema))?;
+        let result = merge_object(document, schema(document, name)?, reference, visiting);
+        visiting.remove(reference);
+        return result;
+    }
+    let mut merged = value.clone();
+    let members = merged
+        .as_object_mut()
+        .ok_or_else(|| conflict(path))?
+        .remove("allOf");
+    if let Some(members) = members {
+        for (index, member) in members
+            .as_array()
+            .ok_or_else(|| conflict(path))?
+            .iter()
+            .enumerate()
+        {
+            let member_path = format!("{path}/allOf/{index}");
+            let member = merge_object(document, member, &member_path, visiting)?;
+            let fields = member.as_object().ok_or_else(|| conflict(&member_path))?;
+            for (key, next) in fields {
+                if matches!(key.as_str(), "title" | "description" | "$schema") {
+                    continue;
+                }
+                if key == "properties" {
+                    let properties = next.as_object().ok_or_else(|| conflict(&member_path))?;
+                    if merged.get(key).is_none() {
+                        merged[key] = studio_json::json!({});
+                    }
+                    for (name, property) in properties {
+                        if merged[key].get(name).is_some_and(|prior| prior != property) {
+                            return Err(conflict(&format!("{member_path}/properties/{name}")));
+                        }
+                        merged[key][name] = property.clone();
+                    }
+                } else if key == "required" {
+                    let required = next.as_array().ok_or_else(|| conflict(&member_path))?;
+                    if merged.get(key).is_none() {
+                        merged[key] = studio_json::json!([]);
+                    }
+                    let current = merged[key]
+                        .as_array_mut()
+                        .ok_or_else(|| conflict(&member_path))?;
+                    for field in required {
+                        if !current.contains(field) {
+                            current.push(field.clone());
+                        }
+                    }
+                } else {
+                    if merged.get(key).is_some_and(|prior| prior != next) {
+                        return Err(conflict(&format!("{member_path}/{key}")));
+                    }
+                    merged[key] = next.clone();
+                }
+            }
+        }
+    }
+    if merged["type"] != "object" {
+        return Err(conflict(path));
+    }
+    Ok(merged)
 }

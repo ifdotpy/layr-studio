@@ -104,6 +104,14 @@ pub fn apply_api_contract(document: &mut Value) {
         {"$ref":"#/components/schemas/WorkItem"},
         {"type":"object","properties":{"policy":{"$ref":"#/components/schemas/WorkDetailPolicy"}},"required":["policy"]}
     ]});
+    // The existing entity selector reconstructs this domain projection locally.
+    schemas["WorkSubscriptionData"] = json!({"type":"object","additionalProperties":false,
+        "properties":{"rootId":{"type":"string"},
+            "items":{"type":"array","items":{"$ref":"#/components/schemas/WorkDetail"}},
+            "tasks":{"type":"array","items":{"$ref":"#/components/schemas/WorkDetail"}}},
+        "required":["rootId","items","tasks"]});
+    schemas["SubscriptionDataMap"]["properties"]["work"] =
+        json!({"$ref":"#/components/schemas/WorkSubscriptionData"});
     schemas["SyncWorkDetailEntityPayload"]["properties"]["value"] =
         json!({"$ref":"#/components/schemas/WorkDetail"});
     if let Some(variants) = schemas["SyncEntity"]["oneOf"].as_array_mut() {

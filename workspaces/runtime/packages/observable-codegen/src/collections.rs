@@ -92,6 +92,23 @@ pub(crate) fn emit(out: &mut String, resource: &ObservableResource) {
         chars.next().expect("identifier").to_ascii_uppercase(),
         chars.as_str()
     );
+    let entity = format!("{}Entity", name.trim_end_matches("Collections"));
+    let tags = resource
+        .collections
+        .iter()
+        .map(|collection| quote(&collection.collection))
+        .collect::<Vec<_>>()
+        .join(" | ");
+    writeln!(out, "export type {entity} = DeepReadonly<Extract<components['schemas'][{}], {{ collection: {tags} }}>>;", quote(&resource.data)).expect("string");
+    writeln!(
+        out,
+        "export function serialize{name}(collections: {name}): readonly {entity}[] {{ const entities: {entity}[] = [];"
+    )
+    .expect("string");
+    for collection in &resource.collections {
+        writeln!(out, "for (const [id, value] of collections.{}) entities.push({{ collection: {}, id, value: toJS(value) }});", collection.facade, quote(&collection.collection)).expect("string");
+    }
+    out.push_str("return entities; }\n");
     writeln!(out, "export interface {name} {{").expect("string");
     for collection in &resource.collections {
         writeln!(

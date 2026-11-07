@@ -103,6 +103,7 @@ impl ResourceIdentity for SubscribedResource {
         Ok(match &self.resource {
             ResourceRef::StateResource(_) => ResourceKind::State,
             ResourceRef::AgentDetailResource(_) => ResourceKind::AgentDetail,
+            ResourceRef::RetainedWorktreesResource(_) => ResourceKind::RetainedWorktrees,
             ResourceRef::CostsResource(_) => ResourceKind::Costs,
             ResourceRef::DesktopResource(_) => ResourceKind::Desktop,
             ResourceRef::MonitorsResource(_) => ResourceKind::Monitors,
@@ -188,6 +189,7 @@ fn authorize_resource(
         | ResourceRef::VoiceResource(_)
         | ResourceRef::WorkspaceResource(_)
         | ResourceRef::RenameProgressResource(_)
+        | ResourceRef::RetainedWorktreesResource(_)
         | ResourceRef::AgentDetailResource(_)
         | ResourceRef::MonitorsResource(_)
         | ResourceRef::ProcessesResource(_)
@@ -600,6 +602,7 @@ async fn sync_stream(
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
+            | ResourceRef::RetainedWorktreesResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
             | ResourceRef::ProcessesResource(_)
@@ -796,6 +799,7 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::TranscriptsResource(_)
             | ResourceRef::VoiceResource(_)
             | ResourceRef::WorkspaceResource(_)
+            | ResourceRef::RetainedWorktreesResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
             | ResourceRef::ProcessesResource(_)
@@ -1624,6 +1628,7 @@ async fn attach_transient_snapshots(
             | ResourceRef::WorkspaceResource(_)
             | ResourceRef::AuthProgressResource(_)
             | ResourceRef::RenameProgressResource(_)
+            | ResourceRef::RetainedWorktreesResource(_)
             | ResourceRef::AgentDetailResource(_)
             | ResourceRef::MonitorsResource(_)
             | ResourceRef::ProcessesResource(_)

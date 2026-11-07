@@ -24,6 +24,12 @@ export const SUBSCRIPTION_ENTITY_SCOPES = {
     agentField: "agentId",
     includeTeamMembers: true,
   },
+  "retained-worktrees": {
+    collections: ["retainedWorktree"],
+    idField: null,
+    agentField: "agentId",
+    includeTeamMembers: false,
+  },
   "session-cost": {
     collections: ["sessionCost"],
     idField: "agentId",

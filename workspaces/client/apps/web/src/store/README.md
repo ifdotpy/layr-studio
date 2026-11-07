@@ -48,3 +48,17 @@ numeric history cursors. The runtime does not page, merge messages, advance curs
 or issue reads. Wave 3 can pass generated window model references to its history
 UI while keeping `transcriptPageBounds.ts` and the current user-driven page-read
 path as the history owner; drafts and outbox stay handwritten.
+
+Rust also generates `entityCollections.ts` (payload collection names and typed map
+initialization) and each collection facade's serialization boundary, including
+`serializeStateCollections`. The compatibility entity projection consumes that
+inventory. Work items, results and gate evidence use the existing scoped work
+selector through generated field DTOs; terminal metadata and merged output use
+their existing keyed subscriptions. `retainedWorktrees(agentId)` selects the lead
+and its deleted members by retained root identity, without requiring live agents
+or a global state interest.
+
+Retained cleanup delivery relies on the production soft-delete path: the agent
+row keeps its root identity while cleanup completes. An arbitrary hard delete of
+a retained agent is not delivered incrementally; an authoritative snapshot
+reconciles it. Cross-root hard-delete tombstones are never included in this feed.

@@ -19780,7 +19780,8 @@ export interface components {
       | components["schemas"]["ComplaintResource"]
       | components["schemas"]["TerminalOutputResource"]
       | components["schemas"]["NativeLayrSettingsResource"]
-      | components["schemas"]["TaskDetailResource"];
+      | components["schemas"]["TaskDetailResource"]
+      | components["schemas"]["RetainedWorktreesResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -19985,6 +19986,16 @@ export interface components {
       id: string;
       name?: string | null | undefined;
       rootId: string;
+    };
+    /** RetainedWorktreesResource */
+    RetainedWorktreesResource: {
+      /** Agentid */
+      agentId: string;
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "retained-worktrees";
     };
     RetainedWorktreesResponse: {
       retainedWorktrees: {
@@ -22858,6 +22869,7 @@ export interface components {
       queue: components["schemas"]["SyncEntityPayload"][];
       receipts: components["schemas"]["SyncEntityPayload"][];
       "rename-progress": components["schemas"]["RenameResponse"] | null;
+      "retained-worktrees": components["schemas"]["RetainedWorktreeEntityDto"][];
       room:
         | components["schemas"]["ChatRead"]
         | components["schemas"]["MessageHistory"];
@@ -22872,7 +22884,7 @@ export interface components {
       transcript: components["schemas"]["TranscriptPageResponse"];
       transcripts: components["schemas"]["SyncEntityPayload"][];
       voice: components["schemas"]["VoiceRecordBatch"];
-      work: components["schemas"]["WorkList"];
+      work: components["schemas"]["WorkSubscriptionData"];
       workspace: components["schemas"]["SyncEntityPayload"][];
     };
     /**
@@ -27786,6 +27798,11 @@ export interface components {
       | "review"
       | "accepted"
       | "cancelled";
+    WorkSubscriptionData: {
+      items: components["schemas"]["WorkDetail"][];
+      rootId: string;
+      tasks: components["schemas"]["WorkDetail"][];
+    };
     /** WorktreeCleanupErrorRecordResponse */
     WorktreeCleanupErrorRecordResponse: {
       /** At */

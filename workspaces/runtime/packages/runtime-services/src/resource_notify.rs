@@ -61,6 +61,7 @@ pub enum ResourceKind {
     Processes,
     Complaint,
     Work,
+    RetainedWorktrees,
     TerminalOutput,
     Task,
     #[cfg_attr(any(test, feature = "test-support"), serde(rename = "taskDetail"))]
@@ -105,6 +106,7 @@ impl ResourceKind {
                 | Self::Tasks
                 | Self::Terminal
                 | Self::Terminals
+                | Self::RetainedWorktrees
                 | Self::Work
         )
     }
@@ -452,7 +454,8 @@ impl ResourceNotifications {
                 // Discovery reads refresh volatile access timestamps; only its
                 // explicit publications may advance this semantic cursor.
                 ResourceKind::MultiServer => explicit,
-                ResourceKind::AgentDetail
+                ResourceKind::RetainedWorktrees
+                | ResourceKind::AgentDetail
                 | ResourceKind::Costs
                 | ResourceKind::Desktop
                 | ResourceKind::Monitors
