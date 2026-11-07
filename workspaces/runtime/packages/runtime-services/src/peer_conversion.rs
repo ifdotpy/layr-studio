@@ -2,18 +2,14 @@
 //! writes share one transaction. No provider, process or filesystem effects.
 use crate::event_write::{self, truthy};
 use crate::host_project_runtime::PreparedHost;
-use crate::projects::operations::{
-    is_project_lead, live_teams, peer_team_projection, project_agents,
-};
+use crate::projects::operations::{is_project_lead, live_teams, project_agents};
 use crate::projects::{ProjectsError, project_key};
 use rusqlite::{Connection, Transaction, params};
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_schema::peer_team_ingress::Convert;
-use studio_runtime_store::{
-    ProjectsRepository, RuntimeStore, SyncDocumentsRepository, system_reads as records,
-};
+use studio_runtime_store::{ProjectsRepository, RuntimeStore, system_reads as records};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -169,13 +165,8 @@ pub async fn convert(
             }
             crate::radio_runtime::publish_room(db,&room,&prepared)?;
         }
-        let peer_leads=crate::project_projection::peer_leads_of(db,project["id"].as_str().unwrap_or_default())?;
-        for team in &teams {
-            let id=team["id"].as_str().ok_or(ProjectsError::Invalid("team ID invalid"))?;
-            let next=next_teams.iter().find(|t|t["id"]==id);
-            let view=next.map(|t|peer_team_projection(t,&path,next_revision,&peer_leads)).transpose()?;
-            SyncDocumentsRepository::put_entity(db,"peerTeam",id,view.unwrap_or(json!({})),next.is_none())?;
-        }
+        // The team documents are built at read time; mark the visible teams.
+        crate::sync_policy::publish_peer_teams(db)?;
         let result=ConversionReply { id: source, parent_id: target.clone(), root_id: target, moved_agents: moving_ids.into_iter().map(str::to_owned).collect(), peer_teams_revision: next_revision };
         event_write::settle_request(db,&admitted,Some("owner-api"),&result).map_err(studio_runtime_store::StoreError::from)?;
         Ok(result)

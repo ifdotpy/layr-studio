@@ -417,6 +417,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             studio_runtime_store::migrations::migrate_start_attempts_to_turns(db)?;
             studio_runtime_store::migrations::migrate_chat_fields_to_chats(db)?;
             studio_runtime_store::migrations::migrate_status_to_chats(db)?;
+            studio_runtime_store::migrations::migrate_peer_teams_to_window(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;
@@ -661,6 +662,9 @@ fn normalize(value: &mut Value) {
                     // View projections are checked against their OpenAPI owners above.
                     rows.retain(|row| {
                         !super::agent_view_fixtures::is_agent_view_collection(&row["collection"])
+                            // Read-time documents have no stored delete: the stream sends it
+                            // from the window entry.
+                            && !(row["collection"] == "peerTeam" && row["deleted"] == 1)
                     });
                     rows.sort_by_key(|row| {
                         (

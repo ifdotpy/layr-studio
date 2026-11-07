@@ -13,9 +13,7 @@ use studio_runtime_schema::project_ingress::{
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_schema::workspace_modes::PROJECT_LAYR_NATIVE_POLICY;
 use studio_runtime_store::path_identity::CanonicalPath;
-use studio_runtime_store::{
-    ProjectsRepository, RuntimeStore, StoreError, SyncDocumentsRepository, sha256_hex,
-};
+use studio_runtime_store::{ProjectsRepository, RuntimeStore, StoreError, sha256_hex};
 use thiserror::Error;
 use unicode_casefold::UnicodeCaseFold;
 use uuid::Uuid;

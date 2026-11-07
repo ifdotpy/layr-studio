@@ -390,22 +390,15 @@ impl ProjectsRepository {
             params![id, existing.to_string()],
         )? > 0;
         if removed {
-            let mut statement = transaction.prepare_cached(
-                "SELECT id FROM sync_entities WHERE collection='peerTeam' AND deleted=0 \
-                 AND json_extract(payload,'$.value.projectPath')=?1",
-            )?;
-            let ids = statement
-                .query_map([id], |row| row.get::<_, String>(0))?
-                .collect::<Result<Vec<_>, _>>()?;
-            drop(statement);
-            for team_id in ids {
-                SyncDocumentsRepository::put_entity(
-                    transaction,
-                    "peerTeam",
-                    &team_id,
-                    json!({}),
-                    true,
-                )?;
+            // Its teams leave the visible window; their documents are built at read time.
+            for team in existing["peerTeams"].as_array().into_iter().flatten() {
+                if let Some(team_id) = team["id"].as_str() {
+                    crate::durable_seq::leave_window(
+                        transaction,
+                        crate::durable_seq::PEER_TEAM_WINDOW,
+                        team_id,
+                    )?;
+                }
             }
             let room_table: bool = transaction.query_row_cached(
                 "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_rooms')",

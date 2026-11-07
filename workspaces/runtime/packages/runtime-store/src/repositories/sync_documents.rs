@@ -123,6 +123,7 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
     "edge",
     "chat",
     "project",
+    "peerTeam",
 ];
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its

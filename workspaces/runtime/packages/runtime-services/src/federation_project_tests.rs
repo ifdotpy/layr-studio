@@ -294,16 +294,13 @@ async fn revoke_is_final_and_refuses_a_later_pairing_request() {
     );
 }
 
-/// Peer team `team` of the local project `project-b`, as stored in its entity payload.
+/// Peer team `team` of the local project `project-b`, as its document is built at read time.
 async fn peer_team_payload(store: &Arc<RuntimeStore>) -> String {
     store
         .read_async("runtime-services/federation/tests", |tx| {
-            tx.query_row(
-                "SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team' AND deleted=0",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .map_err(StoreError::from)
+            crate::sync_policy::peer_team_document(tx, "team")?
+                .map(|value| value.as_str().to_owned())
+                .ok_or(StoreError::RecordContract("the team is not visible"))
         })
         .await
         .expect("peer team entity")

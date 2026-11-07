@@ -100,6 +100,7 @@ mod m2026_11_06_enum_column_checks;
 mod m2026_11_06_immutable_rows;
 mod m2026_11_06_item_hidden_by;
 mod m2026_11_06_one_draft_per_chat;
+mod m2026_11_06_peer_team_read_time;
 mod m2026_11_06_process_exit_check;
 mod m2026_11_06_project_read_time;
 pub(crate) mod m2026_11_06_start_attempt_on_turns;
@@ -130,6 +131,7 @@ pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_31_room_record::apply as migrate_room_record;
 pub use m2026_11_06_chat_fields_on_chats::apply as migrate_chat_fields_to_chats;
+pub use m2026_11_06_peer_team_read_time::apply as migrate_peer_teams_to_window;
 pub use m2026_11_06_start_attempt_on_turns::apply as migrate_start_attempts_to_turns;
 pub use m2026_11_06_status_on_chats::apply as migrate_status_to_chats;
 
@@ -1684,6 +1686,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_project_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-peer-team-read-time",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Peer team copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_peer_team_read_time::apply(c.transaction),
     },
 ];
 

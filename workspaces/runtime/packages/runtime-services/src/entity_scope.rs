@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 9] = [
+const DIRECT_SOURCES: [DirectSource; 10] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -483,7 +483,15 @@ const DIRECT_SOURCES: [DirectSource; 9] = [
         table: PEER_PROJECTS,
         collections: &["project"],
     },
+    // The visible peer teams; the team writers keep the window (`sync_policy`).
+    DirectSource {
+        table: durable_seq::PEER_TEAM_WINDOW,
+        collections: &["peerTeam"],
+    },
 ];
+
+/// Direct sources that are `durable_rows` names of derived documents, not tables.
+const MARK_SOURCES: [&str; 2] = [durable_seq::CHAT_VIEW_MARK, durable_seq::PEER_TEAM_WINDOW];
 
 /// The table of mirrored peer projects; their ids start with [`PEER_PROJECT_PREFIX`].
 const PEER_PROJECTS: &str = "peer_projects";
@@ -509,7 +517,7 @@ fn direct_units(
     }
     for source in &DIRECT_SOURCES {
         if !source.collections.iter().any(|c| wanted.contains(c))
-            || source.table != durable_seq::CHAT_VIEW_MARK
+            || !MARK_SOURCES.contains(&source.table)
                 && !crate::sync_policy::table_exists(connection, source.table)?
         {
             continue;
@@ -570,6 +578,17 @@ fn direct_docs(
             } else if !snapshot {
                 rows.extend(tombstones(&[collection], wanted, id, seq));
             }
+        }
+        return Ok(rows);
+    }
+    if table == durable_seq::PEER_TEAM_WINDOW {
+        match crate::sync_policy::peer_team_document(connection, id)? {
+            Some(value) if wanted.contains("peerTeam") => {
+                rows.push(upsert("peerTeam", id, seq, value)?)
+            }
+            Some(_) => {}
+            None if !snapshot => rows.extend(tombstones(&["peerTeam"], wanted, id, seq)),
+            None => {}
         }
         return Ok(rows);
     }

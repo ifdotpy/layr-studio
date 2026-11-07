@@ -287,6 +287,11 @@ pub const RECEIPT_VIEW_MARK: &str = "receipt_views";
 pub const TASK_WINDOW: &str = "task_window";
 pub const MONITOR_WINDOW: &str = "monitor_window";
 
+/// The `durable_rows` window of the visible peer teams: the peer team writers (owner:
+/// `sync_policy` in runtime-services) mark a team when its view may change and take it
+/// out when it is no longer visible. Its documents are built at read time.
+pub const PEER_TEAM_WINDOW: &str = "peer_team_window";
+
 /// Put `id` in window `tbl`. An id already in it keeps its number.
 pub fn join_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
     let changed = connection.execute(

@@ -2098,7 +2098,7 @@ fn maintain_peer_team_entities(
     transaction: &Transaction<'_>,
     agent_records: &[(String, String)],
     project_records: &[(String, String)],
-    validate: &impl Fn(&str, &str, &Value, bool) -> bool,
+    _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
     if !table_exists(transaction, "runtime_projects")?
         || !table_exists(transaction, "runtime_agents")?
@@ -2113,6 +2113,60 @@ fn maintain_peer_team_entities(
     }) {
         return Ok(());
     }
+    // The documents are built at read time (`peer_team_document`); the window holds the
+    // visible teams and gives a changed team a new number.
+    // A team takes a new number only when its view changed: the hash of the view it was
+    // last numbered with is kept in `sync_entity_meta`.
+    let current = peer_team_views(transaction, agent_records, project_records)?;
+    for (id, view) in &current {
+        let key = format!("{PEER_TEAM_HASH_PREFIX}{id}");
+        let hash = studio_runtime_store::sha256_hex(&studio_json::to_vec(view)?);
+        let stored: Option<String> = transaction
+            .query_row(
+                "SELECT value FROM sync_entity_meta WHERE key=?1",
+                [&key],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let visible =
+            studio_runtime_store::durable_seq::in_window(transaction, PEER_TEAM_WINDOW, id)?;
+        if stored.as_deref() != Some(hash.as_str()) {
+            // A team already in the window without a hash (moved there by a migration)
+            // keeps its number.
+            if !visible || stored.is_some() {
+                studio_runtime_store::durable_seq::mark(transaction, PEER_TEAM_WINDOW, id)?;
+            }
+            transaction.execute(
+                "INSERT INTO sync_entity_meta(key,value) VALUES(?1,?2)
+                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                rusqlite::params![key, hash],
+            )?;
+        }
+    }
+    for id in studio_runtime_store::durable_seq::window_members(transaction, PEER_TEAM_WINDOW)? {
+        if !current.contains_key(&id) {
+            studio_runtime_store::durable_seq::leave_window(transaction, PEER_TEAM_WINDOW, &id)?;
+            transaction.execute(
+                "DELETE FROM sync_entity_meta WHERE key=?1",
+                [format!("{PEER_TEAM_HASH_PREFIX}{id}")],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The `durable_rows` window of the visible peer teams.
+pub(crate) const PEER_TEAM_WINDOW: &str = studio_runtime_store::durable_seq::PEER_TEAM_WINDOW;
+/// `sync_entity_meta` key prefix of the view hash a visible team was last numbered with.
+const PEER_TEAM_HASH_PREFIX: &str = "peer_team_view_hash:";
+
+/// The view of every visible peer team, by id: a team of a live project with at least
+/// two live lead members in the project folder. Owner of the peer team view rule.
+fn peer_team_views(
+    transaction: &Connection,
+    agent_records: &[(String, String)],
+    project_records: &[(String, String)],
+) -> StoreResult<BTreeMap<String, PeerTeamProjection>> {
     let agents = agent_records
         .iter()
         .filter_map(|(_, raw)| studio_json::from_str::<Value>(raw).ok())
@@ -2132,6 +2186,10 @@ fn maintain_peer_team_entities(
         else {
             continue;
         };
+        // A project hidden from the sidebar shows no teams.
+        if project.sidebar_hidden.value() == Some(&true) {
+            continue;
+        }
         let Some(project_path) = (!project.path.trim().is_empty())
             .then(|| studio_runtime_store::path_identity::lexical_text(&project.path))
             .flatten()
@@ -2179,12 +2237,36 @@ fn maintain_peer_team_entities(
             }
         }
     }
-    let mut kept = BTreeSet::new();
-    for (id, record) in current {
-        kept.insert(id.clone());
-        SyncDocumentsRepository::put_entity(transaction, "peerTeam", &id, record, false)?;
+    Ok(current)
+}
+
+/// The `peerTeam` document of team `id`, built at read time from the projects, the
+/// grants and the live lead agents. None when the team is not visible.
+pub(crate) fn peer_team_document(
+    connection: &Connection,
+    id: &str,
+) -> StoreResult<Option<RawValue>> {
+    if !table_exists(connection, "runtime_projects")?
+        || !table_exists(connection, "runtime_agents")?
+    {
+        return Ok(None);
     }
-    retire_unkept(transaction, "peerTeam", &kept, None, validate)
+    let projects = projection_records(connection, "runtime_projects")?;
+    let agents = live_agent_records(connection)?;
+    peer_team_document_with(connection, &agents, &projects, id)
+}
+
+fn peer_team_document_with(
+    connection: &Connection,
+    agents: &[(String, String)],
+    projects: &[(String, String)],
+    id: &str,
+) -> StoreResult<Option<RawValue>> {
+    peer_team_views(connection, agents, projects)?
+        .remove(id)
+        .map(|view| RawValue::from_string(studio_json::to_string(&view)?))
+        .transpose()
+        .map_err(Into::into)
 }
 
 fn retire_unkept(
@@ -2770,7 +2852,6 @@ mod tests {
                     "INSERT INTO runtime_projects(id,record) VALUES('good',?1)",
                     [r#"{"recordKind":"live","id":"good","path":"/good"}"#],
                 )?;
-                SyncDocumentsRepository::put_entity(tx, "peerTeam", "team", json!({"id":"team","name":"last known","projectPath":"/bad","members":["a","b"]}), false)?;
                 Ok(())
             })
             .await
@@ -2778,18 +2859,25 @@ mod tests {
         let snapshot = ProjectVaultSnapshot::capture_for_sync(&store, root.path())
             .await
             .unwrap();
-        store.transaction(move |tx| {
-            let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
-            maintain_entity_projections_with_server_id(tx, "", None, &snapshot, &rooms, |_, _, _, _| true)?;
-            // Project documents are built at read time: the row that does not decode has
-            // none, the good row has one.
-            assert!(crate::entity_scope::direct_document(tx, "project", "good")?.is_some());
-            assert!(crate::entity_scope::direct_document(tx, "project", "bad")?.is_none());
-            let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team' AND deleted=0", [], |row| row.get(0))?;
-            let payload: Value = studio_json::from_str(&payload)?;
-            assert_eq!(payload["value"]["name"], "last known");
-            Ok(())
-        }).await.unwrap();
+        store
+            .transaction(move |tx| {
+                let rooms = crate::sync_entity_context::RoomDirectory::load(tx)?;
+                maintain_entity_projections_with_server_id(
+                    tx,
+                    "",
+                    None,
+                    &snapshot,
+                    &rooms,
+                    |_, _, _, _| true,
+                )?;
+                // Project documents are built at read time: the row that does not decode has
+                // none, the good row has one.
+                assert!(crate::entity_scope::direct_document(tx, "project", "good")?.is_some());
+                assert!(crate::entity_scope::direct_document(tx, "project", "bad")?.is_none());
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -2820,10 +2908,10 @@ mod tests {
                 let mut project = json!({"recordKind":"live","id":"p","path":"/project","peerTeams":[{"id":"team","name":"Team","members":["a","b"]}]});
                 if let Some(revision) = revision { project["peerTeamsRevision"] = revision; }
                 maintain_peer_team_entities(tx, &agents, &[("p".into(), project.to_string())], &|_, _, _, _| true)?;
-                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='peerTeam' AND id='team'", [], |row| row.get(0))?;
-                let value: Value = studio_json::from_str(&payload)?;
-                assert_eq!(value["value"]["revision"], expected);
-                assert_eq!(value["value"]["members"], json!(["a", "b"]));
+                let payload = super::peer_team_document_with(tx, &agents, &[("p".into(), project.to_string())], "team")?.expect("visible team");
+                let value: Value = studio_json::from_str(payload.as_str())?;
+                assert_eq!(value["revision"], expected);
+                assert_eq!(value["members"], json!(["a", "b"]));
             }
             Ok::<_, StoreError>(())
         }).await.unwrap();

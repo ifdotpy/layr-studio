@@ -5900,19 +5900,19 @@ mod tests {
             .transaction(|tx| {
                 SyncDocumentsRepository::put_entity(
                     tx,
-                    "peerTeam",
+                    "room",
                     "first",
                     json!({"id":"first","name":"superseded","status":"idle","source":"managed"}),
                     false,
                 )?;
                 SyncDocumentsRepository::put_entity(
                     tx,
-                    "peerTeam",
+                    "room",
                     "first",
                     json!({"id":"first","name":"First","status":"idle","source":"managed"}),
                     false,
                 )?;
-                SyncDocumentsRepository::put_entity(tx, "peerTeam", "removed", json!({}), true)?;
+                SyncDocumentsRepository::put_entity(tx, "room", "removed", json!({}), true)?;
                 Ok(())
             })
             .await
@@ -5950,7 +5950,7 @@ mod tests {
                 for index in 0..SYNC_ENTITY_STREAM_MAX_DOCUMENTS {
                     SyncDocumentsRepository::put_entity(
                         tx,
-                        "peerTeam",
+                        "room",
                         &format!("deleted-{index}"),
                         json!({}),
                         true,
@@ -5986,7 +5986,7 @@ mod tests {
                 for index in 0..count {
                     let id = format!("agent-{index}");
                     let name = if scenario == "bytes" { "é".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 2) } else { "Agent".into() };
-                    SyncDocumentsRepository::put_entity(tx, "peerTeam", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
+                    SyncDocumentsRepository::put_entity(tx, "room", &id, json!({"id":id,"name":name,"status":"idle","source":"managed"}), false)?;
                 }
                 if scenario == "pruned" {
                     tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor','1')", [])?;
