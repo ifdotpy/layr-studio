@@ -1,5 +1,3 @@
-import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
-import { simpleRequest } from "../approvalFixtures";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useMantineColorScheme } from "@mantine/core";
@@ -7,8 +5,9 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { publishServerAliases } from "../servers/serverAliases";
 import { readServerAliases } from "../servers/registry";
 import Sidebar, { type SidebarProps } from "./Sidebar";
-import type { Agent, Snapshot } from "../types";
-import { chatIndicators } from "./chat-status/chatStatusModel";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
+import { snapshotFixture } from "../snapshotFixture.ts";
 import { createSidebarServices, type SidebarBackend } from "./sidebar/services";
 import "./sidebar/FleetFixtures.css";
 
@@ -22,94 +21,37 @@ const titles = [
   "Investigate mobile navigation",
   "Ready for the next assignment",
 ];
-const threads = projects.flatMap((project, projectIndex) =>
-  titles.map(
-    (name, index) =>
-      ({
-        id: `${project}-${index}`,
-        name,
-        cwd: `/work/${project}`,
-        source: GeneratedApiAgentSource.managed,
-        isLead: true,
-        provider: index % 2 ? "claude" : "codex",
-        model: index % 2 ? "claude-opus-4-6" : "gpt-5.4",
-        status: [
-          "approval",
-          "failed",
-          "running",
-          "completed",
-          "paused",
-          "completed",
-        ][index],
-        autoWake: index !== 4,
-        inFlight: index === 2,
-        created: now - 86400,
-        updated: now - (projectIndex + index + 1) * 180,
-        pinned: projectIndex === 0 && index === 2,
-        threadId: `${project}-${index}-thread`,
-        lastCompletedTurn: index === 3 ? "result" : null,
-        lastCompletedTurnStatus: index === 3 ? "completed" : null,
-        readStateSupported: true,
-        ...(index === 4 && projectIndex === 0
-          ? { stall: { taskId: "review-navigation", since: now - 240 } }
-          : {}),
-        ...(index === 2
-          ? {
-              commandProgress: [
-                {
-                  monitorId: `${project}-checks`,
-                  stage: "Running focused browser checks",
-                  startedAt: now - 46,
-                  lastOutputLine: "Checking responsive navigation",
-                },
-                {
-                  monitorId: `${project}-types`,
-                  stage: "Checking TypeScript contracts",
-                  startedAt: now - 12,
-                  lastOutputLine: "No contract errors",
-                },
-              ],
-            }
-          : {}),
-      }) as Agent,
-  ),
+const indicators: SidebarChatRow["indicator"][] = [
+      { kind: "answer", label: "Needs your answer" },
+      { kind: "error", label: "Failed" },
+      { kind: "working", label: "Working" },
+      { kind: "none", label: "Ready" },
+      { kind: "none", label: "Paused" },
+      { kind: "none", label: "Ready" },
+    ];
+const rows = projects.flatMap((project, projectIndex) =>
+  titles.map((name, index) => sidebarRowFixture(`${project}-${index}`, {
+    name,
+    projectPath: `/work/${project}`,
+    groupKey: JSON.stringify(["items", `/work/${project}`, null]),
+    sortKey: String(projectIndex * titles.length + index).padStart(2, "0"),
+    activityAt: now - (projectIndex + index + 1) * 180,
+    pinned: projectIndex === 0 && index === 2,
+    provider: index % 2 ? "claude" : "codex",
+    model: index % 2 ? "claude-opus-4-6" : "gpt-5.4",
+    indicator: indicators[index]!, 
+    inFlight: index === 2,
+    canArchive: index !== 2,
+    compactPinned: index < 3,
+    markUnread: "no_completed_result",
+    searchText: `${name} /work/${project}`.toLowerCase(),
+  })),
 );
-const data = {
-  token: "storybook-fleet",
-  stateDir: "storybook-fleet",
-  threads,
-  chats: [],
-  nodes: threads,
-  edges: [],
-  runtime: {
-    agents: threads,
-    projects: projects.map((name) => ({
-      id: name,
-      name,
-      path: `/work/${name}`,
-      created: now - 86400,
-    })),
-    requests: threads
-      .filter((_, index) => index % titles.length === 0)
-      .map((agent) =>
-        simpleRequest({
-          id: `request-${agent.id}`,
-          agent: agent.id,
-        }),
-      ),
-    rooms: [],
-    tasks: [],
-    monitors: [],
-    complaints: [],
-    studioErrors: [],
-    rules: [],
-    peerTeams: [],
-    events: [],
-    work: [],
+const data = snapshotFixture([], {
+    projects: projects.map((name) => ({ id: name, name, path: `/work/${name}`, created: now - 86400 })),
     peerTeamsVersion: 1,
     projectOrganizationVersion: 1,
-  },
-} as Snapshot;
+});
 const values = new Map<string, string>();
 const backend: SidebarBackend = {
   ownerId: "local",
@@ -146,7 +88,7 @@ services.alias = (target) =>
 const args: SidebarProps = {
   services,
   data,
-  indicators: chatIndicators(data),
+  rows,
   opened: "codex-studio-2",
   open: fn(),
   newChat: fn(),
@@ -172,7 +114,7 @@ function FleetFixture({
   const { setColorScheme } = useMantineColorScheme();
   useEffect(() => setColorScheme(scheme), [scheme, setColorScheme]);
   return (
-    <div className="fleet-story">
+    <div id="root" className="fleet-story">
       <Sidebar
         {...props}
         opened={opened}
@@ -275,7 +217,8 @@ export const Interactions: Story = {
       workingStatus.closest(".mantine-VisuallyHidden-root"),
     ).toBeNull();
     await expect(getComputedStyle(firstStrip).boxShadow).toBe("none");
-    await expect(getComputedStyle(firstStrip).backgroundColor).not.toBe(
+    // sidebar-projects.css applies a background only to hovered or selected rows.
+    await expect(getComputedStyle(firstStrip).backgroundColor).toBe(
       "rgba(0, 0, 0, 0)",
     );
     await expect(page.queryByLabelText("Elapsed time")).not.toBeInTheDocument();
@@ -336,12 +279,7 @@ export const Interactions: Story = {
 
 export const NoAttention: Story = {
   args: {
-    indicators: new Map(
-      [...args.indicators].filter(
-        ([, indicator]) =>
-          indicator.kind !== "answer" && indicator.kind !== "error",
-      ),
-    ),
+    rows: rows.map((row) => ({ ...row, indicator: { kind: "none", label: "Ready" } })),
   },
   render: (props) => <FleetFixture {...props} scheme="light" />,
   play: async ({ canvasElement }) => {

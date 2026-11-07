@@ -1,5 +1,8 @@
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
-import type { Agent, Snapshot } from "../../src/types.ts";
+import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
+import { snapshotFixture } from "../../src/snapshotFixture.ts";
+import type { SidebarChatRow } from "../../src/generated/observableResources.ts";
 import type { SidebarSource } from "../../src/servers/mergedSidebar.ts";
 declare global {
   interface Window {
@@ -18,62 +21,33 @@ import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import "../../src/appearance.css";
 const noop = () => {};
-const threads: Agent[] = Array.from({ length: 30 }, (_, index) => ({
-  id: "chat-" + index,
+const rows = Array.from({ length: 30 }, (_, index) => sidebarRowFixture("chat-" + index, {
   name: "Chat " + index + " with a long title reaching the actions",
-  source: "managed",
-  isLead: true,
-  cwd: "/project",
   projectPath: "/project",
-  created: 1,
-  updated: 1,
+  groupKey: JSON.stringify(["items", "/project", null]),
+  sortKey: String(index).padStart(2, "0"),
+  searchText: "chat " + index + " with a long title reaching the actions /project",
 }));
-// Sidebar-only fixtures omit snapshot graph arrays and unrelated runtime collections.
-const sidebarSnapshot = (
-  value: Pick<Snapshot, "stateDir" | "token" | "threads"> & {
-    runtime: Partial<Snapshot["runtime"]>;
-  },
-): Snapshot => value as Snapshot;
-const data = sidebarSnapshot({
+const data = {
+  ...snapshotFixture([], {
+    projects: [{ id: "project", name: "Project", path: "/project", folders: [] }],
+    sidebarOrder: { revision: 0, groups: {} },
+  }),
   stateDir: "sidebar-single-activation",
   token: "fixture-token",
-  threads,
-  runtime: {
-    projects: [
-      { id: "project", name: "Project", path: "/project", folders: [] },
-    ],
-    agents: [],
-    rooms: [],
-    requests: [],
-    complaints: [],
-    peerTeams: [],
-    sidebarOrder: { revision: 0, groups: {} },
-  },
-});
+};
 const scenario = new URLSearchParams(location.search).get("groups");
 const groupChat = (
   id: string,
   cwd: string,
   archived = false,
-): Agent => ({
-  id,
-  name: id,
-  cwd,
+): SidebarChatRow => sidebarRowFixture(id, {
   projectPath: cwd,
   archived,
-  source: "managed",
-  isLead: true,
-  status: "completed",
-  created: 1,
-  updated: 1,
+  groupKey: JSON.stringify(["items", cwd, null]),
+  searchText: id + " " + cwd,
 });
-type Radio =
-  import("../../src/generated/api.ts").components["schemas"]["RoomRadio"];
-// The shared row fixture omits unused active, error, speaker and teamId fields.
-const partialRadio = (value: Partial<Radio>): Radio => value as Radio;
-const groupData: Snapshot = {
-  ...data,
-  threads: [
+const groupRows = [
     ...Array.from({ length: 5 }, (_, directory) =>
       Array.from({ length: 2 }, (_, chat) =>
         groupChat(
@@ -89,7 +63,9 @@ const groupData: Snapshot = {
     groupChat("compact-old-0", "/compact"),
     groupChat("compact-old-1", "/compact"),
     groupChat("registered-archived", "/registered-archive", true),
-  ],
+  ];
+const groupData = {
+  ...data,
   runtime: {
     ...data.runtime,
     projects: [
@@ -107,31 +83,17 @@ const groupData: Snapshot = {
         name: "Shared room",
         projectPath: "/shared-only",
         members: [],
-        radio: partialRadio({
-          direct: true,
-          status: "idle",
-          next: [],
-          revision: 0,
-        }),
+        radio: sidebarFixtureRadio,
       },
     ],
   },
 };
-// Versions are unused by this owner-only fixture.
-const sidebarSource = (
-  value: Pick<SidebarSource, "id" | "online"> & {
-    sidebar: Omit<
-      SidebarSource["sidebar"],
-      "peerTeamsVersion" | "projectOrganizationVersion"
-    >;
-  },
-): SidebarSource => value as SidebarSource;
-const source = sidebarSource({
+const source: SidebarSource = {
   id: "local",
   online: true,
   sidebar: {
     stateDir: groupData.stateDir,
-    threads: groupData.threads,
+    rows: groupRows,
     projects: groupData.runtime.projects,
     rooms: groupData.runtime.rooms,
     peerTeams: [],
@@ -139,10 +101,10 @@ const source = sidebarSource({
     savedOrder: {},
     compact: {},
     collapsed: {},
-    indicators: [],
-    unread: [],
+    peerTeamsVersion: 1,
+    projectOrganizationVersion: 1,
   },
-});
+};
 const model = mergeSidebar([source], 0, true);
 const backends = new Map([["local", localSidebarBackend]]);
 const online = () => true;
@@ -198,7 +160,7 @@ function Fixture() {
           mobile={true}
           onSearch={noop}
           close={noop}
-          indicators={new Map()}
+          rows={scenario ? groupRows : rows}
           markingRead={new Set()}
           markUnread={noop}
           hideOldChatsThreshold={scenario ? 2 : 100}

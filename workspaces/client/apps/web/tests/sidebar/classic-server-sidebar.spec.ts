@@ -18,7 +18,9 @@ for (const viewport of [
     const local = await fixture("Local");
     const remote = await fixture("Remote", true);
     local.snapshot.threads[0]!.pinned = true;
+    local.snapshot.runtime.sidebarRows![0]!.pinned = true;
     remote.snapshot.threads[0]!.pinned = true;
+    remote.snapshot.runtime.sidebarRows![0]!.pinned = true;
     local.discoverPeer(remote);
     try {
       await remoteNetwork(context, remote);

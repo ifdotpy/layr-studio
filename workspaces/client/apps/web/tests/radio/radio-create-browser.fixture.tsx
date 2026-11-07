@@ -116,7 +116,7 @@ function Fixture() {
         onSearch={() => {}}
         close={() => {}}
         refresh={refresh}
-        indicators={new Map()}
+        rows={[]}
         markUnread={() => {}}
         markingRead={new Set()}
       />

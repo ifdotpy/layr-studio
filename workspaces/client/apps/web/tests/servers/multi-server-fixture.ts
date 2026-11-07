@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { components, AgentEntityDto } from "../../src/generated/api.ts";
 import type { PostBody, ApiPostPath } from "../../src/apiTypes.ts";
@@ -177,6 +178,7 @@ export async function fixture(
     threads: [agent],
     runtime: {
       agents: [agent],
+      sidebarRows: [sidebarRowFixture("overlap", { name: `${label} chat`, model: "fixture-model" })],
       projects: [
         {
           path: "/same/project",
@@ -357,7 +359,7 @@ export async function fixture(
                   : claudeLogins.get(resource.requestId) || null,
               }
             : options.progress?.(resource),
-        versionedResources: !!options.entityFrames,
+        versionedResources: true,
         onStreamReady: (send, resources) => {
           subscriptions.set(response, resources);
           notify.push(send);
@@ -806,7 +808,7 @@ export async function fixture(
         lastCompletedTurnStatus: "completed",
         tail: `${label} reply`,
       });
-      notify.forEach((send) => send([{ kind: "state" }]));
+      notify.forEach((send) => send([{ kind: "state" }, { kind: "sidebar" }]));
     },
     publishState(resources: ResourceRef[] = [{ kind: "state" }]) {
       notify.forEach((send) => send(resources));

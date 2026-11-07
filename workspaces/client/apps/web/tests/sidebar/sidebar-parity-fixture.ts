@@ -1,3 +1,5 @@
+import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import type { SidebarChatRow } from "../../src/generated/observableResources.ts";
 import type {
   GetResult,
   PostResult,
@@ -185,6 +187,29 @@ function seed(server: ServerFixture, owner: Owner) {
     order,
   };
   server.setChats(rows);
+  const sidebarRow = (id: string, name: string, patch: Partial<SidebarChatRow> = {}) => sidebarRowFixture(id, {
+    name: `${label} ${name}`, projectPath: path,
+    projectId: owner === "local" ? "logical-project" : "remote-project",
+    projectFolderRevision: 2,
+    groupKey: JSON.stringify(["items", path, null]),
+    activityAt: now,
+    searchText: `${label} ${name} ${path}`.toLowerCase(),
+    ...patch,
+  });
+  server.snapshot.runtime.sidebarRows = [
+    sidebarRow("overlap", "Saved pin", { pinned: true, compactPinned: true, activityAt: 1, sortKey: "00" }),
+    sidebarRow("root-b", "Root B", { sortKey: "01", orderRank: 2 }),
+    sidebarRow("root-a", "Root A", { sortKey: "02", orderRank: 3 }),
+    sidebarRow("approval", "Approval", { sortKey: "03", compactPinned: true, indicator: { kind: "answer", label: "Needs your answer" } }),
+    sidebarRow("read", "Read answer", { sortKey: "04", markRead: { threadId: "thread-read", turnId: "turn-read", read: true, revision: 1 }, markUnread: "allowed" }),
+    sidebarRow("running", "Running", { sortKey: "05", compactPinned: true, inFlight: true, canArchive: false, indicator: { kind: "working", label: "Working" } }),
+    sidebarRow("unread", "Unread", { sortKey: "06", compactPinned: true, markRead: { threadId: "thread-unread", turnId: "turn-unread", read: false, revision: 1 }, markUnread: "already_unread" }),
+    sidebarRow("nested-chat", "Nested chat", { sortKey: "07", projectFolder: "nested", groupKey: JSON.stringify(["items", path, "nested"]) }),
+    sidebarRow("member-a", "Team A", { sortKey: "08", teamId: "team" }),
+    sidebarRow("member-b", "Team B", { sortKey: "09", teamId: "team" }),
+    ...Array.from({ length: 6 }, (_, index) => sidebarRow(`old-${index}`, `Old ${index}`, { activityAt: 1, sortKey: `1${index}`, searchText: `${label} Old ${index} ${path} ${index === 0 ? label + " tail needle" : ""}`.toLowerCase() })),
+    sidebarRow("archived", "Archived", { sortKey: "20", archived: true, activityAt: 1 }),
+  ];
   Object.assign(server.snapshot.runtime, {
     projectOrganizationVersion: 1,
     peerTeamsVersion: 1,
@@ -282,6 +307,11 @@ export async function sidebarParityFixture(
       const row = (id: string) => {
         const value = snapshot.threads.find((chat) => chat.id === id);
         assert.ok(value, `Unknown ${owner} chat: ${id}`);
+        return value;
+      };
+      const sidebarRow = (id: string) => {
+        const value = snapshot.runtime.sidebarRows?.find((row) => row.id === id);
+        assert.ok(value, `Unknown ${owner} sidebar row: ${id}`);
         return value;
       };
       const reply = (value: unknown) => {
@@ -447,7 +477,7 @@ export async function sidebarParityFixture(
         });
         const chat = row(body.id);
         for (const key of ["pinned", "archived"] as const)
-          if (key in body) chat[key] = body[key];
+          if (key in body) { chat[key] = body[key]; sidebarRow(body.id)[key] = body[key]!; }
         if ("project_folder" in body) {
           assert.equal(body.project_path, chat.cwd);
           assert.equal(body.expected_revision, chat.projectFolderRevision);
@@ -457,6 +487,9 @@ export async function sidebarParityFixture(
               chat.projectFolderRevision !== undefined,
           );
           chat.projectFolderRevision++;
+          sidebarRow(body.id).projectFolder = body.project_folder ?? null;
+          sidebarRow(body.id).projectFolderRevision = chat.projectFolderRevision;
+          sidebarRow(body.id).groupKey = JSON.stringify(["items", chat.cwd, body.project_folder]);
         }
         if (body.read_state) {
           assert.equal(body.read_state.thread_id, chat.threadId);
@@ -483,7 +516,10 @@ export async function sidebarParityFixture(
       if (path === "/api/rename") {
         const body = fixturePostBody<"/api/rename">(rawBody);
         calls[owner].push({ path: "/api/rename", body: structuredClone(body) });
+        assert.ok(body.name);
         row(body.id).name = body.name;
+        sidebarRow(body.id).name = body.name;
+        sidebarRow(body.id).searchText = body.name.toLowerCase();
         // The legacy fixture acknowledges renames without the current receipt.
         return reply({ ok: true } satisfies JsonInput);
       }
@@ -495,6 +531,7 @@ export async function sidebarParityFixture(
             body: structuredClone(body),
           });
           row(body.target).deletedAt = Date.now() / 1000;
+          snapshot.runtime.sidebarRows = snapshot.runtime.sidebarRows!.filter((row) => row.id !== body.target);
           return reply({
             status: "applied",
             ref_kind: "agent",
@@ -513,7 +550,11 @@ export async function sidebarParityFixture(
           path: "/api/conversation",
           body: structuredClone(body),
         });
+        assert.ok(body.cwd);
         row(body.id).cwd = body.cwd;
+        sidebarRow(body.id).projectPath = body.cwd;
+        sidebarRow(body.id).projectId = null;
+        sidebarRow(body.id).groupKey = JSON.stringify(["items", body.cwd, null]);
         return reply(row(body.id));
       }
       if (path === "/api/leads") {
@@ -535,6 +576,14 @@ export async function sidebarParityFixture(
           projectFolder: body.project_folder || null,
           updated: Date.now() / 1000,
         };
+        snapshot.runtime.sidebarRows!.push(sidebarRowFixture(body.id, {
+          name: `${owner} new chat`, projectPath: body.cwd || sourcePath(owner),
+          projectFolder: body.project_folder || null,
+          activityAt: Date.now() / 1000,
+          compactPinned: true,
+          sortKey: "00-new-chat",
+          groupKey: JSON.stringify(["items", body.cwd || sourcePath(owner), body.project_folder || null]),
+        }));
         snapshot.threads.push(chat);
         snapshot.runtime.agents = snapshot.threads;
         return reply(chat);
@@ -738,6 +787,7 @@ export async function sidebarParityFixture(
   const prefs = { local: seed(local, "local"), remote: seed(remote, "remote") };
   if (remoteEmpty) {
     remote.setChats([]);
+    remote.snapshot.runtime.sidebarRows = [];
     Object.assign(remote.snapshot.runtime, {
       projects: [],
       rooms: [],

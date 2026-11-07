@@ -1221,6 +1221,7 @@ export type TestRuntimeView = {
   requests: TestApproval[];
   rules: RuleEntityDto[];
   work: WorkEntityDto[];
+  sidebarRows?: import("../src/generated/api.ts").components["schemas"]["SidebarChatRow"][];
   viewScopedAgents?: boolean;
   workDetails?: import("../src/generated/api.ts").components["schemas"]["WorkItem"][];
   agentDetails?: import("../src/generated/api.ts").components["schemas"]["AgentDetailEntityDto"][];
@@ -1646,6 +1647,11 @@ function entityValuesFromSnapshot(
     for (const row of rows ?? [])
       if (typeof row.id === "string") values.push(project(row));
   };
+  append(runtime.sidebarRows, (row) => ({
+    collection: "sidebarChatRow",
+    id: row.id,
+    value: row,
+  }));
   append(runtime.projects, (row) => ({
     collection: "project",
     id: row.id,

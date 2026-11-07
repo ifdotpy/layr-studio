@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
 import type { TestAgent } from "../playwright.ts";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -32,6 +33,11 @@ test("paired sidebar shows the chat provider and server alias", async ({
     row("old", "Old remote chat", 1),
     row("old-two", "Second old remote chat", 1),
   ]);
+  remote.snapshot.runtime.sidebarRows = [
+    sidebarRowFixture("recent", { name: "Claude on remote", provider: "claude", activityAt: Date.now() / 1000, sortKey: "0" }),
+    sidebarRowFixture("old", { name: "Old remote chat", provider: "claude", activityAt: 1, sortKey: "1" }),
+    sidebarRowFixture("old-two", { name: "Second old remote chat", provider: "claude", activityAt: 1, sortKey: "2" }),
+  ];
   try {
     await context.addInitScript(
       ({ origin, target }) => {
