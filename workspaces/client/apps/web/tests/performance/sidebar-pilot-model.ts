@@ -8,24 +8,27 @@ import { pilotSnapshot } from "./sidebar-pilot-data.ts";
 export function pilotEntities(
   agents: Agent[],
 ): components["schemas"]["SyncEntityPayload"][] {
-  return agents.map((agent) => ({
-    collection: "agentSummary",
-    id: agent.id,
-    value: agentSummaryFixture(agent.id, {
-      name: agent.name || "",
-      cwd: agent.cwd || "/fixture",
-      projectPath: agent.cwd || "/fixture",
-      status: agent.status,
-      created: agent.created,
-      updated: agent.updated,
-      threadId: agent.threadId,
-      epoch: agent.epoch,
-      operationalStatus:
-        agent.status === "running"
-          ? { reason: "working" }
-          : { reason: "read_result" },
-    }),
-  }));
+  return agents.map((agent) => {
+    if (!agent.operationalStatus)
+      throw new Error(
+        `Missing explicit operationalStatus in fixture agent ${agent.id}`,
+      );
+    return {
+      collection: "agentSummary",
+      id: agent.id,
+      value: agentSummaryFixture(agent.id, {
+        name: agent.name || "",
+        cwd: agent.cwd || "/fixture",
+        projectPath: agent.cwd || "/fixture",
+        status: agent.status,
+        created: agent.created,
+        updated: agent.updated,
+        threadId: agent.threadId,
+        epoch: agent.epoch,
+        operationalStatus: agent.operationalStatus,
+      }),
+    };
+  });
 }
 export function createPilotModel(agents: Agent[], _notify: () => void) {
   const data = pilotSnapshot(agents);

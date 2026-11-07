@@ -254,6 +254,7 @@ test("Sidebar incremental rows and current callbacks @performance", async ({
         ...window.fixtureAgent,
         name: "Current chat",
         status: "running",
+        operationalStatus: { reason: "working" },
       };
       await window.write("agent", value.id, value, 200);
     });

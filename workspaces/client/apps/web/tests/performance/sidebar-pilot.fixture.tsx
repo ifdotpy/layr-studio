@@ -92,10 +92,9 @@ window.sidebarPilot = {
         )
       )
         throw new Error("Update did not reach actual row");
-      const expected =
-        agents[i % pilotSize.visible]?.status === "running"
-          ? "working"
-          : "none";
+      const expected = required(
+        agents[i % pilotSize.visible],
+      ).expectedIndicator;
       if (
         target
           .closest("[data-sidebar-item]")

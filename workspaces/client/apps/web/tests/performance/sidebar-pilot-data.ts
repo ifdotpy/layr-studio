@@ -3,7 +3,11 @@ import { snapshotFixture } from "../../src/snapshotFixture.ts";
 
 /** Fixture sizes are shared by preparation, the browser and validation. */
 export const pilotSize = { chats: 1000, visible: 30, updates: 120 };
-export function pilotAgents(now = Date.now() / 1000): Agent[] {
+export type PilotAgent = Agent & {
+  operationalStatus: NonNullable<Agent["operationalStatus"]>;
+  expectedIndicator: "none" | "working";
+};
+export function pilotAgents(now = Date.now() / 1000): PilotAgent[] {
   return Array.from({ length: pilotSize.chats }, (_, i) => ({
     id: `pilot-${i}`,
     name: `Chat ${i}`,
@@ -13,6 +17,8 @@ export function pilotAgents(now = Date.now() / 1000): Agent[] {
     rootId: `pilot-${i}`,
     cwd: "/fixture",
     status: "completed",
+    operationalStatus: { reason: "read_result" },
+    expectedIndicator: "none",
     created: i < pilotSize.visible ? now : 1,
     updated: i < pilotSize.visible ? now : 1,
     threadId: `thread-${i}`,
@@ -27,15 +33,24 @@ export function pilotSnapshot(agents: Agent[]) {
     sidebarOrder: { revision: 0, groups: {} },
   });
 }
-export function pilotUpdate(agents: Agent[], index: number): Agent[] {
+export function pilotUpdate(agents: PilotAgent[], index: number): PilotAgent[] {
   const target = index % pilotSize.visible;
-  return agents.map((agent, i) =>
+  return agents.map<PilotAgent>((agent, i) =>
     i === target
       ? {
           ...agent,
           name: `Updated ${index}`,
-          status:
-            Math.floor(index / pilotSize.visible) % 2 ? "completed" : "running",
+          ...(Math.floor(index / pilotSize.visible) % 2
+            ? {
+                status: "completed",
+                operationalStatus: { reason: "read_result" },
+                expectedIndicator: "none",
+              }
+            : {
+                status: "running",
+                operationalStatus: { reason: "working" },
+                expectedIndicator: "working",
+              }),
         }
       : agent,
   );

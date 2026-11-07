@@ -33,6 +33,7 @@ const agents: Agent[] = Array.from({ length: 20 }, (_, i) => ({
   rootId: "agent-" + i,
   cwd: "/fixture",
   status: "completed",
+  operationalStatus: { reason: "read_result" },
   created: i,
   threadId: "thread-" + i,
   epoch: 0,
