@@ -1,12 +1,28 @@
 import { saved } from "../api";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
+import type { StateCollections } from "../generated/observableResources.ts";
+import type { components } from "../generated/api.ts";
+import type { DeepReadonly } from "../deepReadonly.ts";
+import { toJS } from "mobx";
+
+export type SidebarEntity = Extract<components["schemas"]["SyncEntityPayload"], {collection:"agentSummary"|"project"|"peerTeam"|"workspace"|"agentTail"}>;
+
+/** Preserve native collection identities at the frame serialization boundary. */
+export function sidebarEntities(collections:StateCollections): DeepReadonly<SidebarEntity[]> {
+  return [
+    ...[...collections.agents].map(([id,value]) => ({collection:"agentSummary" as const,id,value:toJS(value)})),
+    ...[...collections.projects].map(([id,value]) => ({collection:"project" as const,id,value:toJS(value)})),
+    ...[...collections.peerTeams].map(([id,value]) => ({collection:"peerTeam" as const,id,value:toJS(value)})),
+    ...[...collections.workspaces].map(([id,value]) => ({collection:"workspace" as const,id,value:toJS(value)})),
+    ...[...collections.agentTail].map(([id,value]) => ({collection:"agentTail" as const,id,value:toJS(value)})),
+  ];
+}
 import type { PeerTeam, Project, Room, Snapshot } from "../types";
 import { readPreferenceFields } from "../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../sync/uiPreferenceMerge";
 
 export type ServerSidebarSnapshot = {
   stateDir: string;
-  rows: readonly SidebarChatRow[];
+  entities: DeepReadonly<SidebarEntity[]>;
   projects: Project[];
   rooms: Room[];
   peerTeams: PeerTeam[];
@@ -56,12 +72,12 @@ export function sidebarVisualFields(
 /** Preserve sidebar fields and source identities without transcripts or session state. */
 export function sidebarSnapshot(
   data: Snapshot,
-  rows: readonly SidebarChatRow[] = [],
+  entities: DeepReadonly<SidebarEntity[]> = [],
 ): ServerSidebarSnapshot {
   const runtime = data.runtime;
   return {
     stateDir: data.stateDir,
-    rows,
+    entities,
     projects: (runtime?.projects || []).map((project) =>
       pick(project, [
         "id",
