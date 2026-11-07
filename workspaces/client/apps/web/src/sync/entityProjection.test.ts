@@ -2094,7 +2094,10 @@ it("retains equal nested entity payloads at ingress while advancing the replay s
       entityRow(
         "agentSummary",
         "lead",
-        { ...summary, operationalStatus: { reason: "working" } },
+        agentSummaryFixture("lead", {
+          ...summary,
+          operationalStatus: { reason: "working" },
+        }),
         4,
       ),
     ],
