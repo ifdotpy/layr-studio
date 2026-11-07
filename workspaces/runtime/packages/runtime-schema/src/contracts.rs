@@ -137,6 +137,10 @@ fn shared_values_ts() -> String {
             ("MAX_SAFE_INTEGER", values::MAX_SAFE_INTEGER.to_string()),
             ("COMPACT_RECENT_WINDOW_SECONDS", values::COMPACT_RECENT_WINDOW_SECONDS.to_string()),
             (
+                "COMPACT_RECENT_WINDOW_SECONDS",
+                values::COMPACT_RECENT_WINDOW_SECONDS.to_string(),
+            ),
+            (
                 "MODEL_CHOICES_PREFERENCE_KEY",
                 json_string(values::MODEL_CHOICES_PREFERENCE_KEY),
             ),
@@ -1968,6 +1972,21 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 json_string(crate::provider_diagnostics::STDIN_TIMING_DIAGNOSTIC_PREFIX),
                 json_string(crate::provider_diagnostics::REPLY_TIMING_DIAGNOSTIC_PREFIX),
             ),
+        });
+        let observable = studio_observable_codegen::render(
+            &openapi,
+            &crate::observable_resources::models(),
+            &crate::observable_resources::resources(),
+        )
+        .map_err(|error| error.to_string())?;
+        rendered.push(Rendered {
+            path: web("observableResources.ts"),
+            text: run_node(
+                root,
+                "node_modules/oxfmt/bin/oxfmt",
+                "--stdin-filepath=observableResources.ts",
+                &observable,
+            )?,
         });
         rendered.push(Rendered {
             path: web("api.ts"),

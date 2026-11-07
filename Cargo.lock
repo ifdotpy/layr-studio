@@ -6791,6 +6791,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-observable-codegen"
+version = "0.1.0"
+dependencies = [
+ "schemars 1.2.3",
+ "studio-json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "studio-operations"
 version = "0.1.0"
 dependencies = [
@@ -6949,6 +6958,7 @@ dependencies = [
  "strum",
  "studio-client-domain",
  "studio-json",
+ "studio-observable-codegen",
  "studio-request-signing",
  "thiserror 2.0.21",
  "unicode-general-category",
