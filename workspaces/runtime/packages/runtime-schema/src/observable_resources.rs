@@ -29,6 +29,20 @@ pub fn models() -> Vec<ObservableModel> {
             .identity("id")
             .opaque("folders"),
         ObservableModel::named("NativeThreadBlockDto").opaque("error"),
+        ObservableModel::named("ProcessListing").opaque("activities"),
+        ObservableModel::named("ProcessView").identity("id"),
+        ObservableModel::named("MonitorEntityDto").identity("id"),
+        ObservableModel::named("TranscriptData"),
+        ObservableModel::named("TranscriptMessageRecord")
+            .declared_fields()
+            .identity("id")
+            .track_nested(&["inputs", "fullTextBlob"])
+            .opaque("details")
+            .opaque("nativeError")
+            .opaque("previousError"),
+        ObservableModel::named("TranscriptInput")
+            .declared_fields()
+            .track_nested(&[]),
         ObservableModel::named("PeerTeamEntityDto").identity("id"),
         ObservableModel::named("WorkspaceEntityDto").opaque("nativeNotices"),
         ObservableModel::named("SidebarOrderDto").opaque("groups"),
@@ -58,6 +72,37 @@ pub fn resources() -> Vec<ObservableResource> {
                 brand: "AgentId".into(),
             }],
         ),
+        ObservableResource::named(
+            "processes",
+            "processes",
+            "ProcessList",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        ),
+        ObservableResource::mapped(
+            "monitors",
+            "monitors",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        ),
+        ObservableResource::mapped(
+            "transcript",
+            "transcript",
+            vec![
+                ObservableArg {
+                    name: "agentId".into(),
+                    brand: "AgentId".into(),
+                },
+                ObservableArg {
+                    name: "tail".into(),
+                    brand: "TranscriptTail".into(),
+                },
+            ],
+        ),
     ]
 }
 
@@ -66,7 +111,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 2);
+        assert_eq!(resources.len(), 5);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]

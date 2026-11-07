@@ -7,7 +7,7 @@ mod shape;
 use schemars::JsonSchema;
 use studio_json::Value;
 
-pub use emit::render;
+pub use emit::{render, render_fields};
 
 /// A model's Rust schema owner and field-level observation metadata.
 #[derive(Clone, Debug)]
@@ -17,6 +17,8 @@ pub struct ObservableModel {
     pub opaque: Vec<String>,
     /// When selected, nested fields outside this list remain frozen plain refs.
     pub tracked_nested: Option<Vec<String>>,
+    /// The existing local projection exposes declared fields of an open wire record.
+    pub declared_fields: bool,
     pub ordered_by: Option<String>,
 }
 impl ObservableModel {
@@ -30,6 +32,7 @@ impl ObservableModel {
             identity: None,
             opaque: vec![],
             tracked_nested: None,
+            declared_fields: false,
             ordered_by: None,
         }
     }
@@ -49,6 +52,10 @@ impl ObservableModel {
         self.tracked_nested = Some(fields.iter().map(|field| (*field).into()).collect());
         self
     }
+    pub fn declared_fields(mut self) -> Self {
+        self.declared_fields = true;
+        self
+    }
 }
 
 /// A string resource argument with a distinct generated nominal type.
@@ -66,6 +73,8 @@ pub struct ObservableResource {
     pub(crate) data: String,
     pub args: Vec<ObservableArg>,
     pub collections: Vec<ObservableCollection>,
+    pub(crate) mapped: bool,
+    pub(crate) opaque: bool,
 }
 
 /// Select one existing tagged payload variant as a keyed readonly collection.
@@ -88,6 +97,29 @@ impl ObservableCollection {
     }
 }
 impl ObservableResource {
+    /// Read the response shape from SubscriptionDataMap, including array and union roots.
+    pub fn mapped(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
+        let mut chars = facade.chars();
+        let data = format!(
+            "{}{}Data",
+            chars.next().expect("facade").to_ascii_uppercase(),
+            chars.as_str()
+        );
+        Self {
+            kind: kind.into(),
+            facade: facade.into(),
+            data,
+            args,
+            collections: vec![],
+            mapped: true,
+            opaque: false,
+        }
+    }
+    /// Explicit boundary for an existing open or untagged JSON transport value.
+    pub fn opaque(mut self) -> Self {
+        self.opaque = true;
+        self
+    }
     pub fn named(kind: &str, facade: &str, schema: &str, args: Vec<ObservableArg>) -> Self {
         Self {
             kind: kind.into(),
@@ -95,6 +127,8 @@ impl ObservableResource {
             data: schema.into(),
             args,
             collections: vec![],
+            mapped: false,
+            opaque: false,
         }
     }
     pub fn of<T: JsonSchema>(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
@@ -104,6 +138,8 @@ impl ObservableResource {
             data: T::schema_name().into_owned(),
             args,
             collections: vec![],
+            mapped: false,
+            opaque: false,
         }
     }
     /// Adapt an existing singleton array resource; unselected variants remain outside this store.
@@ -119,6 +155,8 @@ impl ObservableResource {
             data: payload.into(),
             args: vec![],
             collections,
+            mapped: false,
+            opaque: false,
         }
     }
 }

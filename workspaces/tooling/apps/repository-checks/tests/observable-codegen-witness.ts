@@ -96,16 +96,36 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
   );
   assert.equal(api.status, 0, api.stderr);
   write("src/generated/api.ts", api.stdout);
+  if (input.production)
+    write(
+      "src/generated/observableFieldTypes.ts",
+      readFileSync(join(web, "src/generated/observableFieldTypes.ts"), "utf8"),
+    );
   write(
     "src/deepReadonly.ts",
     readFileSync(join(web, "src/deepReadonly.ts"), "utf8"),
   );
+  if (input.production) {
+    write(
+      "src/apiTypes.ts",
+      `import type { components } from './generated/api.ts';
+import type { TranscriptMessageRecordFields } from './generated/observableFieldTypes.ts';
+${declarations("src/apiTypes.ts", ["KnownApiFields", "TranscriptApiItem", "TranscriptApiInput", "TranscriptWireItem", "TranscriptPageData", "TranscriptProjectionPayload"])}`,
+    );
+  }
   write(
     "src/sync/subscriptions/contracts.ts",
     `
     import type { components } from '../../generated/api.ts';
+    import type { DeepReadonly } from '../../deepReadonly.ts';
     export type ResourceRef = components['schemas']['ResourceRef'];
-    export type ResourceData<R extends ResourceRef> = components['schemas']['SubscriptionDataMap'][R['kind']];
+    ${
+      input.production
+        ? `import type { KnownApiFields, TranscriptProjectionPayload } from '../../apiTypes.ts';
+${declarations("src/sync/subscriptions/contracts.ts", ["ReviewTask", "WorkList", "SubscriptionDataMap"])}
+export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']];`
+        : "export type ResourceData<R extends ResourceRef> = components['schemas']['SubscriptionDataMap'][R['kind']];"
+    }
     export type SubscriptionError = Error;
     ${declarations("src/sync/subscriptions/contracts.ts", ["subscriptionKey"]).replace("function subscriptionKey(", "function canonicalSubscriptionKey(")}
     let keyCalls=0;
@@ -127,10 +147,20 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
       ? `
 import assert from 'node:assert/strict';
 import { autorun, isObservable, spy } from 'mobx';
-import {createStateMirror, createAgentDetailMirror} from './src/generated/observableResources.ts';
+import {createStateMirror, createAgentDetailMirror, createProcessesMirror, createTranscriptMirror, createObservableResources, agentId} from './src/generated/observableResources.ts';
 import type {components} from './src/generated/api.ts';
 import type {DeepReadonly} from './src/deepReadonly.ts';
+import type {ObservableResourceRuntime, ResourceSlot} from './src/store/index.ts';
+import {subscriptionKey, type ResourceData} from './src/sync/subscriptions/contracts.ts';
 type Payload=components['schemas']['SyncEntityPayload'];
+function readonlyArrayIdempotence(value: readonly {readonly nested: readonly number[]}[]): DeepReadonly<readonly {nested:number[]}[]> { return value; }
+void readonlyArrayIdempotence;
+type JsonView=DeepReadonly<components['schemas']['JsonValue']>;
+function readonlyJsonIdempotence(value: JsonView): DeepReadonly<JsonView> { return value; }
+void readonlyJsonIdempotence;
+type SameType<A,B> = (<T>()=>T extends A?1:2) extends (<T>()=>T extends B?1:2) ? true : false;
+const readonlyArrayContract: SameType<DeepReadonly<readonly {nested:number[]}[]>, DeepReadonly<{nested:number[]}[]>> = true;
+void readonlyArrayContract;
 const summary={id:'lead',inFlight:false,markRead:{threadId:'thread',turnId:'turn',revision:1,read:false},markUnread:'unsupported',operationalStatus:{reason:'ready'},projectServerId:null,movedTo:{server:'server',move:'move'},startWait:{reason:'workspace_copy',epoch:1,progress:{phase:'transferring',done:1,unit:'bytes'}}} satisfies components['schemas']['AgentSummaryEntityDto'];
 const readonlyMembers: readonly string[]=['lead'];
 const dto:DeepReadonly<Payload[]>=[
@@ -164,7 +194,38 @@ const detailDto={id:'lead',overview:{task:'task',result:'result'},activity:{phas
 const detail=createAgentDetailMirror(detailDto);const overview=detail.current.overview;const activity=detail.current.activity;assert.ok(overview);assert.ok(activity);let taskRuns=0,phaseRuns=0;const stopTask=autorun(()=>{overview.task;taskRuns+=1;});const stopPhase=autorun(()=>{activity.phase;phaseRuns+=1;});
 detail.apply({...detailDto,overview:{...detailDto.overview,task:'updated'}});assert.equal(detail.current.overview,overview);assert.equal(detail.current.activity,activity);assert.equal(taskRuns,2);assert.equal(phaseRuns,1);
 let detailMutations=0;const stopDetailSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')detailMutations+=1;});detail.apply(structuredClone({...detailDto,overview:{...detailDto.overview,task:'updated'}}));assert.equal(detailMutations,0);stopDetailSpy();
-detail.apply({id:'lead'});assert.equal(detail.current.overview,undefined);assert.equal(detail.current.activity,undefined);stopTask();stopPhase();console.log('production selected collection frozen-ref/leaf/union/equal-replay witnesses passed');
+detail.apply({id:'lead'});assert.equal(detail.current.overview,undefined);assert.equal(detail.current.activity,undefined);stopTask();stopPhase();
+const processDto={id:'monitor',key:'key',generation:'g',agent:'lead',accountKey:'account',epoch:1,source:'monitor',status:'running',cancelRequested:false,created:1,name:'command',tail:'first',bytes:5,outputTruncated:false,outputPatterns:[],display:{kind:'monitor',kindLabel:'monitor',title:'command',active:true,indicator:'working',label:'running',inBackgroundList:true,actions:[]}} satisfies components['schemas']['ProcessView'];
+const processes=createProcessesMirror({processes:[processDto],activities:[]});const process=processes.current.processes[0];assert.ok(process);let processNameRuns=0;const stopProcessName=autorun(()=>{process.name;processNameRuns+=1;});processes.apply({processes:[{...processDto,name:'renamed'}],activities:[]});assert.equal(processes.current.processes[0],process);assert.equal(processNameRuns,2);processes.apply(structuredClone({processes:[{...processDto,name:'renamed'}],activities:[]}));assert.equal(processNameRuns,2);stopProcessName();
+const transcriptDto={items:[{id:'message',role:'assistant',text:'first',streaming:true,turnId:'turn'}]} satisfies NonNullable<import('./src/apiTypes.ts').TranscriptProjectionPayload>;
+const transcript=createTranscriptMirror(transcriptDto);const message=transcript.current.items[0];assert.ok(message);assert.equal(transcript.current.truncated,undefined);let textRuns=0,turnRuns=0;const stopText=autorun(()=>{message.text;textRuns+=1;});const stopTurn=autorun(()=>{message.turnId;turnRuns+=1;});const firstTranscript=transcriptDto.items[0];assert.ok(firstTranscript);const streamed={items:[{...firstTranscript,text:'streamed'}]};transcript.apply(streamed);assert.equal(transcript.current.items[0],message);assert.equal(textRuns,2);assert.equal(turnRuns,1);let transcriptMutations=0;const stopTranscriptSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')transcriptMutations+=1;});transcript.apply(structuredClone(streamed));assert.equal(transcriptMutations,0);stopTranscriptSpy();stopText();stopTurn();
+// Exercise the generated argument facade and adapter; lifecycle remains owned by runtime tests.
+let monitorDtos: DeepReadonly<components['schemas']['MonitorEntityDto'][]> = [];
+const monitorUpdates = new Map<string,()=>void>();
+const monitorRuntime: ObservableResourceRuntime = {
+ slot() {throw new Error('monitor reads must use keyed runtime');},
+ keyed(definition) {
+  const slots = new Map<string,ResourceSlot<DeepReadonly<ReturnType<typeof definition.create>>>>();
+  return (ref) => {
+   assert.equal(ref.kind,'monitors');const key=subscriptionKey(ref);const cached=slots.get(key);if(cached)return cached;
+   // The generic fixture boundary deliberately supplies only monitor DTOs.
+   const dto=()=>monitorDtos as DeepReadonly<ResourceData<typeof ref>>;
+   let data=definition.create(dto());monitorUpdates.set(key,()=>{const next=definition.apply(data,dto());if(next!==undefined)data=next;});
+   const slot={get current(){return {status:'live' as const,data:data as DeepReadonly<typeof data>};}};slots.set(key,slot);return slot;
+  };
+ }
+};
+const monitorStore=createObservableResources(monitorRuntime);const monitorSlot=monitorStore.monitors(agentId('lead'));assert.equal(monitorSlot,monitorStore.monitors(agentId('lead')));assert.notEqual(monitorSlot,monitorStore.monitors());
+const monitorDto={id:'watch',agent:'lead',created:1,status:'running',display:processDto.display,name:'watch',tail:'first'} satisfies components['schemas']['MonitorEntityDto'];
+const publishMonitors=()=>{for(const update of monitorUpdates.values())update();};monitorDtos=[monitorDto];publishMonitors();const monitorState=monitorSlot.current;assert.equal(monitorState.status,'live');if(monitorState.status!=='live')throw new Error('monitor facade not live');const monitor=monitorState.data[0];assert.ok(monitor);
+let monitorNames=0,monitorTails=0;const stopMonitorName=autorun(()=>{monitor.name;monitorNames+=1;});const stopMonitorTail=autorun(()=>{monitor.tail;monitorTails+=1;});monitorDtos=[{...monitorDto,tail:'second'}];publishMonitors();assert.equal(monitorNames,1);assert.equal(monitorTails,2);assert.equal(monitorSlot.current.status==='live'&&monitorSlot.current.data[0],monitor);
+let monitorMutations=0;const stopMonitorSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')monitorMutations+=1;});monitorDtos=structuredClone(monitorDtos);publishMonitors();assert.equal(monitorMutations,0);stopMonitorSpy();monitorDtos=[];publishMonitors();assert.equal(monitorSlot.current.status==='live'&&monitorSlot.current.data.length,0);stopMonitorName();stopMonitorTail();
+const nestedItem={id:'nested',role:'assistant',text:'row',fullTextBlob:{hash:'hash',size:1},inputs:[{kind:'user',text:'input',truncated:false}]} satisfies import('./src/apiTypes.ts').TranscriptWireItem;
+const nestedDto={items:[nestedItem],agent:{id:'lead',activity:{phase:'thinking'}}};const nested=createTranscriptMirror(nestedDto);const nestedRow=nested.current.items[0];assert.ok(nestedRow);const blob=nestedRow.fullTextBlob;assert.ok(blob);const nestedAgent=nested.current.agent;assert.ok(nestedAgent);const nestedActivity=nestedAgent.activity;assert.ok(nestedActivity);
+let blobRuns=0,inputRuns=0,phaseRunsNested=0;const stopBlob=autorun(()=>{blob.size;blobRuns+=1;});const stopInput=autorun(()=>{nestedRow.inputs?.[0]?.text;inputRuns+=1;});const stopNestedPhase=autorun(()=>{nestedActivity.phase;phaseRunsNested+=1;});
+const nestedNext={...nestedDto,items:[{...nestedItem,fullTextBlob:{hash:'hash',size:2},inputs:[{kind:'user',text:'changed input',truncated:false}]}]};nested.apply(nestedNext);assert.equal(nested.current.items[0],nestedRow);assert.equal(nestedRow.fullTextBlob,blob);assert.equal(nested.current.agent,nestedAgent);assert.equal(blobRuns,2);assert.equal(inputRuns,2);assert.equal(phaseRunsNested,1);
+let nestedMutations=0;const stopNestedSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')nestedMutations+=1;});nested.apply(structuredClone(nestedNext));assert.equal(nestedMutations,0);stopNestedSpy();nested.apply({items:[{id:'nested',role:'assistant',text:'row',fullTextBlob:null}]});assert.equal(nestedRow.fullTextBlob,null);nested.apply({items:[{id:'nested',role:'assistant',text:'row'}]});assert.equal(nestedRow.fullTextBlob,undefined);stopBlob();stopInput();stopNestedPhase();
+console.log('production selected collection frozen-ref/leaf/union/equal-replay/monitor/nested-transcript witnesses passed');
 `
       : input.collections
         ? `

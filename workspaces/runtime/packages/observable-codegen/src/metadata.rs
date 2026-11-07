@@ -17,7 +17,9 @@ pub(crate) fn validate(
         }
         &data["items"]["$ref"]
     };
-    if reference != &format!("#/components/schemas/{}", resource.data) {
+    if data.is_null()
+        || !resource.mapped && reference != &format!("#/components/schemas/{}", resource.data)
+    {
         return Err(fail(&path, UnsupportedShape::Resource));
     }
     let reference = schema(document, "ResourceRef")?;
@@ -41,18 +43,19 @@ pub(crate) fn validate(
         let fields = variant["properties"]
             .as_object()
             .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?;
-        let required = variant["required"]
+        let _required = variant["required"]
             .as_array()
             .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?;
-        if fields.len() != resource.args.len() + 1 || required.len() != fields.len() {
+        if fields.len() != resource.args.len() + 1 {
             return Err(fail(&path, UnsupportedShape::Resource));
         }
         for arg in &resource.args {
-            if fields
-                .get(&arg.name)
-                .is_none_or(|field| field["type"] != "string")
-                || !required.iter().any(|field| field == &arg.name)
-            {
+            if fields.get(&arg.name).is_none_or(|field| {
+                !matches!(
+                    field["type"].as_str(),
+                    Some("string" | "integer" | "number" | "boolean")
+                )
+            }) {
                 return Err(fail(
                     &format!("{path}/args/{}", arg.name),
                     UnsupportedShape::Resource,
@@ -60,6 +63,45 @@ pub(crate) fn validate(
             }
         }
         return Ok(());
+    }
+    Err(fail(&path, UnsupportedShape::Resource))
+}
+
+/// Argument representation and omission come from the ResourceRef schema owner.
+pub(crate) fn argument(
+    document: &Value,
+    resource: &ObservableResource,
+    name: &str,
+) -> Result<(String, bool), GenerationError> {
+    let path = format!("#/resources/{}/args/{name}", resource.kind);
+    let variants = schema(document, "ResourceRef")?["oneOf"]
+        .as_array()
+        .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?;
+    for variant in variants {
+        let variant = if let Some(reference) = variant["$ref"].as_str() {
+            schema(
+                document,
+                reference
+                    .strip_prefix("#/components/schemas/")
+                    .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?,
+            )?
+        } else {
+            variant
+        };
+        let kind = &variant["properties"]["kind"];
+        if kind["const"] != resource.kind && kind["enum"] != studio_json::json!([resource.kind]) {
+            continue;
+        }
+        let ty = match variant["properties"][name]["type"].as_str() {
+            Some("string") => "string",
+            Some("number" | "integer") => "number",
+            Some("boolean") => "boolean",
+            _ => return Err(fail(&path, UnsupportedShape::Resource)),
+        };
+        let optional = !variant["required"]
+            .as_array()
+            .is_some_and(|required| required.iter().any(|v| v == name));
+        return Ok((ty.into(), optional));
     }
     Err(fail(&path, UnsupportedShape::Resource))
 }

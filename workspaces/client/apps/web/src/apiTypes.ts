@@ -5,6 +5,7 @@ import type {
 } from "openapi-typescript-helpers";
 import type { ApiSuccessBodyFor } from "./apiContracts.ts";
 import type { components, paths } from "./generated/api.ts";
+import type { TranscriptMessageRecordFields } from "./generated/observableFieldTypes.ts";
 
 // Provider and extensible app-server payloads are JSON objects, not untyped maps.
 export type JsonValue = components["schemas"]["JsonValue"];
@@ -37,14 +38,7 @@ export type KnownApiFields<T> = {
         : Key
   ]: T[Key];
 };
-type TranscriptApiItem = components["schemas"]["TranscriptMessageRecord"];
-type TranscriptApiInput = components["schemas"]["TranscriptInput"];
-export type TranscriptWireItem = Omit<
-  KnownApiFields<TranscriptApiItem>,
-  "inputs"
-> & {
-  inputs?: Array<KnownApiFields<TranscriptApiInput>> | null | undefined;
-};
+export type TranscriptWireItem = TranscriptMessageRecordFields;
 export type TranscriptPageData = Omit<
   components["schemas"]["TranscriptPageResponse"],
   "items"

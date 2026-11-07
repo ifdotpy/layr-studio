@@ -17685,6 +17685,7 @@ export interface components {
       tail: string;
       /** Format: int64 */
       timeout_ms?: number | null | undefined;
+      turnId?: string | null | undefined;
     };
     ProcessWakeBudget: {
       paused: boolean;
@@ -25259,19 +25260,11 @@ export interface components {
     };
     /**
      * TranscriptMessageRecord
-     * @description Transcript rows always carry their runtime role and display text.
+     * @description Runtime role and display text are required; omitted and null facts stay distinct.
      */
     TranscriptMessageRecord: {
-      /**
-       * Accountwide
-       * @default null
-       */
       accountWide?: boolean | null | undefined;
-      /**
-       * Agent
-       * @default null
-       */
-      agent?: null | string | undefined;
+      agent?: string | null | undefined;
       /**
        * Assets
        * @default null
@@ -25282,21 +25275,9 @@ export interface components {
        * @default null
        */
       at?: null | number | string | undefined;
-      /**
-       * Clientmessageid
-       * @default null
-       */
-      clientMessageId?: null | string | undefined;
-      /**
-       * Cyberaccessprogram
-       * @default null
-       */
-      cyberAccessProgram?: null | string | undefined;
-      /**
-       * Deliveryerror
-       * @default null
-       */
-      deliveryError?: null | string | undefined;
+      clientMessageId?: string | null | undefined;
+      cyberAccessProgram?: string | null | undefined;
+      deliveryError?: string | null | undefined;
       deliveryStatus?:
         | components["schemas"]["MessageSendStatus"]
         | null
@@ -25308,7 +25289,6 @@ export interface components {
        * @default null
        */
       fullTextBlob?: components["schemas"]["TextBlobRef"] | null | undefined;
-      /** Id */
       id: string;
       /** @description The notice confirms a completed idle compaction of a Claude session. */
       idleCompaction?: boolean | undefined;
@@ -25317,15 +25297,7 @@ export interface components {
        * @default null
        */
       inputs?: components["schemas"]["TranscriptInput"][] | null | undefined;
-      /**
-       * Kind
-       * @default null
-       */
-      kind?: null | string | undefined;
-      /**
-       * Materialized
-       * @default null
-       */
+      kind?: string | null | undefined;
       materialized?: boolean | null | undefined;
       /** @default null */
       nativeError?: components["schemas"]["JsonValue"] | null | undefined;
@@ -25339,10 +25311,6 @@ export interface components {
           }
         | null
         | undefined;
-      /**
-       * Nativehookquiet
-       * @default null
-       */
       nativeHookQuiet?: boolean | null | undefined;
       /**
        * Nativenotice
@@ -25359,21 +25327,13 @@ export interface components {
           }
         | null
         | undefined;
-      /**
-       * Observedwait
-       * @default null
-       */
       observedWait?: boolean | null | undefined;
       /**
        * Pending
        * @default false
        */
       pending?: boolean | undefined;
-      /**
-       * Phase
-       * @default null
-       */
-      phase?: null | string | undefined;
+      phase?: string | null | undefined;
       /** @default null */
       previousError?: components["schemas"]["JsonValue"] | null | undefined;
       /** @description Set on a stored provider item whose kind Studio does not know. raw is the provider item as opaque JSON text. */
@@ -25406,39 +25366,17 @@ export interface components {
         | components["schemas"]["DeliveryMoment"]
         | null
         | undefined;
-      /** Role */
       role: string;
-      /**
-       * Sourceid
-       * @default null
-       */
-      sourceId?: null | string | undefined;
-      /**
-       * Streaming
-       * @default null
-       */
+      sourceId?: string | null | undefined;
       streaming?: boolean | null | undefined;
-      /** Text */
       text: string;
-      /**
-       * Threadid
-       * @default null
-       */
-      threadId?: null | string | undefined;
+      threadId?: string | null | undefined;
       /**
        * Title
        * @default
        */
       title?: string | undefined;
-      /**
-       * Toolstatus
-       * @default null
-       */
-      toolStatus?: null | string | undefined;
-      /**
-       * Truncated
-       * @default null
-       */
+      toolStatus?: string | null | undefined;
       truncated?: boolean | null | undefined;
       /**
        * Turnerror
@@ -25451,21 +25389,9 @@ export interface components {
         | null
         | string
         | undefined;
-      /**
-       * Turnerrorresolved
-       * @default null
-       */
       turnErrorResolved?: boolean | null | undefined;
-      /**
-       * Turnid
-       * @default null
-       */
-      turnId?: null | string | undefined;
-      /**
-       * Turnstatus
-       * @default null
-       */
-      turnStatus?: null | string | undefined;
+      turnId?: string | null | undefined;
+      turnStatus?: string | null | undefined;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };

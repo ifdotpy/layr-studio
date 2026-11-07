@@ -1443,6 +1443,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     crate::chat_operational_status::refresh_summary(&mut openapi);
+    openapi["components"]["schemas"]["TranscriptMessageRecord"] = crate::transcript_wire::schema();
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
@@ -2215,6 +2216,20 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 "node_modules/oxfmt/bin/oxfmt",
                 "--stdin-filepath=observableResources.ts",
                 &observable,
+            )?,
+        });
+        rendered.push(Rendered {
+            path: web("observableFieldTypes.ts"),
+            text: run_node(
+                root,
+                "node_modules/oxfmt/bin/oxfmt",
+                "--stdin-filepath=observableFieldTypes.ts",
+                &studio_observable_codegen::render_fields(
+                    &openapi,
+                    &crate::observable_resources::models(),
+                    &crate::observable_resources::resources(),
+                )
+                .map_err(|error| error.to_string())?,
             )?,
         });
         rendered.push(Rendered {

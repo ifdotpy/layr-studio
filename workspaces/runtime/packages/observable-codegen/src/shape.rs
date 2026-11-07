@@ -5,6 +5,7 @@ use studio_json::Value;
 #[derive(Clone)]
 pub(crate) enum Shape {
     Leaf,
+    Frozen,
     Object(String),
     Array(Box<Shape>),
     Nullable(Box<Shape>),
@@ -34,6 +35,7 @@ pub(crate) struct Parser<'a> {
     pub metadata: &'a [ObservableModel],
     pub models: BTreeMap<String, Model>,
     pub unions: BTreeMap<String, Shape>,
+    pub roots: Vec<Shape>,
     visiting: BTreeSet<String>,
 }
 impl<'a> Parser<'a> {
@@ -43,6 +45,7 @@ impl<'a> Parser<'a> {
             metadata,
             models: BTreeMap::new(),
             unions: BTreeMap::new(),
+            roots: vec![],
             visiting: BTreeSet::new(),
         }
     }
@@ -67,10 +70,18 @@ impl<'a> Parser<'a> {
                 self.visiting.remove(target);
                 return result;
             }
+            let local = self
+                .metadata
+                .iter()
+                .any(|meta| meta.schema == target && meta.declared_fields);
             return self.parse_named(
                 &target_schema,
                 target,
-                &format!("DeepReadonly<components['schemas'][{}]>", quote(target)),
+                &if local {
+                    dto.into()
+                } else {
+                    format!("DeepReadonly<components['schemas'][{}]>", quote(target))
+                },
                 reference,
             );
         }
@@ -127,12 +138,24 @@ impl<'a> Parser<'a> {
             .or_else(|| value["oneOf"].as_array())
             .filter(|_| !validation_alternatives)
         {
-            if variants.iter().all(|variant| {
-                matches!(
-                    variant["type"].as_str(),
-                    Some("string" | "number" | "integer" | "boolean" | "null")
-                )
-            }) {
+            let nested = variants
+                .iter()
+                .map(|variant| self.is_nested(variant, &mut BTreeSet::new()))
+                .collect::<Result<Vec<_>, _>>()?;
+            if nested.iter().all(|nested| !nested) {
+                for (index, variant) in variants.iter().enumerate() {
+                    if !matches!(
+                        self.parse(
+                            variant,
+                            &format!("{name}Scalar{index}"),
+                            dto,
+                            &format!("{path}/anyOf/{index}")
+                        )?,
+                        Shape::Leaf
+                    ) {
+                        return Err(fail(path, UnsupportedShape::Union));
+                    }
+                }
                 return Ok(Shape::Leaf);
             }
             let properties = variants
@@ -214,13 +237,15 @@ impl<'a> Parser<'a> {
                 )?)))
             }
             Some("object") => {
-                if value["additionalProperties"] != false {
+                let meta = self.metadata.iter().find(|m| m.schema == name);
+                if value["additionalProperties"] != false
+                    && !meta.is_some_and(|m| m.declared_fields)
+                {
                     return Err(fail(path, UnsupportedShape::OpenObject));
                 }
                 let props = value["properties"]
                     .as_object()
                     .ok_or_else(|| fail(path, UnsupportedShape::Shape))?;
-                let meta = self.metadata.iter().find(|m| m.schema == name);
                 if let Some(meta) = meta {
                     for field in meta
                         .identity

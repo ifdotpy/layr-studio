@@ -142,6 +142,8 @@ pub struct ProcessView {
     pub cancel_requested: bool,
     pub created: f64,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<String>,
     pub command: Option<String>,
     pub cwd: Option<String>,
     pub log: Option<String>,

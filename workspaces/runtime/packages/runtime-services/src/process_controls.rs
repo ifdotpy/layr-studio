@@ -405,6 +405,7 @@ fn project_monitor_bound(
         cancel_requested: cancelled,
         created: monitor.created.seconds(),
         name: name.to_owned(),
+        turn_id: None,
         command: Some(command.to_owned()),
         cwd: Some(monitor.cwd.clone()),
         log: Some(monitor.log.clone()),
@@ -677,6 +678,7 @@ pub fn project(
         cancel_requested: false,
         created: raw.created(),
         name: name.into(),
+        turn_id: Some(raw.turn_id().to_owned()),
         command: raw.command.clone(),
         cwd: raw.cwd.clone(),
         log: None,
@@ -1331,6 +1333,10 @@ mod claim_identity_tests {
         assert!(matches!(&before[0], BackgroundTaskView::Task(_)));
         assert_eq!(running.len(), 1);
         assert!(matches!(&running[0], BackgroundTaskView::Process(_)));
+        assert_eq!(
+            studio_json::to_value(&running[0]).unwrap()["value"]["turnId"],
+            "turn"
+        );
         assert_eq!(after.len(), 1);
         assert!(matches!(&after[0], BackgroundTaskView::Task(_)));
     }

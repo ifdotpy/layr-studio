@@ -9,12 +9,19 @@ import {
 } from "mobx";
 import type { components } from "./api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
-import type { ResourceRef } from "../sync/subscriptions/contracts.ts";
+import type {
+  ResourceRef,
+  ResourceData,
+} from "../sync/subscriptions/contracts.ts";
 import type {
   ResourceSlot,
   ObservableResourceRuntime,
 } from "../store/index.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
+type ObservableInput<T> =
+  T extends ReadonlyArray<infer Item>
+    ? ReadonlyArray<Item>
+    : { [K in keyof T]: T[K] | ({} extends Pick<T, K> ? undefined : never) };
 function freezePlain<T>(value: T): T {
   if (value !== null && typeof value === "object") {
     for (const key in value) freezePlain(value[key]);
@@ -26,6 +33,12 @@ declare const agentIdBrand: unique symbol;
 export type AgentId = string & { readonly [agentIdBrand]: true };
 export function agentId(value: string): AgentId;
 export function agentId(value: string): string {
+  return value;
+}
+declare const transcriptTailBrand: unique symbol;
+export type TranscriptTail = number & { readonly [transcriptTailBrand]: true };
+export function transcriptTail(value: number): TranscriptTail;
+export function transcriptTail(value: number): number {
   return value;
 }
 type ActiveToolDtoDto = DeepReadonly<components["schemas"]["ActiveToolDto"]>;
@@ -4383,6 +4396,721 @@ class AgentWaitReasonsModel {
     return this;
   }
 }
+type BackgroundTaskDisplayDto = DeepReadonly<
+  components["schemas"]["BackgroundTaskDisplay"]
+>;
+class BackgroundTaskDisplayModel {
+  actions: NonNullable<BackgroundTaskDisplayDto["actions"]>[number][];
+  active: BackgroundTaskDisplayDto["active"];
+  inBackgroundList: BackgroundTaskDisplayDto["inBackgroundList"];
+  indicator: BackgroundTaskDisplayDto["indicator"];
+  kind: BackgroundTaskDisplayDto["kind"];
+  kindLabel: BackgroundTaskDisplayDto["kindLabel"];
+  label: BackgroundTaskDisplayDto["label"];
+  stdinState:
+    | NonNullable<BackgroundTaskDisplayDto["stdinState"]>
+    | null
+    | undefined;
+  title: BackgroundTaskDisplayDto["title"];
+  constructor(dto: BackgroundTaskDisplayDto) {
+    this.actions = dto.actions.map((item) => item);
+    this.active = dto.active;
+    this.inBackgroundList = dto.inBackgroundList;
+    this.indicator = dto.indicator;
+    this.kind = dto.kind;
+    this.kindLabel = dto.kindLabel;
+    this.label = dto.label;
+    this.stdinState =
+      dto.stdinState === undefined
+        ? undefined
+        : dto.stdinState === null
+          ? null
+          : dto.stdinState;
+    this.title = dto.title;
+    makeObservable(this, {
+      actions: observableRef,
+      active: observableRef,
+      inBackgroundList: observableRef,
+      indicator: observableRef,
+      kind: observableRef,
+      kindLabel: observableRef,
+      label: observableRef,
+      stdinState: observableRef,
+      title: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BackgroundTaskDisplayDto): this {
+    {
+      const next =
+        this.actions.length === dto.actions.length &&
+        this.actions.every((leftItem0, index) => {
+          const rightItem0 = dto.actions?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.actions
+          : dto.actions.map((item) => item);
+      if (this.actions !== next) this.actions = next;
+    }
+    {
+      const next = dto.active;
+      if (this.active !== next) this.active = next;
+    }
+    {
+      const next = dto.inBackgroundList;
+      if (this.inBackgroundList !== next) this.inBackgroundList = next;
+    }
+    {
+      const next = dto.indicator;
+      if (this.indicator !== next) this.indicator = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.kindLabel;
+      if (this.kindLabel !== next) this.kindLabel = next;
+    }
+    {
+      const next = dto.label;
+      if (this.label !== next) this.label = next;
+    }
+    {
+      const next =
+        dto.stdinState === undefined
+          ? undefined
+          : this.stdinState === undefined
+            ? dto.stdinState === null
+              ? null
+              : dto.stdinState
+            : dto.stdinState === null
+              ? null
+              : this.stdinState === null
+                ? dto.stdinState
+                : dto.stdinState;
+      if (this.stdinState !== next) this.stdinState = next;
+    }
+    {
+      const next = dto.title;
+      if (this.title !== next) this.title = next;
+    }
+    return this;
+  }
+}
+type MonitorEntityDtoDto = DeepReadonly<
+  components["schemas"]["MonitorEntityDto"]
+>;
+class MonitorEntityDtoModel {
+  agent: MonitorEntityDtoDto["agent"];
+  bytes: NonNullable<MonitorEntityDtoDto["bytes"]> | null | undefined;
+  cancelRequested:
+    | NonNullable<MonitorEntityDtoDto["cancelRequested"]>
+    | null
+    | undefined;
+  command: NonNullable<MonitorEntityDtoDto["command"]> | null | undefined;
+  created: MonitorEntityDtoDto["created"];
+  cwd: NonNullable<MonitorEntityDtoDto["cwd"]> | null | undefined;
+  display: BackgroundTaskDisplayModel;
+  durationMs: NonNullable<MonitorEntityDtoDto["durationMs"]> | null | undefined;
+  error: NonNullable<MonitorEntityDtoDto["error"]> | null | undefined;
+  exitCode: NonNullable<MonitorEntityDtoDto["exitCode"]> | null | undefined;
+  finished: NonNullable<MonitorEntityDtoDto["finished"]> | null | undefined;
+  id: MonitorEntityDtoDto["id"];
+  interactive:
+    | NonNullable<MonitorEntityDtoDto["interactive"]>
+    | null
+    | undefined;
+  log: NonNullable<MonitorEntityDtoDto["log"]> | null | undefined;
+  name: NonNullable<MonitorEntityDtoDto["name"]> | null | undefined;
+  outputFile: NonNullable<MonitorEntityDtoDto["outputFile"]> | null | undefined;
+  outputPatterns:
+    | NonNullable<MonitorEntityDtoDto["outputPatterns"]>[number][]
+    | undefined;
+  outputTruncated:
+    | NonNullable<MonitorEntityDtoDto["outputTruncated"]>
+    | null
+    | undefined;
+  outputWakeBudget: MonitorOutputWakeBudgetModel | null | undefined;
+  processId: NonNullable<MonitorEntityDtoDto["processId"]> | null | undefined;
+  ruleId: NonNullable<MonitorEntityDtoDto["ruleId"]> | null | undefined;
+  status: MonitorEntityDtoDto["status"];
+  stdinCloseRequested:
+    | NonNullable<MonitorEntityDtoDto["stdinCloseRequested"]>
+    | null
+    | undefined;
+  stdinClosed:
+    | NonNullable<MonitorEntityDtoDto["stdinClosed"]>
+    | null
+    | undefined;
+  stdinError: NonNullable<MonitorEntityDtoDto["stdinError"]> | null | undefined;
+  tail: NonNullable<MonitorEntityDtoDto["tail"]> | null | undefined;
+  timeout_ms: NonNullable<MonitorEntityDtoDto["timeout_ms"]> | null | undefined;
+  constructor(dto: MonitorEntityDtoDto) {
+    this.agent = dto.agent;
+    this.bytes =
+      dto.bytes === undefined
+        ? undefined
+        : dto.bytes === null
+          ? null
+          : dto.bytes;
+    this.cancelRequested =
+      dto.cancelRequested === undefined
+        ? undefined
+        : dto.cancelRequested === null
+          ? null
+          : dto.cancelRequested;
+    this.command =
+      dto.command === undefined
+        ? undefined
+        : dto.command === null
+          ? null
+          : dto.command;
+    this.created = dto.created;
+    this.cwd =
+      dto.cwd === undefined ? undefined : dto.cwd === null ? null : dto.cwd;
+    this.display = new BackgroundTaskDisplayModel(dto.display);
+    this.durationMs =
+      dto.durationMs === undefined
+        ? undefined
+        : dto.durationMs === null
+          ? null
+          : dto.durationMs;
+    this.error =
+      dto.error === undefined
+        ? undefined
+        : dto.error === null
+          ? null
+          : dto.error;
+    this.exitCode =
+      dto.exitCode === undefined
+        ? undefined
+        : dto.exitCode === null
+          ? null
+          : dto.exitCode;
+    this.finished =
+      dto.finished === undefined
+        ? undefined
+        : dto.finished === null
+          ? null
+          : dto.finished;
+    this.id = dto.id;
+    this.interactive =
+      dto.interactive === undefined
+        ? undefined
+        : dto.interactive === null
+          ? null
+          : dto.interactive;
+    this.log =
+      dto.log === undefined ? undefined : dto.log === null ? null : dto.log;
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.outputFile =
+      dto.outputFile === undefined
+        ? undefined
+        : dto.outputFile === null
+          ? null
+          : dto.outputFile;
+    this.outputPatterns =
+      dto.outputPatterns === undefined
+        ? undefined
+        : dto.outputPatterns.map((item) => item);
+    this.outputTruncated =
+      dto.outputTruncated === undefined
+        ? undefined
+        : dto.outputTruncated === null
+          ? null
+          : dto.outputTruncated;
+    this.outputWakeBudget =
+      dto.outputWakeBudget === undefined
+        ? undefined
+        : dto.outputWakeBudget === null
+          ? null
+          : new MonitorOutputWakeBudgetModel(dto.outputWakeBudget);
+    this.processId =
+      dto.processId === undefined
+        ? undefined
+        : dto.processId === null
+          ? null
+          : dto.processId;
+    this.ruleId =
+      dto.ruleId === undefined
+        ? undefined
+        : dto.ruleId === null
+          ? null
+          : dto.ruleId;
+    this.status = dto.status;
+    this.stdinCloseRequested =
+      dto.stdinCloseRequested === undefined
+        ? undefined
+        : dto.stdinCloseRequested === null
+          ? null
+          : dto.stdinCloseRequested;
+    this.stdinClosed =
+      dto.stdinClosed === undefined
+        ? undefined
+        : dto.stdinClosed === null
+          ? null
+          : dto.stdinClosed;
+    this.stdinError =
+      dto.stdinError === undefined
+        ? undefined
+        : dto.stdinError === null
+          ? null
+          : dto.stdinError;
+    this.tail =
+      dto.tail === undefined ? undefined : dto.tail === null ? null : dto.tail;
+    this.timeout_ms =
+      dto.timeout_ms === undefined
+        ? undefined
+        : dto.timeout_ms === null
+          ? null
+          : dto.timeout_ms;
+    makeObservable(this, {
+      agent: observableRef,
+      bytes: observableRef,
+      cancelRequested: observableRef,
+      command: observableRef,
+      created: observableRef,
+      cwd: observableRef,
+      display: observableRef,
+      durationMs: observableRef,
+      error: observableRef,
+      exitCode: observableRef,
+      finished: observableRef,
+      id: observableRef,
+      interactive: observableRef,
+      log: observableRef,
+      name: observableRef,
+      outputFile: observableRef,
+      outputPatterns: observableRef,
+      outputTruncated: observableRef,
+      outputWakeBudget: observableRef,
+      processId: observableRef,
+      ruleId: observableRef,
+      status: observableRef,
+      stdinCloseRequested: observableRef,
+      stdinClosed: observableRef,
+      stdinError: observableRef,
+      tail: observableRef,
+      timeout_ms: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: MonitorEntityDtoDto): this {
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next =
+        dto.bytes === undefined
+          ? undefined
+          : this.bytes === undefined
+            ? dto.bytes === null
+              ? null
+              : dto.bytes
+            : dto.bytes === null
+              ? null
+              : this.bytes === null
+                ? dto.bytes
+                : dto.bytes;
+      if (this.bytes !== next) this.bytes = next;
+    }
+    {
+      const next =
+        dto.cancelRequested === undefined
+          ? undefined
+          : this.cancelRequested === undefined
+            ? dto.cancelRequested === null
+              ? null
+              : dto.cancelRequested
+            : dto.cancelRequested === null
+              ? null
+              : this.cancelRequested === null
+                ? dto.cancelRequested
+                : dto.cancelRequested;
+      if (this.cancelRequested !== next) this.cancelRequested = next;
+    }
+    {
+      const next =
+        dto.command === undefined
+          ? undefined
+          : this.command === undefined
+            ? dto.command === null
+              ? null
+              : dto.command
+            : dto.command === null
+              ? null
+              : this.command === null
+                ? dto.command
+                : dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.cwd === undefined
+          ? undefined
+          : this.cwd === undefined
+            ? dto.cwd === null
+              ? null
+              : dto.cwd
+            : dto.cwd === null
+              ? null
+              : this.cwd === null
+                ? dto.cwd
+                : dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next = this.display.apply(dto.display);
+      if (this.display !== next) this.display = next;
+    }
+    {
+      const next =
+        dto.durationMs === undefined
+          ? undefined
+          : this.durationMs === undefined
+            ? dto.durationMs === null
+              ? null
+              : dto.durationMs
+            : dto.durationMs === null
+              ? null
+              : this.durationMs === null
+                ? dto.durationMs
+                : dto.durationMs;
+      if (this.durationMs !== next) this.durationMs = next;
+    }
+    {
+      const next =
+        dto.error === undefined
+          ? undefined
+          : this.error === undefined
+            ? dto.error === null
+              ? null
+              : dto.error
+            : dto.error === null
+              ? null
+              : this.error === null
+                ? dto.error
+                : dto.error;
+      if (this.error !== next) this.error = next;
+    }
+    {
+      const next =
+        dto.exitCode === undefined
+          ? undefined
+          : this.exitCode === undefined
+            ? dto.exitCode === null
+              ? null
+              : dto.exitCode
+            : dto.exitCode === null
+              ? null
+              : this.exitCode === null
+                ? dto.exitCode
+                : dto.exitCode;
+      if (this.exitCode !== next) this.exitCode = next;
+    }
+    {
+      const next =
+        dto.finished === undefined
+          ? undefined
+          : this.finished === undefined
+            ? dto.finished === null
+              ? null
+              : dto.finished
+            : dto.finished === null
+              ? null
+              : this.finished === null
+                ? dto.finished
+                : dto.finished;
+      if (this.finished !== next) this.finished = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.interactive === undefined
+          ? undefined
+          : this.interactive === undefined
+            ? dto.interactive === null
+              ? null
+              : dto.interactive
+            : dto.interactive === null
+              ? null
+              : this.interactive === null
+                ? dto.interactive
+                : dto.interactive;
+      if (this.interactive !== next) this.interactive = next;
+    }
+    {
+      const next =
+        dto.log === undefined
+          ? undefined
+          : this.log === undefined
+            ? dto.log === null
+              ? null
+              : dto.log
+            : dto.log === null
+              ? null
+              : this.log === null
+                ? dto.log
+                : dto.log;
+      if (this.log !== next) this.log = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.outputFile === undefined
+          ? undefined
+          : this.outputFile === undefined
+            ? dto.outputFile === null
+              ? null
+              : dto.outputFile
+            : dto.outputFile === null
+              ? null
+              : this.outputFile === null
+                ? dto.outputFile
+                : dto.outputFile;
+      if (this.outputFile !== next) this.outputFile = next;
+    }
+    {
+      const next =
+        dto.outputPatterns === undefined
+          ? undefined
+          : this.outputPatterns === undefined
+            ? dto.outputPatterns.map((item) => item)
+            : this.outputPatterns.length === dto.outputPatterns.length &&
+                this.outputPatterns.every((leftItem0, index) => {
+                  const rightItem0 = dto.outputPatterns?.[index];
+                  return rightItem0 !== undefined && leftItem0 === rightItem0;
+                })
+              ? this.outputPatterns
+              : dto.outputPatterns.map((item) => item);
+      if (this.outputPatterns !== next) this.outputPatterns = next;
+    }
+    {
+      const next =
+        dto.outputTruncated === undefined
+          ? undefined
+          : this.outputTruncated === undefined
+            ? dto.outputTruncated === null
+              ? null
+              : dto.outputTruncated
+            : dto.outputTruncated === null
+              ? null
+              : this.outputTruncated === null
+                ? dto.outputTruncated
+                : dto.outputTruncated;
+      if (this.outputTruncated !== next) this.outputTruncated = next;
+    }
+    {
+      const next =
+        dto.outputWakeBudget === undefined
+          ? undefined
+          : this.outputWakeBudget === undefined
+            ? dto.outputWakeBudget === null
+              ? null
+              : new MonitorOutputWakeBudgetModel(dto.outputWakeBudget)
+            : dto.outputWakeBudget === null
+              ? null
+              : this.outputWakeBudget === null
+                ? new MonitorOutputWakeBudgetModel(dto.outputWakeBudget)
+                : this.outputWakeBudget.apply(dto.outputWakeBudget);
+      if (this.outputWakeBudget !== next) this.outputWakeBudget = next;
+    }
+    {
+      const next =
+        dto.processId === undefined
+          ? undefined
+          : this.processId === undefined
+            ? dto.processId === null
+              ? null
+              : dto.processId
+            : dto.processId === null
+              ? null
+              : this.processId === null
+                ? dto.processId
+                : dto.processId;
+      if (this.processId !== next) this.processId = next;
+    }
+    {
+      const next =
+        dto.ruleId === undefined
+          ? undefined
+          : this.ruleId === undefined
+            ? dto.ruleId === null
+              ? null
+              : dto.ruleId
+            : dto.ruleId === null
+              ? null
+              : this.ruleId === null
+                ? dto.ruleId
+                : dto.ruleId;
+      if (this.ruleId !== next) this.ruleId = next;
+    }
+    {
+      const next = dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.stdinCloseRequested === undefined
+          ? undefined
+          : this.stdinCloseRequested === undefined
+            ? dto.stdinCloseRequested === null
+              ? null
+              : dto.stdinCloseRequested
+            : dto.stdinCloseRequested === null
+              ? null
+              : this.stdinCloseRequested === null
+                ? dto.stdinCloseRequested
+                : dto.stdinCloseRequested;
+      if (this.stdinCloseRequested !== next) this.stdinCloseRequested = next;
+    }
+    {
+      const next =
+        dto.stdinClosed === undefined
+          ? undefined
+          : this.stdinClosed === undefined
+            ? dto.stdinClosed === null
+              ? null
+              : dto.stdinClosed
+            : dto.stdinClosed === null
+              ? null
+              : this.stdinClosed === null
+                ? dto.stdinClosed
+                : dto.stdinClosed;
+      if (this.stdinClosed !== next) this.stdinClosed = next;
+    }
+    {
+      const next =
+        dto.stdinError === undefined
+          ? undefined
+          : this.stdinError === undefined
+            ? dto.stdinError === null
+              ? null
+              : dto.stdinError
+            : dto.stdinError === null
+              ? null
+              : this.stdinError === null
+                ? dto.stdinError
+                : dto.stdinError;
+      if (this.stdinError !== next) this.stdinError = next;
+    }
+    {
+      const next =
+        dto.tail === undefined
+          ? undefined
+          : this.tail === undefined
+            ? dto.tail === null
+              ? null
+              : dto.tail
+            : dto.tail === null
+              ? null
+              : this.tail === null
+                ? dto.tail
+                : dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    {
+      const next =
+        dto.timeout_ms === undefined
+          ? undefined
+          : this.timeout_ms === undefined
+            ? dto.timeout_ms === null
+              ? null
+              : dto.timeout_ms
+            : dto.timeout_ms === null
+              ? null
+              : this.timeout_ms === null
+                ? dto.timeout_ms
+                : dto.timeout_ms;
+      if (this.timeout_ms !== next) this.timeout_ms = next;
+    }
+    return this;
+  }
+}
+function reconcileMonitorEntityDto(
+  data: MonitorEntityDtoModel[],
+  dto: readonly MonitorEntityDtoDto[],
+): MonitorEntityDtoModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in MonitorEntityDto");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: MonitorEntityDtoModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new MonitorEntityDtoModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type MonitorOutputWakeBudgetDto = DeepReadonly<
+  components["schemas"]["MonitorOutputWakeBudget"]
+>;
+class MonitorOutputWakeBudgetModel {
+  paused: MonitorOutputWakeBudgetDto["paused"];
+  tokens: MonitorOutputWakeBudgetDto["tokens"];
+  totalSuppressedMatches: MonitorOutputWakeBudgetDto["totalSuppressedMatches"];
+  constructor(dto: MonitorOutputWakeBudgetDto) {
+    this.paused = dto.paused;
+    this.tokens = dto.tokens;
+    this.totalSuppressedMatches = dto.totalSuppressedMatches;
+    makeObservable(this, {
+      paused: observableRef,
+      tokens: observableRef,
+      totalSuppressedMatches: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: MonitorOutputWakeBudgetDto): this {
+    {
+      const next = dto.paused;
+      if (this.paused !== next) this.paused = next;
+    }
+    {
+      const next = dto.tokens;
+      if (this.tokens !== next) this.tokens = next;
+    }
+    {
+      const next = dto.totalSuppressedMatches;
+      if (this.totalSuppressedMatches !== next)
+        this.totalSuppressedMatches = next;
+    }
+    return this;
+  }
+}
 type NativeSafetyBufferingRecordDto = DeepReadonly<
   components["schemas"]["NativeSafetyBufferingRecord"]
 >;
@@ -4757,6 +5485,591 @@ class PeerTeamEntityDto_peerLeadsItemModel {
     {
       const next = dto.server;
       if (this.server !== next) this.server = next;
+    }
+    return this;
+  }
+}
+type ProcessListingDto = DeepReadonly<components["schemas"]["ProcessListing"]>;
+class ProcessListingModel {
+  activities: ProcessListingDto["activities"];
+  processes: ProcessViewModel[];
+  responseTarget: ProcessResponseTargetModel | null | undefined;
+  constructor(dto: ProcessListingDto) {
+    this.activities = freezePlain(structuredClone(dto.activities));
+    this.processes = reconcileProcessView([], dto.processes);
+    this.responseTarget =
+      dto.responseTarget === undefined
+        ? undefined
+        : dto.responseTarget === null
+          ? null
+          : new ProcessResponseTargetModel(dto.responseTarget);
+    makeObservable(this, {
+      activities: observableRef,
+      processes: observableRef,
+      responseTarget: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProcessListingDto): this {
+    {
+      const next = compareStructural(this.activities, dto.activities)
+        ? this.activities
+        : freezePlain(structuredClone(dto.activities));
+      if (this.activities !== next) this.activities = next;
+    }
+    {
+      const next = reconcileProcessView(this.processes, dto.processes);
+      if (this.processes !== next) this.processes = next;
+    }
+    {
+      const next =
+        dto.responseTarget === undefined
+          ? undefined
+          : this.responseTarget === undefined
+            ? dto.responseTarget === null
+              ? null
+              : new ProcessResponseTargetModel(dto.responseTarget)
+            : dto.responseTarget === null
+              ? null
+              : this.responseTarget === null
+                ? new ProcessResponseTargetModel(dto.responseTarget)
+                : this.responseTarget.apply(dto.responseTarget);
+      if (this.responseTarget !== next) this.responseTarget = next;
+    }
+    return this;
+  }
+}
+type ProcessResponseTargetDto = DeepReadonly<
+  components["schemas"]["ProcessResponseTarget"]
+>;
+class ProcessResponseTargetModel {
+  accountKey: ProcessResponseTargetDto["accountKey"];
+  agent: ProcessResponseTargetDto["agent"];
+  connectionId: ProcessResponseTargetDto["connectionId"];
+  epoch: ProcessResponseTargetDto["epoch"];
+  threadId: ProcessResponseTargetDto["threadId"];
+  turnId: ProcessResponseTargetDto["turnId"];
+  constructor(dto: ProcessResponseTargetDto) {
+    this.accountKey = dto.accountKey;
+    this.agent = dto.agent;
+    this.connectionId = dto.connectionId;
+    this.epoch = dto.epoch;
+    this.threadId = dto.threadId;
+    this.turnId = dto.turnId;
+    makeObservable(this, {
+      accountKey: observableRef,
+      agent: observableRef,
+      connectionId: observableRef,
+      epoch: observableRef,
+      threadId: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProcessResponseTargetDto): this {
+    {
+      const next = dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next = dto.connectionId;
+      if (this.connectionId !== next) this.connectionId = next;
+    }
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next = dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    return this;
+  }
+}
+type ProcessViewDto = DeepReadonly<components["schemas"]["ProcessView"]>;
+class ProcessViewModel {
+  accountKey: ProcessViewDto["accountKey"];
+  agent: ProcessViewDto["agent"];
+  bytes: ProcessViewDto["bytes"];
+  cancelRequested: ProcessViewDto["cancelRequested"];
+  command: NonNullable<ProcessViewDto["command"]> | null | undefined;
+  created: ProcessViewDto["created"];
+  cwd: NonNullable<ProcessViewDto["cwd"]> | null | undefined;
+  display: BackgroundTaskDisplayModel;
+  durationMs: NonNullable<ProcessViewDto["durationMs"]> | null | undefined;
+  epoch: ProcessViewDto["epoch"];
+  error: NonNullable<ProcessViewDto["error"]> | null | undefined;
+  exitCode: NonNullable<ProcessViewDto["exitCode"]> | null | undefined;
+  finished: NonNullable<ProcessViewDto["finished"]> | null | undefined;
+  generation: ProcessViewDto["generation"];
+  id: ProcessViewDto["id"];
+  key: ProcessViewDto["key"];
+  log: NonNullable<ProcessViewDto["log"]> | null | undefined;
+  name: ProcessViewDto["name"];
+  outputFile: NonNullable<ProcessViewDto["outputFile"]> | null | undefined;
+  outputPatterns: NonNullable<ProcessViewDto["outputPatterns"]>[number][];
+  outputTruncated: ProcessViewDto["outputTruncated"];
+  outputWakeBudget: ProcessWakeBudgetModel | null | undefined;
+  processId: NonNullable<ProcessViewDto["processId"]> | null | undefined;
+  source: ProcessViewDto["source"];
+  status: ProcessViewDto["status"];
+  stdinError: NonNullable<ProcessViewDto["stdinError"]> | null | undefined;
+  tail: ProcessViewDto["tail"];
+  timeout_ms: NonNullable<ProcessViewDto["timeout_ms"]> | null | undefined;
+  turnId: NonNullable<ProcessViewDto["turnId"]> | null | undefined;
+  constructor(dto: ProcessViewDto) {
+    this.accountKey = dto.accountKey;
+    this.agent = dto.agent;
+    this.bytes = dto.bytes;
+    this.cancelRequested = dto.cancelRequested;
+    this.command =
+      dto.command === undefined
+        ? undefined
+        : dto.command === null
+          ? null
+          : dto.command;
+    this.created = dto.created;
+    this.cwd =
+      dto.cwd === undefined ? undefined : dto.cwd === null ? null : dto.cwd;
+    this.display = new BackgroundTaskDisplayModel(dto.display);
+    this.durationMs =
+      dto.durationMs === undefined
+        ? undefined
+        : dto.durationMs === null
+          ? null
+          : dto.durationMs;
+    this.epoch = dto.epoch;
+    this.error =
+      dto.error === undefined
+        ? undefined
+        : dto.error === null
+          ? null
+          : dto.error;
+    this.exitCode =
+      dto.exitCode === undefined
+        ? undefined
+        : dto.exitCode === null
+          ? null
+          : dto.exitCode;
+    this.finished =
+      dto.finished === undefined
+        ? undefined
+        : dto.finished === null
+          ? null
+          : dto.finished;
+    this.generation = dto.generation;
+    this.id = dto.id;
+    this.key = dto.key;
+    this.log =
+      dto.log === undefined ? undefined : dto.log === null ? null : dto.log;
+    this.name = dto.name;
+    this.outputFile =
+      dto.outputFile === undefined
+        ? undefined
+        : dto.outputFile === null
+          ? null
+          : dto.outputFile;
+    this.outputPatterns = dto.outputPatterns.map((item) => item);
+    this.outputTruncated = dto.outputTruncated;
+    this.outputWakeBudget =
+      dto.outputWakeBudget === undefined
+        ? undefined
+        : dto.outputWakeBudget === null
+          ? null
+          : new ProcessWakeBudgetModel(dto.outputWakeBudget);
+    this.processId =
+      dto.processId === undefined
+        ? undefined
+        : dto.processId === null
+          ? null
+          : dto.processId;
+    this.source = dto.source;
+    this.status = dto.status;
+    this.stdinError =
+      dto.stdinError === undefined
+        ? undefined
+        : dto.stdinError === null
+          ? null
+          : dto.stdinError;
+    this.tail = dto.tail;
+    this.timeout_ms =
+      dto.timeout_ms === undefined
+        ? undefined
+        : dto.timeout_ms === null
+          ? null
+          : dto.timeout_ms;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    makeObservable(this, {
+      accountKey: observableRef,
+      agent: observableRef,
+      bytes: observableRef,
+      cancelRequested: observableRef,
+      command: observableRef,
+      created: observableRef,
+      cwd: observableRef,
+      display: observableRef,
+      durationMs: observableRef,
+      epoch: observableRef,
+      error: observableRef,
+      exitCode: observableRef,
+      finished: observableRef,
+      generation: observableRef,
+      id: observableRef,
+      key: observableRef,
+      log: observableRef,
+      name: observableRef,
+      outputFile: observableRef,
+      outputPatterns: observableRef,
+      outputTruncated: observableRef,
+      outputWakeBudget: observableRef,
+      processId: observableRef,
+      source: observableRef,
+      status: observableRef,
+      stdinError: observableRef,
+      tail: observableRef,
+      timeout_ms: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProcessViewDto): this {
+    {
+      const next = dto.accountKey;
+      if (this.accountKey !== next) this.accountKey = next;
+    }
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next = dto.bytes;
+      if (this.bytes !== next) this.bytes = next;
+    }
+    {
+      const next = dto.cancelRequested;
+      if (this.cancelRequested !== next) this.cancelRequested = next;
+    }
+    {
+      const next =
+        dto.command === undefined
+          ? undefined
+          : this.command === undefined
+            ? dto.command === null
+              ? null
+              : dto.command
+            : dto.command === null
+              ? null
+              : this.command === null
+                ? dto.command
+                : dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.cwd === undefined
+          ? undefined
+          : this.cwd === undefined
+            ? dto.cwd === null
+              ? null
+              : dto.cwd
+            : dto.cwd === null
+              ? null
+              : this.cwd === null
+                ? dto.cwd
+                : dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next = this.display.apply(dto.display);
+      if (this.display !== next) this.display = next;
+    }
+    {
+      const next =
+        dto.durationMs === undefined
+          ? undefined
+          : this.durationMs === undefined
+            ? dto.durationMs === null
+              ? null
+              : dto.durationMs
+            : dto.durationMs === null
+              ? null
+              : this.durationMs === null
+                ? dto.durationMs
+                : dto.durationMs;
+      if (this.durationMs !== next) this.durationMs = next;
+    }
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next =
+        dto.error === undefined
+          ? undefined
+          : this.error === undefined
+            ? dto.error === null
+              ? null
+              : dto.error
+            : dto.error === null
+              ? null
+              : this.error === null
+                ? dto.error
+                : dto.error;
+      if (this.error !== next) this.error = next;
+    }
+    {
+      const next =
+        dto.exitCode === undefined
+          ? undefined
+          : this.exitCode === undefined
+            ? dto.exitCode === null
+              ? null
+              : dto.exitCode
+            : dto.exitCode === null
+              ? null
+              : this.exitCode === null
+                ? dto.exitCode
+                : dto.exitCode;
+      if (this.exitCode !== next) this.exitCode = next;
+    }
+    {
+      const next =
+        dto.finished === undefined
+          ? undefined
+          : this.finished === undefined
+            ? dto.finished === null
+              ? null
+              : dto.finished
+            : dto.finished === null
+              ? null
+              : this.finished === null
+                ? dto.finished
+                : dto.finished;
+      if (this.finished !== next) this.finished = next;
+    }
+    {
+      const next = dto.generation;
+      if (this.generation !== next) this.generation = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.key;
+      if (this.key !== next) this.key = next;
+    }
+    {
+      const next =
+        dto.log === undefined
+          ? undefined
+          : this.log === undefined
+            ? dto.log === null
+              ? null
+              : dto.log
+            : dto.log === null
+              ? null
+              : this.log === null
+                ? dto.log
+                : dto.log;
+      if (this.log !== next) this.log = next;
+    }
+    {
+      const next = dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.outputFile === undefined
+          ? undefined
+          : this.outputFile === undefined
+            ? dto.outputFile === null
+              ? null
+              : dto.outputFile
+            : dto.outputFile === null
+              ? null
+              : this.outputFile === null
+                ? dto.outputFile
+                : dto.outputFile;
+      if (this.outputFile !== next) this.outputFile = next;
+    }
+    {
+      const next =
+        this.outputPatterns.length === dto.outputPatterns.length &&
+        this.outputPatterns.every((leftItem0, index) => {
+          const rightItem0 = dto.outputPatterns?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.outputPatterns
+          : dto.outputPatterns.map((item) => item);
+      if (this.outputPatterns !== next) this.outputPatterns = next;
+    }
+    {
+      const next = dto.outputTruncated;
+      if (this.outputTruncated !== next) this.outputTruncated = next;
+    }
+    {
+      const next =
+        dto.outputWakeBudget === undefined
+          ? undefined
+          : this.outputWakeBudget === undefined
+            ? dto.outputWakeBudget === null
+              ? null
+              : new ProcessWakeBudgetModel(dto.outputWakeBudget)
+            : dto.outputWakeBudget === null
+              ? null
+              : this.outputWakeBudget === null
+                ? new ProcessWakeBudgetModel(dto.outputWakeBudget)
+                : this.outputWakeBudget.apply(dto.outputWakeBudget);
+      if (this.outputWakeBudget !== next) this.outputWakeBudget = next;
+    }
+    {
+      const next =
+        dto.processId === undefined
+          ? undefined
+          : this.processId === undefined
+            ? dto.processId === null
+              ? null
+              : dto.processId
+            : dto.processId === null
+              ? null
+              : this.processId === null
+                ? dto.processId
+                : dto.processId;
+      if (this.processId !== next) this.processId = next;
+    }
+    {
+      const next = dto.source;
+      if (this.source !== next) this.source = next;
+    }
+    {
+      const next = dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.stdinError === undefined
+          ? undefined
+          : this.stdinError === undefined
+            ? dto.stdinError === null
+              ? null
+              : dto.stdinError
+            : dto.stdinError === null
+              ? null
+              : this.stdinError === null
+                ? dto.stdinError
+                : dto.stdinError;
+      if (this.stdinError !== next) this.stdinError = next;
+    }
+    {
+      const next = dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    {
+      const next =
+        dto.timeout_ms === undefined
+          ? undefined
+          : this.timeout_ms === undefined
+            ? dto.timeout_ms === null
+              ? null
+              : dto.timeout_ms
+            : dto.timeout_ms === null
+              ? null
+              : this.timeout_ms === null
+                ? dto.timeout_ms
+                : dto.timeout_ms;
+      if (this.timeout_ms !== next) this.timeout_ms = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    return this;
+  }
+}
+function reconcileProcessView(
+  data: ProcessViewModel[],
+  dto: readonly ProcessViewDto[],
+): ProcessViewModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id)) throw new Error("Duplicate identity in ProcessView");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: ProcessViewModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new ProcessViewModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type ProcessWakeBudgetDto = DeepReadonly<
+  components["schemas"]["ProcessWakeBudget"]
+>;
+class ProcessWakeBudgetModel {
+  paused: ProcessWakeBudgetDto["paused"];
+  tokens: ProcessWakeBudgetDto["tokens"];
+  totalSuppressedMatches: ProcessWakeBudgetDto["totalSuppressedMatches"];
+  constructor(dto: ProcessWakeBudgetDto) {
+    this.paused = dto.paused;
+    this.tokens = dto.tokens;
+    this.totalSuppressedMatches = dto.totalSuppressedMatches;
+    makeObservable(this, {
+      paused: observableRef,
+      tokens: observableRef,
+      totalSuppressedMatches: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProcessWakeBudgetDto): this {
+    {
+      const next = dto.paused;
+      if (this.paused !== next) this.paused = next;
+    }
+    {
+      const next = dto.tokens;
+      if (this.tokens !== next) this.tokens = next;
+    }
+    {
+      const next = dto.totalSuppressedMatches;
+      if (this.totalSuppressedMatches !== next)
+        this.totalSuppressedMatches = next;
     }
     return this;
   }
@@ -5673,6 +6986,1624 @@ class SidebarOrderDtoModel {
     return this;
   }
 }
+type TextBlobRefDto = DeepReadonly<components["schemas"]["TextBlobRef"]>;
+class TextBlobRefModel {
+  hash: TextBlobRefDto["hash"];
+  size: TextBlobRefDto["size"];
+  constructor(dto: TextBlobRefDto) {
+    this.hash = dto.hash;
+    this.size = dto.size;
+    makeObservable(this, {
+      hash: observableRef,
+      size: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TextBlobRefDto): this {
+    {
+      const next = dto.hash;
+      if (this.hash !== next) this.hash = next;
+    }
+    {
+      const next = dto.size;
+      if (this.size !== next) this.size = next;
+    }
+    return this;
+  }
+}
+type TranscriptAgentDto = DeepReadonly<
+  components["schemas"]["TranscriptAgent"]
+>;
+class TranscriptAgentModel {
+  activity: AgentActivityModel | null | undefined;
+  compactions:
+    | NonNullable<TranscriptAgentDto["compactions"]>
+    | null
+    | undefined;
+  contextUsage: TranscriptContextUsageModel | null | undefined;
+  id: TranscriptAgentDto["id"];
+  inFlight: NonNullable<TranscriptAgentDto["inFlight"]> | null | undefined;
+  status: NonNullable<TranscriptAgentDto["status"]> | null | undefined;
+  constructor(dto: TranscriptAgentDto) {
+    this.activity =
+      dto.activity === undefined
+        ? undefined
+        : dto.activity === null
+          ? null
+          : new AgentActivityModel(dto.activity);
+    this.compactions =
+      dto.compactions === undefined
+        ? undefined
+        : dto.compactions === null
+          ? null
+          : dto.compactions;
+    this.contextUsage =
+      dto.contextUsage === undefined
+        ? undefined
+        : dto.contextUsage === null
+          ? null
+          : new TranscriptContextUsageModel(dto.contextUsage);
+    this.id = dto.id;
+    this.inFlight =
+      dto.inFlight === undefined
+        ? undefined
+        : dto.inFlight === null
+          ? null
+          : dto.inFlight;
+    this.status =
+      dto.status === undefined
+        ? undefined
+        : dto.status === null
+          ? null
+          : dto.status;
+    makeObservable(this, {
+      activity: observableRef,
+      compactions: observableRef,
+      contextUsage: observableRef,
+      id: observableRef,
+      inFlight: observableRef,
+      status: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TranscriptAgentDto): this {
+    {
+      const next =
+        dto.activity === undefined
+          ? undefined
+          : this.activity === undefined
+            ? dto.activity === null
+              ? null
+              : new AgentActivityModel(dto.activity)
+            : dto.activity === null
+              ? null
+              : this.activity === null
+                ? new AgentActivityModel(dto.activity)
+                : this.activity.apply(dto.activity);
+      if (this.activity !== next) this.activity = next;
+    }
+    {
+      const next =
+        dto.compactions === undefined
+          ? undefined
+          : this.compactions === undefined
+            ? dto.compactions === null
+              ? null
+              : dto.compactions
+            : dto.compactions === null
+              ? null
+              : this.compactions === null
+                ? dto.compactions
+                : dto.compactions;
+      if (this.compactions !== next) this.compactions = next;
+    }
+    {
+      const next =
+        dto.contextUsage === undefined
+          ? undefined
+          : this.contextUsage === undefined
+            ? dto.contextUsage === null
+              ? null
+              : new TranscriptContextUsageModel(dto.contextUsage)
+            : dto.contextUsage === null
+              ? null
+              : this.contextUsage === null
+                ? new TranscriptContextUsageModel(dto.contextUsage)
+                : this.contextUsage.apply(dto.contextUsage);
+      if (this.contextUsage !== next) this.contextUsage = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.inFlight === undefined
+          ? undefined
+          : this.inFlight === undefined
+            ? dto.inFlight === null
+              ? null
+              : dto.inFlight
+            : dto.inFlight === null
+              ? null
+              : this.inFlight === null
+                ? dto.inFlight
+                : dto.inFlight;
+      if (this.inFlight !== next) this.inFlight = next;
+    }
+    {
+      const next =
+        dto.status === undefined
+          ? undefined
+          : this.status === undefined
+            ? dto.status === null
+              ? null
+              : dto.status
+            : dto.status === null
+              ? null
+              : this.status === null
+                ? dto.status
+                : dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    return this;
+  }
+}
+type TranscriptContextUsageDto = DeepReadonly<
+  components["schemas"]["TranscriptContextUsage"]
+>;
+class TranscriptContextUsageModel {
+  at: TranscriptContextUsageDto["at"];
+  tokens: NonNullable<TranscriptContextUsageDto["tokens"]> | null | undefined;
+  window: NonNullable<TranscriptContextUsageDto["window"]> | null | undefined;
+  constructor(dto: TranscriptContextUsageDto) {
+    this.at = dto.at;
+    this.tokens =
+      dto.tokens === undefined
+        ? undefined
+        : dto.tokens === null
+          ? null
+          : dto.tokens;
+    this.window =
+      dto.window === undefined
+        ? undefined
+        : dto.window === null
+          ? null
+          : dto.window;
+    makeObservable(this, {
+      at: observableRef,
+      tokens: observableRef,
+      window: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TranscriptContextUsageDto): this {
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next =
+        dto.tokens === undefined
+          ? undefined
+          : this.tokens === undefined
+            ? dto.tokens === null
+              ? null
+              : dto.tokens
+            : dto.tokens === null
+              ? null
+              : this.tokens === null
+                ? dto.tokens
+                : dto.tokens;
+      if (this.tokens !== next) this.tokens = next;
+    }
+    {
+      const next =
+        dto.window === undefined
+          ? undefined
+          : this.window === undefined
+            ? dto.window === null
+              ? null
+              : dto.window
+            : dto.window === null
+              ? null
+              : this.window === null
+                ? dto.window
+                : dto.window;
+      if (this.window !== next) this.window = next;
+    }
+    return this;
+  }
+}
+type TranscriptDataDto = TranscriptData;
+class TranscriptDataModel {
+  agent: TranscriptAgentModel | null | undefined;
+  historyVersion:
+    | NonNullable<TranscriptDataDto["historyVersion"]>
+    | null
+    | undefined;
+  items: TranscriptMessageRecordModel[];
+  nextAfterCursor:
+    | NonNullable<TranscriptDataDto["nextAfterCursor"]>
+    | null
+    | undefined;
+  nextCursor: NonNullable<TranscriptDataDto["nextCursor"]> | null | undefined;
+  tail: NonNullable<TranscriptDataDto["tail"]> | null | undefined;
+  truncated: TranscriptDataDto["truncated"];
+  unavailable: NonNullable<TranscriptDataDto["unavailable"]> | null | undefined;
+  constructor(dto: TranscriptDataDto) {
+    this.agent =
+      dto.agent === undefined
+        ? undefined
+        : dto.agent === null
+          ? null
+          : new TranscriptAgentModel(dto.agent);
+    this.historyVersion =
+      dto.historyVersion === undefined
+        ? undefined
+        : dto.historyVersion === null
+          ? null
+          : dto.historyVersion;
+    this.items = reconcileTranscriptMessageRecord([], dto.items);
+    this.nextAfterCursor =
+      dto.nextAfterCursor === undefined
+        ? undefined
+        : dto.nextAfterCursor === null
+          ? null
+          : dto.nextAfterCursor;
+    this.nextCursor =
+      dto.nextCursor === undefined
+        ? undefined
+        : dto.nextCursor === null
+          ? null
+          : dto.nextCursor;
+    this.tail =
+      dto.tail === undefined ? undefined : dto.tail === null ? null : dto.tail;
+    this.truncated = dto.truncated;
+    this.unavailable =
+      dto.unavailable === undefined
+        ? undefined
+        : dto.unavailable === null
+          ? null
+          : dto.unavailable;
+    makeObservable(this, {
+      agent: observableRef,
+      historyVersion: observableRef,
+      items: observableRef,
+      nextAfterCursor: observableRef,
+      nextCursor: observableRef,
+      tail: observableRef,
+      truncated: observableRef,
+      unavailable: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TranscriptDataDto): this {
+    {
+      const next =
+        dto.agent === undefined
+          ? undefined
+          : this.agent === undefined
+            ? dto.agent === null
+              ? null
+              : new TranscriptAgentModel(dto.agent)
+            : dto.agent === null
+              ? null
+              : this.agent === null
+                ? new TranscriptAgentModel(dto.agent)
+                : this.agent.apply(dto.agent);
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next =
+        dto.historyVersion === undefined
+          ? undefined
+          : this.historyVersion === undefined
+            ? dto.historyVersion === null
+              ? null
+              : dto.historyVersion
+            : dto.historyVersion === null
+              ? null
+              : this.historyVersion === null
+                ? dto.historyVersion
+                : dto.historyVersion;
+      if (this.historyVersion !== next) this.historyVersion = next;
+    }
+    {
+      const next = reconcileTranscriptMessageRecord(this.items, dto.items);
+      if (this.items !== next) this.items = next;
+    }
+    {
+      const next =
+        dto.nextAfterCursor === undefined
+          ? undefined
+          : this.nextAfterCursor === undefined
+            ? dto.nextAfterCursor === null
+              ? null
+              : dto.nextAfterCursor
+            : dto.nextAfterCursor === null
+              ? null
+              : this.nextAfterCursor === null
+                ? dto.nextAfterCursor
+                : dto.nextAfterCursor;
+      if (this.nextAfterCursor !== next) this.nextAfterCursor = next;
+    }
+    {
+      const next =
+        dto.nextCursor === undefined
+          ? undefined
+          : this.nextCursor === undefined
+            ? dto.nextCursor === null
+              ? null
+              : dto.nextCursor
+            : dto.nextCursor === null
+              ? null
+              : this.nextCursor === null
+                ? dto.nextCursor
+                : dto.nextCursor;
+      if (this.nextCursor !== next) this.nextCursor = next;
+    }
+    {
+      const next =
+        dto.tail === undefined
+          ? undefined
+          : this.tail === undefined
+            ? dto.tail === null
+              ? null
+              : dto.tail
+            : dto.tail === null
+              ? null
+              : this.tail === null
+                ? dto.tail
+                : dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    {
+      const next = dto.truncated;
+      if (this.truncated !== next) this.truncated = next;
+    }
+    {
+      const next =
+        dto.unavailable === undefined
+          ? undefined
+          : this.unavailable === undefined
+            ? dto.unavailable === null
+              ? null
+              : dto.unavailable
+            : dto.unavailable === null
+              ? null
+              : this.unavailable === null
+                ? dto.unavailable
+                : dto.unavailable;
+      if (this.unavailable !== next) this.unavailable = next;
+    }
+    return this;
+  }
+}
+type TranscriptInputDto = NonNullable<
+  NonNullable<TranscriptMessageRecordDto["inputs"]>
+>[number];
+class TranscriptInputModel {
+  assets: TranscriptInputDto["assets"] | undefined;
+  at: NonNullable<TranscriptInputDto["at"]> | null | undefined;
+  clientMessageId:
+    | NonNullable<TranscriptInputDto["clientMessageId"]>
+    | null
+    | undefined;
+  deliveryError:
+    | NonNullable<TranscriptInputDto["deliveryError"]>
+    | null
+    | undefined;
+  deliveryStatus:
+    | NonNullable<TranscriptInputDto["deliveryStatus"]>
+    | null
+    | undefined;
+  id: NonNullable<TranscriptInputDto["id"]> | null | undefined;
+  kind: TranscriptInputDto["kind"];
+  materialized:
+    | NonNullable<TranscriptInputDto["materialized"]>
+    | null
+    | undefined;
+  pending: NonNullable<TranscriptInputDto["pending"]> | null | undefined;
+  requestedDelivery:
+    | NonNullable<TranscriptInputDto["requestedDelivery"]>
+    | null
+    | undefined;
+  text: TranscriptInputDto["text"];
+  truncated: TranscriptInputDto["truncated"];
+  constructor(dto: TranscriptInputDto) {
+    this.assets =
+      dto.assets === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.assets));
+    this.at =
+      dto.at === undefined ? undefined : dto.at === null ? null : dto.at;
+    this.clientMessageId =
+      dto.clientMessageId === undefined
+        ? undefined
+        : dto.clientMessageId === null
+          ? null
+          : dto.clientMessageId;
+    this.deliveryError =
+      dto.deliveryError === undefined
+        ? undefined
+        : dto.deliveryError === null
+          ? null
+          : dto.deliveryError;
+    this.deliveryStatus =
+      dto.deliveryStatus === undefined
+        ? undefined
+        : dto.deliveryStatus === null
+          ? null
+          : dto.deliveryStatus;
+    this.id =
+      dto.id === undefined ? undefined : dto.id === null ? null : dto.id;
+    this.kind = dto.kind;
+    this.materialized =
+      dto.materialized === undefined
+        ? undefined
+        : dto.materialized === null
+          ? null
+          : dto.materialized;
+    this.pending =
+      dto.pending === undefined
+        ? undefined
+        : dto.pending === null
+          ? null
+          : dto.pending;
+    this.requestedDelivery =
+      dto.requestedDelivery === undefined
+        ? undefined
+        : dto.requestedDelivery === null
+          ? null
+          : dto.requestedDelivery;
+    this.text = dto.text;
+    this.truncated = dto.truncated;
+    makeObservable(this, {
+      assets: observableRef,
+      at: observableRef,
+      clientMessageId: observableRef,
+      deliveryError: observableRef,
+      deliveryStatus: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      materialized: observableRef,
+      pending: observableRef,
+      requestedDelivery: observableRef,
+      text: observableRef,
+      truncated: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TranscriptInputDto): this {
+    {
+      const next =
+        dto.assets === undefined
+          ? undefined
+          : this.assets === undefined
+            ? freezePlain(structuredClone(dto.assets))
+            : compareStructural(this.assets, dto.assets)
+              ? this.assets
+              : freezePlain(structuredClone(dto.assets));
+      if (this.assets !== next) this.assets = next;
+    }
+    {
+      const next =
+        dto.at === undefined
+          ? undefined
+          : this.at === undefined
+            ? dto.at === null
+              ? null
+              : dto.at
+            : dto.at === null
+              ? null
+              : this.at === null
+                ? dto.at
+                : dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next =
+        dto.clientMessageId === undefined
+          ? undefined
+          : this.clientMessageId === undefined
+            ? dto.clientMessageId === null
+              ? null
+              : dto.clientMessageId
+            : dto.clientMessageId === null
+              ? null
+              : this.clientMessageId === null
+                ? dto.clientMessageId
+                : dto.clientMessageId;
+      if (this.clientMessageId !== next) this.clientMessageId = next;
+    }
+    {
+      const next =
+        dto.deliveryError === undefined
+          ? undefined
+          : this.deliveryError === undefined
+            ? dto.deliveryError === null
+              ? null
+              : dto.deliveryError
+            : dto.deliveryError === null
+              ? null
+              : this.deliveryError === null
+                ? dto.deliveryError
+                : dto.deliveryError;
+      if (this.deliveryError !== next) this.deliveryError = next;
+    }
+    {
+      const next =
+        dto.deliveryStatus === undefined
+          ? undefined
+          : this.deliveryStatus === undefined
+            ? dto.deliveryStatus === null
+              ? null
+              : dto.deliveryStatus
+            : dto.deliveryStatus === null
+              ? null
+              : this.deliveryStatus === null
+                ? dto.deliveryStatus
+                : dto.deliveryStatus;
+      if (this.deliveryStatus !== next) this.deliveryStatus = next;
+    }
+    {
+      const next =
+        dto.id === undefined
+          ? undefined
+          : this.id === undefined
+            ? dto.id === null
+              ? null
+              : dto.id
+            : dto.id === null
+              ? null
+              : this.id === null
+                ? dto.id
+                : dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.materialized === undefined
+          ? undefined
+          : this.materialized === undefined
+            ? dto.materialized === null
+              ? null
+              : dto.materialized
+            : dto.materialized === null
+              ? null
+              : this.materialized === null
+                ? dto.materialized
+                : dto.materialized;
+      if (this.materialized !== next) this.materialized = next;
+    }
+    {
+      const next =
+        dto.pending === undefined
+          ? undefined
+          : this.pending === undefined
+            ? dto.pending === null
+              ? null
+              : dto.pending
+            : dto.pending === null
+              ? null
+              : this.pending === null
+                ? dto.pending
+                : dto.pending;
+      if (this.pending !== next) this.pending = next;
+    }
+    {
+      const next =
+        dto.requestedDelivery === undefined
+          ? undefined
+          : this.requestedDelivery === undefined
+            ? dto.requestedDelivery === null
+              ? null
+              : dto.requestedDelivery
+            : dto.requestedDelivery === null
+              ? null
+              : this.requestedDelivery === null
+                ? dto.requestedDelivery
+                : dto.requestedDelivery;
+      if (this.requestedDelivery !== next) this.requestedDelivery = next;
+    }
+    {
+      const next = dto.text;
+      if (this.text !== next) this.text = next;
+    }
+    {
+      const next = dto.truncated;
+      if (this.truncated !== next) this.truncated = next;
+    }
+    return this;
+  }
+}
+type TranscriptMessageRecordDto = NonNullable<
+  TranscriptDataDto["items"]
+>[number];
+class TranscriptMessageRecordModel {
+  accountWide:
+    | NonNullable<TranscriptMessageRecordDto["accountWide"]>
+    | null
+    | undefined;
+  agent: NonNullable<TranscriptMessageRecordDto["agent"]> | null | undefined;
+  assets: TranscriptMessageRecordDto["assets"] | undefined;
+  at: TranscriptMessageRecordDto["at"] | undefined;
+  clientMessageId:
+    | NonNullable<TranscriptMessageRecordDto["clientMessageId"]>
+    | null
+    | undefined;
+  cyberAccessProgram:
+    | NonNullable<TranscriptMessageRecordDto["cyberAccessProgram"]>
+    | null
+    | undefined;
+  deliveryError:
+    | NonNullable<TranscriptMessageRecordDto["deliveryError"]>
+    | null
+    | undefined;
+  deliveryStatus:
+    | NonNullable<TranscriptMessageRecordDto["deliveryStatus"]>
+    | null
+    | undefined;
+  details: TranscriptMessageRecordDto["details"] | undefined;
+  fullTextBlob: TextBlobRefModel | null | undefined;
+  id: TranscriptMessageRecordDto["id"];
+  idleCompaction: TranscriptMessageRecordDto["idleCompaction"] | undefined;
+  inputs: TranscriptInputModel[] | null | undefined;
+  kind: NonNullable<TranscriptMessageRecordDto["kind"]> | null | undefined;
+  materialized:
+    | NonNullable<TranscriptMessageRecordDto["materialized"]>
+    | null
+    | undefined;
+  nativeError: TranscriptMessageRecordDto["nativeError"] | undefined;
+  nativeHook: TranscriptMessageRecordDto["nativeHook"] | undefined;
+  nativeHookQuiet:
+    | NonNullable<TranscriptMessageRecordDto["nativeHookQuiet"]>
+    | null
+    | undefined;
+  nativeNotice:
+    | NonNullable<TranscriptMessageRecordDto["nativeNotice"]>
+    | null
+    | undefined;
+  nativeReview: TranscriptMessageRecordDto["nativeReview"] | undefined;
+  observedWait:
+    | NonNullable<TranscriptMessageRecordDto["observedWait"]>
+    | null
+    | undefined;
+  pending: TranscriptMessageRecordDto["pending"] | undefined;
+  phase: NonNullable<TranscriptMessageRecordDto["phase"]> | null | undefined;
+  previousError: TranscriptMessageRecordDto["previousError"] | undefined;
+  providerUnknown: TranscriptMessageRecordDto["providerUnknown"] | undefined;
+  reasoningMs:
+    | NonNullable<TranscriptMessageRecordDto["reasoningMs"]>
+    | null
+    | undefined;
+  reasoningObservedAt:
+    | NonNullable<TranscriptMessageRecordDto["reasoningObservedAt"]>
+    | null
+    | undefined;
+  reasoningSince:
+    | NonNullable<TranscriptMessageRecordDto["reasoningSince"]>
+    | null
+    | undefined;
+  requestedDelivery:
+    | NonNullable<TranscriptMessageRecordDto["requestedDelivery"]>
+    | null
+    | undefined;
+  role: TranscriptMessageRecordDto["role"];
+  sourceId:
+    | NonNullable<TranscriptMessageRecordDto["sourceId"]>
+    | null
+    | undefined;
+  streaming:
+    | NonNullable<TranscriptMessageRecordDto["streaming"]>
+    | null
+    | undefined;
+  text: TranscriptMessageRecordDto["text"];
+  threadId:
+    | NonNullable<TranscriptMessageRecordDto["threadId"]>
+    | null
+    | undefined;
+  title: TranscriptMessageRecordDto["title"] | undefined;
+  toolStatus:
+    | NonNullable<TranscriptMessageRecordDto["toolStatus"]>
+    | null
+    | undefined;
+  truncated:
+    | NonNullable<TranscriptMessageRecordDto["truncated"]>
+    | null
+    | undefined;
+  turnError: TranscriptMessageRecordDto["turnError"] | undefined;
+  turnErrorResolved:
+    | NonNullable<TranscriptMessageRecordDto["turnErrorResolved"]>
+    | null
+    | undefined;
+  turnId: NonNullable<TranscriptMessageRecordDto["turnId"]> | null | undefined;
+  turnStatus:
+    | NonNullable<TranscriptMessageRecordDto["turnStatus"]>
+    | null
+    | undefined;
+  constructor(dto: TranscriptMessageRecordDto) {
+    this.accountWide =
+      dto.accountWide === undefined
+        ? undefined
+        : dto.accountWide === null
+          ? null
+          : dto.accountWide;
+    this.agent =
+      dto.agent === undefined
+        ? undefined
+        : dto.agent === null
+          ? null
+          : dto.agent;
+    this.assets =
+      dto.assets === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.assets));
+    this.at = dto.at === undefined ? undefined : dto.at;
+    this.clientMessageId =
+      dto.clientMessageId === undefined
+        ? undefined
+        : dto.clientMessageId === null
+          ? null
+          : dto.clientMessageId;
+    this.cyberAccessProgram =
+      dto.cyberAccessProgram === undefined
+        ? undefined
+        : dto.cyberAccessProgram === null
+          ? null
+          : dto.cyberAccessProgram;
+    this.deliveryError =
+      dto.deliveryError === undefined
+        ? undefined
+        : dto.deliveryError === null
+          ? null
+          : dto.deliveryError;
+    this.deliveryStatus =
+      dto.deliveryStatus === undefined
+        ? undefined
+        : dto.deliveryStatus === null
+          ? null
+          : dto.deliveryStatus;
+    this.details =
+      dto.details === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.details));
+    this.fullTextBlob =
+      dto.fullTextBlob === undefined
+        ? undefined
+        : dto.fullTextBlob === null
+          ? null
+          : new TextBlobRefModel(dto.fullTextBlob);
+    this.id = dto.id;
+    this.idleCompaction =
+      dto.idleCompaction === undefined ? undefined : dto.idleCompaction;
+    this.inputs =
+      dto.inputs === undefined
+        ? undefined
+        : dto.inputs === null
+          ? null
+          : dto.inputs.map((item) => new TranscriptInputModel(item));
+    this.kind =
+      dto.kind === undefined ? undefined : dto.kind === null ? null : dto.kind;
+    this.materialized =
+      dto.materialized === undefined
+        ? undefined
+        : dto.materialized === null
+          ? null
+          : dto.materialized;
+    this.nativeError =
+      dto.nativeError === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.nativeError));
+    this.nativeHook =
+      dto.nativeHook === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.nativeHook));
+    this.nativeHookQuiet =
+      dto.nativeHookQuiet === undefined
+        ? undefined
+        : dto.nativeHookQuiet === null
+          ? null
+          : dto.nativeHookQuiet;
+    this.nativeNotice =
+      dto.nativeNotice === undefined
+        ? undefined
+        : dto.nativeNotice === null
+          ? null
+          : dto.nativeNotice;
+    this.nativeReview =
+      dto.nativeReview === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.nativeReview));
+    this.observedWait =
+      dto.observedWait === undefined
+        ? undefined
+        : dto.observedWait === null
+          ? null
+          : dto.observedWait;
+    this.pending = dto.pending === undefined ? undefined : dto.pending;
+    this.phase =
+      dto.phase === undefined
+        ? undefined
+        : dto.phase === null
+          ? null
+          : dto.phase;
+    this.previousError =
+      dto.previousError === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.previousError));
+    this.providerUnknown =
+      dto.providerUnknown === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.providerUnknown));
+    this.reasoningMs =
+      dto.reasoningMs === undefined
+        ? undefined
+        : dto.reasoningMs === null
+          ? null
+          : dto.reasoningMs;
+    this.reasoningObservedAt =
+      dto.reasoningObservedAt === undefined
+        ? undefined
+        : dto.reasoningObservedAt === null
+          ? null
+          : dto.reasoningObservedAt;
+    this.reasoningSince =
+      dto.reasoningSince === undefined
+        ? undefined
+        : dto.reasoningSince === null
+          ? null
+          : dto.reasoningSince;
+    this.requestedDelivery =
+      dto.requestedDelivery === undefined
+        ? undefined
+        : dto.requestedDelivery === null
+          ? null
+          : dto.requestedDelivery;
+    this.role = dto.role;
+    this.sourceId =
+      dto.sourceId === undefined
+        ? undefined
+        : dto.sourceId === null
+          ? null
+          : dto.sourceId;
+    this.streaming =
+      dto.streaming === undefined
+        ? undefined
+        : dto.streaming === null
+          ? null
+          : dto.streaming;
+    this.text = dto.text;
+    this.threadId =
+      dto.threadId === undefined
+        ? undefined
+        : dto.threadId === null
+          ? null
+          : dto.threadId;
+    this.title = dto.title === undefined ? undefined : dto.title;
+    this.toolStatus =
+      dto.toolStatus === undefined
+        ? undefined
+        : dto.toolStatus === null
+          ? null
+          : dto.toolStatus;
+    this.truncated =
+      dto.truncated === undefined
+        ? undefined
+        : dto.truncated === null
+          ? null
+          : dto.truncated;
+    this.turnError =
+      dto.turnError === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.turnError));
+    this.turnErrorResolved =
+      dto.turnErrorResolved === undefined
+        ? undefined
+        : dto.turnErrorResolved === null
+          ? null
+          : dto.turnErrorResolved;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    this.turnStatus =
+      dto.turnStatus === undefined
+        ? undefined
+        : dto.turnStatus === null
+          ? null
+          : dto.turnStatus;
+    makeObservable(this, {
+      accountWide: observableRef,
+      agent: observableRef,
+      assets: observableRef,
+      at: observableRef,
+      clientMessageId: observableRef,
+      cyberAccessProgram: observableRef,
+      deliveryError: observableRef,
+      deliveryStatus: observableRef,
+      details: observableRef,
+      fullTextBlob: observableRef,
+      id: observableRef,
+      idleCompaction: observableRef,
+      inputs: observableRef,
+      kind: observableRef,
+      materialized: observableRef,
+      nativeError: observableRef,
+      nativeHook: observableRef,
+      nativeHookQuiet: observableRef,
+      nativeNotice: observableRef,
+      nativeReview: observableRef,
+      observedWait: observableRef,
+      pending: observableRef,
+      phase: observableRef,
+      previousError: observableRef,
+      providerUnknown: observableRef,
+      reasoningMs: observableRef,
+      reasoningObservedAt: observableRef,
+      reasoningSince: observableRef,
+      requestedDelivery: observableRef,
+      role: observableRef,
+      sourceId: observableRef,
+      streaming: observableRef,
+      text: observableRef,
+      threadId: observableRef,
+      title: observableRef,
+      toolStatus: observableRef,
+      truncated: observableRef,
+      turnError: observableRef,
+      turnErrorResolved: observableRef,
+      turnId: observableRef,
+      turnStatus: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TranscriptMessageRecordDto): this {
+    {
+      const next =
+        dto.accountWide === undefined
+          ? undefined
+          : this.accountWide === undefined
+            ? dto.accountWide === null
+              ? null
+              : dto.accountWide
+            : dto.accountWide === null
+              ? null
+              : this.accountWide === null
+                ? dto.accountWide
+                : dto.accountWide;
+      if (this.accountWide !== next) this.accountWide = next;
+    }
+    {
+      const next =
+        dto.agent === undefined
+          ? undefined
+          : this.agent === undefined
+            ? dto.agent === null
+              ? null
+              : dto.agent
+            : dto.agent === null
+              ? null
+              : this.agent === null
+                ? dto.agent
+                : dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next =
+        dto.assets === undefined
+          ? undefined
+          : this.assets === undefined
+            ? freezePlain(structuredClone(dto.assets))
+            : compareStructural(this.assets, dto.assets)
+              ? this.assets
+              : freezePlain(structuredClone(dto.assets));
+      if (this.assets !== next) this.assets = next;
+    }
+    {
+      const next =
+        dto.at === undefined
+          ? undefined
+          : this.at === undefined
+            ? dto.at
+            : dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next =
+        dto.clientMessageId === undefined
+          ? undefined
+          : this.clientMessageId === undefined
+            ? dto.clientMessageId === null
+              ? null
+              : dto.clientMessageId
+            : dto.clientMessageId === null
+              ? null
+              : this.clientMessageId === null
+                ? dto.clientMessageId
+                : dto.clientMessageId;
+      if (this.clientMessageId !== next) this.clientMessageId = next;
+    }
+    {
+      const next =
+        dto.cyberAccessProgram === undefined
+          ? undefined
+          : this.cyberAccessProgram === undefined
+            ? dto.cyberAccessProgram === null
+              ? null
+              : dto.cyberAccessProgram
+            : dto.cyberAccessProgram === null
+              ? null
+              : this.cyberAccessProgram === null
+                ? dto.cyberAccessProgram
+                : dto.cyberAccessProgram;
+      if (this.cyberAccessProgram !== next) this.cyberAccessProgram = next;
+    }
+    {
+      const next =
+        dto.deliveryError === undefined
+          ? undefined
+          : this.deliveryError === undefined
+            ? dto.deliveryError === null
+              ? null
+              : dto.deliveryError
+            : dto.deliveryError === null
+              ? null
+              : this.deliveryError === null
+                ? dto.deliveryError
+                : dto.deliveryError;
+      if (this.deliveryError !== next) this.deliveryError = next;
+    }
+    {
+      const next =
+        dto.deliveryStatus === undefined
+          ? undefined
+          : this.deliveryStatus === undefined
+            ? dto.deliveryStatus === null
+              ? null
+              : dto.deliveryStatus
+            : dto.deliveryStatus === null
+              ? null
+              : this.deliveryStatus === null
+                ? dto.deliveryStatus
+                : dto.deliveryStatus;
+      if (this.deliveryStatus !== next) this.deliveryStatus = next;
+    }
+    {
+      const next =
+        dto.details === undefined
+          ? undefined
+          : this.details === undefined
+            ? freezePlain(structuredClone(dto.details))
+            : compareStructural(this.details, dto.details)
+              ? this.details
+              : freezePlain(structuredClone(dto.details));
+      if (this.details !== next) this.details = next;
+    }
+    {
+      const next =
+        dto.fullTextBlob === undefined
+          ? undefined
+          : this.fullTextBlob === undefined
+            ? dto.fullTextBlob === null
+              ? null
+              : new TextBlobRefModel(dto.fullTextBlob)
+            : dto.fullTextBlob === null
+              ? null
+              : this.fullTextBlob === null
+                ? new TextBlobRefModel(dto.fullTextBlob)
+                : this.fullTextBlob.apply(dto.fullTextBlob);
+      if (this.fullTextBlob !== next) this.fullTextBlob = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.idleCompaction === undefined
+          ? undefined
+          : this.idleCompaction === undefined
+            ? dto.idleCompaction
+            : dto.idleCompaction;
+      if (this.idleCompaction !== next) this.idleCompaction = next;
+    }
+    {
+      const next =
+        dto.inputs === undefined
+          ? undefined
+          : this.inputs === undefined
+            ? dto.inputs === null
+              ? null
+              : dto.inputs.map((item) => new TranscriptInputModel(item))
+            : dto.inputs === null
+              ? null
+              : this.inputs === null
+                ? dto.inputs.map((item) => new TranscriptInputModel(item))
+                : this.inputs.length === dto.inputs.length &&
+                    this.inputs.every((leftItem0, index) => {
+                      const rightItem0 = dto.inputs?.[index];
+                      return (
+                        rightItem0 !== undefined &&
+                        (leftItem0.assets === undefined ||
+                        rightItem0.assets === undefined
+                          ? leftItem0.assets === rightItem0.assets
+                          : compareStructural(
+                              leftItem0.assets,
+                              rightItem0.assets,
+                            )) &&
+                        (leftItem0.at === undefined ||
+                        rightItem0.at === undefined
+                          ? leftItem0.at === rightItem0.at
+                          : leftItem0.at === null || rightItem0.at === null
+                            ? leftItem0.at === rightItem0.at
+                            : leftItem0.at === rightItem0.at) &&
+                        (leftItem0.clientMessageId === undefined ||
+                        rightItem0.clientMessageId === undefined
+                          ? leftItem0.clientMessageId ===
+                            rightItem0.clientMessageId
+                          : leftItem0.clientMessageId === null ||
+                              rightItem0.clientMessageId === null
+                            ? leftItem0.clientMessageId ===
+                              rightItem0.clientMessageId
+                            : leftItem0.clientMessageId ===
+                              rightItem0.clientMessageId) &&
+                        (leftItem0.deliveryError === undefined ||
+                        rightItem0.deliveryError === undefined
+                          ? leftItem0.deliveryError === rightItem0.deliveryError
+                          : leftItem0.deliveryError === null ||
+                              rightItem0.deliveryError === null
+                            ? leftItem0.deliveryError ===
+                              rightItem0.deliveryError
+                            : leftItem0.deliveryError ===
+                              rightItem0.deliveryError) &&
+                        (leftItem0.deliveryStatus === undefined ||
+                        rightItem0.deliveryStatus === undefined
+                          ? leftItem0.deliveryStatus ===
+                            rightItem0.deliveryStatus
+                          : leftItem0.deliveryStatus === null ||
+                              rightItem0.deliveryStatus === null
+                            ? leftItem0.deliveryStatus ===
+                              rightItem0.deliveryStatus
+                            : leftItem0.deliveryStatus ===
+                              rightItem0.deliveryStatus) &&
+                        (leftItem0.id === undefined ||
+                        rightItem0.id === undefined
+                          ? leftItem0.id === rightItem0.id
+                          : leftItem0.id === null || rightItem0.id === null
+                            ? leftItem0.id === rightItem0.id
+                            : leftItem0.id === rightItem0.id) &&
+                        leftItem0.kind === rightItem0.kind &&
+                        (leftItem0.materialized === undefined ||
+                        rightItem0.materialized === undefined
+                          ? leftItem0.materialized === rightItem0.materialized
+                          : leftItem0.materialized === null ||
+                              rightItem0.materialized === null
+                            ? leftItem0.materialized === rightItem0.materialized
+                            : leftItem0.materialized ===
+                              rightItem0.materialized) &&
+                        (leftItem0.pending === undefined ||
+                        rightItem0.pending === undefined
+                          ? leftItem0.pending === rightItem0.pending
+                          : leftItem0.pending === null ||
+                              rightItem0.pending === null
+                            ? leftItem0.pending === rightItem0.pending
+                            : leftItem0.pending === rightItem0.pending) &&
+                        (leftItem0.requestedDelivery === undefined ||
+                        rightItem0.requestedDelivery === undefined
+                          ? leftItem0.requestedDelivery ===
+                            rightItem0.requestedDelivery
+                          : leftItem0.requestedDelivery === null ||
+                              rightItem0.requestedDelivery === null
+                            ? leftItem0.requestedDelivery ===
+                              rightItem0.requestedDelivery
+                            : leftItem0.requestedDelivery ===
+                              rightItem0.requestedDelivery) &&
+                        leftItem0.text === rightItem0.text &&
+                        leftItem0.truncated === rightItem0.truncated
+                      );
+                    })
+                  ? this.inputs
+                  : dto.inputs.map((item) => new TranscriptInputModel(item));
+      if (this.inputs !== next) this.inputs = next;
+    }
+    {
+      const next =
+        dto.kind === undefined
+          ? undefined
+          : this.kind === undefined
+            ? dto.kind === null
+              ? null
+              : dto.kind
+            : dto.kind === null
+              ? null
+              : this.kind === null
+                ? dto.kind
+                : dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.materialized === undefined
+          ? undefined
+          : this.materialized === undefined
+            ? dto.materialized === null
+              ? null
+              : dto.materialized
+            : dto.materialized === null
+              ? null
+              : this.materialized === null
+                ? dto.materialized
+                : dto.materialized;
+      if (this.materialized !== next) this.materialized = next;
+    }
+    {
+      const next =
+        dto.nativeError === undefined
+          ? undefined
+          : this.nativeError === undefined
+            ? freezePlain(structuredClone(dto.nativeError))
+            : compareStructural(this.nativeError, dto.nativeError)
+              ? this.nativeError
+              : freezePlain(structuredClone(dto.nativeError));
+      if (this.nativeError !== next) this.nativeError = next;
+    }
+    {
+      const next =
+        dto.nativeHook === undefined
+          ? undefined
+          : this.nativeHook === undefined
+            ? freezePlain(structuredClone(dto.nativeHook))
+            : compareStructural(this.nativeHook, dto.nativeHook)
+              ? this.nativeHook
+              : freezePlain(structuredClone(dto.nativeHook));
+      if (this.nativeHook !== next) this.nativeHook = next;
+    }
+    {
+      const next =
+        dto.nativeHookQuiet === undefined
+          ? undefined
+          : this.nativeHookQuiet === undefined
+            ? dto.nativeHookQuiet === null
+              ? null
+              : dto.nativeHookQuiet
+            : dto.nativeHookQuiet === null
+              ? null
+              : this.nativeHookQuiet === null
+                ? dto.nativeHookQuiet
+                : dto.nativeHookQuiet;
+      if (this.nativeHookQuiet !== next) this.nativeHookQuiet = next;
+    }
+    {
+      const next =
+        dto.nativeNotice === undefined
+          ? undefined
+          : this.nativeNotice === undefined
+            ? dto.nativeNotice === null
+              ? null
+              : dto.nativeNotice
+            : dto.nativeNotice === null
+              ? null
+              : this.nativeNotice === null
+                ? dto.nativeNotice
+                : dto.nativeNotice;
+      if (this.nativeNotice !== next) this.nativeNotice = next;
+    }
+    {
+      const next =
+        dto.nativeReview === undefined
+          ? undefined
+          : this.nativeReview === undefined
+            ? freezePlain(structuredClone(dto.nativeReview))
+            : compareStructural(this.nativeReview, dto.nativeReview)
+              ? this.nativeReview
+              : freezePlain(structuredClone(dto.nativeReview));
+      if (this.nativeReview !== next) this.nativeReview = next;
+    }
+    {
+      const next =
+        dto.observedWait === undefined
+          ? undefined
+          : this.observedWait === undefined
+            ? dto.observedWait === null
+              ? null
+              : dto.observedWait
+            : dto.observedWait === null
+              ? null
+              : this.observedWait === null
+                ? dto.observedWait
+                : dto.observedWait;
+      if (this.observedWait !== next) this.observedWait = next;
+    }
+    {
+      const next =
+        dto.pending === undefined
+          ? undefined
+          : this.pending === undefined
+            ? dto.pending
+            : dto.pending;
+      if (this.pending !== next) this.pending = next;
+    }
+    {
+      const next =
+        dto.phase === undefined
+          ? undefined
+          : this.phase === undefined
+            ? dto.phase === null
+              ? null
+              : dto.phase
+            : dto.phase === null
+              ? null
+              : this.phase === null
+                ? dto.phase
+                : dto.phase;
+      if (this.phase !== next) this.phase = next;
+    }
+    {
+      const next =
+        dto.previousError === undefined
+          ? undefined
+          : this.previousError === undefined
+            ? freezePlain(structuredClone(dto.previousError))
+            : compareStructural(this.previousError, dto.previousError)
+              ? this.previousError
+              : freezePlain(structuredClone(dto.previousError));
+      if (this.previousError !== next) this.previousError = next;
+    }
+    {
+      const next =
+        dto.providerUnknown === undefined
+          ? undefined
+          : this.providerUnknown === undefined
+            ? freezePlain(structuredClone(dto.providerUnknown))
+            : compareStructural(this.providerUnknown, dto.providerUnknown)
+              ? this.providerUnknown
+              : freezePlain(structuredClone(dto.providerUnknown));
+      if (this.providerUnknown !== next) this.providerUnknown = next;
+    }
+    {
+      const next =
+        dto.reasoningMs === undefined
+          ? undefined
+          : this.reasoningMs === undefined
+            ? dto.reasoningMs === null
+              ? null
+              : dto.reasoningMs
+            : dto.reasoningMs === null
+              ? null
+              : this.reasoningMs === null
+                ? dto.reasoningMs
+                : dto.reasoningMs;
+      if (this.reasoningMs !== next) this.reasoningMs = next;
+    }
+    {
+      const next =
+        dto.reasoningObservedAt === undefined
+          ? undefined
+          : this.reasoningObservedAt === undefined
+            ? dto.reasoningObservedAt === null
+              ? null
+              : dto.reasoningObservedAt
+            : dto.reasoningObservedAt === null
+              ? null
+              : this.reasoningObservedAt === null
+                ? dto.reasoningObservedAt
+                : dto.reasoningObservedAt;
+      if (this.reasoningObservedAt !== next) this.reasoningObservedAt = next;
+    }
+    {
+      const next =
+        dto.reasoningSince === undefined
+          ? undefined
+          : this.reasoningSince === undefined
+            ? dto.reasoningSince === null
+              ? null
+              : dto.reasoningSince
+            : dto.reasoningSince === null
+              ? null
+              : this.reasoningSince === null
+                ? dto.reasoningSince
+                : dto.reasoningSince;
+      if (this.reasoningSince !== next) this.reasoningSince = next;
+    }
+    {
+      const next =
+        dto.requestedDelivery === undefined
+          ? undefined
+          : this.requestedDelivery === undefined
+            ? dto.requestedDelivery === null
+              ? null
+              : dto.requestedDelivery
+            : dto.requestedDelivery === null
+              ? null
+              : this.requestedDelivery === null
+                ? dto.requestedDelivery
+                : dto.requestedDelivery;
+      if (this.requestedDelivery !== next) this.requestedDelivery = next;
+    }
+    {
+      const next = dto.role;
+      if (this.role !== next) this.role = next;
+    }
+    {
+      const next =
+        dto.sourceId === undefined
+          ? undefined
+          : this.sourceId === undefined
+            ? dto.sourceId === null
+              ? null
+              : dto.sourceId
+            : dto.sourceId === null
+              ? null
+              : this.sourceId === null
+                ? dto.sourceId
+                : dto.sourceId;
+      if (this.sourceId !== next) this.sourceId = next;
+    }
+    {
+      const next =
+        dto.streaming === undefined
+          ? undefined
+          : this.streaming === undefined
+            ? dto.streaming === null
+              ? null
+              : dto.streaming
+            : dto.streaming === null
+              ? null
+              : this.streaming === null
+                ? dto.streaming
+                : dto.streaming;
+      if (this.streaming !== next) this.streaming = next;
+    }
+    {
+      const next = dto.text;
+      if (this.text !== next) this.text = next;
+    }
+    {
+      const next =
+        dto.threadId === undefined
+          ? undefined
+          : this.threadId === undefined
+            ? dto.threadId === null
+              ? null
+              : dto.threadId
+            : dto.threadId === null
+              ? null
+              : this.threadId === null
+                ? dto.threadId
+                : dto.threadId;
+      if (this.threadId !== next) this.threadId = next;
+    }
+    {
+      const next =
+        dto.title === undefined
+          ? undefined
+          : this.title === undefined
+            ? dto.title
+            : dto.title;
+      if (this.title !== next) this.title = next;
+    }
+    {
+      const next =
+        dto.toolStatus === undefined
+          ? undefined
+          : this.toolStatus === undefined
+            ? dto.toolStatus === null
+              ? null
+              : dto.toolStatus
+            : dto.toolStatus === null
+              ? null
+              : this.toolStatus === null
+                ? dto.toolStatus
+                : dto.toolStatus;
+      if (this.toolStatus !== next) this.toolStatus = next;
+    }
+    {
+      const next =
+        dto.truncated === undefined
+          ? undefined
+          : this.truncated === undefined
+            ? dto.truncated === null
+              ? null
+              : dto.truncated
+            : dto.truncated === null
+              ? null
+              : this.truncated === null
+                ? dto.truncated
+                : dto.truncated;
+      if (this.truncated !== next) this.truncated = next;
+    }
+    {
+      const next =
+        dto.turnError === undefined
+          ? undefined
+          : this.turnError === undefined
+            ? freezePlain(structuredClone(dto.turnError))
+            : compareStructural(this.turnError, dto.turnError)
+              ? this.turnError
+              : freezePlain(structuredClone(dto.turnError));
+      if (this.turnError !== next) this.turnError = next;
+    }
+    {
+      const next =
+        dto.turnErrorResolved === undefined
+          ? undefined
+          : this.turnErrorResolved === undefined
+            ? dto.turnErrorResolved === null
+              ? null
+              : dto.turnErrorResolved
+            : dto.turnErrorResolved === null
+              ? null
+              : this.turnErrorResolved === null
+                ? dto.turnErrorResolved
+                : dto.turnErrorResolved;
+      if (this.turnErrorResolved !== next) this.turnErrorResolved = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    {
+      const next =
+        dto.turnStatus === undefined
+          ? undefined
+          : this.turnStatus === undefined
+            ? dto.turnStatus === null
+              ? null
+              : dto.turnStatus
+            : dto.turnStatus === null
+              ? null
+              : this.turnStatus === null
+                ? dto.turnStatus
+                : dto.turnStatus;
+      if (this.turnStatus !== next) this.turnStatus = next;
+    }
+    return this;
+  }
+}
+function reconcileTranscriptMessageRecord(
+  data: TranscriptMessageRecordModel[],
+  dto: readonly TranscriptMessageRecordDto[],
+): TranscriptMessageRecordModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in TranscriptMessageRecord");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: TranscriptMessageRecordModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new TranscriptMessageRecordModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
 type WorkspaceCleanupSummaryDtoDto = DeepReadonly<
   components["schemas"]["WorkspaceCleanupSummaryDto"]
 >;
@@ -6103,6 +9034,19 @@ export type ProjectEntityDto = DeepReadonly<
 export type NativeThreadBlockDto = DeepReadonly<
   components["schemas"]["NativeThreadBlockDto"]
 >;
+export type ProcessListing = DeepReadonly<
+  components["schemas"]["ProcessListing"]
+>;
+export type ProcessView = DeepReadonly<components["schemas"]["ProcessView"]>;
+export type MonitorEntityDto = DeepReadonly<
+  components["schemas"]["MonitorEntityDto"]
+>;
+export type TranscriptMessageRecord = DeepReadonly<
+  components["schemas"]["TranscriptMessageRecord"]
+>;
+export type TranscriptInput = DeepReadonly<
+  components["schemas"]["TranscriptInput"]
+>;
 export type PeerTeamEntityDto = DeepReadonly<
   components["schemas"]["PeerTeamEntityDto"]
 >;
@@ -6115,6 +9059,13 @@ export type SidebarOrderDto = DeepReadonly<
 export type AgentTail = DeepReadonly<components["schemas"]["AgentTail"]>;
 export type AgentDetailEntityDto = DeepReadonly<
   components["schemas"]["AgentDetailEntityDto"]
+>;
+export type ProcessList = DeepReadonly<components["schemas"]["ProcessList"]>;
+export type MonitorsData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "monitors" }>>>
+>;
+export type TranscriptData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "transcript" }>>>
 >;
 export interface StateCollections {
   readonly agents: ReadonlyMap<
@@ -6281,14 +9232,62 @@ export function createAgentDetailMirror(dto: AgentDetailEntityDto): {
   readonly current: AgentDetailEntityDto;
   apply(dto: AgentDetailEntityDto): void;
 } {
-  const model = new AgentDetailEntityDtoModel(dto);
+  let model: AgentDetailEntityDtoModel = new AgentDetailEntityDtoModel(dto);
   return {
     get current(): AgentDetailEntityDto {
       return model;
     },
     apply(dto: AgentDetailEntityDto): void {
       runInAction(() => {
-        model.apply(dto);
+        model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createProcessesMirror(dto: ProcessList): {
+  readonly current: ProcessList;
+  apply(dto: ProcessList): void;
+} {
+  let model: ProcessListingModel = new ProcessListingModel(dto);
+  return {
+    get current(): ProcessList {
+      return model;
+    },
+    apply(dto: ProcessList): void {
+      runInAction(() => {
+        model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createMonitorsMirror(): {
+  readonly current: MonitorsData;
+  apply(dto: MonitorsData): void;
+} {
+  let model: MonitorEntityDtoModel[] = reconcileMonitorEntityDto([], []);
+  return {
+    get current(): MonitorsData {
+      return model;
+    },
+    apply(dto: MonitorsData): void {
+      runInAction(() => {
+        model = reconcileMonitorEntityDto(model, dto);
+      });
+    },
+  };
+}
+export function createTranscriptMirror(dto: TranscriptData): {
+  readonly current: TranscriptData;
+  apply(dto: TranscriptData): void;
+} {
+  let model: TranscriptDataModel = new TranscriptDataModel(dto);
+  return {
+    get current(): TranscriptData {
+      return model;
+    },
+    apply(dto: TranscriptData): void {
+      runInAction(() => {
+        model = model.apply(dto);
       });
     },
   };
@@ -6296,6 +9295,12 @@ export function createAgentDetailMirror(dto: AgentDetailEntityDto): {
 export interface ObservableResources {
   state(): ResourceSlot<StateCollections>;
   agentDetail(agentId: AgentId): ResourceSlot<AgentDetailEntityDto>;
+  processes(agentId: AgentId): ResourceSlot<ProcessList>;
+  monitors(agentId?: AgentId): ResourceSlot<MonitorsData>;
+  transcript(
+    agentId: AgentId,
+    tail?: TranscriptTail,
+  ): ResourceSlot<TranscriptData>;
 }
 export function createObservableResources(
   runtime: ObservableResourceRuntime,
@@ -6308,6 +9313,27 @@ export function createObservableResources(
     create: (dto) => new AgentDetailEntityDtoModel(dto),
     apply: (data, dto) => data.apply(dto),
   });
+  const processesSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "processes" }>,
+    ProcessListingModel
+  >({
+    create: (dto) => new ProcessListingModel(dto),
+    apply: (data, dto) => data.apply(dto),
+  });
+  const monitorsSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "monitors" }>,
+    MonitorEntityDtoModel[]
+  >({
+    create: (dto) => reconcileMonitorEntityDto([], dto),
+    apply: (data, dto) => reconcileMonitorEntityDto(data, dto),
+  });
+  const transcriptSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "transcript" }>,
+    TranscriptDataModel
+  >({
+    create: (dto) => new TranscriptDataModel(dto),
+    apply: (data, dto) => data.apply(dto),
+  });
   return {
     state() {
       if (stateSlot !== undefined) return stateSlot;
@@ -6317,9 +9343,7 @@ export function createObservableResources(
         key,
         ref,
         create: (dto) => new StateCollectionsModel(dto),
-        apply: (data, dto) => {
-          data.apply(dto);
-        },
+        apply: (data, dto) => data.apply(dto),
       }));
     },
     agentDetail(agentId: AgentId) {
@@ -6328,6 +9352,28 @@ export function createObservableResources(
         agentId,
       };
       return agentDetailSlots(ref);
+    },
+    processes(agentId: AgentId) {
+      const ref: Extract<ResourceRef, { kind: "processes" }> = {
+        kind: "processes",
+        agentId,
+      };
+      return processesSlots(ref);
+    },
+    monitors(agentId?: AgentId) {
+      const ref: Extract<ResourceRef, { kind: "monitors" }> = {
+        kind: "monitors",
+        ...(agentId === undefined ? {} : { agentId }),
+      };
+      return monitorsSlots(ref);
+    },
+    transcript(agentId: AgentId, tail?: TranscriptTail) {
+      const ref: Extract<ResourceRef, { kind: "transcript" }> = {
+        kind: "transcript",
+        agentId,
+        ...(tail === undefined ? {} : { tail }),
+      };
+      return transcriptSlots(ref);
     },
   };
 }

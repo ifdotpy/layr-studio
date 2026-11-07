@@ -38908,6 +38908,12 @@
               "integer",
               "null"
             ]
+          },
+          "turnId": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [
@@ -58709,31 +58715,19 @@
         "additionalProperties": {
           "$ref": "#/components/schemas/JsonValue"
         },
-        "description": "Transcript rows always carry their runtime role and display text.",
+        "description": "Runtime role and display text are required; omitted and null facts stay distinct.",
         "properties": {
           "accountWide": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Accountwide"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "agent": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Agent"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "assets": {
             "anyOf": [
@@ -58766,40 +58760,22 @@
             "title": "At"
           },
           "clientMessageId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Clientmessageid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "cyberAccessProgram": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Cyberaccessprogram"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryError": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Deliveryerror"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "deliveryStatus": {
             "anyOf": [
@@ -58835,7 +58811,6 @@
             "title": "Fulltextblob"
           },
           "id": {
-            "title": "Id",
             "type": "string"
           },
           "idleCompaction": {
@@ -58858,28 +58833,16 @@
             "title": "Inputs"
           },
           "kind": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Kind"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "materialized": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Materialized"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "nativeError": {
             "anyOf": [
@@ -58908,16 +58871,10 @@
             "title": "Nativehook"
           },
           "nativeHookQuiet": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Nativehookquiet"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "nativeNotice": {
             "anyOf": [
@@ -58952,16 +58909,10 @@
             "title": "Nativereview"
           },
           "observedWait": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Observedwait"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "pending": {
             "default": false,
@@ -58969,16 +58920,10 @@
             "type": "boolean"
           },
           "phase": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Phase"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "previousError": {
             "anyOf": [
@@ -59056,48 +59001,28 @@
             "title": "Requesteddelivery"
           },
           "role": {
-            "title": "Role",
             "type": "string"
           },
           "sourceId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Sourceid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "streaming": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Streaming"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "text": {
-            "title": "Text",
             "type": "string"
           },
           "threadId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Threadid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "title": {
             "default": "",
@@ -59105,28 +59030,16 @@
             "type": "string"
           },
           "toolStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Toolstatus"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "truncated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Truncated"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "turnError": {
             "anyOf": [
@@ -59147,40 +59060,22 @@
             "title": "Turnerror"
           },
           "turnErrorResolved": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Turnerrorresolved"
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "turnId": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnid"
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "turnStatus": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Turnstatus"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         },
         "required": [

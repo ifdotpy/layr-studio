@@ -38,6 +38,7 @@ fn models() -> Vec<ObservableModel> {
         ordered_by: Some("sortKey".into()),
         opaque: vec!["opaque".into()],
         tracked_nested: None,
+        declared_fields: false,
     }]
 }
 
@@ -153,6 +154,8 @@ fn resources() -> Vec<ObservableResource> {
             },
         ],
         collections: vec![],
+        mapped: false,
+        opaque: false,
     }]
 }
 
@@ -390,4 +393,61 @@ fn schema_property_names_can_be_typescript_keywords() {
     let mut document = fixture();
     document["components"]["schemas"]["Row"]["properties"]["type"] = json!({"type":"string"});
     render(&document, &models(), &resources()).expect("type is a valid class property");
+}
+
+#[test]
+fn referenced_scalar_union_fields_and_aliased_resource_roots_render() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Row"]["properties"]["optional"] =
+        json!({"anyOf":[{"$ref":"#/components/schemas/Text"},{"type":"boolean"}]});
+    document["components"]["schemas"]["Text"] = json!({"type":"string"});
+    document["components"]["schemas"]["AliasList"] = json!({"$ref":"#/components/schemas/List"});
+    document["components"]["schemas"]["SubscriptionDataMap"]["properties"]["fixture"] =
+        json!({"$ref":"#/components/schemas/AliasList"});
+    let mut resources = resources();
+    resources[0].data = "AliasList".into();
+    let generated = render(&document, &models(), &resources).expect("aliased resource root");
+    assert!(generated.contains("new ListModel(dto)"));
+}
+
+#[test]
+fn mapped_array_resources_derive_optional_numeric_and_boolean_arguments() {
+    let mut document = fixture();
+    let resource = &mut document["components"]["schemas"]["ResourceRef"]["oneOf"][0];
+    resource["properties"]["tail"] = json!({"type":"integer","minimum":1,"maximum":512});
+    resource["properties"]["legacy"] = json!({"type":"boolean"});
+    document["components"]["schemas"]["SubscriptionDataMap"]["properties"]["fixture"] =
+        json!({"type":"array","items":{"$ref":"#/components/schemas/Row"}});
+    let mut args = resources()[0].args.clone();
+    args.push(ObservableArg {
+        name: "tail".into(),
+        brand: "TailWindow".into(),
+    });
+    args.push(ObservableArg {
+        name: "legacy".into(),
+        brand: "LegacyRoom".into(),
+    });
+    let generated = render(
+        &document,
+        &models(),
+        &[ObservableResource::mapped("fixture", "fixture", args)],
+    )
+    .expect("mapped array");
+    assert!(generated.contains("tail?: TailWindow"));
+    assert!(generated.contains("legacy?: LegacyRoom"));
+    assert!(generated.contains("type TailWindow = number &"));
+    assert!(generated.contains("type LegacyRoom = boolean &"));
+    assert!(generated.contains("reconcileRow(data, dto)"));
+}
+
+#[test]
+fn declared_wire_fields_are_separate_from_runtime_facades() {
+    let mut metadata = models();
+    metadata[0].declared_fields = true;
+    let fields = render_fields(&fixture(), &metadata, &resources()).expect("pure wire fields");
+    assert!(fields.contains("export type RowFields"));
+    assert!(!fields.contains("store/"));
+    assert!(!fields.contains("ResourceSlot"));
+    let facade = render(&fixture(), &metadata, &resources()).expect("resource facades");
+    assert!(!facade.contains("export type RowFields"));
 }
