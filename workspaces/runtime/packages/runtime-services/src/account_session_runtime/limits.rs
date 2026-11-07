@@ -280,8 +280,15 @@ pub(crate) fn populate_agents(
 ) -> Result<(), StoreError> {
     let limits = crate::usage_resume::LimitsObservation::from_response(view.observation.clone());
     view.projection.agents.clear();
-    let mut statement = tx.prepare_cached("SELECT id,record FROM runtime_agents ORDER BY rowid")?;
-    let mut rows = statement.query([])?;
+    // AGENT_COLUMNS in runtime-store/src/agent_columns.rs owns this STORED
+    // generated account_key: missing/null becomes default; empty stays empty.
+    // Include empty keys for default, matching the projection normalization below.
+    let mut statement = tx.prepare_cached(
+        "SELECT id,record FROM runtime_agents WHERE account_key IN (?1,CASE WHEN ?1='default' THEN '' ELSE ?1 END) ORDER BY rowid",
+    )?;
+    #[cfg(test)]
+    statement.reset_status(rusqlite::StatementStatus::VmStep);
+    let mut rows = statement.query([limits.account_key()])?;
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
@@ -298,6 +305,10 @@ pub(crate) fn populate_agents(
             );
         }
     }
+    drop(rows);
+    #[cfg(test)]
+    AGENT_SCAN_STEPS
+        .with(|count| count.set(statement.get_status(rusqlite::StatementStatus::VmStep)));
     Ok(())
 }
 
@@ -306,6 +317,8 @@ fn decode_limit_agent<'a>(
     id: &str,
     raw: &'a str,
 ) -> Result<crate::usage_resume::LimitAgent<'a>, StoreError> {
+    #[cfg(test)]
+    AGENT_DECODES.with(|count| count.set(count.get() + 1));
     let invalid = || StoreError::InvalidSyncObject {
         scope: "runtime_agents".into(),
         id: id.to_owned(),
@@ -528,4 +541,124 @@ pub(super) async fn read_for_resume(
         }
     }
     Ok(LimitsSnapshot::read(account, runtime.read_limits(account).await?)?.response)
+}
+
+#[cfg(test)]
+thread_local! {
+    static AGENT_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static AGENT_SCAN_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn indexed_account_projection_follows_production_agent_updates()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, AgentStatus, Table};
+        let root = tempfile::tempdir()?;
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path())).await?;
+        store
+            .transaction(|tx| {
+                for initial in ["default", "", "other"] {
+                    let id = AgentId::from("moving-agent");
+                    let mut agent =
+                        AgentRecord::new(id.clone(), id, 0, AgentStatus::Waiting, initial.into());
+                    agent.provider = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_providers::ProviderKind::Codex,
+                    );
+                    AgentRepository::put(tx, &agent)?;
+                    for account in [initial, "destination", initial] {
+                        agent.account_key = account.into();
+                        assert!(Table::<AgentRecord>::new(tx).update(&agent)?);
+                        let column: String = tx.query_row(
+                            "SELECT account_key FROM runtime_agents WHERE id=?1",
+                            [&agent.id.0],
+                            |row| row.get(0),
+                        )?;
+                        assert_eq!(column, account);
+                        for queried in ["default", "other", "destination"] {
+                            let mut view = RateLimitView::from_observation(
+                                UsageLimitsResponse {
+                                    account_key: queried.into(),
+                                    ..Default::default()
+                                },
+                                1.0,
+                            );
+                            populate_agents(tx, &mut view, 1.0)?;
+                            assert_eq!(
+                                view.projection.agents.contains_key(&agent.id.0),
+                                queried
+                                    == if account.is_empty() {
+                                        "default"
+                                    } else {
+                                        account
+                                    }
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            })
+            .await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn limits_commit_decodes_only_its_account_and_preserves_projection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root = tempfile::tempdir()?;
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path())).await?;
+        store.transaction(|tx| {
+            for index in 0..1000 {
+                let id = format!("foreign-{index}");
+                let raw = studio_json::json!({"id":id,"accountKey":"foreign","epoch":0,"provider":"codex"}).to_string();
+                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id,raw])?;
+            }
+            for (id, account, deleted) in [
+                ("default", "default", None),
+                ("empty", "", None),
+                ("zero", "default", Some(0.0)),
+                ("deleted", "default", Some(1.0)),
+                ("other", "other", None),
+            ] {
+                let raw = studio_json::json!({"id":id,"accountKey":account,"epoch":0,"provider":"codex","deletedAt":deleted}).to_string();
+                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id,raw])?;
+            }
+            for (account, expected_decodes) in [("default", 4), ("other", 1), ("missing", 0)] {
+                let response = UsageLimitsResponse { account_key: account.into(), at: Some(1.0), ..Default::default() };
+                let mut expected = RateLimitView::from_observation(response.clone(), 1.0);
+                let limits = crate::usage_resume::LimitsObservation::from_response(response.clone());
+                let mut statement = tx.prepare("SELECT id,record FROM runtime_agents ORDER BY rowid")?;
+                let mut rows = statement.query([])?;
+                AGENT_DECODES.set(0);
+                while let Some(row) = rows.next()? {
+                    let id: String = row.get(0)?;
+                    let raw: String = row.get(1)?;
+                    let agent = decode_limit_agent(&id, &raw)?;
+                    let key = if agent.account_key.is_empty() { "default" } else { &agent.account_key };
+                    if key == account && !agent.deleted_at.is_some_and(|at| at != 0.0) {
+                        expected.projection.agents.insert(agent.id.to_string(), crate::usage_resume::agent_limit_projection_view(&limits, &agent, 1.0));
+                    }
+                }
+                drop(rows);
+                let before_steps = statement.get_status(rusqlite::StatementStatus::VmStep);
+                let before_decodes = AGENT_DECODES.get();
+                AGENT_DECODES.set(0);
+                commit(tx, account, LimitsWrite::Snapshot(LimitsSnapshot { response }), 1.0, None)?;
+                let decodes = AGENT_DECODES.get();
+                let steps = AGENT_SCAN_STEPS.get();
+                let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id=?1", [account], |row| row.get(0))?;
+                let (published, unreadable) = account_state::normalized_limits_view(account, payload.as_bytes(), 1.0);
+                assert!(!unreadable);
+                assert_eq!(studio_json::to_string(&published)?, studio_json::to_string(&expected)?);
+                eprintln!("limits account={account} decodes={before_decodes}->{decodes} vm_steps={before_steps}->{steps}");
+                assert_eq!(decodes, expected_decodes, "must decode only the selected account");
+                assert!(steps < 200, "account lookup must use its index: {steps} VM steps");
+            }
+            Ok(())
+        }).await?;
+        Ok(())
+    }
 }
