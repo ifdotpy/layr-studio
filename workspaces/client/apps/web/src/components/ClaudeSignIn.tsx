@@ -1,7 +1,7 @@
 import { randomUUID } from "../uuid";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Button, Group, Modal, Stack } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText, type PostResult } from "../api";
 import { copyText } from "../clipboard/clipboard";
 import type { Account } from "./Accounts";
@@ -10,11 +10,12 @@ import {
   codeSubmissionNotApplied,
   codeSubmissionResolved,
   codeVerificationPending,
-  currentClaudeLoginReadMatches,
 } from "./claudeCodeSubmission";
-import { useServerResources } from "../servers/ServerServicesContext";
 
-import { subscribeProgress } from "../sync/progressSubscription";
+import {
+  useClaudeLoginProgress,
+  type ClaudeLoginProgressModel,
+} from "./useClaudeLoginProgress";
 
 type Receipt = PostResult<"/api/accounts/claude/login">;
 type LoginAction = "start" | "code" | "cancel";
@@ -51,8 +52,7 @@ export default function ClaudeSignIn({
   onReady: () => unknown;
   serverLabel?: string | undefined;
 }) {
-  const resources = useServerResources();
-  const { clearStableRequestId, get, post, save, saved, stableRequestId } =
+  const { clearStableRequestId, post, save, saved, stableRequestId } =
     useServerApi();
 
   const storageKey = `claude-sign-in:${scope || "local"}:${account.id}`;
@@ -68,12 +68,14 @@ export default function ClaudeSignIn({
   const [codeSubmissionUncertain, setCodeSubmissionUncertain] = useState(() =>
     saved<boolean>(uncertaintyKey, false),
   );
-  const lock = useRef(false);
+  const progress = useRef<ClaudeLoginProgressModel>({
+    locked: false,
+    requestId,
+    readGeneration: 0,
+    refresh: () => {},
+  });
   const preflightRejected = useRef(false);
   const refreshed = useRef("");
-  const currentRequestId = useRef(requestId);
-  const statusReadGeneration = useRef(0);
-  const refreshStatus = useRef<() => void>(() => {});
   const ready = useRef(onReady);
   ready.current = onReady;
   const setCodeSubmissionUnknown = (value: boolean) => {
@@ -102,79 +104,14 @@ export default function ClaudeSignIn({
       );
     }
   };
-  useEffect(() => {
-    if (!requestId || !active(receipt) || busy) return;
-    let live = true;
-    const readStatus = async () => {
-      if (lock.current) return;
-      const readGeneration = statusReadGeneration.current;
-      const id = requestId;
-      try {
-        const result = await get("/api/accounts/claude/login", {
-          query: { request_id: id },
-        });
-        if (
-          !live ||
-          lock.current ||
-          !currentClaudeLoginReadMatches(
-            currentRequestId.current,
-            id,
-            result.requestId,
-            statusReadGeneration.current,
-            readGeneration,
-          )
-        )
-          return;
-        store(result, id, true);
-      } catch (failure) {
-        if (
-          live &&
-          !lock.current &&
-          currentRequestId.current === id &&
-          statusReadGeneration.current === readGeneration
-        )
-          throw failure;
-      }
-    };
-    const stop = subscribeProgress(
-      resources,
-      { kind: "auth-progress", requestId },
-      (progress) => {
-        if (
-          progress.resource.kind !== "auth-progress" ||
-          !progress.value ||
-          progress.value.status === "duplicate" ||
-          progress.value.status === "uncertain" ||
-          typeof progress.value !== "object" ||
-          !live ||
-          lock.current ||
-          currentRequestId.current !== requestId
-        )
-          return;
-        statusReadGeneration.current += 1;
-        store(
-          { ...progress.value, status: progress.value.status },
-          requestId,
-          true,
-        );
-      },
-      readStatus,
-      (failure) => {
-        if (live) setError(errorText(failure));
-      },
-    );
-    const refresh = stop.refresh;
-    refreshStatus.current = refresh;
-    return () => {
-      live = false;
-      stop();
-      if (refreshStatus.current === refresh) refreshStatus.current = () => {};
-    };
-  }, [busy, requestId, receipt?.status, resources]);
+  useClaudeLoginProgress(progress, active(receipt) && !busy, {
+    apply: (result) => store(result, requestId, true),
+    failed: (failure) => setError(errorText(failure)),
+  });
   const run = async (action: LoginAction) => {
-    if (lock.current) return;
-    statusReadGeneration.current += 1;
-    lock.current = true;
+    if (progress.current.locked) return;
+    progress.current.readGeneration += 1;
+    progress.current.locked = true;
     setBusy(action);
     setError("");
     try {
@@ -189,7 +126,7 @@ export default function ClaudeSignIn({
         }
         save(storageKey, id);
         setRequestId(id);
-        currentRequestId.current = id;
+        progress.current.requestId = id;
         setReceipt(null);
       }
       const submittedCode = code.trim();
@@ -237,7 +174,7 @@ export default function ClaudeSignIn({
       }
       setError(errorText(failure));
     } finally {
-      lock.current = false;
+      progress.current.locked = false;
       setBusy("");
     }
   };
@@ -337,7 +274,7 @@ export default function ClaudeSignIn({
                 </Button>
               ) : pending ? (
                 <Button
-                  onClick={() => refreshStatus.current()}
+                  onClick={() => progress.current.refresh()}
                   disabled={!!busy}
                 >
                   Check sign-in status

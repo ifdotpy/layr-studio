@@ -123,6 +123,14 @@ fn shared_values_ts() -> String {
                 crate::account_key::ACCOUNT_KEY_MAX_CHARS.to_string(),
             ),
             (
+                "ACCOUNT_NAME_MAX_CHARS",
+                crate::http_bounded_ingress::ACCOUNT_NAME_MAX_CHARS.to_string(),
+            ),
+            (
+                "LOGIN_LABEL_MAX_CHARS",
+                crate::http_bounded_ingress::LOGIN_LABEL_MAX_CHARS.to_string(),
+            ),
+            (
                 "CLAUDE_MCP_AUTO_BACKGROUND_MS",
                 values::CLAUDE_MCP_AUTO_BACKGROUND_MS.to_string(),
             ),

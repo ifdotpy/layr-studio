@@ -213,34 +213,7 @@ fn invalid_stored(object: &str, id: &str) -> ApiError {
 }
 
 fn map_store_error(error: StoreError) -> ApiError {
-    match error {
-        StoreError::InvalidStoredObject { table, id } => invalid_stored(table, &id),
-        StoreError::RequestResult(error) => error.into(),
-        StoreError::Outbox(error) => error.into(),
-        error @ (StoreError::TranscriptFullTextUnavailable { .. }
-        | StoreError::TranscriptInputsIncomplete { .. }) => ApiError::stored(error),
-        StoreError::StateDirectory(_)
-        | StoreError::AlreadyOwned
-        | StoreError::IntermediateReleaseRequired
-        | StoreError::MissingDatabase(_)
-        | StoreError::Migration { .. }
-        | StoreError::UnsafeStateDirectory
-        | StoreError::SchemaMismatch(_)
-        | StoreError::InvalidSyncObject { .. }
-        | StoreError::InvalidSyncObjectField { .. }
-        | StoreError::InvalidStoredRecord { .. }
-        | StoreError::SchemaObjectMismatch { .. }
-        | StoreError::Sqlite(_)
-        | StoreError::CommitOutcomeUnknown(_)
-        | StoreError::Json(_)
-        | StoreError::SchemaValidation(_)
-        | StoreError::RecordContract(_)
-        | StoreError::WriterPoisoned
-        | StoreError::WriterActorInitialization(_)
-        | StoreError::WriterActorControl(_)
-        | StoreError::CommitActorOutcomeUnknown(_)
-        | StoreError::ReadTaskFailed => ApiError::internal(),
-    }
+    ApiError::stored(error)
 }
 
 fn file_error(error: WorkspaceFilesError) -> ApiError {
@@ -496,5 +469,29 @@ mod asset_ingress_tests {
             studio_json::from_str::<super::AssetUpload>(r#"{"agent":"a","name":"n","extra":1}"#)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod stored_diagnostics_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[tokio::test]
+    async fn route_preserves_central_stored_diagnostics() {
+        let response = map_store_error(StoreError::InvalidStoredRecord {
+            object: "profiles",
+            id: "broken".into(),
+        })
+        .into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: studio_json::Value = studio_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"], "Stored data profiles/broken is unavailable");
     }
 }

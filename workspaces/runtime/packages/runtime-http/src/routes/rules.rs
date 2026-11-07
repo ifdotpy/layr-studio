@@ -473,28 +473,7 @@ fn store_api_error(error: StoreError) -> ApiError {
         | StoreError::InvalidSyncObjectField { scope, id, .. } => {
             ApiError::invalid_stored(&scope, &id)
         }
-        StoreError::RequestResult(error) => error.into(),
-        StoreError::Outbox(error) => error.into(),
-        error @ (StoreError::TranscriptFullTextUnavailable { .. }
-        | StoreError::TranscriptInputsIncomplete { .. }) => ApiError::stored(error),
-        StoreError::StateDirectory(_)
-        | StoreError::AlreadyOwned
-        | StoreError::IntermediateReleaseRequired
-        | StoreError::MissingDatabase(_)
-        | StoreError::Migration { .. }
-        | StoreError::UnsafeStateDirectory
-        | StoreError::SchemaMismatch(_)
-        | StoreError::SchemaObjectMismatch { .. }
-        | StoreError::Sqlite(_)
-        | StoreError::CommitOutcomeUnknown(_)
-        | StoreError::Json(_)
-        | StoreError::SchemaValidation(_)
-        | StoreError::RecordContract(_)
-        | StoreError::WriterPoisoned
-        | StoreError::WriterActorInitialization(_)
-        | StoreError::WriterActorControl(_)
-        | StoreError::CommitActorOutcomeUnknown(_)
-        | StoreError::ReadTaskFailed => ApiError::internal(),
+        error => ApiError::stored(error),
     }
 }
 
@@ -573,5 +552,49 @@ inventory::submit! {
         name: "rules",
         routes: Some(routes),
         dependencies: &["rule-driver/event-rules"],
+    }
+}
+
+#[cfg(test)]
+mod stored_diagnostics_tests {
+    use super::*;
+    use axum::response::IntoResponse;
+
+    #[test]
+    fn route_preserves_central_store_error_cause() {
+        let actual = store_api_error(StoreError::WriterPoisoned).into_response();
+        let expected = ApiError::stored(StoreError::WriterPoisoned).into_response();
+        assert_eq!(
+            format!(
+                "{:?}",
+                actual
+                    .extensions()
+                    .get::<crate::error::InternalErrorCause>()
+            ),
+            format!(
+                "{:?}",
+                expected
+                    .extensions()
+                    .get::<crate::error::InternalErrorCause>()
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn route_preserves_central_stored_diagnostics() {
+        let response = store_api_error(StoreError::InvalidStoredRecord {
+            object: "profiles",
+            id: "broken".into(),
+        })
+        .into_response();
+        assert_eq!(
+            response.status(),
+            axum::http::StatusCode::SERVICE_UNAVAILABLE
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let body: studio_json::Value = studio_json::from_slice(&body).unwrap();
+        assert_eq!(body["error"], "Stored data profiles/broken is unavailable");
     }
 }

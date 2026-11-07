@@ -1,14 +1,6 @@
+import { runInAction } from "mobx";
 import { AccountStatus } from "../generated/api";
-import {
-  Accordion,
-  Badge,
-  Button,
-  Menu,
-  Modal,
-  Select,
-  Stack,
-  TextInput,
-} from "@mantine/core";
+import { Accordion, Badge, Menu, Modal, Select } from "@mantine/core";
 import { Check, CloudOff, Ellipsis, LogIn, RefreshCw } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import {
@@ -33,12 +25,12 @@ import {
 } from "./ServerAccountLimits";
 import { AccountCapacityView, type Account } from "../components/Accounts";
 import { accountLimitView, ProviderMark } from "../components/AccountTiles";
-import { ACCOUNT_SIGN_IN_HINTS } from "../components/AccountAddDialog.tsx";
 import {
-  PROVIDER_KINDS,
-  PROVIDER_LABELS,
-  ProviderKind,
-} from "../generated/providerKind.ts";
+  AccountAddForm,
+  AccountAddActionsContext,
+  createAccountAddDraft,
+} from "../components/AccountAddForm";
+import { PROVIDER_LABELS, ProviderKind } from "../generated/providerKind.ts";
 import type { ServerServices } from "./serverServices";
 
 type AccountAction = Extract<ServerCommand, { action: "account-action" }>;
@@ -126,10 +118,8 @@ export default function ServerAccountsPanel({
     servicesFor,
   );
   const [adding, setAdding] = useState(false);
-  const [provider, setProvider] = useState<ProviderKind | "">("");
+  const [draft] = useState(createAccountAddDraft);
   const [serverId, setServerId] = useState(servers[0]?.id || "local");
-  const [label, setLabel] = useState("");
-  const [email, setEmail] = useState("");
   const [openAccountMenuKey, setOpenAccountMenuKey] = useState<string | null>(
     null,
   );
@@ -161,7 +151,9 @@ export default function ServerAccountsPanel({
             <ActionButton
               actionRole="primary"
               onClick={() => {
-                setProvider("");
+                runInAction(() => {
+                  draft.provider = "";
+                });
                 setAdding(true);
               }}
             >
@@ -581,73 +573,43 @@ export default function ServerAccountsPanel({
         title="Add account"
         centered
       >
-        <Stack gap="sm">
-          <div
-            className="account-provider-choices"
-            role="group"
-            aria-label="Account type"
-          >
-            {PROVIDER_KINDS.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className={`account-provider-choice${provider === kind ? " selected" : ""}`}
-                aria-pressed={provider === kind}
-                onClick={() => setProvider(kind)}
-              >
-                <strong>{PROVIDER_LABELS[kind]}</strong>
-                <span>{ACCOUNT_SIGN_IN_HINTS[kind]}</span>
-              </button>
-            ))}
-          </div>
-          <Select
-            label="Server"
-            data={servers.map((server) => ({
-              value: server.id,
-              label: server.label,
-            }))}
-            value={selected?.id || null}
-            onChange={(value) => value && setServerId(value)}
-          />
-          <TextInput
-            label="Name"
-            value={label}
-            maxLength={32}
-            onChange={(event) => setLabel(event.currentTarget.value)}
-          />
-          <TextInput
-            label="Email (optional)"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.currentTarget.value)}
-            description="Studio checks that you sign in with this account."
-          />
-          <div className="account-add-dialog-actions">
-            <Button variant="default" onClick={() => setAdding(false)}>
-              Cancel
-            </Button>
-            <Button
-              disabled={!provider || !selected}
-              onClick={() => {
-                if (!selected || !provider) return;
-                startAccount(selected.id, {
-                  action: "account-sign-in",
-                  provider,
-                  email: email.trim() || null,
-                  label:
-                    label.trim() || email.trim() || PROVIDER_LABELS[provider],
-                  serverLabel: selected.label,
-                  forceAdd: true,
-                });
-                setAdding(false);
-                setLabel("");
-                setEmail("");
-              }}
-            >
-              Continue
-            </Button>
-          </div>
-        </Stack>
+        <AccountAddActionsContext
+          value={{
+            onCancel: () => setAdding(false),
+            unavailable: !selected,
+            onContinue: () => {
+              if (!selected || !draft.provider) return;
+              startAccount(selected.id, {
+                action: "account-sign-in",
+                provider: draft.provider,
+                email: draft.email.trim() || null,
+                label:
+                  draft.label.trim() ||
+                  draft.email.trim() ||
+                  PROVIDER_LABELS[draft.provider],
+                serverLabel: selected.label,
+                forceAdd: true,
+              });
+              setAdding(false);
+              runInAction(() => {
+                draft.label = "";
+                draft.email = "";
+              });
+            },
+          }}
+        >
+          <AccountAddForm model={draft} gap="sm">
+            <Select
+              label="Server"
+              data={servers.map((server) => ({
+                value: server.id,
+                label: server.label,
+              }))}
+              value={selected?.id || null}
+              onChange={(value) => value && setServerId(value)}
+            />
+          </AccountAddForm>
+        </AccountAddActionsContext>
       </Modal>
     </div>
   );

@@ -1,3 +1,4 @@
+import { ACCOUNT_NAME_MAX_CHARS } from "../generated/sharedValues";
 import { appendAppLog } from "../appLog";
 import DirectoryField from "./DirectoryField";
 import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
@@ -1462,7 +1463,7 @@ export default function Accounts({
             <TextInput
               label="Name"
               value={renameLabel}
-              maxLength={32}
+              maxLength={ACCOUNT_NAME_MAX_CHARS}
               onChange={(event) => setRenameLabel(event.currentTarget.value)}
             />
             <Group justify="flex-end">

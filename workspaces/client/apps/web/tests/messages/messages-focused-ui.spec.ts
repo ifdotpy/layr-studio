@@ -3,7 +3,7 @@ import { required } from "./helpers.ts";
 import { responseJson } from "./helpers.ts";
 import { requestBody } from "./helpers.ts";
 import type { ComplaintBody } from "./helpers.ts";
-import type { TestInfo, BrowserContext } from "@playwright/test";
+import type {} from "@playwright/test";
 import {
   readTestState,
   stubEntityState,
@@ -18,20 +18,6 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 test("messages focused ui", async ({ browser: _browser }) => {
   test.setTimeout(120_000);

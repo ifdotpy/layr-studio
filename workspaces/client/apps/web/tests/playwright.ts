@@ -516,6 +516,7 @@ export type ClientTestFixtures = import("@playwright/test").PlaywrightTestArgs &
     apiSchemaFixtureHeaders: boolean;
     apiSchemaFixtureHeaderSetup: void;
     fixtureChildCleanup: void;
+    browserContextCleanup: void;
     readOnlyRust: {
       origin: string;
       open: (page: import("playwright").Page) => Promise<void>;
@@ -537,6 +538,19 @@ const sharedFixtures: import("@playwright/test").Fixtures<
   import("@playwright/test").PlaywrightWorkerArgs &
     import("@playwright/test").PlaywrightWorkerOptions
 > = {
+  browserContextCleanup: [
+    async ({ browser }, use) => {
+      const initialContexts = new Set(browser.contexts());
+      await use();
+      await Promise.all(
+        browser
+          .contexts()
+          .filter((context) => !initialContexts.has(context))
+          .map((context) => context.close()),
+      );
+    },
+    { auto: true },
+  ],
   apiSchemaFixtureHeaders: [true, { option: true }],
   apiSchemaFixtureBrowserSetup: [
     async ({ playwright, browserName }, use) => {

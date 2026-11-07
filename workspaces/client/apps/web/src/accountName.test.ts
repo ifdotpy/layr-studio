@@ -57,3 +57,9 @@ describe("account names", () => {
     ).toBe("ifdotpy");
   });
 });
+
+it("exports separate account display and login label length contracts", async () => {
+  const values = await import("./generated/sharedValues");
+  expect(values).toHaveProperty("ACCOUNT_NAME_MAX_CHARS", expect.any(Number));
+  expect(values).toHaveProperty("LOGIN_LABEL_MAX_CHARS", expect.any(Number));
+});

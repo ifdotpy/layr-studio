@@ -1,3 +1,5 @@
+import { ByteBudgetLru } from "../byteBudgetLru";
+
 // Compact JSON trees: bare numbers reference interned strings; arrays are
 // tagged as object (0, key/value tuples), array (1), or number (2). This keeps
 // repeated field names and sentence text once without changing the tree API.
@@ -37,20 +39,14 @@ function unpack(value: Packed, strings: string[]): unknown {
 // Cache serialized inert trees, not React nodes or workspace-dependent elements.
 // UTF-16 source/output plus bookkeeping is an accounting bound, not heap size.
 export class MarkdownCache {
-  private entries = new Map<string, { json: string; bytes: number }>();
-  private bytes = 0;
-  declare private maxBytes: number;
-  declare private maxEntries: number;
-  constructor(maxBytes = 4 * 1024 * 1024, maxEntries = 512) {
-    this.maxBytes = maxBytes;
-    this.maxEntries = maxEntries;
+  private readonly entries: ByteBudgetLru<string>;
+  constructor(maxBytes?: number, maxEntries?: number) {
+    this.entries = new ByteBudgetLru(maxBytes, maxEntries);
   }
   get(text: string): unknown | undefined {
-    const entry = this.entries.get(text);
-    if (!entry) return undefined;
-    this.entries.delete(text);
-    this.entries.set(text, entry);
-    const { tree, strings } = JSON.parse(entry.json);
+    const json = this.entries.get(text);
+    if (json === undefined) return undefined;
+    const { tree, strings } = JSON.parse(json);
     return unpack(tree, strings);
   }
   set(text: string, value: unknown) {
@@ -68,19 +64,7 @@ export class MarkdownCache {
     const tree = pack(value, intern);
     const json = JSON.stringify({ tree, strings });
     const bytes = 128 + 2 * (text.length + json.length);
-    const old = this.entries.get(text);
-    if (old) {
-      this.bytes -= old.bytes;
-      this.entries.delete(text);
-    }
-    if (bytes > this.maxBytes || this.maxEntries < 1) return;
-    this.entries.set(text, { json, bytes });
-    this.bytes += bytes;
-    while (this.bytes > this.maxBytes || this.entries.size > this.maxEntries) {
-      const oldest = this.entries.keys().next().value!;
-      this.bytes -= this.entries.get(oldest)!.bytes;
-      this.entries.delete(oldest);
-    }
+    this.entries.set(text, json, bytes);
   }
 }
 export const completedMarkdown = new MarkdownCache();

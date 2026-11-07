@@ -1,7 +1,7 @@
 import type { Account } from "../../src/components/Accounts.tsx";
 import type { Project } from "../../src/types.ts";
 
-import type { BrowserContext, TestInfo } from "@playwright/test";
+import type {} from "@playwright/test";
 import {
   fixtureAccount,
   fixtureLead,
@@ -25,20 +25,6 @@ import { readFile, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 test("project settings rows and requests", async ({ browser: _browser }) => {
   test.setTimeout(120_000);

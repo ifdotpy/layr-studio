@@ -48,3 +48,22 @@ it("retains repeated sentence text within the same byte budget and restores the 
   sentence.text = "changed";
   expect(cache.get("source")).toEqual(tree);
 });
+
+// The other adapter keeps compiled blocks and charges their source/output size.
+it("bounds completed blocks by bytes and refreshes their LRU order", async () => {
+  const { CompletedMarkdownCache } =
+    await import("../components/completedMarkdownCache");
+  const cache = new CompletedMarkdownCache(400, 2);
+  const a = [{ html: "A" }];
+  cache.set("a", a);
+  cache.set("b", [{ kind: "mermaid", source: "B" }]);
+  expect(cache.get("a")).toBe(a);
+  cache.set("c", [{ html: "C" }]);
+  expect(cache.get("b")).toBeUndefined();
+  cache.set("a", [{ html: "x".repeat(1000) }]);
+  expect(cache.get("a")).toBeUndefined();
+  expect(cache.get("c")).toEqual([{ html: "C" }]);
+  const disabled = new CompletedMarkdownCache(400, 0);
+  disabled.set("a", a);
+  expect(disabled.get("a")).toBeUndefined();
+});

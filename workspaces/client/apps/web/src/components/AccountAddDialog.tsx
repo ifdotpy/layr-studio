@@ -1,19 +1,17 @@
-import { Button, Modal, Stack, TextInput } from "@mantine/core";
+import { observer } from "mobx-react-lite";
+import { runInAction } from "mobx";
+import {
+  AccountAddForm,
+  AccountAddActionsContext,
+  createAccountAddDraft,
+} from "./AccountAddForm";
+import { Modal, Stack, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { layerZIndex } from "../theme";
 import type { useAccounts } from "./Accounts";
 import AccountSignIn from "./AccountSignIn";
 import ClaudeAddSignIn from "./ClaudeAddSignIn";
-import {
-  PROVIDER_KINDS,
-  PROVIDER_LABELS,
-  ProviderKind,
-} from "../generated/providerKind.ts";
-
-export const ACCOUNT_SIGN_IN_HINTS: Record<ProviderKind, string> = {
-  [ProviderKind.Codex]: "ChatGPT subscription, one-time code",
-  [ProviderKind.Claude]: "Claude subscription, link + paste code",
-};
+import { ProviderKind } from "../generated/providerKind.ts";
 
 export type AddAccountIntent = {
   provider?: ProviderKind;
@@ -22,7 +20,7 @@ export type AddAccountIntent = {
   serverLabel?: string;
 };
 
-export default function AccountAddDialog({
+export default observer(function AccountAddDialog({
   opened,
   intent,
   state,
@@ -33,17 +31,17 @@ export default function AccountAddDialog({
   state: ReturnType<typeof useAccounts>;
   onClose: () => void;
 }) {
-  const [provider, setProvider] = useState<ProviderKind | "">("");
-  const [label, setLabel] = useState("");
-  const [email, setEmail] = useState("");
+  const [draft] = useState(createAccountAddDraft);
   const [flow, setFlow] = useState(false);
   useEffect(() => {
     if (!opened) return;
-    setProvider(intent?.provider || "");
-    setLabel(intent?.label || "");
-    setEmail(intent?.email || "");
+    runInAction(() => {
+      draft.provider = intent?.provider || "";
+      draft.label = intent?.label || "";
+      draft.email = intent?.email || "";
+    });
     setFlow(!!intent?.provider);
-  }, [intent, opened]);
+  }, [intent, opened, draft]);
   const serverLabel = intent?.serverLabel || "This computer";
   const close = () => {
     setFlow(false);
@@ -58,55 +56,20 @@ export default function AccountAddDialog({
         title="Add account"
         centered
       >
-        <Stack gap="md">
-          <div
-            className="account-provider-choices"
-            role="group"
-            aria-label="Account type"
-          >
-            {PROVIDER_KINDS.map((kind) => (
-              <button
-                key={kind}
-                type="button"
-                className={`account-provider-choice${provider === kind ? " selected" : ""}`}
-                aria-pressed={provider === kind}
-                onClick={() => setProvider(kind)}
-              >
-                <strong>{PROVIDER_LABELS[kind]}</strong>
-                <span>{ACCOUNT_SIGN_IN_HINTS[kind]}</span>
-              </button>
-            ))}
-          </div>
-          <TextInput label="Server" value={serverLabel} readOnly />
-          <TextInput
-            label="Name"
-            value={label}
-            maxLength={32}
-            onChange={(event) => setLabel(event.currentTarget.value)}
-          />
-          <TextInput
-            label="Email (optional)"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.currentTarget.value)}
-            description="Studio checks that you sign in with this account."
-          />
-          <div className="account-add-dialog-actions">
-            <Button variant="default" onClick={close}>
-              Cancel
-            </Button>
-            <Button disabled={!provider} onClick={() => setFlow(true)}>
-              Continue
-            </Button>
-          </div>
-        </Stack>
+        <AccountAddActionsContext
+          value={{ onCancel: close, onContinue: () => setFlow(true) }}
+        >
+          <AccountAddForm model={draft}>
+            <TextInput label="Server" value={serverLabel} readOnly />
+          </AccountAddForm>
+        </AccountAddActionsContext>
       </Modal>
-      {opened && flow && provider === ProviderKind.Codex && (
+      {opened && flow && draft.provider === ProviderKind.Codex && (
         <Modal
           opened={opened}
           zIndex={layerZIndex.modalAbovePopover}
           onClose={close}
-          title={`Sign in to Codex · ${label || "Codex"}`}
+          title={`Sign in to Codex · ${draft.label || "Codex"}`}
           centered
         >
           <Stack gap="sm">
@@ -115,14 +78,18 @@ export default function AccountAddDialog({
               Open auth.openai.com/codex/device. Use a private window if your
               browser has another ChatGPT account signed in.
             </p>
-            <AccountSignIn state={state} emailHint={email} label={label} />
+            <AccountSignIn
+              state={state}
+              emailHint={draft.email}
+              label={draft.label}
+            />
           </Stack>
         </Modal>
       )}
-      {opened && flow && provider === ProviderKind.Claude && (
+      {opened && flow && draft.provider === ProviderKind.Claude && (
         <ClaudeAddSignIn
-          label={label || "Claude Code"}
-          email={email}
+          label={draft.label || "Claude Code"}
+          email={draft.email}
           serverLabel={serverLabel}
           scope={state.scope || "local"}
           opened={opened}
@@ -132,4 +99,4 @@ export default function AccountAddDialog({
       )}
     </>
   );
-}
+});

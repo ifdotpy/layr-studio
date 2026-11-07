@@ -1,6 +1,6 @@
 import { fixtureOrigin } from "../misc-fixture.ts";
 import { usageSessionCost, usageAccountCost } from "./usage-fixture.ts";
-import type { BrowserContext, TestInfo } from "@playwright/test";
+import type {} from "@playwright/test";
 import type { ServerResponse } from "node:http";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 import { fixturePostBody } from "./fixture-server.ts";
@@ -13,20 +13,6 @@ import {
   API_SCHEMA_HASH_HEADER,
   readApiSchemaHash,
 } from "../playwright.ts";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 test("usage accounts ui", async ({ browser: _browser }) => {
   test.setTimeout(120_000);

@@ -1,6 +1,6 @@
 import { readCachedStorage } from "../cacheFixture.ts";
 import { build } from "esbuild";
-import type { BrowserContext, TestInfo } from "@playwright/test";
+import type {} from "@playwright/test";
 import type { Server } from "node:http";
 import {
   readShellManifest,
@@ -17,20 +17,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gzipSync } from "node:zlib";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 async function initialShellGzipBytes(dist: string) {
   const worker = await readFile(join(dist, "studio-sw.js"), "utf8");

@@ -5,7 +5,7 @@ import type { MessageDelivery } from "../../src/commands.ts";
 import type { Page, Route } from "@playwright/test";
 import type { components } from "../../src/generated/api.ts";
 import type { MessageRequest } from "./helpers.ts";
-import type { TestInfo, BrowserContext } from "@playwright/test";
+import type {} from "@playwright/test";
 import {
   readTestState,
   stubEntityState,
@@ -26,20 +26,6 @@ import type { AddressInfo } from "node:net";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 async function setupUncertainRemovePointer(page: Page) {
   const evidence = await mkdtemp(join(tmpdir(), "studio-message-hit-test-"));

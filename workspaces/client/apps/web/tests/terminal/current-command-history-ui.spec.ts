@@ -1,6 +1,6 @@
 import type { HistorySnapshot } from "./current-command-history-fixture.tsx";
 import type { Message } from "../../src/types.ts";
-import type { BrowserContext, TestInfo } from "@playwright/test";
+import type {} from "@playwright/test";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 // Completed command rows disappear. Current commands and source records remain.
 import assert from "node:assert/strict";
@@ -10,20 +10,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { test } from "../playwright.ts";
-
-const browserContextsByTest = new WeakMap<TestInfo, Set<BrowserContext>>();
-test.beforeEach(async ({ browser }, testInfo) => {
-  browserContextsByTest.set(testInfo, new Set(browser.contexts()));
-});
-test.afterEach(async ({ browser }, testInfo) => {
-  const initialContexts = browserContextsByTest.get(testInfo) ?? new Set();
-  await Promise.all(
-    browser
-      .contexts()
-      .filter((context) => !initialContexts.has(context))
-      .map((context) => context.close()),
-  );
-});
 
 test("current command history ui", async ({ browser: _browser }) => {
   test.setTimeout(120_000);
