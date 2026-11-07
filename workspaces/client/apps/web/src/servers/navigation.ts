@@ -1,4 +1,3 @@
-import { AgentSource } from "../generated/api";
 import {
   isStudioSettingsTab,
   type StudioSettingsTab,
@@ -11,8 +10,7 @@ import {
   type NewChatSettings,
 } from "../components/newChatSettings";
 import type { LocationProject } from "./projectLocations";
-import { chatIndicators } from "../components/chat-status/chatStatusModel";
-import type { ChatIndicator } from "../components/chat-status/chatStatusModel";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
 import { sidebarSnapshot, type ServerSidebarSnapshot } from "./sidebarSnapshot";
 import { isProviderKind, ProviderKind } from "../generated/providerKind.ts";
 export type ServerAccount = {
@@ -59,24 +57,7 @@ export type ServerNavigation = {
   workspaceId?: string | undefined;
   sidebar?: ServerSidebarSnapshot;
   projects: (Omit<LocationProject, "id"> & { id?: string })[];
-  chats: {
-    id: string;
-    name: string;
-    path: string;
-    archived: boolean;
-    status: string;
-    unread: boolean;
-    serverId?: string | null | undefined;
-    projectId?: string | null | undefined;
-    projectServerId?: string | null | undefined;
-    provider?: string | null | undefined;
-    updated?: number | null | undefined;
-    created?: number | null | undefined;
-    indicator?: ChatIndicator | undefined;
-    inFlight?: boolean;
-    pinned?: boolean;
-    team?: boolean;
-  }[];
+  chats: (Pick<SidebarChatRow, "id" | "name" | "archived" | "projectId" | "projectServerId" | "provider" | "indicator" | "compactPinned" | "activityAt"> & { path: string; serverId?: string | null })[];
   ready: boolean;
   busy?: boolean;
   creating?: boolean;
@@ -141,14 +122,11 @@ export function navigationSnapshot(
   data: Snapshot | null,
   opened: string | null,
   error: string,
-  unread = new Set<string>(),
+  rows: readonly SidebarChatRow[] = [],
   alerts: DesktopAlert[] = [],
   readSaved: typeof saved = saved,
 ): ServerNavigation {
   const projects = new Map<string, ServerNavigation["projects"][number]>();
-  const indicators = data
-    ? chatIndicators(data)
-    : new Map<string, ChatIndicator>();
   for (const project of data?.runtime?.projects || []) {
     if (project.path)
       projects.set(project.path, {
@@ -165,18 +143,7 @@ export function navigationSnapshot(
       });
   }
   const chats: ServerNavigation["chats"] = [];
-  for (const chat of data?.threads || []) {
-    if (
-      chat.source !== AgentSource.managed ||
-      !chat.isLead ||
-      chat.deletedAt ||
-      chat.sharedRoomId ||
-      (chat as typeof chat & { remoteAnchor?: unknown; movedTo?: unknown })
-        .remoteAnchor ||
-      chat.movedTo ||
-      chat.moveImportPending
-    )
-      continue;
+  for (const chat of rows) {
     const path = chat.projectPath || "";
     if (
       !projects.has(path) &&
@@ -186,7 +153,7 @@ export function navigationSnapshot(
             project.homeServerId === chat.projectServerId) ||
           project.locations?.some(
             (location) =>
-              location.path === path && location.serverId === chat.serverId,
+              location.path === path && location.serverId === chat.projectServerId,
           ),
       )
     )
@@ -196,41 +163,19 @@ export function navigationSnapshot(
       name: chat.name || "Chat",
       path,
       archived: !!chat.archived,
-      status: chat.status || "",
-      unread: unread.has(chat.id),
-      serverId: chat.serverId,
       projectId: chat.projectId,
       projectServerId: chat.projectServerId,
       provider: chat.provider,
-      updated: chat.updated,
-      created: chat.created,
-      inFlight: !!chat.inFlight,
-      pinned: !!chat.pinned,
-      team: !!data?.runtime?.projects?.some((project) =>
-        project.peerTeams?.some((team) => team.members.includes(chat.id)),
-      ),
-      indicator: indicators.get(chat.id),
-    });
-  }
-  for (const room of data?.runtime?.rooms || []) {
-    if (!room.radio || room.userHidden) continue;
-    const path = room.projectPath || "";
-    if (!projects.has(path))
-      projects.set(path, { path, name: path || "Other chats" });
-    chats.push({
-      id: room.id,
-      name: room.name || "Shared chat",
-      path,
-      archived: false,
-      status: "",
-      unread: (room.members || []).some((id) => unread.has(id)),
+      activityAt: chat.activityAt,
+      compactPinned: chat.compactPinned,
+      indicator: chat.indicator,
     });
   }
   return {
     ...(data?.entityWorkspaceId ? { workspaceId: data.entityWorkspaceId } : {}),
-    ...(data ? { sidebar: sidebarSnapshot(data, unread, indicators) } : {}),
+    ...(data ? { sidebar: sidebarSnapshot(data, rows) } : {}),
     ready: !!data,
-    busy: !!data?.threads.some((agent) => agent.inFlight),
+    busy: rows.some((row) => row.inFlight),
     alerts,
     alertsReady: !!data && data.entitiesComplete !== false,
     projects: [...projects.values()],

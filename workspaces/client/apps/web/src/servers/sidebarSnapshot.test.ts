@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../types";
 import { preferenceMemory } from "./storage";
 import { navigationSnapshot } from "./navigation";
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { sidebarSnapshot } from "./sidebarSnapshot";
 
 function snapshot(): Snapshot {
@@ -49,184 +50,22 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("server sidebar projection", () => {
-  it("retains an epoch-scoped workspace copy wait for the chat row", () => {
+  it("forwards server rows unchanged, with their indicator and CAS proof", () => {
     const data = snapshot();
-    data.threads = [
-      {
-        id: "lead",
-        status: AgentStatus.starting,
-        epoch: 2,
-        startWait: {
-          reason: "workspace_copy",
-          epoch: 2,
-          progress: { phase: "staging", done: 2, total: 4, unit: "files" },
-        },
-      },
-    ];
-    expect(sidebarSnapshot(data).threads[0]).toMatchObject({
-      epoch: 2,
-      startWait: { reason: "workspace_copy", progress: { done: 2, total: 4 } },
-    });
-  });
-  it("preserves organization, tails, workers and radio membership without transcripts or session state", () => {
-    const data = snapshot();
-    data.threads = [
-      {
-        id: "lead",
-        source: AgentSource.managed,
-        isLead: true,
-        name: "Original chat",
-        cwd: "/work",
-        projectId: "project",
-        projectServerId: "home",
-        projectFolder: "nested",
-        projectFolderRevision: 4,
-        pinned: true,
-        archived: true,
-        status: AgentStatus.completed,
-        updated: 8,
-        created: 2,
-        tail: "Short search text",
-        lastAnswer: "Full answer",
-        threadId: "native-thread",
-        lastCompletedTurn: "turn",
-        lastCompletedTurnStatus: "completed",
-        readStateSupported: true,
-        readState: {
-          threadId: "native-thread",
-          turnId: "turn",
-          read: false,
-          revision: 5,
-        },
-      },
-      {
-        id: "worker",
-        source: AgentSource.managed,
-        isLead: false,
-        parentId: "lead",
-        rootId: "lead",
-      },
-      {
-        id: "hidden",
-        source: AgentSource.managed,
-        deletedAt: 10,
-        sharedRoomId: "room",
-      },
-    ];
-    data.runtime.projects = [
-      {
-        id: "project",
-        path: "/work",
-        name: "Original project",
-        folders: [
-          { id: "parent", name: "Parent" },
-          { id: "nested", name: "Child", parentId: "parent" },
-        ],
-        organizationRevision: 7,
-        peerTeamsRevision: 3,
-        peerTeams: [{ id: "team", name: "Peers", members: ["lead", "second"] }],
-        homeServerId: "home",
-        locationsRevision: 9,
-        locations: [
-          {
-            path: "/remote/work",
-            serverId: "remote",
-            projectId: "remote-project",
-          },
-        ],
-        projectAliases: [
-          {
-            serverId: "remote",
-            projectId: "remote-project",
-            name: "Remote project",
-          },
-        ],
-      },
-    ];
-    data.runtime.peerTeams = [
-      {
-        id: "team",
-        name: "Peers",
-        projectPath: "/work",
-        members: ["lead", "second"],
-        revision: 3,
-      },
-    ];
-    data.runtime.rooms = [
-      {
-        id: "room",
-        name: "Shared chat",
-        members: ["lead", "worker"],
-        projectPath: "/work",
-        radio: {
-          controls: {
-            busy: false,
-            inputBlocked: false,
-            canPass: false,
-            stopping: false,
-            speaking: false,
-            busyNotice: null,
-          },
-          direct: true,
-          teamId: "team",
-          revision: 2,
-          status: "idle",
-          active: null,
-          error: null,
-          speaker: null,
-          next: [],
-        },
-        lastMessage: {
-          text: "Private transcript text",
-          sender: "lead",
-          seq: 1,
-          created: 4,
-        },
-      },
-    ];
-    data.runtime.peerTeamsVersion = 1;
-    data.runtime.projectOrganizationVersion = 2;
-    const before = JSON.stringify(data);
-    const projected = sidebarSnapshot(data, new Set(["lead"]));
-    expect(projected.threads).toEqual(
-      data.threads.map(({ lastAnswer: _lastAnswer, ...agent }) => agent),
-    );
-    expect(projected.projects).toEqual(data.runtime.projects);
-    expect(projected.peerTeams).toEqual(data.runtime.peerTeams);
-    expect(projected.rooms).toEqual(
-      data.runtime.rooms.map(({ lastMessage: _lastMessage, ...room }) => room),
-    );
-    expect(projected.peerTeamsVersion).toBe(1);
-    expect(projected.projectOrganizationVersion).toBe(2);
-    expect(projected.unread).toEqual(["lead"]);
-    expect(new Map(projected.indicators).get("lead")).toEqual({
-      kind: "unread",
-      label: "Unread result",
-    });
-    expect(Object.keys(projected).sort()).toEqual(
-      [
-        "stateDir",
-        "studioErrors",
-        "threads",
-        "projects",
-        "rooms",
-        "peerTeams",
-        "peerTeamsVersion",
-        "projectOrganizationVersion",
-        "sidebarOrder",
-        "savedOrder",
-        "compact",
-        "collapsed",
-        "visualFields",
-        "indicators",
-        "unread",
-      ].sort(),
-    );
+    data.threads = [{ id: "lead", name: "Stale Agent title", inFlight: true }];
+    const rows = [sidebarRowFixture("lead", {
+      indicator: { kind: "answer", label: "Server decides precedence" },
+      markRead: { threadId: "native", turnId: "turn", read: true, revision: 5 },
+      copyProgress: { phase: "staging", done: 2, total: 4, unit: "files" },
+    })];
+    const projected = sidebarSnapshot(data, rows);
+    expect(projected.rows).toBe(rows);
+    expect(projected.rows[0]).toBe(rows[0]);
+    expect(projected).not.toHaveProperty("threads");
+    expect(projected).not.toHaveProperty("indicators");
+    expect(projected).not.toHaveProperty("unread");
     expect(JSON.stringify(projected)).not.toContain("session-token");
-    expect(JSON.stringify(projected)).not.toContain("Full answer");
-    expect(JSON.stringify(projected)).not.toContain("Private transcript text");
-    expect(JSON.stringify(data)).toBe(before);
-    expect(setItem).not.toHaveBeenCalled();
+    expect(JSON.stringify(projected)).not.toContain("Stale Agent title");
   });
 
   it("reads the original saved keys and preserves every group, folder and team key", () => {
@@ -314,23 +153,6 @@ describe("server sidebar projection", () => {
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
   });
 
-  it("shows Layr chats in their host project", () => {
-    const line = "/var/lib/codex-studio/layr/projects/da54bb40/lines/main";
-    const native = {
-      id: "native",
-      cwd: line,
-      executionMode: "native",
-      projectPath: "/Users/me/Projects/attar",
-    } as Snapshot["threads"][number];
-    const data = snapshot();
-    data.threads = [native];
-    const threads = sidebarSnapshot(data).threads;
-    expect(threads.map((row) => row.projectPath)).toEqual([
-      "/Users/me/Projects/attar",
-    ]);
-    expect(native.cwd).toBe(line);
-  });
-
   it("uses empty saved preferences when keys are missing or invalid", () => {
     const data = snapshot();
     records.set(`codex-project-compact:${data.stateDir}`, "invalid");
@@ -367,30 +189,13 @@ describe("server sidebar projection", () => {
     expect(sidebarSnapshot(data).studioErrors).toBe(data.runtime.studioErrors);
   });
 
-  it("adds the real sidebar snapshot to navigation only after data is available", () => {
+  it("publishes navigation from rows only after data is available", () => {
     const data = snapshot();
-    data.threads = [
-      {
-        id: "lead",
-        source: AgentSource.managed,
-        isLead: true,
-        cwd: "/work",
-        inFlight: true,
-      },
-    ];
-    const navigation = navigationSnapshot(data, "lead", "", new Set(["lead"]));
-    expect(navigation.sidebar).toEqual(
-      sidebarSnapshot(data, new Set(["lead"])),
-    );
-    expect(navigation.chats[0]).toMatchObject({
-      id: "lead",
-      unread: true,
-      inFlight: true,
-    });
-    assert.ok(navigation.chats[0] != null);
-    expect(navigation.sidebar?.indicators).toEqual([
-      ["lead", navigation.chats[0].indicator],
-    ]);
-    expect(navigationSnapshot(null, null, "")).not.toHaveProperty("sidebar");
+    const rows = [sidebarRowFixture("lead", { inFlight: true })];
+    const navigation = navigationSnapshot(data, "lead", "", rows);
+    expect(navigation.sidebar).toEqual(sidebarSnapshot(data, rows));
+    expect(navigation.busy).toBe(true);
+    expect(navigation.chats[0]?.indicator).toBe(rows[0]?.indicator);
+    expect(navigationSnapshot(null, null, "", rows)).not.toHaveProperty("sidebar");
   });
 });

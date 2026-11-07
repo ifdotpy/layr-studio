@@ -1,8 +1,7 @@
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
-import type { Agent, PeerTeam, Project, Room, Snapshot } from "../types";
-import type { ChatIndicator } from "../components/chat-status/chatStatusModel";
+import type { PeerTeam, Project, Room, Snapshot } from "../types";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
-import { isVisibleSidebarAgent } from "../components/sidebar/catalog";
 import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
 
 export type SidebarSource = {
@@ -191,7 +190,7 @@ export function mergeSidebar(
     );
   }
   const projectPaths = new Set(projects.map((project) => project.path));
-  const boundProject = (source: SidebarSource, chat: Agent) => {
+  const boundProject = (source: SidebarSource, chat: SidebarChatRow) => {
     if (chat.projectId && chat.projectServerId) {
       const home = uiServers.get(chat.projectServerId) || chat.projectServerId;
       const binding = key(home, chat.projectId);
@@ -199,127 +198,6 @@ export function mergeSidebar(
     }
     return projectKey(source.id, chat.projectPath || "");
   };
-  const threads: Agent[] = [];
-  const peerTeams: PeerTeam[] = [];
-  const rooms: Room[] = [];
-  const indicators = new Map<string, ChatIndicator>();
-  const unread = new Set<string>();
-  for (const source of sources) {
-    for (const chat of source.sidebar.threads) {
-      const id = chatKey(source.id, chat.id);
-      const path = boundProject(source, chat);
-      chatReferences.set(id, {
-        owner: source.id,
-        id: chat.id,
-        path: chat.projectPath || "",
-      });
-      // Only a chat that the sidebar shows makes a project group: workers and imported
-      // sessions live in worktree folders and would add empty "No chats" groups.
-      if (!single && !projectPaths.has(path) && isVisibleSidebarAgent(chat)) {
-        projectPaths.add(path);
-        projects.push({
-          id: path,
-          path,
-          name: chat.projectPath || "Other chats",
-          folders: [],
-        });
-      }
-      threads.push(
-        single
-          ? chat
-          : {
-              ...chat,
-              id,
-              projectPath: path,
-              serverId: source.id,
-              rootId: chat.rootId
-                ? chatKey(source.id, chat.rootId)
-                : chat.rootId,
-              parentId: chat.parentId
-                ? chatKey(source.id, chat.parentId)
-                : chat.parentId,
-              sharedRoomId: chat.sharedRoomId
-                ? chatKey(source.id, chat.sharedRoomId)
-                : chat.sharedRoomId,
-              projectFolder: chat.projectFolder
-                ? folderKey(
-                    source.id,
-                    chat.projectPath || "",
-                    chat.projectFolder,
-                  )
-                : chat.projectFolder,
-            },
-      );
-    }
-    const teams = new Map<string, PeerTeam>();
-    for (const team of source.sidebar.peerTeams) teams.set(team.id, team);
-    for (const project of source.sidebar.projects)
-      for (const team of project.peerTeams || [])
-        if (!teams.has(team.id))
-          teams.set(team.id, { ...team, projectPath: project.path });
-    for (const team of teams.values())
-      peerTeams.push(
-        single
-          ? team
-          : {
-              ...team,
-              id: teamKey(source.id, team.id),
-              projectPath: projectKey(source.id, team.projectPath || ""),
-              members: team.members?.map((id) => chatKey(source.id, id)),
-            },
-      );
-    for (const room of source.sidebar.rooms) {
-      const id = chatKey(source.id, room.id);
-      rooms.push(
-        single
-          ? room
-          : {
-              ...room,
-              id,
-              rootId: room.rootId
-                ? chatKey(source.id, room.rootId)
-                : room.rootId,
-              members: room.members?.map((id) => chatKey(source.id, id)),
-              projectPath: projectKey(source.id, room.projectPath || ""),
-              peerTeamId: room.peerTeamId
-                ? teamKey(source.id, room.peerTeamId)
-                : room.peerTeamId,
-              radio: room.radio
-                ? {
-                    ...room.radio,
-                    teamId: room.radio.teamId
-                      ? teamKey(source.id, room.radio.teamId)
-                      : room.radio.teamId,
-                  }
-                : room.radio,
-            },
-      );
-    }
-    for (const [id, indicator] of source.sidebar.indicators)
-      indicators.set(chatKey(source.id, id), indicator);
-    for (const id of source.sidebar.unread) unread.add(chatKey(source.id, id));
-  }
-  // Single-server mode preserves every identity, including rooms and teams.
-  if (single) {
-    for (const team of peerTeams) teamKey(single.id, team.id);
-    for (const room of rooms) chatKey(single.id, room.id);
-  } else {
-    const teamsByPath = new Map<string, PeerTeam[]>();
-    for (const team of peerTeams) {
-      const path = team.projectPath || "";
-      const rows = teamsByPath.get(path) || [];
-      rows.push(team);
-      teamsByPath.set(path, rows);
-    }
-    for (const project of projects)
-      project.peerTeams = (teamsByPath.get(project.path || "") || []).map(
-        (team) => ({
-          id: team.id,
-          name: team.name || "Team",
-          members: team.members || [],
-        }),
-      );
-  }
   const mapTreeKey = (owner: string, value: string) => {
     if (!value.startsWith("[")) return projectKey(owner, value);
     let parts: unknown;
@@ -381,6 +259,114 @@ export function mergeSidebar(
     }
     return chatKey(owner, value);
   };
+  const rows: SidebarChatRow[] = [];
+  const peerTeams: PeerTeam[] = [];
+  const rooms: Room[] = [];
+  for (const source of sources) {
+    for (const chat of source.sidebar.rows) {
+      const id = chatKey(source.id, chat.id);
+      const path = boundProject(source, chat);
+      chatReferences.set(id, {
+        owner: source.id,
+        id: chat.id,
+        path: chat.projectPath || "",
+      });
+      // Only a chat that the sidebar shows makes a project group: workers and imported
+      // sessions live in worktree folders and would add empty "No chats" groups.
+      if (!single && !projectPaths.has(path)) {
+        projectPaths.add(path);
+        projects.push({
+          id: path,
+          path,
+          name: chat.projectPath || "Other chats",
+          folders: [],
+        });
+      }
+      rows.push(
+        single
+          ? chat
+          : {
+              ...chat,
+              id,
+              projectPath: path,
+              groupKey: mapOrderGroup(source.id, chat.groupKey),
+              teamId: chat.teamId ? teamKey(source.id, chat.teamId) : null,
+              projectFolder: chat.projectFolder
+                ? folderKey(
+                    source.id,
+                    chat.projectPath || "",
+                    chat.projectFolder,
+                  )
+                : chat.projectFolder,
+            },
+      );
+    }
+    const teams = new Map<string, PeerTeam>();
+    for (const team of source.sidebar.peerTeams) teams.set(team.id, team);
+    for (const project of source.sidebar.projects)
+      for (const team of project.peerTeams || [])
+        if (!teams.has(team.id))
+          teams.set(team.id, { ...team, projectPath: project.path });
+    for (const team of teams.values())
+      peerTeams.push(
+        single
+          ? team
+          : {
+              ...team,
+              id: teamKey(source.id, team.id),
+              projectPath: projectKey(source.id, team.projectPath || ""),
+              members: team.members?.map((id) => chatKey(source.id, id)),
+            },
+      );
+    for (const room of source.sidebar.rooms) {
+      const id = chatKey(source.id, room.id);
+      rooms.push(
+        single
+          ? room
+          : {
+              ...room,
+              id,
+              rootId: room.rootId
+                ? chatKey(source.id, room.rootId)
+                : room.rootId,
+              members: room.members?.map((id) => chatKey(source.id, id)),
+              projectPath: projectKey(source.id, room.projectPath || ""),
+              peerTeamId: room.peerTeamId
+                ? teamKey(source.id, room.peerTeamId)
+                : room.peerTeamId,
+              radio: room.radio
+                ? {
+                    ...room.radio,
+                    teamId: room.radio.teamId
+                      ? teamKey(source.id, room.radio.teamId)
+                      : room.radio.teamId,
+                  }
+                : room.radio,
+            },
+      );
+    }
+  }
+  // Single-server mode preserves every identity, including rooms and teams.
+  if (single) {
+    for (const team of peerTeams) teamKey(single.id, team.id);
+    for (const room of rooms) chatKey(single.id, room.id);
+  } else {
+    const teamsByPath = new Map<string, PeerTeam[]>();
+    for (const team of peerTeams) {
+      const path = team.projectPath || "";
+      const rows = teamsByPath.get(path) || [];
+      rows.push(team);
+      teamsByPath.set(path, rows);
+    }
+    for (const project of projects)
+      project.peerTeams = (teamsByPath.get(project.path || "") || []).map(
+        (team) => ({
+          id: team.id,
+          name: team.name || "Team",
+          members: team.members || [],
+        }),
+      );
+  }
   const mergeOrder = (orders: ReadonlyMap<string, SidebarOrder>) => {
     const merged: SidebarOrder = {};
     const overlays = new Map<string, string[]>();
@@ -462,7 +448,7 @@ export function mergeSidebar(
     }
     for (const team of source.sidebar.peerTeams)
       collapsed.add(JSON.stringify([team.projectPath || "", "team", team.id]));
-    for (const chat of source.sidebar.threads) addPath(chat.projectPath || "");
+    for (const chat of source.sidebar.rows) addPath(chat.projectPath || "");
     for (const room of source.sidebar.rooms) addPath(room.projectPath || "");
     preferenceKeys.set(source.id, { compact, collapsed });
   }
@@ -567,12 +553,12 @@ export function mergeSidebar(
   const data: Snapshot = {
     token: "",
     stateDir: scope,
-    threads,
-    nodes: threads,
+    threads: [],
+    nodes: [],
     chats: [],
     edges: [],
     runtime: {
-      agents: threads,
+      agents: [],
       projects,
       rooms,
       peerTeams,
@@ -609,8 +595,7 @@ export function mergeSidebar(
     order,
     compact,
     collapsed,
-    indicators,
-    unread,
+    rows,
     offlineServers,
     chatReferences,
     projectReferences,
@@ -698,9 +683,7 @@ export function createMergedSidebarSelector(combined = true) {
             : row;
         });
       };
-      next.data.threads = retain(next.data.threads, previous.data.threads);
-      next.data.nodes = next.data.threads;
-      next.data.runtime.agents = next.data.threads;
+      next.rows = retain(next.rows, previous.rows);
       next.data.runtime.projects = retain(
         next.data.runtime.projects,
         previous.data.runtime.projects,

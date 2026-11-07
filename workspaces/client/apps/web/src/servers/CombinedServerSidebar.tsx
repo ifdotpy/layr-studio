@@ -98,6 +98,7 @@ export default function CombinedServerSidebar({
     <Sidebar
       services={services}
       data={model.data}
+      rows={model.rows}
       registeredProjectPaths={registeredProjectPaths}
       opened={opened ? model.chatKey(current, opened) : null}
       selectionIdentity={JSON.stringify([
@@ -105,10 +106,9 @@ export default function CombinedServerSidebar({
         opened,
         model.sourceById
           .get(current)
-          ?.sidebar.threads.find((row) => row.id === opened)?.projectFolder ||
+          ?.sidebar.rows.find((row) => row.id === opened)?.projectFolder ||
           null,
       ])}
-      indicators={model.indicators}
       offlineServers={model.offlineServers}
       markingRead={marking}
       creating={!!navigation[current]?.creating}
@@ -187,10 +187,10 @@ export default function CombinedServerSidebar({
           ? send(current, { action: "add-project" })
           : notify("The sidebar server is offline.")
       }
-      changeProject={(agent) =>
-        action({ kind: "chat", id: agent.id }, () => ({
+      changeProject={(id) =>
+        action({ kind: "chat", id }, () => ({
           action: "change-project",
-          id: model.requireReference(model.chatReferences, agent.id).id,
+          id: model.requireReference(model.chatReferences, id).id,
         }))
       }
       projectFolders={(path) =>
@@ -251,28 +251,26 @@ export default function CombinedServerSidebar({
           room,
         }))
       }
-      markUnread={(agent) => {
-        const reference = model.chatReferences.get(agent.id);
+      markUnread={(id, target) => {
+        const reference = model.chatReferences.get(id);
         if (
           !reference ||
-          !online(reference.owner) ||
-          !agent.threadId ||
-          !agent.lastCompletedTurn
+          !online(reference.owner)
         )
           return;
-        setMarking((old) => new Set([...old, agent.id]));
+        setMarking((old) => new Set([...old, id]));
         void executeCommand(reference.owner, {
           action: "mark-unread",
           id: reference.id,
-          threadId: agent.threadId,
-          turnId: agent.lastCompletedTurn,
+          threadId: target.threadId,
+          turnId: target.turnId,
         })
           .then(refresh)
           .catch((failure) => notify(errorText(failure)))
           .finally(() =>
             setMarking((old) => {
               const next = new Set(old);
-              next.delete(agent.id);
+              next.delete(id);
               return next;
             }),
           );

@@ -64,7 +64,7 @@ export default function ProjectGroupsSidebar({
   const lastServer = (group: LogicalProject) =>
     saved<string>(`project-last-server:${group.key}`, "") ||
     [...group.chats].sort(
-      (a, b) => (b.updated || b.created || 0) - (a.updated || a.created || 0),
+      (a, b) => b.activityAt - a.activityAt,
     )[0]?.serverId;
   return (
     <>
@@ -142,8 +142,6 @@ export default function ProjectGroupsSidebar({
               chats={chats.map((chat) => ({
                 ...chat,
                 provider: chat.provider || undefined,
-                updated: chat.updated || undefined,
-                created: chat.created || undefined,
               }))}
               aliases={aliases}
               selected={{

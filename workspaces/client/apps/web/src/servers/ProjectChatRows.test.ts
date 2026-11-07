@@ -5,29 +5,20 @@ import {
   shouldShowOldChatsControl,
 } from "./ProjectChatRows";
 
-it("keeps active, pinned, unread, team, and recent chats in compact projects", () => {
-  const old = { id: "old", name: "Old chat", updated: 1 };
+it("uses server compact eligibility and the shared activity window", () => {
+  const old = { id: "old", name: "Old", activityAt: 1, compactPinned: false };
   const now = 200000;
   expect(keepCompactChat(old, now)).toBe(false);
-  for (const extra of [
-    { pinned: true },
-    { unread: true },
-    { team: true },
-    { inFlight: true },
-    { status: "running" },
-    { status: "starting" },
-    { status: "approval" },
-    { updated: now - 86400 },
-  ])
-    expect(keepCompactChat({ ...old, ...extra }, now)).toBe(true);
-  expect(keepCompactChat({ ...old, updated: now - 86401 }, now)).toBe(false);
+  expect(keepCompactChat({ ...old, compactPinned: true }, now)).toBe(true);
+  expect(keepCompactChat({ ...old, activityAt: now - 86399 }, now)).toBe(true);
+  expect(keepCompactChat({ ...old, activityAt: now - 86400 }, now)).toBe(false);
 });
 
 it("applies the old-chat threshold to all chats in a project", () => {
   const now = Date.now() / 1000;
-  const recent = { id: "recent", name: "Recent", updated: now };
-  const recentTwo = { id: "recent-two", name: "Recent two", updated: now };
-  const old = { id: "old", name: "Old", updated: 1 };
+  const recent = { id: "recent", name: "Recent", compactPinned: false, activityAt: now };
+  const recentTwo = { id: "recent-two", name: "Recent two", compactPinned: false, activityAt: now };
+  const old = { id: "old", name: "Old", compactPinned: false, activityAt: 1 };
   const twoChats = [recent, old];
   expect(shouldShowOldChatsControl(twoChats.length, 3)).toBe(false);
   expect(compactVisibleChats(twoChats, true, 3)).toEqual(twoChats);

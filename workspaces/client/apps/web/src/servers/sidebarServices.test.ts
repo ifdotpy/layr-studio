@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
@@ -48,24 +49,16 @@ function fixture() {
           peerTeamsRevision: id === "local" ? 5 : 8,
         },
       ],
-      threads: [
-        {
-          id: "same",
+      rows: [
+        sidebarRowFixture("same", {
           name: id,
-          cwd: `/${id}`,
           projectPath: `/${id}`,
-          source: AgentSource.managed,
-          isLead: true,
           projectFolder: "folder",
-        },
-        {
-          id: "second",
+        }),
+        sidebarRowFixture("second", {
           name: id,
-          cwd: `/${id}`,
           projectPath: `/${id}`,
-          source: AgentSource.managed,
-          isLead: true,
-        },
+        }),
       ],
       rooms: [],
       peerTeams: [
@@ -88,8 +81,6 @@ function fixture() {
       savedOrder: {},
       compact: {},
       collapsed: {},
-      indicators: [],
-      unread: [],
     },
   });
   const sources = [source("local"), source("remote")];

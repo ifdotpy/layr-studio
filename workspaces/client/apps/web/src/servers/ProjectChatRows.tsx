@@ -1,38 +1,15 @@
 import ChatStatus from "../components/agents/ChatStatus";
 import { ProviderMark } from "../components/AccountTiles";
-import type { ChatIndicator } from "../components/chat-status/chatStatusModel";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import { keepCompactSidebarChat } from "../components/sidebar/compact.ts";
 import { Badge, Tooltip } from "@mantine/core";
 import { WifiOff } from "lucide-react";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "./serverAliases";
 import "./sidebar-status.css";
 import { providerLabel } from "../generated/providerKind.ts";
 
-export type ProjectChat = {
-  id: string;
-  name: string;
-  serverId?: string | null;
-  provider?: string | null | undefined;
-  indicator?: ChatIndicator | undefined;
-  status?: string;
-  unread?: boolean;
-  updated?: number | null | undefined;
-  created?: number | null | undefined;
-  pinned?: boolean;
-  inFlight?: boolean;
-  team?: boolean;
-};
-
-export function keepCompactChat(chat: ProjectChat, now = Date.now() / 1000) {
-  return !!(
-    chat.team ||
-    chat.pinned ||
-    chat.inFlight ||
-    chat.unread ||
-    ["running", "starting", "approval"].includes(chat.status || "") ||
-    chat.indicator?.kind === "unread" ||
-    (chat.updated || chat.created || 0) >= now - 86400
-  );
-}
+export type ProjectChat = Pick<SidebarChatRow, "id" | "name" | "activityAt" | "compactPinned"> & Partial<Pick<SidebarChatRow, "provider" | "indicator">> & { serverId?: string | null };
+export const keepCompactChat = keepCompactSidebarChat;
 
 export function compactVisibleChats(
   chats: ProjectChat[],
@@ -150,17 +127,7 @@ export default function ProjectChatRows({
             />
           </span>
           <ChatStatus
-            status={
-              chat.indicator ||
-              (chat.inFlight ||
-              ["running", "starting", "approval"].includes(chat.status || "")
-                ? { kind: "working", label: "Working" }
-                : chat.status === "failed"
-                  ? { kind: "error", label: "Failed" }
-                  : chat.unread
-                    ? { kind: "unread", label: "Unread result" }
-                    : undefined)
-            }
+            status={chat.indicator}
             provider={chat.provider || undefined}
           />
         </button>

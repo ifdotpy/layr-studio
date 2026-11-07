@@ -16,7 +16,7 @@ function source(id: string): SidebarSource {
     online: id !== "remote",
     sidebar: {
       stateDir: scope,
-      threads: [],
+      rows: [],
       projects: [
         {
           id: path,
@@ -33,8 +33,6 @@ function source(id: string): SidebarSource {
       savedOrder: {},
       compact: { [path]: true },
       collapsed: { [JSON.stringify([path, "folder", "folder"])]: true },
-      indicators: [],
-      unread: [],
     },
   };
 }

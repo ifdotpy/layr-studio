@@ -1,15 +1,12 @@
 import { saved } from "../api";
-import {
-  chatIndicators,
-  type ChatIndicator,
-} from "../components/chat-status/chatStatusModel";
-import type { Agent, PeerTeam, Project, Room, Snapshot } from "../types";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import type { PeerTeam, Project, Room, Snapshot } from "../types";
 import { readPreferenceFields } from "../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../sync/uiPreferenceMerge";
 
 export type ServerSidebarSnapshot = {
   stateDir: string;
-  threads: Agent[];
+  rows: readonly SidebarChatRow[];
   projects: Project[];
   rooms: Room[];
   peerTeams: PeerTeam[];
@@ -23,8 +20,6 @@ export type ServerSidebarSnapshot = {
   visualFields?: PreferenceFields;
   /** Local errors keep their server-owned ids for safe actions. */
   studioErrors?: Snapshot["runtime"]["studioErrors"];
-  indicators: [string, ChatIndicator][];
-  unread: string[];
 };
 
 function pick<T extends object, K extends keyof T>(
@@ -35,49 +30,6 @@ function pick<T extends object, K extends keyof T>(
   for (const key of keys)
     if (Object.hasOwn(value, key)) result[key] = value[key];
   return result;
-}
-
-export function sidebarAgent(agent: Agent): Agent {
-  return pick(agent, [
-    "id",
-    "name",
-    "tail",
-    "source",
-    "isLead",
-    "parentId",
-    "rootId",
-    "cwd",
-    "projectPath",
-    "project",
-    "projectId",
-    "projectServerId",
-    "projectFolder",
-    "projectFolderRevision",
-    "serverId",
-    "provider",
-    "model",
-    "created",
-    "updated",
-    "pinned",
-    "archived",
-    "deletedAt",
-    "sharedRoomId",
-    "remoteAnchor",
-    "movedTo",
-    "movedFrom",
-    "moveImportPending",
-    "status",
-    "epoch",
-    "startWait",
-    "inFlight",
-    "autoWake",
-    "empty",
-    "threadId",
-    "lastCompletedTurn",
-    "lastCompletedTurnStatus",
-    "readState",
-    "readStateSupported",
-  ]);
 }
 
 /** The saved preference fields of this server's compact and collapse records. */
@@ -104,13 +56,12 @@ export function sidebarVisualFields(
 /** Preserve sidebar fields and source identities without transcripts or session state. */
 export function sidebarSnapshot(
   data: Snapshot,
-  unread = new Set<string>(),
-  indicators = chatIndicators(data),
+  rows: readonly SidebarChatRow[] = [],
 ): ServerSidebarSnapshot {
   const runtime = data.runtime;
   return {
     stateDir: data.stateDir,
-    threads: data.threads.map(sidebarAgent),
+    rows,
     projects: (runtime?.projects || []).map((project) =>
       pick(project, [
         "id",
@@ -170,7 +121,5 @@ export function sidebarSnapshot(
       {},
     ),
     visualFields: sidebarVisualFields(data.stateDir),
-    indicators: [...indicators],
-    unread: [...unread],
   };
 }
