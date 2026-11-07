@@ -510,6 +510,8 @@ it("merges current summary/detail streams for owned agents and observes input ev
           rootId: "lead",
           model: "gpt-6-luna",
           status: "running",
+          inFlight: true,
+          operationalStatus: { reason: "working" },
         }),
       ),
       upsert("event", "input", { agent: "lead", status: "pending" }),
@@ -548,7 +550,12 @@ it("merges current summary/detail streams for owned agents and observes input ev
       upsert(
         "agentSummary",
         "worker",
-        agentSummaryFixture("worker", { rootId: "lead", status: "running" }),
+        agentSummaryFixture("worker", {
+          rootId: "lead",
+          status: "running",
+          inFlight: true,
+          operationalStatus: { reason: "working" },
+        }),
       ),
     ]),
   );
