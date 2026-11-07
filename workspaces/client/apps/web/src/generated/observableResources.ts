@@ -1864,7 +1864,7 @@ class AgentSummaryEntityDtoModel {
             : this.accountDestinations.length ===
                   dto.accountDestinations.length &&
                 this.accountDestinations.every((leftItem0, index) => {
-                  const rightItem0 = dto.accountDestinations[index];
+                  const rightItem0 = dto.accountDestinations?.[index];
                   return (
                     rightItem0 !== undefined &&
                     leftItem0.accountKey === rightItem0.accountKey &&
@@ -3144,7 +3144,7 @@ class PeerTeamEntityDtoModel {
                 ? dto.members.map((item) => item)
                 : this.members.length === dto.members.length &&
                     this.members.every((leftItem0, index) => {
-                      const rightItem0 = dto.members[index];
+                      const rightItem0 = dto.members?.[index];
                       return (
                         rightItem0 !== undefined && leftItem0 === rightItem0
                       );
@@ -3178,7 +3178,7 @@ class PeerTeamEntityDtoModel {
               )
             : this.peerLeads.length === dto.peerLeads.length &&
                 this.peerLeads.every((leftItem0, index) => {
-                  const rightItem0 = dto.peerLeads[index];
+                  const rightItem0 = dto.peerLeads?.[index];
                   return (
                     rightItem0 !== undefined &&
                     leftItem0.grant === rightItem0.grant &&
@@ -3555,7 +3555,7 @@ class ProjectEntityDtoModel {
                 ? dto.accountGroups.map((item) => item)
                 : this.accountGroups.length === dto.accountGroups.length &&
                     this.accountGroups.every((leftItem0, index) => {
-                      const rightItem0 = dto.accountGroups[index];
+                      const rightItem0 = dto.accountGroups?.[index];
                       return (
                         rightItem0 !== undefined && leftItem0 === rightItem0
                       );
@@ -3609,7 +3609,7 @@ class ProjectEntityDtoModel {
                 ? dto.accountKeys.map((item) => item)
                 : this.accountKeys.length === dto.accountKeys.length &&
                     this.accountKeys.every((leftItem0, index) => {
-                      const rightItem0 = dto.accountKeys[index];
+                      const rightItem0 = dto.accountKeys?.[index];
                       return (
                         rightItem0 !== undefined && leftItem0 === rightItem0
                       );
@@ -3690,7 +3690,7 @@ class ProjectEntityDtoModel {
                 ? dto.locations.map((item) => new ProjectLocationDtoModel(item))
                 : this.locations.length === dto.locations.length &&
                     this.locations.every((leftItem0, index) => {
-                      const rightItem0 = dto.locations[index];
+                      const rightItem0 = dto.locations?.[index];
                       return (
                         rightItem0 !== undefined &&
                         (leftItem0.gitOrigin === undefined ||
@@ -3794,14 +3794,14 @@ class ProjectEntityDtoModel {
                 ? dto.peerTeams.map((item) => new ProjectPeerTeamDtoModel(item))
                 : this.peerTeams.length === dto.peerTeams.length &&
                     this.peerTeams.every((leftItem0, index) => {
-                      const rightItem0 = dto.peerTeams[index];
+                      const rightItem0 = dto.peerTeams?.[index];
                       return (
                         rightItem0 !== undefined &&
                         leftItem0.id === rightItem0.id &&
                         leftItem0.members.length ===
                           rightItem0.members.length &&
                         leftItem0.members.every((leftItem1, index) => {
-                          const rightItem1 = rightItem0.members[index];
+                          const rightItem1 = rightItem0.members?.[index];
                           return (
                             rightItem1 !== undefined && leftItem1 === rightItem1
                           );
@@ -3846,7 +3846,7 @@ class ProjectEntityDtoModel {
                   )
                 : this.projectAliases.length === dto.projectAliases.length &&
                     this.projectAliases.every((leftItem0, index) => {
-                      const rightItem0 = dto.projectAliases[index];
+                      const rightItem0 = dto.projectAliases?.[index];
                       return (
                         rightItem0 !== undefined &&
                         leftItem0.name === rightItem0.name &&
@@ -4089,7 +4089,7 @@ class ProjectPeerTeamDtoModel {
       const next =
         this.members.length === dto.members.length &&
         this.members.every((leftItem0, index) => {
-          const rightItem0 = dto.members[index];
+          const rightItem0 = dto.members?.[index];
           return rightItem0 !== undefined && leftItem0 === rightItem0;
         })
           ? this.members

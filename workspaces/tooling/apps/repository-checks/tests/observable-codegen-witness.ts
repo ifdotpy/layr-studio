@@ -104,7 +104,72 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
   );
   write(
     "witness.ts",
+<<<<<<< head
     `
+=======
+    input.collections
+      ? `
+import assert from 'node:assert/strict';
+import { autorun, spy } from 'mobx';
+import { createObservableResources, createStateMirror, type StateCollections } from './src/generated/observableResources.ts';
+import { fixtureKeyComputations } from './src/sync/subscriptions/contracts.ts';
+import type { ObservableResourceRuntime } from './src/store/index.ts';
+import type { components } from './src/generated/api.ts';
+type Row = components['schemas']['Row'];
+type Payload = components['schemas']['Payload'];
+const opaque = {payload:'opaque'};
+const row = (id: string): Row => ({id,sortKey:id,title:null,nested:{count:1},tags:[],choice:{kind:'count',count:1},opaque,maybe:null,nil:null,a:null,b:null,c:null,d:null,e:null,f:null});
+const envelope = (value: Row): Payload => ({collection:'row',id:value.id,value});
+let opens = 0;
+const runtime: ObservableResourceRuntime = { slot(definition) {
+  opens += 1;
+  assert.equal(definition.ref.kind, 'state');
+  return {current:{status:'loading'}};
+}};
+const store = createObservableResources(runtime);
+assert.equal(store.state(), store.state()); assert.equal(opens,1); assert.equal(fixtureKeyComputations(),1);
+function readonlyWitness(value: StateCollections) {
+  // @ts-expect-error Public collection membership is readonly.
+  value.rows.set('bad', row('bad'));
+  const item = value.rows.get('x');
+  if(item) {
+    // @ts-expect-error Public collection model values are readonly.
+    item.nested.count = 2;
+    // @ts-expect-error Private apply is not part of the facade.
+    item.apply(item);
+  }
+}
+void readonlyWitness;
+const mirror = createStateMirror(); const members = mirror.current.rows;
+let memberRuns = 0; const stopMembers = autorun(() => { [...members.keys()]; memberRuns += 1; });
+let rows = Array.from({length:1000},(_,index)=>row(String(index)));
+mirror.apply(rows.map(envelope)); assert.equal(mirror.current.rows,members); assert.equal(memberRuns,2);
+const first=members.get('500'); assert.ok(first);
+let titleRuns=0; const stopTitle=autorun(()=>{ first.title; titleRuns += 1; });
+let mapOperations=0; const stopSpy=spy(event=>{
+  if((event.type==='add'||event.type==='update'||event.type==='delete') && event.object===members) mapOperations += 1;
+});
+rows=rows.map(item=>item.id==='500'?{...item,title:'changed'}:item);
+mirror.apply(rows.map(envelope)); assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2); assert.equal(members.get('500'),first);
+mirror.apply(rows.map(item=>envelope({...item})).reverse()); assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2);
+mirror.apply([...rows.map(envelope),{collection:'ignored',id:'ignored',value:{arbitrary:{nested:true}}}]);
+assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2); assert.equal(members.size,1000);
+const withTail = (tail: string): Payload[] => [...rows.map(envelope),{collection:'tail',id:'500',value:{tail}}];
+mirror.apply(withTail('first')); const firstTail=mirror.current.tails.get('500'); assert.ok(firstTail);
+let tailRuns=0; const stopTail=autorun(()=>{firstTail.tail; tailRuns += 1;});
+mirror.apply(withTail('second')); assert.equal(mirror.current.tails.get('500'),firstTail); assert.equal(tailRuns,2);
+assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2);
+mirror.apply(withTail('second')); assert.equal(tailRuns,2); stopTail();
+assert.throws(()=>mirror.apply([...rows.map(envelope),envelope(row('500'))]),/Duplicate identity/); assert.equal(mapOperations,0);
+rows=[...rows,row('new')]; mirror.apply(rows.map(envelope)); assert.equal(mapOperations,1); assert.equal(memberRuns,3);
+rows=rows.filter(item=>item.id!=='500'); mirror.apply(rows.map(envelope)); assert.equal(mapOperations,2); assert.equal(memberRuns,4);
+mirror.apply([]); assert.equal(members.size,0); assert.equal(mirror.current.rows,members); assert.equal(memberRuns,5);
+mirror.apply([envelope(row('again'))]); assert.equal(members.size,1); assert.equal(mirror.current.rows,members); assert.equal(memberRuns,6);
+stopMembers(); stopTitle(); stopSpy();
+console.log('selected collection facade witnesses passed');
+`
+      : `
+>>>>>>> 270f99e
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';

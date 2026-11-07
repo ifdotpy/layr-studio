@@ -8,6 +8,7 @@ fn fixture() -> Value {
             "nested":{"type":"object","additionalProperties":false,"required":["count"],"properties":{"count":{"type":"number"}}},
             "tags":{"type":"array","items":{"type":"string"}},
             "optional":{"type":"string"},
+            "optionalTags":{"anyOf":[{"type":"array","items":{"type":"string"}},{"type":"null"}]},
             "nil":{"type":"null"},
             "a":{"$ref":"#/components/schemas/Maybe"},"b":{"$ref":"#/components/schemas/Maybe"},
             "c":{"$ref":"#/components/schemas/FlagMaybe"},"d":{"$ref":"#/components/schemas/FlagMaybe"},
@@ -46,9 +47,13 @@ fn selected_collections_use_the_existing_array_resource() {
         "type":"object","additionalProperties":false,"required":["kind"],
         "properties":{"kind":{"type":"string","const":"state"}}
     }]});
+    document["components"]["schemas"]["Tail"] = json!({"type":"object","additionalProperties":false,"required":["tail"],"properties":{"tail":{"type":"string"}}});
     document["components"]["schemas"]["Payload"] = json!({"oneOf":[
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
             "collection":{"type":"string","const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}
+        }},
+        {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
+            "collection":{"type":"string","const":"tail"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Tail"}
         }},
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
             "collection":{"type":"string","const":"ignored"},"id":{"type":"string"},"value":{"type":"object","additionalProperties":true}
@@ -61,7 +66,10 @@ fn selected_collections_use_the_existing_array_resource() {
         "state",
         "state",
         "Payload",
-        vec![ObservableCollection::named("row", "rows", "Row")],
+        vec![
+            ObservableCollection::named("row", "rows", "Row"),
+            ObservableCollection::named("tail", "tails", "Tail"),
+        ],
     )];
     let generated =
         render(&document, &models(), &resources).expect("selected state collections render");

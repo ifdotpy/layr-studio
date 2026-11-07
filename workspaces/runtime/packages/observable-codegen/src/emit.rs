@@ -287,7 +287,7 @@ fn equal(shape: &Shape, left: &str, right: &str, parser: &Parser<'_>, depth: usi
             let l = format!("leftItem{depth}");
             let r = format!("rightItem{depth}");
             format!(
-                "({left}.length === {right}.length && {left}.every(({l}, index) => {{ const {r} = {right}[index]; return {r} !== undefined && {}; }}))",
+                "({left}.length === {right}.length && {left}.every(({l}, index) => {{ const {r} = {right}?.[index]; return {r} !== undefined && {}; }}))",
                 equal(item, &l, &r, parser, depth + 1)
             )
         }
