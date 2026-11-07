@@ -1,6 +1,5 @@
 import { randomUUID } from "../uuid";
 import { frameMessageOrigin } from "./frameOrigin";
-import type { PostResult } from "../apiTypes.ts";
 import {
   ApiError,
   NetworkTimeoutError,
@@ -76,11 +75,13 @@ const sidebarPaths = [
 ] as const;
 export type SidebarPostPath = (typeof sidebarPaths)[number];
 type PostRequest = {
-  action: "post";
-  path: SidebarPostPath;
-  body: PostBody<SidebarPostPath>;
-  options?: Pick<PostOptions, "timeoutMs" | "requestId">;
-};
+  [Path in SidebarPostPath]: {
+    action: "post";
+    path: Path;
+    body: PostBody<Path>;
+    options?: Pick<PostOptions, "timeoutMs" | "requestId">;
+  };
+}[SidebarPostPath];
 export type SidebarRpcRequest =
   | PostRequest
   | { action: "refresh" }
@@ -246,12 +247,11 @@ export async function executeSidebarRequest(
     throw new Error("Invalid sidebar request options.");
   if (!sessionToken)
     throw new Error("The sidebar server session is not ready.");
-  const result = await post(request.path!, request.body, {
-    ...options,
-    sessionToken,
-  });
   if (request.path === "/api/organization") {
-    const source = result as PostResult<"/api/organization">;
+    const source = await post(request.path, request.body, {
+      ...options,
+      sessionToken,
+    });
     const receipt: Pick<
       typeof source,
       "projectFolder" | "projectFolderRevision"
@@ -261,5 +261,5 @@ export async function executeSidebarRequest(
       receipt.projectFolderRevision = source.projectFolderRevision;
     return receipt;
   }
-  return result;
+  return post(request.path, request.body, { ...options, sessionToken });
 }

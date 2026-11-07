@@ -1,5 +1,4 @@
 import { sidebarRowFixture } from "./sidebarRowFixture";
-import { AgentSource } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { expect, it, vi } from "vitest";
@@ -17,7 +16,6 @@ import {
   localSidebarBackend,
   type SidebarBackend,
 } from "../components/sidebar/services";
-import type { Agent } from "../types";
 
 function source(id: string, count = 1, directories = false): SidebarSource {
   const path = "/" + id;

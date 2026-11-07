@@ -1,6 +1,6 @@
 import { sidebarRowFixture } from "./sidebarRowFixture";
 import { StudioErrorLevel } from "../generated/api";
-import { AgentSource, StudioErrorEffectCertainty } from "../generated/api";
+import { StudioErrorEffectCertainty } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { decodeSidebarRanks } from "./sidebarOrderRanks";

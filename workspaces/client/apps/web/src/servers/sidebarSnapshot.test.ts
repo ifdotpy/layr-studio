@@ -1,10 +1,5 @@
 import { StudioErrorLevel } from "../generated/api";
-import {
-  AgentSource,
-  AgentStatus,
-  StudioErrorEffectCertainty,
-} from "../generated/api";
-import assert from "node:assert/strict";
+import { StudioErrorEffectCertainty } from "../generated/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Snapshot } from "../types";
 import { preferenceMemory } from "./storage";
@@ -202,7 +197,10 @@ describe("server sidebar projection", () => {
     const navigation = navigationSnapshot(data, "lead", "", rows);
     expect(navigation.sidebar).toEqual(sidebarSnapshot(data, rows));
     expect(navigation.busy).toBe(true);
-    expect(navigation.chats[0]?.indicator).toBe(rows[0]?.indicator);
+    expect(navigation.chats[0]).toMatchObject({
+      kind: "chat",
+      indicator: rows[0]?.indicator,
+    });
     expect(navigationSnapshot(null, null, "", rows)).not.toHaveProperty(
       "sidebar",
     );

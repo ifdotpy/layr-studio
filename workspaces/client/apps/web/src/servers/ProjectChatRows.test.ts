@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { expect, it } from "vitest";
 import {
   compactVisibleChats,
@@ -7,6 +8,7 @@ import {
 
 it("uses server compact eligibility and the shared activity window", () => {
   const old = {
+    ...sidebarRowFixture("old"),
     kind: "chat" as const,
     id: "old",
     name: "Old",
@@ -23,6 +25,7 @@ it("uses server compact eligibility and the shared activity window", () => {
 it("applies the old-chat threshold to all chats in a project", () => {
   const now = Date.now() / 1000;
   const recent = {
+    ...sidebarRowFixture("recent"),
     kind: "chat" as const,
     id: "recent",
     name: "Recent",
@@ -30,6 +33,7 @@ it("applies the old-chat threshold to all chats in a project", () => {
     activityAt: now,
   };
   const recentTwo = {
+    ...sidebarRowFixture("recent-two"),
     kind: "chat" as const,
     id: "recent-two",
     name: "Recent two",
@@ -37,6 +41,7 @@ it("applies the old-chat threshold to all chats in a project", () => {
     activityAt: now,
   };
   const old = {
+    ...sidebarRowFixture("old"),
     kind: "chat" as const,
     id: "old",
     name: "Old",

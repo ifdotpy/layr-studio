@@ -1,7 +1,6 @@
 import { snapshotFixture } from "../snapshotFixture";
 import { sidebarRowFixture } from "./sidebarRowFixture";
 import { expect, it } from "vitest";
-import assert from "node:assert/strict";
 import {
   navigationSnapshot,
   isServerCommand,

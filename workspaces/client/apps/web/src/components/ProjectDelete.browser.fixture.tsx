@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -166,21 +167,23 @@ function Fixture() {
       ? React.createElement(ProjectGroupsSidebar, {
           navigation: {
             owner: {
-              ...navigationSnapshot(data, "lead", ""),
+              ...navigationSnapshot(
+                data,
+                "lead",
+                "",
+                data.threads.map((chat) =>
+                  sidebarRowFixture(chat.id, {
+                    name: chat.name || "Chat",
+                    projectPath: chat.projectPath || chat.cwd || "",
+                  }),
+                ),
+              ),
               projects: data.runtime.projects.map((project) => ({
                 ...project,
                 ...(location.search.includes("legacy") ? { id: "" } : {}),
               })) as React.ComponentProps<
                 typeof ProjectGroupsSidebar
               >["navigation"][string]["projects"],
-              // The source fixture intentionally omits the unrelated unread field.
-              chats: data.threads.map((chat) => ({
-                ...chat,
-                path: chat.cwd,
-                archived: false,
-              })) as React.ComponentProps<
-                typeof ProjectGroupsSidebar
-              >["navigation"][string]["chats"],
               ready: true,
               opened: "lead",
               alerts: [],

@@ -9,11 +9,13 @@ import "./sidebar-status.css";
 import { providerLabel } from "../generated/providerKind.ts";
 
 export type ProjectChat =
-  | (Pick<SidebarChatRow, "id" | "name" | "activityAt" | "compactPinned"> &
-      Partial<Pick<SidebarChatRow, "provider" | "indicator">> & {
-        kind: "chat";
-        serverId?: string | null;
-      })
+  | (Pick<
+      SidebarChatRow,
+      "id" | "name" | "activityAt" | "compactPinned" | "provider" | "indicator"
+    > & {
+      kind: "chat";
+      serverId?: string | null;
+    })
   | {
       kind: "room";
       id: string;
@@ -157,7 +159,13 @@ export default function ProjectChatRows({
             />
           </span>
           <ChatStatus
-            status={chat.indicator}
+            status={
+              chat.kind === "chat"
+                ? chat.indicator
+                : chat.unread
+                  ? { kind: "unread", label: "Unread result" }
+                  : undefined
+            }
             provider={chat.provider || undefined}
           />
         </button>

@@ -334,7 +334,7 @@ export function useServerFrame(
       window.removeEventListener(preferenceEvent, preferencesChanged);
       window.removeEventListener("storage", preferencesChanged);
     };
-  }, [data, opened, error, unread, creating, now, store]);
+  }, [data, opened, error, [...unread].join(":"), creating, now, store]);
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const safeAccounts = readServerAccounts(accounts);

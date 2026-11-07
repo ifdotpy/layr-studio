@@ -63,15 +63,10 @@ export default function ProjectGroupsSidebar({
   const needle = query.trim().toLocaleLowerCase();
   const lastServer = (group: LogicalProject) =>
     saved<string>(`project-last-server:${group.key}`, "") ||
-    [...group.chats].sort((a, b) =>
-      a.kind === "room"
-        ? b.kind === "room"
-          ? 0
-          : 1
-        : b.kind === "room"
-          ? -1
-          : b.activityAt - a.activityAt,
-    )[0]?.serverId;
+    [...group.chats]
+      .filter((chat) => chat.kind === "chat")
+      .sort((a, b) => b.activityAt - a.activityAt)[0]?.serverId ||
+    group.chats.find((chat) => chat.kind === "room")?.serverId;
   return (
     <>
       {groups.map((project) => {
@@ -145,10 +140,7 @@ export default function ProjectGroupsSidebar({
               </Menu>
             </div>
             <ProjectChatRows
-              chats={chats.map((chat) => ({
-                ...chat,
-                provider: chat.provider || undefined,
-              }))}
+              chats={chats}
               aliases={aliases}
               selected={{
                 id: navigation[current]?.opened || "",
