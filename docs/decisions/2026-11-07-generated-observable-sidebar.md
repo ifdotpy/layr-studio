@@ -101,10 +101,14 @@ deadline scheduler add no necessary behavior to this pilot.
 ## Pilot line-count exception
 
 The owner accepted the pilot's handwritten line-count miss without expanding
-scope or compressing formatting. At the integrated hierarchy checkpoint,
-production handwritten TypeScript added 1,431 lines and removed 1,011 (net +420):
-store +223; shared row leaves +600; Sidebar -72; SidebarRow -195; servers -2;
-App -9; other -125. Tests, generated output and Rust are counted separately in
-the final evidence. Later review corrections may change these measured counts.
-The next stage moves conversation status to server read models and removes the
-remaining shared `chatStatusModel` and App selectors when their last callers move.
+scope or compressing formatting. Relative to the exact starting Git revision
+`947e17dfb3209bc90afac82a555d82a036a7240f`, production handwritten web source
+TypeScript adds 1,497 lines and removes 1,054 (net +443): store +206; shared row
+leaves +541; Sidebar -43; SidebarRow -195; servers -28; App -1; other -37.
+This count excludes generated output, tests, stories, fixture files and tooling
+configuration. Rust and generated additions are reported separately.
+
+The remaining conversation status owner is `chatStatusModel.ts` (412 lines).
+The shared App catalog module is 134 lines, including its 56-line selector for
+the current agent, team and workers. The next stage moves conversation status
+to server read models and removes these owners when their last callers move.
