@@ -1,6 +1,6 @@
 import { createElement } from "react";
 import { MantineProvider } from "@mantine/core";
-import { AgentSource } from "../../../generated/api";
+import { sidebarRowFixture } from "../../../servers/sidebarRowFixture.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { PeerLeadRows, PeerTeamForm } from "./PeerTeams";
@@ -17,14 +17,10 @@ describe("peer leads in a team", () => {
           action: "save",
           close: () => {},
           agents: [
-            {
-              id: "lead",
+            sidebarRowFixture("lead", {
               name: "Line-backed lead",
-              isLead: true,
-          source: AgentSource.managed,
-              cwd: "/store/projects/id/lines/main",
               projectPath: "/source",
-            },
+            }),
           ],
         }),
       ),

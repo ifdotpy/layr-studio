@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { snapshotFixture } from "../snapshotFixture";
 import Sidebar from "./Sidebar";
 import { AgentSource } from "../generated/api";
+import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
 
 // Static markup has no layout, so the measured frame would start as a closed
 // drawer. The frame's geometry has its own tests; render its content inline here.
@@ -27,7 +28,7 @@ it("leaves the desktop close action to the workspace header", () => {
       createElement(Sidebar, {
         data: snapshotFixture(),
         opened: "",
-        indicators: new Map(),
+        rows: [],
         markingRead: new Set<string>(),
         creating: false,
         mobile: false,
@@ -82,7 +83,7 @@ it("shows an upgraded chat at the project root without changing its old line fol
       createElement(Sidebar, {
         data,
         opened: "",
-        indicators: new Map(),
+        rows: [sidebarRowFixture("lead", {name:"Upgraded chat",projectPath:"/source",projectFolder:"old-folder"})],
         markingRead: new Set<string>(),
         creating: false,
         mobile: false,

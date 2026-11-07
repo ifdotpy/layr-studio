@@ -11,6 +11,7 @@ import {
 import { needsYou, projectStateCounts, projectStateLabel } from "./fleet";
 import ProjectStateCounts from "./ProjectStateCounts";
 import SidebarRow from "../SidebarRow";
+import { sidebarRowFixture } from "../../servers/sidebarRowFixture.ts";
 
 const chat = (id: string, cwd = "/work/api") =>
   ({ id, cwd, name: `Chat ${id}` }) as Agent;
@@ -88,29 +89,14 @@ function renderRow(overrides: Partial<Parameters<typeof SidebarRow>[0]> = {}) {
       MantineProvider,
       {},
       createElement(SidebarRow, {
-        row: {
-          ...chat("answer"),
-          updated: 100,
+        row: sidebarRowFixture("answer", {
+          name: "Chat answer",
           pinned: true,
-          commandProgress: [
-            {
-              monitorId: "test",
-              stage: "Checking permissions",
-              startedAt: 50,
-              lastOutputLine: "Output details",
-            },
-            {
-              monitorId: "next",
-              stage: "Second command",
-              startedAt: 60,
-              lastOutputLine: "",
-            },
-          ],
-        },
+          indicator: {kind:"answer",label:"Needs your answer"},
+        }),
         selected: true,
         serverAlias: "MAC",
         showServer: false,
-        indicator: indicators.get("answer"),
         renaming: false,
         organizing: false,
         name: "",
@@ -160,13 +146,13 @@ describe("real fleet strip", () => {
   });
   it("preserves the stall attention cue", () => {
     const html = renderRow({
-      row: { ...chat("stalled"), stall: { taskId: "task-4", since: 10 } },
+      row: sidebarRowFixture("stalled", {waitingForLead:true}),
     });
     expect(html).toContain('role="status"');
     expect(html).toContain("Waiting for lead");
   });
   it("shows only non-default server identities and retains offline attention", () => {
-    const quiet = renderRow({ row: chat("quiet") });
+    const quiet = renderRow({ row: sidebarRowFixture("quiet") });
     expect(quiet).not.toContain("fleet-server-badge");
     expect(quiet).not.toContain("fleet-chat-meta");
     const remote = renderRow({ serverAlias: "RMT", showServer: true });

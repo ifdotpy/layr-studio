@@ -140,7 +140,10 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       disposed = true;
       pending.clear();
       stopEvictions();
-      for (const entry of entries.values()) entry.dispose();
+      for (const entry of entries.values()) {
+        entry.dispose();
+        entry.evict();
+      }
       entries.clear();
     },
   };

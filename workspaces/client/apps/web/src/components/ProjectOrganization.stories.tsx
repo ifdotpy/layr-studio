@@ -50,7 +50,7 @@ function ProjectFixture({ light = false }: { light?: boolean }) {
           <ProjectNameForm project={project} saved={async () => {}} />
           <MoveChatForm
             project={project}
-            agent={{ id: "lead", name: "Release lead" }}
+            agent={{ id: "lead" }}
             saved={async () => {}}
           />
         </SettingsSection>

@@ -77,6 +77,7 @@ describe("observable resource runtime over the subscription owner", () => {
     expect(seen).toEqual(["loading", "one", "two"]);
     stop();
     f.runtime.dispose();
+    expect(f.slot.current).toEqual({status: "loading"});
     f.subscriptions.dispose();
   });
 

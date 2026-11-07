@@ -47,7 +47,10 @@ and batching through `sync/resourceEvents.ts`. Eviction clears the slot's model
 graph. Subscription notifications apply in one MobX action per queued batch.
 Untracked reads, including action handlers, open no subscriptions.
 
-The sidebar uses small observer components. Selection, expansion, drag state,
+The sidebar follows the [observable component hierarchy](../../workspaces/client/apps/web/README.md#observable-component-hierarchy):
+list membership, row shells and independently changing leaves form separate
+observer boundaries. Shared title, indicator, progress and action-menu leaves
+are reused across the main and combined sidebars. Selection, expansion, drag state,
 rename drafts and pending command state remain device-local. The server owns the
 final indicator including unread precedence. Only a pending mark-read for the
 exact current CAS target may temporarily display it as read; changing that
@@ -81,6 +84,11 @@ migration removes a helper only when its final caller has moved.
 
 Radio rooms retain their existing sidebar summary path. They are the next
 read-model candidate and are not represented as `SidebarChatRow` values.
+
+The legacy project summary navigation crosses serialized frame messages and
+retains plain DTOs. Its reused observer leaves do not isolate field updates
+across a whole message replacement. The combined sidebar reconciles mapped rows
+through the generated mirror, preserving model identity and field isolation.
 
 ## Alternatives
 

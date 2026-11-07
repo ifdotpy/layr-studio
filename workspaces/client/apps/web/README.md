@@ -52,6 +52,28 @@ and creates the production bundle. `pnpm test` builds that bundle and checks it 
 a separate headless Chrome process against an isolated server and database.
 Set `CHROME_BIN` if Chrome uses another executable path.
 
+## Observable component hierarchy
+
+Keep components small, hierarchical and reusable so each observer tracks only
+the fields it renders. The [sidebar architecture decision](../../../../docs/decisions/2026-11-07-generated-observable-sidebar.md)
+records the generated store boundary.
+
+1. Dereference late: pass observable models, or IDs and a facade, down to the
+   smallest component that renders a field. Do not destructure observables in a
+   parent just to pass primitive props.
+2. Every component reading store data is an `observer`. A list reads membership
+   and order; rows and independently changing indicator, title and progress
+   leaves observe their own fields.
+3. At Mantine and other non-observer boundaries, pass primitives read inside the
+   closest observer leaf.
+4. Reuse existing leaves before writing new ones. Shared status, progress, title
+   and action-menu components live once in `src/components/chat-row/` and serve
+   both sidebars and future screens.
+5. Server read models own business policy. Components retain only device-local
+   state such as selection, drafts and expansion.
+6. Keep each component file single-purpose. Split a component when it reads
+   unrelated observables, and witness field isolation with render probes.
+
 ## Component workbench
 
 Storybook runs inside this package and reads stories colocated with components
