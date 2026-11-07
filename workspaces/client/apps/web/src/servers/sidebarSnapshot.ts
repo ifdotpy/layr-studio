@@ -4,16 +4,48 @@ import type { components } from "../generated/api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { toJS } from "mobx";
 
-export type SidebarEntity = Extract<components["schemas"]["SyncEntityPayload"], {collection:"agentSummary"|"project"|"peerTeam"|"workspace"|"agentTail"}>;
+export type SidebarEntity = Extract<
+  components["schemas"]["SyncEntityPayload"],
+  {
+    collection:
+      | "agentSummary"
+      | "project"
+      | "peerTeam"
+      | "workspace"
+      | "agentTail";
+  }
+>;
 
 /** Preserve native collection identities at the frame serialization boundary. */
-export function sidebarEntities(collections:StateCollections): DeepReadonly<SidebarEntity[]> {
+export function sidebarEntities(
+  collections: StateCollections,
+): DeepReadonly<SidebarEntity[]> {
   return [
-    ...[...collections.agents].map(([id,value]) => ({collection:"agentSummary" as const,id,value:toJS(value)})),
-    ...[...collections.projects].map(([id,value]) => ({collection:"project" as const,id,value:toJS(value)})),
-    ...[...collections.peerTeams].map(([id,value]) => ({collection:"peerTeam" as const,id,value:toJS(value)})),
-    ...[...collections.workspaces].map(([id,value]) => ({collection:"workspace" as const,id,value:toJS(value)})),
-    ...[...collections.agentTail].map(([id,value]) => ({collection:"agentTail" as const,id,value:toJS(value)})),
+    ...[...collections.agents].map(([id, value]) => ({
+      collection: "agentSummary" as const,
+      id,
+      value: toJS(value),
+    })),
+    ...[...collections.projects].map(([id, value]) => ({
+      collection: "project" as const,
+      id,
+      value: toJS(value),
+    })),
+    ...[...collections.peerTeams].map(([id, value]) => ({
+      collection: "peerTeam" as const,
+      id,
+      value: toJS(value),
+    })),
+    ...[...collections.workspaces].map(([id, value]) => ({
+      collection: "workspace" as const,
+      id,
+      value: toJS(value),
+    })),
+    ...[...collections.agentTail].map(([id, value]) => ({
+      collection: "agentTail" as const,
+      id,
+      value: toJS(value),
+    })),
   ];
 }
 import type { PeerTeam, Project, Room, Snapshot } from "../types";

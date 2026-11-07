@@ -1,9 +1,15 @@
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
 import type { PeerTeam, Project, Room, Snapshot } from "../types";
 import {
-  createSidebarMirror,
-  type SidebarChatRow,
+  createStateMirror,
+  type StateCollections,
 } from "../generated/observableResources.ts";
+import { observable } from "mobx";
+import {
+  createSidebarViewModel,
+  type SidebarAgent,
+  type SidebarIdentity,
+} from "../components/sidebar/viewModel.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
 import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
 
@@ -11,6 +17,8 @@ export type SidebarSource = {
   id: string;
   online: boolean;
   sidebar: ServerSidebarSnapshot;
+  collections: StateCollections;
+  view: ReturnType<typeof createSidebarViewModel>;
 };
 export type SidebarReference = { owner: string; id: string; path?: string };
 type ProjectMember = { source: SidebarSource; project: Project };
@@ -28,6 +36,10 @@ export function mergeSidebar(
   sources: readonly SidebarSource[],
   revision = 0,
   combined = sources.length > 1,
+  sourceView?: (
+    source: SidebarSource,
+    identity: SidebarIdentity,
+  ) => ReturnType<typeof createSidebarViewModel>,
 ) {
   const identities = new Set(sources.map((source) => source.id));
   if (identities.size !== sources.length)
@@ -193,7 +205,7 @@ export function mergeSidebar(
     );
   }
   const projectPaths = new Set(projects.map((project) => project.path));
-  const boundProject = (source: SidebarSource, chat: SidebarChatRow) => {
+  const boundProject = (source: SidebarSource, chat: SidebarAgent) => {
     if (chat.projectId && chat.projectServerId) {
       const home = uiServers.get(chat.projectServerId) || chat.projectServerId;
       const binding = key(home, chat.projectId);
@@ -262,11 +274,11 @@ export function mergeSidebar(
     }
     return chatKey(owner, value);
   };
-  const rowValues: SidebarChatRow[] = [];
   const peerTeams: PeerTeam[] = [];
   const rooms: Room[] = [];
-  for (const [position, source] of sources.entries()) {
-    for (const chat of source.sidebar.rows) {
+  for (const source of sources) {
+    for (const nativeRow of source.view.rows) {
+      const chat = nativeRow.agent;
       const id = chatKey(source.id, chat.id);
       const path = boundProject(source, chat);
       chatReferences.set(id, {
@@ -285,25 +297,6 @@ export function mergeSidebar(
           folders: [],
         });
       }
-      rowValues.push(
-        single
-          ? chat
-          : {
-              ...chat,
-              id,
-              projectPath: path,
-              sortKey: `${String(position).padStart(10, "0")}\u0000${chat.sortKey}`,
-              groupKey: mapOrderGroup(source.id, chat.groupKey),
-              teamId: chat.teamId ? teamKey(source.id, chat.teamId) : null,
-              projectFolder: chat.projectFolder
-                ? folderKey(
-                    source.id,
-                    chat.projectPath || "",
-                    chat.projectFolder,
-                  )
-                : chat.projectFolder,
-            },
-      );
     }
     const teams = new Map<string, PeerTeam>();
     for (const team of source.sidebar.peerTeams) teams.set(team.id, team);
@@ -452,7 +445,7 @@ export function mergeSidebar(
     }
     for (const team of source.sidebar.peerTeams)
       collapsed.add(JSON.stringify([team.projectPath || "", "team", team.id]));
-    for (const chat of source.sidebar.rows) addPath(chat.projectPath || "");
+    for (const row of source.view.rows) addPath(row.agent.projectPath || "");
     for (const room of source.sidebar.rooms) addPath(room.projectPath || "");
     preferenceKeys.set(source.id, { compact, collapsed });
   }
@@ -591,7 +584,21 @@ export function mergeSidebar(
         : { revision, groups: order },
     },
   };
-  const rows: readonly SidebarChatRow[] = rowValues;
+  const views = sources.map((source) => {
+    const identity: SidebarIdentity = {
+      chatKey: (id) => chatKey(source.id, id),
+      projectKey: (agent) => boundProject(source, agent),
+      folderKey: (path, id) => folderKey(source.id, path, id),
+      teamKey: (id) => teamKey(source.id, id),
+    };
+    return sourceView
+      ? sourceView(source, identity)
+      : createSidebarViewModel(
+          () => source.collections,
+          () => membershipInputs,
+          identity,
+        );
+  });
   return {
     data,
     sources,
@@ -600,13 +607,16 @@ export function mergeSidebar(
     order,
     compact,
     collapsed,
-    rows,
+    get rows() {
+      return views.flatMap((view) => view.rows);
+    },
     offlineServers,
     chatReferences,
     projectReferences,
     folderReferences,
     teamReferences,
     projectKey,
+    boundProject,
     chatKey,
     folderKey,
     teamKey,
@@ -625,29 +635,77 @@ export function mergeSidebar(
 export type MergedSidebar = ReturnType<typeof mergeSidebar>;
 
 /** Summary-only or offline updates cannot erase the last complete sidebar. */
+const membershipInputs = {
+  query: "",
+  archived: false,
+  opened: null,
+  rank: () => 0,
+};
 export function createSidebarSourceStore() {
-  const snapshots = new Map<string, ServerSidebarSnapshot>();
+  const snapshots = new Map<
+    string,
+    {
+      sidebar: ServerSidebarSnapshot;
+      mirror: ReturnType<typeof createStateMirror>;
+      view: ReturnType<typeof createSidebarViewModel>;
+    }
+  >();
   return {
     update(id: string, sidebar: ServerSidebarSnapshot | undefined) {
-      if (sidebar) snapshots.set(id, sidebar);
+      if (!sidebar) return;
+      const previous = snapshots.get(id);
+      const mirror = previous?.mirror || createStateMirror();
+      const view =
+        previous?.view ||
+        createSidebarViewModel(
+          () => mirror.current,
+          () => membershipInputs,
+        );
+      mirror.apply(sidebar.entities);
+      snapshots.set(id, { sidebar, mirror, view });
     },
     forget(id: string) {
       snapshots.delete(id);
+    },
+    collections(id: string) {
+      return snapshots.get(id)?.mirror.current;
     },
     sources(
       ids: readonly string[],
       online: ReadonlySet<string>,
     ): SidebarSource[] {
       return ids.flatMap((id) => {
-        const sidebar = snapshots.get(id);
-        return sidebar ? [{ id, sidebar, online: online.has(id) }] : [];
+        const value = snapshots.get(id);
+        return value
+          ? [
+              {
+                id,
+                sidebar: value.sidebar,
+                collections: value.mirror.current,
+                view: value.view,
+                online: online.has(id),
+              },
+            ]
+          : [];
       });
     },
   };
 }
 
 export function createMergedSidebarSelector(combined = true) {
-  const mirror = createSidebarMirror();
+  const routing = observable.box<MergedSidebar | null>(null, { deep: false });
+  const views = new Map<
+    string,
+    {
+      collections: StateCollections;
+      view: ReturnType<typeof createSidebarViewModel>;
+    }
+  >();
+  const route = () => {
+    const value = routing.get();
+    if (!value) throw new Error("Sidebar routing is unavailable.");
+    return value;
+  };
   let previous: MergedSidebar | undefined;
   let revision = 0;
   return (sources: readonly SidebarSource[]) => {
@@ -664,9 +722,23 @@ export function createMergedSidebarSelector(combined = true) {
       })
     )
       return previous;
-    const next = mergeSidebar(sources, revision + 1, combined);
-    mirror.apply({ rows: next.rows });
-    next.rows = mirror.current.rows;
+    const next = mergeSidebar(sources, revision + 1, combined, (source) => {
+      const previous = views.get(source.id);
+      if (previous?.collections === source.collections) return previous.view;
+      const identity: SidebarIdentity = {
+        chatKey: (id) => route().chatKey(source.id, id),
+        projectKey: (agent) => route().boundProject(source, agent),
+        folderKey: (path, id) => route().folderKey(source.id, path, id),
+        teamKey: (id) => route().teamKey(source.id, id),
+      };
+      const view = createSidebarViewModel(
+        () => source.collections,
+        () => membershipInputs,
+        identity,
+      );
+      views.set(source.id, { collections: source.collections, view });
+      return view;
+    });
     // The merged order revision grows only when the merged order changes. A snapshot for
     // another reason must not replace an order move that waits for its server.
     const previousOrder = previous?.data.runtime.sidebarOrder;
@@ -684,12 +756,16 @@ export function createMergedSidebarSelector(combined = true) {
     if (previous) {
       const retain = <T extends { id: string }>(rows: T[], old: T[]) => {
         const prior = new Map(old.map((row) => [row.id, row]));
-        return rows.map((row) => {
+        const retained = rows.map((row) => {
           const existing = prior.get(row.id);
           return existing && JSON.stringify(existing) === JSON.stringify(row)
             ? existing
             : row;
         });
+        return retained.length === old.length &&
+          retained.every((row, index) => row === old[index])
+          ? old
+          : retained;
       };
       next.data.runtime.projects = retain(
         next.data.runtime.projects,
@@ -704,6 +780,14 @@ export function createMergedSidebarSelector(combined = true) {
         previous.data.runtime.peerTeams,
       );
     }
+    if (
+      !previous ||
+      next.data.runtime.projects !== previous.data.runtime.projects ||
+      next.data.runtime.peerTeams !== previous.data.runtime.peerTeams
+    )
+      routing.set(next);
+    for (const id of views.keys())
+      if (!next.sourceById.has(id)) views.delete(id);
     previous = next;
     return next;
   };

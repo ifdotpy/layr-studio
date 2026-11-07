@@ -13,8 +13,8 @@ import { errorText } from "../api";
 import { executeSidebarRequest, serializeSidebarError } from "./sidebarRpc";
 import { desktopAlerts } from "../desktop/desktopAlerts";
 import { useAlertClock } from "../hooks/useAlertClock";
-import { useEffect, useRef } from "react";
-import { reaction, toJS } from "mobx";
+import { useEffect, useRef, useMemo } from "react";
+import { reaction } from "mobx";
 import { serverViewId, serverParentOrigin } from "./environment";
 import { publishServerAliases } from "./serverAliases";
 import {
@@ -25,6 +25,8 @@ import {
   type ServerCommand,
 } from "./navigation";
 import type { Snapshot } from "../types";
+import { sidebarEntities } from "./sidebarSnapshot.ts";
+import { createSidebarViewModel } from "../components/sidebar/viewModel.ts";
 import "../sync/subscriptions/events";
 import { preferenceEvent } from "../sync/uiPreferenceMerge";
 import { preferenceMemory, serverStorageEventKey } from "./storage";
@@ -39,14 +41,42 @@ export function useServerFrame(
 ) {
   const screen = useScreenChannel();
   const store = useServerStore();
-  const sidebarRows = () => {
-    const current = store.sidebar().current;
-    return current.status === "live" || current.status === "stale"
-      ? current.data.rows.map((row) => toJS(row))
-      : [];
-  };
   const { get, saved } = useServerApi();
   const { watchResourceConnection } = useServerResources();
+
+  const view = useMemo(
+    () =>
+      createSidebarViewModel(
+        () => {
+          const current = store.state().current;
+          if (current.status !== "live" && current.status !== "stale")
+            throw new Error("The server state is unavailable.");
+          return current.data;
+        },
+        () => ({ query: "", archived: false, opened: null, rank: () => 0 }),
+      ),
+    [store],
+  );
+  const projectNavigation = (
+    data: Snapshot | null,
+    opened: string | null,
+    error: string,
+    unread: ReadonlySet<string>,
+    now?: number,
+  ) => {
+    const current = store.state().current;
+    const available = current.status === "live" || current.status === "stale";
+    return navigationSnapshot(
+      data,
+      opened,
+      error,
+      available ? view.rows : [],
+      data ? desktopAlerts(data, now) : [],
+      saved,
+      unread,
+      available ? sidebarEntities(current.data) : [],
+    );
+  };
 
   // Sign-in alerts become due without a record change (desktopAlerts.ts).
   const now = useAlertClock(data);
@@ -91,15 +121,7 @@ export function useServerFrame(
       () => ({
         kind: "studio-server-navigation" as const,
         navigation: {
-          ...navigationSnapshot(
-            data,
-            opened,
-            error,
-            sidebarRows(),
-            data ? desktopAlerts(data, now) : [],
-            saved,
-            unread,
-          ),
+          ...projectNavigation(data, opened, error, unread, now),
           creating,
         },
       }),
@@ -163,13 +185,10 @@ export function useServerFrame(
             await new Promise<void>((resolve) => setTimeout(resolve, 0));
             const value = latest.current;
             return {
-              ...navigationSnapshot(
+              ...projectNavigation(
                 value.data,
                 value.opened,
                 value.error,
-                sidebarRows(),
-                value.data ? desktopAlerts(value.data) : [],
-                saved,
                 value.unread,
               ),
               creating: value.creating,
@@ -278,15 +297,7 @@ export function useServerFrame(
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const navigation = () => ({
-      ...navigationSnapshot(
-        data,
-        opened,
-        error,
-        sidebarRows(),
-        data ? desktopAlerts(data, now) : [],
-        saved,
-        unread,
-      ),
+      ...projectNavigation(data, opened, error, unread, now),
       creating,
     });
     const publish = () =>

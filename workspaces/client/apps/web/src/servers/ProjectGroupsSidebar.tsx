@@ -1,5 +1,5 @@
 import type { ConnectionHealth } from "../sync/connectionState";
-import { useServerApi } from "./ServerServicesContext";
+import { useServerApi, useServerStore } from "./ServerServicesContext";
 import { writePreferenceEdit } from "../sync/uiPreferenceStore";
 import { useSyncedVisualState } from "../sync/useSyncedVisualState";
 import { ActionIcon, Button, Menu, Modal } from "@mantine/core";
@@ -7,7 +7,12 @@ import { FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { useMemo, useState } from "react";
 import "../api";
 import ProjectServerCards from "../components/ProjectServerCards";
-import ProjectChatRows from "./ProjectChatRows";
+import ProjectChatRows, { type ProjectChat } from "./ProjectChatRows";
+import type { StateCollections } from "../generated/observableResources.ts";
+import {
+  createSidebarRow,
+  localSidebarIdentity,
+} from "../components/sidebar/viewModel.ts";
 import { logicalProjects, type LogicalProject } from "./logicalProjects";
 import { projectServerChoices } from "./projectLocations";
 import type { ServerCommand, ServerNavigation } from "./navigation";
@@ -16,6 +21,7 @@ import { DEFAULT_LOCAL_SERVER_ALIAS } from "./serverAliases";
 
 export default function ProjectGroupsSidebar({
   navigation,
+  collections: suppliedCollections,
   servers,
   statuses,
   reachability,
@@ -26,6 +32,7 @@ export default function ProjectGroupsSidebar({
   hideOldChatsThreshold,
 }: {
   navigation: Record<string, ServerNavigation>;
+  collections?: StateCollections;
   servers: StudioServer[];
   statuses: Record<string, ConnectionHealth>;
   reachability?: Record<string, string | null | undefined>;
@@ -36,6 +43,12 @@ export default function ProjectGroupsSidebar({
   hideOldChatsThreshold: number;
 }) {
   const { saved, save } = useServerApi();
+  const state = useServerStore().state().current;
+  const collections =
+    suppliedCollections ||
+    (state.status === "live" || state.status === "stale"
+      ? state.data
+      : undefined);
 
   const groups = useMemo(() => logicalProjects(navigation), [navigation]);
   const [choosing, setChoosing] = useState<LogicalProject | null>(null);
@@ -61,20 +74,33 @@ export default function ProjectGroupsSidebar({
     ]),
   );
   const needle = query.trim().toLocaleLowerCase();
+  if (!collections) return null;
+  const context = { collections, ...localSidebarIdentity };
+  const chatViews = (group: LogicalProject): ProjectChat[] =>
+    group.chats.map((chat) =>
+      chat.kind === "chat"
+        ? {
+            kind: "chat",
+            id: chat.id,
+            serverId: chat.serverId,
+            row: createSidebarRow(chat.agent, context),
+          }
+        : chat,
+    );
   const lastServer = (group: LogicalProject) =>
     saved<string>(`project-last-server:${group.key}`, "") ||
-    [...group.chats]
+    chatViews(group)
       .filter((chat) => chat.kind === "chat")
-      .sort((a, b) => b.activityAt - a.activityAt)[0]?.serverId ||
+      .sort((a, b) => b.row.activityAt - a.row.activityAt)[0]?.serverId ||
     group.chats.find((chat) => chat.kind === "room")?.serverId;
   return (
     <>
       {groups.map((project) => {
-        const chats = project.chats.filter(
+        const chats = chatViews(project).filter(
           (chat) =>
-            !chat.archived &&
+            (chat.kind === "room" || !chat.row.agent.archived) &&
             (!needle ||
-              `${project.name} ${chat.name}`
+              `${project.name} ${chat.kind === "chat" ? chat.row.searchText : chat.name}`
                 .toLocaleLowerCase()
                 .includes(needle)),
         );

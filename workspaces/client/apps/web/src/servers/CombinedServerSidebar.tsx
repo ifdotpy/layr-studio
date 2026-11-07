@@ -104,10 +104,8 @@ export default function CombinedServerSidebar({
       selectionIdentity={JSON.stringify([
         current,
         opened,
-        model.sourceById
-          .get(current)
-          ?.sidebar.rows.find((row) => row.id === opened)?.projectFolder ||
-          null,
+        model.sourceById.get(current)?.collections.agents.get(opened || "")
+          ?.projectFolder || null,
       ])}
       offlineServers={model.offlineServers}
       markingRead={marking}

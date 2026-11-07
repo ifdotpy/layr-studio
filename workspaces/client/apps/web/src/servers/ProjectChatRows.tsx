@@ -9,27 +9,18 @@ export {
   ChatServerLine,
   offlineServerDescription,
 } from "../components/chat-row/index.ts";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { keepCompactSidebarChat } from "../components/sidebar/compact.ts";
+import type { SidebarChatView } from "../components/sidebar/viewModel.ts";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "./serverAliases";
 import "./sidebar-status.css";
 
 export type ProjectChat =
-  | (Pick<
-      SidebarChatRow,
-      "id" | "name" | "activityAt" | "compactPinned" | "provider" | "indicator"
-    > & {
-      kind: "chat";
-      serverId?: string | null;
-    })
+  | { kind: "chat"; id: string; row: SidebarChatView; serverId?: string | null }
   | {
       kind: "room";
       id: string;
       name: string;
       unread: boolean;
       serverId?: string | null;
-      provider?: never;
-      indicator?: never;
     };
 export function keepCompactChat(
   chat: ProjectChat,
@@ -37,7 +28,7 @@ export function keepCompactChat(
 ): boolean {
   switch (chat.kind) {
     case "chat":
-      return keepCompactSidebarChat(chat, now);
+      return chat.row.compactVisible(now);
     case "room":
       return chat.unread;
     default: {
@@ -144,16 +135,20 @@ const ProjectChatButton = observer(function ProjectChatButton({
       onClick={() => open(chat)}
     >
       <span className="row-copy">
-        <ChatTitle row={chat} />
+        {chat.kind === "chat" ? (
+          <ChatTitle row={chat.row} />
+        ) : (
+          <ChatTitle room={chat} />
+        )}
         <ChatServerLine
-          row={chat}
+          row={chat.kind === "chat" ? chat.row : undefined}
           alias={
             aliases[chat.serverId || "local"] || DEFAULT_LOCAL_SERVER_ALIAS
           }
         />
       </span>
       {chat.kind === "chat" ? (
-        <ChatIndicator row={chat} />
+        <ChatIndicator row={chat.row} />
       ) : (
         <ChatStatus
           status={

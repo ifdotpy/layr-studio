@@ -11,8 +11,17 @@ import {
   type NewChatSettings,
 } from "../components/newChatSettings";
 import type { LocationProject } from "./projectLocations";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { sidebarSnapshot, type ServerSidebarSnapshot } from "./sidebarSnapshot";
+import type {
+  SidebarAgent,
+  SidebarChatView,
+} from "../components/sidebar/viewModel.ts";
+import type { DeepReadonly } from "../deepReadonly.ts";
+import { toJS } from "mobx";
+import {
+  sidebarSnapshot,
+  type ServerSidebarSnapshot,
+  type SidebarEntity,
+} from "./sidebarSnapshot";
 import { isProviderKind, ProviderKind } from "../generated/providerKind.ts";
 export type ServerAccount = {
   accountKey?: string;
@@ -54,18 +63,13 @@ export function readServerAccounts(value: unknown): ServerAccount[] | null {
   }
   return accounts;
 }
-export type ServerChatSummary = Pick<
-  SidebarChatRow,
-  | "id"
-  | "name"
-  | "archived"
-  | "projectId"
-  | "projectServerId"
-  | "provider"
-  | "indicator"
-  | "compactPinned"
-  | "activityAt"
-> & { kind: "chat"; path: string; serverId?: string | null };
+export type ServerChatSummary = {
+  kind: "chat";
+  id: string;
+  path: string;
+  agent: SidebarAgent;
+  serverId?: string | null;
+};
 export type ServerRoomSummary = {
   kind: "room";
   id: string;
@@ -145,10 +149,11 @@ export function navigationSnapshot(
   data: Snapshot | null,
   opened: string | null,
   error: string,
-  rows: readonly SidebarChatRow[] = [],
+  rows: readonly SidebarChatView[] = [],
   alerts: DesktopAlert[] = [],
   readSaved: typeof saved = saved,
   unread: ReadonlySet<string> = new Set(),
+  entities: DeepReadonly<SidebarEntity[]> = [],
 ): ServerNavigation {
   const projects = new Map<string, ServerNavigation["projects"][number]>();
   for (const project of data?.runtime?.projects || []) {
@@ -173,29 +178,17 @@ export function navigationSnapshot(
       !projects.has(path) &&
       ![...projects.values()].some(
         (project) =>
-          (project.id === chat.projectId &&
-            project.homeServerId === chat.projectServerId) ||
+          (project.id === chat.agent.projectId &&
+            project.homeServerId === chat.agent.projectServerId) ||
           project.locations?.some(
             (location) =>
               location.path === path &&
-              location.serverId === chat.projectServerId,
+              location.serverId === chat.agent.projectServerId,
           ),
       )
     )
       projects.set(path, { path, name: path || "Other chats" });
-    chats.push({
-      kind: "chat",
-      id: chat.id,
-      name: chat.name || "Chat",
-      path,
-      archived: !!chat.archived,
-      projectId: chat.projectId,
-      projectServerId: chat.projectServerId,
-      provider: chat.provider,
-      activityAt: chat.activityAt,
-      compactPinned: chat.compactPinned,
-      indicator: chat.indicator,
-    });
+    chats.push({ kind: "chat", id: chat.id, path, agent: toJS(chat.agent) });
   }
   for (const room of data?.runtime?.rooms || []) {
     if (!room.radio || room.userHidden) continue;
@@ -213,9 +206,11 @@ export function navigationSnapshot(
   }
   return {
     ...(data?.entityWorkspaceId ? { workspaceId: data.entityWorkspaceId } : {}),
-    ...(data ? { sidebar: sidebarSnapshot(data, rows) } : {}),
+    ...(data ? { sidebar: sidebarSnapshot(data, entities) } : {}),
     ready: !!data,
-    busy: rows.some((row) => row.inFlight),
+    busy: entities.some(
+      (entity) => entity.collection === "agentSummary" && entity.value.inFlight,
+    ),
     alerts,
     alertsReady: !!data && data.entitiesComplete !== false,
     projects: [...projects.values()],
