@@ -1207,10 +1207,6 @@ pub struct ReceiptIdentity {
 }
 
 pub fn receipt(connection: &Connection, query: &ReceiptIdentity) -> Result<ProcessReceipt, Error> {
-    let exists:bool=connection.query_row("SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_process_actions')",[],|r|r.get(0)).map_err(StoreError::from)?;
-    if !exists {
-        return input_receipt(connection, query);
-    }
     let record: Option<String> = connection
         .query_row(
             "SELECT record FROM runtime_process_actions WHERE id=?",
@@ -1264,6 +1260,38 @@ mod claim_identity_tests {
     use super::*;
     use studio_runtime_schema::persistence::RequestIdentity;
     use studio_runtime_store::request_results::RequestResults;
+
+    thread_local! {
+        static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn process_receipt_does_not_read_schema() {
+        let db = studio_runtime_store::test_canvas();
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Stmt(statement, _) = event {
+                    let sql = statement.sql().to_ascii_lowercase();
+                    if sql.contains("sqlite_master") || sql.contains("sqlite_schema") {
+                        SCHEMA_READS.with(|count| count.set(count.get() + 1));
+                    }
+                }
+            }),
+        );
+        SCHEMA_READS.with(|count| count.set(0));
+        receipt(
+            &db,
+            &ReceiptIdentity {
+                request_id: "missing".into(),
+                agent: "agent".into(),
+                account_key: "acct".into(),
+                epoch: 1,
+            },
+        )
+        .unwrap();
+        assert_eq!(SCHEMA_READS.with(std::cell::Cell::get), 0);
+    }
 
     #[test]
     fn task_process_query_uses_status_index() {

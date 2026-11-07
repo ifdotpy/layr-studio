@@ -195,21 +195,8 @@ pub fn read(connection: &Connection, hash: &str) -> StoreResult<String> {
     }
 }
 
-/// True when the reference table exists. Production schemas always have it;
-/// a bare database, such as a test fixture, has no blobs yet.
-fn has_table(connection: &Connection) -> rusqlite::Result<bool> {
-    connection.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='runtime_item_blobs')",
-        [],
-        |row| row.get(0),
-    )
-}
-
 /// The blob that holds the full text of item `id`.
 pub fn reference(connection: &Connection, id: &str) -> rusqlite::Result<Option<TextBlobRef>> {
-    if !has_table(connection)? {
-        return Ok(None);
-    }
     connection
         .query_row_cached(
             "SELECT hash,size FROM runtime_item_blobs WHERE id=?1",
@@ -227,9 +214,6 @@ pub fn reference(connection: &Connection, id: &str) -> rusqlite::Result<Option<T
 /// Stop pointing item `id` at a blob. A writer calls it whenever it writes the
 /// item's full text, so a pointer never outlives the text it was made from.
 pub fn clear_reference(connection: &Connection, id: &str) -> rusqlite::Result<()> {
-    if !has_table(connection)? {
-        return Ok(());
-    }
     connection
         .execute_cached("DELETE FROM runtime_item_blobs WHERE id=?1", [id])
         .map(drop)

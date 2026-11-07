@@ -160,9 +160,6 @@ impl TranscriptRepository {
             next_phase.as_deref(),
             Some("active" | "dropping" | "complete")
         ) {
-            if !table_exists(connection, "runtime_search_next")? {
-                return Ok(Vec::new());
-            }
             let mut statement = connection.prepare_cached(
                 "SELECT m.id,m.agent,m.kind FROM runtime_search_next \
                  JOIN runtime_search_next_meta m ON m.search_rowid=runtime_search_next.rowid \
@@ -512,11 +509,7 @@ impl TranscriptRepository {
         {
             return Err(invalid_record("runtime_items", id));
         }
-        let has_fulltext = table_exists(transaction, "runtime_item_fulltext")?;
         let long = text_blobs::is_long(text);
-        if long && !has_fulltext {
-            return Err(invalid_record("runtime_item_fulltext", id));
-        }
         let owner = transaction
             .query_row_cached("SELECT agent FROM runtime_items WHERE id=?1", [id], |row| {
                 row.get::<_, String>(0)
@@ -544,7 +537,7 @@ impl TranscriptRepository {
                  ON CONFLICT(id) DO UPDATE SET body=excluded.body",
                 params![id, StoredTextValue::compressed(text)],
             )?;
-        } else if has_fulltext {
+        } else {
             transaction.execute_cached("DELETE FROM runtime_item_fulltext WHERE id=?1", [id])?;
         }
         if search.indexed {
@@ -597,14 +590,6 @@ impl TranscriptRepository {
         }
         Ok(None)
     }
-}
-
-fn table_exists(connection: &Connection, table: &str) -> TranscriptStoreResult<bool> {
-    Ok(connection.query_row_cached(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-        [table],
-        |row| row.get(0),
-    )?)
 }
 
 fn map_store_error(error: crate::StoreError) -> TranscriptStoreError {
@@ -684,9 +669,7 @@ fn index_search_item(
     if matches!(
         phase.as_str(),
         "building" | "active" | "dropping" | "complete"
-    ) && table_exists(transaction, "runtime_search_next")?
-        && table_exists(transaction, "runtime_search_next_meta")?
-    {
+    ) {
         let previous = transaction
             .query_row_cached(
                 "SELECT search_rowid FROM runtime_search_next_meta WHERE id=?1",
@@ -727,9 +710,7 @@ fn delete_search_item(transaction: &Transaction<'_>, id: &str) -> TranscriptStor
     if matches!(
         phase.as_str(),
         "building" | "active" | "dropping" | "complete"
-    ) && table_exists(transaction, "runtime_search_next")?
-        && table_exists(transaction, "runtime_search_next_meta")?
-    {
+    ) {
         let rowid = transaction
             .query_row_cached(
                 "SELECT search_rowid FROM runtime_search_next_meta WHERE id=?1",
@@ -1025,9 +1006,6 @@ pub(crate) fn hash_only_sync_entity_storage_error(
 }
 
 fn search_phase(connection: &Connection) -> TranscriptStoreResult<String> {
-    if !table_exists(connection, "runtime_search_rollout")? {
-        return Ok(String::new());
-    }
     Ok(connection
         .query_row_cached(
             "SELECT phase FROM runtime_search_rollout WHERE id=1",
@@ -1046,6 +1024,32 @@ mod tests {
     use studio_json::json;
 
     use super::{TranscriptRepository, TranscriptStoreError};
+
+    thread_local! {
+        static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn transcript_write_does_not_read_schema() {
+        let mut db = crate::test_canvas();
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Stmt(statement, _) = event {
+                    let sql = statement.sql().to_ascii_lowercase();
+                    if sql.contains("sqlite_master") || sql.contains("sqlite_schema") {
+                        SCHEMA_READS.with(|count| count.set(count.get() + 1));
+                    }
+                }
+            }),
+        );
+        SCHEMA_READS.with(|count| count.set(0));
+        let tx = db.transaction().unwrap();
+        let record = json!({"id":"agent:x","role":"user","text":"body"});
+        TranscriptRepository::put_item(&tx, "agent:x", "agent", &record, 1.0, "body", true)
+            .unwrap();
+        assert_eq!(SCHEMA_READS.with(std::cell::Cell::get), 0);
+    }
 
     #[test]
     #[ignore]
@@ -1092,8 +1096,7 @@ mod tests {
 
     #[test]
     fn transcript_writer_requires_complete_input_fields() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL)").unwrap();
+        let mut db = crate::test_canvas();
         let tx = db.transaction().unwrap();
         for field in ["id", "kind", "text", "truncated", "at", "assets"] {
             let mut input = json!({"id":"i","kind":"user","text":"body","truncated":false,"at":1.0,"assets":[]});
@@ -1251,8 +1254,7 @@ mod tests {
 
     #[test]
     fn writers_reject_invalid_inputs_and_checked_reads_enforce_shell() {
-        let mut db = Connection::open_in_memory().unwrap();
-        db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT NOT NULL,record TEXT NOT NULL,created REAL NOT NULL); CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL)").unwrap();
+        let mut db = crate::test_canvas();
         let tx = db.transaction().unwrap();
         let raw = json!({"id":"agent:x","role":"user","text":"body","inputs":[null]});
         assert!(
@@ -1378,7 +1380,7 @@ mod tests {
         let connection = Connection::open_in_memory().expect("in-memory database opens");
         connection
             .execute_batch(
-                "CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL);",
+                "CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY,body TEXT NOT NULL); CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY,hash TEXT NOT NULL,size INTEGER NOT NULL);",
             )
             .expect("fulltext table creates");
         connection
@@ -1527,7 +1529,8 @@ mod tests {
                 "CREATE TABLE runtime_items(id TEXT PRIMARY KEY, agent TEXT NOT NULL, \
                  record TEXT NOT NULL, created REAL NOT NULL);
                  CREATE TABLE runtime_item_fulltext(id TEXT PRIMARY KEY, body TEXT NOT NULL);
-                 CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL);",
+                 CREATE TABLE runtime_item_blobs(id TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL);
+                 CREATE TABLE runtime_search_rollout(id INTEGER PRIMARY KEY, phase TEXT NOT NULL);",
             )
             .expect("transcript tables create");
         connection
