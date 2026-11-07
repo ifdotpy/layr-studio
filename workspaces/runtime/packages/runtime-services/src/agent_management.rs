@@ -246,10 +246,27 @@ pub struct Decision {
     pub result: Value,
     pub writes: Vec<RowWrite>,
     pub cancel_pending: Vec<String>,
+    /// Stops of agents with no running turn: the queue moves to the new epoch.
+    #[serde(default)]
+    pub requeue: Vec<Requeue>,
     #[serde(skip)]
     pub effects: Vec<LifecycleEffect>,
     #[serde(skip)]
     pub(crate) archive_release: Option<ArchiveRelease>,
+}
+
+/// A stop of an agent with no running turn advances its epoch to fence the start,
+/// resume or recovery in progress, like a pause, but keeps the queue: the input of the
+/// interrupted start is cancelled and the rest of the pending input moves to the new
+/// epoch.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Requeue {
+    pub agent: String,
+    pub from_epoch: i64,
+    pub to_epoch: i64,
+    /// The input of the start that the stop interrupted.
+    pub interrupted: Vec<String>,
+    pub reason: String,
 }
 
 /// What the archive of a failed worker settles besides its record: input that
@@ -269,6 +286,7 @@ impl Decision {
             result,
             writes: Vec::new(),
             cancel_pending: Vec::new(),
+            requeue: Vec::new(),
             effects: Vec::new(),
             archive_release: None,
         }
@@ -1214,7 +1232,8 @@ struct StopOptions<'a> {
 /// A stop that only interrupts needs a running turn to end. An agent with a
 /// start in preparation (no turn yet), a scheduled resume, a remote route or a
 /// lost connection (a disconnect receipt and no turn in flight) has nothing to
-/// interrupt, so a stop pauses it as before.
+/// interrupt: the stop advances its epoch as a fence and keeps its queue
+/// ([`Requeue`]).
 fn needs_pause(agent: &Agent, effects: &[LifecycleEffectKind]) -> bool {
     let in_flight = agent.identity.in_flight == Some(true);
     (in_flight && !agent.flag("turnId"))
@@ -1350,9 +1369,17 @@ fn stop(
             receipt.insert("cancelledAtEpoch".to_owned(), json!(epoch));
             object.insert("cancelledPark".to_owned(), Value::Object(receipt));
         }
-        object.insert("autoWake".to_owned(), json!(false));
+        // A stop leaves the chat and its queue as they are; only pause and delete
+        // turn off automatic continuation.
+        let stop_only = !pause && !delete;
+        if !stop_only {
+            object.insert("autoWake".to_owned(), json!(false));
+        }
         object.insert("epoch".to_owned(), json!(epoch));
-        object.insert("status".to_owned(), json!("paused"));
+        object.insert(
+            "status".to_owned(),
+            json!(if stop_only { "interrupted" } else { "paused" }),
+        );
         object.insert("error".to_owned(), json!(reason.clone()));
         if let Some((request_id, control_epoch)) = remote_request
             && agent.id() == target
@@ -1406,7 +1433,23 @@ fn stop(
             ));
         }
         decision.write("runtime_agents", record);
-        decision.cancel_pending.push(agent.id().to_owned());
+        if stop_only {
+            decision.requeue.push(Requeue {
+                agent: agent.id().to_owned(),
+                from_epoch: agent.identity.epoch,
+                to_epoch: epoch,
+                interrupted: agent.record["startAttempt"]["events"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+                reason: reason.clone(),
+            });
+        } else {
+            decision.cancel_pending.push(agent.id().to_owned());
+        }
     }
     for request in snapshot.rows("approvals") {
         if !request
@@ -1886,10 +1929,12 @@ mod lifecycle_scope_parity_tests {
     }
 
     #[test]
-    fn stop_pauses_an_agent_whose_start_is_still_in_preparation() {
+    fn stop_fences_a_start_in_preparation_and_keeps_the_queue() {
         let mut lead = agent("lead", "lead", None, true);
         lead["status"] = json!("starting");
         lead["inFlight"] = json!(true);
+        lead["autoWake"] = json!(true);
+        lead["startAttempt"] = json!({"events":["started"]});
         let snapshot = ManagementSnapshot::from_records(Records {
             tables: BTreeMap::from([("runtime_agents".to_owned(), vec![lead])]),
         })
@@ -1906,8 +1951,22 @@ mod lifecycle_scope_parity_tests {
             10.0,
         )
         .expect("stop");
-        assert_eq!(stop.writes[0].record["epoch"], 2, "no turn to interrupt");
-        assert_eq!(stop.writes[0].record["status"], "paused");
+        assert_eq!(
+            stop.writes[0].record["epoch"], 2,
+            "the epoch fences the start"
+        );
+        assert_eq!(stop.writes[0].record["status"], "interrupted");
+        assert_eq!(
+            stop.writes[0].record["autoWake"], true,
+            "a stop is not a pause"
+        );
+        assert!(stop.cancel_pending.is_empty(), "the queue stays");
+        assert_eq!(stop.requeue.len(), 1);
+        assert_eq!(
+            (stop.requeue[0].from_epoch, stop.requeue[0].to_epoch),
+            (1, 2)
+        );
+        assert_eq!(stop.requeue[0].interrupted, ["started"]);
     }
 
     #[test]

@@ -906,8 +906,13 @@ consumes generated copies. Both backends use them:
 ## Stop and recovery
 
 **Stop agent** stops only the selected agent. **Stop team** stops its lead and all
-descendants. Stop disables automatic continuation, increments the agent generation,
-cancels pending events and requests interruption of active turns and commands.
+descendants. Stop interrupts the running turn and its commands and keeps automatic
+continuation, the generation and the queue; the turn ends as `interrupted` and the queue
+goes on. An agent with no running turn (a start in preparation, a scheduled resume, a
+remote worker route or a lost connection) gets a new generation as a fence: the input of
+the interrupted start is cancelled, the rest of the pending input moves to the new
+generation, and the agent is `interrupted`. **Pause** and delete turn off automatic
+continuation, increment the generation and cancel pending events.
 The interrupt goes to the provider process that runs the turn, also after Studio
 reconnects to that process. A Codex interrupt leaves the thread's background
 terminals running, so Stop and delete then send `thread/backgroundTerminals/clean`.
