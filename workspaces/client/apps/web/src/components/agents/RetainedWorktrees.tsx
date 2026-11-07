@@ -1,29 +1,28 @@
 import { WorkspaceMode } from "../../generated/api";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@mantine/core";
-import { errorText, type GetResult } from "../../api";
+import { errorText } from "../../api";
 import type { Agent } from "../../types";
-import {
-  useServerFileDialogs,
-  useServerSync,
-} from "../../servers/ServerServicesContext";
+import { useServerFileDialogs } from "../../servers/ServerServicesContext";
 import "./retained-worktrees.css";
 import { observer } from "mobx-react-lite";
 
-type RetainedItem =
-  GetResult<"/api/retained-worktrees">["retainedWorktrees"][number];
+import type { RetainedWorktreesData } from "../../generated/observableResources.ts";
+
+type RetainedItem = RetainedWorktreesData[number];
 
 /** The folder that cleanup kept for one worker, with its reason and path. */
 export const RetainedWorktree = observer(function RetainedWorktree({
   agent,
-  remoteWorker = agent.remoteWorker,
+  remoteWorker = "remoteWorker" in agent ? agent.remoteWorker : undefined,
 }: {
-  agent: Agent;
+  agent: Agent | RetainedItem;
   remoteWorker?: Agent["remoteWorker"];
 }) {
   const { canRevealPath, revealPath } = useServerFileDialogs();
   const [error, setError] = useState("");
-  const cleanup = agent.workspaceCleanupIntent;
+  const cleanup =
+    "cleanup" in agent ? agent.cleanup : agent.workspaceCleanupIntent;
   const canOpen = !remoteWorker && canRevealPath();
   if (!cleanup || !["not_sent", "unknown"].includes(cleanup.phase)) return null;
   return (
@@ -32,7 +31,9 @@ export const RetainedWorktree = observer(function RetainedWorktree({
         <strong>
           {cleanup.phase === "unknown"
             ? "Cleanup outcome unconfirmed"
-            : agent.worktree || agent.workspaceMode === WorkspaceMode.worktree
+            : "cleanup" in agent ||
+                agent.worktree ||
+                agent.workspaceMode === WorkspaceMode.worktree
               ? "Worktree retained"
               : "Workspace retained"}
         </strong>
@@ -62,51 +63,23 @@ export const RetainedWorktree = observer(function RetainedWorktree({
   );
 });
 
-/**
- * The retained folders of deleted workers of this team. Cleanup can end after a worker left
- * the live team list; their source-published entities survive until cleanup settles.
- */
-export function useRetainedWorktrees(
-  leadId: string | undefined,
-  members: Agent[],
-): RetainedItem[] {
-  const { subscribeStateProjection } = useServerSync();
-  const [items, setItems] = useState<RetainedItem[]>([]);
-  useEffect(() => {
-    setItems([]);
-    if (!leadId) return;
-    let source: unknown;
-    return subscribeStateProjection(
-      (snapshot) => {
-        if (!snapshot || source === snapshot.runtime.retainedWorktrees) return;
-        source = snapshot.runtime.retainedWorktrees;
-        setItems(
-          (Array.isArray(snapshot.runtime.retainedWorktrees)
-            ? snapshot.runtime.retainedWorktrees
-            : []
-          ).filter((item) => item.rootId === leadId),
-        );
-      },
-      () => {},
-    );
-  }, [leadId, subscribeStateProjection]);
-  return items.filter(
-    (item) => !members.some((member) => member.id === item.id),
-  );
+export function TeamRetainedWorktrees({
+  items,
+}: {
+  items: readonly RetainedItem[];
+}) {
+  return items.map((item) => <RetainedRow key={item.id} item={item} />);
 }
 
-export function TeamRetainedWorktrees({ items }: { items: RetainedItem[] }) {
-  return items.map((item) => (
-    <div key={item.id}>
+const RetainedRow = observer(function RetainedRow({
+  item,
+}: {
+  item: RetainedItem;
+}) {
+  return (
+    <div>
       <p>{item.name || item.id}</p>
-      <RetainedWorktree
-        agent={{
-          id: item.id,
-          name: item.name,
-          worktree: true,
-          workspaceCleanupIntent: item.cleanup,
-        }}
-      />
+      <RetainedWorktree agent={item} />
     </div>
-  ));
-}
+  );
+});

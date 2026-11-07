@@ -859,6 +859,8 @@ export default observer(function App({ active = true }: { active?: boolean }) {
     workerQuery,
     workerFilter,
     readState.pendingReadTargets,
+    // Interim discovery until the global retained projection migrates.
+    !!data?.runtime.retainedWorktrees?.some((row) => row.rootId === lead?.id),
   );
   const team = teamArea.view.members;
   const workers = teamArea.view.workers;

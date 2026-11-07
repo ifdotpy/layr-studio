@@ -1,6 +1,8 @@
 import type { ReadState } from "../../status/operationalStatus.ts";
 import { observer } from "mobx-react-lite";
-import { useRetainedWorktrees } from "./RetainedWorktrees.tsx";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { agentId } from "../../generated/observableResources.ts";
+import { resourceData } from "../../store/runtime.ts";
 import type { ReactNode } from "react";
 import { createArea } from "../area.ts";
 import type { PreviewTarget } from "../FilePreview.tsx";
@@ -27,19 +29,27 @@ export const [TeamProvider, useTeam] = createArea<
   TeamControls & TeamActions & ReturnType<typeof useTeamArea>
 >("Team");
 
-/** One team area owns both generated membership and the remaining legacy cleanup feed. */
+/** The team root resolves resources; observed leaves read their native models. */
 export function useTeamArea(
   leadId: string | undefined,
   query: string,
   filter: string,
   pendingReads?: ReadonlyMap<string, ReadState>,
+  hasRetained = false,
 ) {
   const view = useTeamView(leadId, query, filter, pendingReads);
-  const retainedWorktrees = useRetainedWorktrees(leadId, view.workers);
+  const store = useServerStore();
+  const retained = leadId
+    ? store.retainedWorktrees(agentId(leadId))
+    : undefined;
+  const retainedWorktrees = () =>
+    (retained ? (resourceData(retained.current) ?? []) : []).filter(
+      (item) => !view.workers.some((worker) => worker.id === item.id),
+    );
   return {
     view,
     retainedWorktrees,
-    hasTeam: () => view.workers.length > 0 || retainedWorktrees.length > 0,
+    hasTeam: () => view.workers.length > 0 || hasRetained,
   };
 }
 

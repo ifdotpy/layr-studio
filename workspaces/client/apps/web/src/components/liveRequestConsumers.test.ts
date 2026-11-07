@@ -1,3 +1,4 @@
+import { createRetainedWorktreesMirror } from "../generated/observableResources";
 import { requestFixture } from "./questions/requestFixtures";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
@@ -67,7 +68,7 @@ vi.mock("../servers/ServerServicesContext", () => ({
     },
   }),
 }));
-import { useRetainedWorktrees } from "./agents/RetainedWorktrees";
+import { useTeamArea } from "./agents/TeamPanelContext";
 import { useQuestionCards } from "./questions/useQuestionCards";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 
@@ -85,26 +86,28 @@ afterEach(() => {
   h.get.mockClear();
 });
 
-it("retained folders follow source entity changes without cost-triggered HTTP reads", () => {
-  const lead = { id: "lead" };
-  const read = () => useRetainedWorktrees(lead.id, []);
-  render(read);
+it("retained folders follow generated delivery without HTTP reads", (ctx) => {
+  const retained = createRetainedWorktreesMirror();
+  const fixture = requestFixture([]);
+  h.questions = fixture;
+  ctx.onTestFinished(() => fixture.store.dispose());
+  fixture.store.retainedWorktrees = () => ({
+    get current() {
+      return { status: "live" as const, data: retained.current };
+    },
+  });
+  const area = render(() => useTeamArea("lead", "", "all"));
+  retained.apply([
+    {
+      id: "worker",
+      rootId: "lead",
+      name: "Deleted worker",
+      cleanup: { phase: "unknown", path: "/kept", reason: null },
+    },
+  ]);
+  expect(area.retainedWorktrees().map((row) => row.id)).toEqual(["worker"]);
+  expect(h.projections.size).toBe(0);
   expect(h.get).not.toHaveBeenCalled();
-  expect(h.projections.size).toBe(1);
-  for (const accept of h.projections)
-    accept({
-      runtime: {
-        retainedWorktrees: [
-          {
-            id: "worker",
-            rootId: "lead",
-            cleanup: { phase: "unknown", path: "/kept" },
-          },
-          { id: "other", rootId: "other-team", cleanup: { phase: "unknown" } },
-        ],
-      },
-    } as unknown as Snapshot);
-  expect(render(read).map((row) => row.id)).toEqual(["worker"]);
 });
 
 it("question history follows projected answers without a request-triggered HTTP read", () => {

@@ -35,7 +35,7 @@ function Card({ agent, selected }: { agent: SidebarAgent; selected: boolean }) {
       value={{
         ...actions,
         view,
-        retainedWorktrees: [],
+        retainedWorktrees: () => [],
         hasTeam: () => true,
         opened: selected ? agent.id : null,
         workerQuery: "",

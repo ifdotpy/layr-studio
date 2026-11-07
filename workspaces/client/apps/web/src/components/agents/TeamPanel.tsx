@@ -56,7 +56,7 @@ export const TeamPanelView = observer(function TeamPanelView() {
           </ActionIcon>
         </div>
         {lead && <LeadReport agent={lead} />}
-        <TeamRetainedWorktrees items={retainedWorktrees} />
+        <TeamRetainedWorktrees items={retainedWorktrees()} />
         <TeamSummary />
         {/* The lead link is only useful from a worker chat. */}
         {lead && opened !== lead.id && (

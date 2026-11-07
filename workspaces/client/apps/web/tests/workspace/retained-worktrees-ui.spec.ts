@@ -36,38 +36,9 @@ test("retained folders of live and deleted workers show at both widths", async (
     ],
   });
   const errors: string[] = [];
-  let cleanupComplete = false;
   page.on("pageerror", (error) => errors.push(error.message));
   try {
     await server.listen();
-    await page.route("**/api/retained-worktrees?*", (route) =>
-      route.fulfill({
-        json: {
-          rootId: "lead",
-          retainedWorktrees: [
-            // A live worker shows on its own card, not twice.
-            {
-              id: "worker",
-              name: "Live worker",
-              cleanup: { phase: "not_sent", reason: null, path: "/work/live" },
-            },
-            ...(cleanupComplete
-              ? [
-                  {
-                    id: "deleted-worker",
-                    name: "Deleted worker",
-                    cleanup: {
-                      phase: "unknown",
-                      reason: null,
-                      path: "/Users/example/Projects/studio/.worktrees/codex-agents/deleted-worker",
-                    },
-                  },
-                ]
-              : []),
-          ],
-        },
-      }),
-    );
     await page.setViewportSize({ width: 320, height: 900 });
     await page.goto(server.resolvedUrls!.local[0]! + "check");
     await expect(
@@ -77,7 +48,6 @@ test("retained folders of live and deleted workers show at both widths", async (
     await expect(page.getByText("Deleted worker", { exact: true })).toHaveCount(
       0,
     );
-    cleanupComplete = true;
     await page.evaluate(() => window.refreshRetained());
     for (const text of ["Deleted worker", "Cleanup outcome unconfirmed"])
       await expect(page.getByText(text, { exact: true })).toBeVisible();

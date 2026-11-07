@@ -6,8 +6,9 @@ import "@mantine/core/styles.css";
 import {
   RetainedWorktree,
   TeamRetainedWorktrees,
-  useRetainedWorktrees,
 } from "../../src/components/agents/RetainedWorktrees.tsx";
+import { observer } from "mobx-react-lite";
+import { useTeamArea } from "../../src/components/agents/TeamPanelContext.tsx";
 const worker: Agent = {
   id: "worker",
   worktree: true,
@@ -20,19 +21,15 @@ const worker: Agent = {
     path: "/Users/example/Projects/studio/.worktrees/codex-agents/worker/vendor/documentation",
   },
 };
-const lead: Agent = {
-  id: "lead",
-  isLead: true,
-};
-function Team() {
-  const items = useRetainedWorktrees(lead?.rootId || lead?.id, [worker]);
+const Team = observer(function Team() {
+  const area = useTeamArea("lead", "", "all");
   return (
     <>
-      <TeamRetainedWorktrees items={items} />
+      <TeamRetainedWorktrees items={area.retainedWorktrees()} />
       <RetainedWorktree agent={worker} />
     </>
   );
-}
+});
 createRoot(document.getElementById("root")!).render(
   <MantineProvider>
     <main

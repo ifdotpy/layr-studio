@@ -26,9 +26,11 @@ export default function TeamFixture({
   leadId,
   actions,
   pendingReads,
+  hasRetained = false,
   children,
   ...controls
 }: Partial<TeamControls> & {
+  hasRetained?: boolean;
   leadId?: string | undefined;
   actions?: TeamActions;
   pendingReads?: ReadonlyMap<string, ReadState>;
@@ -39,6 +41,7 @@ export default function TeamFixture({
     controls.workerQuery || "",
     controls.workerFilter || "all",
     pendingReads,
+    hasRetained,
   );
   return (
     <TeamProvider value={{ ...defaults, ...controls, ...area, ...actions }}>
