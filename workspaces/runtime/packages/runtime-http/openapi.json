@@ -16410,6 +16410,7 @@
         "description": "The answer a person or policy gives. Its kind must fit the request kind.",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "decision": {
                 "$ref": "#/components/schemas/Decision"
@@ -16426,6 +16427,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "answers": {
                 "items": {
@@ -16445,6 +16447,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "action": {
                 "$ref": "#/components/schemas/ElicitationAction"
@@ -16736,6 +16739,7 @@
         "type": "object"
       },
       "Approval": {
+        "additionalProperties": false,
         "description": "A row. `fire_at` is the durable expiry timer of a pending approval.",
         "properties": {
           "agent": {
@@ -16841,6 +16845,7 @@
       "ApprovalState": {
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "pending",
@@ -16853,6 +16858,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "The answer is stored and its delivery command exists.",
             "properties": {
               "answer": {
@@ -16874,6 +16880,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "answer": {
                 "$ref": "#/components/schemas/Answer"
@@ -16898,6 +16905,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "Delivery was lost. Nobody knows whether the provider got the answer.",
             "properties": {
               "answer": {
@@ -16919,6 +16927,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "at": {
                 "$ref": "#/components/schemas/Timestamp"
@@ -17417,6 +17426,7 @@
       "BackgroundTaskView": {
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "source": {
                 "const": "process",
@@ -17433,6 +17443,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "source": {
                 "const": "task",
@@ -26325,6 +26336,7 @@
         "type": "object"
       },
       "Deferral": {
+        "additionalProperties": false,
         "description": "The user moved the question aside. `active` is false after it came back.",
         "properties": {
           "active": {
@@ -26434,6 +26446,7 @@
         "type": "object"
       },
       "Delivery": {
+        "additionalProperties": false,
         "description": "What the server needs to send the answer back to the provider.",
         "properties": {
           "account": {
@@ -26866,6 +26879,7 @@
         "type": "object"
       },
       "Detail": {
+        "additionalProperties": false,
         "description": "Display content and provider fields that no logic reads by name.",
         "properties": {
           "answer_error": {
@@ -30416,6 +30430,7 @@
         "type": "string"
       },
       "Hidden": {
+        "additionalProperties": false,
         "description": "History stays: a hidden row is not shown in the default list.",
         "properties": {
           "at": {
@@ -37924,6 +37939,7 @@
         "description": "Who acts. Local copy of the permissions work (`feat/principal-permissions`);\nthe second change to land unifies the two.",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "owner",
@@ -37936,6 +37952,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "grant": {
                 "$ref": "#/components/schemas/Grant"
@@ -37956,6 +37973,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "peer",
@@ -37972,6 +37990,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "epoch": {
                 "format": "uint64",
@@ -37994,6 +38013,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "federated",
@@ -38010,6 +38030,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "Automatic answers, such as full access mode.",
             "properties": {
               "kind": {
@@ -41616,6 +41637,7 @@
         "type": "object"
       },
       "Question": {
+        "additionalProperties": false,
         "properties": {
           "header": {
             "type": [
@@ -41664,6 +41686,7 @@
         "type": "object"
       },
       "QuestionAnswer": {
+        "additionalProperties": false,
         "properties": {
           "answer": {
             "items": {
@@ -41886,6 +41909,7 @@
         "type": "object"
       },
       "QuestionOption": {
+        "additionalProperties": false,
         "properties": {
           "description": {
             "type": [
@@ -43463,6 +43487,7 @@
         "description": "Fixed at creation. Decides which answers are allowed.",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "command": {
                 "type": "string"
@@ -43490,6 +43515,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "files": {
                 "items": {
@@ -43520,6 +43546,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "permissions",
@@ -43539,6 +43566,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "elicitation",
@@ -43555,6 +43583,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "question",
@@ -43574,6 +43603,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "Claude tool permission.",
             "properties": {
               "input": true,
@@ -43593,6 +43623,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "Today `agent/asyncQuestion`.",
             "properties": {
               "kind": {
@@ -43613,6 +43644,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "description": "Today `monitor/approve`.",
             "properties": {
               "command": {
@@ -44578,6 +44610,7 @@
             "session-cost": "#/components/schemas/SessionCostResource",
             "state": "#/components/schemas/StateResource",
             "task": "#/components/schemas/TaskResource",
+            "taskDetail": "#/components/schemas/TaskDetailResource",
             "tasks": "#/components/schemas/TasksResource",
             "terminal": "#/components/schemas/TerminalResource",
             "terminal-output": "#/components/schemas/TerminalOutputResource",
@@ -44677,6 +44710,9 @@
           },
           {
             "$ref": "#/components/schemas/NativeLayrSettingsResource"
+          },
+          {
+            "$ref": "#/components/schemas/TaskDetailResource"
           }
         ],
         "title": "ResourceRef"
@@ -46574,6 +46610,7 @@
         "description": "JSON-RPC id of a provider request. The reply must use the same form.",
         "oneOf": [
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "number",
@@ -46591,6 +46628,7 @@
             "type": "object"
           },
           {
+            "additionalProperties": false,
             "properties": {
               "kind": {
                 "const": "text",
@@ -52625,6 +52663,9 @@
           "task": {
             "$ref": "#/components/schemas/TaskEntityDto"
           },
+          "taskDetail": {
+            "$ref": "#/components/schemas/TaskDetailResponse"
+          },
           "tasks": {
             "items": {
               "$ref": "#/components/schemas/TaskEntityDto"
@@ -52694,7 +52735,8 @@
           "work",
           "complaint",
           "terminal-output",
-          "native-layr-settings"
+          "native-layr-settings",
+          "taskDetail"
         ],
         "type": "object"
       },
@@ -53048,6 +53090,7 @@
         "type": "object"
       },
       "Supervisor": {
+        "additionalProperties": false,
         "description": "The provider process generation that owns a request, under the supervisor.",
         "properties": {
           "generation": {
@@ -54187,7 +54230,8 @@
                   "workResult",
                   "workDecision",
                   "workRelease",
-                  "agentTail"
+                  "agentTail",
+                  "taskDetail"
                 ],
                 "type": "string"
               },
@@ -54516,6 +54560,27 @@
               "value"
             ],
             "type": "object"
+          },
+          {
+            "properties": {
+              "collection": {
+                "const": "taskDetail",
+                "type": "string"
+              },
+              "op": {
+                "const": "upsert",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/TaskDetailResponse"
+              }
+            },
+            "required": [
+              "op",
+              "collection",
+              "value"
+            ],
+            "type": "object"
           }
         ],
         "properties": {
@@ -54580,6 +54645,7 @@
             "sessionCost": "#/components/schemas/SyncSessionCostEntityPayload",
             "studioError": "#/components/schemas/SyncStudioErrorEntityPayload",
             "task": "#/components/schemas/SyncTaskEntityPayload",
+            "taskDetail": "#/components/schemas/SyncTaskDetailEntityPayload",
             "terminal": "#/components/schemas/SyncTerminalEntityPayload",
             "uiPreferences": "#/components/schemas/SyncUiPreferencesEntityPayload",
             "work": "#/components/schemas/SyncWorkEntityPayload",
@@ -54699,6 +54765,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncAgentTailEntityPayload"
+          },
+          {
+            "$ref": "#/components/schemas/SyncTaskDetailEntityPayload"
           }
         ]
       },
@@ -55472,6 +55541,27 @@
         "title": "SyncSubscriptionRequest",
         "type": "object"
       },
+      "SyncTaskDetailEntityPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "const": "taskDetail",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/TaskDetailResponse"
+          }
+        },
+        "required": [
+          "collection",
+          "id",
+          "value"
+        ],
+        "type": "object"
+      },
       "SyncTaskEntityPayload": {
         "additionalProperties": false,
         "properties": {
@@ -55751,6 +55841,34 @@
         ],
         "title": "TaskCursor",
         "type": "object"
+      },
+      "TaskDetailResource": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "const": "taskDetail",
+            "type": "string"
+          },
+          "taskId": {
+            "minLength": 1,
+            "title": "Taskid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "taskId"
+        ],
+        "title": "TaskDetailResource",
+        "type": "object",
+        "x-studio-entity-scope": {
+          "agentField": null,
+          "collections": [
+            "taskDetail"
+          ],
+          "idField": "taskId",
+          "includeTeamMembers": true
+        }
       },
       "TaskDetailResponse": {
         "additionalProperties": false,
@@ -56556,6 +56674,7 @@
         "type": "object"
       },
       "TaskProjection": {
+        "additionalProperties": false,
         "description": "Bounded public task fields, serialized directly from the stored task.",
         "properties": {
           "agent": {

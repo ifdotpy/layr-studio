@@ -146,6 +146,7 @@ async fn transcript_initial(
         | ResourceRef::SessionCostResource(_)
         | ResourceRef::StateResource(_)
         | ResourceRef::TaskResource(_)
+        | ResourceRef::TaskDetailResource(_)
         | ResourceRef::TasksResource(_)
         | ResourceRef::TerminalResource(_)
         | ResourceRef::TerminalsResource(_)
@@ -272,6 +273,7 @@ async fn view_value(
         | ResourceRef::SessionCostResource(_)
         | ResourceRef::StateResource(_)
         | ResourceRef::TaskResource(_)
+        | ResourceRef::TaskDetailResource(_)
         | ResourceRef::TasksResource(_)
         | ResourceRef::TerminalResource(_)
         | ResourceRef::TerminalsResource(_)
@@ -450,6 +452,7 @@ resource_handlers! {
     SessionCostResourceHandler => SessionCostResource, entity_initial, Cache;
     StateResourceHandler => StateResource, entity_initial, Cache;
     TaskResourceHandler => TaskResource, entity_initial, Cache;
+    TaskDetailResourceHandler => TaskDetailResource, entity_initial, Cache;
     TasksResourceHandler => TasksResource, entity_initial, NoCache;
     // A terminal detail overlaps the terminal list; only the list owns a cache.
     TerminalResourceHandler => TerminalResource, entity_initial, NoCache;
@@ -660,6 +663,7 @@ async fn content_fingerprint(state: HttpState, resource: ResourceRef) -> Option<
         | ResourceRef::RoomResource(_)
         | ResourceRef::StateResource(_)
         | ResourceRef::TaskResource(_)
+        | ResourceRef::TaskDetailResource(_)
         | ResourceRef::TasksResource(_)
         | ResourceRef::TerminalResource(_)
         | ResourceRef::TranscriptsResource(_)

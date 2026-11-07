@@ -174,6 +174,7 @@ pub struct ProcessView {
 /// Bounded public task fields, serialized directly from the stored task.
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
 pub struct TaskProjection {
     pub display: BackgroundTaskDisplay,
     pub id: String,
@@ -213,6 +214,7 @@ pub struct TaskProjection {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "source", content = "value", rename_all = "camelCase")]
+#[schemars(deny_unknown_fields)]
 pub enum BackgroundTaskView {
     Process(ProcessView),
     Task(TaskProjection),
@@ -625,6 +627,37 @@ pub(crate) fn apply_background_views(document: &mut Value) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn activity_schema_closes_without_changing_decode_or_direct_wire_bytes() {
+        // Golden direct serializer output from the pre-closure process/task owners.
+        let display = r#"{"kind":"command","kindLabel":"command","title":"Command","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}"#;
+        let task = format!(
+            r#"{{"source":"task","value":{{"display":{display},"id":"same","agent":"lead","created":1,"kind":"command","status":"running","turnId":"turn","name":"command","tail":"output"}}}}"#
+        );
+        let mut corpus = vec![task.clone()];
+        for source in ["monitor", "codex_task", "claude_task"] {
+            corpus.push(format!(r#"{{"source":"process","value":{{"id":"same","key":"key","generation":"g","agent":"lead","accountKey":"account","epoch":1,"source":"{source}","status":"running","cancelRequested":false,"created":1.0,"name":"command","turnId":"turn","command":null,"cwd":null,"log":null,"tail":"output","error":null,"stdinError":null,"bytes":6,"outputTruncated":false,"outputPatterns":[],"display":{display}}}}}"#));
+        }
+        for expected in corpus {
+            let row: BackgroundTaskView =
+                studio_json::from_str(&expected).expect("existing activity");
+            assert_eq!(studio_json::to_vec(&row).unwrap(), expected.as_bytes());
+        }
+        let mut extended: Value = studio_json::from_str(&task).unwrap();
+        extended["olderEnvelope"] = json!(true);
+        extended["value"]["providerExtension"] = json!({"opaque":[1,null]});
+        let decoded: BackgroundTaskView =
+            studio_json::from_value(extended).expect("unknown fields remain tolerated");
+        assert_eq!(studio_json::to_vec(&decoded).unwrap(), task.as_bytes());
+        let schemas = schemas()
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(schemas["TaskProjection"]["additionalProperties"], false);
+        for variant in schemas["BackgroundTaskView"]["oneOf"].as_array().unwrap() {
+            assert_eq!(variant["additionalProperties"], false);
+        }
+    }
+
     #[test]
     fn background_display_rejects_removed_boolean_shape() {
         let old = r#"{"kind":"command","kindLabel":"command","title":"Command","active":true,"indicator":"working","label":"running","inBackgroundList":false,"canStop":true,"canInput":false,"canResize":true,"canReadOutput":true,"canApprove":false}"#;

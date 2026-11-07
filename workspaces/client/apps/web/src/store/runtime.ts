@@ -11,6 +11,7 @@ import { observeInterest } from "./interest.ts";
 
 export type ResourceStatus<T> =
   | { readonly status: "loading" }
+  | { readonly status: "absent" }
   | { readonly status: "error"; readonly error: SubscriptionError }
   | { readonly status: "live"; readonly data: T }
   | {
@@ -53,6 +54,7 @@ type Subscriptions = Pick<
  * identities; this map retains only their lifecycle, never erased model values. */
 export function createObservableResourceRuntime(subscriptions: Subscriptions) {
   type Entry = {
+    resourceKey: string;
     observed: boolean;
     keyed: boolean;
     dispose(): void;
@@ -79,7 +81,12 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
   const pending = new Set<() => void>();
   let disposed = false;
   const stopEvictions = subscriptions.onEvict((ref) => {
-    entries.get(subscriptionKey(ref))?.evict();
+    const resourceKey = subscriptionKey(ref);
+    // Notification can touch/reinsert observed keyed entries; collect before eviction.
+    const projections = [...entries.values()].filter(
+      (entry) => entry.resourceKey === resourceKey,
+    );
+    for (const entry of projections) entry.evict();
   });
   const schedule = (apply: () => void) => {
     const scheduled = pending.size > 0;
@@ -119,19 +126,24 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
           if (replacement !== undefined) data = replacement;
         }
       }
+      // A live subscription with no selected row is confirmed absence, not loading.
+      if (snapshot.status === "live" && snapshot.data === undefined)
+        data = undefined;
       const next =
-        snapshot.error !== null && data === undefined
-          ? { status: "error" as const, error: snapshot.error }
-          : data === undefined
-            ? { status: "loading" as const }
-            : {
-                status:
-                  snapshot.status === "live"
-                    ? ("live" as const)
-                    : ("stale" as const),
-                data: data as DeepReadonly<typeof data>,
-                ...(snapshot.error !== null ? { error: snapshot.error } : {}),
-              };
+        snapshot.status === "live" && snapshot.data === undefined
+          ? { status: "absent" as const }
+          : snapshot.error !== null && data === undefined
+            ? { status: "error" as const, error: snapshot.error }
+            : data === undefined
+              ? { status: "loading" as const }
+              : {
+                  status:
+                    snapshot.status === "live"
+                      ? ("live" as const)
+                      : ("stale" as const),
+                  data: data as DeepReadonly<typeof data>,
+                  ...(snapshot.error !== null ? { error: snapshot.error } : {}),
+                };
       if (
         current.status === next.status &&
         (!("data" in next) ||
@@ -172,6 +184,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       interest.unobserved,
     );
     const entry: Entry = {
+      resourceKey: subscriptionKey(ref),
       observed: false,
       keyed: remove !== undefined,
       dispose: interest.dispose,

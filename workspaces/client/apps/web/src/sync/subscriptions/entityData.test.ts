@@ -1,3 +1,8 @@
+import { autorun } from "mobx";
+import { createServerStore } from "../../store/server.ts";
+import { taskId } from "../../generated/observableResources.ts";
+import { createSubscriptions } from "./module.ts";
+import type { ResourceVersion } from "./contracts.ts";
 import { expect, it, vi } from "vitest";
 import { createEntityDataObserver } from "./entityData";
 import type { createSyncClient } from "../client";
@@ -191,4 +196,89 @@ it("clears a retained detail after its authoritative local row is removed", asyn
   expect(accept).toHaveBeenLastCalledWith(undefined);
   stop();
   expect(unsubscribe).toHaveBeenCalledOnce();
+});
+
+it("clears confirmed missing task detail through the real entity observer and facade", async () => {
+  let emit!: (rows: { toJSON(): unknown }[]) => void;
+  const observe = createEntityDataObserver((async () => ({
+    db: {
+      projections: {
+        find: () => ({
+          $: {
+            subscribe: ({ next }: { next: typeof emit }) => {
+              emit = next;
+              return { unsubscribe() {} };
+            },
+          },
+        }),
+      },
+    },
+  })) as ReturnType<typeof createSyncClient>["syncDatabase"]);
+  let changed!: (version?: ResourceVersion) => void;
+  const subscriptions = createSubscriptions(
+    {
+      watchResourceChanges: (_ref, accept) => {
+        changed = accept;
+        return () => {};
+      },
+      watchResourceConnection: (accept) => {
+        accept("live", "open", {});
+        return () => {};
+      },
+    },
+    observe,
+  );
+  const store = createServerStore(subscriptions);
+  const slot = store.taskDetail(taskId("chosen"));
+  const stop = autorun(() => slot.current);
+  try {
+    expect(slot.current.status).toBe("loading");
+    await vi.waitFor(() => expect(emit).toBeTypeOf("function"));
+    const row = (seq: number) => ({
+      toJSON: () => ({
+        id: "entity:taskDetail:chosen",
+        seq,
+        entity: {
+          collection: "taskDetail",
+          id: "chosen",
+          value: {
+            id: "chosen",
+            agent: "lead",
+            created: 1,
+            kind: "tool",
+            status: "completed",
+            arguments: "private input",
+          },
+        },
+      }),
+    });
+    changed({
+      epoch: "test",
+      revision: 1,
+      cursor: { workspaceId: "test", seq: 1 },
+      replyKind: "snapshot",
+    });
+    emit([row(1)]);
+    await vi.waitFor(() => expect(slot.current.status).toBe("live"));
+    const before = slot.current;
+    expect(before.status === "live" && before.data.arguments).toBe(
+      "private input",
+    );
+    emit([]);
+    await vi.waitFor(() => expect(slot.current.status).toBe("absent"));
+    expect("data" in slot.current).toBe(false);
+    emit([row(3)]);
+    await vi.waitFor(() => expect(slot.current.status).toBe("live"));
+    const restored = slot.current;
+    expect(restored.status === "live" && restored.data.arguments).toBe(
+      "private input",
+    );
+    expect(
+      restored.status === "live" && before.status === "live" && restored.data,
+    ).not.toBe(before.status === "live" && before.data);
+  } finally {
+    stop();
+    store.dispose();
+    subscriptions.dispose();
+  }
 });

@@ -67,6 +67,12 @@ export const SUBSCRIPTION_ENTITY_SCOPES = {
     agentField: null,
     includeTeamMembers: true,
   },
+  taskDetail: {
+    collections: ["taskDetail"],
+    idField: "taskId",
+    agentField: null,
+    includeTeamMembers: true,
+  },
   tasks: {
     collections: ["task"],
     idField: null,

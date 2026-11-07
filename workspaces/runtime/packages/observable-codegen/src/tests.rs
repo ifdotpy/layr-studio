@@ -35,6 +35,7 @@ fn models() -> Vec<ObservableModel> {
     vec![ObservableModel {
         schema: "Row".into(),
         identity: Some("id".into()),
+        keyed_by: vec![],
         ordered_by: Some("sortKey".into()),
         opaque: vec!["opaque".into()],
         tracked_nested: None,
@@ -450,4 +451,58 @@ fn declared_wire_fields_are_separate_from_runtime_facades() {
     assert!(!fields.contains("ResourceSlot"));
     let facade = render(&fixture(), &metadata, &resources()).expect("resource facades");
     assert!(!facade.contains("export type RowFields"));
+}
+
+#[test]
+fn keyed_unions_validate_required_string_identity_paths() {
+    let mut document = fixture();
+    document["components"]["schemas"]["Entry"] = json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"required":["source","value"],"properties":{"source":{"type":"string","const":"process"},"value":{"$ref":"#/components/schemas/IdentityValue"}}},
+        {"type":"object","additionalProperties":false,"required":["source","value"],"properties":{"source":{"type":"string","const":"task"},"value":{"$ref":"#/components/schemas/IdentityValue"}}}
+    ]});
+    document["components"]["schemas"]["IdentityValue"] = json!({"type":"object","additionalProperties":false,"required":["id"],"properties":{"id":{"type":"string"}}});
+    document["components"]["schemas"]["List"]["properties"]["rows"]["items"] =
+        json!({"$ref":"#/components/schemas/Entry"});
+    let metadata = vec![ObservableModel::named("Entry").keyed_by(&["source", "value.id"])];
+    let source = render(&document, &metadata, &resources()).expect("required string paths");
+    assert!(source.contains("reconcileEntry"));
+    assert!(source.contains("JSON.stringify([item.source, item.value.id])"));
+    for invalid in [json!({"type":"integer"}), json!({"type":["string","null"]})] {
+        document["components"]["schemas"]["IdentityValue"]["properties"]["id"] = invalid;
+        assert_eq!(
+            render(&document, &metadata, &resources()).unwrap_err().kind,
+            UnsupportedShape::Identity
+        );
+    }
+    document["components"]["schemas"]["IdentityValue"]["properties"]["id"] =
+        json!({"type":"string"});
+    document["components"]["schemas"]["IdentityValue"]["required"] = json!([]);
+    assert_eq!(
+        render(&document, &metadata, &resources()).unwrap_err().kind,
+        UnsupportedShape::Identity
+    );
+}
+
+#[test]
+fn union_opaque_fields_follow_declared_variant_properties() {
+    let mut document = fixture();
+    document["components"]["schemas"]["List"]["properties"]["rows"]["items"] = json!({"type":"object","additionalProperties":false,"required":["choice"],"properties":{"choice":{"$ref":"#/components/schemas/Choice"}}});
+    document["components"]["schemas"]["Choice"] = json!({"oneOf":[
+        {"type":"object","additionalProperties":false,"required":["kind","input"],"properties":{"kind":{"type":"string","const":"tool"},"input":true}},
+        {"type":"object","additionalProperties":false,"required":["kind","text"],"properties":{"kind":{"type":"string","const":"text"},"text":{"type":"string"}}}
+    ]});
+    let source = render(
+        &document,
+        &[ObservableModel::named("Choice").opaque("input")],
+        &resources(),
+    )
+    .expect("explicit frozen provider boundary");
+    assert!(source.contains("freezePlain(structuredClone(dto.input))"));
+    let error = render(
+        &document,
+        &[ObservableModel::named("Choice").opaque("unknown")],
+        &resources(),
+    )
+    .unwrap_err();
+    assert_eq!(error.kind, UnsupportedShape::UnknownField);
 }

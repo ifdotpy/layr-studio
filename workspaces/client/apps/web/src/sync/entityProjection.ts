@@ -50,6 +50,7 @@ const ENTITY_COLLECTIONS = [
   "agentDetail",
   "room",
   "task",
+  "taskDetail",
   "monitor",
   "complaint",
   "request",
@@ -137,6 +138,7 @@ function emptyEntityValues(): EntityValues {
     agentDetail: new Map(),
     room: new Map<string, RoomEntityDto>(),
     task: new Map<string, TaskEntityDto>(),
+    taskDetail: new Map(),
     monitor: new Map<string, MonitorEntityDto>(),
     complaint: new Map<string, ComplaintEntityDto>(),
     request: new Map<string, Approval>(),
@@ -611,6 +613,9 @@ export function applyEntityChanges(
       case "workspace":
         state.values.workspace.set(payload.id, payload.value);
         break;
+      case "taskDetail":
+        // Full inputs belong only to the scoped generated facade.
+        continue;
       case "agentTail":
         // Tails are consumed by the generated state facade, never merged into detail.
         continue;

@@ -15,7 +15,11 @@ function readonlyFacade(store: ObservableResources) {
   // @ts-expect-error A component cannot replace a resource's state.
   slot.current = { status: "loading" };
   const current = slot.current;
-  if (current.status === "loading" || current.status === "error") {
+  if (
+    current.status === "loading" ||
+    current.status === "error" ||
+    current.status === "absent"
+  ) {
     // @ts-expect-error Data is unreachable before a baseline or without cached data.
     void current.data;
     return;

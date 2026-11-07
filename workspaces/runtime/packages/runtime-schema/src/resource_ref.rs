@@ -140,6 +140,8 @@ pub enum ResourceRef {
     StateResource(EmptyResource),
     #[serde(rename = "task")]
     TaskResource(TaskResource),
+    #[serde(rename = "taskDetail")]
+    TaskDetailResource(TaskResource),
     #[serde(rename = "tasks")]
     TasksResource(OptionalAgentResource),
     #[serde(rename = "terminal")]
@@ -210,8 +212,12 @@ impl Serialize for ResourceRef {
             }
             Self::SessionCostResource(v) => agent!(v, "session-cost"),
             Self::StateResource(_) => kind!("state"),
-            Self::TaskResource(v) => {
-                kind!("task");
+            Self::TaskResource(v) | Self::TaskDetailResource(v) => {
+                kind!(if matches!(self, Self::TaskDetailResource(_)) {
+                    "taskDetail"
+                } else {
+                    "task"
+                });
                 map.serialize_entry("taskId", &v.task_id)?;
             }
             Self::TasksResource(v) => {
@@ -265,10 +271,89 @@ impl Serialize for ResourceRef {
     }
 }
 
+/// A scoped full task document reuses the existing REST response contract.
+pub(crate) fn refresh_task_detail(openapi: &mut studio_json::Value) {
+    use studio_json::json;
+    let s = &mut openapi["components"]["schemas"];
+    let mut resource = s["TaskResource"].clone();
+    resource["title"] = json!("TaskDetailResource");
+    resource["properties"]["kind"] = json!({"type":"string","const":"taskDetail"});
+    resource["x-studio-entity-scope"] = json!({"collections":["taskDetail"],"idField":"taskId","agentField":null,"includeTeamMembers":true});
+    s["TaskDetailResource"] = resource;
+    s["ResourceRef"]["discriminator"]["mapping"]["taskDetail"] =
+        json!("#/components/schemas/TaskDetailResource");
+    let reference = json!({"$ref":"#/components/schemas/TaskDetailResource"});
+    let variants = s["ResourceRef"]["oneOf"]
+        .as_array_mut()
+        .expect("resource variants");
+    if !variants.contains(&reference) {
+        variants.push(reference);
+    }
+    s["SubscriptionDataMap"]["properties"]["taskDetail"] =
+        json!({"$ref":"#/components/schemas/TaskDetailResponse"});
+    let required = s["SubscriptionDataMap"]["required"]
+        .as_array_mut()
+        .expect("data kinds");
+    if !required.contains(&json!("taskDetail")) {
+        required.push(json!("taskDetail"));
+    }
+    s["SyncTaskDetailEntityPayload"] = json!({"type":"object","additionalProperties":false,"properties":{"collection":{"type":"string","const":"taskDetail"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/TaskDetailResponse"}},"required":["collection","id","value"]});
+    s["SyncEntityPayload"]["discriminator"]["mapping"]["taskDetail"] =
+        json!("#/components/schemas/SyncTaskDetailEntityPayload");
+    let reference = json!({"$ref":"#/components/schemas/SyncTaskDetailEntityPayload"});
+    let variants = s["SyncEntityPayload"]["oneOf"]
+        .as_array_mut()
+        .expect("payload variants");
+    if !variants.contains(&reference) {
+        variants.push(reference);
+    }
+    let variants = s["SyncEntity"]["oneOf"]
+        .as_array_mut()
+        .expect("entity variants");
+    if !variants
+        .iter()
+        .any(|v| v["properties"]["collection"]["const"] == "taskDetail")
+    {
+        variants.push(json!({"type":"object","properties":{"op":{"type":"string","const":"upsert"},"collection":{"type":"string","const":"taskDetail"},"value":{"$ref":"#/components/schemas/TaskDetailResponse"}},"required":["op","collection","value"]}));
+    }
+    for variant in variants {
+        if variant["properties"]["op"]["const"] == "delete" {
+            let names = variant["properties"]["collection"]["enum"]
+                .as_array_mut()
+                .expect("delete collections");
+            if !names.contains(&json!("taskDetail")) {
+                names.push(json!("taskDetail"));
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::ResourceRef;
     use studio_json::json;
+
+    #[test]
+    fn task_detail_resource_has_scoped_existing_response() {
+        let value = json!({"kind":"taskDetail","taskId":"task"});
+        let resource: ResourceRef =
+            studio_json::from_value(value.clone()).expect("task detail ref");
+        assert_eq!(studio_json::to_value(resource).unwrap(), value);
+        assert!(
+            crate::compiled_validator("ResourceRef")
+                .unwrap()
+                .is_valid(&value)
+        );
+        let scope = &crate::sync_protocol::subscription_entity_scopes()["taskDetail"];
+        assert_eq!(scope.collections, ["taskDetail"]);
+        assert_eq!(scope.id_field.as_deref(), Some("taskId"));
+        assert!(
+            !crate::sync_protocol::subscription_entity_scopes()["state"]
+                .collections
+                .iter()
+                .any(|c| c == "taskDetail")
+        );
+    }
 
     #[test]
     fn notification_tail_refuses_integral_float_spelling() {

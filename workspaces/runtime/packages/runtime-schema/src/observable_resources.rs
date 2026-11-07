@@ -29,8 +29,19 @@ pub fn models() -> Vec<ObservableModel> {
             .identity("id")
             .opaque("folders"),
         ObservableModel::named("NativeThreadBlockDto").opaque("error"),
-        ObservableModel::named("ProcessListing").opaque("activities"),
+        ObservableModel::named("BackgroundTaskView").keyed_by(&["source", "value.id"]),
         ObservableModel::named("ProcessView").identity("id"),
+        ObservableModel::named("Approval"),
+        ObservableModel::named("Request")
+            .opaque("schema")
+            .opaque("input"),
+        ObservableModel::named("Answer").opaque("content"),
+        ObservableModel::named("Detail")
+            .opaque("params")
+            .opaque("preview"),
+        ObservableModel::named("Question").identity("id"),
+        ObservableModel::named("QuestionAnswer").identity("id"),
+        ObservableModel::named("TaskDetailResponse"),
         ObservableModel::named("MonitorEntityDto").identity("id"),
         ObservableModel::named("TranscriptData"),
         ObservableModel::named("TranscriptMessageRecord")
@@ -63,6 +74,24 @@ pub fn resources() -> Vec<ObservableResource> {
                 ObservableCollection::of::<crate::agent_tail::AgentTail>("agentTail", "agentTail"),
             ],
         ),
+        ObservableResource::collections(
+            "state",
+            "requests",
+            "SyncEntityPayload",
+            vec![ObservableCollection::named(
+                "request", "requests", "Approval",
+            )],
+        ),
+        ObservableResource::collections(
+            "state",
+            "questionHistory",
+            "SyncEntityPayload",
+            vec![ObservableCollection::named(
+                "questionHistory",
+                "questionHistory",
+                "Approval",
+            )],
+        ),
         ObservableResource::named(
             "agentDetail",
             "agentDetail",
@@ -79,6 +108,15 @@ pub fn resources() -> Vec<ObservableResource> {
             vec![ObservableArg {
                 name: "agentId".into(),
                 brand: "AgentId".into(),
+            }],
+        ),
+        ObservableResource::named(
+            "taskDetail",
+            "taskDetail",
+            "TaskDetailResponse",
+            vec![ObservableArg {
+                name: "taskId".into(),
+                brand: "TaskId".into(),
             }],
         ),
         ObservableResource::mapped(
@@ -111,7 +149,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 5);
+        assert_eq!(resources.len(), 8);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]

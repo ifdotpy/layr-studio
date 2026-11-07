@@ -147,7 +147,7 @@ export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']]
       ? `
 import assert from 'node:assert/strict';
 import { autorun, isObservable, spy } from 'mobx';
-import {createStateMirror, createAgentDetailMirror, createProcessesMirror, createTranscriptMirror, createObservableResources, agentId} from './src/generated/observableResources.ts';
+import {createStateMirror, createAgentDetailMirror, createProcessesMirror, createTranscriptMirror, createObservableResources, createRequestsMirror, createQuestionHistoryMirror, createTaskDetailMirror, agentId, taskId} from './src/generated/observableResources.ts';
 import type {components} from './src/generated/api.ts';
 import type {DeepReadonly} from './src/deepReadonly.ts';
 import type {ObservableResourceRuntime, ResourceSlot} from './src/store/index.ts';
@@ -197,6 +197,33 @@ let detailMutations=0;const stopDetailSpy=spy(event=>{if(event.type==='update'||
 detail.apply({id:'lead'});assert.equal(detail.current.overview,undefined);assert.equal(detail.current.activity,undefined);stopTask();stopPhase();
 const processDto={id:'monitor',key:'key',generation:'g',agent:'lead',accountKey:'account',epoch:1,source:'monitor',status:'running',cancelRequested:false,created:1,name:'command',tail:'first',bytes:5,outputTruncated:false,outputPatterns:[],display:{kind:'monitor',kindLabel:'monitor',title:'command',active:true,indicator:'working',label:'running',inBackgroundList:true,actions:[]}} satisfies components['schemas']['ProcessView'];
 const processes=createProcessesMirror({processes:[processDto],activities:[]});const process=processes.current.processes[0];assert.ok(process);let processNameRuns=0;const stopProcessName=autorun(()=>{process.name;processNameRuns+=1;});processes.apply({processes:[{...processDto,name:'renamed'}],activities:[]});assert.equal(processes.current.processes[0],process);assert.equal(processNameRuns,2);processes.apply(structuredClone({processes:[{...processDto,name:'renamed'}],activities:[]}));assert.equal(processNameRuns,2);stopProcessName();
+// Same source/id scenario as Wave 2's real BackgroundTasks render probe (752bd8b).
+const activitiesMirror=createProcessesMirror({processes:[processDto],activities:[{source:'process',value:processDto}]});
+const activities=activitiesMirror.current.activities;const activityRow=activities[0];assert.ok(activityRow);
+let membershipRuns=0,titleRuns=0,tailRuns=0,statusRuns=0;
+const stopMembership=autorun(()=>{activitiesMirror.current.activities.forEach(row=>row.value.id);membershipRuns+=1;});
+const stopActivityTitle=autorun(()=>{activityRow.value.display.title;titleRuns+=1;});
+const stopActivityTail=autorun(()=>{activityRow.value.tail;tailRuns+=1;});
+const stopActivityStatus=autorun(()=>{activityRow.value.status;statusRuns+=1;});
+const titleDto={...processDto,display:{...processDto.display,title:'Changed command'}};
+activitiesMirror.apply({processes:[titleDto],activities:[{source:'process',value:titleDto}]});
+assert.equal(activitiesMirror.current.activities,activities);assert.equal(activitiesMirror.current.activities[0],activityRow);assert.equal(membershipRuns,1);assert.equal(titleRuns,2);assert.equal(tailRuns,1);assert.equal(statusRuns,1);
+const tailDto={...titleDto,tail:'New output'};
+activitiesMirror.apply({processes:[tailDto],activities:[{source:'process',value:tailDto}]});
+assert.equal(titleRuns,2);assert.equal(tailRuns,2);assert.equal(statusRuns,1);assert.equal(membershipRuns,1);
+activitiesMirror.apply(structuredClone({processes:[tailDto],activities:[{source:'process',value:tailDto}]}));
+assert.equal(titleRuns,2);assert.equal(tailRuns,2);stopMembership();stopActivityTitle();stopActivityTail();stopActivityStatus();
+const legacyTask={id:processDto.id,agent:'lead',created:1,kind:'command',status:'running',turnId:'turn',name:'legacy',tail:'legacy output',display:processDto.display} satisfies components['schemas']['TaskProjection'];
+activitiesMirror.apply({processes:[tailDto],activities:[{source:'process',value:tailDto},{source:'task',value:legacyTask}]});
+const legacyEntry=activitiesMirror.current.activities[1];assert.ok(legacyEntry);assert.notEqual(legacyEntry,activityRow);
+const legacyValue=legacyEntry.value;const processValue=activityRow.value;
+activitiesMirror.apply({processes:[tailDto],activities:[{source:'task',value:{...legacyTask,tail:'changed legacy'}},{source:'process',value:tailDto}]});
+assert.equal(activitiesMirror.current.activities[0],legacyEntry);assert.equal(activitiesMirror.current.activities[1],activityRow);assert.equal(legacyEntry.value,legacyValue);assert.equal(activityRow.value,processValue);assert.equal(legacyEntry.value.tail,'changed legacy');
+const beforeDuplicate=activitiesMirror.current.activities;
+assert.throws(()=>activitiesMirror.apply({processes:[tailDto],activities:[{source:'task',value:legacyTask},{source:'task',value:legacyTask}]}),/Duplicate identity/);
+assert.equal(activitiesMirror.current.activities,beforeDuplicate);
+activitiesMirror.apply({processes:[],activities:[]});assert.equal(activitiesMirror.current.activities.length,0);
+
 const transcriptDto={items:[{id:'message',role:'assistant',text:'first',streaming:true,turnId:'turn'}]} satisfies NonNullable<import('./src/apiTypes.ts').TranscriptProjectionPayload>;
 const transcript=createTranscriptMirror(transcriptDto);const message=transcript.current.items[0];assert.ok(message);assert.equal(transcript.current.truncated,undefined);let textRuns=0,turnRuns=0;const stopText=autorun(()=>{message.text;textRuns+=1;});const stopTurn=autorun(()=>{message.turnId;turnRuns+=1;});const firstTranscript=transcriptDto.items[0];assert.ok(firstTranscript);const streamed={items:[{...firstTranscript,text:'streamed'}]};transcript.apply(streamed);assert.equal(transcript.current.items[0],message);assert.equal(textRuns,2);assert.equal(turnRuns,1);let transcriptMutations=0;const stopTranscriptSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')transcriptMutations+=1;});transcript.apply(structuredClone(streamed));assert.equal(transcriptMutations,0);stopTranscriptSpy();stopText();stopTurn();
 // Exercise the generated argument facade and adapter; lifecycle remains owned by runtime tests.
@@ -220,6 +247,33 @@ const monitorDto={id:'watch',agent:'lead',created:1,status:'running',display:pro
 const publishMonitors=()=>{for(const update of monitorUpdates.values())update();};monitorDtos=[monitorDto];publishMonitors();const monitorState=monitorSlot.current;assert.equal(monitorState.status,'live');if(monitorState.status!=='live')throw new Error('monitor facade not live');const monitor=monitorState.data[0];assert.ok(monitor);
 let monitorNames=0,monitorTails=0;const stopMonitorName=autorun(()=>{monitor.name;monitorNames+=1;});const stopMonitorTail=autorun(()=>{monitor.tail;monitorTails+=1;});monitorDtos=[{...monitorDto,tail:'second'}];publishMonitors();assert.equal(monitorNames,1);assert.equal(monitorTails,2);assert.equal(monitorSlot.current.status==='live'&&monitorSlot.current.data[0],monitor);
 let monitorMutations=0;const stopMonitorSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')monitorMutations+=1;});monitorDtos=structuredClone(monitorDtos);publishMonitors();assert.equal(monitorMutations,0);stopMonitorSpy();monitorDtos=[];publishMonitors();assert.equal(monitorSlot.current.status==='live'&&monitorSlot.current.data.length,0);stopMonitorName();stopMonitorTail();
+
+
+const approvalDto={id:'request',agent:'lead',turn:'turn',created:1,epoch:null,request:{kind:'monitor_start',monitor:'monitor',command:'first'},delivery:null,detail:{params:{provider:{opaque:true}},preview:null,answer_error:null,host_close_reason:null},state:{kind:'pending'},deferral:null,fire_at:null,hidden:null} satisfies components['schemas']['Approval'];
+const approvalMirror=createRequestsMirror();approvalMirror.apply([{collection:'request',id:approvalDto.id,value:approvalDto},{collection:'questionHistory',id:approvalDto.id,value:approvalDto}]);
+const approvalRow=approvalMirror.current.requests.get('request');assert.ok(approvalRow);
+let commandRuns=0,stateRuns=0;const stopCommand=autorun(()=>{if(approvalRow.request.kind==='monitor_start')approvalRow.request.command;commandRuns+=1;});const stopApprovalState=autorun(()=>{approvalRow.state.kind;stateRuns+=1;});
+approvalMirror.apply([{collection:'request',id:approvalDto.id,value:{...approvalDto,request:{...approvalDto.request,command:'updated'}}}]);
+assert.equal(approvalMirror.current.requests.get('request'),approvalRow);assert.equal(commandRuns,2);assert.equal(stateRuns,1);assert.ok(Object.isFrozen(approvalRow.detail.params));stopCommand();stopApprovalState();
+
+const questionDto={...approvalDto,request:{kind:'question',questions:[{id:'q',question:'Choose?',header:null,options:[],is_secret:false,multi_select:null,is_other:null}]}} satisfies components['schemas']['Approval'];
+const questionsMirror=createQuestionHistoryMirror();questionsMirror.apply([{collection:'request',id:'request',value:questionDto},{collection:'questionHistory',id:'request',value:questionDto}]);
+const questionApproval=questionsMirror.current.questionHistory.get('request');assert.ok(questionApproval);assert.equal(questionApproval.request.kind,'question');if(questionApproval.request.kind!=='question')throw new Error('question fixture');
+const questionRow=questionApproval.request.questions[0];assert.ok(questionRow);
+let questionRuns=0;const stopQuestion=autorun(()=>{questionRow.question;questionRuns+=1;});
+const changedQuestion={...questionDto,request:{...questionDto.request,questions:[{...questionDto.request.questions[0]!,question:'Changed?'}]}};
+questionsMirror.apply([{collection:'questionHistory',id:'request',value:changedQuestion}]);
+assert.equal(questionsMirror.current.questionHistory.get('request'),questionApproval);assert.equal(questionApproval.request.questions[0],questionRow);assert.equal(questionRuns,2);
+const answered={...changedQuestion,state:{kind:'answered',answer:{kind:'answers',answers:[{id:'q',answer:['value']}]},by:{kind:'owner'},at:2}} satisfies components['schemas']['Approval'];
+questionsMirror.apply([{collection:'questionHistory',id:'request',value:answered}]);assert.equal(questionApproval.state.kind,'answered');
+let questionMutations=0;const stopQuestionSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')questionMutations+=1;});questionsMirror.apply(structuredClone([{collection:'questionHistory',id:'request',value:answered}]));assert.equal(questionMutations,0);stopQuestionSpy();stopQuestion();
+const opaqueRequest={...approvalDto,request:{kind:'tool_use',tool:'tool',input:{deep:[{value:1}]}}} satisfies components['schemas']['Approval'];
+approvalMirror.apply([{collection:'request',id:'opaque',value:opaqueRequest}]);const toolRequest=approvalMirror.current.requests.get('opaque');assert.ok(toolRequest);if(toolRequest.request.kind!=='tool_use')throw new Error('tool fixture');assert.ok(Object.isFrozen(toolRequest.request.input));
+const taskDetailDto={id:'chosen',agent:'lead',created:1,kind:'tool',status:'completed',arguments:'private input',tail:'first'} satisfies components['schemas']['TaskDetailResponse'];
+const taskDetail=createTaskDetailMirror(taskDetailDto);const taskRow=taskDetail.current;
+let taskArgumentsRuns=0,taskTailRuns=0;const stopArguments=autorun(()=>{taskRow.arguments;taskArgumentsRuns+=1;});const stopTaskTail=autorun(()=>{taskRow.tail;taskTailRuns+=1;});
+taskDetail.apply({...taskDetailDto,tail:'updated'});assert.equal(taskDetail.current,taskRow);assert.equal(taskArgumentsRuns,1);assert.equal(taskTailRuns,2);
+let taskDetailMutations=0;const stopTaskSpy=spy(event=>{if(event.type==='update'||event.type==='add'||event.type==='delete'||event.type==='splice')taskDetailMutations+=1;});taskDetail.apply(structuredClone({...taskDetailDto,tail:'updated'}));assert.equal(taskDetailMutations,0);stopTaskSpy();stopArguments();stopTaskTail();assert.equal(taskId('chosen'),'chosen');
 const nestedItem={id:'nested',role:'assistant',text:'row',fullTextBlob:{hash:'hash',size:1},inputs:[{kind:'user',text:'input',truncated:false}]} satisfies import('./src/apiTypes.ts').TranscriptWireItem;
 const nestedDto={items:[nestedItem],agent:{id:'lead',activity:{phase:'thinking'}}};const nested=createTranscriptMirror(nestedDto);const nestedRow=nested.current.items[0];assert.ok(nestedRow);const blob=nestedRow.fullTextBlob;assert.ok(blob);const nestedAgent=nested.current.agent;assert.ok(nestedAgent);const nestedActivity=nestedAgent.activity;assert.ok(nestedActivity);
 let blobRuns=0,inputRuns=0,phaseRunsNested=0;const stopBlob=autorun(()=>{blob.size;blobRuns+=1;});const stopInput=autorun(()=>{nestedRow.inputs?.[0]?.text;inputRuns+=1;});const stopNestedPhase=autorun(()=>{nestedActivity.phase;phaseRunsNested+=1;});

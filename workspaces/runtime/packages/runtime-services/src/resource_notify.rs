@@ -63,6 +63,8 @@ pub enum ResourceKind {
     Work,
     TerminalOutput,
     Task,
+    #[cfg_attr(any(test, feature = "test-support"), serde(rename = "taskDetail"))]
+    TaskDetail,
     Tasks,
     Workspace,
     MultiServer,
@@ -99,6 +101,7 @@ impl ResourceKind {
                 | Self::Monitors
                 | Self::SessionCost
                 | Self::Task
+                | Self::TaskDetail
                 | Self::Tasks
                 | Self::Terminal
                 | Self::Terminals
@@ -465,6 +468,7 @@ impl ResourceNotifications {
                 | ResourceKind::Work
                 | ResourceKind::TerminalOutput
                 | ResourceKind::Task
+                | ResourceKind::TaskDetail
                 | ResourceKind::Tasks
                 | ResourceKind::Workspace => explicit
                     .max(cursor.resource_revision)
@@ -778,6 +782,7 @@ mod tests {
         let resources = [
             json!({"kind":"state"}),
             json!({"kind":"tasks","agentId":"lead"}),
+            json!({"kind":"taskDetail","taskId":"task"}),
         ];
         let baseline = notifications
             .changes_since_with_content(&resources, None, |_| async {

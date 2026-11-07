@@ -180,6 +180,7 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
         "SessionCostResource",
         "StateResource",
         "TaskResource",
+        "TaskDetailResource",
         "TasksResource",
         "TerminalResource",
         "TerminalsResource",

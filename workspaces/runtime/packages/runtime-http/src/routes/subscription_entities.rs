@@ -22,6 +22,7 @@ pub(super) fn selection(
         ResourceRef::TerminalsResource(_) => ("terminals", None, None),
         ResourceRef::AgentDetailResource(r) => ("agentDetail", Some(r.agent_id.as_str()), None),
         ResourceRef::SessionCostResource(r) => ("session-cost", Some(r.agent_id.as_str()), None),
+        ResourceRef::TaskDetailResource(r) => ("taskDetail", Some(r.task_id.as_str()), None),
         ResourceRef::TaskResource(r) => ("task", Some(r.task_id.as_str()), None),
         ResourceRef::TerminalResource(r) => ("terminal", Some(r.terminal_id.as_str()), None),
         ResourceRef::TasksResource(r) => ("tasks", None, r.agent_id.as_deref()),
@@ -162,6 +163,129 @@ mod tests {
                 "{kind} agent owner"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn task_detail_is_id_scoped_and_streams_existing_payload_and_delete() {
+        let directory = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(
+            RuntimeStore::open(Some(directory.path()))
+                .await
+                .expect("store"),
+        );
+        studio_runtime_services::entity_publication::install(&store)
+            .await
+            .expect("publisher");
+        store.transaction_with(|tx| {
+            AgentRepository::put(tx, &AgentRecord::from_value(json!({"id":"lead","rootId":"lead","accountKey":"default","provider":"codex","epoch":1,"status":"idle","compactions":0}))?)?;
+            for id in ["chosen", "other"] {
+                tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)", rusqlite::params![id,json!({"id":id,"agent":"lead","kind":"tool","type":"dynamicToolCall","name":"tool","itemId":id,"turnId":"turn","status":"completed","created":1,"arguments":"private input","tail":"first"}).to_string()])?;
+            }
+            Ok::<_, StoreError>(())
+        }).await.expect("tasks");
+        let workspace = store
+            .test_read_transaction(|tx| SyncDocumentsRepository::workspace_id(tx))
+            .unwrap();
+        let state = HttpState::new(
+            "token".into(),
+            workspace,
+            directory.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let resource =
+            ResourceRef::TaskDetailResource(studio_runtime_schema::resource_ref::TaskResource {
+                task_id: String::from("chosen").try_into().unwrap(),
+            });
+        let initial = initial_snapshot(state.clone(), resource.clone(), None)
+            .await
+            .expect("detail");
+        let cursor = initial.cursor.clone();
+        let frame = studio_json::to_value(initial).unwrap();
+        let rows = frame["entityChanges"]["documents"].as_array().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["collection"], "taskDetail");
+        assert_eq!(rows[0]["id"], "chosen");
+        let rest = store
+            .test_read_transaction(|tx| {
+                studio_runtime_store::WorkspaceViewsRepository::task(tx, "chosen")
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(rows[0]["value"], rest, "same existing REST payload");
+        assert_eq!(rows[0]["value"]["arguments"], "private input");
+        for request in [
+            json!({"kind":"state"}),
+            json!({"kind":"tasks","agentId":"lead"}),
+        ] {
+            let frame = initial_snapshot(
+                state.clone(),
+                studio_json::from_value(request).unwrap(),
+                None,
+            )
+            .await
+            .unwrap();
+            let frame = studio_json::to_value(frame).unwrap();
+            for row in frame["entityChanges"]["documents"].as_array().unwrap() {
+                assert_ne!(row["collection"], "taskDetail");
+                assert!(
+                    row["value"].get("arguments").is_none(),
+                    "arguments stay outside summaries"
+                );
+            }
+        }
+        let mut owner_cursor = cursor.clone();
+        for deleted in [true, false] {
+            store.transaction_with(move |tx| {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',?1) WHERE id='lead'", rusqlite::params![if deleted { Some(2.0) } else { None }])?;
+                Ok::<_, StoreError>(())
+            }).await.unwrap();
+            let change = initial_snapshot(state.clone(), resource.clone(), owner_cursor)
+                .await
+                .unwrap();
+            owner_cursor = change.cursor.clone();
+            let value = studio_json::to_value(change).unwrap();
+            let rows = value["entityChanges"]["documents"].as_array().unwrap();
+            assert_eq!(
+                rows.len(),
+                1,
+                "owner delete/restore must invalidate task detail"
+            );
+            if deleted {
+                assert_eq!(rows[0]["op"], "delete");
+            } else {
+                assert_eq!(rows[0]["value"]["arguments"], "private input");
+            }
+        }
+        let cursor = owner_cursor;
+        store.transaction_with(|tx| {
+            tx.execute("UPDATE runtime_tasks SET record=json_set(record,'$.tail','updated') WHERE id='chosen'", [])?;
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+        let update = initial_snapshot(state.clone(), resource.clone(), cursor)
+            .await
+            .unwrap();
+        let cursor = update.cursor.clone();
+        assert_eq!(
+            studio_json::to_value(update).unwrap()["entityChanges"]["documents"][0]["value"]["tail"],
+            "updated"
+        );
+        store
+            .transaction_with(|tx| {
+                tx.execute("DELETE FROM runtime_tasks WHERE id='chosen'", [])?;
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
+        let removed = initial_snapshot(state, resource, cursor).await.unwrap();
+        let frame = studio_json::to_value(removed).unwrap();
+        assert_eq!(frame["entityChanges"]["documents"][0]["op"], "delete");
+        assert_eq!(
+            frame["entityChanges"]["documents"][0]["collection"],
+            "taskDetail"
+        );
     }
 
     #[tokio::test]

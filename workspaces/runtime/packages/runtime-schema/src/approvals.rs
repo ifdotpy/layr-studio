@@ -38,6 +38,7 @@ pub struct Timestamp(pub f64);
 /// the second change to land unifies the two.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
 pub enum Principal {
     Owner,
     Device {
@@ -66,6 +67,7 @@ pub enum Grant {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct QuestionOption {
     pub label: String,
     pub description: Option<String>,
@@ -74,6 +76,7 @@ pub struct QuestionOption {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Question {
     pub id: String,
     pub question: String,
@@ -95,6 +98,7 @@ pub struct Question {
 #[serde(tag = "kind", rename_all = "snake_case")]
 // The browser card is the large variant; boxing it would change every match on requests.
 #[allow(clippy::large_enum_variant)]
+#[schemars(deny_unknown_fields)]
 pub enum Request {
     Exec {
         command: String,
@@ -147,6 +151,7 @@ pub enum BrowserSource {
 /// The loopback address the sign-in command listens on.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct BrowserRedirect {
     pub host: String,
     pub port: u16,
@@ -156,6 +161,7 @@ pub struct BrowserRedirect {
 /// A forward of the callback to another server. Only the hash of the token is stored.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+#[schemars(deny_unknown_fields)]
 pub struct BrowserCallbackForward {
     pub token_hash: String,
     pub expires_at: Timestamp,
@@ -246,6 +252,7 @@ pub enum ElicitationAction {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct QuestionAnswer {
     pub id: String,
     pub answer: Vec<String>,
@@ -262,6 +269,7 @@ impl QuestionAnswer {
 /// The answer a person or policy gives. Its kind must fit the request kind.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
 pub enum Answer {
     Decision {
         decision: Decision,
@@ -294,6 +302,7 @@ pub enum CloseReason {
 #[strum_discriminants(name(ApprovalStateKind), derive(VariantNames))]
 #[strum_discriminants(strum(serialize_all = "snake_case"))]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
 pub enum ApprovalState {
     Pending,
     /// The answer is stored and its delivery command exists.
@@ -320,6 +329,7 @@ pub enum ApprovalState {
 /// JSON-RPC id of a provider request. The reply must use the same form.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[schemars(deny_unknown_fields)]
 pub enum RpcId {
     Number { value: i64 },
     Text { value: String },
@@ -327,6 +337,7 @@ pub enum RpcId {
 
 /// The provider process generation that owns a request, under the supervisor.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Supervisor {
     pub generation: u64,
     pub state_dir: Option<String>,
@@ -335,6 +346,7 @@ pub struct Supervisor {
 
 /// What the server needs to send the answer back to the provider.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Delivery {
     pub rpc_id: RpcId,
     pub account: String,
@@ -351,6 +363,7 @@ pub struct ProviderObject(pub studio_json::Map<String, studio_json::Value>);
 
 /// Display content and provider fields that no logic reads by name.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Detail {
     /// Provider request params without the fields typed in `Request`.
     pub params: ProviderObject,
@@ -364,6 +377,7 @@ pub struct Detail {
 
 /// The user moved the question aside. `active` is false after it came back.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Deferral {
     pub active: bool,
     pub at: Timestamp,
@@ -372,6 +386,7 @@ pub struct Deferral {
 
 /// History stays: a hidden row is not shown in the default list.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Hidden {
     pub at: Timestamp,
     pub by: Principal,
@@ -379,6 +394,7 @@ pub struct Hidden {
 
 /// A row. `fire_at` is the durable expiry timer of a pending approval.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
 pub struct Approval {
     pub id: ApprovalId,
     pub agent: AgentId,
@@ -494,5 +510,29 @@ impl RequestKind {
 impl From<RequestKind> for &'static str {
     fn from(kind: RequestKind) -> Self {
         RequestKind::VARIANTS[kind as usize]
+    }
+}
+
+#[cfg(test)]
+mod observable_schema_tests {
+    #[test]
+    fn schema_closure_preserves_tolerant_decoding_and_direct_wire_bytes() {
+        let golden = r#"{"id":"a","agent":"lead","turn":null,"created":1.0,"epoch":null,"request":{"kind":"monitor_start","monitor":"m","command":"tail"},"delivery":null,"detail":{"params":{"extension":[null,1]},"preview":null,"answer_error":null,"host_close_reason":null},"state":{"kind":"pending"},"deferral":null,"fire_at":null,"hidden":null}"#;
+        let row: super::Approval = studio_json::from_str(golden).unwrap();
+        assert_eq!(studio_json::to_vec(&row).unwrap(), golden.as_bytes());
+        let mut extended: studio_json::Value = studio_json::from_str(golden).unwrap();
+        extended["extension"] = studio_json::json!(true);
+        extended["request"]["extension"] = studio_json::json!([1]);
+        extended["detail"]["extension"] = studio_json::json!(false);
+        let row: super::Approval =
+            studio_json::from_value(extended).expect("legacy extensions decode");
+        assert_eq!(studio_json::to_vec(&row).unwrap(), golden.as_bytes());
+        let schemas = super::schemas()
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        assert_eq!(schemas["Approval"]["additionalProperties"], false);
+        for variant in schemas["Request"]["oneOf"].as_array().unwrap() {
+            assert_eq!(variant["additionalProperties"], false);
+        }
     }
 }

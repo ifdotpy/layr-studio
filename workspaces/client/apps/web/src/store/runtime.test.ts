@@ -1,3 +1,4 @@
+import { approval } from "../approvalFixtures.ts";
 import { autorun, makeObservable, observable, spy } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResourceVersion } from "../sync/resourceEvents.ts";
@@ -468,5 +469,66 @@ describe("generated agent detail facade through the runtime", () => {
     expect(slot.current).toEqual({ status: "loading" });
     store.dispose();
     f.close();
+  });
+});
+
+describe("independent request projections over one state subscription", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+  it("sidebar builds zero Approval models, readers acquire projections and eviction clears all", async () => {
+    const f = keyedFixture();
+    const store = createServerStore(f.subscriptions);
+    const stops: (() => void)[] = [];
+    let approvalAdds = 0;
+    const stopSpy = spy((event) => {
+      if (
+        event.type === "add" &&
+        event.object?.constructor.name === "ApprovalModel"
+      )
+        approvalAdds++;
+    });
+    try {
+      stops.push(autorun(() => store.state().current));
+      await vi.advanceTimersByTimeAsync(100);
+      const row = approval({
+        request: { kind: "monitor_start", monitor: "m", command: "tail" },
+      });
+      const ref = { kind: "state" } as const;
+      f.callbacks.get(subscriptionKey(ref))?.({
+        epoch: "state",
+        revision: 1,
+        cursor: { workspaceId: "state", seq: 1 },
+        replyKind: "snapshot",
+      });
+      f.subscriptions.publish(ref, [
+        { collection: "request", id: row.id, value: row },
+        { collection: "questionHistory", id: row.id, value: row },
+      ]);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(approvalAdds).toBe(0);
+      const requests = store.requests(),
+        history = store.questionHistory();
+      stops.push(autorun(() => requests.current));
+      await vi.advanceTimersByTimeAsync(100);
+      const first = requests.current;
+      expect(first.status === "live" && first.data.requests.size).toBe(1);
+      expect(approvalAdds).toBeGreaterThan(0);
+      const requestAdds = approvalAdds;
+      expect(history.current.status).toBe("loading");
+      stops.push(autorun(() => history.current));
+      await vi.advanceTimersByTimeAsync(100);
+      expect(approvalAdds).toBeGreaterThan(requestAdds);
+      expect(f.added).toHaveBeenCalledTimes(1);
+      for (const stop of stops.splice(0)) stop();
+      f.subscriptions.dispose();
+      expect(requests.current.status).toBe("loading");
+      expect(history.current.status).toBe("loading");
+      expect(store.state().current.status).toBe("loading");
+    } finally {
+      stopSpy();
+      for (const stop of stops) stop();
+      store.dispose();
+      f.close();
+    }
   });
 });

@@ -32,6 +32,13 @@ model reference alone carries no subscription interest or validity guarantee.
 Scalar and union roots can return a replacement from `apply`; equal roots leave
 the slot atom unchanged.
 
+A confirmed live subscription with no selected record yields `absent` and drops
+the retained model. Loading or an interrupted connection does not establish
+absence. Requests and question history have independent generated projections
+over the same state subscription; observing the sidebar state creates no approval
+models. Projection slot keys differ, but acquisition and eviction use the shared
+resource identity, so an owner eviction resets every projection of that resource.
+
 Transcript and room facades use the same subscription data observer as handwritten
 consumers. `createDataObserver` attaches `subscribeTranscriptProjection` with the
 complete ref (including tail), preserving the existing local projection's partial

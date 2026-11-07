@@ -21,6 +21,8 @@ const selectors: Required<Pick<ResourceDataSelectors<Selection>, ScopeKind>> = {
   work: (ref, { entities, selectWork }) => selectWork(entities, ref.agentId),
   agentDetail: (_ref, { entities }) =>
     entities.find((row) => row.collection === "agentDetail")?.value,
+  taskDetail: (_ref, { entities }) =>
+    entities.find((row) => row.collection === "taskDetail")?.value,
   task: (_ref, { entities }) =>
     entities.find((row) => row.collection === "task")?.value,
   "session-cost": (_ref, { entities }) =>

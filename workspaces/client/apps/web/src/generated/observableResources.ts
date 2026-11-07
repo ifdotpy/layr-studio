@@ -35,6 +35,12 @@ export function agentId(value: string): AgentId;
 export function agentId(value: string): string {
   return value;
 }
+declare const taskIdBrand: unique symbol;
+export type TaskId = string & { readonly [taskIdBrand]: true };
+export function taskId(value: string): TaskId;
+export function taskId(value: string): string {
+  return value;
+}
 declare const transcriptTailBrand: unique symbol;
 export type TranscriptTail = number & { readonly [transcriptTailBrand]: true };
 export function transcriptTail(value: number): TranscriptTail;
@@ -4396,6 +4402,386 @@ class AgentWaitReasonsModel {
     return this;
   }
 }
+type AnswerVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["Answer"]>,
+  { kind: "decision" }
+>;
+class AnswerVariant0Model {
+  decision: AnswerVariant0Dto["decision"];
+  kind: AnswerVariant0Dto["kind"];
+  constructor(dto: AnswerVariant0Dto) {
+    this.decision = dto.decision;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      decision: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AnswerVariant0Dto): this {
+    {
+      const next = dto.decision;
+      if (this.decision !== next) this.decision = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AnswerVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["Answer"]>,
+  { kind: "answers" }
+>;
+class AnswerVariant1Model {
+  answers: QuestionAnswerModel[];
+  kind: AnswerVariant1Dto["kind"];
+  constructor(dto: AnswerVariant1Dto) {
+    this.answers = reconcileQuestionAnswer([], dto.answers);
+    this.kind = dto.kind;
+    makeObservable(this, {
+      answers: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AnswerVariant1Dto): this {
+    {
+      const next = reconcileQuestionAnswer(this.answers, dto.answers);
+      if (this.answers !== next) this.answers = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type AnswerVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["Answer"]>,
+  { kind: "elicitation" }
+>;
+class AnswerVariant2Model {
+  action: AnswerVariant2Dto["action"];
+  content: AnswerVariant2Dto["content"];
+  kind: AnswerVariant2Dto["kind"];
+  constructor(dto: AnswerVariant2Dto) {
+    this.action = dto.action;
+    this.content = freezePlain(structuredClone(dto.content));
+    this.kind = dto.kind;
+    makeObservable(this, {
+      action: observableRef,
+      content: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AnswerVariant2Dto): this {
+    {
+      const next = dto.action;
+      if (this.action !== next) this.action = next;
+    }
+    {
+      const next = compareStructural(this.content, dto.content)
+        ? this.content
+        : freezePlain(structuredClone(dto.content));
+      if (this.content !== next) this.content = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type ApprovalDto = DeepReadonly<components["schemas"]["Approval"]>;
+class ApprovalModel {
+  agent: ApprovalDto["agent"];
+  created: ApprovalDto["created"];
+  deferral: DeferralModel | null;
+  delivery: DeliveryModel | null;
+  detail: DetailModel;
+  epoch: NonNullable<ApprovalDto["epoch"]> | null;
+  fire_at: NonNullable<ApprovalDto["fire_at"]> | null;
+  hidden: HiddenModel | null;
+  id: ApprovalDto["id"];
+  request: RequestModel;
+  state: ApprovalStateModel;
+  turn: NonNullable<ApprovalDto["turn"]> | null;
+  constructor(dto: ApprovalDto) {
+    this.agent = dto.agent;
+    this.created = dto.created;
+    this.deferral =
+      dto.deferral === null ? null : new DeferralModel(dto.deferral);
+    this.delivery =
+      dto.delivery === null ? null : new DeliveryModel(dto.delivery);
+    this.detail = new DetailModel(dto.detail);
+    this.epoch = dto.epoch === null ? null : dto.epoch;
+    this.fire_at = dto.fire_at === null ? null : dto.fire_at;
+    this.hidden = dto.hidden === null ? null : new HiddenModel(dto.hidden);
+    this.id = dto.id;
+    this.request = createRequest(dto.request);
+    this.state = createApprovalState(dto.state);
+    this.turn = dto.turn === null ? null : dto.turn;
+    makeObservable(this, {
+      agent: observableRef,
+      created: observableRef,
+      deferral: observableRef,
+      delivery: observableRef,
+      detail: observableRef,
+      epoch: observableRef,
+      fire_at: observableRef,
+      hidden: observableRef,
+      id: observableRef,
+      request: observableRef,
+      state: observableRef,
+      turn: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalDto): this {
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.deferral === null
+          ? null
+          : this.deferral === null
+            ? new DeferralModel(dto.deferral)
+            : this.deferral.apply(dto.deferral);
+      if (this.deferral !== next) this.deferral = next;
+    }
+    {
+      const next =
+        dto.delivery === null
+          ? null
+          : this.delivery === null
+            ? new DeliveryModel(dto.delivery)
+            : this.delivery.apply(dto.delivery);
+      if (this.delivery !== next) this.delivery = next;
+    }
+    {
+      const next = this.detail.apply(dto.detail);
+      if (this.detail !== next) this.detail = next;
+    }
+    {
+      const next =
+        dto.epoch === null ? null : this.epoch === null ? dto.epoch : dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next =
+        dto.fire_at === null
+          ? null
+          : this.fire_at === null
+            ? dto.fire_at
+            : dto.fire_at;
+      if (this.fire_at !== next) this.fire_at = next;
+    }
+    {
+      const next =
+        dto.hidden === null
+          ? null
+          : this.hidden === null
+            ? new HiddenModel(dto.hidden)
+            : this.hidden.apply(dto.hidden);
+      if (this.hidden !== next) this.hidden = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = updateRequest(this.request, dto.request);
+      if (this.request !== next) this.request = next;
+    }
+    {
+      const next = updateApprovalState(this.state, dto.state);
+      if (this.state !== next) this.state = next;
+    }
+    {
+      const next =
+        dto.turn === null ? null : this.turn === null ? dto.turn : dto.turn;
+      if (this.turn !== next) this.turn = next;
+    }
+    return this;
+  }
+}
+type ApprovalStateVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["ApprovalState"]>,
+  { kind: "pending" }
+>;
+class ApprovalStateVariant0Model {
+  kind: ApprovalStateVariant0Dto["kind"];
+  constructor(dto: ApprovalStateVariant0Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalStateVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type ApprovalStateVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["ApprovalState"]>,
+  { kind: "answering" }
+>;
+class ApprovalStateVariant1Model {
+  answer: AnswerModel;
+  command: ApprovalStateVariant1Dto["command"];
+  kind: ApprovalStateVariant1Dto["kind"];
+  constructor(dto: ApprovalStateVariant1Dto) {
+    this.answer = createAnswer(dto.answer);
+    this.command = dto.command;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      answer: observableRef,
+      command: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalStateVariant1Dto): this {
+    {
+      const next = updateAnswer(this.answer, dto.answer);
+      if (this.answer !== next) this.answer = next;
+    }
+    {
+      const next = dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type ApprovalStateVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["ApprovalState"]>,
+  { kind: "answered" }
+>;
+class ApprovalStateVariant2Model {
+  answer: AnswerModel;
+  at: ApprovalStateVariant2Dto["at"];
+  by: PrincipalModel;
+  kind: ApprovalStateVariant2Dto["kind"];
+  constructor(dto: ApprovalStateVariant2Dto) {
+    this.answer = createAnswer(dto.answer);
+    this.at = dto.at;
+    this.by = createPrincipal(dto.by);
+    this.kind = dto.kind;
+    makeObservable(this, {
+      answer: observableRef,
+      at: observableRef,
+      by: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalStateVariant2Dto): this {
+    {
+      const next = updateAnswer(this.answer, dto.answer);
+      if (this.answer !== next) this.answer = next;
+    }
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next = updatePrincipal(this.by, dto.by);
+      if (this.by !== next) this.by = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type ApprovalStateVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["ApprovalState"]>,
+  { kind: "unknown" }
+>;
+class ApprovalStateVariant3Model {
+  answer: AnswerModel;
+  kind: ApprovalStateVariant3Dto["kind"];
+  since: ApprovalStateVariant3Dto["since"];
+  constructor(dto: ApprovalStateVariant3Dto) {
+    this.answer = createAnswer(dto.answer);
+    this.kind = dto.kind;
+    this.since = dto.since;
+    makeObservable(this, {
+      answer: observableRef,
+      kind: observableRef,
+      since: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalStateVariant3Dto): this {
+    {
+      const next = updateAnswer(this.answer, dto.answer);
+      if (this.answer !== next) this.answer = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.since;
+      if (this.since !== next) this.since = next;
+    }
+    return this;
+  }
+}
+type ApprovalStateVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["ApprovalState"]>,
+  { kind: "closed" }
+>;
+class ApprovalStateVariant4Model {
+  at: ApprovalStateVariant4Dto["at"];
+  kind: ApprovalStateVariant4Dto["kind"];
+  reason: ApprovalStateVariant4Dto["reason"];
+  constructor(dto: ApprovalStateVariant4Dto) {
+    this.at = dto.at;
+    this.kind = dto.kind;
+    this.reason = dto.reason;
+    makeObservable(this, {
+      at: observableRef,
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ApprovalStateVariant4Dto): this {
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
 type BackgroundTaskDisplayDto = DeepReadonly<
   components["schemas"]["BackgroundTaskDisplay"]
 >;
@@ -4494,6 +4880,399 @@ class BackgroundTaskDisplayModel {
     {
       const next = dto.title;
       if (this.title !== next) this.title = next;
+    }
+    return this;
+  }
+}
+type BackgroundTaskViewVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["BackgroundTaskView"]>,
+  { source: "process" }
+>;
+class BackgroundTaskViewVariant0Model {
+  source: BackgroundTaskViewVariant0Dto["source"];
+  value: ProcessViewModel;
+  constructor(dto: BackgroundTaskViewVariant0Dto) {
+    this.source = dto.source;
+    this.value = new ProcessViewModel(dto.value);
+    makeObservable(this, {
+      source: observableRef,
+      value: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BackgroundTaskViewVariant0Dto): this {
+    {
+      const next = dto.source;
+      if (this.source !== next) this.source = next;
+    }
+    {
+      const next = this.value.apply(dto.value);
+      if (this.value !== next) this.value = next;
+    }
+    return this;
+  }
+}
+type BackgroundTaskViewVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["BackgroundTaskView"]>,
+  { source: "task" }
+>;
+class BackgroundTaskViewVariant1Model {
+  source: BackgroundTaskViewVariant1Dto["source"];
+  value: TaskProjectionModel;
+  constructor(dto: BackgroundTaskViewVariant1Dto) {
+    this.source = dto.source;
+    this.value = new TaskProjectionModel(dto.value);
+    makeObservable(this, {
+      source: observableRef,
+      value: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BackgroundTaskViewVariant1Dto): this {
+    {
+      const next = dto.source;
+      if (this.source !== next) this.source = next;
+    }
+    {
+      const next = this.value.apply(dto.value);
+      if (this.value !== next) this.value = next;
+    }
+    return this;
+  }
+}
+type BrowserCallbackForwardDto = DeepReadonly<
+  components["schemas"]["BrowserCallbackForward"]
+>;
+class BrowserCallbackForwardModel {
+  expires_at: BrowserCallbackForwardDto["expires_at"];
+  token_hash: BrowserCallbackForwardDto["token_hash"];
+  constructor(dto: BrowserCallbackForwardDto) {
+    this.expires_at = dto.expires_at;
+    this.token_hash = dto.token_hash;
+    makeObservable(this, {
+      expires_at: observableRef,
+      token_hash: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserCallbackForwardDto): this {
+    {
+      const next = dto.expires_at;
+      if (this.expires_at !== next) this.expires_at = next;
+    }
+    {
+      const next = dto.token_hash;
+      if (this.token_hash !== next) this.token_hash = next;
+    }
+    return this;
+  }
+}
+type BrowserPhaseVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["BrowserPhase"]>,
+  { kind: "link" }
+>;
+class BrowserPhaseVariant0Model {
+  kind: BrowserPhaseVariant0Dto["kind"];
+  constructor(dto: BrowserPhaseVariant0Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserPhaseVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type BrowserPhaseVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["BrowserPhase"]>,
+  { kind: "waiting" }
+>;
+class BrowserPhaseVariant1Model {
+  expires_at: BrowserPhaseVariant1Dto["expires_at"];
+  kind: BrowserPhaseVariant1Dto["kind"];
+  constructor(dto: BrowserPhaseVariant1Dto) {
+    this.expires_at = dto.expires_at;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      expires_at: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserPhaseVariant1Dto): this {
+    {
+      const next = dto.expires_at;
+      if (this.expires_at !== next) this.expires_at = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type BrowserPhaseVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["BrowserPhase"]>,
+  { kind: "pasted" }
+>;
+class BrowserPhaseVariant2Model {
+  at: BrowserPhaseVariant2Dto["at"];
+  expires_at: BrowserPhaseVariant2Dto["expires_at"];
+  kind: BrowserPhaseVariant2Dto["kind"];
+  constructor(dto: BrowserPhaseVariant2Dto) {
+    this.at = dto.at;
+    this.expires_at = dto.expires_at;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      at: observableRef,
+      expires_at: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserPhaseVariant2Dto): this {
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next = dto.expires_at;
+      if (this.expires_at !== next) this.expires_at = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type BrowserPhaseVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["BrowserPhase"]>,
+  { kind: "finished" }
+>;
+class BrowserPhaseVariant3Model {
+  http: NonNullable<BrowserPhaseVariant3Dto["http"]> | null;
+  kind: BrowserPhaseVariant3Dto["kind"];
+  outcome: BrowserPhaseVariant3Dto["outcome"];
+  constructor(dto: BrowserPhaseVariant3Dto) {
+    this.http = dto.http === null ? null : dto.http;
+    this.kind = dto.kind;
+    this.outcome = dto.outcome;
+    makeObservable(this, {
+      http: observableRef,
+      kind: observableRef,
+      outcome: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserPhaseVariant3Dto): this {
+    {
+      const next =
+        dto.http === null ? null : this.http === null ? dto.http : dto.http;
+      if (this.http !== next) this.http = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.outcome;
+      if (this.outcome !== next) this.outcome = next;
+    }
+    return this;
+  }
+}
+type BrowserRedirectDto = DeepReadonly<
+  components["schemas"]["BrowserRedirect"]
+>;
+class BrowserRedirectModel {
+  host: BrowserRedirectDto["host"];
+  path: BrowserRedirectDto["path"];
+  port: BrowserRedirectDto["port"];
+  constructor(dto: BrowserRedirectDto) {
+    this.host = dto.host;
+    this.path = dto.path;
+    this.port = dto.port;
+    makeObservable(this, {
+      host: observableRef,
+      path: observableRef,
+      port: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: BrowserRedirectDto): this {
+    {
+      const next = dto.host;
+      if (this.host !== next) this.host = next;
+    }
+    {
+      const next = dto.path;
+      if (this.path !== next) this.path = next;
+    }
+    {
+      const next = dto.port;
+      if (this.port !== next) this.port = next;
+    }
+    return this;
+  }
+}
+type DeferralDto = DeepReadonly<components["schemas"]["Deferral"]>;
+class DeferralModel {
+  active: DeferralDto["active"];
+  at: DeferralDto["at"];
+  by: PrincipalModel;
+  constructor(dto: DeferralDto) {
+    this.active = dto.active;
+    this.at = dto.at;
+    this.by = createPrincipal(dto.by);
+    makeObservable(this, {
+      active: observableRef,
+      at: observableRef,
+      by: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: DeferralDto): this {
+    {
+      const next = dto.active;
+      if (this.active !== next) this.active = next;
+    }
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next = updatePrincipal(this.by, dto.by);
+      if (this.by !== next) this.by = next;
+    }
+    return this;
+  }
+}
+type DeliveryDto = DeepReadonly<components["schemas"]["Delivery"]>;
+class DeliveryModel {
+  account: DeliveryDto["account"];
+  connection: DeliveryDto["connection"];
+  rpc_id: RpcIdModel;
+  supervisor: SupervisorModel | null;
+  constructor(dto: DeliveryDto) {
+    this.account = dto.account;
+    this.connection = dto.connection;
+    this.rpc_id = createRpcId(dto.rpc_id);
+    this.supervisor =
+      dto.supervisor === null ? null : new SupervisorModel(dto.supervisor);
+    makeObservable(this, {
+      account: observableRef,
+      connection: observableRef,
+      rpc_id: observableRef,
+      supervisor: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: DeliveryDto): this {
+    {
+      const next = dto.account;
+      if (this.account !== next) this.account = next;
+    }
+    {
+      const next = dto.connection;
+      if (this.connection !== next) this.connection = next;
+    }
+    {
+      const next = updateRpcId(this.rpc_id, dto.rpc_id);
+      if (this.rpc_id !== next) this.rpc_id = next;
+    }
+    {
+      const next =
+        dto.supervisor === null
+          ? null
+          : this.supervisor === null
+            ? new SupervisorModel(dto.supervisor)
+            : this.supervisor.apply(dto.supervisor);
+      if (this.supervisor !== next) this.supervisor = next;
+    }
+    return this;
+  }
+}
+type DetailDto = DeepReadonly<components["schemas"]["Detail"]>;
+class DetailModel {
+  answer_error: NonNullable<DetailDto["answer_error"]> | null;
+  host_close_reason: NonNullable<DetailDto["host_close_reason"]> | null;
+  params: DetailDto["params"];
+  preview: DetailDto["preview"];
+  constructor(dto: DetailDto) {
+    this.answer_error = dto.answer_error === null ? null : dto.answer_error;
+    this.host_close_reason =
+      dto.host_close_reason === null ? null : dto.host_close_reason;
+    this.params = freezePlain(structuredClone(dto.params));
+    this.preview = freezePlain(structuredClone(dto.preview));
+    makeObservable(this, {
+      answer_error: observableRef,
+      host_close_reason: observableRef,
+      params: observableRef,
+      preview: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: DetailDto): this {
+    {
+      const next =
+        dto.answer_error === null
+          ? null
+          : this.answer_error === null
+            ? dto.answer_error
+            : dto.answer_error;
+      if (this.answer_error !== next) this.answer_error = next;
+    }
+    {
+      const next =
+        dto.host_close_reason === null
+          ? null
+          : this.host_close_reason === null
+            ? dto.host_close_reason
+            : dto.host_close_reason;
+      if (this.host_close_reason !== next) this.host_close_reason = next;
+    }
+    {
+      const next = compareStructural(this.params, dto.params)
+        ? this.params
+        : freezePlain(structuredClone(dto.params));
+      if (this.params !== next) this.params = next;
+    }
+    {
+      const next = compareStructural(this.preview, dto.preview)
+        ? this.preview
+        : freezePlain(structuredClone(dto.preview));
+      if (this.preview !== next) this.preview = next;
+    }
+    return this;
+  }
+}
+type HiddenDto = DeepReadonly<components["schemas"]["Hidden"]>;
+class HiddenModel {
+  at: HiddenDto["at"];
+  by: PrincipalModel;
+  constructor(dto: HiddenDto) {
+    this.at = dto.at;
+    this.by = createPrincipal(dto.by);
+    makeObservable(this, {
+      at: observableRef,
+      by: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: HiddenDto): this {
+    {
+      const next = dto.at;
+      if (this.at !== next) this.at = next;
+    }
+    {
+      const next = updatePrincipal(this.by, dto.by);
+      if (this.by !== next) this.by = next;
     }
     return this;
   }
@@ -5489,13 +6268,181 @@ class PeerTeamEntityDto_peerLeadsItemModel {
     return this;
   }
 }
+type PrincipalVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "owner" }
+>;
+class PrincipalVariant0Model {
+  kind: PrincipalVariant0Dto["kind"];
+  constructor(dto: PrincipalVariant0Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type PrincipalVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "device" }
+>;
+class PrincipalVariant1Model {
+  grant: PrincipalVariant1Dto["grant"];
+  id: PrincipalVariant1Dto["id"];
+  kind: PrincipalVariant1Dto["kind"];
+  constructor(dto: PrincipalVariant1Dto) {
+    this.grant = dto.grant;
+    this.id = dto.id;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      grant: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant1Dto): this {
+    {
+      const next = dto.grant;
+      if (this.grant !== next) this.grant = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type PrincipalVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "peer" }
+>;
+class PrincipalVariant2Model {
+  kind: PrincipalVariant2Dto["kind"];
+  server: PrincipalVariant2Dto["server"];
+  constructor(dto: PrincipalVariant2Dto) {
+    this.kind = dto.kind;
+    this.server = dto.server;
+    makeObservable(this, {
+      kind: observableRef,
+      server: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant2Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.server;
+      if (this.server !== next) this.server = next;
+    }
+    return this;
+  }
+}
+type PrincipalVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "agent" }
+>;
+class PrincipalVariant3Model {
+  epoch: PrincipalVariant3Dto["epoch"];
+  id: PrincipalVariant3Dto["id"];
+  kind: PrincipalVariant3Dto["kind"];
+  constructor(dto: PrincipalVariant3Dto) {
+    this.epoch = dto.epoch;
+    this.id = dto.id;
+    this.kind = dto.kind;
+    makeObservable(this, {
+      epoch: observableRef,
+      id: observableRef,
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant3Dto): this {
+    {
+      const next = dto.epoch;
+      if (this.epoch !== next) this.epoch = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
+type PrincipalVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "federated" }
+>;
+class PrincipalVariant4Model {
+  kind: PrincipalVariant4Dto["kind"];
+  peer: PrincipalVariant4Dto["peer"];
+  constructor(dto: PrincipalVariant4Dto) {
+    this.kind = dto.kind;
+    this.peer = dto.peer;
+    makeObservable(this, {
+      kind: observableRef,
+      peer: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant4Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.peer;
+      if (this.peer !== next) this.peer = next;
+    }
+    return this;
+  }
+}
+type PrincipalVariant5Dto = Extract<
+  DeepReadonly<components["schemas"]["Principal"]>,
+  { kind: "policy" }
+>;
+class PrincipalVariant5Model {
+  kind: PrincipalVariant5Dto["kind"];
+  constructor(dto: PrincipalVariant5Dto) {
+    this.kind = dto.kind;
+    makeObservable(this, {
+      kind: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PrincipalVariant5Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    return this;
+  }
+}
 type ProcessListingDto = DeepReadonly<components["schemas"]["ProcessListing"]>;
 class ProcessListingModel {
-  activities: ProcessListingDto["activities"];
+  activities: BackgroundTaskViewModel[];
   processes: ProcessViewModel[];
   responseTarget: ProcessResponseTargetModel | null | undefined;
   constructor(dto: ProcessListingDto) {
-    this.activities = freezePlain(structuredClone(dto.activities));
+    this.activities = reconcileBackgroundTaskView([], dto.activities);
     this.processes = reconcileProcessView([], dto.processes);
     this.responseTarget =
       dto.responseTarget === undefined
@@ -5512,9 +6459,7 @@ class ProcessListingModel {
   }
   apply(dto: ProcessListingDto): this {
     {
-      const next = compareStructural(this.activities, dto.activities)
-        ? this.activities
-        : freezePlain(structuredClone(dto.activities));
+      const next = reconcileBackgroundTaskView(this.activities, dto.activities);
       if (this.activities !== next) this.activities = next;
     }
     {
@@ -6918,6 +7863,241 @@ class ProjectPeerTeamDtoModel {
     return this;
   }
 }
+type QuestionDto = DeepReadonly<components["schemas"]["Question"]>;
+class QuestionModel {
+  header: NonNullable<QuestionDto["header"]> | null;
+  id: QuestionDto["id"];
+  is_other: NonNullable<QuestionDto["is_other"]> | null;
+  is_secret: QuestionDto["is_secret"];
+  multi_select: NonNullable<QuestionDto["multi_select"]> | null;
+  options: QuestionOptionModel[];
+  question: QuestionDto["question"];
+  constructor(dto: QuestionDto) {
+    this.header = dto.header === null ? null : dto.header;
+    this.id = dto.id;
+    this.is_other = dto.is_other === null ? null : dto.is_other;
+    this.is_secret = dto.is_secret;
+    this.multi_select = dto.multi_select === null ? null : dto.multi_select;
+    this.options = dto.options.map((item) => new QuestionOptionModel(item));
+    this.question = dto.question;
+    makeObservable(this, {
+      header: observableRef,
+      id: observableRef,
+      is_other: observableRef,
+      is_secret: observableRef,
+      multi_select: observableRef,
+      options: observableRef,
+      question: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: QuestionDto): this {
+    {
+      const next =
+        dto.header === null
+          ? null
+          : this.header === null
+            ? dto.header
+            : dto.header;
+      if (this.header !== next) this.header = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.is_other === null
+          ? null
+          : this.is_other === null
+            ? dto.is_other
+            : dto.is_other;
+      if (this.is_other !== next) this.is_other = next;
+    }
+    {
+      const next = dto.is_secret;
+      if (this.is_secret !== next) this.is_secret = next;
+    }
+    {
+      const next =
+        dto.multi_select === null
+          ? null
+          : this.multi_select === null
+            ? dto.multi_select
+            : dto.multi_select;
+      if (this.multi_select !== next) this.multi_select = next;
+    }
+    {
+      const next =
+        this.options.length === dto.options.length &&
+        this.options.every((leftItem0, index) => {
+          const rightItem0 = dto.options?.[index];
+          return (
+            rightItem0 !== undefined &&
+            (leftItem0.description === null || rightItem0.description === null
+              ? leftItem0.description === rightItem0.description
+              : leftItem0.description === rightItem0.description) &&
+            leftItem0.label === rightItem0.label &&
+            (leftItem0.preview === null || rightItem0.preview === null
+              ? leftItem0.preview === rightItem0.preview
+              : leftItem0.preview === rightItem0.preview)
+          );
+        })
+          ? this.options
+          : dto.options.map((item) => new QuestionOptionModel(item));
+      if (this.options !== next) this.options = next;
+    }
+    {
+      const next = dto.question;
+      if (this.question !== next) this.question = next;
+    }
+    return this;
+  }
+}
+function reconcileQuestion(
+  data: QuestionModel[],
+  dto: readonly QuestionDto[],
+): QuestionModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id)) throw new Error("Duplicate identity in Question");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: QuestionModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined ? new QuestionModel(item) : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type QuestionAnswerDto = DeepReadonly<components["schemas"]["QuestionAnswer"]>;
+class QuestionAnswerModel {
+  answer: NonNullable<QuestionAnswerDto["answer"]>[number][];
+  digest: NonNullable<QuestionAnswerDto["digest"]> | null | undefined;
+  id: QuestionAnswerDto["id"];
+  constructor(dto: QuestionAnswerDto) {
+    this.answer = dto.answer.map((item) => item);
+    this.digest =
+      dto.digest === undefined
+        ? undefined
+        : dto.digest === null
+          ? null
+          : dto.digest;
+    this.id = dto.id;
+    makeObservable(this, {
+      answer: observableRef,
+      digest: observableRef,
+      id: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: QuestionAnswerDto): this {
+    {
+      const next =
+        this.answer.length === dto.answer.length &&
+        this.answer.every((leftItem0, index) => {
+          const rightItem0 = dto.answer?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.answer
+          : dto.answer.map((item) => item);
+      if (this.answer !== next) this.answer = next;
+    }
+    {
+      const next =
+        dto.digest === undefined
+          ? undefined
+          : this.digest === undefined
+            ? dto.digest === null
+              ? null
+              : dto.digest
+            : dto.digest === null
+              ? null
+              : this.digest === null
+                ? dto.digest
+                : dto.digest;
+      if (this.digest !== next) this.digest = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    return this;
+  }
+}
+function reconcileQuestionAnswer(
+  data: QuestionAnswerModel[],
+  dto: readonly QuestionAnswerDto[],
+): QuestionAnswerModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.id))
+      throw new Error("Duplicate identity in QuestionAnswer");
+    ids.add(item.id);
+  }
+  const previous = new Map(data.map((item) => [item.id, item]));
+  const next: QuestionAnswerModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.id);
+    const row =
+      existing === undefined
+        ? new QuestionAnswerModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type QuestionOptionDto = DeepReadonly<components["schemas"]["QuestionOption"]>;
+class QuestionOptionModel {
+  description: NonNullable<QuestionOptionDto["description"]> | null;
+  label: QuestionOptionDto["label"];
+  preview: NonNullable<QuestionOptionDto["preview"]> | null;
+  constructor(dto: QuestionOptionDto) {
+    this.description = dto.description === null ? null : dto.description;
+    this.label = dto.label;
+    this.preview = dto.preview === null ? null : dto.preview;
+    makeObservable(this, {
+      description: observableRef,
+      label: observableRef,
+      preview: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: QuestionOptionDto): this {
+    {
+      const next =
+        dto.description === null
+          ? null
+          : this.description === null
+            ? dto.description
+            : dto.description;
+      if (this.description !== next) this.description = next;
+    }
+    {
+      const next = dto.label;
+      if (this.label !== next) this.label = next;
+    }
+    {
+      const next =
+        dto.preview === null
+          ? null
+          : this.preview === null
+            ? dto.preview
+            : dto.preview;
+      if (this.preview !== next) this.preview = next;
+    }
+    return this;
+  }
+}
 type ReadStateDtoDto = DeepReadonly<components["schemas"]["ReadStateDto"]>;
 class ReadStateDtoModel {
   read: ReadStateDtoDto["read"];
@@ -6957,6 +8137,510 @@ class ReadStateDtoModel {
     return this;
   }
 }
+type RequestVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "exec" }
+>;
+class RequestVariant0Model {
+  command: RequestVariant0Dto["command"];
+  cwd: RequestVariant0Dto["cwd"];
+  kind: RequestVariant0Dto["kind"];
+  reason: NonNullable<RequestVariant0Dto["reason"]> | null;
+  constructor(dto: RequestVariant0Dto) {
+    this.command = dto.command;
+    this.cwd = dto.cwd;
+    this.kind = dto.kind;
+    this.reason = dto.reason === null ? null : dto.reason;
+    makeObservable(this, {
+      command: observableRef,
+      cwd: observableRef,
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant0Dto): this {
+    {
+      const next = dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.reason === null
+          ? null
+          : this.reason === null
+            ? dto.reason
+            : dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type RequestVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "patch" }
+>;
+class RequestVariant1Model {
+  files: NonNullable<RequestVariant1Dto["files"]>[number][];
+  item: RequestVariant1Dto["item"];
+  kind: RequestVariant1Dto["kind"];
+  reason: NonNullable<RequestVariant1Dto["reason"]> | null;
+  constructor(dto: RequestVariant1Dto) {
+    this.files = dto.files.map((item) => item);
+    this.item = dto.item;
+    this.kind = dto.kind;
+    this.reason = dto.reason === null ? null : dto.reason;
+    makeObservable(this, {
+      files: observableRef,
+      item: observableRef,
+      kind: observableRef,
+      reason: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant1Dto): this {
+    {
+      const next =
+        this.files.length === dto.files.length &&
+        this.files.every((leftItem0, index) => {
+          const rightItem0 = dto.files?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.files
+          : dto.files.map((item) => item);
+      if (this.files !== next) this.files = next;
+    }
+    {
+      const next = dto.item;
+      if (this.item !== next) this.item = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.reason === null
+          ? null
+          : this.reason === null
+            ? dto.reason
+            : dto.reason;
+      if (this.reason !== next) this.reason = next;
+    }
+    return this;
+  }
+}
+type RequestVariant2Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "permissions" }
+>;
+class RequestVariant2Model {
+  kind: RequestVariant2Dto["kind"];
+  requested: NonNullable<RequestVariant2Dto["requested"]>[number][];
+  constructor(dto: RequestVariant2Dto) {
+    this.kind = dto.kind;
+    this.requested = dto.requested.map((item) => item);
+    makeObservable(this, {
+      kind: observableRef,
+      requested: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant2Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        this.requested.length === dto.requested.length &&
+        this.requested.every((leftItem0, index) => {
+          const rightItem0 = dto.requested?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.requested
+          : dto.requested.map((item) => item);
+      if (this.requested !== next) this.requested = next;
+    }
+    return this;
+  }
+}
+type RequestVariant3Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "elicitation" }
+>;
+class RequestVariant3Model {
+  kind: RequestVariant3Dto["kind"];
+  schema: RequestVariant3Dto["schema"];
+  constructor(dto: RequestVariant3Dto) {
+    this.kind = dto.kind;
+    this.schema = freezePlain(structuredClone(dto.schema));
+    makeObservable(this, {
+      kind: observableRef,
+      schema: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant3Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = compareStructural(this.schema, dto.schema)
+        ? this.schema
+        : freezePlain(structuredClone(dto.schema));
+      if (this.schema !== next) this.schema = next;
+    }
+    return this;
+  }
+}
+type RequestVariant4Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "question" }
+>;
+class RequestVariant4Model {
+  kind: RequestVariant4Dto["kind"];
+  questions: QuestionModel[];
+  constructor(dto: RequestVariant4Dto) {
+    this.kind = dto.kind;
+    this.questions = reconcileQuestion([], dto.questions);
+    makeObservable(this, {
+      kind: observableRef,
+      questions: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant4Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = reconcileQuestion(this.questions, dto.questions);
+      if (this.questions !== next) this.questions = next;
+    }
+    return this;
+  }
+}
+type RequestVariant5Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "tool_use" }
+>;
+class RequestVariant5Model {
+  input: RequestVariant5Dto["input"];
+  kind: RequestVariant5Dto["kind"];
+  tool: RequestVariant5Dto["tool"];
+  constructor(dto: RequestVariant5Dto) {
+    this.input = freezePlain(structuredClone(dto.input));
+    this.kind = dto.kind;
+    this.tool = dto.tool;
+    makeObservable(this, {
+      input: observableRef,
+      kind: observableRef,
+      tool: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant5Dto): this {
+    {
+      const next = compareStructural(this.input, dto.input)
+        ? this.input
+        : freezePlain(structuredClone(dto.input));
+      if (this.input !== next) this.input = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.tool;
+      if (this.tool !== next) this.tool = next;
+    }
+    return this;
+  }
+}
+type RequestVariant6Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "agent_question" }
+>;
+class RequestVariant6Model {
+  kind: RequestVariant6Dto["kind"];
+  questions: QuestionModel[];
+  constructor(dto: RequestVariant6Dto) {
+    this.kind = dto.kind;
+    this.questions = reconcileQuestion([], dto.questions);
+    makeObservable(this, {
+      kind: observableRef,
+      questions: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant6Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = reconcileQuestion(this.questions, dto.questions);
+      if (this.questions !== next) this.questions = next;
+    }
+    return this;
+  }
+}
+type RequestVariant7Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "monitor_start" }
+>;
+class RequestVariant7Model {
+  command: RequestVariant7Dto["command"];
+  kind: RequestVariant7Dto["kind"];
+  monitor: RequestVariant7Dto["monitor"];
+  constructor(dto: RequestVariant7Dto) {
+    this.command = dto.command;
+    this.kind = dto.kind;
+    this.monitor = dto.monitor;
+    makeObservable(this, {
+      command: observableRef,
+      kind: observableRef,
+      monitor: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant7Dto): this {
+    {
+      const next = dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.monitor;
+      if (this.monitor !== next) this.monitor = next;
+    }
+    return this;
+  }
+}
+type RequestVariant8Dto = Extract<
+  DeepReadonly<components["schemas"]["Request"]>,
+  { kind: "browser_open" }
+>;
+class RequestVariant8Model {
+  bridge_id: RequestVariant8Dto["bridge_id"];
+  client_id: NonNullable<RequestVariant8Dto["client_id"]> | null;
+  expires_at: NonNullable<RequestVariant8Dto["expires_at"]> | null;
+  forward: BrowserCallbackForwardModel | null;
+  host: RequestVariant8Dto["host"];
+  joined: NonNullable<RequestVariant8Dto["joined"]>[number][];
+  kind: RequestVariant8Dto["kind"];
+  linux_user: NonNullable<RequestVariant8Dto["linux_user"]> | null;
+  phase: BrowserPhaseModel;
+  redirect: BrowserRedirectModel | null;
+  scope: NonNullable<RequestVariant8Dto["scope"]> | null;
+  source: RequestVariant8Dto["source"];
+  url: RequestVariant8Dto["url"];
+  user_code: NonNullable<RequestVariant8Dto["user_code"]> | null;
+  constructor(dto: RequestVariant8Dto) {
+    this.bridge_id = dto.bridge_id;
+    this.client_id = dto.client_id === null ? null : dto.client_id;
+    this.expires_at = dto.expires_at === null ? null : dto.expires_at;
+    this.forward =
+      dto.forward === null
+        ? null
+        : new BrowserCallbackForwardModel(dto.forward);
+    this.host = dto.host;
+    this.joined = dto.joined.map((item) => item);
+    this.kind = dto.kind;
+    this.linux_user = dto.linux_user === null ? null : dto.linux_user;
+    this.phase = createBrowserPhase(dto.phase);
+    this.redirect =
+      dto.redirect === null ? null : new BrowserRedirectModel(dto.redirect);
+    this.scope = dto.scope === null ? null : dto.scope;
+    this.source = dto.source;
+    this.url = dto.url;
+    this.user_code = dto.user_code === null ? null : dto.user_code;
+    makeObservable(this, {
+      bridge_id: observableRef,
+      client_id: observableRef,
+      expires_at: observableRef,
+      forward: observableRef,
+      host: observableRef,
+      joined: observableRef,
+      kind: observableRef,
+      linux_user: observableRef,
+      phase: observableRef,
+      redirect: observableRef,
+      scope: observableRef,
+      source: observableRef,
+      url: observableRef,
+      user_code: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RequestVariant8Dto): this {
+    {
+      const next = dto.bridge_id;
+      if (this.bridge_id !== next) this.bridge_id = next;
+    }
+    {
+      const next =
+        dto.client_id === null
+          ? null
+          : this.client_id === null
+            ? dto.client_id
+            : dto.client_id;
+      if (this.client_id !== next) this.client_id = next;
+    }
+    {
+      const next =
+        dto.expires_at === null
+          ? null
+          : this.expires_at === null
+            ? dto.expires_at
+            : dto.expires_at;
+      if (this.expires_at !== next) this.expires_at = next;
+    }
+    {
+      const next =
+        dto.forward === null
+          ? null
+          : this.forward === null
+            ? new BrowserCallbackForwardModel(dto.forward)
+            : this.forward.apply(dto.forward);
+      if (this.forward !== next) this.forward = next;
+    }
+    {
+      const next = dto.host;
+      if (this.host !== next) this.host = next;
+    }
+    {
+      const next =
+        this.joined.length === dto.joined.length &&
+        this.joined.every((leftItem0, index) => {
+          const rightItem0 = dto.joined?.[index];
+          return rightItem0 !== undefined && leftItem0 === rightItem0;
+        })
+          ? this.joined
+          : dto.joined.map((item) => item);
+      if (this.joined !== next) this.joined = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.linux_user === null
+          ? null
+          : this.linux_user === null
+            ? dto.linux_user
+            : dto.linux_user;
+      if (this.linux_user !== next) this.linux_user = next;
+    }
+    {
+      const next = updateBrowserPhase(this.phase, dto.phase);
+      if (this.phase !== next) this.phase = next;
+    }
+    {
+      const next =
+        dto.redirect === null
+          ? null
+          : this.redirect === null
+            ? new BrowserRedirectModel(dto.redirect)
+            : this.redirect.apply(dto.redirect);
+      if (this.redirect !== next) this.redirect = next;
+    }
+    {
+      const next =
+        dto.scope === null ? null : this.scope === null ? dto.scope : dto.scope;
+      if (this.scope !== next) this.scope = next;
+    }
+    {
+      const next = dto.source;
+      if (this.source !== next) this.source = next;
+    }
+    {
+      const next = dto.url;
+      if (this.url !== next) this.url = next;
+    }
+    {
+      const next =
+        dto.user_code === null
+          ? null
+          : this.user_code === null
+            ? dto.user_code
+            : dto.user_code;
+      if (this.user_code !== next) this.user_code = next;
+    }
+    return this;
+  }
+}
+type RpcIdVariant0Dto = Extract<
+  DeepReadonly<components["schemas"]["RpcId"]>,
+  { kind: "number" }
+>;
+class RpcIdVariant0Model {
+  kind: RpcIdVariant0Dto["kind"];
+  value: RpcIdVariant0Dto["value"];
+  constructor(dto: RpcIdVariant0Dto) {
+    this.kind = dto.kind;
+    this.value = dto.value;
+    makeObservable(this, {
+      kind: observableRef,
+      value: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RpcIdVariant0Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.value;
+      if (this.value !== next) this.value = next;
+    }
+    return this;
+  }
+}
+type RpcIdVariant1Dto = Extract<
+  DeepReadonly<components["schemas"]["RpcId"]>,
+  { kind: "text" }
+>;
+class RpcIdVariant1Model {
+  kind: RpcIdVariant1Dto["kind"];
+  value: RpcIdVariant1Dto["value"];
+  constructor(dto: RpcIdVariant1Dto) {
+    this.kind = dto.kind;
+    this.value = dto.value;
+    makeObservable(this, {
+      kind: observableRef,
+      value: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: RpcIdVariant1Dto): this {
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.value;
+      if (this.value !== next) this.value = next;
+    }
+    return this;
+  }
+}
 type SidebarOrderDtoDto = DeepReadonly<
   components["schemas"]["SidebarOrderDto"]
 >;
@@ -6982,6 +8666,1028 @@ class SidebarOrderDtoModel {
     {
       const next = dto.revision;
       if (this.revision !== next) this.revision = next;
+    }
+    return this;
+  }
+}
+type SupervisorDto = DeepReadonly<components["schemas"]["Supervisor"]>;
+class SupervisorModel {
+  generation: SupervisorDto["generation"];
+  handle: NonNullable<SupervisorDto["handle"]> | null;
+  state_dir: NonNullable<SupervisorDto["state_dir"]> | null;
+  constructor(dto: SupervisorDto) {
+    this.generation = dto.generation;
+    this.handle = dto.handle === null ? null : dto.handle;
+    this.state_dir = dto.state_dir === null ? null : dto.state_dir;
+    makeObservable(this, {
+      generation: observableRef,
+      handle: observableRef,
+      state_dir: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: SupervisorDto): this {
+    {
+      const next = dto.generation;
+      if (this.generation !== next) this.generation = next;
+    }
+    {
+      const next =
+        dto.handle === null
+          ? null
+          : this.handle === null
+            ? dto.handle
+            : dto.handle;
+      if (this.handle !== next) this.handle = next;
+    }
+    {
+      const next =
+        dto.state_dir === null
+          ? null
+          : this.state_dir === null
+            ? dto.state_dir
+            : dto.state_dir;
+      if (this.state_dir !== next) this.state_dir = next;
+    }
+    return this;
+  }
+}
+type TaskDetailResponseDto = DeepReadonly<
+  components["schemas"]["TaskDetailResponse"]
+>;
+class TaskDetailResponseModel {
+  agent: TaskDetailResponseDto["agent"];
+  arguments: NonNullable<TaskDetailResponseDto["arguments"]> | null | undefined;
+  bytes: NonNullable<TaskDetailResponseDto["bytes"]> | null | undefined;
+  cancelRequested:
+    | NonNullable<TaskDetailResponseDto["cancelRequested"]>
+    | null
+    | undefined;
+  command: NonNullable<TaskDetailResponseDto["command"]> | null | undefined;
+  completedAtMs: TaskDetailResponseDto["completedAtMs"] | undefined;
+  created: TaskDetailResponseDto["created"];
+  cwd: NonNullable<TaskDetailResponseDto["cwd"]> | null | undefined;
+  durationMs: TaskDetailResponseDto["durationMs"] | undefined;
+  error: NonNullable<TaskDetailResponseDto["error"]> | null | undefined;
+  exitCode: NonNullable<TaskDetailResponseDto["exitCode"]> | null | undefined;
+  finished: NonNullable<TaskDetailResponseDto["finished"]> | null | undefined;
+  id: TaskDetailResponseDto["id"];
+  interactive:
+    | NonNullable<TaskDetailResponseDto["interactive"]>
+    | null
+    | undefined;
+  itemId: NonNullable<TaskDetailResponseDto["itemId"]> | null | undefined;
+  kind: TaskDetailResponseDto["kind"];
+  log: NonNullable<TaskDetailResponseDto["log"]> | null | undefined;
+  name: NonNullable<TaskDetailResponseDto["name"]> | null | undefined;
+  outputFile:
+    | NonNullable<TaskDetailResponseDto["outputFile"]>
+    | null
+    | undefined;
+  outputTruncated:
+    | NonNullable<TaskDetailResponseDto["outputTruncated"]>
+    | null
+    | undefined;
+  processId: NonNullable<TaskDetailResponseDto["processId"]> | null | undefined;
+  query: NonNullable<TaskDetailResponseDto["query"]> | null | undefined;
+  server: NonNullable<TaskDetailResponseDto["server"]> | null | undefined;
+  startedAtMs: TaskDetailResponseDto["startedAtMs"] | undefined;
+  status: TaskDetailResponseDto["status"];
+  stdinCloseRequested:
+    | NonNullable<TaskDetailResponseDto["stdinCloseRequested"]>
+    | null
+    | undefined;
+  stdinClosed:
+    | NonNullable<TaskDetailResponseDto["stdinClosed"]>
+    | null
+    | undefined;
+  stdinError:
+    | NonNullable<TaskDetailResponseDto["stdinError"]>
+    | null
+    | undefined;
+  tail: NonNullable<TaskDetailResponseDto["tail"]> | null | undefined;
+  timeout_ms:
+    | NonNullable<TaskDetailResponseDto["timeout_ms"]>
+    | null
+    | undefined;
+  turnId: NonNullable<TaskDetailResponseDto["turnId"]> | null | undefined;
+  type: NonNullable<TaskDetailResponseDto["type"]> | null | undefined;
+  constructor(dto: TaskDetailResponseDto) {
+    this.agent = dto.agent;
+    this.arguments =
+      dto.arguments === undefined
+        ? undefined
+        : dto.arguments === null
+          ? null
+          : dto.arguments;
+    this.bytes =
+      dto.bytes === undefined
+        ? undefined
+        : dto.bytes === null
+          ? null
+          : dto.bytes;
+    this.cancelRequested =
+      dto.cancelRequested === undefined
+        ? undefined
+        : dto.cancelRequested === null
+          ? null
+          : dto.cancelRequested;
+    this.command =
+      dto.command === undefined
+        ? undefined
+        : dto.command === null
+          ? null
+          : dto.command;
+    this.completedAtMs =
+      dto.completedAtMs === undefined ? undefined : dto.completedAtMs;
+    this.created = dto.created;
+    this.cwd =
+      dto.cwd === undefined ? undefined : dto.cwd === null ? null : dto.cwd;
+    this.durationMs = dto.durationMs === undefined ? undefined : dto.durationMs;
+    this.error =
+      dto.error === undefined
+        ? undefined
+        : dto.error === null
+          ? null
+          : dto.error;
+    this.exitCode =
+      dto.exitCode === undefined
+        ? undefined
+        : dto.exitCode === null
+          ? null
+          : dto.exitCode;
+    this.finished =
+      dto.finished === undefined
+        ? undefined
+        : dto.finished === null
+          ? null
+          : dto.finished;
+    this.id = dto.id;
+    this.interactive =
+      dto.interactive === undefined
+        ? undefined
+        : dto.interactive === null
+          ? null
+          : dto.interactive;
+    this.itemId =
+      dto.itemId === undefined
+        ? undefined
+        : dto.itemId === null
+          ? null
+          : dto.itemId;
+    this.kind = dto.kind;
+    this.log =
+      dto.log === undefined ? undefined : dto.log === null ? null : dto.log;
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.outputFile =
+      dto.outputFile === undefined
+        ? undefined
+        : dto.outputFile === null
+          ? null
+          : dto.outputFile;
+    this.outputTruncated =
+      dto.outputTruncated === undefined
+        ? undefined
+        : dto.outputTruncated === null
+          ? null
+          : dto.outputTruncated;
+    this.processId =
+      dto.processId === undefined
+        ? undefined
+        : dto.processId === null
+          ? null
+          : dto.processId;
+    this.query =
+      dto.query === undefined
+        ? undefined
+        : dto.query === null
+          ? null
+          : dto.query;
+    this.server =
+      dto.server === undefined
+        ? undefined
+        : dto.server === null
+          ? null
+          : dto.server;
+    this.startedAtMs =
+      dto.startedAtMs === undefined ? undefined : dto.startedAtMs;
+    this.status = dto.status;
+    this.stdinCloseRequested =
+      dto.stdinCloseRequested === undefined
+        ? undefined
+        : dto.stdinCloseRequested === null
+          ? null
+          : dto.stdinCloseRequested;
+    this.stdinClosed =
+      dto.stdinClosed === undefined
+        ? undefined
+        : dto.stdinClosed === null
+          ? null
+          : dto.stdinClosed;
+    this.stdinError =
+      dto.stdinError === undefined
+        ? undefined
+        : dto.stdinError === null
+          ? null
+          : dto.stdinError;
+    this.tail =
+      dto.tail === undefined ? undefined : dto.tail === null ? null : dto.tail;
+    this.timeout_ms =
+      dto.timeout_ms === undefined
+        ? undefined
+        : dto.timeout_ms === null
+          ? null
+          : dto.timeout_ms;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    this.type =
+      dto.type === undefined ? undefined : dto.type === null ? null : dto.type;
+    makeObservable(this, {
+      agent: observableRef,
+      arguments: observableRef,
+      bytes: observableRef,
+      cancelRequested: observableRef,
+      command: observableRef,
+      completedAtMs: observableRef,
+      created: observableRef,
+      cwd: observableRef,
+      durationMs: observableRef,
+      error: observableRef,
+      exitCode: observableRef,
+      finished: observableRef,
+      id: observableRef,
+      interactive: observableRef,
+      itemId: observableRef,
+      kind: observableRef,
+      log: observableRef,
+      name: observableRef,
+      outputFile: observableRef,
+      outputTruncated: observableRef,
+      processId: observableRef,
+      query: observableRef,
+      server: observableRef,
+      startedAtMs: observableRef,
+      status: observableRef,
+      stdinCloseRequested: observableRef,
+      stdinClosed: observableRef,
+      stdinError: observableRef,
+      tail: observableRef,
+      timeout_ms: observableRef,
+      turnId: observableRef,
+      type: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TaskDetailResponseDto): this {
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next =
+        dto.arguments === undefined
+          ? undefined
+          : this.arguments === undefined
+            ? dto.arguments === null
+              ? null
+              : dto.arguments
+            : dto.arguments === null
+              ? null
+              : this.arguments === null
+                ? dto.arguments
+                : dto.arguments;
+      if (this.arguments !== next) this.arguments = next;
+    }
+    {
+      const next =
+        dto.bytes === undefined
+          ? undefined
+          : this.bytes === undefined
+            ? dto.bytes === null
+              ? null
+              : dto.bytes
+            : dto.bytes === null
+              ? null
+              : this.bytes === null
+                ? dto.bytes
+                : dto.bytes;
+      if (this.bytes !== next) this.bytes = next;
+    }
+    {
+      const next =
+        dto.cancelRequested === undefined
+          ? undefined
+          : this.cancelRequested === undefined
+            ? dto.cancelRequested === null
+              ? null
+              : dto.cancelRequested
+            : dto.cancelRequested === null
+              ? null
+              : this.cancelRequested === null
+                ? dto.cancelRequested
+                : dto.cancelRequested;
+      if (this.cancelRequested !== next) this.cancelRequested = next;
+    }
+    {
+      const next =
+        dto.command === undefined
+          ? undefined
+          : this.command === undefined
+            ? dto.command === null
+              ? null
+              : dto.command
+            : dto.command === null
+              ? null
+              : this.command === null
+                ? dto.command
+                : dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next =
+        dto.completedAtMs === undefined
+          ? undefined
+          : this.completedAtMs === undefined
+            ? dto.completedAtMs
+            : dto.completedAtMs;
+      if (this.completedAtMs !== next) this.completedAtMs = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.cwd === undefined
+          ? undefined
+          : this.cwd === undefined
+            ? dto.cwd === null
+              ? null
+              : dto.cwd
+            : dto.cwd === null
+              ? null
+              : this.cwd === null
+                ? dto.cwd
+                : dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next =
+        dto.durationMs === undefined
+          ? undefined
+          : this.durationMs === undefined
+            ? dto.durationMs
+            : dto.durationMs;
+      if (this.durationMs !== next) this.durationMs = next;
+    }
+    {
+      const next =
+        dto.error === undefined
+          ? undefined
+          : this.error === undefined
+            ? dto.error === null
+              ? null
+              : dto.error
+            : dto.error === null
+              ? null
+              : this.error === null
+                ? dto.error
+                : dto.error;
+      if (this.error !== next) this.error = next;
+    }
+    {
+      const next =
+        dto.exitCode === undefined
+          ? undefined
+          : this.exitCode === undefined
+            ? dto.exitCode === null
+              ? null
+              : dto.exitCode
+            : dto.exitCode === null
+              ? null
+              : this.exitCode === null
+                ? dto.exitCode
+                : dto.exitCode;
+      if (this.exitCode !== next) this.exitCode = next;
+    }
+    {
+      const next =
+        dto.finished === undefined
+          ? undefined
+          : this.finished === undefined
+            ? dto.finished === null
+              ? null
+              : dto.finished
+            : dto.finished === null
+              ? null
+              : this.finished === null
+                ? dto.finished
+                : dto.finished;
+      if (this.finished !== next) this.finished = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.interactive === undefined
+          ? undefined
+          : this.interactive === undefined
+            ? dto.interactive === null
+              ? null
+              : dto.interactive
+            : dto.interactive === null
+              ? null
+              : this.interactive === null
+                ? dto.interactive
+                : dto.interactive;
+      if (this.interactive !== next) this.interactive = next;
+    }
+    {
+      const next =
+        dto.itemId === undefined
+          ? undefined
+          : this.itemId === undefined
+            ? dto.itemId === null
+              ? null
+              : dto.itemId
+            : dto.itemId === null
+              ? null
+              : this.itemId === null
+                ? dto.itemId
+                : dto.itemId;
+      if (this.itemId !== next) this.itemId = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.log === undefined
+          ? undefined
+          : this.log === undefined
+            ? dto.log === null
+              ? null
+              : dto.log
+            : dto.log === null
+              ? null
+              : this.log === null
+                ? dto.log
+                : dto.log;
+      if (this.log !== next) this.log = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.outputFile === undefined
+          ? undefined
+          : this.outputFile === undefined
+            ? dto.outputFile === null
+              ? null
+              : dto.outputFile
+            : dto.outputFile === null
+              ? null
+              : this.outputFile === null
+                ? dto.outputFile
+                : dto.outputFile;
+      if (this.outputFile !== next) this.outputFile = next;
+    }
+    {
+      const next =
+        dto.outputTruncated === undefined
+          ? undefined
+          : this.outputTruncated === undefined
+            ? dto.outputTruncated === null
+              ? null
+              : dto.outputTruncated
+            : dto.outputTruncated === null
+              ? null
+              : this.outputTruncated === null
+                ? dto.outputTruncated
+                : dto.outputTruncated;
+      if (this.outputTruncated !== next) this.outputTruncated = next;
+    }
+    {
+      const next =
+        dto.processId === undefined
+          ? undefined
+          : this.processId === undefined
+            ? dto.processId === null
+              ? null
+              : dto.processId
+            : dto.processId === null
+              ? null
+              : this.processId === null
+                ? dto.processId
+                : dto.processId;
+      if (this.processId !== next) this.processId = next;
+    }
+    {
+      const next =
+        dto.query === undefined
+          ? undefined
+          : this.query === undefined
+            ? dto.query === null
+              ? null
+              : dto.query
+            : dto.query === null
+              ? null
+              : this.query === null
+                ? dto.query
+                : dto.query;
+      if (this.query !== next) this.query = next;
+    }
+    {
+      const next =
+        dto.server === undefined
+          ? undefined
+          : this.server === undefined
+            ? dto.server === null
+              ? null
+              : dto.server
+            : dto.server === null
+              ? null
+              : this.server === null
+                ? dto.server
+                : dto.server;
+      if (this.server !== next) this.server = next;
+    }
+    {
+      const next =
+        dto.startedAtMs === undefined
+          ? undefined
+          : this.startedAtMs === undefined
+            ? dto.startedAtMs
+            : dto.startedAtMs;
+      if (this.startedAtMs !== next) this.startedAtMs = next;
+    }
+    {
+      const next = dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.stdinCloseRequested === undefined
+          ? undefined
+          : this.stdinCloseRequested === undefined
+            ? dto.stdinCloseRequested === null
+              ? null
+              : dto.stdinCloseRequested
+            : dto.stdinCloseRequested === null
+              ? null
+              : this.stdinCloseRequested === null
+                ? dto.stdinCloseRequested
+                : dto.stdinCloseRequested;
+      if (this.stdinCloseRequested !== next) this.stdinCloseRequested = next;
+    }
+    {
+      const next =
+        dto.stdinClosed === undefined
+          ? undefined
+          : this.stdinClosed === undefined
+            ? dto.stdinClosed === null
+              ? null
+              : dto.stdinClosed
+            : dto.stdinClosed === null
+              ? null
+              : this.stdinClosed === null
+                ? dto.stdinClosed
+                : dto.stdinClosed;
+      if (this.stdinClosed !== next) this.stdinClosed = next;
+    }
+    {
+      const next =
+        dto.stdinError === undefined
+          ? undefined
+          : this.stdinError === undefined
+            ? dto.stdinError === null
+              ? null
+              : dto.stdinError
+            : dto.stdinError === null
+              ? null
+              : this.stdinError === null
+                ? dto.stdinError
+                : dto.stdinError;
+      if (this.stdinError !== next) this.stdinError = next;
+    }
+    {
+      const next =
+        dto.tail === undefined
+          ? undefined
+          : this.tail === undefined
+            ? dto.tail === null
+              ? null
+              : dto.tail
+            : dto.tail === null
+              ? null
+              : this.tail === null
+                ? dto.tail
+                : dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    {
+      const next =
+        dto.timeout_ms === undefined
+          ? undefined
+          : this.timeout_ms === undefined
+            ? dto.timeout_ms === null
+              ? null
+              : dto.timeout_ms
+            : dto.timeout_ms === null
+              ? null
+              : this.timeout_ms === null
+                ? dto.timeout_ms
+                : dto.timeout_ms;
+      if (this.timeout_ms !== next) this.timeout_ms = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    {
+      const next =
+        dto.type === undefined
+          ? undefined
+          : this.type === undefined
+            ? dto.type === null
+              ? null
+              : dto.type
+            : dto.type === null
+              ? null
+              : this.type === null
+                ? dto.type
+                : dto.type;
+      if (this.type !== next) this.type = next;
+    }
+    return this;
+  }
+}
+type TaskProjectionDto = DeepReadonly<components["schemas"]["TaskProjection"]>;
+class TaskProjectionModel {
+  agent: TaskProjectionDto["agent"];
+  command: NonNullable<TaskProjectionDto["command"]> | null | undefined;
+  created: TaskProjectionDto["created"];
+  cwd: NonNullable<TaskProjectionDto["cwd"]> | null | undefined;
+  display: BackgroundTaskDisplayModel;
+  durationMs: NonNullable<TaskProjectionDto["durationMs"]> | null | undefined;
+  error: NonNullable<TaskProjectionDto["error"]> | null | undefined;
+  exitCode: NonNullable<TaskProjectionDto["exitCode"]> | null | undefined;
+  finished: NonNullable<TaskProjectionDto["finished"]> | null | undefined;
+  id: TaskProjectionDto["id"];
+  interactive: NonNullable<TaskProjectionDto["interactive"]> | null | undefined;
+  kind: TaskProjectionDto["kind"];
+  name: TaskProjectionDto["name"];
+  outputFile: NonNullable<TaskProjectionDto["outputFile"]> | null | undefined;
+  outputTruncated:
+    | NonNullable<TaskProjectionDto["outputTruncated"]>
+    | null
+    | undefined;
+  processId: NonNullable<TaskProjectionDto["processId"]> | null | undefined;
+  query: NonNullable<TaskProjectionDto["query"]> | null | undefined;
+  status: TaskProjectionDto["status"];
+  tail: NonNullable<TaskProjectionDto["tail"]> | null | undefined;
+  turnId: TaskProjectionDto["turnId"];
+  constructor(dto: TaskProjectionDto) {
+    this.agent = dto.agent;
+    this.command =
+      dto.command === undefined
+        ? undefined
+        : dto.command === null
+          ? null
+          : dto.command;
+    this.created = dto.created;
+    this.cwd =
+      dto.cwd === undefined ? undefined : dto.cwd === null ? null : dto.cwd;
+    this.display = new BackgroundTaskDisplayModel(dto.display);
+    this.durationMs =
+      dto.durationMs === undefined
+        ? undefined
+        : dto.durationMs === null
+          ? null
+          : dto.durationMs;
+    this.error =
+      dto.error === undefined
+        ? undefined
+        : dto.error === null
+          ? null
+          : dto.error;
+    this.exitCode =
+      dto.exitCode === undefined
+        ? undefined
+        : dto.exitCode === null
+          ? null
+          : dto.exitCode;
+    this.finished =
+      dto.finished === undefined
+        ? undefined
+        : dto.finished === null
+          ? null
+          : dto.finished;
+    this.id = dto.id;
+    this.interactive =
+      dto.interactive === undefined
+        ? undefined
+        : dto.interactive === null
+          ? null
+          : dto.interactive;
+    this.kind = dto.kind;
+    this.name = dto.name;
+    this.outputFile =
+      dto.outputFile === undefined
+        ? undefined
+        : dto.outputFile === null
+          ? null
+          : dto.outputFile;
+    this.outputTruncated =
+      dto.outputTruncated === undefined
+        ? undefined
+        : dto.outputTruncated === null
+          ? null
+          : dto.outputTruncated;
+    this.processId =
+      dto.processId === undefined
+        ? undefined
+        : dto.processId === null
+          ? null
+          : dto.processId;
+    this.query =
+      dto.query === undefined
+        ? undefined
+        : dto.query === null
+          ? null
+          : dto.query;
+    this.status = dto.status;
+    this.tail =
+      dto.tail === undefined ? undefined : dto.tail === null ? null : dto.tail;
+    this.turnId = dto.turnId;
+    makeObservable(this, {
+      agent: observableRef,
+      command: observableRef,
+      created: observableRef,
+      cwd: observableRef,
+      display: observableRef,
+      durationMs: observableRef,
+      error: observableRef,
+      exitCode: observableRef,
+      finished: observableRef,
+      id: observableRef,
+      interactive: observableRef,
+      kind: observableRef,
+      name: observableRef,
+      outputFile: observableRef,
+      outputTruncated: observableRef,
+      processId: observableRef,
+      query: observableRef,
+      status: observableRef,
+      tail: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TaskProjectionDto): this {
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next =
+        dto.command === undefined
+          ? undefined
+          : this.command === undefined
+            ? dto.command === null
+              ? null
+              : dto.command
+            : dto.command === null
+              ? null
+              : this.command === null
+                ? dto.command
+                : dto.command;
+      if (this.command !== next) this.command = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next =
+        dto.cwd === undefined
+          ? undefined
+          : this.cwd === undefined
+            ? dto.cwd === null
+              ? null
+              : dto.cwd
+            : dto.cwd === null
+              ? null
+              : this.cwd === null
+                ? dto.cwd
+                : dto.cwd;
+      if (this.cwd !== next) this.cwd = next;
+    }
+    {
+      const next = this.display.apply(dto.display);
+      if (this.display !== next) this.display = next;
+    }
+    {
+      const next =
+        dto.durationMs === undefined
+          ? undefined
+          : this.durationMs === undefined
+            ? dto.durationMs === null
+              ? null
+              : dto.durationMs
+            : dto.durationMs === null
+              ? null
+              : this.durationMs === null
+                ? dto.durationMs
+                : dto.durationMs;
+      if (this.durationMs !== next) this.durationMs = next;
+    }
+    {
+      const next =
+        dto.error === undefined
+          ? undefined
+          : this.error === undefined
+            ? dto.error === null
+              ? null
+              : dto.error
+            : dto.error === null
+              ? null
+              : this.error === null
+                ? dto.error
+                : dto.error;
+      if (this.error !== next) this.error = next;
+    }
+    {
+      const next =
+        dto.exitCode === undefined
+          ? undefined
+          : this.exitCode === undefined
+            ? dto.exitCode === null
+              ? null
+              : dto.exitCode
+            : dto.exitCode === null
+              ? null
+              : this.exitCode === null
+                ? dto.exitCode
+                : dto.exitCode;
+      if (this.exitCode !== next) this.exitCode = next;
+    }
+    {
+      const next =
+        dto.finished === undefined
+          ? undefined
+          : this.finished === undefined
+            ? dto.finished === null
+              ? null
+              : dto.finished
+            : dto.finished === null
+              ? null
+              : this.finished === null
+                ? dto.finished
+                : dto.finished;
+      if (this.finished !== next) this.finished = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.interactive === undefined
+          ? undefined
+          : this.interactive === undefined
+            ? dto.interactive === null
+              ? null
+              : dto.interactive
+            : dto.interactive === null
+              ? null
+              : this.interactive === null
+                ? dto.interactive
+                : dto.interactive;
+      if (this.interactive !== next) this.interactive = next;
+    }
+    {
+      const next = dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next = dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.outputFile === undefined
+          ? undefined
+          : this.outputFile === undefined
+            ? dto.outputFile === null
+              ? null
+              : dto.outputFile
+            : dto.outputFile === null
+              ? null
+              : this.outputFile === null
+                ? dto.outputFile
+                : dto.outputFile;
+      if (this.outputFile !== next) this.outputFile = next;
+    }
+    {
+      const next =
+        dto.outputTruncated === undefined
+          ? undefined
+          : this.outputTruncated === undefined
+            ? dto.outputTruncated === null
+              ? null
+              : dto.outputTruncated
+            : dto.outputTruncated === null
+              ? null
+              : this.outputTruncated === null
+                ? dto.outputTruncated
+                : dto.outputTruncated;
+      if (this.outputTruncated !== next) this.outputTruncated = next;
+    }
+    {
+      const next =
+        dto.processId === undefined
+          ? undefined
+          : this.processId === undefined
+            ? dto.processId === null
+              ? null
+              : dto.processId
+            : dto.processId === null
+              ? null
+              : this.processId === null
+                ? dto.processId
+                : dto.processId;
+      if (this.processId !== next) this.processId = next;
+    }
+    {
+      const next =
+        dto.query === undefined
+          ? undefined
+          : this.query === undefined
+            ? dto.query === null
+              ? null
+              : dto.query
+            : dto.query === null
+              ? null
+              : this.query === null
+                ? dto.query
+                : dto.query;
+      if (this.query !== next) this.query = next;
+    }
+    {
+      const next = dto.status;
+      if (this.status !== next) this.status = next;
+    }
+    {
+      const next =
+        dto.tail === undefined
+          ? undefined
+          : this.tail === undefined
+            ? dto.tail === null
+              ? null
+              : dto.tail
+            : dto.tail === null
+              ? null
+              : this.tail === null
+                ? dto.tail
+                : dto.tail;
+      if (this.tail !== next) this.tail = next;
+    }
+    {
+      const next = dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
     }
     return this;
   }
@@ -9025,6 +11731,351 @@ function updateAgentOperationalStatus(
         : new AgentOperationalStatusVariant12Model(dto);
   }
 }
+type AnswerModel =
+  | AnswerVariant0Model
+  | AnswerVariant1Model
+  | AnswerVariant2Model;
+function createAnswer(
+  dto: DeepReadonly<components["schemas"]["Answer"]>,
+): AnswerModel {
+  switch (dto.kind) {
+    case "decision":
+      return new AnswerVariant0Model(dto);
+    case "answers":
+      return new AnswerVariant1Model(dto);
+    case "elicitation":
+      return new AnswerVariant2Model(dto);
+  }
+}
+function updateAnswer(
+  data: AnswerModel,
+  dto: DeepReadonly<components["schemas"]["Answer"]>,
+): AnswerModel {
+  switch (dto.kind) {
+    case "decision":
+      return data.kind === "decision"
+        ? data.apply(dto)
+        : new AnswerVariant0Model(dto);
+    case "answers":
+      return data.kind === "answers"
+        ? data.apply(dto)
+        : new AnswerVariant1Model(dto);
+    case "elicitation":
+      return data.kind === "elicitation"
+        ? data.apply(dto)
+        : new AnswerVariant2Model(dto);
+  }
+}
+type ApprovalStateModel =
+  | ApprovalStateVariant0Model
+  | ApprovalStateVariant1Model
+  | ApprovalStateVariant2Model
+  | ApprovalStateVariant3Model
+  | ApprovalStateVariant4Model;
+function createApprovalState(
+  dto: DeepReadonly<components["schemas"]["ApprovalState"]>,
+): ApprovalStateModel {
+  switch (dto.kind) {
+    case "pending":
+      return new ApprovalStateVariant0Model(dto);
+    case "answering":
+      return new ApprovalStateVariant1Model(dto);
+    case "answered":
+      return new ApprovalStateVariant2Model(dto);
+    case "unknown":
+      return new ApprovalStateVariant3Model(dto);
+    case "closed":
+      return new ApprovalStateVariant4Model(dto);
+  }
+}
+function updateApprovalState(
+  data: ApprovalStateModel,
+  dto: DeepReadonly<components["schemas"]["ApprovalState"]>,
+): ApprovalStateModel {
+  switch (dto.kind) {
+    case "pending":
+      return data.kind === "pending"
+        ? data.apply(dto)
+        : new ApprovalStateVariant0Model(dto);
+    case "answering":
+      return data.kind === "answering"
+        ? data.apply(dto)
+        : new ApprovalStateVariant1Model(dto);
+    case "answered":
+      return data.kind === "answered"
+        ? data.apply(dto)
+        : new ApprovalStateVariant2Model(dto);
+    case "unknown":
+      return data.kind === "unknown"
+        ? data.apply(dto)
+        : new ApprovalStateVariant3Model(dto);
+    case "closed":
+      return data.kind === "closed"
+        ? data.apply(dto)
+        : new ApprovalStateVariant4Model(dto);
+  }
+}
+type BackgroundTaskViewModel =
+  | BackgroundTaskViewVariant0Model
+  | BackgroundTaskViewVariant1Model;
+function createBackgroundTaskView(
+  dto: DeepReadonly<components["schemas"]["BackgroundTaskView"]>,
+): BackgroundTaskViewModel {
+  switch (dto.source) {
+    case "process":
+      return new BackgroundTaskViewVariant0Model(dto);
+    case "task":
+      return new BackgroundTaskViewVariant1Model(dto);
+  }
+}
+function updateBackgroundTaskView(
+  data: BackgroundTaskViewModel,
+  dto: DeepReadonly<components["schemas"]["BackgroundTaskView"]>,
+): BackgroundTaskViewModel {
+  switch (dto.source) {
+    case "process":
+      return data.source === "process"
+        ? data.apply(dto)
+        : new BackgroundTaskViewVariant0Model(dto);
+    case "task":
+      return data.source === "task"
+        ? data.apply(dto)
+        : new BackgroundTaskViewVariant1Model(dto);
+  }
+}
+function keyBackgroundTaskView(
+  item:
+    | DeepReadonly<components["schemas"]["BackgroundTaskView"]>
+    | BackgroundTaskViewModel,
+): string {
+  return JSON.stringify([item.source, item.value.id]);
+}
+function reconcileBackgroundTaskView(
+  data: BackgroundTaskViewModel[],
+  dto: readonly DeepReadonly<components["schemas"]["BackgroundTaskView"]>[],
+): BackgroundTaskViewModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    const key = keyBackgroundTaskView(item);
+    if (ids.has(key))
+      throw new Error("Duplicate identity in BackgroundTaskView");
+    ids.add(key);
+  }
+  const previous = new Map(
+    data.map((item) => [keyBackgroundTaskView(item), item]),
+  );
+  const next = dto.map((item) => {
+    const existing = previous.get(keyBackgroundTaskView(item));
+    return existing === undefined
+      ? createBackgroundTaskView(item)
+      : updateBackgroundTaskView(existing, item);
+  });
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type BrowserPhaseModel =
+  | BrowserPhaseVariant0Model
+  | BrowserPhaseVariant1Model
+  | BrowserPhaseVariant2Model
+  | BrowserPhaseVariant3Model;
+function createBrowserPhase(
+  dto: DeepReadonly<components["schemas"]["BrowserPhase"]>,
+): BrowserPhaseModel {
+  switch (dto.kind) {
+    case "link":
+      return new BrowserPhaseVariant0Model(dto);
+    case "waiting":
+      return new BrowserPhaseVariant1Model(dto);
+    case "pasted":
+      return new BrowserPhaseVariant2Model(dto);
+    case "finished":
+      return new BrowserPhaseVariant3Model(dto);
+  }
+}
+function updateBrowserPhase(
+  data: BrowserPhaseModel,
+  dto: DeepReadonly<components["schemas"]["BrowserPhase"]>,
+): BrowserPhaseModel {
+  switch (dto.kind) {
+    case "link":
+      return data.kind === "link"
+        ? data.apply(dto)
+        : new BrowserPhaseVariant0Model(dto);
+    case "waiting":
+      return data.kind === "waiting"
+        ? data.apply(dto)
+        : new BrowserPhaseVariant1Model(dto);
+    case "pasted":
+      return data.kind === "pasted"
+        ? data.apply(dto)
+        : new BrowserPhaseVariant2Model(dto);
+    case "finished":
+      return data.kind === "finished"
+        ? data.apply(dto)
+        : new BrowserPhaseVariant3Model(dto);
+  }
+}
+type PrincipalModel =
+  | PrincipalVariant0Model
+  | PrincipalVariant1Model
+  | PrincipalVariant2Model
+  | PrincipalVariant3Model
+  | PrincipalVariant4Model
+  | PrincipalVariant5Model;
+function createPrincipal(
+  dto: DeepReadonly<components["schemas"]["Principal"]>,
+): PrincipalModel {
+  switch (dto.kind) {
+    case "owner":
+      return new PrincipalVariant0Model(dto);
+    case "device":
+      return new PrincipalVariant1Model(dto);
+    case "peer":
+      return new PrincipalVariant2Model(dto);
+    case "agent":
+      return new PrincipalVariant3Model(dto);
+    case "federated":
+      return new PrincipalVariant4Model(dto);
+    case "policy":
+      return new PrincipalVariant5Model(dto);
+  }
+}
+function updatePrincipal(
+  data: PrincipalModel,
+  dto: DeepReadonly<components["schemas"]["Principal"]>,
+): PrincipalModel {
+  switch (dto.kind) {
+    case "owner":
+      return data.kind === "owner"
+        ? data.apply(dto)
+        : new PrincipalVariant0Model(dto);
+    case "device":
+      return data.kind === "device"
+        ? data.apply(dto)
+        : new PrincipalVariant1Model(dto);
+    case "peer":
+      return data.kind === "peer"
+        ? data.apply(dto)
+        : new PrincipalVariant2Model(dto);
+    case "agent":
+      return data.kind === "agent"
+        ? data.apply(dto)
+        : new PrincipalVariant3Model(dto);
+    case "federated":
+      return data.kind === "federated"
+        ? data.apply(dto)
+        : new PrincipalVariant4Model(dto);
+    case "policy":
+      return data.kind === "policy"
+        ? data.apply(dto)
+        : new PrincipalVariant5Model(dto);
+  }
+}
+type RequestModel =
+  | RequestVariant0Model
+  | RequestVariant1Model
+  | RequestVariant2Model
+  | RequestVariant3Model
+  | RequestVariant4Model
+  | RequestVariant5Model
+  | RequestVariant6Model
+  | RequestVariant7Model
+  | RequestVariant8Model;
+function createRequest(
+  dto: DeepReadonly<components["schemas"]["Request"]>,
+): RequestModel {
+  switch (dto.kind) {
+    case "exec":
+      return new RequestVariant0Model(dto);
+    case "patch":
+      return new RequestVariant1Model(dto);
+    case "permissions":
+      return new RequestVariant2Model(dto);
+    case "elicitation":
+      return new RequestVariant3Model(dto);
+    case "question":
+      return new RequestVariant4Model(dto);
+    case "tool_use":
+      return new RequestVariant5Model(dto);
+    case "agent_question":
+      return new RequestVariant6Model(dto);
+    case "monitor_start":
+      return new RequestVariant7Model(dto);
+    case "browser_open":
+      return new RequestVariant8Model(dto);
+  }
+}
+function updateRequest(
+  data: RequestModel,
+  dto: DeepReadonly<components["schemas"]["Request"]>,
+): RequestModel {
+  switch (dto.kind) {
+    case "exec":
+      return data.kind === "exec"
+        ? data.apply(dto)
+        : new RequestVariant0Model(dto);
+    case "patch":
+      return data.kind === "patch"
+        ? data.apply(dto)
+        : new RequestVariant1Model(dto);
+    case "permissions":
+      return data.kind === "permissions"
+        ? data.apply(dto)
+        : new RequestVariant2Model(dto);
+    case "elicitation":
+      return data.kind === "elicitation"
+        ? data.apply(dto)
+        : new RequestVariant3Model(dto);
+    case "question":
+      return data.kind === "question"
+        ? data.apply(dto)
+        : new RequestVariant4Model(dto);
+    case "tool_use":
+      return data.kind === "tool_use"
+        ? data.apply(dto)
+        : new RequestVariant5Model(dto);
+    case "agent_question":
+      return data.kind === "agent_question"
+        ? data.apply(dto)
+        : new RequestVariant6Model(dto);
+    case "monitor_start":
+      return data.kind === "monitor_start"
+        ? data.apply(dto)
+        : new RequestVariant7Model(dto);
+    case "browser_open":
+      return data.kind === "browser_open"
+        ? data.apply(dto)
+        : new RequestVariant8Model(dto);
+  }
+}
+type RpcIdModel = RpcIdVariant0Model | RpcIdVariant1Model;
+function createRpcId(
+  dto: DeepReadonly<components["schemas"]["RpcId"]>,
+): RpcIdModel {
+  switch (dto.kind) {
+    case "number":
+      return new RpcIdVariant0Model(dto);
+    case "text":
+      return new RpcIdVariant1Model(dto);
+  }
+}
+function updateRpcId(
+  data: RpcIdModel,
+  dto: DeepReadonly<components["schemas"]["RpcId"]>,
+): RpcIdModel {
+  switch (dto.kind) {
+    case "number":
+      return data.kind === "number"
+        ? data.apply(dto)
+        : new RpcIdVariant0Model(dto);
+    case "text":
+      return data.kind === "text"
+        ? data.apply(dto)
+        : new RpcIdVariant1Model(dto);
+  }
+}
 export type AgentSummaryEntityDto = DeepReadonly<
   components["schemas"]["AgentSummaryEntityDto"]
 >;
@@ -9034,10 +12085,18 @@ export type ProjectEntityDto = DeepReadonly<
 export type NativeThreadBlockDto = DeepReadonly<
   components["schemas"]["NativeThreadBlockDto"]
 >;
-export type ProcessListing = DeepReadonly<
-  components["schemas"]["ProcessListing"]
+export type BackgroundTaskView = DeepReadonly<
+  components["schemas"]["BackgroundTaskView"]
 >;
 export type ProcessView = DeepReadonly<components["schemas"]["ProcessView"]>;
+export type Approval = DeepReadonly<components["schemas"]["Approval"]>;
+export type Request = DeepReadonly<components["schemas"]["Request"]>;
+export type Answer = DeepReadonly<components["schemas"]["Answer"]>;
+export type Detail = DeepReadonly<components["schemas"]["Detail"]>;
+export type Question = DeepReadonly<components["schemas"]["Question"]>;
+export type QuestionAnswer = DeepReadonly<
+  components["schemas"]["QuestionAnswer"]
+>;
 export type MonitorEntityDto = DeepReadonly<
   components["schemas"]["MonitorEntityDto"]
 >;
@@ -9061,6 +12120,9 @@ export type AgentDetailEntityDto = DeepReadonly<
   components["schemas"]["AgentDetailEntityDto"]
 >;
 export type ProcessList = DeepReadonly<components["schemas"]["ProcessList"]>;
+export type TaskDetailResponse = DeepReadonly<
+  components["schemas"]["TaskDetailResponse"]
+>;
 export type MonitorsData = DeepReadonly<
   ObservableInput<ResourceData<Extract<ResourceRef, { kind: "monitors" }>>>
 >;
@@ -9228,6 +12290,131 @@ export function createStateMirror(): {
     },
   };
 }
+export interface RequestsCollections {
+  readonly requests: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["Approval"]>
+  >;
+}
+type RequestsCollectionsDto = DeepReadonly<
+  components["schemas"]["SyncEntityPayload"][]
+>;
+class RequestsCollectionsModel {
+  readonly requests = new Map<string, ApprovalModel>();
+  constructor(dto: RequestsCollectionsDto) {
+    makeObservable(this, {
+      requests: observableShallow,
+      apply: action,
+    });
+    this.apply(dto);
+  }
+  apply(dto: RequestsCollectionsDto): void {
+    const requestsIds = new Set<string>();
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "request":
+          if (requestsIds.has(entity.id))
+            throw new Error("Duplicate identity in request");
+          requestsIds.add(entity.id);
+          break;
+      }
+    }
+    for (const id of this.requests.keys()) {
+      if (!requestsIds.has(id)) this.requests.delete(id);
+    }
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "request": {
+          const previous = this.requests.get(entity.id);
+          if (previous === undefined)
+            this.requests.set(entity.id, new ApprovalModel(entity.value));
+          else previous.apply(entity.value);
+          break;
+        }
+      }
+    }
+  }
+}
+export function createRequestsMirror(): {
+  readonly current: RequestsCollections;
+  apply(dto: RequestsCollectionsDto): void;
+} {
+  const model = new RequestsCollectionsModel([]);
+  return {
+    get current(): RequestsCollections {
+      return model;
+    },
+    apply(dto: RequestsCollectionsDto): void {
+      runInAction(() => {
+        model.apply(dto);
+      });
+    },
+  };
+}
+export interface QuestionHistoryCollections {
+  readonly questionHistory: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["Approval"]>
+  >;
+}
+type QuestionHistoryCollectionsDto = DeepReadonly<
+  components["schemas"]["SyncEntityPayload"][]
+>;
+class QuestionHistoryCollectionsModel {
+  readonly questionHistory = new Map<string, ApprovalModel>();
+  constructor(dto: QuestionHistoryCollectionsDto) {
+    makeObservable(this, {
+      questionHistory: observableShallow,
+      apply: action,
+    });
+    this.apply(dto);
+  }
+  apply(dto: QuestionHistoryCollectionsDto): void {
+    const questionHistoryIds = new Set<string>();
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "questionHistory":
+          if (questionHistoryIds.has(entity.id))
+            throw new Error("Duplicate identity in questionHistory");
+          questionHistoryIds.add(entity.id);
+          break;
+      }
+    }
+    for (const id of this.questionHistory.keys()) {
+      if (!questionHistoryIds.has(id)) this.questionHistory.delete(id);
+    }
+    for (const entity of dto) {
+      switch (entity.collection) {
+        case "questionHistory": {
+          const previous = this.questionHistory.get(entity.id);
+          if (previous === undefined)
+            this.questionHistory.set(
+              entity.id,
+              new ApprovalModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+      }
+    }
+  }
+}
+export function createQuestionHistoryMirror(): {
+  readonly current: QuestionHistoryCollections;
+  apply(dto: QuestionHistoryCollectionsDto): void;
+} {
+  const model = new QuestionHistoryCollectionsModel([]);
+  return {
+    get current(): QuestionHistoryCollections {
+      return model;
+    },
+    apply(dto: QuestionHistoryCollectionsDto): void {
+      runInAction(() => {
+        model.apply(dto);
+      });
+    },
+  };
+}
 export function createAgentDetailMirror(dto: AgentDetailEntityDto): {
   readonly current: AgentDetailEntityDto;
   apply(dto: AgentDetailEntityDto): void;
@@ -9254,6 +12441,22 @@ export function createProcessesMirror(dto: ProcessList): {
       return model;
     },
     apply(dto: ProcessList): void {
+      runInAction(() => {
+        model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createTaskDetailMirror(dto: TaskDetailResponse): {
+  readonly current: TaskDetailResponse;
+  apply(dto: TaskDetailResponse): void;
+} {
+  let model: TaskDetailResponseModel = new TaskDetailResponseModel(dto);
+  return {
+    get current(): TaskDetailResponse {
+      return model;
+    },
+    apply(dto: TaskDetailResponse): void {
       runInAction(() => {
         model = model.apply(dto);
       });
@@ -9294,8 +12497,11 @@ export function createTranscriptMirror(dto: TranscriptData): {
 }
 export interface ObservableResources {
   state(): ResourceSlot<StateCollections>;
+  requests(): ResourceSlot<RequestsCollections>;
+  questionHistory(): ResourceSlot<QuestionHistoryCollections>;
   agentDetail(agentId: AgentId): ResourceSlot<AgentDetailEntityDto>;
   processes(agentId: AgentId): ResourceSlot<ProcessList>;
+  taskDetail(taskId: TaskId): ResourceSlot<TaskDetailResponse>;
   monitors(agentId?: AgentId): ResourceSlot<MonitorsData>;
   transcript(
     agentId: AgentId,
@@ -9306,6 +12512,8 @@ export function createObservableResources(
   runtime: ObservableResourceRuntime,
 ): ObservableResources {
   let stateSlot: ResourceSlot<StateCollections> | undefined;
+  let requestsSlot: ResourceSlot<RequestsCollections> | undefined;
+  let questionHistorySlot: ResourceSlot<QuestionHistoryCollections> | undefined;
   const agentDetailSlots = runtime.keyed<
     Extract<ResourceRef, { kind: "agentDetail" }>,
     AgentDetailEntityDtoModel
@@ -9318,6 +12526,13 @@ export function createObservableResources(
     ProcessListingModel
   >({
     create: (dto) => new ProcessListingModel(dto),
+    apply: (data, dto) => data.apply(dto),
+  });
+  const taskDetailSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "taskDetail" }>,
+    TaskDetailResponseModel
+  >({
+    create: (dto) => new TaskDetailResponseModel(dto),
     apply: (data, dto) => data.apply(dto),
   });
   const monitorsSlots = runtime.keyed<
@@ -9346,6 +12561,28 @@ export function createObservableResources(
         apply: (data, dto) => data.apply(dto),
       }));
     },
+    requests() {
+      if (requestsSlot !== undefined) return requestsSlot;
+      const ref: Extract<ResourceRef, { kind: "state" }> = { kind: "state" };
+      const key = JSON.stringify(["requests", subscriptionKey(ref)]);
+      return (requestsSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => new RequestsCollectionsModel(dto),
+        apply: (data, dto) => data.apply(dto),
+      }));
+    },
+    questionHistory() {
+      if (questionHistorySlot !== undefined) return questionHistorySlot;
+      const ref: Extract<ResourceRef, { kind: "state" }> = { kind: "state" };
+      const key = JSON.stringify(["questionHistory", subscriptionKey(ref)]);
+      return (questionHistorySlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => new QuestionHistoryCollectionsModel(dto),
+        apply: (data, dto) => data.apply(dto),
+      }));
+    },
     agentDetail(agentId: AgentId) {
       const ref: Extract<ResourceRef, { kind: "agentDetail" }> = {
         kind: "agentDetail",
@@ -9359,6 +12596,13 @@ export function createObservableResources(
         agentId,
       };
       return processesSlots(ref);
+    },
+    taskDetail(taskId: TaskId) {
+      const ref: Extract<ResourceRef, { kind: "taskDetail" }> = {
+        kind: "taskDetail",
+        taskId,
+      };
+      return taskDetailSlots(ref);
     },
     monitors(agentId?: AgentId) {
       const ref: Extract<ResourceRef, { kind: "monitors" }> = {

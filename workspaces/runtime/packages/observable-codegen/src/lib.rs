@@ -14,6 +14,7 @@ pub use emit::{render, render_fields};
 pub struct ObservableModel {
     pub(crate) schema: String,
     pub identity: Option<String>,
+    pub keyed_by: Vec<String>,
     pub opaque: Vec<String>,
     /// When selected, nested fields outside this list remain frozen plain refs.
     pub tracked_nested: Option<Vec<String>>,
@@ -30,6 +31,7 @@ impl ObservableModel {
         Self {
             schema: schema.into(),
             identity: None,
+            keyed_by: vec![],
             opaque: vec![],
             tracked_nested: None,
             declared_fields: false,
@@ -38,6 +40,11 @@ impl ObservableModel {
     }
     pub fn identity(mut self, field: &str) -> Self {
         self.identity = Some(field.into());
+        self
+    }
+    /// Required string paths that jointly identify a tagged union entry.
+    pub fn keyed_by(mut self, paths: &[&str]) -> Self {
+        self.keyed_by = paths.iter().map(|path| (*path).into()).collect();
         self
     }
     pub fn ordered_by(mut self, field: &str) -> Self {

@@ -85,7 +85,7 @@ fn render_all(
         roots.insert(resource.facade.clone(), shape);
     }
     for meta in metadata {
-        if !parser.models.contains_key(&meta.schema) {
+        if !parser.models.contains_key(&meta.schema) && !parser.unions.contains_key(&meta.schema) {
             return Err(fail(
                 &format!("#/components/schemas/{}", meta.schema),
                 UnsupportedShape::MissingSchema,
@@ -312,7 +312,12 @@ fn render_all(
                 let model = crate::collections::name(resource);
                 (format!("new {model}Model(dto)"), "data.apply(dto)".into())
             };
-            writeln!(out,"const key = subscriptionKey(ref);\nreturn {facade}Slot = runtime.slot({{ key, ref, create: (dto) => {initial}, apply: (data, dto) => {next} }});").expect("string");
+            let key = if resource.facade == resource.kind {
+                "subscriptionKey(ref)".into()
+            } else {
+                format!("JSON.stringify([{}, subscriptionKey(ref)])", quote(facade))
+            };
+            writeln!(out,"const key = {key};\nreturn {facade}Slot = runtime.slot({{ key, ref, create: (dto) => {initial}, apply: (data, dto) => {next} }});").expect("string");
         } else {
             writeln!(out, "return {facade}Slots(ref);").expect("string");
         }
@@ -382,15 +387,20 @@ fn ty(shape: &Shape, dto: &str) -> String {
         Shape::Union { name, .. } => format!("{name}Model"),
     }
 }
+fn keyed_name<'a>(shape: &'a Shape, parser: &Parser<'_>) -> Option<&'a str> {
+    match shape {
+        Shape::Object(name) if parser.models[name].identity.is_some() => Some(name),
+        Shape::Union { name, keyed_by, .. } if !keyed_by.is_empty() => Some(name),
+        _ => None,
+    }
+}
 fn create(shape: &Shape, value: &str, parser: &Parser<'_>) -> String {
     match shape {
         Shape::Leaf => value.into(),
         Shape::Frozen => format!("freezePlain(structuredClone({value}))"),
         Shape::Object(name) => format!("new {name}Model({value})"),
         Shape::Array(item) => {
-            if let Shape::Object(name) = item.as_ref()
-                && parser.models[name].identity.is_some()
-            {
+            if let Some(name) = keyed_name(item, parser) {
                 return format!("reconcile{name}([], {value})");
             }
             format!("{value}.map((item) => {})", create(item, "item", parser))
@@ -458,9 +468,7 @@ fn apply(shape: &Shape, left: &str, right: &str, parser: &Parser<'_>) -> String 
             apply(item, left, right, parser)
         ),
         Shape::Array(item) => {
-            if let Shape::Object(name) = item.as_ref()
-                && parser.models[name].identity.is_some()
-            {
+            if let Some(name) = keyed_name(item, parser) {
                 return format!("reconcile{name}({left}, {right})");
             }
             format!(
@@ -611,6 +619,7 @@ pub(crate) fn emit_union(out: &mut String, union: &Shape) {
         dto,
         tag,
         variants,
+        keyed_by,
     } = union
     else {
         return;
@@ -649,4 +658,19 @@ pub(crate) fn emit_union(out: &mut String, union: &Shape) {
         .expect("string");
     }
     out.push_str("} }\n");
+    if !keyed_by.is_empty() {
+        let key = keyed_by
+            .iter()
+            .map(|path| format!("item.{path}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        writeln!(out, "function key{name}(item: {dto} | {name}Model): string {{ return JSON.stringify([{key}]); }}
+function reconcile{name}(data: {name}Model[], dto: readonly ({dto})[]): {name}Model[] {{
+const ids = new Set<string>();
+for (const item of dto) {{ const key = key{name}(item); if (ids.has(key)) throw new Error('Duplicate identity in {name}'); ids.add(key); }}
+const previous = new Map(data.map(item => [key{name}(item), item]));
+const next = dto.map(item => {{ const existing = previous.get(key{name}(item)); return existing === undefined ? create{name}(item) : update{name}(existing, item); }});
+return data.length === next.length && data.every((item, index) => item === next[index]) ? data : next;
+}}").expect("string");
+    }
 }

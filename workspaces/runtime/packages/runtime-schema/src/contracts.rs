@@ -1597,6 +1597,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     crate::process_controls::apply_background_views(&mut openapi);
+    crate::resource_ref::refresh_task_detail(&mut openapi);
     for (name, schema) in crate::approvals::schemas() {
         openapi["components"]["schemas"][name] = schema;
     }

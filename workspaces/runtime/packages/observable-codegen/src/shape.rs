@@ -14,6 +14,7 @@ pub(crate) enum Shape {
         dto: String,
         tag: String,
         variants: Vec<(String, String)>,
+        keyed_by: Vec<String>,
     },
 }
 pub(crate) struct Field {
@@ -36,6 +37,7 @@ pub(crate) struct Parser<'a> {
     pub models: BTreeMap<String, Model>,
     pub unions: BTreeMap<String, Shape>,
     pub roots: Vec<Shape>,
+    variant_metadata: BTreeMap<String, ObservableModel>,
     visiting: BTreeSet<String>,
 }
 impl<'a> Parser<'a> {
@@ -46,6 +48,7 @@ impl<'a> Parser<'a> {
             models: BTreeMap::new(),
             unions: BTreeMap::new(),
             roots: vec![],
+            variant_metadata: BTreeMap::new(),
             visiting: BTreeSet::new(),
         }
     }
@@ -180,9 +183,31 @@ impl<'a> Parser<'a> {
                 .clone();
             self.visiting.insert(name.into());
             let mut members = vec![];
+            if let Some(meta) = self.metadata.iter().find(|m| m.schema == name) {
+                for field in &meta.opaque {
+                    if !variants
+                        .iter()
+                        .any(|v| v["properties"].get(field).is_some())
+                    {
+                        return Err(fail(
+                            &format!("{path}/properties/{field}"),
+                            UnsupportedShape::UnknownField,
+                        ));
+                    }
+                }
+            }
             for (index, variant) in variants.iter().enumerate() {
                 let literal = literal(&variant["properties"][&tag]).expect("checked tags");
                 let variant_name = format!("{name}Variant{index}");
+                if let Some(meta) = self.metadata.iter().find(|m| m.schema == name) {
+                    let mut local = meta.clone();
+                    local.schema = variant_name.clone();
+                    local
+                        .opaque
+                        .retain(|field| variant["properties"].get(field).is_some());
+                    self.variant_metadata.insert(variant_name.clone(), local);
+                }
+
                 self.parse(
                     variant,
                     &variant_name,
@@ -199,11 +224,28 @@ impl<'a> Parser<'a> {
                 members.push((literal, variant_name));
             }
             self.visiting.remove(name);
+            let keyed_by = self
+                .metadata
+                .iter()
+                .find(|m| m.schema == name)
+                .map(|m| m.keyed_by.clone())
+                .unwrap_or_default();
+            for key in &keyed_by {
+                for variant in variants {
+                    if !identity_path(self.document, variant, &key.split('.').collect::<Vec<_>>()) {
+                        return Err(fail(
+                            &format!("{path}/identity/{key}"),
+                            UnsupportedShape::Identity,
+                        ));
+                    }
+                }
+            }
             let union = Shape::Union {
                 name: name.into(),
                 dto: dto.into(),
                 tag,
                 variants: members,
+                keyed_by,
             };
             self.unions.insert(name.into(), union.clone());
             return Ok(union);
@@ -237,7 +279,13 @@ impl<'a> Parser<'a> {
                 )?)))
             }
             Some("object") => {
-                let meta = self.metadata.iter().find(|m| m.schema == name);
+                let owned_meta = self
+                    .metadata
+                    .iter()
+                    .find(|m| m.schema == name)
+                    .or_else(|| self.variant_metadata.get(name))
+                    .cloned();
+                let meta = owned_meta.as_ref();
                 if value["additionalProperties"] != false
                     && !meta.is_some_and(|m| m.declared_fields)
                 {
@@ -412,4 +460,21 @@ fn nullable_base(value: &Value) -> Option<Value> {
         return Some(base);
     }
     None
+}
+
+// Identity paths may traverse only required closed-object properties.
+fn identity_path(document: &Value, value: &Value, path: &[&str]) -> bool {
+    if let Some(reference) = value["$ref"].as_str() {
+        return reference
+            .strip_prefix("#/components/schemas/")
+            .and_then(|name| schema(document, name).ok())
+            .is_some_and(|target| identity_path(document, target, path));
+    }
+    if path.is_empty() {
+        return value["type"] == "string";
+    }
+    value["required"]
+        .as_array()
+        .is_some_and(|fields| fields.iter().any(|f| f.as_str() == Some(path[0])))
+        && identity_path(document, &value["properties"][path[0]], &path[1..])
 }

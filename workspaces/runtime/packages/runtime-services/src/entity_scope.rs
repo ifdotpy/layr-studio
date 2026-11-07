@@ -431,7 +431,11 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 7] = [
+const DIRECT_SOURCES: [DirectSource; 8] = [
+    DirectSource {
+        table: "runtime_tasks",
+        collections: &["taskDetail"],
+    },
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -481,16 +485,33 @@ fn direct_units(
         return Ok(units);
     }
     for source in &DIRECT_SOURCES {
+        // Full task inputs are available only to an explicit id-scoped observer.
+        if source.table == "runtime_tasks" && id.is_none() {
+            continue;
+        }
         if !source.collections.iter().any(|c| wanted.contains(c)) {
             continue;
         }
+        let query = if source.table == "runtime_tasks" {
+            // One explicit task also depends on whether its owner is visible.
+            // Read the owner's durable sequence in the same interval; no copied view or mark.
+            "SELECT id,MAX(seq),MAX(deleted) FROM (
+               SELECT id,seq,deleted FROM durable_rows
+               WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4) AND id=?5
+               UNION ALL
+               SELECT task.id,owner.seq,0 FROM runtime_tasks task
+               JOIN durable_rows owner ON owner.tbl='runtime_agents'
+                 AND owner.id=json_extract(task.record,'$.agent')
+               WHERE task.id=?5 AND owner.seq>?2 AND owner.seq<=?3
+             ) GROUP BY id ORDER BY MAX(seq) LIMIT ?6"
+        } else {
+            "SELECT id,seq,deleted FROM durable_rows
+             WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4)
+               AND (?5 IS NULL OR id=?5)
+             ORDER BY seq LIMIT ?6"
+        };
         let changed: Vec<(String, i64, bool)> = connection
-            .prepare_cached(
-                "SELECT id,seq,deleted FROM durable_rows
-                 WHERE tbl=?1 AND seq>?2 AND seq<=?3 AND (deleted=0 OR seq>?4)
-                   AND (?5 IS NULL OR id=?5)
-                 ORDER BY seq LIMIT ?6",
-            )?
+            .prepare_cached(query)?
             .query_map(
                 params![source.table, after, through, deletes_after, id, fetch],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get::<_, i64>(2)? != 0)),
@@ -520,6 +541,27 @@ fn direct_docs(
     snapshot: bool,
 ) -> StoreResult<Vec<EntityRow>> {
     let mut rows = Vec::new();
+    if table == "runtime_tasks" {
+        if !wanted.contains("taskDetail") {
+            return Ok(rows);
+        }
+        let task = studio_runtime_store::WorkspaceViewsRepository::task(connection, id)?;
+        let visible = if let Some(value) = &task {
+            let owner = value["agent"]
+                .as_str()
+                .ok_or(StoreError::RecordContract("task owner"))?;
+            studio_runtime_store::WorkspaceViewsRepository::agent(connection, owner)?
+                .is_some_and(|agent| agent.deleted_at.is_none())
+        } else {
+            false
+        };
+        if visible {
+            rows.push(upsert("taskDetail", id, seq, task.expect("visible task"))?);
+        } else if !snapshot {
+            rows.extend(tombstones(&["taskDetail"], wanted, id, seq));
+        }
+        return Ok(rows);
+    }
     if table == "approvals" {
         let Some(row) = studio_runtime_store::approvals::get(
             connection,

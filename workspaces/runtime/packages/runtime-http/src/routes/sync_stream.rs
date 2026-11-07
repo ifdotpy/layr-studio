@@ -117,6 +117,7 @@ impl ResourceIdentity for SubscribedResource {
             ResourceRef::WorkResource(_) => ResourceKind::Work,
             ResourceRef::TerminalOutputResource(_) => ResourceKind::TerminalOutput,
             ResourceRef::TaskResource(_) => ResourceKind::Task,
+            ResourceRef::TaskDetailResource(_) => ResourceKind::TaskDetail,
             ResourceRef::TasksResource(_) => ResourceKind::Tasks,
             ResourceRef::WorkspaceResource(_) => ResourceKind::Workspace,
             ResourceRef::MultiServerResource(_) => ResourceKind::MultiServer,
@@ -178,6 +179,7 @@ fn authorize_resource(
         | ResourceRef::SessionCostResource(_)
         | ResourceRef::StateResource(_)
         | ResourceRef::TaskResource(_)
+        | ResourceRef::TaskDetailResource(_)
         | ResourceRef::TasksResource(_)
         | ResourceRef::TerminalResource(_)
         | ResourceRef::TerminalsResource(_)
@@ -588,6 +590,7 @@ async fn sync_stream(
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
             | ResourceRef::TaskResource(_)
+            | ResourceRef::TaskDetailResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
             | ResourceRef::TerminalsResource(_)
@@ -785,6 +788,7 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
             | ResourceRef::TaskResource(_)
+            | ResourceRef::TaskDetailResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
             | ResourceRef::TerminalsResource(_)
@@ -1611,6 +1615,7 @@ async fn attach_transient_snapshots(
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
             | ResourceRef::TaskResource(_)
+            | ResourceRef::TaskDetailResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
             | ResourceRef::TerminalsResource(_)

@@ -19779,7 +19779,8 @@ export interface components {
       | components["schemas"]["WorkResource"]
       | components["schemas"]["ComplaintResource"]
       | components["schemas"]["TerminalOutputResource"]
-      | components["schemas"]["NativeLayrSettingsResource"];
+      | components["schemas"]["NativeLayrSettingsResource"]
+      | components["schemas"]["TaskDetailResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -22863,6 +22864,7 @@ export interface components {
       "session-cost": components["schemas"]["SessionCostResponse"];
       state: components["schemas"]["SyncEntityPayload"][];
       task: components["schemas"]["TaskEntityDto"];
+      taskDetail: components["schemas"]["TaskDetailResponse"];
       tasks: components["schemas"]["TaskEntityDto"][];
       terminal: components["schemas"]["TerminalRecord"];
       "terminal-output": components["schemas"]["TerminalOutput"];
@@ -23490,7 +23492,8 @@ export interface components {
             | "workResult"
             | "workDecision"
             | "workRelease"
-            | "agentTail";
+            | "agentTail"
+            | "taskDetail";
           /** @constant */
           op: "delete";
         }
@@ -23599,6 +23602,13 @@ export interface components {
           op: "upsert";
           value: components["schemas"]["AgentTail"];
         }
+      | {
+          /** @constant */
+          collection: "taskDetail";
+          /** @constant */
+          op: "upsert";
+          value: components["schemas"]["TaskDetailResponse"];
+        }
     );
     SyncEntityPayload:
       | components["schemas"]["SyncAgentEntityPayload"]
@@ -23636,7 +23646,8 @@ export interface components {
       | components["schemas"]["SyncWorkResultEntityPayload"]
       | components["schemas"]["SyncWorkDecisionEntityPayload"]
       | components["schemas"]["SyncWorkReleaseEntityPayload"]
-      | components["schemas"]["SyncAgentTailEntityPayload"];
+      | components["schemas"]["SyncAgentTailEntityPayload"]
+      | components["schemas"]["SyncTaskDetailEntityPayload"];
     /** SyncEventEntityPayload */
     SyncEventEntityPayload: {
       /**
@@ -23935,6 +23946,15 @@ export interface components {
       sessionId: string;
       tokenRates?: boolean | undefined;
     };
+    SyncTaskDetailEntityPayload: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      collection: "taskDetail";
+      id: string;
+      value: components["schemas"]["TaskDetailResponse"];
+    };
     /** SyncTaskEntityPayload */
     SyncTaskEntityPayload: {
       /**
@@ -24051,6 +24071,16 @@ export interface components {
       id: string;
       /** Updated */
       updated: number;
+    };
+    /** TaskDetailResource */
+    TaskDetailResource: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "taskDetail";
+      /** Taskid */
+      taskId: string;
     };
     /** TaskDetailResponse */
     TaskDetailResponse: {

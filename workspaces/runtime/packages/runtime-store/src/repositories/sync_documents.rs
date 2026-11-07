@@ -114,6 +114,7 @@ pub const WORK_COLLECTIONS: &[&str] = &[
 /// `graph_edges`) or per chat (`chat`, marked by its writers). Like the work documents,
 /// they are built at read time and have no copy in `sync_entities`.
 pub const DIRECT_COLLECTIONS: &[&str] = &[
+    "taskDetail",
     "plan",
     "annotation",
     "rule",
