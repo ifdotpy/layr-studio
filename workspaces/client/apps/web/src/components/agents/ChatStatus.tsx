@@ -31,6 +31,7 @@ export default observer(function ChatStatus(props: Props) {
   if (!status) return null;
   const kind = status.kind;
   switch (kind) {
+    case "loading":
     case "none":
     case "paused":
       return null;

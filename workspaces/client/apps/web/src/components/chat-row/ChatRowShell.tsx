@@ -53,7 +53,7 @@ export const ChatRowButton = observer(function ChatRowButton({
     <UnstyledButton
       {...bindings}
       {...events}
-      title={row.agent.name}
+      title={row.agent.name ?? undefined}
       aria-description={[
         "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",
         serverOffline ? offlineServerDescription(serverAlias) : undefined,

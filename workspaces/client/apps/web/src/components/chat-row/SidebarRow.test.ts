@@ -1,7 +1,5 @@
-import {
-  ChatOperationalKind,
-  MarkUnreadEligibility,
-} from "../../generated/api.ts";
+import type { Summary } from "./testFixture.ts";
+import { MarkUnreadEligibility } from "../../generated/api.ts";
 // @vitest-environment happy-dom
 import {
   act,
@@ -13,9 +11,9 @@ import {
 import { MantineProvider } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import { expect, it, vi } from "vitest";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import SidebarRow from "../SidebarRow.tsx";
-import { sidebarRowFixture } from "../../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
 import { actions, fixture } from "./testFixture.ts";
 
 const commits = vi.hoisted(() => new Map<string, number>());
@@ -60,9 +58,7 @@ it.each([false, true])(
     let parentRenders = 0;
     const Rows = observer(function Rows() {
       parentRenders++;
-      const slot = f.store.sidebar().current;
-      if (slot.status !== "live" && slot.status !== "stale") return null;
-      return slot.data.rows.map((row) =>
+      return f.model.rows.map((row) =>
         createElement(SidebarRow, {
           key: row.id,
           row,
@@ -84,8 +80,14 @@ it.each([false, true])(
       f.root.render(strict ? createElement(StrictMode, null, tree) : tree),
     );
     await act(async () => vi.advanceTimersByTimeAsync(100));
-    let row = sidebarRowFixture("a", {
-      copyProgress: { phase: "staging", done: 1, total: 10, unit: "files" },
+    let row = agentSummaryFixture("a", {
+      status: "queued",
+      epoch: 1,
+      startWait: {
+        reason: "workspace_copy",
+        epoch: 1,
+        progress: { phase: "staging", done: 1, total: 10, unit: "files" },
+      },
       markUnread: "allowed",
     });
     const publish = async () =>
@@ -107,22 +109,23 @@ it.each([false, true])(
       [
         ["indicator"],
         {
-          indicator: { kind: ChatOperationalKind["working"], label: "Working" },
+          operationalStatus: { reason: "working" },
         },
       ],
       [
         ["progress"],
         {
-          copyProgress: { phase: "staging", done: 2, total: 10, unit: "files" },
+          startWait: {
+            reason: "workspace_copy",
+            epoch: 1,
+            progress: { phase: "staging", done: 2, total: 10, unit: "files" },
+          },
         },
       ],
       [["title", "pin"], { pinned: true }],
-      [["archive"], { archived: true, canArchive: false }],
+      [["archive"], { archived: true, inFlight: true }],
       [["unread"], { markUnread: MarkUnreadEligibility["unsupported"] }],
-    ] satisfies readonly (readonly [
-      readonly string[],
-      Partial<SidebarChatRow>,
-    ])[]) {
+    ] satisfies readonly (readonly [readonly string[], Partial<Summary>])[]) {
       commits.clear();
       row = { ...row, ...patch };
       await publish();
@@ -135,8 +138,11 @@ it.each([false, true])(
     commits.clear();
     row = {
       ...row,
-      indicator: { ...row.indicator },
-      copyProgress: row.copyProgress ? { ...row.copyProgress } : null,
+      operationalStatus: { ...row.operationalStatus },
+      startWait:
+        row.startWait?.reason === "workspace_copy"
+          ? { ...row.startWait, progress: { ...row.startWait.progress } }
+          : row.startWait,
     };
     await publish();
     expect([...commits]).toEqual([]);
@@ -153,15 +159,13 @@ it("removing pendingRead restores an unchanged target through the real row", asy
     revision: 2,
     read: false,
   };
-  let pendingRead: SidebarChatRow["markRead"] | undefined = { ...target };
+  let pendingRead: SidebarAgent["markRead"] | undefined = { ...target };
   const Rows = observer(function Rows({
     pending,
   }: {
-    pending: SidebarChatRow["markRead"] | undefined;
+    pending: SidebarAgent["markRead"] | undefined;
   }) {
-    const slot = f.store.sidebar().current;
-    if (slot.status !== "live" && slot.status !== "stale") return null;
-    return slot.data.rows.map((row) =>
+    return f.model.rows.map((row) =>
       createElement(SidebarRow, {
         key: row.id,
         row,
@@ -193,11 +197,8 @@ it("removing pendingRead restores an unchanged target through the real row", asy
   await act(async () => vi.advanceTimersByTimeAsync(100));
   await act(async () => {
     f.publish([
-      sidebarRowFixture("a", {
-        indicator: {
-          kind: ChatOperationalKind["unread"],
-          label: "Unread result",
-        },
+      agentSummaryFixture("a", {
+        operationalStatus: { reason: "unread_result" },
         markRead: target,
       }),
     ]);

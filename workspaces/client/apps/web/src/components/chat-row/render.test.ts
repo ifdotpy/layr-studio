@@ -1,13 +1,12 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
+import type { Summary } from "./testFixture.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Profiler, StrictMode } from "react";
 import { MantineProvider } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import { expect, it, vi } from "vitest";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
-import { sidebarRowFixture } from "../../servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
 import { ChatTitle, ChatIndicator, ChatCopyProgress } from "./index.ts";
-import { fixture } from "./testFixture.ts";
+import { fixture, makeRow } from "./testFixture.ts";
 
 it.each([false, true])(
   "isolates generated title, indicator and progress leaves; equal replay is silent (StrictMode=%s)",
@@ -23,9 +22,7 @@ it.each([false, true])(
     }
     const Rows = observer(function Rows() {
       parentRenders++;
-      const slot = f.store.sidebar().current;
-      if (slot.status !== "live" && slot.status !== "stale") return null;
-      return slot.data.rows.map((row) =>
+      return f.model.rows.map((row) =>
         createElement(
           "div",
           { key: row.id },
@@ -57,10 +54,16 @@ it.each([false, true])(
       f.root.render(strict ? createElement(StrictMode, null, tree) : tree),
     );
     await act(async () => vi.advanceTimersByTimeAsync(100));
-    let rows: readonly SidebarChatRow[] = [
-      sidebarRowFixture("a"),
-      sidebarRowFixture("b", {
-        copyProgress: { phase: "staging", done: 1, total: 10, unit: "files" },
+    let rows: readonly Summary[] = [
+      agentSummaryFixture("a"),
+      agentSummaryFixture("b", {
+        status: "queued",
+        epoch: 1,
+        startWait: {
+          reason: "workspace_copy",
+          epoch: 1,
+          progress: { phase: "staging", done: 1, total: 10, unit: "files" },
+        },
       }),
     ];
     const publish = async () =>
@@ -75,17 +78,21 @@ it.each([false, true])(
       [
         "indicator",
         {
-          indicator: { kind: ChatOperationalKind["working"], label: "Working" },
+          operationalStatus: { reason: "working" },
         },
       ],
       ["title", { name: "Changed title" }],
       [
         "progress",
         {
-          copyProgress: { phase: "staging", done: 2, total: 10, unit: "files" },
+          startWait: {
+            reason: "workspace_copy",
+            epoch: 1,
+            progress: { phase: "staging", done: 2, total: 10, unit: "files" },
+          },
         },
       ],
-    ] satisfies readonly (readonly [string, Partial<SidebarChatRow>])[]) {
+    ] satisfies readonly (readonly [string, Partial<Summary>])[]) {
       commits.clear();
       rows = rows.map((row) => (row.id === "b" ? { ...row, ...patch } : row));
       await publish();
@@ -94,8 +101,11 @@ it.each([false, true])(
     commits.clear();
     rows = rows.map((row) => ({
       ...row,
-      indicator: { ...row.indicator },
-      copyProgress: row.copyProgress ? { ...row.copyProgress } : null,
+      operationalStatus: { ...row.operationalStatus },
+      startWait:
+        row.startWait?.reason === "workspace_copy"
+          ? { ...row.startWait, progress: { ...row.startWait.progress } }
+          : row.startWait,
     }));
     await publish();
     expect([...commits]).toEqual([]);
@@ -115,10 +125,8 @@ it("retires the optimistic unread overlay when the generated CAS target changes"
     revision: 2,
   };
   const Rows = observer(function Rows() {
-    const slot = f.store.sidebar().current;
-    if (slot.status !== "live" && slot.status !== "stale") return null;
-    const row = slot.data.rows[0];
-    if (!row) throw new Error("Missing sidebar row fixture");
+    const row = f.model.rows[0];
+    if (!row) return null;
     return createElement(ChatIndicator, {
       row,
       pendingRead: target,
@@ -128,8 +136,8 @@ it("retires the optimistic unread overlay when the generated CAS target changes"
     f.root.render(createElement(MantineProvider, null, createElement(Rows))),
   );
   await act(async () => vi.advanceTimersByTimeAsync(100));
-  const row = sidebarRowFixture("a", {
-    indicator: { kind: ChatOperationalKind["unread"], label: "Unread result" },
+  const row = agentSummaryFixture("a", {
+    operationalStatus: { reason: "unread_result" },
     markRead: target,
   });
   await act(async () => {
@@ -168,13 +176,15 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
     turnId: "turn",
     revision: 2,
   };
-  const row = sidebarRowFixture("a", {
-    name: "A chat",
-    pinned: true,
-    markRead: target,
-    markUnread: "allowed",
-    indicator: { kind: ChatOperationalKind["working"], label: "Working" },
-  });
+  const row = makeRow(
+    agentSummaryFixture("a", {
+      name: "A chat",
+      pinned: true,
+      markRead: target,
+      markUnread: "allowed",
+      operationalStatus: { reason: "working" },
+    }),
+  );
   const render = async (open: () => void) =>
     act(async () =>
       f.root.render(
@@ -239,7 +249,9 @@ it("renders every server unread eligibility and pending-write menu state", async
   const unread = vi.fn();
   for (const eligibility of Object.values(MarkUnreadEligibility)) {
     for (const markingRead of [false, true]) {
-      const row = sidebarRowFixture("a", { markUnread: eligibility });
+      const row = makeRow(
+        agentSummaryFixture("a", { markUnread: eligibility }),
+      );
       await act(async () =>
         f.root.render(
           createElement(
@@ -274,5 +286,71 @@ it("renders every server unread eligibility and pending-write menu state", async
       );
     }
   }
+  await f.close();
+});
+
+it("leaves a missing operational summary neutral", async () => {
+  const f = fixture();
+  const { formatOperationalStatus } =
+    await import("../../status/operationalStatus.ts");
+  await act(async () =>
+    f.root.render(
+      createElement(ChatIndicator, {
+        status: formatOperationalStatus(undefined),
+      }),
+    ),
+  );
+  expect(document.querySelector("[data-chat-status]")).toBeNull();
+  expect(document.body.textContent).toBe("");
+  await f.close();
+});
+
+it("renders only epoch-valid active workspace copy progress from summary facts", async () => {
+  const f = fixture();
+  const Rows = observer(function Rows() {
+    return f.model.rows.map((row) =>
+      createElement(ChatCopyProgress, { key: row.id, row }),
+    );
+  });
+  await act(async () => f.root.render(createElement(Rows)));
+  await act(async () => vi.advanceTimersByTimeAsync(100));
+  const progress = {
+    phase: "staging",
+    done: 1,
+    total: 10,
+    unit: "files",
+  } satisfies NonNullable<
+    Extract<Summary["startWait"], { reason: "workspace_copy" }>
+  >["progress"];
+  const row = agentSummaryFixture("a", {
+    status: "queued",
+    epoch: 1,
+    startWait: { reason: "workspace_copy", epoch: 2, progress },
+  });
+  await act(async () => {
+    f.publish([row]);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(document.querySelector(".layr-copy-progress")).toBeNull();
+  await act(async () => {
+    f.publish([
+      { ...row, startWait: { reason: "workspace_copy", epoch: 1, progress } },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(document.querySelector(".layr-copy-progress")?.textContent).toContain(
+    "Copying files",
+  );
+  await act(async () => {
+    f.publish([
+      {
+        ...row,
+        status: "completed",
+        startWait: { reason: "workspace_copy", epoch: 1, progress },
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(document.querySelector(".layr-copy-progress")).toBeNull();
   await f.close();
 });

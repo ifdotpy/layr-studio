@@ -5,7 +5,14 @@ import { afterEach, beforeEach, vi } from "vitest";
 import { createServerStore } from "../../store/index.ts";
 import { createSubscriptions } from "../../sync/subscriptions/module.ts";
 import type { ResourceVersion } from "../../sync/resourceEvents.ts";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import { createStateMirror } from "../../generated/observableResources.ts";
+import {
+  createSidebarViewModel,
+  createSidebarRow,
+  localSidebarIdentity,
+  type SidebarAgent,
+} from "../sidebar/viewModel.ts";
+import type { components } from "../../generated/api.ts";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -26,6 +33,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   document.body.replaceChildren();
 });
+
+export type Summary = components["schemas"]["AgentSummaryEntityDto"];
 
 const noop = () => {};
 export const actions = {
@@ -57,15 +66,35 @@ function fixture() {
     },
   });
   const store = createServerStore(subscriptions);
+  const empty = createStateMirror();
+  const model = createSidebarViewModel(
+    () => {
+      const value = store.state().current;
+      return value.status === "live" || value.status === "stale"
+        ? value.data
+        : empty.current;
+    },
+    () => ({ query: "", archived: false, opened: null, rank: () => 0 }),
+  );
   let revision = 0;
-  const publish = (rows: readonly SidebarChatRow[]) => {
+  const publish = (rows: readonly Summary[]) => {
     accept({
       epoch: "fixture",
       revision: ++revision,
       cursor: { workspaceId: "workspace", seq: revision },
       replyKind: "delta",
     });
-    subscriptions.publish({ kind: "sidebar" }, { rows });
+    subscriptions.publish(
+      { kind: "state" },
+      rows.map(
+        (
+          agent,
+        ): Extract<
+          components["schemas"]["SyncEntityPayload"],
+          { collection: "agentSummary" }
+        > => ({ collection: "agentSummary", id: agent.id, value: agent }),
+      ),
+    );
   };
   const host = document.createElement("div");
   document.body.append(host);
@@ -75,7 +104,14 @@ function fixture() {
     store.dispose();
     subscriptions.dispose();
   };
-  return { store, subscriptions, added, removed, root, publish, close };
+  return { store, model, subscriptions, added, removed, root, publish, close };
 }
 
 export { fixture };
+
+export function makeRow(agent: SidebarAgent) {
+  return createSidebarRow(agent, {
+    collections: createStateMirror().current,
+    ...localSidebarIdentity,
+  });
+}
