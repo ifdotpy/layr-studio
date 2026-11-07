@@ -104,7 +104,7 @@ function Harness() {
         }),
       ),
     });
-    return mirror.rows;
+      return mirror.current.rows;
   }, [data]);
   window.fixtureData = data;
   const checks =
