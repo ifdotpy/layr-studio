@@ -1,5 +1,5 @@
 import { observer } from "mobx-react-lite";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView } from "./viewModel.ts";
 import type { components } from "../../generated/api";
 
 type Progress = Extract<
@@ -24,7 +24,9 @@ const labels: Record<Progress["phase"], string> = {
 };
 
 export default observer(function LayrCopyProgress(
-  props: { progress: Progress } | { row: Pick<SidebarChatRow, "copyProgress"> },
+  props:
+    | { progress: Progress }
+    | { row: Pick<SidebarChatView, "copyProgress"> },
 ) {
   const progress = "row" in props ? props.row.copyProgress : props.progress;
   if (!progress) return null;

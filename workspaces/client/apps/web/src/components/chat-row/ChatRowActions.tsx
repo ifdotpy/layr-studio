@@ -7,21 +7,21 @@ import { forwardRef, type ComponentPropsWithoutRef } from "react";
 import { observer } from "mobx-react-lite";
 import { ActionIcon, Button, Menu, TextInput } from "@mantine/core";
 import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView } from "../sidebar/viewModel.ts";
 
 import type { ChatRowActions } from "./actions.ts";
 
 const RowActionTarget = observer(
   forwardRef<
     HTMLButtonElement,
-    { row: SidebarChatRow } & ComponentPropsWithoutRef<typeof ActionIcon>
+    { row: SidebarChatView } & ComponentPropsWithoutRef<typeof ActionIcon>
   >(function RowActionTarget({ row, ...props }, ref) {
     return (
       <ActionIcon
         {...props}
         ref={ref}
         className="row-actions"
-        aria-label={`Actions for ${row.name}`}
+        aria-label={`Actions for ${row.agent.name}`}
       >
         <MoreHorizontal size={16} />
       </ActionIcon>
@@ -40,7 +40,7 @@ export const ChatRowActionMenu = observer(function ChatRowActionMenu({
   markingRead,
   actions,
 }: {
-  row: SidebarChatRow;
+  row: SidebarChatView;
   pinned?: boolean | undefined;
   renaming: boolean;
   name: string;

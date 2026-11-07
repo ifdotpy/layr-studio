@@ -1,7 +1,7 @@
 import type { HTMLAttributes, ReactNode } from "react";
 import { observer } from "mobx-react-lite";
 import { UnstyledButton } from "@mantine/core";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
 import { displayedIndicator } from "./indicator.ts";
 import { offlineServerDescription } from "./ChatServerLine.tsx";
 import type { ChatRowActions } from "./actions.ts";
@@ -12,9 +12,9 @@ export const ChatRowShell = observer(function ChatRowShell({
   pendingRead,
   children,
 }: {
-  row: SidebarChatRow;
+  row: SidebarChatView;
   selected: boolean;
-  pendingRead?: SidebarChatRow["markRead"] | undefined;
+  pendingRead?: SidebarAgent["markRead"] | undefined;
   children: ReactNode;
 }) {
   return (
@@ -39,9 +39,9 @@ export const ChatRowButton = observer(function ChatRowButton({
   actions,
   children,
 }: {
-  row: SidebarChatRow;
+  row: SidebarChatView;
   selected: boolean;
-  pendingRead?: SidebarChatRow["markRead"] | undefined;
+  pendingRead?: SidebarAgent["markRead"] | undefined;
   serverOffline: boolean;
   serverAlias: string;
   bindings: HTMLAttributes<HTMLElement>;
@@ -53,7 +53,7 @@ export const ChatRowButton = observer(function ChatRowButton({
     <UnstyledButton
       {...bindings}
       {...events}
-      title={row.name}
+      title={row.agent.name}
       aria-description={[
         "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",
         serverOffline ? offlineServerDescription(serverAlias) : undefined,

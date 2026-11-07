@@ -1,7 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Mail } from "lucide-react";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
 import { MarkUnreadEligibility } from "../../generated/api.ts";
 import type { ChatRowActions } from "./actions.ts";
 
@@ -11,15 +11,15 @@ export const UnreadAction = observer(function UnreadAction({
   markingRead,
   actions,
 }: {
-  row: SidebarChatRow;
+  row: SidebarChatView;
   disabled: boolean;
   markingRead: boolean;
   actions: ChatRowActions;
 }) {
-  const a = row;
+  const a = row.agent;
   const unreadHelp = markingRead
     ? "The read status is changing."
-    : markUnreadHelp(row.markUnread);
+    : markUnreadHelp(row.agent.markUnread);
   return (
     <Menu.Item
       leftSection={<Mail size={14} />}
@@ -38,7 +38,7 @@ export const UnreadAction = observer(function UnreadAction({
 });
 
 function markUnreadHelp(
-  eligibility: SidebarChatRow["markUnread"],
+  eligibility: SidebarAgent["markUnread"],
 ): string | null {
   switch (eligibility) {
     case MarkUnreadEligibility.allowed:

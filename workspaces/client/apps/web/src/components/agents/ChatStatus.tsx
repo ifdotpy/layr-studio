@@ -1,22 +1,17 @@
 import { CircleAlert } from "lucide-react";
 import { providerLabel } from "../../generated/providerKind.ts";
 import { observer } from "mobx-react-lite";
-import { ChatOperationalKind } from "../../generated/api.ts";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
-import type { ChatIndicator } from "../chat-status/chatStatusModel";
-import {
-  displayedIndicator,
-  type IndicatorRow,
-} from "../chat-row/indicator.ts";
+import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
+import type { ChatIndicator } from "../../status/operationalStatus.ts";
+import { displayedIndicator } from "../chat-row/indicator.ts";
 import "./chat-status.css";
 import "./provider-activity.css";
 import { useVisualActivityRef } from "../../hooks/useVisualActivity";
 
 type Props =
   | {
-      row: IndicatorRow;
-      pendingRead?: SidebarChatRow["markRead"] | undefined;
-      model?: string | undefined;
+      row: SidebarChatView;
+      pendingRead?: SidebarAgent["markRead"] | undefined;
     }
   | {
       status?: ChatIndicator | undefined;
@@ -29,21 +24,20 @@ export default observer(function ChatStatus(props: Props) {
     "row" in props
       ? displayedIndicator(props.row, props.pendingRead)
       : props.status;
-  const provider = "row" in props ? props.row.provider : props.provider;
+  const provider = "row" in props ? props.row.agent.provider : props.provider;
   const model =
-    props.model ??
-    ("row" in props ? (props.row.model ?? undefined) : undefined);
+    "row" in props ? (props.row.agent.model ?? undefined) : props.model;
   const visualRef = useVisualActivityRef<HTMLSpanElement>();
   if (!status) return null;
   const kind = status.kind;
   switch (kind) {
-    case ChatOperationalKind.none:
-    case ChatOperationalKind.paused:
+    case "none":
+    case "paused":
       return null;
-    case ChatOperationalKind.working:
-    case ChatOperationalKind.unread:
-    case ChatOperationalKind.answer:
-    case ChatOperationalKind.error:
+    case "working":
+    case "unread":
+    case "answer":
+    case "error":
       break;
     default:
       return kind satisfies never;

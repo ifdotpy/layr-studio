@@ -1,6 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { WifiOff } from "lucide-react";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView } from "../sidebar/viewModel.ts";
 import { offlineServerDescription } from "./ChatServerLine.tsx";
 
 export const ChatRowMeta = observer(function ChatRowMeta({
@@ -9,7 +9,7 @@ export const ChatRowMeta = observer(function ChatRowMeta({
   serverOffline,
   serverAlias,
 }: {
-  row: Pick<SidebarChatRow, "waitingForLead">;
+  row: Pick<SidebarChatView, "waitingForLead">;
   showServer: boolean;
   serverOffline: boolean;
   serverAlias: string;

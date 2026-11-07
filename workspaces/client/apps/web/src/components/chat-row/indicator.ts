@@ -1,23 +1,20 @@
-import { ChatOperationalKind } from "../../generated/api.ts";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
-
-export type IndicatorRow = Pick<SidebarChatRow, "indicator" | "provider"> &
-  Partial<Pick<SidebarChatRow, "model" | "markRead">>;
+import type { SidebarChatView, SidebarAgent } from "../sidebar/viewModel.ts";
+import { formatOperationalStatus } from "../../status/operationalStatus.ts";
 
 export function displayedIndicator(
-  row: IndicatorRow,
-  pendingRead?: SidebarChatRow["markRead"],
+  row: SidebarChatView,
+  pendingRead?: SidebarAgent["markRead"],
 ) {
-  const target = pendingRead ? row.markRead : null;
+  const target = pendingRead ? row.agent.markRead : null;
   if (
     pendingRead &&
     target &&
     pendingRead.threadId === target.threadId &&
     pendingRead.turnId === target.turnId &&
     pendingRead.revision === target.revision &&
-    row.indicator.kind === ChatOperationalKind.unread
+    row.indicator.kind === "unread"
   ) {
-    return { kind: ChatOperationalKind.none, label: "Read" };
+    return formatOperationalStatus({ reason: "read_result" });
   }
   return row.indicator;
 }

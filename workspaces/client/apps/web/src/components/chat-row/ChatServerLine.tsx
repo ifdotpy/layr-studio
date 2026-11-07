@@ -3,7 +3,7 @@ import { Badge, Tooltip } from "@mantine/core";
 import { WifiOff } from "lucide-react";
 import { ProviderMark } from "../AccountTiles.tsx";
 import { providerLabel } from "../../generated/providerKind.ts";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView } from "../sidebar/viewModel.ts";
 import "../../servers/sidebar-status.css";
 
 export const ChatServerLine = observer(function ChatServerLine({
@@ -12,12 +12,12 @@ export const ChatServerLine = observer(function ChatServerLine({
   alias,
   offline = false,
 }: {
-  row?: Partial<Pick<SidebarChatRow, "provider">> | undefined;
+  row?: SidebarChatView | undefined;
   provider?: string | undefined;
   alias: string;
   offline?: boolean | undefined;
 }) {
-  const provider = row ? row.provider : legacyProvider;
+  const provider = row ? row.agent.provider : legacyProvider;
   return (
     <span
       className="chat-server-line"

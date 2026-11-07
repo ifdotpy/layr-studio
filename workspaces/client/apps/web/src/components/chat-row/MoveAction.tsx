@@ -1,7 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Folder } from "lucide-react";
-import type { SidebarChatRow } from "../../generated/observableResources.ts";
+import type { SidebarChatView } from "../sidebar/viewModel.ts";
 import type { ChatRowActions } from "./actions.ts";
 
 export const MoveAction = observer(function MoveAction({
@@ -9,13 +9,12 @@ export const MoveAction = observer(function MoveAction({
   disabled,
   actions,
 }: {
-  row: SidebarChatRow;
+  row: SidebarChatView;
   disabled: boolean;
   actions: ChatRowActions;
 }) {
-  const a = row;
   return (
-    a.projectPath && (
+    row.projectPath && (
       <Menu.Item
         disabled={disabled}
         leftSection={<Folder size={14} />}

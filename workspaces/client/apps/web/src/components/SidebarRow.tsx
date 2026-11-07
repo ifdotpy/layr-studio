@@ -1,6 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, type HTMLAttributes } from "react";
 import { observer } from "mobx-react-lite";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
+import type { SidebarChatView, SidebarAgent } from "./sidebar/viewModel.ts";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
 import {
   ChatTitle,
@@ -20,11 +20,11 @@ type Bindings = HTMLAttributes<HTMLElement> & {
 };
 type Props = {
   disabled?: boolean | undefined;
-  row: SidebarChatRow;
+  row: SidebarChatView;
   selected: boolean;
   serverAlias: string;
   showServer: boolean;
-  pendingRead?: SidebarChatRow["markRead"] | undefined;
+  pendingRead?: SidebarAgent["markRead"] | undefined;
   pinned?: boolean | undefined;
   serverOffline?: boolean | undefined;
   renaming: boolean;
