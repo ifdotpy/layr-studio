@@ -125,6 +125,11 @@ impl<'a> Parser<'a> {
                         .map(|v| literal(&v["properties"][*key]))
                         .collect();
                     tags.is_some_and(|tags| tags.len() == variants.len())
+                        && variants.iter().all(|variant| {
+                            variant["required"].as_array().is_some_and(|required| {
+                                required.iter().any(|field| field.as_str() == Some(key))
+                            })
+                        })
                 })
                 .ok_or_else(|| fail(path, UnsupportedShape::Union))?
                 .clone();
@@ -137,7 +142,14 @@ impl<'a> Parser<'a> {
                     variant,
                     &variant_name,
                     &format!("Extract<{dto}, {{ {tag}: {} }}>", quote(&literal)),
-                    &format!("{path}/oneOf/{index}"),
+                    &format!(
+                        "{path}/{}/{index}",
+                        if value.get("anyOf").is_some() {
+                            "anyOf"
+                        } else {
+                            "oneOf"
+                        }
+                    ),
                 )?;
                 members.push((literal, variant_name));
             }
@@ -162,13 +174,19 @@ impl<'a> Parser<'a> {
                     path,
                 )?)));
             }
-            return Err(fail(path, UnsupportedShape::Shape));
+            return Err(fail(path, UnsupportedShape::MixedTypes));
         }
-        if value.get("allOf").is_some()
-            || value.get("not").is_some()
-            || value.get("patternProperties").is_some()
+        if ["allOf", "not", "if", "then", "else"]
+            .iter()
+            .any(|key| value.get(key).is_some())
         {
-            return Err(fail(path, UnsupportedShape::Shape));
+            return Err(fail(path, UnsupportedShape::Composition));
+        }
+        if value.get("patternProperties").is_some() {
+            return Err(fail(path, UnsupportedShape::OpenObject));
+        }
+        if value.get("prefixItems").is_some() {
+            return Err(fail(path, UnsupportedShape::Tuple));
         }
         match value["type"].as_str() {
             Some("string" | "number" | "integer" | "boolean" | "null") => Ok(Shape::Leaf),
@@ -185,7 +203,7 @@ impl<'a> Parser<'a> {
             }
             Some("object") => {
                 if value["additionalProperties"] != false {
-                    return Err(fail(path, UnsupportedShape::Shape));
+                    return Err(fail(path, UnsupportedShape::OpenObject));
                 }
                 let props = value["properties"]
                     .as_object()
