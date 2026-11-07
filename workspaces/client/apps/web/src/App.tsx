@@ -2020,13 +2020,7 @@ export default function App({ active = true }: { active?: boolean }) {
       else if (command.action === "refresh") return refresh(false);
       else if (command.action === "prepare-chat") prepareChat(command.id);
       else if (command.action === "mark-unread") {
-        const agent = data?.threads.find(
-          (row) =>
-            row.id === command.id &&
-            row.threadId === command.threadId &&
-            row.lastCompletedTurn === command.turnId,
-        );
-        if (agent) return readState.markUnread(agent);
+        return readState.markSidebarUnread(command.id, command.target);
       } else if (command.action === "remove-chat")
         remove(command.id, command.room);
       else if (command.action === "change-project") {
