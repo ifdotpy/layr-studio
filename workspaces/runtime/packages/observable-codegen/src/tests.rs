@@ -38,8 +38,6 @@ fn models() -> Vec<ObservableModel> {
         opaque: vec!["opaque".into()],
     }]
 }
-<<<<<<< head
-=======
 
 #[test]
 fn selected_collections_use_the_existing_array_resource() {
@@ -119,7 +117,6 @@ fn component_aliases_resolve_and_cycles_fail_with_the_schema_path() {
         UnsupportedShape::Recursive
     );
 }
->>>>>>> 160a9ce
 fn resources() -> Vec<ObservableResource> {
     vec![ObservableResource {
         kind: "fixture".into(),
