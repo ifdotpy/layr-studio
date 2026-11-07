@@ -178,7 +178,12 @@ export async function fixture(
     threads: [agent],
     runtime: {
       agents: [agent],
-      sidebarRows: [sidebarRowFixture("overlap", { name: `${label} chat`, model: "fixture-model" })],
+      sidebarRows: [
+        sidebarRowFixture("overlap", {
+          name: `${label} chat`,
+          model: "fixture-model",
+        }),
+      ],
       projects: [
         {
           path: "/same/project",

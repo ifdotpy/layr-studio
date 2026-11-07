@@ -22,35 +22,42 @@ const titles = [
   "Ready for the next assignment",
 ];
 const indicators: SidebarChatRow["indicator"][] = [
-      { kind: "answer", label: "Needs your answer" },
-      { kind: "error", label: "Failed" },
-      { kind: "working", label: "Working" },
-      { kind: "none", label: "Ready" },
-      { kind: "none", label: "Paused" },
-      { kind: "none", label: "Ready" },
-    ];
+  { kind: "answer", label: "Needs your answer" },
+  { kind: "error", label: "Failed" },
+  { kind: "working", label: "Working" },
+  { kind: "none", label: "Ready" },
+  { kind: "none", label: "Paused" },
+  { kind: "none", label: "Ready" },
+];
 const rows = projects.flatMap((project, projectIndex) =>
-  titles.map((name, index) => sidebarRowFixture(`${project}-${index}`, {
-    name,
-    projectPath: `/work/${project}`,
-    groupKey: JSON.stringify(["items", `/work/${project}`, null]),
-    sortKey: String(projectIndex * titles.length + index).padStart(2, "0"),
-    activityAt: now - (projectIndex + index + 1) * 180,
-    pinned: projectIndex === 0 && index === 2,
-    provider: index % 2 ? "claude" : "codex",
-    model: index % 2 ? "claude-opus-4-6" : "gpt-5.4",
-    indicator: indicators[index]!, 
-    inFlight: index === 2,
-    canArchive: index !== 2,
-    compactPinned: index < 3,
-    markUnread: "no_completed_result",
-    searchText: `${name} /work/${project}`.toLowerCase(),
-  })),
+  titles.map((name, index) =>
+    sidebarRowFixture(`${project}-${index}`, {
+      name,
+      projectPath: `/work/${project}`,
+      groupKey: JSON.stringify(["items", `/work/${project}`, null]),
+      sortKey: String(projectIndex * titles.length + index).padStart(2, "0"),
+      activityAt: now - (projectIndex + index + 1) * 180,
+      pinned: projectIndex === 0 && index === 2,
+      provider: index % 2 ? "claude" : "codex",
+      model: index % 2 ? "claude-opus-4-6" : "gpt-5.4",
+      indicator: indicators[index]!,
+      inFlight: index === 2,
+      canArchive: index !== 2,
+      compactPinned: index < 3,
+      markUnread: "no_completed_result",
+      searchText: `${name} /work/${project}`.toLowerCase(),
+    }),
+  ),
 );
 const data = snapshotFixture([], {
-    projects: projects.map((name) => ({ id: name, name, path: `/work/${name}`, created: now - 86400 })),
-    peerTeamsVersion: 1,
-    projectOrganizationVersion: 1,
+  projects: projects.map((name) => ({
+    id: name,
+    name,
+    path: `/work/${name}`,
+    created: now - 86400,
+  })),
+  peerTeamsVersion: 1,
+  projectOrganizationVersion: 1,
 });
 const values = new Map<string, string>();
 const backend: SidebarBackend = {
@@ -279,7 +286,10 @@ export const Interactions: Story = {
 
 export const NoAttention: Story = {
   args: {
-    rows: rows.map((row) => ({ ...row, indicator: { kind: "none", label: "Ready" } })),
+    rows: rows.map((row) => ({
+      ...row,
+      indicator: { kind: "none", label: "Ready" },
+    })),
   },
   render: (props) => <FleetFixture {...props} scheme="light" />,
   play: async ({ canvasElement }) => {

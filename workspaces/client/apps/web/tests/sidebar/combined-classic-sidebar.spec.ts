@@ -429,12 +429,18 @@ for (const [theme, viewport] of [
         projectFolderRevision: 2,
         updated: Date.now() / 1000,
       } satisfies Partial<TestAgent>);
-      server.snapshot.runtime.sidebarRows = [sidebarRowFixture("overlap", {
-        name: `${server === local ? "Local" : "Remote"} chat`, projectPath: project.path!,
-        projectId: project.id!, pinned: true, compactPinned: true,
-        projectFolderRevision: 2, activityAt: Date.now() / 1000,
-        groupKey: JSON.stringify(["items", project.path, null]),
-      })];
+      server.snapshot.runtime.sidebarRows = [
+        sidebarRowFixture("overlap", {
+          name: `${server === local ? "Local" : "Remote"} chat`,
+          projectPath: project.path!,
+          projectId: project.id!,
+          pinned: true,
+          compactPinned: true,
+          projectFolderRevision: 2,
+          activityAt: Date.now() / 1000,
+          groupKey: JSON.stringify(["items", project.path, null]),
+        }),
+      ];
       Object.assign(server.snapshot.runtime, {
         projectOrganizationVersion: 1,
         peerTeamsVersion: 1,
@@ -685,11 +691,15 @@ test("offline folder expansion preserves the saved source state after reconnect"
     projectFolder: "folder",
     updated: Date.now() / 1000,
   } satisfies Partial<TestAgent>);
-  remote.snapshot.runtime.sidebarRows = [sidebarRowFixture("overlap", {
-    name: "Remote chat", projectPath: path, projectFolder: "folder",
-    activityAt: Date.now() / 1000,
-    groupKey: JSON.stringify(["items", path, "folder"]),
-  })];
+  remote.snapshot.runtime.sidebarRows = [
+    sidebarRowFixture("overlap", {
+      name: "Remote chat",
+      projectPath: path,
+      projectFolder: "folder",
+      activityAt: Date.now() / 1000,
+      groupKey: JSON.stringify(["items", path, "folder"]),
+    }),
+  ];
   Object.assign(remote.snapshot.runtime, {
     projectOrganizationVersion: 1,
     sidebarOrder: { revision: 1, groups: {} },

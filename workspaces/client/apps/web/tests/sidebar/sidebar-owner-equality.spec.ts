@@ -135,11 +135,33 @@ function seedFixture(local: ServerFixture) {
   ]);
 
   local.snapshot.runtime.sidebarRows = [
-    sidebarRowFixture("overlap", { name: "Saved pin", pinned: true, compactPinned: true, sortKey: "0" }),
-    sidebarRowFixture("nested-chat", { name: "Nested chat", projectFolder: "nested", groupKey: JSON.stringify(["items", path, "nested"]), sortKey: "1" }),
-    sidebarRowFixture("member-a", { name: "Team member A", teamId: "team", sortKey: "2" }),
-    sidebarRowFixture("member-b", { name: "Team member B", teamId: "team", sortKey: "3" }),
-    sidebarRowFixture("archived-chat", { name: "Archived chat", archived: true, sortKey: "4" }),
+    sidebarRowFixture("overlap", {
+      name: "Saved pin",
+      pinned: true,
+      compactPinned: true,
+      sortKey: "0",
+    }),
+    sidebarRowFixture("nested-chat", {
+      name: "Nested chat",
+      projectFolder: "nested",
+      groupKey: JSON.stringify(["items", path, "nested"]),
+      sortKey: "1",
+    }),
+    sidebarRowFixture("member-a", {
+      name: "Team member A",
+      teamId: "team",
+      sortKey: "2",
+    }),
+    sidebarRowFixture("member-b", {
+      name: "Team member B",
+      teamId: "team",
+      sortKey: "3",
+    }),
+    sidebarRowFixture("archived-chat", {
+      name: "Archived chat",
+      archived: true,
+      sortKey: "4",
+    }),
   ];
   const initialProject = local.snapshot.runtime.projects[0];
   assert.ok(initialProject);
@@ -311,9 +333,9 @@ test("the owner adapter preserves saved organization in standalone and classic s
       { id: "nested", name: "Nested", parentId: "parent" },
     ]);
     expect(published!.peerTeams.map((team) => team.id)).toEqual(["team"]);
-    expect(
-      published!.rows.find((chat) => chat.id === "overlap")!.pinned,
-    ).toBe(true);
+    expect(published!.rows.find((chat) => chat.id === "overlap")!.pinned).toBe(
+      true,
+    );
     expect(
       published!.rows.find((chat) => chat.id === "archived-chat")!.archived,
     ).toBe(true);

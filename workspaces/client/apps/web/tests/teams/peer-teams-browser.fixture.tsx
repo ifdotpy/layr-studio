@@ -99,10 +99,27 @@ function Fixture() {
           close={() => {}}
           refresh={refresh}
           rows={[
-            sidebarRowFixture("a", { name: "Alpha", projectPath: "/p", sortKey: "0" }),
-            sidebarRowFixture("b", { name: "Beta", projectPath: "/p", projectFolder: "f", sortKey: "1" }),
-            sidebarRowFixture("c", { name: "Gamma", projectPath: "/p", sortKey: "2" }),
-            sidebarRowFixture("x", { name: "Other project", projectPath: "/other", sortKey: "3" }),
+            sidebarRowFixture("a", {
+              name: "Alpha",
+              projectPath: "/p",
+              sortKey: "0",
+            }),
+            sidebarRowFixture("b", {
+              name: "Beta",
+              projectPath: "/p",
+              projectFolder: "f",
+              sortKey: "1",
+            }),
+            sidebarRowFixture("c", {
+              name: "Gamma",
+              projectPath: "/p",
+              sortKey: "2",
+            }),
+            sidebarRowFixture("x", {
+              name: "Other project",
+              projectPath: "/other",
+              sortKey: "3",
+            }),
           ]}
           markUnread={() => {}}
           markingRead={new Set()}

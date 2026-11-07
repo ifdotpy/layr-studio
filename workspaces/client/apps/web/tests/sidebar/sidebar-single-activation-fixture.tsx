@@ -21,49 +21,51 @@ import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import "../../src/appearance.css";
 const noop = () => {};
-const rows = Array.from({ length: 30 }, (_, index) => sidebarRowFixture("chat-" + index, {
-  name: "Chat " + index + " with a long title reaching the actions",
-  projectPath: "/project",
-  groupKey: JSON.stringify(["items", "/project", null]),
-  sortKey: String(index).padStart(2, "0"),
-  searchText: "chat " + index + " with a long title reaching the actions /project",
-}));
+const rows = Array.from({ length: 30 }, (_, index) =>
+  sidebarRowFixture("chat-" + index, {
+    name: "Chat " + index + " with a long title reaching the actions",
+    projectPath: "/project",
+    groupKey: JSON.stringify(["items", "/project", null]),
+    sortKey: String(index).padStart(2, "0"),
+    searchText:
+      "chat " + index + " with a long title reaching the actions /project",
+  }),
+);
 const data = {
   ...snapshotFixture([], {
-    projects: [{ id: "project", name: "Project", path: "/project", folders: [] }],
+    projects: [
+      { id: "project", name: "Project", path: "/project", folders: [] },
+    ],
     sidebarOrder: { revision: 0, groups: {} },
   }),
   stateDir: "sidebar-single-activation",
   token: "fixture-token",
 };
 const scenario = new URLSearchParams(location.search).get("groups");
-const groupChat = (
-  id: string,
-  cwd: string,
-  archived = false,
-): SidebarChatRow => sidebarRowFixture(id, {
-  projectPath: cwd,
-  archived,
-  groupKey: JSON.stringify(["items", cwd, null]),
-  searchText: id + " " + cwd,
-});
+const groupChat = (id: string, cwd: string, archived = false): SidebarChatRow =>
+  sidebarRowFixture(id, {
+    projectPath: cwd,
+    archived,
+    groupKey: JSON.stringify(["items", cwd, null]),
+    searchText: id + " " + cwd,
+  });
 const groupRows = [
-    ...Array.from({ length: 5 }, (_, directory) =>
-      Array.from({ length: 2 }, (_, chat) =>
-        groupChat(
-          "archived-" + directory + "-" + chat,
-          "/archive-only-" + directory,
-          true,
-        ),
+  ...Array.from({ length: 5 }, (_, directory) =>
+    Array.from({ length: 2 }, (_, chat) =>
+      groupChat(
+        "archived-" + directory + "-" + chat,
+        "/archive-only-" + directory,
+        true,
       ),
-    ).flat(),
-    groupChat("active-chat", "/active"),
-    groupChat("mixed-active", "/mixed"),
-    groupChat("mixed-archived", "/mixed", true),
-    groupChat("compact-old-0", "/compact"),
-    groupChat("compact-old-1", "/compact"),
-    groupChat("registered-archived", "/registered-archive", true),
-  ];
+    ),
+  ).flat(),
+  groupChat("active-chat", "/active"),
+  groupChat("mixed-active", "/mixed"),
+  groupChat("mixed-archived", "/mixed", true),
+  groupChat("compact-old-0", "/compact"),
+  groupChat("compact-old-1", "/compact"),
+  groupChat("registered-archived", "/registered-archive", true),
+];
 const groupData = {
   ...data,
   runtime: {
