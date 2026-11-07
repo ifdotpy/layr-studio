@@ -54,15 +54,15 @@ if (!bindingCli)
     "--root",
     cache,
   ]);
-run("cargo", [
-  "build",
-  "-p",
-  "studio-client-wasm",
-  "--release",
-  "--target",
-  "wasm32-unknown-unknown",
-  "--locked",
-]);
+// The cargo arguments live in client-wasm-build-args.json: the `sweep` list in the root Cargo.toml
+// names the same command, so a new layr line takes its release units warm (layr-sweep-parity.test.ts).
+const wasmBuildArgs: string[] = JSON.parse(
+  readFileSync(
+    new URL("./client-wasm-build-args.json", import.meta.url),
+    "utf8",
+  ),
+);
+run("cargo", wasmBuildArgs);
 const target = process.env.CARGO_TARGET_DIR
   ? resolve(root, process.env.CARGO_TARGET_DIR)
   : resolve(root, "target");
