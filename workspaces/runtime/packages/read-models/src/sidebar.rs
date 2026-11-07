@@ -270,18 +270,78 @@ fn sort_key(pinned: bool, rank: Option<u32>, activity: f64, id: &str) -> String 
 }
 
 #[cfg(test)]
+fn test_facts(id: &str) -> SidebarFacts {
+    SidebarFacts {
+        id: id.into(),
+        source: Some(studio_runtime_schema::agent_entity_nested::AgentSource::Managed),
+        is_lead: true,
+        name: None,
+        project_path: None,
+        project: None,
+        project_id: None,
+        project_server_id: None,
+        project_folder: None,
+        project_folder_revision: 0,
+        provider: ProviderKind::Codex,
+        model: None,
+        status: Some(AgentStatus::Idle),
+        epoch: 0,
+        thread_id: None,
+        turn_id: None,
+        stall: None,
+        last_completed_turn: None,
+        last_completed_turn_status: None,
+        read_state: None,
+        deleted_at: None,
+        shared_room_id: None,
+        moved_to: None,
+        move_import_pending: false,
+        pinned: false,
+        archived: false,
+        in_flight: false,
+        auto_wake: None,
+        empty: false,
+        created: None,
+        updated: studio_runtime_schema::queue_command::Field::Missing,
+        tail: None,
+        start_wait: None,
+        capacity_retry: None,
+        account_key: None,
+        parent_id: None,
+        parked_event: None,
+        has_question: false,
+        has_approval: false,
+        has_background_work: false,
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    use studio_json::json;
 
     #[test]
     fn sidebar_projector_owns_unread_status_order_and_copy_epoch() {
-        let source: SidebarFacts = studio_json::from_value(json!({
-            "id":"chat","source":"managed","isLead":true,"name":"Title","projectPath":"/p",
-            "provider":"codex","status":"completed","threadId":"t","lastCompletedTurn":"r",
-            "lastCompletedTurnStatus":"completed","created":100,"updated":200,"epoch":2,
-            "startWait":{"reason":"workspace_copy","epoch":2,"progress":{"phase":"staging","done":1,"unit":"files"}}
-        })).expect("typed facts");
+        let source = SidebarFacts {
+            name: Some("Title".into()),
+            project_path: Some("/p".into()),
+            status: Some(AgentStatus::Completed),
+            thread_id: Some("t".into()),
+            last_completed_turn: Some("r".into()),
+            last_completed_turn_status: Some("completed".into()),
+            created: Some(100.0),
+            updated: studio_runtime_schema::queue_command::Field::Value(200.0),
+            epoch: 2,
+            start_wait: Some(AgentStartWait::WorkspaceCopy {
+                epoch: 2,
+                progress: studio_runtime_schema::layr_progress::CopyProgress {
+                    phase: studio_runtime_schema::layr_progress::CopyPhase::Staging,
+                    done: 1,
+                    total: None,
+                    unit: studio_runtime_schema::layr_progress::CopyUnit::Files,
+                },
+            }),
+            ..test_facts("chat")
+        };
         let context = SidebarContext::default();
         let row = project(&source, &context).expect("visible lead");
         assert_eq!(
@@ -299,10 +359,12 @@ mod tests {
         assert!(row.compact_pinned, "unread results survive compact mode");
         assert_eq!(row.search_text, " title /p   ");
         let mut read = source.clone();
-        read.read_state = Some(
-            studio_json::from_value(json!({"threadId":"t","turnId":"r","read":true,"revision":3}))
-                .expect("receipt"),
-        );
+        read.read_state = Some(ReadStateDto {
+            thread_id: "t".into(),
+            turn_id: "r".into(),
+            read: true,
+            revision: studio_runtime_schema::AgentCounter::from_i64(3).expect("counter"),
+        });
         let read_row = project(&read, &context).expect("read row");
         assert_eq!(
             read_row.indicator.kind,
@@ -336,7 +398,10 @@ mod tests {
 
     #[test]
     fn sort_key_orders_rank_then_activity_then_id_and_visibility_is_exact() {
-        let source: SidebarFacts = studio_json::from_value(json!({"id":"b","source":"managed","isLead":true,"provider":"codex","status":"idle","updated":1.5})).expect("facts");
+        let source = SidebarFacts {
+            updated: studio_runtime_schema::queue_command::Field::Value(1.5),
+            ..test_facts("b")
+        };
         let mut context = SidebarContext::default();
         let unranked = project(&source, &context).expect("row");
         context
@@ -352,14 +417,26 @@ mod tests {
                 .sort_key
                 < unranked.sort_key
         );
-        for field in ["deletedAt", "sharedRoomId", "movedTo", "moveImportPending"] {
-            let mut value = json!({"id":"b","source":"managed","isLead":true,"provider":"codex"});
-            value[field] = match field {
-                "deletedAt" => json!(1),
-                "moveImportPending" => json!(true),
-                _ => json!("other"),
-            };
-            assert!(project(&studio_json::from_value(value).expect("facts"), &context).is_none());
+        let deleted = SidebarFacts {
+            deleted_at: Some(1.0),
+            ..source.clone()
+        };
+        let shared = SidebarFacts {
+            shared_room_id: Some("other".into()),
+            ..source.clone()
+        };
+        let moved = SidebarFacts {
+            moved_to: Some(studio_runtime_schema::raw_json::RawJson(
+                studio_json::OwnedRawJson::from_string("\"other\"".into()).expect("opaque target"),
+            )),
+            ..source.clone()
+        };
+        let importing = SidebarFacts {
+            move_import_pending: true,
+            ..source
+        };
+        for hidden in [deleted, shared, moved, importing] {
+            assert!(project(&hidden, &context).is_none());
         }
     }
 }
@@ -493,14 +570,20 @@ pub fn status_context(
 #[cfg(test)]
 mod wait_tests {
     use super::*;
-    use studio_json::json;
     #[test]
     fn wait_spinner_uses_current_children_commands_inputs_and_event() {
-        let lead: SidebarFacts = studio_json::from_value(
-            json!({"id":"lead","provider":"codex","status":"waiting","parkedEvent":"ready"}),
-        )
-        .expect("lead");
-        let worker: SidebarFacts = studio_json::from_value(json!({"id":"worker","provider":"codex","parentId":"lead","status":"running","autoWake":true})).expect("worker");
+        let lead = SidebarFacts {
+            status: Some(AgentStatus::Waiting),
+            parked_event: Some("ready".into()),
+            ..test_facts("lead")
+        };
+        let worker = SidebarFacts {
+            is_lead: false,
+            parent_id: Some("lead".into()),
+            status: Some(AgentStatus::Running),
+            auto_wake: Some(true),
+            ..test_facts("worker")
+        };
         let mut context = SidebarContext::default();
         status_context(
             &mut context,

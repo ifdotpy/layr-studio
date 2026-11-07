@@ -159,8 +159,8 @@ mod tests {
             Some(store.clone()),
             None,
         );
-        let resource: ResourceRef =
-            studio_json::from_value(json!({"kind":"sidebar"})).expect("resource");
+        let resource =
+            ResourceRef::SidebarResource(studio_runtime_schema::resource_ref::EmptyResource {});
         let baseline =
             super::super::subscriptions::initial_snapshot(state.clone(), resource.clone(), None)
                 .await
