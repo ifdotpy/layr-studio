@@ -54,6 +54,8 @@
     "lucide-react": "1.61.0",
     "marked": "18.1.1",
     "mermaid": "11.17.2",
+    "mobx": "7.1.4",
+    "mobx-react-lite": "5.1.2",
     "openapi-fetch": "0.17.0",
     "openapi-typescript-helpers": "0.1.0",
     "react": "19.3.1",
