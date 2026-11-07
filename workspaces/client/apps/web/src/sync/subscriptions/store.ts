@@ -46,6 +46,7 @@ type Entry = {
  * A zero-consumer entry stays subscribed through grace, but its cache is stale. */
 export function createSubscriptionStore(transport: SubscriptionTransport) {
   const entries = new Map<string, Entry>();
+  const evictions = new Set<(ref: ResourceRef) => void>();
   let connection: ConnectionHealth = "connecting";
   let stopConnection: (() => void) | undefined;
   let disposed = false;
@@ -110,11 +111,13 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
         !candidate.consumers.size &&
         !candidate.observers.size,
     );
-    for (const [key] of inactive.slice(
+    for (const [key, candidate] of inactive.slice(
       0,
       Math.max(0, inactive.length - MAX_INACTIVE_SUBSCRIPTION_CACHE_ENTRIES),
-    ))
+    )) {
       entries.delete(key);
+      for (const accept of evictions) accept(candidate.ref);
+    }
     if (![...entries.values()].some((candidate) => candidate.stop)) {
       stopConnection?.();
       stopConnection = undefined;
@@ -176,6 +179,12 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
 
   return {
     watchResourceChanges,
+    onEvict(accept: (ref: ResourceRef) => void) {
+      evictions.add(accept);
+      return () => {
+        evictions.delete(accept);
+      };
+    },
     getSnapshot<R extends ResourceRef>(
       ref: R,
     ): SubscriptionState<ResourceData<R>> {
@@ -217,8 +226,10 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
         entry.consumers.clear();
         releaseSource(entry);
         entry.observers.clear();
+        for (const accept of evictions) accept(entry.ref);
       }
       entries.clear();
+      evictions.clear();
       stopConnection?.();
       stopConnection = undefined;
     },

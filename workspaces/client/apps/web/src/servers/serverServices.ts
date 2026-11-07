@@ -16,6 +16,7 @@ import { createBrowserDrafts } from "../sync/drafts";
 import { createOutbox } from "../sync/send";
 import { createSyncClient } from "../sync/client";
 import { createServerSubscriptions } from "../sync/subscriptions/server";
+import { createServerStore } from "../store/index.ts";
 import { createTranscriptCache } from "../sync/transcriptCache";
 import { createTokenRateCache } from "../usage/tokenRate";
 import { createEntitySequenceScope } from "../sync/entitySequence";
@@ -71,6 +72,7 @@ export function createServerServices(server: StudioServer) {
     | {
         sync: ReturnType<typeof createSyncClient>;
         resources: ReturnType<typeof createServerSubscriptions>;
+        store: ReturnType<typeof createServerStore>;
       }
     | undefined;
   let stopName = () => {};
@@ -108,7 +110,7 @@ export function createServerServices(server: StudioServer) {
               byte.toString(16).padStart(2, "0"),
             ).join(""),
     });
-    runtime = { sync, resources };
+    runtime = { sync, resources, store: createServerStore(resources) };
     if (transport.owner.id !== "local")
       stopName = watchServerName(transport.owner, resources);
     return runtime;
@@ -193,12 +195,16 @@ export function createServerServices(server: StudioServer) {
     get resources() {
       return synchronization().resources;
     },
+    get store() {
+      return synchronization().store;
+    },
     api,
     storage,
     ready,
     close(removeCache = false) {
       audio.close();
       stopName();
+      runtime?.store.dispose();
       runtime?.resources.dispose();
       runtime?.sync.disposeCache();
       transport.close();

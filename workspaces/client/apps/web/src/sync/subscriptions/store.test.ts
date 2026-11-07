@@ -48,6 +48,23 @@ describe("screen subscription ownership", () => {
     store.dispose();
   });
 
+  it("announces bounded inactive eviction and disposal to derived stores", () => {
+    const { store } = fixture();
+    const evicted = vi.fn();
+    const stopEvictions = store.onEvict(evicted);
+    for (let index = 0; index < 129; index++) {
+      const ref = { kind: "transcript", agentId: `chat-${index}` } as const;
+      store.watchResourceChanges(ref, () => {}, { graceMs: 0 })();
+    }
+    expect(evicted).toHaveBeenCalledExactlyOnceWith({
+      kind: "transcript",
+      agentId: "chat-0",
+    });
+    store.dispose();
+    expect(evicted).toHaveBeenCalledTimes(129);
+    stopEvictions();
+  });
+
   it("shares the reference across components and releases after the final grace", () => {
     const { store, add, removed } = fixture();
     const one = store.watchResourceChanges(resource, () => {}, { graceMs: 50 });

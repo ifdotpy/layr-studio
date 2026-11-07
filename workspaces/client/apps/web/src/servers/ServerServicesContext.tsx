@@ -29,8 +29,10 @@ import { defaultSubscriptions as defaultResources } from "../sync/subscriptions/
 import * as defaultTranscripts from "../sync/transcriptCache";
 import * as defaultTokenRates from "../usage/tokenRate";
 import type { ServerServices } from "./serverServices";
+import { createServerStore } from "../store/index.ts";
 
 const Context = createContext<ServerServices | null>(null);
+const defaultStore = createServerStore(defaultResources);
 
 /** A chat/project subtree receives the services of its own resource owner. */
 export function ServerServicesProvider({
@@ -68,6 +70,7 @@ export function useServerSidebarServices() {
 export const useServerSync = () => useServerServices()?.sync ?? defaultSync;
 export const useServerResources = () =>
   useServerServices()?.resources ?? defaultResources;
+export const useServerStore = () => useServerServices()?.store ?? defaultStore;
 export const useServerTranscripts = () =>
   useServerServices()?.transcripts ?? defaultTranscripts;
 export const useServerTokenRates = () =>

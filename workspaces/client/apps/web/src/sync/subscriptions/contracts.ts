@@ -76,6 +76,8 @@ export type SubscriptionState<T> = {
   status: SubscriptionStatus;
   error: Error | null;
 };
+/** The subscription module owns normalization of failures at its ingress. */
+export type SubscriptionError = NonNullable<SubscriptionState<never>["error"]>;
 export type SubscriptionOptions = { graceMs?: number | undefined };
 /** Retain interest after the final consumer leaves, in milliseconds. */
 export const DEFAULT_SUBSCRIPTION_GRACE_MS = 20_000;
