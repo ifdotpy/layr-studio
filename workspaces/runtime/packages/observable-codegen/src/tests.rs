@@ -101,6 +101,13 @@ fn object_validation_alternatives_do_not_create_union_models() {
     document["components"]["schemas"]["Row"]["properties"]["nested"]["anyOf"] =
         json!([{"properties":{"count":{"minimum":1}}}]);
     render(&document, &models(), &resources()).expect("validation narrows existing fields");
+    let nested = &mut document["components"]["schemas"]["Row"]["properties"]["nested"];
+    let mut complete = nested.clone();
+    complete.as_object_mut().expect("object").remove("anyOf");
+    complete["properties"]["count"]["minimum"] = json!(1);
+    nested["anyOf"] = json!([complete]);
+    render(&document, &models(), &resources())
+        .expect("complete validation alternative repeats the declared shape");
     document["components"]["schemas"]["Row"]["properties"]["nested"]["anyOf"] =
         json!([{"properties":{"extra":{"type":"string"}}}]);
     assert!(

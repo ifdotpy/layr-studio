@@ -111,11 +111,12 @@ impl<'a> Parser<'a> {
                 let constraints = variant
                     .as_object()
                     .ok_or_else(|| fail(path, UnsupportedShape::Composition))?;
-                if constraints.keys().any(|key| key != "properties")
-                    || constraints
-                        .get("properties")
-                        .and_then(Value::as_object)
-                        .is_none_or(|fields| fields.keys().any(|key| !properties.contains_key(key)))
+                if constraints.iter().any(|(key, constraint)| {
+                    key != "properties" && value.get(key) != Some(constraint)
+                }) || constraints
+                    .get("properties")
+                    .and_then(Value::as_object)
+                    .is_none_or(|fields| fields.keys().any(|key| !properties.contains_key(key)))
                 {
                     return Err(fail(path, UnsupportedShape::Composition));
                 }

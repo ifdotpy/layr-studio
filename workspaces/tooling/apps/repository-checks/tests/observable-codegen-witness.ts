@@ -14,9 +14,33 @@ import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "../../../../..");
 const web = join(root, "workspaces/client/apps/web");
+<<<<<<< head
 const input: { source: string; document: object } = JSON.parse(
   await text(process.stdin),
 );
+=======
+const input: {
+  source: string;
+  document: object;
+  collections: boolean;
+  production?: boolean;
+} = process.argv.includes("--production")
+  ? {
+      source: readFileSync(
+        join(web, "src/generated/observableResources.ts"),
+        "utf8",
+      ),
+      document: JSON.parse(
+        readFileSync(
+          join(root, "workspaces/runtime/packages/runtime-http/openapi.json"),
+          "utf8",
+        ),
+      ),
+      collections: true,
+      production: true,
+    }
+  : JSON.parse(await text(process.stdin));
+>>>>>>> 0a6da4e
 const directory = mkdtempSync(join(web, ".observable-codegen-"));
 function write(path: string, source: string) {
   const destination = join(directory, path);
@@ -73,6 +97,7 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
         ...input.document,
       }),
       encoding: "utf8",
+      maxBuffer: 8 * 1024 * 1024,
     },
   );
   assert.equal(api.status, 0, api.stderr);
@@ -104,8 +129,37 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
   );
   write(
     "witness.ts",
-    input.collections
+    input.production
       ? `
+import assert from 'node:assert/strict';
+import { autorun } from 'mobx';
+import {createStateMirror} from './src/generated/observableResources.ts';
+import type {components} from './src/generated/api.ts';
+type Payload=components['schemas']['SyncEntityPayload'];
+const summary={id:'lead',inFlight:false,markRead:null,markUnread:'unsupported',operationalStatus:{reason:'ready'},projectServerId:null} satisfies components['schemas']['AgentSummaryEntityDto'];
+const dto:Payload[]=[
+ {collection:'agentSummary',id:'lead',value:summary},
+ {collection:'project',id:'project',value:{id:'project',path:'/project'}},
+ {collection:'peerTeam',id:'team',value:{id:'team',members:['lead']}},
+ {collection:'workspace',id:'root',value:{stateDir:'/fixture'}},
+ {collection:'agentTail',id:'lead',value:{id:'lead',tail:'first'}}
+];
+const mirror=createStateMirror(); const agents=mirror.current.agents;
+let members=0;const stop=autorun(()=>{[...agents.keys()];members+=1;});
+mirror.apply(dto); assert.equal(mirror.current.agents,agents); assert.equal(members,2);
+const lead=agents.get('lead');assert.ok(lead); assert.equal(lead.operationalStatus.reason,'ready');
+assert.equal(mirror.current.workspaces.get('root')?.stateDir,'/fixture');
+assert.equal(mirror.current.projects.get('project')?.path,'/project');
+assert.equal(mirror.current.peerTeams.get('team')?.members?.[0],'lead');
+let status=0;const stopStatus=autorun(()=>{lead.operationalStatus.reason;status+=1;});
+mirror.apply(dto.map(item=>item.collection==='agentTail'?{...item,value:{id:'lead',tail:'second'}}:item));
+assert.equal(members,2);assert.equal(status,1);assert.equal(mirror.current.agentTail.get('lead')?.tail,'second');
+mirror.apply(dto.map(item=>item.collection==='agentSummary'?{...item,value:{...summary,operationalStatus:{reason:'waiting',wait:{agents:1,commands:0,monitors:0,inputs:0,event:null}}}}:item));
+assert.equal(agents.get('lead'),lead);assert.equal(lead.operationalStatus.reason,'waiting');assert.equal(status,2);assert.equal(members,2);
+stop();stopStatus();console.log('production selected collection witnesses passed');
+`
+      : input.collections
+        ? `
 import assert from 'node:assert/strict';
 import { autorun, spy } from 'mobx';
 import { createObservableResources, createStateMirror, type StateCollections } from './src/generated/observableResources.ts';
@@ -165,7 +219,7 @@ mirror.apply([envelope(row('again'))]); assert.equal(members.size,1); assert.equ
 stopMembers(); stopTitle(); stopSpy();
 console.log('selected collection facade witnesses passed');
 `
-      : `
+        : `
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
