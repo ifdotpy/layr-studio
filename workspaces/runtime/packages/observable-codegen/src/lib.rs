@@ -1,4 +1,5 @@
 //! Pure metadata and TypeScript generation for the observable sidebar pilot.
+mod collections;
 mod emit;
 mod metadata;
 mod shape;
@@ -18,8 +19,12 @@ pub struct ObservableModel {
 }
 impl ObservableModel {
     pub fn of<T: JsonSchema>() -> Self {
+        Self::named(&T::schema_name())
+    }
+    /// Refer to an existing component whose schema is already owned by the contract document.
+    pub fn named(schema: &str) -> Self {
         Self {
-            schema: T::schema_name().into_owned(),
+            schema: schema.into(),
             identity: None,
             opaque: vec![],
             ordered_by: None,
@@ -53,6 +58,27 @@ pub struct ObservableResource {
     pub facade: String,
     pub(crate) data: String,
     pub args: Vec<ObservableArg>,
+    pub collections: Vec<ObservableCollection>,
+}
+
+/// Select one existing tagged payload variant as a keyed readonly collection.
+#[derive(Clone, Debug)]
+pub struct ObservableCollection {
+    pub collection: String,
+    pub facade: String,
+    pub schema: String,
+}
+impl ObservableCollection {
+    pub fn named(collection: &str, facade: &str, schema: &str) -> Self {
+        Self {
+            collection: collection.into(),
+            facade: facade.into(),
+            schema: schema.into(),
+        }
+    }
+    pub fn of<T: JsonSchema>(collection: &str, facade: &str) -> Self {
+        Self::named(collection, facade, &T::schema_name())
+    }
 }
 impl ObservableResource {
     pub fn of<T: JsonSchema>(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
@@ -61,6 +87,22 @@ impl ObservableResource {
             facade: facade.into(),
             data: T::schema_name().into_owned(),
             args,
+            collections: vec![],
+        }
+    }
+    /// Adapt an existing singleton array resource; unselected variants remain outside this store.
+    pub fn collections(
+        kind: &str,
+        facade: &str,
+        payload: &str,
+        collections: Vec<ObservableCollection>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            facade: facade.into(),
+            data: payload.into(),
+            args: vec![],
+            collections,
         }
     }
 }

@@ -8,9 +8,16 @@ pub(crate) fn validate(
 ) -> Result<(), GenerationError> {
     let path = format!("#/resources/{}", resource.kind);
     let data = schema(document, "SubscriptionDataMap")?;
-    if data["properties"][&resource.kind]["$ref"]
-        != format!("#/components/schemas/{}", resource.data)
-    {
+    let data = &data["properties"][&resource.kind];
+    let reference = if resource.collections.is_empty() {
+        &data["$ref"]
+    } else {
+        if data["type"] != "array" {
+            return Err(fail(&path, UnsupportedShape::Resource));
+        }
+        &data["items"]["$ref"]
+    };
+    if reference != &format!("#/components/schemas/{}", resource.data) {
         return Err(fail(&path, UnsupportedShape::Resource));
     }
     let reference = schema(document, "ResourceRef")?;

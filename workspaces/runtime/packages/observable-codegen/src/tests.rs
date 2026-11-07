@@ -47,15 +47,21 @@ fn selected_collections_use_the_existing_array_resource() {
         "type":"object","additionalProperties":false,"required":["kind"],
         "properties":{"kind":{"type":"string","const":"state"}}
     }]});
+<<<<<<< head
     document["components"]["schemas"]["Tail"] = json!({"type":"object","additionalProperties":false,"required":["tail"],"properties":{"tail":{"type":"string"}}});
+=======
+>>>>>>> 0243a5f
     document["components"]["schemas"]["Payload"] = json!({"oneOf":[
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
             "collection":{"type":"string","const":"row"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Row"}
         }},
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
+<<<<<<< head
             "collection":{"type":"string","const":"tail"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/Tail"}
         }},
         {"type":"object","additionalProperties":false,"required":["collection","id","value"],"properties":{
+=======
+>>>>>>> 0243a5f
             "collection":{"type":"string","const":"ignored"},"id":{"type":"string"},"value":{"type":"object","additionalProperties":true}
         }}
     ]});
@@ -66,10 +72,14 @@ fn selected_collections_use_the_existing_array_resource() {
         "state",
         "state",
         "Payload",
+<<<<<<< head
         vec![
             ObservableCollection::named("row", "rows", "Row"),
             ObservableCollection::named("tail", "tails", "Tail"),
         ],
+=======
+        vec![ObservableCollection::named("row", "rows", "Row")],
+>>>>>>> 0243a5f
     )];
     let generated =
         render(&document, &models(), &resources).expect("selected state collections render");
@@ -94,6 +104,7 @@ fn selected_collections_use_the_existing_array_resource() {
         UnsupportedShape::Identifier
     );
 }
+<<<<<<< head
 
 #[test]
 fn object_validation_alternatives_do_not_create_union_models() {
@@ -132,6 +143,8 @@ fn component_aliases_resolve_and_cycles_fail_with_the_schema_path() {
         UnsupportedShape::Recursive
     );
 }
+=======
+>>>>>>> 0243a5f
 fn resources() -> Vec<ObservableResource> {
     vec![ObservableResource {
         kind: "fixture".into(),
@@ -147,6 +160,7 @@ fn resources() -> Vec<ObservableResource> {
                 brand: "TeamId".into(),
             },
         ],
+        collections: vec![],
     }]
 }
 
@@ -246,10 +260,14 @@ fn deterministic_fixture_and_typed_path_failures() {
 
 #[test]
 fn generated_fixture_compiles_and_updates_through_facade() {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
     let document = fixture();
     let generated = render(&document, &models(), &resources()).expect("fixture");
+    assert_witness(&document, &generated, false);
+}
+
+fn assert_witness(document: &Value, generated: &str, collections: bool) {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
     let root = std::env::current_dir().expect("cwd").join("../../../..");
     let mut child =
         Command::new("node")
@@ -266,9 +284,11 @@ fn generated_fixture_compiles_and_updates_through_facade() {
         .take()
         .expect("stdin")
         .write_all(
-            studio_json::to_string(&json!({"source":generated,"document":document}))
-                .expect("json")
-                .as_bytes(),
+            studio_json::to_string(
+                &json!({"source":generated,"document":document,"collections":collections}),
+            )
+            .expect("json")
+            .as_bytes(),
         )
         .expect("write");
     let output = child.wait_with_output().expect("witness exits");

@@ -14,6 +14,7 @@ import ts from "typescript";
 
 const root = resolve(import.meta.dirname, "../../../../..");
 const web = join(root, "workspaces/client/apps/web");
+<<<<<<< head
 const input: {
   source: string;
   document: object;
@@ -35,6 +36,10 @@ const input: {
       production: true,
     }
   : JSON.parse(await text(process.stdin));
+=======
+const input: { source: string; document: object; collections: boolean } =
+  JSON.parse(await text(process.stdin));
+>>>>>>> 0243a5f
 const directory = mkdtempSync(join(web, ".observable-codegen-"));
 function write(path: string, source: string) {
   const destination = join(directory, path);
@@ -123,6 +128,7 @@ function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]
   );
   write(
     "witness.ts",
+<<<<<<< head
     input.production
       ? `
 import assert from 'node:assert/strict';
@@ -155,6 +161,11 @@ stop();stopStatus();console.log('production selected collection witnesses passed
       : input.collections
         ? `
 import assert from 'node:assert/strict';
+=======
+    input.collections
+      ? `
+import assert from 'node:assert/strict';
+>>>>>>> 0243a5f
 import { autorun, spy } from 'mobx';
 import { createObservableResources, createStateMirror, type StateCollections } from './src/generated/observableResources.ts';
 import { fixtureKeyComputations } from './src/sync/subscriptions/contracts.ts';
@@ -199,12 +210,15 @@ mirror.apply(rows.map(envelope)); assert.equal(mapOperations,0); assert.equal(me
 mirror.apply(rows.map(item=>envelope({...item})).reverse()); assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2);
 mirror.apply([...rows.map(envelope),{collection:'ignored',id:'ignored',value:{arbitrary:{nested:true}}}]);
 assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2); assert.equal(members.size,1000);
+<<<<<<< head
 const withTail = (tail: string): Payload[] => [...rows.map(envelope),{collection:'tail',id:'500',value:{tail}}];
 mirror.apply(withTail('first')); const firstTail=mirror.current.tails.get('500'); assert.ok(firstTail);
 let tailRuns=0; const stopTail=autorun(()=>{firstTail.tail; tailRuns += 1;});
 mirror.apply(withTail('second')); assert.equal(mirror.current.tails.get('500'),firstTail); assert.equal(tailRuns,2);
 assert.equal(mapOperations,0); assert.equal(memberRuns,2); assert.equal(titleRuns,2);
 mirror.apply(withTail('second')); assert.equal(tailRuns,2); stopTail();
+=======
+>>>>>>> 0243a5f
 assert.throws(()=>mirror.apply([...rows.map(envelope),envelope(row('500'))]),/Duplicate identity/); assert.equal(mapOperations,0);
 rows=[...rows,row('new')]; mirror.apply(rows.map(envelope)); assert.equal(mapOperations,1); assert.equal(memberRuns,3);
 rows=rows.filter(item=>item.id!=='500'); mirror.apply(rows.map(envelope)); assert.equal(mapOperations,2); assert.equal(memberRuns,4);
@@ -213,7 +227,11 @@ mirror.apply([envelope(row('again'))]); assert.equal(members.size,1); assert.equ
 stopMembers(); stopTitle(); stopSpy();
 console.log('selected collection facade witnesses passed');
 `
+<<<<<<< head
         : `
+=======
+      : `
+>>>>>>> 0243a5f
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
