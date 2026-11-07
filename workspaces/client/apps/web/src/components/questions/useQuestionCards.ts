@@ -1,91 +1,55 @@
-import { useEffect, useMemo, useState } from "react";
-import { useServerSync } from "../../servers/ServerServicesContext";
-import type { Approval } from "../../approvals";
+import { useMemo } from "react";
+import { computed, makeAutoObservable, type IComputedValue } from "mobx";
+import { useServerStore } from "../../servers/ServerServicesContext";
 import type { Message } from "../../types";
 import {
   isPendingQuestionRequest,
   pendingQuestionRequests,
   questionCard,
   questionHistoryIndex,
-  questionRefreshKey,
-  type QuestionHistoryEntry,
-  type QuestionLookup,
 } from "./questionCardModel";
+import { useRequestsView } from "./requestView";
 
-type RequestDto = Approval;
-
-/**
- * Question cards for one chat. Pending state comes from live request entities;
- * answers come from source-published question history entities.
- */
-export function useQuestionCards(
-  agentId: string | undefined,
-  scope: string,
-  items: Message[],
-  requests: RequestDto[],
-) {
-  const { subscribeStateProjection } = useServerSync();
-  const refreshKey = useMemo(
-    () => questionRefreshKey(items, requests),
-    [items, requests],
-  );
-  const owner = `${scope}\u0000${agentId || ""}`;
-  const [history, setHistory] = useState<{
-    owner: string;
-    entries: QuestionHistoryEntry[];
-  }>({ owner, entries: [] });
-  useEffect(() => {
-    if (!agentId) return;
-    let source: unknown;
-    let familyKey = "";
-    return subscribeStateProjection(
-      (snapshot) => {
-        if (!snapshot) return;
-        const agent = snapshot.runtime.agents.find((row) => row.id === agentId);
-        const root = agent?.rootId || agentId;
-        const family = new Set(
-          snapshot.runtime.agents
-            .filter((row) => (row.rootId || row.id) === root)
-            .map((row) => row.id),
-        );
-        const nextFamily = JSON.stringify([...family].sort());
-        if (
-          source === snapshot.runtime.questionHistory &&
-          familyKey === nextFamily
-        )
-          return;
-        source = snapshot.runtime.questionHistory;
-        familyKey = nextFamily;
-        setHistory({
-          owner,
-          entries: (snapshot.runtime.questionHistory ?? []).filter((entry) =>
-            family.has(entry.agent),
-          ),
-        });
-      },
-      () => {},
-    );
-  }, [owner, subscribeStateProjection]);
-  const entries = history.owner === owner ? history.entries : undefined;
-  const lookup = useMemo<QuestionLookup>(
-    () => ({
-      agentId,
-      history: questionHistoryIndex(entries || []),
-      pending: pendingQuestionRequests(requests),
-      pendingIds: new Set(
-        requests.filter(isPendingQuestionRequest).map((request) => request.id),
-      ),
-    }),
-    // Requests change identity often; the refresh key names their question state.
-    [agentId, entries, refreshKey],
-  );
+/** A stable selector; only the transcript row observes its computed card. */
+export function useQuestionCards(agentId: string | undefined) {
+  const store = useServerStore();
+  const requests = useRequestsView({ agentId, includeTeam: true });
   return useMemo(() => {
-    const cache = new WeakMap<Message, ReturnType<typeof questionCard>>();
+    if (!agentId) return (item: Message) => questionCard(item);
+    const view = makeAutoObservable({
+      get lookup() {
+        const current = store.questionHistory().current;
+        const entries =
+          current.status === "live" || current.status === "stale"
+            ? [...current.data.questionHistory.values()].filter((entry) => {
+                const owner = requests.agents?.get(entry.agent);
+                return (owner?.rootId || entry.agent) === requests.rootId;
+              })
+            : [];
+        const pending = requests.familyRequests;
+        return {
+          agentId,
+          history: questionHistoryIndex(entries),
+          pending: pendingQuestionRequests(pending),
+          pendingIds: new Set(
+            pending
+              .filter(isPendingQuestionRequest)
+              .map((request) => request.id),
+          ),
+        };
+      },
+    });
+    const cards = new WeakMap<
+      Message,
+      IComputedValue<ReturnType<typeof questionCard>>
+    >();
     return (item: Message) => {
-      if (cache.has(item)) return cache.get(item);
-      const card = questionCard(item, lookup);
-      cache.set(item, card);
-      return card;
+      let card = cards.get(item);
+      if (!card) {
+        card = computed(() => questionCard(item, view.lookup));
+        cards.set(item, card);
+      }
+      return card.get();
     };
-  }, [lookup]);
+  }, [store, requests, agentId]);
 }

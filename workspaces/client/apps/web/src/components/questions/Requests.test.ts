@@ -1,14 +1,17 @@
-import { QuestionDecision } from "../../generated/api";
+import { QuestionDecision, type components } from "../../generated/api";
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { approval, question } from "../../approvalFixtures";
 import type { Approval } from "../../approvals";
-import { isValidElement, type ReactElement, type ReactNode } from "react";
-import { afterEach, expect, it, vi } from "vitest";
-import type { components } from "../../generated/api";
-import { required, type ComponentHookCell } from "../componentTestFixtures";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
+import { requestFixture } from "./requestFixtures";
+import Requests, { RequestArea } from "./Requests";
 
 const h = vi.hoisted(() => ({
-  cursor: 0,
-  cells: [] as ComponentHookCell[],
+  store: null as ReturnType<typeof requestFixture>["store"] | null,
   storage: {},
   post: vi.fn(async () => ({})),
   answer: vi.fn(async () => ({
@@ -16,138 +19,248 @@ const h = vi.hoisted(() => ({
     result: { status: "answered" },
   })),
 }));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => {
-    const index = h.cursor++;
-    h.cells[index] ??= {
-      value: typeof initial === "function" ? initial() : initial,
-    };
-    return [
-      required(h.cells[index]).value,
-      (value: unknown) => {
-        const cell = required(h.cells[index]);
-        cell.value = typeof value === "function" ? value(cell.value) : value;
-      },
-    ];
-  },
-  useRef: (current: unknown) => {
-    const index = h.cursor++;
-    h.cells[index] ??= { current };
-    return h.cells[index];
-  },
-  useEffect: () => {},
-  useCallback: <T>(callback: T) => callback,
+vi.mock("../../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../../servers/ServerServicesContext")>()),
+  useServerStore: () => h.store,
+  useServerApi: () => ({ post: h.post, command: { answer: h.answer } }),
+  useServerServices: () => null,
+  useServerStorage: () => h.storage,
 }));
 vi.mock("../../unsent/useUnsentText", () => ({
   useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
-vi.mock("../../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ post: h.post, command: { answer: h.answer } }),
-  useServerServices: () => null,
-  useServerStorage: () => h.storage,
-  useServerLocalDrafts: () => ({ writeLocalDraft: () => null }),
-}));
-import { AnswerForm, RequestCard } from "./Requests";
-
-type NodeProps = {
-  children?: ReactNode;
-  "data-request"?: string;
-  "data-answer"?: string;
-  "aria-expanded"?: boolean;
-  className?: string;
-  onClick?: () => void;
-};
-function nodes(node: ReactNode): ReactElement<NodeProps>[] {
-  if (Array.isArray(node)) return node.flatMap(nodes);
-  if (!isValidElement<NodeProps>(node)) return [];
-  return [node, ...nodes(node.props.children)];
-}
-const refresh = vi.fn(async () => {});
-const notify = vi.fn();
-function render(
-  request: Approval,
-  agents: Parameters<typeof RequestCard>[0]["agents"] = [],
-) {
-  h.cursor = 0;
-  return RequestCard({ request, agents, scope: "server", refresh, notify });
-}
-afterEach(() => {
-  h.cells = [];
+let root: Root;
+const refresh = vi.fn(async () => {}),
+  notify = vi.fn();
+beforeEach(() => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    media: "",
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent() {
+      return true;
+    },
+  }));
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { addEventListener() {}, removeEventListener() {} },
+  });
+  root = createRoot(document.body.appendChild(document.createElement("div")));
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  document.body.replaceChildren();
+  vi.unstubAllGlobals();
   h.post.mockClear();
   h.answer.mockClear();
   refresh.mockClear();
   notify.mockClear();
 });
-
-it("Answer expands and hides the editor inside the same request card", () => {
-  const request = approval({
-    id: "question",
-    request: {
-      kind: "agent_question",
-      questions: [question("choice", "Continue?")],
-    },
-  });
-  const closed = render(request);
-  const answer = required(
-    nodes(closed).find((node) => node.props["data-answer"] === request.id),
+async function render(request: Approval, threadId?: string | null) {
+  h.store = requestFixture(
+    [request],
+    threadId === undefined ? [] : [agentSummaryFixture("lead", { threadId })],
+    threadId === undefined
+      ? []
+      : [
+          {
+            id: "lead",
+            error: { codexErrorInfo: "misalignmentPolicyViolation" },
+          },
+        ],
+  ).store;
+  await act(async () =>
+    root.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(
+          RequestArea,
+          { scope: "server", refresh, notify },
+          createElement(Requests, { all: true }),
+        ),
+      ),
+    ),
   );
-  expect(answer.props["aria-expanded"]).toBe(false);
-  required(answer.props.onClick)();
-  const opened = render(request);
-  expect(opened.type).toBe(closed.type);
-  expect(opened.key).toBe(closed.key);
-  expect(opened.props["data-request"]).toBe(request.id);
-  expect(
-    nodes(opened).filter((node) => node.props["data-request"]),
-  ).toHaveLength(1);
-  expect(
-    nodes(opened).filter(
-      (node) => node.props.className === "request-inline-answer",
-    ),
-  ).toHaveLength(1);
-  required(
-    required(
-      nodes(opened).find((node) => node.props["data-answer"] === request.id),
-    ).props.onClick,
-  )();
-  expect(
-    nodes(render(request)).filter(
-      (node) => node.props.className === "request-inline-answer",
-    ),
-  ).toHaveLength(0);
+}
+function button(label: string) {
+  const button = [...document.querySelectorAll("button")].find(
+    (b) => b.textContent?.trim() === label,
+  );
+  expect(button, label).toBeDefined();
+  return button!;
+}
+const click = (label: string) => act(async () => button(label).click());
+async function fill(label: string, value: string) {
+  const field = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(
+    `[aria-label="${label}"]`,
+  )!;
+  expect(field).not.toBeNull();
+  await act(async () => {
+    const prototype =
+      field.tagName === "TEXTAREA"
+        ? HTMLTextAreaElement.prototype
+        : HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(
+      field,
+      value,
+    );
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+it("Answer expands and hides the editor inside the same request card", async () => {
+  await render(
+    approval({
+      request: {
+        kind: "agent_question",
+        questions: [question("choice", "Continue?")],
+      },
+    }),
+  );
+  const card = document.querySelector("[data-request]");
+  expect(button("Answer").getAttribute("aria-expanded")).toBe("false");
+  await click("Answer");
+  expect(document.querySelector("[data-request]")).toBe(card);
+  expect(document.querySelectorAll("[data-request]")).toHaveLength(1);
+  expect(document.querySelectorAll(".request-inline-answer")).toHaveLength(1);
+  await click("Hide");
+  expect(document.querySelectorAll(".request-inline-answer")).toHaveLength(0);
   expect(h.post).not.toHaveBeenCalled();
 });
-
 for (const decision of ["accept", "decline"] as const) {
   it(`approval ${decision} retains its card and sends the exact request once`, async () => {
-    const request = approval({
-      id: "approval",
-      request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
-    });
-    const before = render(request);
-    const action = required(
-      nodes(before).find(
-        (node) =>
-          node.props.children ===
-          (decision === "accept" ? "Approve" : "Decline"),
-      ),
+    await render(
+      approval({
+        id: "approval",
+        request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+      }),
     );
-    required(action.props.onClick)();
-    required(action.props.onClick)();
-    const sending = render(request);
-    expect(sending.type).toBe(before.type);
-    expect(sending.props["data-request"]).toBe(request.id);
-    expect(
-      nodes(sending).filter((node) => node.props["data-request"]),
-    ).toHaveLength(1);
+    const card = document.querySelector("[data-request]");
+    await act(async () => {
+      const action = button(decision === "accept" ? "Approve" : "Decline");
+      action.click();
+      action.click();
+    });
+    expect(document.querySelector("[data-request]")).toBe(card);
+    expect(document.querySelectorAll("[data-request]")).toHaveLength(1);
     expect(h.answer).toHaveBeenCalledTimes(1);
-    expect(h.answer).toHaveBeenCalledWith(request.id, { decision });
-    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(h.answer).toHaveBeenCalledWith("approval", { decision });
+    expect(refresh).toHaveBeenCalledTimes(1);
     expect(notify).not.toHaveBeenCalled();
   });
 }
-
+for (const threadId of [null, "thread-1"]) {
+  it(`keeps the native thread refusal scoped to a real matching thread (${threadId})`, async () => {
+    await render(
+      approval({
+        id: "approval",
+        request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
+        params: { threadId },
+      }),
+      threadId,
+    );
+    const approve = [...document.querySelectorAll("button")].find(
+      (button) => button.textContent === "Approve",
+    );
+    expect(Boolean(approve)).toBe(threadId === null);
+    if (approve) {
+      await act(async () => approve.click());
+      expect(h.answer).toHaveBeenCalledWith("approval", { decision: "accept" });
+    } else expect(h.answer).not.toHaveBeenCalled();
+  });
+}
+for (const kind of ["agent_question", "question"] as const) {
+  it(`sends only the answer data for ${kind}`, async () => {
+    await render(
+      approval({
+        id: "q",
+        request: { kind, questions: [question("q", "Choose")] },
+      }),
+    );
+    await click("Answer");
+    await fill("Choose", "Chosen");
+    await act(async () =>
+      document
+        .querySelector("form")!
+        .dispatchEvent(
+          new Event("submit", { bubbles: true, cancelable: true }),
+        ),
+    );
+    expect(h.answer).toHaveBeenCalledWith("q", {
+      answers: { q: { answers: ["Chosen"] } },
+    });
+  });
+}
+it("sends elicitation content through its generated answer variant", async () => {
+  await render(
+    approval({
+      id: "form",
+      request: {
+        kind: "elicitation",
+        schema: {
+          properties: { count: { type: "integer" }, flag: { type: "boolean" } },
+          required: ["count", "flag"],
+        },
+      },
+      params: { mode: "form" },
+    }),
+  );
+  await click("Answer");
+  await fill("count", "7");
+  await fill("flag", "true");
+  await act(async () =>
+    document
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  expect(h.answer).toHaveBeenCalledWith("form", {
+    decision: "accept",
+    content: { count: 7, flag: true },
+  });
+});
+const answer = {
+  kind: "answers" as const,
+  answers: [{ id: "q", answer: ["Yes"] }],
+};
+const stateCases: [Approval["state"], boolean][] = [
+  [{ kind: "pending" }, true],
+  [{ kind: "answering", answer, command: "command" }, false],
+  [{ kind: "answered", answer, by: { kind: "owner" }, at: 2 }, false],
+  [{ kind: "unknown", answer, since: 2 }, false],
+  [{ kind: "closed", reason: "expired", at: 2 }, false],
+];
+for (const [state, controls] of stateCases) {
+  it(`shows answer controls only while a question is pending (${state.kind})`, async () => {
+    await render(
+      approval({
+        request: {
+          kind: "agent_question",
+          questions: [question("q", "Continue?")],
+        },
+        state,
+      }),
+    );
+    expect(!!document.querySelector('[data-answer="approval"]')).toBe(controls);
+  });
+}
+const approvalCases: Approval["request"][] = [
+  { kind: "patch", item: "item", files: ["a.ts"], reason: null },
+  { kind: "permissions", requested: ["network"] },
+  { kind: "tool_use", tool: "Bash", input: {} },
+  { kind: "monitor_start", monitor: "m", command: "tail -f log" },
+];
+for (const request of approvalCases) {
+  it(`offers approve and decline for a ${request.kind} request`, async () => {
+    await render(approval({ request }));
+    expect(button("Approve")).toBeDefined();
+    expect(button("Decline")).toBeDefined();
+  });
+}
 // These deliberately invalid fresh answers must fail against the same generated
 // contract used by AnswerForm; opaque legacy HTTP answers keep their own boundary.
 function questionAnswerConstructionWitness() {
@@ -167,133 +280,3 @@ function questionAnswerConstructionWitness() {
   void [missingAnswers, missingContent, wrongMethod];
 }
 void questionAnswerConstructionWitness;
-
-for (const threadId of [null, "thread-1"]) {
-  it(`keeps the native thread refusal scoped to a real matching thread (${threadId})`, () => {
-    const request = approval({
-      id: "approval",
-      request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
-      params: { threadId },
-    });
-    const card = render(request, [
-      {
-        id: "lead",
-        threadId,
-        error: { codexErrorInfo: "misalignmentPolicyViolation" },
-      },
-    ]);
-    const approve = nodes(card).find(
-      (node) => node.props.children === "Approve",
-    );
-    expect(Boolean(approve)).toBe(threadId === null);
-    if (approve) {
-      required(approve.props.onClick)();
-      expect(h.answer).toHaveBeenCalledWith("approval", { decision: "accept" });
-    } else expect(h.answer).not.toHaveBeenCalled();
-  });
-}
-
-for (const kind of ["agent_question", "question"] as const) {
-  it(`sends only the answer data for ${kind}`, () => {
-    h.cells = [{ value: { q: "Chosen" } }];
-    h.cursor = 0;
-    const post = vi.fn(async () => true);
-    const form = AnswerForm({
-      draftKey: "form",
-      sending: false,
-      post,
-      close: vi.fn(),
-      notify,
-      request: approval({
-        id: "q",
-        request: { kind, questions: [question("q", "Choose")] },
-      }),
-    });
-    if (
-      !isValidElement<{
-        onSubmit: (event: { preventDefault(): void }) => void;
-      }>(form)
-    )
-      throw new Error("Expected answer form");
-    form.props.onSubmit({ preventDefault() {} });
-    expect(post).toHaveBeenCalledWith(
-      { answers: { q: { answers: ["Chosen"] } } },
-      JSON.stringify({ q: "Chosen" }),
-    );
-  });
-}
-
-it("sends elicitation content through its generated answer variant", () => {
-  h.cells = [{ value: { count: "7", flag: "true" } }];
-  h.cursor = 0;
-  const post = vi.fn(async () => true);
-  const form = AnswerForm({
-    draftKey: "form",
-    sending: false,
-    post,
-    close: vi.fn(),
-    notify,
-    request: approval({
-      id: "form",
-      request: {
-        kind: "elicitation",
-        schema: {
-          properties: { count: { type: "integer" }, flag: { type: "boolean" } },
-          required: ["count", "flag"],
-        },
-      },
-      params: { mode: "form" },
-    }),
-  });
-  if (
-    !isValidElement<{ onSubmit: (event: { preventDefault(): void }) => void }>(
-      form,
-    )
-  )
-    throw new Error("Expected answer form");
-  form.props.onSubmit({ preventDefault() {} });
-  expect(post).toHaveBeenCalledWith(
-    { decision: "accept", content: { count: 7, flag: true } },
-    JSON.stringify({ count: "7", flag: "true" }),
-  );
-});
-
-const question1: Approval["request"] = {
-  kind: "agent_question",
-  questions: [question("q", "Continue?")],
-};
-const sent: Extract<Approval["state"], { kind: "answered" }>["answer"] = {
-  kind: "answers",
-  answers: [{ id: "q", answer: ["Yes"] }],
-};
-const stateCases: [Approval["state"], boolean][] = [
-  [{ kind: "pending" }, true],
-  [{ kind: "answering", answer: sent, command: "command" }, false],
-  [{ kind: "answered", answer: sent, by: { kind: "owner" }, at: 2 }, false],
-  [{ kind: "unknown", answer: sent, since: 2 }, false],
-  [{ kind: "closed", reason: "expired", at: 2 }, false],
-];
-for (const [state, controls] of stateCases) {
-  it(`shows answer controls only while a question is pending (${state.kind})`, () => {
-    const card = render(approval({ request: question1, state }));
-    expect(
-      nodes(card).some((node) => node.props["data-answer"] === "approval"),
-    ).toBe(controls);
-  });
-}
-
-const approvalCases: Approval["request"][] = [
-  { kind: "patch", item: "item", files: ["a.ts"], reason: null },
-  { kind: "permissions", requested: ["network"] },
-  { kind: "tool_use", tool: "Bash", input: {} },
-  { kind: "monitor_start", monitor: "m", command: "tail -f log" },
-];
-for (const request of approvalCases) {
-  it(`offers approve and decline for a ${request.kind} request`, () => {
-    const labels = nodes(render(approval({ request }))).map(
-      (node) => node.props.children,
-    );
-    expect(labels).toContain("Approve");
-    expect(labels).toContain("Decline");
-  });
-}

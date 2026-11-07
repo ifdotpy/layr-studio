@@ -1,3 +1,4 @@
+import { RequestFixture } from "../../src/components/questions/requestFixtures";
 import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext";
 import { ApiError } from "../../src/api";
 import { flushSync } from "react-dom";
@@ -22,7 +23,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Requests from "../../src/components/questions/Requests.tsx";
+import Requests, {
+  RequestArea,
+} from "../../src/components/questions/Requests.tsx";
 import UserMessages from "../../src/components/shell/messages/UserMessages.tsx";
 import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
 import CapacityRetry from "../../src/components/CapacityRetry.tsx";
@@ -73,14 +76,24 @@ window.renderCase = async (which, value) => {
         reason: "Structured operation failed",
       },
     });
-    component = React.createElement(Requests, {
-      requests: [request],
-      allRequests: [request],
-      scope: "fixture",
-      agents: [agent],
-      refresh,
-      notify: noop,
-    });
+    component = React.createElement(
+      RequestFixture,
+      {
+        requests: [request],
+        agents: [
+          agentSummaryFixture(agent.id, {
+            name: agent.name,
+            rootId: agent.rootId,
+          }),
+        ],
+        details: [{ id: agent.id }],
+      },
+      React.createElement(
+        RequestArea,
+        { scope: "fixture", refresh: async () => {}, notify: () => {} },
+        React.createElement(Requests, { all: true }),
+      ),
+    );
   }
   if (which === "message")
     component = React.createElement(UserMessages, {

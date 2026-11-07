@@ -1,3 +1,6 @@
+import { observer } from "mobx-react-lite";
+import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
+import { requestFixture } from "../../src/components/questions/requestFixtures";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -10,6 +13,7 @@ import {
 import type { Approval } from "../../src/approvals.ts";
 import Requests, {
   RequestCard,
+  RequestArea,
 } from "../../src/components/questions/Requests.tsx";
 import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.tsx";
 import {
@@ -60,8 +64,9 @@ const initial: Approval[] = [
     params: { itemId: "command-item" },
   }),
 ];
-function Fixture() {
-  const [requests, setRequests] = useState(initial);
+const Fixture = observer(function Fixture() {
+  const [fixture] = useState(() => requestFixture(initial));
+  const requests = [...fixture.live.current.requests.values()];
   const [items, setItems] = useState([question, approvalItem]);
   const lookup: QuestionLookup = {
     agentId: "lead",
@@ -78,77 +83,79 @@ function Fixture() {
     throw new Error(text);
   };
   return (
-    <main id="messages" style={{ maxWidth: 650, margin: "24px auto" }}>
-      <TurnHistory
-        items={items}
-        enabled={false}
-        storageKey="question-identity"
-        questionCards={cards}
-        requestCards={
-          new Map(
-            [...linked].map(([messageId, request]) => [
-              messageId,
-              request && (
-                <RequestCard
-                  key={request.id}
-                  messageId={messageId}
-                  request={request}
-                  scope="identity"
-                  agents={[]}
-                  notify={notify}
-                  refresh={async () => {
-                    setRequests((current) =>
-                      current.filter((entry) => entry.id !== request.id),
-                    );
-                    if (request.id === "question")
-                      setItems((current) =>
-                        current.map((item) =>
-                          item.id === question.id
-                            ? {
-                                ...question,
-                                toolStatus: "completed",
-                                text: JSON.stringify({
-                                  id: "question-item",
-                                  type: "mcpToolCall",
-                                  tool: "AskUserQuestion",
-                                  status: "completed",
-                                  arguments: {
-                                    questions: [
-                                      {
-                                        question: "Continue?",
-                                        options: [{ label: "Yes" }],
+    <ServerStoreProvider value={fixture.store}>
+      <RequestArea scope="identity" notify={notify} refresh={async () => {}}>
+        <main id="messages" style={{ maxWidth: 650, margin: "24px auto" }}>
+          <TurnHistory
+            items={items}
+            enabled={false}
+            storageKey="question-identity"
+            questionCards={cards}
+            requestCards={
+              new Map(
+                [...linked].map(([messageId, request]) => [
+                  messageId,
+                  request && (
+                    <RequestArea
+                      key={request.id}
+                      scope="identity"
+                      notify={notify}
+                      refresh={async () => {
+                        fixture.live.apply(
+                          requests
+                            .filter((entry) => entry.id !== request.id)
+                            .map((value) => ({
+                              collection: "request",
+                              id: value.id,
+                              value,
+                            })),
+                        );
+                        if (request.id === "question")
+                          setItems((current) =>
+                            current.map((item) =>
+                              item.id === question.id
+                                ? {
+                                    ...question,
+                                    toolStatus: "completed",
+                                    text: JSON.stringify({
+                                      id: "question-item",
+                                      type: "mcpToolCall",
+                                      tool: "AskUserQuestion",
+                                      status: "completed",
+                                      arguments: {
+                                        questions: [
+                                          {
+                                            question: "Continue?",
+                                            options: [{ label: "Yes" }],
+                                          },
+                                        ],
                                       },
-                                    ],
-                                  },
-                                  result: {
-                                    content:
-                                      'User has answered: "Continue?"="Yes". Continue.',
-                                  },
-                                }),
-                              }
-                            : item,
-                        ),
-                      );
-                  }}
-                />
-              ),
-            ]),
-          )
-        }
-        renderMessage={(item) => <p>{item.text}</p>}
-        onJump={() => {}}
-      />
-      <Requests
-        requests={requests.filter((request) => !ids.has(request.id))}
-        allRequests={requests}
-        scope="identity"
-        agents={[]}
-        notify={notify}
-        refresh={async () => {}}
-      />
-    </main>
+                                      result: {
+                                        content:
+                                          'User has answered: "Continue?"="Yes". Continue.',
+                                      },
+                                    }),
+                                  }
+                                : item,
+                            ),
+                          );
+                      }}
+                    >
+                      <RequestCard request={request} messageId={messageId} />
+                    </RequestArea>
+                  ),
+                ]),
+              )
+            }
+            renderMessage={(item) => <p>{item.text}</p>}
+            onJump={() => {}}
+          />
+          <Requests all excludeIds={ids} />
+        </main>
+      </RequestArea>
+    </ServerStoreProvider>
   );
-}
+});
 const root = document.getElementById("root");
 if (!root) throw new Error("Missing fixture root");
 createRoot(root).render(

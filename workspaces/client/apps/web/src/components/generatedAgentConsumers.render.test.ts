@@ -1,3 +1,4 @@
+import { createRequestsMirror } from "../generated/observableResources";
 import NewChatModelSettings from "./NewChatModelSettings.tsx";
 import { type NewChatSettings } from "./newChatSettings.ts";
 import { observable, runInAction } from "mobx";
@@ -38,7 +39,7 @@ import { ChatSettingsDialog } from "./agents/ChatSettingsDialog.tsx";
 import { UnifiedAgentSettings } from "./agents/UnifiedAgentSettings.tsx";
 import { LiveAgentPhase } from "./agents/AgentPhase.tsx";
 import Usage from "./Usage.tsx";
-import Requests from "./questions/Requests.tsx";
+import Requests, { RequestArea } from "./questions/Requests.tsx";
 import { approval } from "../approvalFixtures.ts";
 import type { AgentSetupPickerProps } from "./agents/AgentSetupPicker.tsx";
 
@@ -296,16 +297,26 @@ it("keeps generated request owners blocked for the same native thread", () => {
     request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
     params: { threadId: "thread" },
   });
+  const requests = createRequestsMirror();
+  requests.apply([{ collection: "request", id: request.id, value: request }]);
   const html = render(
     f,
-    createElement(Requests, {
-      requests: [request],
-      allRequests: [request],
-      agents: [...f.mirror.current.agents.values()],
-      scope: "owner",
-      refresh: async () => {},
-      notify: () => {},
-    }),
+    createElement(
+      ServerStoreProvider,
+      {
+        value: {
+          ...f.store,
+          requests: () => ({
+            current: { status: "live" as const, data: requests.current },
+          }),
+        },
+      },
+      createElement(
+        RequestArea,
+        { scope: "owner", refresh: async () => {}, notify() {} },
+        createElement(Requests, { all: true }),
+      ),
+    ),
   );
   expect(html).toContain("This chat stopped as a precaution");
   f.store.dispose();
@@ -635,27 +646,29 @@ it("updates settings, context usage and native actions when the owning detail sl
 
 it("keeps request approval disabled until its native-thread detail is known", () => {
   const f = observableFixture([record]);
-  const store = {
-    ...f.store,
-    agentDetail: () => ({ current: { status: "loading" as const } }),
-  };
   const request = approval({
     request: { kind: "exec", command: "pwd", cwd: "/", reason: null },
     params: { threadId: "thread" },
   });
+  const requests = createRequestsMirror();
+  requests.apply([{ collection: "request", id: request.id, value: request }]);
+  const store = {
+    ...f.store,
+    requests: () => ({
+      current: { status: "live" as const, data: requests.current },
+    }),
+    agentDetail: () => ({ current: { status: "loading" as const } }),
+  };
   const html = render(
     f,
     createElement(
       ServerStoreProvider,
       { value: store },
-      createElement(Requests, {
-        requests: [request],
-        allRequests: [request],
-        agents: [...f.mirror.current.agents.values()],
-        scope: "owner",
-        refresh: async () => {},
-        notify: () => {},
-      }),
+      createElement(
+        RequestArea,
+        { scope: "owner", refresh: async () => {}, notify() {} },
+        createElement(Requests, { all: true }),
+      ),
     ),
   );
   const host = document.createElement("div");

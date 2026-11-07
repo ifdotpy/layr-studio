@@ -1,5 +1,4 @@
 import { randomUUID } from "../uuid";
-import { isPending } from "../approvals";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { providerLabel } from "../generated/providerKind.ts";
 import { Button, Select, Textarea } from "@mantine/core";
@@ -9,7 +8,7 @@ import { useMessages } from "../hooks";
 import type { Room, Snapshot } from "../types";
 import AgentAvatar from "./agents/AgentAvatar";
 import MessageDate from "./conversation/transcript/MessageDate";
-import Requests from "./questions/Requests";
+import Requests, { RequestArea } from "./questions/Requests";
 import StreamingText from "./conversation/transcript/StreamingText";
 import { useConversationScroll } from "./useConversationScroll";
 import {
@@ -174,13 +173,6 @@ export default function RadioChat({
     radio.controls;
   const frozen = pending || !!attempt;
   const canSend = !frozen && !inputBlocked && !!draft.trim();
-  const runtimeRequests = data.runtime?.requests || [];
-  const requests = runtimeRequests.filter(
-    (r) =>
-      r.agent === radio.active?.agentId &&
-      isPending(r) &&
-      (!r.turn || r.turn === radio.active?.turnId),
-  );
   return (
     <section className="radio-chat" aria-label="Shared chat">
       <div className="radio-participants">
@@ -272,16 +264,13 @@ export default function RadioChat({
               />
             </article>
           ))}
-          {!!requests.length && (
+          <RequestArea scope={data.stateDir} refresh={refresh} notify={notify}>
             <Requests
-              requests={requests}
-              allRequests={runtimeRequests}
-              agents={data.threads}
-              scope={data.stateDir}
-              refresh={refresh}
-              notify={notify}
+              agentId={radio.active?.agentId}
+              turnId={radio.active?.turnId}
+              pendingOnly
             />
-          )}
+          </RequestArea>
         </div>
       </div>
       <form

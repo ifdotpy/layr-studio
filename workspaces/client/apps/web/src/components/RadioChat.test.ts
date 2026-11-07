@@ -1,3 +1,4 @@
+import { requestFixture } from "./questions/requestFixtures";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -7,6 +8,8 @@ import { componentSnapshot } from "./componentTestFixtures";
 import type { Room } from "../types";
 
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => requestFixture([]).store,
+  useServerStorage: () => ({}),
   useServerApi: () => ({ post: vi.fn(), save: vi.fn(), saved: () => null }),
 }));
 vi.mock("../hooks", () => ({

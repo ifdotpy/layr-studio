@@ -117,7 +117,8 @@ import PromptComposer, {
 } from "./prompt-composer/PromptComposer";
 import PromptInput from "./prompt-composer/PromptInput";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
-import Requests, { LiveRequestCard as RequestCard } from "./questions/Requests";
+import Requests, { RequestArea, RequestCard } from "./questions/Requests";
+import { useRequestsView } from "./questions/requestView";
 import { useQuestionCards } from "./questions/useQuestionCards";
 import MessageDate from "./conversation/transcript/MessageDate";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
@@ -150,10 +151,7 @@ import { LiveConversationStart } from "./conversation/ConversationStart";
 import "./chat-controls.css";
 import "./conversation/empty-chat-settings.css";
 import { copyText } from "../clipboard/clipboard";
-import {
-  isPendingQuestionRequest,
-  transcriptRequests,
-} from "./questions/questionCardModel";
+import { useTranscriptRequests } from "./questions/useTranscriptRequests";
 
 function isJsonObject(value: unknown): value is Json {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -358,7 +356,6 @@ export function ConversationView(p: {
   lead?: Agent | undefined;
   room?: Room | undefined;
   legacy?: Json | undefined;
-  requests?: Snapshot["runtime"]["requests"];
   getDraft: DraftReader;
   subscribeDraft: DraftSubscription;
   setDraft: (v: string | ((current: string) => string), id?: string) => void;
@@ -1261,40 +1258,12 @@ export function ConversationView(p: {
     p.setDraft(`${draft}${separator}${quoted}\n\n`);
     input.current?.focus();
   });
-  const team = agents.filter(
-    (a) => a.rootId === (agent?.rootId || p.room?.rootId),
-  );
-  const root = p.agent?.rootId || p.lead?.id || p.agent?.id;
-  const requestSource = (p.requests || []).filter(
-    (request) =>
-      p.room ||
-      p.legacy ||
-      !request.agent ||
-      agents.some(
-        (agent) =>
-          (agent.id === root || agent.rootId === root) &&
-          agent.id === request.agent,
-      ),
-  );
-  // Snapshots replace the request array often; keep one identity per question state.
-  const pendingQuestionList = requestSource.filter(isPendingQuestionRequest);
-  const pendingQuestionKey = JSON.stringify(
-    pendingQuestionList.map((request) => [request.id, request.agent]),
-  );
-  const pendingQuestions = useMemo(
-    () => pendingQuestionList,
-    [pendingQuestionKey],
-  );
-  const requests = useMemo(
-    () =>
-      requestSource.filter(
-        (r) =>
-          !r.agent ||
-          r.agent === p.id ||
-          (!mobileClient && team.some((a) => a.id === r.agent)),
-      ),
-    [p.requests, p.id, mobileClient, agents, agent?.rootId, p.room?.rootId],
-  );
+  const requestView = useRequestsView({
+    agentId: p.id,
+    familyId: p.room?.rootId,
+    includeTeam: !mobileClient,
+  });
+  const requests = requestView.requests;
   const first = p.room?.members?.[0] || items.find((m) => m.sender)?.sender;
   const canSend =
     !p.schemaMismatch &&
@@ -1360,18 +1329,11 @@ export function ConversationView(p: {
   );
   const questionCards = useQuestionCards(
     managed && !p.room ? agent?.id : undefined,
-    stateDir,
-    transcriptItems,
-    pendingQuestions,
   );
-  const inlineRequests = useMemo(
-    () =>
-      transcriptRequests(
-        managed && !p.room ? transcriptItems : [],
-        requests,
-        questionCards,
-      ),
-    [managed, p.room, transcriptItems, requests, questionCards],
+  const inlineRequests = useTranscriptRequests(
+    managed && !p.room ? transcriptItems : [],
+    requests,
+    questionCards,
   );
   const inlineRequestIds = new Set(
     [...inlineRequests.values()].flatMap((request) =>
@@ -1741,18 +1703,20 @@ export function ConversationView(p: {
               [...inlineRequests].map(([messageId, request]) => [
                 messageId,
                 request && (
-                  <RequestCard
+                  <RequestArea
                     key={request.id}
-                    request={request}
-                    messageId={messageId}
-                    showDates={!!p.room}
                     scope={stateDir}
-                    agents={agents}
                     refresh={p.refresh}
                     notify={p.notify}
                     onAnswerOpen={() => setFollow(false)}
                     onAnswerPosition={revealRequest}
-                  />
+                  >
+                    <RequestCard
+                      request={request}
+                      messageId={messageId}
+                      showDates={!!p.room}
+                    />
+                  </RequestArea>
                 ),
               ]),
             )
@@ -1763,7 +1727,6 @@ export function ConversationView(p: {
     [
       after,
       items,
-      pendingQuestions,
       questionCards,
       requests,
       inlineRequests,
@@ -2235,24 +2198,21 @@ export function ConversationView(p: {
               connectionDetails={p.offlineSendDetails}
             />
           )}
-          <Requests
-            onAnswerOpen={() => setFollow(false)}
-            onAnswerPosition={revealRequest}
-            mainAgentId={
-              !p.room && agent?.isLead === false
-                ? agent.rootId || undefined
-                : undefined
-            }
-            showDates={!!p.room}
+          <RequestArea
             scope={stateDir}
-            allRequests={p.requests || []}
-            requests={requests.filter(
-              (request) => !inlineRequestIds.has(request.id),
-            )}
-            agents={agents}
             refresh={p.refresh}
             notify={p.notify}
-          />
+            onAnswerOpen={() => setFollow(false)}
+            onAnswerPosition={revealRequest}
+          >
+            <Requests
+              agentId={p.id}
+              familyId={p.room?.rootId}
+              includeTeam={!mobileClient}
+              showDates={!!p.room}
+              excludeIds={inlineRequestIds}
+            />
+          </RequestArea>
         </div>
       </div>
       {!p.room && (
@@ -2568,19 +2528,12 @@ const ObservedSafetyBuffering = observer(SafetyBuffering);
 export const ObservedNativeError = observer(NativeError);
 const ObservedConversation = observer(ConversationView);
 export const LiveConversation = observer(function LiveConversation({
-  snapshot,
   ...props
 }: Parameters<typeof ConversationView>[0] & {
   snapshot: Snapshot;
 }) {
   const state = useStateCollections();
   const detail = useAgentDetail(props.agent);
-  return state ? (
-    <ObservedConversation
-      {...props}
-      detail={detail}
-      requests={snapshot.runtime.requests}
-    />
-  ) : null;
+  return state ? <ObservedConversation {...props} detail={detail} /> : null;
 });
 export default ObservedConversation;

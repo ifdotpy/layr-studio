@@ -1,10 +1,11 @@
 import { AgentSource, AgentStatus } from "../generated/api";
-import { approval, question } from "../approvalFixtures";
+import { approval, question, browserOpen } from "../approvalFixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "@mantine/core";
 import QuestionCard from "../components/questions/QuestionCard";
-import Requests from "../components/questions/Requests";
-import SignInCard from "../components/questions/SignInCard";
+import Requests, { RequestArea } from "../components/questions/Requests";
+import { RequestFixture } from "../components/questions/requestFixtures";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture";
 import { expect } from "storybook/test";
 import { NativeError, NativeNotice } from "../components/NativeNotice";
 import type { Agent, Message } from "../types";
@@ -145,26 +146,29 @@ function PrimaryAudit() {
         }}
         onAnswer={() => {}}
       />
-      <Requests
-        requests={requests}
-        allRequests={requests}
-        scope="semantic-audit"
-        agents={[{ id: "audit-lead", name: "Release lead" }]}
-        refresh={async () => {}}
-        notify={() => {}}
-      />
-      <SignInCard
-        details={{
-          host: "example.com",
-          url: "https://example.com/device",
-          userCode: "ABCD-1234",
-        }}
-        agentName="Release lead"
-        sending={false}
-        error=""
-        post={async () => true}
-        notify={() => {}}
-      />
+      <RequestFixture
+        requests={[
+          ...requests,
+          approval({
+            id: "audit-signin",
+            agent: "audit-lead",
+            request: browserOpen("https://example.com/device", {
+              host: "example.com",
+              userCode: "ABCD-1234",
+            }),
+          }),
+        ]}
+        agents={[agentSummaryFixture("audit-lead", { name: "Release lead" })]}
+        details={[{ id: "audit-lead" }]}
+      >
+        <RequestArea
+          scope="semantic-audit"
+          refresh={async () => {}}
+          notify={() => {}}
+        >
+          <Requests all />
+        </RequestArea>
+      </RequestFixture>
       <Button variant="filled">Create project</Button>
       <Button data-audit-quiet>Cancel</Button>
     </main>

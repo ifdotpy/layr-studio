@@ -125,7 +125,7 @@ export const RESULT_SENT_NOTE =
  */
 export function waitingChatsLabel(
   joined: readonly string[] | undefined,
-  names: ReadonlyMap<string, string>,
+  names: Pick<ReadonlyMap<string, string>, "get">,
 ): string | undefined {
   if (!joined?.length) return undefined;
   const known = joined

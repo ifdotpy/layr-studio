@@ -1,3 +1,5 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import { RequestFixture } from "../../src/components/questions/requestFixtures";
 import type { Agent } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 
@@ -5,7 +7,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Requests from "../../src/components/questions/Requests.tsx";
+import Requests, {
+  RequestArea,
+} from "../../src/components/questions/Requests.tsx";
 const agent: Agent = {
   id: "lead",
   rootId: "lead",
@@ -38,13 +42,23 @@ createRoot(document.getElementById("root")!).render(
   React.createElement(
     MantineProvider,
     null,
-    React.createElement(Requests, {
-      requests: [request],
-      allRequests: [request],
-      scope: "fixture",
-      agents: [agent],
-      refresh: async () => {},
-      notify: () => {},
-    }),
+    React.createElement(
+      RequestFixture,
+      {
+        requests: [request],
+        agents: [
+          agentSummaryFixture(agent.id, {
+            name: agent.name,
+            rootId: agent.rootId,
+          }),
+        ],
+        details: [{ id: agent.id }],
+      },
+      React.createElement(
+        RequestArea,
+        { scope: "fixture", refresh: async () => {}, notify: () => {} },
+        React.createElement(Requests, { all: true }),
+      ),
+    ),
   ),
 );

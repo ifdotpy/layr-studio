@@ -1,3 +1,5 @@
+import { RequestFixture } from "../../src/components/questions/requestFixtures";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 import type { Agent, Complaint, Snapshot } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 declare global {
@@ -14,7 +16,9 @@ import "@mantine/core/styles.css";
 import Picker from "../../src/components/ProjectDirectoryPicker.tsx";
 import UserMessages from "../../src/components/shell/messages/UserMessages.tsx";
 import MessageDate from "../../src/components/conversation/transcript/MessageDate.tsx";
-import Requests from "../../src/components/questions/Requests.tsx";
+import Requests, {
+  RequestArea,
+} from "../../src/components/questions/Requests.tsx";
 const lead = {
   id: "lead",
   rootId: "lead",
@@ -85,14 +89,19 @@ function Fixture() {
       <div data-missing-date>
         <MessageDate at={0} />
       </div>
-      <Requests
+      <RequestFixture
         requests={[request]}
-        allRequests={[request]}
-        scope={workspace}
-        agents={[lead]}
-        refresh={async () => {}}
-        notify={(message) => window.notices.push(message)}
-      />
+        agents={[agentSummaryFixture(lead.id, lead)]}
+        details={[{ id: lead.id }]}
+      >
+        <RequestArea
+          scope={workspace}
+          refresh={async () => {}}
+          notify={(message) => window.notices.push(message)}
+        >
+          <Requests all />
+        </RequestArea>
+      </RequestFixture>
       <Picker initialPath="/project" onSelect={async () => {}} />
       {show && (
         <UserMessages

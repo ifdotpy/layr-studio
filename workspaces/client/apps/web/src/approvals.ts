@@ -1,3 +1,4 @@
+import type { DeepReadonly } from "./deepReadonly";
 import type { Approval } from "./generated/rustOwned";
 
 export type { Approval };
@@ -16,44 +17,51 @@ export const QUESTION_KINDS: readonly ApprovalKind[] = [
   "agent_question",
 ];
 
-export const isPending = (approval: Approval) =>
+export const isPending = (approval: DeepReadonly<Approval>) =>
   approval.state.kind === "pending";
 
 /** The person moved the question aside; the agent may still wait for it. */
-export const isDeferred = (approval: Approval) =>
+export const isDeferred = (approval: DeepReadonly<Approval>) =>
   approval.deferral?.active === true;
 
 /** Pending and not moved aside: it needs the person now. */
-export const needsAnswer = (approval: Approval) =>
+export const needsAnswer = (approval: DeepReadonly<Approval>) =>
   isPending(approval) && !isDeferred(approval);
 
-export const isQuestion = (approval: Approval) =>
+export const isQuestion = (approval: DeepReadonly<Approval>) =>
   QUESTION_KINDS.includes(approval.request.kind);
 
 /** Question that waits for a person and lets the agent keep working. */
-export const isAgentQuestion = (approval: Approval) =>
+export const isAgentQuestion = (approval: DeepReadonly<Approval>) =>
   approval.request.kind === "agent_question";
 
 const text = (value: unknown): string | undefined =>
   typeof value === "string" && value ? value : undefined;
 
 /** Provider fields that no logic reads by name, such as the thread id. */
-export const approvalParams = (approval: Approval) => approval.detail.params;
+export const approvalParams = (approval: DeepReadonly<Approval>) =>
+  approval.detail.params;
 
 /** The provider transcript item that asked, when known. */
-export const approvalItemId = (approval: Approval): string | undefined =>
+export const approvalItemId = (
+  approval: DeepReadonly<Approval>,
+): string | undefined =>
   approval.request.kind === "patch"
     ? text(approval.request.item)
     : text(approvalParams(approval).itemId);
 
-export const approvalThreadId = (approval: Approval): string | undefined =>
-  text(approvalParams(approval).threadId);
+export const approvalThreadId = (
+  approval: DeepReadonly<Approval>,
+): string | undefined => text(approvalParams(approval).threadId);
 
 /** Seconds since the Unix epoch. */
-export const approvalCreated = (approval: Approval): number => approval.created;
+export const approvalCreated = (approval: DeepReadonly<Approval>): number =>
+  approval.created;
 
 /** The first question text of a question request, or undefined. */
-export const firstQuestionText = (approval: Approval): string | undefined => {
+export const firstQuestionText = (
+  approval: DeepReadonly<Approval>,
+): string | undefined => {
   const { request } = approval;
   return request.kind === "question" || request.kind === "agent_question"
     ? request.questions[0]?.question
@@ -61,7 +69,9 @@ export const firstQuestionText = (approval: Approval): string | undefined => {
 };
 
 /** One line that says what the request asks. */
-export const approvalSummary = (approval: Approval): string | undefined => {
+export const approvalSummary = (
+  approval: DeepReadonly<Approval>,
+): string | undefined => {
   const { request } = approval;
   switch (request.kind) {
     case "question":

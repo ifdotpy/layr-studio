@@ -68,14 +68,6 @@
     "callee": "serverCredentialAdapter().fetch"
   },
   {
-    "file": "components/questions/Requests.tsx",
-    "callee": "apiPost"
-  },
-  {
-    "file": "components/questions/Requests.tsx",
-    "callee": "apiPost"
-  },
-  {
     "file": "components/removeSendingMessages.ts",
     "callee": "localStorage"
   },

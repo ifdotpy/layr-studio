@@ -1,4 +1,6 @@
-import type { Approval } from "../../approvals";
+import type { DeepReadonly } from "../../deepReadonly";
+import type { Approval as ApprovalDto } from "../../approvals";
+type Approval = DeepReadonly<ApprovalDto>;
 import { approvalParams } from "../../approvals";
 import type { JsonValue } from "../../types";
 import type { AnswerQuestion } from "./AnswerFields";
@@ -167,7 +169,7 @@ export type BrowserOpenDetails = {
   /** A pasted result is on its way to the command. */
   pasteSent?: boolean;
   /** Agent IDs of other chats that wait on this card (one card for one sign-in). */
-  joined?: string[];
+  joined?: readonly string[];
 };
 
 /** The sign-in link of an agent, or undefined. */

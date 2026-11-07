@@ -3,10 +3,13 @@ vi.mock("../agents/state.ts", async (original) => ({
   useAgentDetail: <T>(agent: T) => agent,
 }));
 import { approval, browserOpen } from "../../approvalFixtures";
-import { createElement, type ComponentProps } from "react";
+import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import Requests from "./Requests";
+import Requests, { RequestArea } from "./Requests";
+import { requestFixture } from "./requestFixtures";
+import type { RequestView } from "./requestActions";
+import type { Approval } from "../../approvals";
 import { required } from "../componentTestFixtures";
 
 const controls = vi.hoisted(() => ({
@@ -14,9 +17,11 @@ const controls = vi.hoisted(() => ({
   post: vi.fn(),
   answer: vi.fn(),
   storage: {},
+  store: null as ReturnType<typeof requestFixture>["store"] | null,
   write: vi.fn(() => null),
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
+  useServerStore: () => controls.store,
   useServerApi: () => ({
     post: controls.post,
     command: { answer: controls.answer },
@@ -31,8 +36,8 @@ vi.mock("../../api", () => ({
     String(error instanceof Error ? error.message : error),
 }));
 vi.mock("./SignInCard", () => ({
-  default: (props: (typeof controls.cards)[number]) => {
-    controls.cards.push(props);
+  default: ({ view }: { view: RequestView }) => {
+    controls.cards.push(view);
     return null;
   },
 }));
@@ -52,28 +57,24 @@ const forward = {
 function card() {
   const notify = vi.fn();
   const refresh = vi.fn(async () => {});
-  const request: ComponentProps<typeof Requests>["requests"][number] = approval(
-    {
-      id: requestId,
-      agent: "agent",
-      request: browserOpen(link, {
-        bridgeId: forward.bridgeId,
-        host: "identity.example.test",
-        source: "host",
-        redirect: { host: "localhost", port: 8250, path: "/callback" },
-        expiresAt: forward.expiresAt,
-      }),
-    },
-  );
-  renderToStaticMarkup(
-    createElement(Requests, {
-      requests: [request],
-      allRequests: [request],
-      agents: [{ id: "agent", name: "Worker" }],
-      scope: "remote",
-      notify,
-      refresh,
+  const request: Approval = approval({
+    id: requestId,
+    agent: "agent",
+    request: browserOpen(link, {
+      bridgeId: forward.bridgeId,
+      host: "identity.example.test",
+      source: "host",
+      redirect: { host: "localhost", port: 8250, path: "/callback" },
+      expiresAt: forward.expiresAt,
     }),
+  });
+  controls.store = requestFixture([request]).store;
+  renderToStaticMarkup(
+    createElement(
+      RequestArea,
+      { scope: "remote", notify, refresh },
+      createElement(Requests, { all: true }),
+    ),
   );
   expect(controls.cards).toHaveLength(1);
   return { post: required(controls.cards[0]).post, notify, refresh };

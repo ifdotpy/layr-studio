@@ -1,3 +1,6 @@
+vi.mock("./questions/requestView", () => ({
+  useRequestsView: () => ({ requests: [] }),
+}));
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useWorkspace: () => ({ stateDir: "fixture" }),
@@ -132,7 +135,6 @@ import { ConversationView as Conversation } from "./Conversation";
 type Props = ComponentProps<typeof Conversation>;
 const propsFixture: Partial<Props> = {
   id: "lead",
-  requests: [],
   getDraft: () => "",
 };
 function elements(node: ReactNode): ReactElement<{

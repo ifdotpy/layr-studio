@@ -1,3 +1,5 @@
+import { RequestFixture } from "../../src/components/questions/requestFixtures";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
 declare global {
   interface Window {
     __opened: string[];
@@ -12,7 +14,9 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/studio-theme.css";
-import Requests from "../../src/components/questions/Requests.tsx";
+import Requests, {
+  RequestArea,
+} from "../../src/components/questions/Requests.tsx";
 const agent = {
   id: "worker",
   rootId: "lead",
@@ -52,14 +56,23 @@ const render = () =>
       React.createElement(
         "div",
         { style: { padding: "0 16px" } },
-        React.createElement(Requests, {
-          requests,
-          allRequests: requests,
-          scope: "fixture",
-          agents: [agent],
-          refresh: async () => {},
-          notify: (s) => window.__notes.push(s),
-        }),
+        React.createElement(
+          RequestFixture,
+          {
+            requests,
+            agents: [agentSummaryFixture(agent.id, agent)],
+            details: [{ id: agent.id }],
+          },
+          React.createElement(
+            RequestArea,
+            {
+              scope: "fixture",
+              refresh: async () => {},
+              notify: (s: string) => window.__notes.push(s),
+            },
+            React.createElement(Requests, { all: true }),
+          ),
+        ),
       ),
     ),
   );

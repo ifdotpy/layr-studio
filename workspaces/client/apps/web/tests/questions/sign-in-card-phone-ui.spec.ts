@@ -1,15 +1,13 @@
+import { createBuiltQuestionServer } from "./builtQuestionServer";
 import type { AddressInfo } from "node:net";
 import { phoneSignInUrl } from "./sign-in.fixture.ts";
 import type {} from "./sign-in-card-phone-ui.fixture.tsx";
-import { createFixtureViteServer } from "../playwright.ts";
 // A sign-in card at phone width. The window has no
 // desktop bridge and is not on the server's own Mac, so it opens the link in paste mode,
 // then sends the pasted address of the page that did not load once. A device code card
 // shows the code with a copy button. The card fits the screen without a horizontal scroll.
 
 import { createServer as createNetServer } from "node:net";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
 import { browserExecutablePath } from "../browser-executable.ts";
 import {
@@ -50,39 +48,10 @@ test.use({
 test("Sign-in card at phone width uses paste mode and the device code", async ({
   page,
 }, testInfo) => {
-  const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
-
-  const server = await createFixtureViteServer({
-    configFile: false,
-    root: join(root, "workspaces/client/apps/web"),
-    // Prepare the card dependencies before the first page load.
-    optimizeDeps: {
-      entries: ["src/components/questions/Requests.tsx"],
-      include: ["react", "react-dom/client", "@mantine/core"],
-    },
-    plugins: [
-      {
-        name: "sign-in-phone-fixture",
-        // The page comes from the same server as its modules, so the browser sees one
-        // address space (a routed page would count as public and lose its loopback scripts).
-        configureServer(vite) {
-          vite.middlewares.use("/check", (_request, response) => {
-            response.setHeader("Content-Type", "text/html");
-            response.end(
-              '<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><div id="root"></div><script type="module">import "/tests/questions/sign-in-card-phone-ui.fixture.tsx";</script>',
-            );
-          });
-        },
-      },
-    ],
-    server: {
-      host: "127.0.0.1",
-      port: PORT,
-      strictPort: true,
-      hmr: false,
-      allowedHosts: [PHONE_HOST],
-    },
-  });
+  const server = await createBuiltQuestionServer(
+    "sign-in-card-phone-ui.fixture.tsx",
+    { port: PORT },
+  );
   await server.listen();
   try {
     page.setDefaultTimeout(5000);

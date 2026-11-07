@@ -1,3 +1,6 @@
+vi.mock("./questions/requestView", () => ({
+  useRequestsView: () => ({ requests: [] }),
+}));
 import { required } from "./componentTestFixtures.ts";
 import { observableFixture } from "./observableFixture.tsx";
 import PromptInput from "./prompt-composer/PromptInput.tsx";
@@ -104,7 +107,6 @@ function render(
     id: "lead",
     agent,
     detail,
-    requests: [],
     getDraft: () => "",
     subscribeDraft: () => () => {},
     setDraft: () => {},

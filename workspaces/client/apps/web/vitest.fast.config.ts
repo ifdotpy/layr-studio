@@ -177,6 +177,8 @@ export default {
       "src/components/conversation/transcript/MessageDate.test.ts",
       "src/components/questions/QuestionCard.test.ts",
       "src/components/questions/Requests.test.ts",
+      "src/components/questions/Requests.render.test.ts",
+      "src/components/questions/Conversation.requests.render.test.ts",
       "src/components/shell/WorkerPermissions.test.ts",
       "src/components/agents/RetainedWorktrees.test.ts",
       "src/components/liveRequestConsumers.test.ts",

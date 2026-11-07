@@ -1,5 +1,5 @@
-import { fileURLToPath } from "node:url";
-import { createFixtureViteServer, test, expect } from "../playwright.ts";
+import { createBuiltQuestionServer } from "./builtQuestionServer";
+import { test, expect } from "../playwright.ts";
 import {
   answerReply,
   answerRequest,
@@ -10,27 +10,9 @@ import {
 test("questions and confirmations edit their original mounted card", async ({
   page,
 }, testInfo) => {
-  const server = await createFixtureViteServer({
-    configFile: false,
-    root: fileURLToPath(new URL("../../", import.meta.url)),
-    optimizeDeps: {
-      entries: ["tests/questions/question-card-identity-ui.fixture.tsx"],
-    },
-    plugins: [
-      {
-        name: "question-identity",
-        configureServer(vite) {
-          vite.middlewares.use("/check", (_request, response) => {
-            response.setHeader("Content-Type", "text/html");
-            response.end(
-              '<!doctype html><div id="root"></div><script type="module" src="/tests/questions/question-card-identity-ui.fixture.tsx"></script>',
-            );
-          });
-        },
-      },
-    ],
-    server: { host: "127.0.0.1", port: 0, hmr: false },
-  });
+  const server = await createBuiltQuestionServer(
+    "question-card-identity-ui.fixture.tsx",
+  );
   await server.listen();
   const answers: AnswerRequest[] = [];
   let release: (() => void) | undefined;

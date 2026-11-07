@@ -1,3 +1,5 @@
+import { requestFixture } from "./questions/requestFixtures";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture";
 import { AgentStatus as GeneratedApiAgentStatus } from "../generated/api.ts";
 import { approval, question as questionField } from "../approvalFixtures.ts";
 import { required } from "./componentTestFixtures.ts";
@@ -15,6 +17,7 @@ const h = vi.hoisted(() => ({
     retainedWorktrees: [],
     status: "none",
   })),
+  questions: null as ReturnType<typeof requestFixture> | null,
   projections: new Set<(snapshot: Snapshot) => void>(),
 }));
 vi.mock("react", async (original) => {
@@ -50,6 +53,7 @@ vi.mock("react", async (original) => {
   };
 });
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => h.questions!.store,
   useServerApi: () => ({ get: h.get }),
   useServerResourceReads: () => (_resource: unknown, read: () => unknown) => {
     void read();
@@ -109,7 +113,24 @@ it("question history follows projected answers without a request-triggered HTTP 
     role: "assistant",
     text: "Continue?",
   };
-  const read = () => useQuestionCards("lead", "server", [item], []);
+  h.questions = requestFixture([]);
+  h.projections.add((snapshot) => {
+    h.questions!.state.apply(
+      snapshot.runtime.agents.map((value) => ({
+        collection: "agentSummary",
+        id: value.id,
+        value: agentSummaryFixture(value.id, { rootId: value.rootId }),
+      })),
+    );
+    h.questions!.history.apply(
+      (snapshot.runtime.questionHistory || []).map((value) => ({
+        collection: "questionHistory",
+        id: value.id,
+        value,
+      })),
+    );
+  });
+  const read = () => useQuestionCards("lead");
   render(read);
   expect(h.get).not.toHaveBeenCalled();
   expect(h.projections.size).toBe(1);

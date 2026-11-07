@@ -59,14 +59,21 @@ const answerQuestion = (requestId: string) => {
 };
 
 /** A transcript row: a question card replaces its tool row and follows its message. */
-function row(
-  item: Message,
-  render: (message: Message) => ReactNode,
-  questions: QuestionCards,
-  agentId?: string,
-  cwd?: string,
-  requestCards?: RequestCards,
-) {
+const TranscriptRow = observer(function TranscriptRow({
+  item,
+  render,
+  questions,
+  agentId,
+  cwd,
+  requestCards,
+}: {
+  item: Message;
+  render: (message: Message) => ReactNode;
+  questions: QuestionCards;
+  agentId?: string | undefined;
+  cwd?: string | undefined;
+  requestCards?: RequestCards | undefined;
+}) {
   if (requestCards?.has(item.id)) return requestCards.get(item.id);
   const unknown = providerUnknown(item);
   if (unknown) return <ProviderUnknownItem {...unknown} />;
@@ -90,7 +97,7 @@ function row(
       {question}
     </>
   );
-}
+});
 
 /** Rows that join the collapsible work log. Question cards stay visible. */
 const workRow = (item: Message) =>
@@ -161,7 +168,14 @@ function messages(
         <Activity key={item[0].id} items={item} agentId={agentId} />
       ) : (
         <Fragment key={messageRenderKey(item)}>
-          {row(item, render, questions, agentId, cwd, requestCards)}
+          <TranscriptRow
+            item={item}
+            render={render}
+            questions={questions}
+            agentId={agentId}
+            cwd={cwd}
+            requestCards={requestCards}
+          />
         </Fragment>
       ),
   );
@@ -367,7 +381,14 @@ function Turn({
             key={item.id}
             className={item.id === result?.id ? "turn-answer" : undefined}
           >
-            {row(item, render, questions, agentId, cwd, requestCards)}
+            <TranscriptRow
+              item={item}
+              render={render}
+              questions={questions}
+              agentId={agentId}
+              cwd={cwd}
+              requestCards={requestCards}
+            />
           </div>
         ),
       )}

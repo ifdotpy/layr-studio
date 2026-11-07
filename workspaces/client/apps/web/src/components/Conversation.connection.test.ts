@@ -1,3 +1,6 @@
+vi.mock("./questions/requestView", () => ({
+  useRequestsView: () => ({ requests: [] }),
+}));
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useWorkspace: () => ({ stateDir: "fixture" }),
@@ -170,7 +173,6 @@ function renderActivity(pending: boolean, currentAgent = agent) {
     id: "lead",
     agent: currentAgent,
     detail: currentAgent,
-    requests: [],
     getDraft: () => "",
     subscribeDraft: () => () => {},
     setDraft: () => {},

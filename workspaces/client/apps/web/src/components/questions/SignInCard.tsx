@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { KeyRound } from "lucide-react";
-import type { Json } from "../../types";
-import type { BrowserOpenDetails } from "./requestData";
+import { observer } from "mobx-react-lite";
+import type { RequestView } from "./requestActions";
+import { useServerServices } from "../../servers/ServerServicesContext";
+import { useStateCollections } from "../agents/state";
 import { canForwardSignIn } from "./openSignIn";
 import {
   RESULT_SENT_NOTE,
@@ -37,32 +39,21 @@ function useNow() {
 /** A sign-in request of an agent. The link opens in
  * the system browser after the approval; a window that cannot hold the redirect port takes the
  * address of the page that did not load and sends it to the command. */
-export default function SignInCard({
-  details,
-  agentName,
-  chatNames,
-  serverName,
-  sending,
-  error,
-  post,
-  notify,
-}: {
-  details: BrowserOpenDetails;
-  agentName: string;
-  /** Chat names by agent ID, for the chats that wait on this card. */
-  chatNames?: ReadonlyMap<string, string>;
-  serverName?: string | undefined;
-  sending: boolean;
-  error: string;
-  /** Answer the request; true when the server accepted the answer. */
-  post: (body: Json) => Promise<boolean>;
-  notify: (text: string) => void;
-}) {
+export default observer(function SignInCard({ view }: { view: RequestView }) {
+  const details = view.browserOpen!;
+  const { post, notify } = view;
+  const sending = view.disabled,
+    error = view.error;
+  const services = useServerServices();
+  const serverName = services?.owner.alias || services?.owner.label;
+  const agents = useStateCollections()?.agents;
   const now = useNow();
   const flow = signInFlow(details);
   const state = signInState(details, sending);
   const timeLeft = timeLeftLabel(signInDeadline(details), now);
-  const waiting = waitingChatsLabel(details.joined, chatNames ?? new Map());
+  const waiting = waitingChatsLabel(details.joined, {
+    get: (id) => agents?.get(id)?.name || "",
+  });
   // The pasted address stays in this component only: never in drafts or storage.
   const [address, setAddress] = useState("");
   const [copied, setCopied] = useState(false);
@@ -118,7 +109,7 @@ export default function SignInCard({
       <header className="sign-in-card-head">
         <KeyRound size={16} className="sign-in-card-icon" />
         <strong>Sign-in request</strong>
-        <span className="sign-in-card-chat">{agentName}</span>
+        <span className="sign-in-card-chat">{view.owner?.name || "Codex"}</span>
         <span className="sign-in-card-state">{SIGN_IN_STATE_LABEL[state]}</span>
       </header>
       <p className="sign-in-card-host">{details.host}</p>
@@ -256,4 +247,4 @@ export default function SignInCard({
       )}
     </section>
   );
-}
+});

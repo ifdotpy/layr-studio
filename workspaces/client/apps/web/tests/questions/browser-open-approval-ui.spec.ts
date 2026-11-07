@@ -1,13 +1,11 @@
+import { createBuiltQuestionServer } from "./builtQuestionServer";
 import { browserSignInUrl } from "./sign-in.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
 import type {} from "./browser-open-approval-ui.fixture.tsx";
-import { createFixtureViteServer } from "../playwright.ts";
 // An agent's sign-in link (browser/open) renders as a sign-in
 // card. Nothing opens before the approval; after it, the desktop opens only the link that the
 // server returned. A refusal from the server, such as a remote window, opens nothing.
 
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { test, expect } from "../playwright.ts";
 import {
   answerReply,
@@ -20,18 +18,9 @@ const REMOTE =
   "Open this chat in the window of the Mac that runs its server to sign in, or use the tool's device-code mode.";
 
 test("Browser Open Approval Ui", async ({ page }) => {
-  const root = fileURLToPath(new URL("../../../../../../", import.meta.url));
-
-  const server = await createFixtureViteServer({
-    configFile: false,
-    root: join(root, "workspaces/client/apps/web"),
-    // Prepare the card dependencies before the first page load.
-    optimizeDeps: {
-      entries: ["src/components/questions/Requests.tsx"],
-      include: ["react", "react-dom/client", "@mantine/core"],
-    },
-    server: { host: "127.0.0.1", port: 0, hmr: false },
-  });
+  const server = await createBuiltQuestionServer(
+    "browser-open-approval-ui.fixture.tsx",
+  );
   await server.listen();
   try {
     page.setDefaultTimeout(5000);
@@ -78,12 +67,6 @@ test("Browser Open Approval Ui", async ({ page }) => {
         });
       return route.fulfill({ json: answerReply({ status: "answered" }) });
     });
-    await page.route("**/check", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: '<!doctype html><div id="root"></div><script type="module">import "/tests/questions/browser-open-approval-ui.fixture.tsx";</script>',
-      }),
-    );
     // The first load waits for the Vite dependency scan, which takes longer than the
     // 5 s action limit on a busy machine.
     await page.goto(server.resolvedUrls!.local[0]! + "check", {

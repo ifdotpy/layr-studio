@@ -1,10 +1,13 @@
+import type { DeepReadonly } from "../../deepReadonly";
 import {
   approvalItemId,
   isPending,
   needsAnswer,
-  type Approval,
+  type Approval as ApprovalDto,
 } from "../../approvals";
 import type { Message } from "../../types";
+
+type Approval = DeepReadonly<ApprovalDto>;
 
 /** One synchronized question-history row: the typed approval of a question. */
 export type QuestionHistoryEntry = Approval;
@@ -23,7 +26,7 @@ export interface CardQuestion {
   multiSelect: boolean;
   isSecret: boolean;
   /** The user's answers in provider order; undefined while no answer is known. */
-  answers?: string[] | undefined;
+  answers?: readonly string[] | undefined;
 }
 
 export type QuestionCardState =
@@ -235,7 +238,7 @@ function historyAnswers(
   entry: QuestionHistoryEntry,
   question: CardQuestion,
   index: number,
-): string[] | undefined {
+): readonly string[] | undefined {
   if (question.isSecret) return undefined;
   const history = storedAnswers(entry) || [];
   const row =
@@ -280,7 +283,7 @@ export const isPendingQuestionRequest = (request: RequestDto) =>
     request.request.kind === "agent_question");
 
 /** Live pending question requests, keyed by agent and provider item id. */
-export function pendingQuestionRequests(requests: RequestDto[]) {
+export function pendingQuestionRequests(requests: readonly RequestDto[]) {
   const result = new Map<string, string>();
   for (const request of requests) {
     if (!isPendingQuestionRequest(request)) continue;
@@ -294,7 +297,7 @@ export const questionKey = (agent: string, item: string) =>
   `${agent}\u0000${item}`;
 
 /** Index question history rows by the transcript item that asked them. */
-export function questionHistoryIndex(entries: QuestionHistoryEntry[]) {
+export function questionHistoryIndex(entries: readonly QuestionHistoryEntry[]) {
   const result = new Map<string, QuestionHistoryEntry>();
   for (const entry of entries) {
     const item = approvalItemId(entry);
@@ -317,7 +320,7 @@ export interface QuestionLookup {
  */
 export function transcriptRequests(
   items: Message[],
-  requests: RequestDto[],
+  requests: readonly RequestDto[],
   cards: (item: Message) => QuestionCardModel | undefined,
 ): Map<string, RequestDto | null> {
   const pending = requests.filter(needsAnswer);
@@ -424,19 +427,4 @@ export function questionCard(
     questions,
     ...(pending ? { requestId: entry.id } : {}),
   };
-}
-
-/** Text that changes when a question may have changed state; drives history refresh. */
-export function questionRefreshKey(
-  items: Message[],
-  requests: RequestDto[],
-): string {
-  const tools = items
-    .filter(isQuestionToolItem)
-    .map((item) => `${item.id}:${item.toolStatus || ""}`);
-  const pending = requests
-    .filter(isPendingQuestionRequest)
-    .map((request) => request.id)
-    .sort();
-  return JSON.stringify([tools, pending]);
 }

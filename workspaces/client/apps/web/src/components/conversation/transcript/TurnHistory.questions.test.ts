@@ -18,7 +18,8 @@ import {
   type QuestionHistoryEntry,
   type QuestionLookup,
 } from "../../questions/questionCardModel";
-import { RequestCard } from "../../questions/Requests";
+import { RequestCard, RequestArea } from "../../questions/Requests";
+import { RequestFixture } from "../../questions/requestFixtures";
 
 const question: Message = {
   id: "lead:toolu_9",
@@ -107,14 +108,19 @@ for (const afterTool of [false, true]) {
             [...inline].map(([messageId, entry]) => [
               messageId,
               entry &&
-                createElement(RequestCard, {
-                  request: entry,
-                  messageId,
-                  scope: "empty-async-question",
-                  agents: [],
-                  refresh: async () => {},
-                  notify: () => {},
-                }),
+                createElement(
+                  RequestFixture,
+                  { requests: [entry] },
+                  createElement(
+                    RequestArea,
+                    {
+                      scope: "empty-async-question",
+                      refresh: async () => {},
+                      notify() {},
+                    },
+                    createElement(RequestCard, { request: entry, messageId }),
+                  ),
+                ),
             ]),
           ),
           renderMessage: (item: Message) => createElement("p", null, item.text),

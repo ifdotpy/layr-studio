@@ -21,7 +21,7 @@ import {
   isPending,
 } from "../../../approvals";
 import StreamingText from "../../conversation/transcript/StreamingText";
-import Requests from "../../questions/Requests";
+import Requests, { RequestArea } from "../../questions/Requests";
 import UserMessages from "./UserMessages";
 import {
   useConversationScroll,
@@ -218,14 +218,9 @@ export default function TeamChats({
         id: `request:${request.id}`,
         created: approvalCreated(request),
         content: (
-          <Requests
-            scope={data.stateDir}
-            requests={[request]}
-            allRequests={runtime?.requests ?? []}
-            agents={data.threads}
-            refresh={refresh}
-            notify={notify}
-          />
+          <RequestArea scope={data.stateDir} refresh={refresh} notify={notify}>
+            <Requests all requestIds={[request.id]} />
+          </RequestArea>
         ),
       })),
     ...(showYou ? (runtime?.complaints ?? []) : []).map((message) => ({

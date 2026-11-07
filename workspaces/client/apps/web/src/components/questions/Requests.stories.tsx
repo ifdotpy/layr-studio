@@ -2,7 +2,10 @@ import { AgentSource, AgentStatus } from "../../generated/api";
 import { approval } from "../../approvalFixtures";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, userEvent, within } from "storybook/test";
-import Requests from "./Requests";
+import Requests, { RequestArea } from "./Requests";
+import { RequestFixture } from "./requestFixtures";
+import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
+import type { Approval } from "../../approvals";
 import type { Agent } from "../../types";
 
 const agent = {
@@ -41,18 +44,26 @@ const question = approval({
   },
 });
 
+function RequestStory({ requests }: { requests: Approval[] }) {
+  return (
+    <RequestFixture
+      requests={requests}
+      agents={[agentSummaryFixture(agent.id, agent)]}
+      details={[{ id: agent.id }]}
+    >
+      <RequestArea scope="storybook" refresh={async () => {}} notify={() => {}}>
+        <Requests all />
+      </RequestArea>
+    </RequestFixture>
+  );
+}
 const meta = {
   title: "Questions/Requests",
-  component: Requests,
+  component: RequestStory,
   args: {
     requests: [question],
-    allRequests: [question],
-    scope: "storybook",
-    agents: [agent],
-    refresh: async () => {},
-    notify: () => {},
   },
-} satisfies Meta<typeof Requests>;
+} satisfies Meta<typeof RequestStory>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
@@ -80,7 +91,6 @@ const deferredQuestion = {
 export const DeferredQuestion: Story = {
   args: {
     requests: [deferredQuestion],
-    allRequests: [deferredQuestion],
   },
 };
 
@@ -98,7 +108,7 @@ const sending = {
 
 /** The answer is stored and on its way; the card shows no controls. */
 export const AnsweringQuestion: Story = {
-  args: { requests: [sending], allRequests: [sending] },
+  args: { requests: [sending] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     expect(canvas.getByText("Sending your answer")).toBeVisible();
@@ -118,7 +128,7 @@ const approveCommand = approval({
 });
 
 export const CommandApproval: Story = {
-  args: { requests: [approveCommand], allRequests: [approveCommand] },
+  args: { requests: [approveCommand] },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
     expect(canvas.getByText("npm run build")).toBeVisible();
