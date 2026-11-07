@@ -169,6 +169,7 @@ export function workerDepth(
 }
 
 const teamIndicatorLabels: Record<ChatIndicatorKind, string> = {
+  loading: "",
   answer: "Needs you",
   error: "Failed",
   working: "Working",

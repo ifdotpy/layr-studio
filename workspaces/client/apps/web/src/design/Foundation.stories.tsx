@@ -24,6 +24,7 @@ const projects = [
   },
 ];
 const states = {
+  loading: "",
   answer: "Needs your answer",
   error: "Build failed",
   working: "Running focused tests",

@@ -1,15 +1,17 @@
 import { expect, it, vi } from "vitest";
-import { createSidebarMirror } from "../generated/observableResources.ts";
-import { sidebarRowFixture } from "./sidebarRowFixture.ts";
+import { createStateMirror } from "../generated/observableResources.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { receiveSidebarRead } from "./receiveSidebarRead.ts";
 
 it("the App receiver writes the clicked CAS target without Agent data even while queued", async () => {
-  const mirror = createSidebarMirror();
-  const initial = sidebarRowFixture("chat", {
+  const mirror = createStateMirror();
+  const initial = agentSummaryFixture("chat", {
     markRead: { threadId: "thread", turnId: "turn", read: true, revision: 3 },
   });
-  mirror.apply({ rows: [initial] });
-  const row = mirror.current.rows[0];
+  mirror.apply([
+    { collection: "agentSummary", id: initial.id, value: initial },
+  ]);
+  const row = mirror.current.agents.get("chat");
   if (!row?.markRead) throw new Error("Missing fixture target");
   let release = () => {};
   const queue = new Promise<void>((resolve) => {
@@ -23,9 +25,11 @@ it("the App receiver writes the clicked CAS target without Agent data even while
       post({ id, target });
     },
   );
-  mirror.apply({
-    rows: [
-      {
+  mirror.apply([
+    {
+      collection: "agentSummary",
+      id: initial.id,
+      value: {
         ...initial,
         markRead: {
           threadId: "thread",
@@ -34,8 +38,8 @@ it("the App receiver writes the clicked CAS target without Agent data even while
           revision: 4,
         },
       },
-    ],
-  });
+    },
+  ]);
   expect(row.markRead.revision).toBe(4);
   release();
   await writing;

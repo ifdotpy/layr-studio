@@ -3,7 +3,7 @@ import type { ObservableResources } from "../generated/observableResources.ts";
 
 /** Compiler witnesses exercise exactly the facade consumed by components. */
 function readonlyFacade(store: ObservableResources) {
-  const slot = store.sidebar();
+  const slot = store.state();
   // @ts-expect-error A component cannot replace a resource's state.
   slot.current = { status: "loading" };
   const current = slot.current;
@@ -12,14 +12,14 @@ function readonlyFacade(store: ObservableResources) {
     void current.data;
     return;
   }
-  // @ts-expect-error The membership/order array belongs to the generated store.
-  current.data.rows.reverse();
-  const row = current.data.rows[0];
+  // @ts-expect-error The collection membership belongs to the generated store.
+  current.data.agents.clear();
+  const row = current.data.agents.get("chat");
   if (row) {
     // @ts-expect-error Server-owned titles cannot be edited from a component.
     row.name = "Changed";
-    // @ts-expect-error Nested status objects are readonly too.
-    row.indicator.label = "Changed";
+    // @ts-expect-error Nested reason objects are readonly too.
+    row.operationalStatus.reason = "ready";
   }
 }
 it("keeps the generated public facade's compiler witnesses reachable", () => {

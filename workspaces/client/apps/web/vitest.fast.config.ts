@@ -36,6 +36,8 @@ export default {
       "src/store/runtime.test.ts",
       "src/store/contracts.test.ts",
       "src/store/render.test.ts",
+      "src/components/sidebar/viewModel.test.ts",
+      "src/status/operationalStatus.test.ts",
       "src/components/chat-row/render.test.ts",
       "src/servers/CombinedServerSidebar.test.ts",
       "src/servers/receiveSidebarRead.test.ts",

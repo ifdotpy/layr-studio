@@ -27,6 +27,7 @@ const stateIcons = {
   none: Circle,
 };
 export function TeamStateIcon({ kind }: { kind: ChatIndicatorKind }) {
+  if (kind === "loading") return null;
   const Icon = stateIcons[kind];
   return (
     <Icon
