@@ -271,8 +271,44 @@ impl MonitorSnapshot {
         {
             return Err(invalid("agent"));
         }
-        crate::monitor_matches::validate(&typed).map_err(invalid)?;
         let actor: Actor = studio_json::from_value(actor).map_err(|_| invalid("agent"))?;
+        Self::checked_actor(typed, actor)
+    }
+
+    /// The store has already decoded the agent; ownership needs only these fields.
+    pub(crate) fn checked_agent(
+        typed: studio_runtime_store::MonitorRecord,
+        actor: &studio_runtime_store::AgentRecord,
+    ) -> Result<Self, MonitorError> {
+        let auto_wake = actor.auto_wake.ok_or_else(|| MonitorError::InvalidStored {
+            id: typed.id.clone(),
+            location: "agent".into(),
+        })?;
+        Self::checked_actor(
+            typed,
+            Actor {
+                id: actor.id.0.clone(),
+                epoch: actor.epoch,
+                auto_wake,
+                // JSON serializes non-finite floats as null, which the Value path reads as None.
+                deleted_at: actor.deleted_at.filter(|at| at.is_finite()),
+                account_key: actor.account_key.clone(),
+            },
+        )
+    }
+
+    fn checked_actor(
+        typed: studio_runtime_store::MonitorRecord,
+        actor: Actor,
+    ) -> Result<Self, MonitorError> {
+        let invalid = |location: &str| MonitorError::InvalidStored {
+            id: typed.id.clone(),
+            location: location.into(),
+        };
+        if !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&actor.epoch) {
+            return Err(invalid("agent"));
+        }
+        crate::monitor_matches::validate(&typed).map_err(invalid)?;
         if typed.agent != actor.id {
             return Err(invalid("agent/id"));
         }
@@ -1316,5 +1352,104 @@ mod ownership_bench {
                 std::hint::black_box(snapshot.expect("snapshot"));
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "perf-reporting"))]
+mod snapshot_serialization_tests {
+    #[tokio::test]
+    async fn runtime_snapshot_does_not_serialize_the_agent() {
+        let root = tempfile::tempdir().unwrap();
+        let store = studio_runtime_store::RuntimeStore::open(Some(root.path()))
+            .await
+            .unwrap();
+        store.transaction_with::<_, super::MonitorError>(|tx| {
+            let mut actor = studio_json::json!({"id":"agent","rootId":"agent","epoch":0,"status":"running","compactions":0,"accountKey":"default","autoWake":true,"provider":"codex"});
+            actor["largeExtension"] = studio_json::json!({"text":"雪\\\"".repeat(1024)});
+            let actor = studio_runtime_store::AgentRecord::from_value(actor).unwrap();
+            studio_runtime_store::Table::new(tx).put(&actor)?;
+            let monitor = super::complete_test_monitor(studio_json::json!({}));
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)", [monitor.to_string()]).unwrap();
+            // Nextest runs each test in its own process, isolating the global facade counts.
+            let calls = || studio_json::perf_reporting::snapshot()
+                .iter()
+                .filter(|(key, _)| key.starts_with("to_value ") && key.ends_with("::AgentRecord"))
+                .map(|(_, counts)| counts.calls)
+                .sum::<u64>();
+            let before = calls();
+            let (snapshot, actor) = crate::monitor_runtime::snapshot(tx, "watch")?;
+            assert_eq!(snapshot.agent(), actor.id.as_ref());
+            assert_eq!(calls() - before, 0, "monitor ownership needs no full-record serialization");
+            Ok(())
+        }).await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod typed_conversion_tests {
+    use super::*;
+
+    #[test]
+    fn typed_snapshot_preserves_owner_fields_and_refusals() {
+        let base = studio_runtime_store::AgentRecord::from_value(json!({
+            "id":"agent", "rootId":"agent", "epoch":0, "status":"running",
+            "compactions":0, "accountKey":"default", "autoWake":true
+        }))
+        .unwrap();
+        let record: studio_runtime_store::MonitorRecord =
+            serde_path_to_error::deserialize(complete_test_monitor(json!({}))).unwrap();
+        let mut cases = vec![base.clone()];
+        for epoch in [
+            -1,
+            1,
+            studio_runtime_schema::shared_values::MAX_SAFE_INTEGER,
+            studio_runtime_schema::shared_values::MAX_SAFE_INTEGER + 1,
+        ] {
+            let mut actor = base.clone();
+            actor.epoch = epoch;
+            cases.push(actor);
+        }
+        for auto_wake in [None, Some(false)] {
+            let mut actor = base.clone();
+            actor.auto_wake = auto_wake;
+            cases.push(actor);
+        }
+        for deleted_at in [0.0, 1.0, -1.0, f64::NAN, f64::INFINITY] {
+            let mut actor = base.clone();
+            actor.deleted_at = Some(deleted_at);
+            cases.push(actor);
+        }
+        for account in ["", "other-account"] {
+            let mut actor = base.clone();
+            actor.account_key = account.into();
+            cases.push(actor);
+        }
+        let mut mismatched = base.clone();
+        mismatched.id = "other".into();
+        cases.push(mismatched);
+        for actor in cases {
+            let legacy = MonitorSnapshot::checked_owned(record.clone(), actor.value());
+            let typed = MonitorSnapshot::checked_agent(record.clone(), &actor);
+            match (legacy, typed) {
+                (Ok(legacy), Ok(typed)) => {
+                    assert_eq!(legacy.actor.id, typed.actor.id);
+                    assert_eq!(legacy.actor.epoch, typed.actor.epoch);
+                    assert_eq!(legacy.actor.auto_wake, typed.actor.auto_wake);
+                    assert_eq!(legacy.actor.deleted_at, typed.actor.deleted_at);
+                    assert_eq!(legacy.actor.account_key, typed.actor.account_key);
+                    assert_eq!(legacy.active_owner(), typed.active_owner());
+                }
+                (
+                    Err(MonitorError::InvalidStored { location: old, .. }),
+                    Err(MonitorError::InvalidStored { location: new, .. }),
+                ) => assert_eq!(old, new),
+                _ => panic!("typed and JSON ownership checks differ"),
+            }
+        }
+        let mut actor = base.value();
+        actor.as_object_mut().unwrap().remove("accountKey");
+        let legacy = MonitorSnapshot::checked_owned(record.clone(), actor).unwrap();
+        let typed = MonitorSnapshot::checked_agent(record, &base).unwrap();
+        assert_eq!(legacy.actor.account_key, typed.actor.account_key);
     }
 }

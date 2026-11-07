@@ -118,6 +118,11 @@ pub fn record_sql_row(sql: &str) {
     let entry = aggregate_entry(&mut data.sql, &normalize_sql(sql));
     entry.rows = entry.rows.saturating_add(1);
 }
+#[cfg(test)]
+thread_local! {
+    static SQL_TEXT_CONVERSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Read and reset counters of statements still prepared on this connection.
 #[allow(
     unsafe_code,
@@ -142,7 +147,6 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
             if sql.is_null() {
                 continue;
             }
-            let sql = std::ffi::CStr::from_ptr(sql).to_string_lossy();
             let counts = [
                 ffi::SQLITE_STMTSTATUS_FULLSCAN_STEP,
                 ffi::SQLITE_STMTSTATUS_VM_STEP,
@@ -155,6 +159,9 @@ pub(crate) fn sweep_sql(connection: &rusqlite::Connection, record: bool) {
             if !record || counts.iter().all(|count| *count == 0) {
                 continue;
             }
+            #[cfg(test)]
+            SQL_TEXT_CONVERSIONS.with(|count| count.set(count.get() + 1));
+            let sql = std::ffi::CStr::from_ptr(sql).to_string_lossy();
             let normalized = normalize_sql(&sql);
             let mut data = AGGREGATES
                 .get_or_init(|| Mutex::new(Snapshot::default()))
@@ -458,6 +465,31 @@ fn collapse_in_lists(sql: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sql_sweep_converts_only_executed_statements() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        let mut active = db
+            .prepare_cached("SELECT 'sweep conversion witness' AS sweep_conversion_witness")
+            .unwrap();
+        let _inactive = db.prepare_cached("SELECT 'inactive witness'").unwrap();
+        let conversions = || SQL_TEXT_CONVERSIONS.with(|count| count.replace(0));
+        conversions();
+        active.query_row([], |_| Ok(())).unwrap();
+        sweep_sql(&db, false);
+        assert_eq!(conversions(), 0, "discarding counters needs no SQL text");
+        active.query_row([], |_| Ok(())).unwrap();
+        let expected_steps = active.get_status(rusqlite::StatementStatus::VmStep) as u64;
+        let sql = "SELECT ? AS sweep_conversion_witness";
+        let previous_steps = snapshot().sql.get(sql).map_or(0, |entry| entry.vm_steps);
+        sweep_sql(&db, true);
+        assert_eq!(conversions(), 1, "only one statement executed");
+        assert_eq!(
+            snapshot().sql[sql].vm_steps - previous_steps,
+            expected_steps
+        );
+        sweep_sql(&db, true);
+        assert_eq!(conversions(), 0, "counters were reset by the prior sweep");
+    }
     #[test]
     fn sql_values_are_removed() {
         let sql = normalize_sql("SELECT '$.agent', 'a''b', x'abcdef', 42 FROM t WHERE n = ?1");

@@ -320,9 +320,7 @@ pub fn snapshot(
     let agent_id = row.agent();
     let actor = AgentRepository::get(transaction, &AgentId::from(agent_id))?
         .ok_or(MonitorError::Refused("Unknown agent"))?;
-    let actor_value =
-        studio_json::to_value(&actor).map_err(studio_runtime_store::StoreError::from)?;
-    let snapshot = MonitorSnapshot::checked_owned(row, actor_value)?;
+    let snapshot = MonitorSnapshot::checked_agent(row, &actor)?;
     Ok((snapshot, actor))
 }
 
