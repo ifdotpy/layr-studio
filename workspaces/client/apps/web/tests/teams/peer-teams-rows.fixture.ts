@@ -1,22 +1,22 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 
 export const peerTeamRowFixtures = {
-  a: sidebarRowFixture("a", { name: "Alpha", projectPath: "/p", sortKey: "0" }),
-  b: sidebarRowFixture("b", {
+  a: agentSummaryFixture("a", { name: "Alpha", projectPath: "/p", cwd: "/p" }),
+  b: agentSummaryFixture("b", {
     name: "Beta",
     projectPath: "/p",
+    cwd: "/p",
     projectFolder: "f",
-    sortKey: "1",
   }),
-  c: sidebarRowFixture("c", { name: "Gamma", projectPath: "/p", sortKey: "2" }),
-  x: sidebarRowFixture("x", {
+  c: agentSummaryFixture("c", { name: "Gamma", projectPath: "/p", cwd: "/p" }),
+  x: agentSummaryFixture("x", {
     name: "Other project",
     projectPath: "/other",
-    sortKey: "3",
+    cwd: "/other",
   }),
-  e: sidebarRowFixture("e", {
+  e: agentSummaryFixture("e", {
     name: "Epsilon",
     projectPath: "/p",
-    sortKey: "4",
+    cwd: "/p",
   }),
 };

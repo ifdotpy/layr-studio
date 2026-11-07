@@ -1,6 +1,6 @@
 import { observer } from "mobx-react-lite";
 import { peerTeamRowFixtures } from "./peer-teams-rows.fixture.ts";
-import { createSidebarMirror } from "../../src/generated/observableResources.ts";
+import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent, Snapshot } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -10,7 +10,9 @@ declare global {
     // Renamed from fixture: performance/scroll-restart.fixture.tsx declares scroll fixture controls.
     peerTeamsData: Snapshot;
     failRefresh: boolean;
-    receivePeerSidebar: (dto: components["schemas"]["SidebarChatList"]) => void;
+    receivePeerSidebar: (
+      dto: components["schemas"]["SyncEntityPayload"][],
+    ) => void;
   }
 }
 
@@ -73,15 +75,24 @@ const initial: Snapshot = {
     agents: [],
   },
 };
-const sidebar = createSidebarMirror();
-sidebar.apply({
-  rows: [
+const sidebar = createStateMirror();
+sidebar.apply([
+  ...[
     peerTeamRowFixtures.a,
     peerTeamRowFixtures.b,
     peerTeamRowFixtures.c,
     peerTeamRowFixtures.x,
-  ],
-});
+  ].map((value) => ({
+    collection: "agentSummary" as const,
+    id: value.id,
+    value,
+  })),
+  ...initial.runtime.projects.map((value) => ({
+    collection: "project" as const,
+    id: value.id!,
+    value,
+  })),
+]);
 window.receivePeerSidebar = sidebar.apply;
 const Fixture = observer(function Fixture() {
   const [data, setData] = useState(initial);
@@ -112,7 +123,7 @@ const Fixture = observer(function Fixture() {
           onSearch={() => {}}
           close={() => {}}
           refresh={refresh}
-          rows={sidebar.current.rows}
+          collections={sidebar.current}
           markUnread={() => {}}
           markingRead={new Set()}
         />

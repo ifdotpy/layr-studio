@@ -1,4 +1,4 @@
-import { ChatOperationalKind } from "../generated/api.ts";
+import type { components } from "../generated/api.ts";
 import { useEffect, useState } from "react";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useMantineColorScheme } from "@mantine/core";
@@ -6,8 +6,8 @@ import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { publishServerAliases } from "../servers/serverAliases";
 import { readServerAliases } from "../servers/registry";
 import Sidebar, { type SidebarProps } from "./Sidebar";
-import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { sidebarRowFixture } from "../servers/sidebarRowFixture.ts";
+import { createStateMirror } from "../generated/observableResources.ts";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { snapshotFixture } from "../snapshotFixture.ts";
 import { createSidebarServices, type SidebarBackend } from "./sidebar/services";
 import "./sidebar/FleetFixtures.css";
@@ -22,44 +22,59 @@ const titles = [
   "Investigate mobile navigation",
   "Ready for the next assignment",
 ];
-const indicators: SidebarChatRow["indicator"][] = [
-  { kind: ChatOperationalKind["answer"], label: "Needs your answer" },
-  { kind: ChatOperationalKind["error"], label: "Failed" },
-  { kind: ChatOperationalKind["working"], label: "Working" },
-  { kind: ChatOperationalKind["none"], label: "Ready" },
-  { kind: ChatOperationalKind["none"], label: "Paused" },
-  { kind: ChatOperationalKind["none"], label: "Ready" },
+const statuses: components["schemas"]["AgentOperationalStatus"][] = [
+  { reason: "needs_input", wait: null },
+  { reason: "failed" },
+  { reason: "working" },
+  { reason: "read_result" },
+  { reason: "ready" },
+  { reason: "ready" },
 ];
-const rows = projects.flatMap((project, projectIndex) =>
+const summaries = projects.flatMap((project, projectIndex) =>
   titles.map((name, index) =>
-    sidebarRowFixture(`${project}-${index}`, {
+    agentSummaryFixture(`${project}-${index}`, {
       name,
       projectPath: `/work/${project}`,
-      groupKey: JSON.stringify(["items", `/work/${project}`, null]),
-      sortKey: String(projectIndex * titles.length + index).padStart(2, "0"),
-      activityAt: now - (projectIndex + index + 1) * 180,
+      cwd: `/work/${project}`,
+      updated: now - (projectIndex + index + 1) * 180,
       pinned: projectIndex === 0 && index === 2,
       provider: index % 2 ? "claude" : "codex",
       model: index % 2 ? "claude-opus-4-6" : "gpt-5.4",
-      indicator: indicators[index]!,
+      operationalStatus: statuses[index]!,
       inFlight: index === 2,
-      canArchive: index !== 2,
-      compactPinned: index < 3,
       markUnread: "no_completed_result",
-      searchText: `${name} /work/${project}`.toLowerCase(),
     }),
   ),
 );
+const projectRows = projects.map((name) => ({
+  id: name,
+  name,
+  path: `/work/${name}`,
+  created: now - 86400,
+}));
 const data = snapshotFixture([], {
-  projects: projects.map((name) => ({
-    id: name,
-    name,
-    path: `/work/${name}`,
-    created: now - 86400,
-  })),
+  projects: projectRows,
   peerTeamsVersion: 1,
   projectOrganizationVersion: 1,
 });
+function storyCollections(
+  agents: components["schemas"]["AgentSummaryEntityDto"][],
+) {
+  const mirror = createStateMirror();
+  mirror.apply([
+    ...agents.map((value) => ({
+      collection: "agentSummary" as const,
+      id: value.id,
+      value,
+    })),
+    ...projectRows.map((value) => ({
+      collection: "project" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
+  return mirror.current;
+}
 const values = new Map<string, string>();
 const backend: SidebarBackend = {
   ownerId: "local",
@@ -96,7 +111,7 @@ services.alias = (target) =>
 const args: SidebarProps = {
   services,
   data,
-  rows,
+  collections: storyCollections(summaries),
   opened: "codex-studio-2",
   open: fn(),
   newChat: fn(),
@@ -287,10 +302,12 @@ export const Interactions: Story = {
 
 export const NoAttention: Story = {
   args: {
-    rows: rows.map((row) => ({
-      ...row,
-      indicator: { kind: "none", label: "Ready" },
-    })),
+    collections: storyCollections(
+      summaries.map((agent) => ({
+        ...agent,
+        operationalStatus: { reason: "ready" },
+      })),
+    ),
   },
   render: (props) => <FleetFixture {...props} scheme="light" />,
   play: async ({ canvasElement }) => {

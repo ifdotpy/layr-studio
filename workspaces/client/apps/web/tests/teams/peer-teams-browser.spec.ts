@@ -51,16 +51,27 @@ test("Peer teams browser", async ({
       requests: PeerRequest[] = [];
     await page.route("**/snapshot", (r) => r.fulfill({ json: state }));
     // Each write below states its expected server read model explicitly.
-    let sidebarAfterWrite: (
-      teamId: string,
-    ) => components["schemas"]["SidebarChatList"] = (teamId) => ({
-      rows: [
-        { ...row.a, teamId, compactPinned: true },
-        { ...row.b, teamId, compactPinned: true },
-        row.c,
-        row.x,
-      ],
-    });
+    let sidebarAfterWrite: () => components["schemas"]["AgentSummaryEntityDto"][] =
+      () => [{ ...row.a }, { ...row.b }, row.c, row.x];
+    const sidebarPayload = (
+      agents: components["schemas"]["AgentSummaryEntityDto"][],
+    ): components["schemas"]["SyncEntityPayload"][] => [
+      ...agents.map((value) => ({
+        collection: "agentSummary" as const,
+        id: value.id,
+        value,
+      })),
+      ...state.runtime.peerTeams.map((value) => ({
+        collection: "peerTeam" as const,
+        id: value.id,
+        value,
+      })),
+      ...state.runtime.projects.map((value) => ({
+        collection: "project" as const,
+        id: value.id!,
+        value,
+      })),
+    ];
     const applied = new Map<string, PeerRequest>();
     await page.route("**/api/peer-teams", async (route) => {
       // The peer-team fixture sends only move, delete and save requests.
@@ -105,7 +116,7 @@ test("Peer teams browser", async ({
       project.peerTeamsRevision!++;
       await page.evaluate(
         (dto) => window.receivePeerSidebar(dto),
-        sidebarAfterWrite(body.team_id ?? ""),
+        sidebarPayload(sidebarAfterWrite()),
       );
       applied.set(body.request_id, body);
       if (mode === "lost") {
@@ -185,14 +196,7 @@ test("Peer teams browser", async ({
       .click();
     form = page.getByRole("form", { name: "Edit team", exact: true });
     await form.getByLabel("Gamma", { exact: true }).check();
-    sidebarAfterWrite = (teamId) => ({
-      rows: [
-        { ...row.a, teamId, compactPinned: true },
-        { ...row.b, teamId, compactPinned: true },
-        { ...row.c, teamId, compactPinned: true },
-        row.x,
-      ],
-    });
+    sidebarAfterWrite = () => [{ ...row.a }, { ...row.b }, { ...row.c }, row.x];
     await page.evaluate(() => (window.failRefresh = true));
     await form.getByRole("button", { name: "Save team", exact: true }).click();
     await form.getByRole("alert").waitFor();
@@ -207,7 +211,7 @@ test("Peer teams browser", async ({
       .getByRole("menuitem", { name: "Dissolve team", exact: true })
       .click();
     form = page.getByRole("form", { name: "Dissolve team", exact: true });
-    sidebarAfterWrite = () => ({ rows: [row.a, row.b, row.c, row.x] });
+    sidebarAfterWrite = () => [row.a, row.b, row.c, row.x];
     await form.getByRole("button", { name: "Dissolve", exact: true }).click();
     await form.waitFor({ state: "detached" });
     assert.equal(await team.count(), 0);
@@ -228,42 +232,33 @@ test("Peer teams browser", async ({
       (value) => window.setFixture(value as Snapshot),
       state,
     );
-    await page.evaluate((dto) => window.receivePeerSidebar(dto), {
-      rows: [
-        { ...row.a, teamId: "t1", compactPinned: true },
-        { ...row.b, teamId: "t1", compactPinned: true },
-        { ...row.c, teamId: "t2", compactPinned: true },
+    await page.evaluate(
+      (dto) => window.receivePeerSidebar(dto),
+      sidebarPayload([
+        { ...row.a },
+        { ...row.b },
+        { ...row.c },
         row.x,
-        { ...row.e, teamId: "t2", compactPinned: true },
-      ],
-    });
+        { ...row.e },
+      ]),
+    );
     const second = page.locator('[data-peer-team="t2"]');
     const teamTarget = second.locator(".peer-team-toggle");
     const projectTarget = project.locator(
       ":scope > .project-tree-heading .project-tree-toggle",
     );
-    sidebarAfterWrite = () => ({
-      rows: [
-        { ...row.a, teamId: "t2", compactPinned: true },
-        row.b,
-        { ...row.c, teamId: "t2", compactPinned: true },
-        row.x,
-        { ...row.e, teamId: "t2", compactPinned: true },
-      ],
-    });
+    sidebarAfterWrite = () => [
+      { ...row.a },
+      row.b,
+      { ...row.c },
+      row.x,
+      { ...row.e },
+    ];
     await project.locator('[data-chat="a"]').dragTo(teamTarget);
     await second.locator('[data-chat="a"]').waitFor();
     assert.equal(await page.locator('[data-peer-team="t1"]').count(), 0);
     assert.equal(requests.at(-1)!.action, "move");
-    sidebarAfterWrite = () => ({
-      rows: [
-        row.a,
-        row.b,
-        { ...row.c, teamId: "t2", compactPinned: true },
-        row.x,
-        { ...row.e, teamId: "t2", compactPinned: true },
-      ],
-    });
+    sidebarAfterWrite = () => [row.a, row.b, { ...row.c }, row.x, { ...row.e }];
     await second.locator('[data-chat="a"]').dragTo(projectTarget);
     await page.waitForFunction(
       () =>
@@ -279,15 +274,13 @@ test("Peer teams browser", async ({
       "Foreign projects cannot join the team",
     );
     mode = "lost";
-    sidebarAfterWrite = () => ({
-      rows: [
-        row.a,
-        { ...row.b, teamId: "t2", compactPinned: true },
-        { ...row.c, teamId: "t2", compactPinned: true },
-        row.x,
-        { ...row.e, teamId: "t2", compactPinned: true },
-      ],
-    });
+    sidebarAfterWrite = () => [
+      row.a,
+      { ...row.b },
+      { ...row.c },
+      row.x,
+      { ...row.e },
+    ];
     await project.locator('[data-chat="b"]').dragTo(teamTarget);
     await page
       .getByRole("button", { name: "Retry move", exact: true })
@@ -300,15 +293,7 @@ test("Peer teams browser", async ({
       lostMove,
       "Retry keeps the move identity and original revision",
     );
-    sidebarAfterWrite = () => ({
-      rows: [
-        row.a,
-        row.b,
-        { ...row.c, teamId: "t2", compactPinned: true },
-        row.x,
-        { ...row.e, teamId: "t2", compactPinned: true },
-      ],
-    });
+    sidebarAfterWrite = () => [row.a, row.b, { ...row.c }, row.x, { ...row.e }];
     mode = "stale";
     await second.locator('[data-chat="b"]').dragTo(projectTarget);
     await page

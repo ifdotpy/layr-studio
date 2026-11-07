@@ -1,8 +1,13 @@
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
 import { snapshotFixture } from "../../src/snapshotFixture.ts";
-import type { SidebarChatRow } from "../../src/generated/observableResources.ts";
+import { createStateMirror } from "../../src/generated/observableResources.ts";
+import type { AgentSummaryEntityDto } from "../../src/generated/api.ts";
+import {
+  createSidebarRow,
+  localSidebarIdentity,
+} from "../../src/components/sidebar/viewModel.ts";
 import type { SidebarSource } from "../../src/servers/mergedSidebar.ts";
 declare global {
   interface Window {
@@ -22,13 +27,12 @@ import "../../src/style.css";
 import "../../src/appearance.css";
 const noop = () => {};
 const rows = Array.from({ length: 30 }, (_, index) =>
-  sidebarRowFixture("chat-" + index, {
+  agentSummaryFixture("chat-" + index, {
     name: "Chat " + index + " with a long title reaching the actions",
     projectPath: "/project",
-    groupKey: JSON.stringify(["items", "/project", null]),
-    sortKey: String(index).padStart(2, "0"),
-    searchText:
-      "chat " + index + " with a long title reaching the actions /project",
+    cwd: "/project",
+    created: index,
+    updated: 1,
   }),
 );
 const data = {
@@ -42,12 +46,15 @@ const data = {
   token: "fixture-token",
 };
 const scenario = new URLSearchParams(location.search).get("groups");
-const groupChat = (id: string, cwd: string, archived = false): SidebarChatRow =>
-  sidebarRowFixture(id, {
+const groupChat = (
+  id: string,
+  cwd: string,
+  archived = false,
+): AgentSummaryEntityDto =>
+  agentSummaryFixture(id, {
     projectPath: cwd,
+    cwd,
     archived,
-    groupKey: JSON.stringify(["items", cwd, null]),
-    searchText: id + " " + cwd,
   });
 const groupRows = [
   ...Array.from({ length: 5 }, (_, directory) =>
@@ -90,12 +97,43 @@ const groupData = {
     ],
   },
 };
+const mirror = createStateMirror();
+mirror.apply([
+  ...rows.map((value) => ({
+    collection: "agentSummary" as const,
+    id: value.id,
+    value,
+  })),
+  ...data.runtime.projects.map((value) => ({
+    collection: "project" as const,
+    id: value.id!,
+    value,
+  })),
+]);
+const groupMirror = createStateMirror();
+groupMirror.apply([
+  ...groupRows.map((value) => ({
+    collection: "agentSummary" as const,
+    id: value.id,
+    value,
+  })),
+  ...groupData.runtime.projects.map((value) => ({
+    collection: "project" as const,
+    id: value.id,
+    value,
+  })),
+]);
 const source: SidebarSource = {
   id: "local",
   online: true,
   sidebar: {
     stateDir: groupData.stateDir,
-    rows: groupRows,
+    rows: groupRows.map((agent) =>
+      createSidebarRow(agent, {
+        collections: groupMirror.current,
+        ...localSidebarIdentity,
+      }),
+    ),
     projects: groupData.runtime.projects,
     rooms: groupData.runtime.rooms,
     peerTeams: [],
@@ -162,7 +200,7 @@ function Fixture() {
           mobile={true}
           onSearch={noop}
           close={noop}
-          rows={scenario ? groupRows : rows}
+          collections={scenario ? groupMirror.current : mirror.current}
           markingRead={new Set()}
           markUnread={noop}
           hideOldChatsThreshold={scenario ? 2 : 100}
