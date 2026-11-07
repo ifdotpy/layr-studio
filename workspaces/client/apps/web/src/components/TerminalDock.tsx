@@ -174,15 +174,23 @@ export default function TerminalDock({
     if (!opened) setEndTarget(null);
     save("codex.terminal.open", opened);
   }, [opened]);
+  // The page reserves the committed height on #root. During a drag only the
+  // dock follows the pointer, so no move recalculates the whole page.
+  const dragging = dragHeight !== null;
   useLayoutEffect(() => {
-    document.documentElement.style.setProperty(
-      "--terminal-dock-height",
-      `${geometry.height}px`,
-    );
-    return () => {
-      document.documentElement.style.removeProperty("--terminal-dock-height");
-    };
-  }, [geometry.height]);
+    if (dragging) return;
+    (
+      document.getElementById("root") ?? document.documentElement
+    ).style.setProperty("--terminal-dock-height", `${geometry.height}px`);
+  }, [geometry.height, dragging]);
+  useLayoutEffect(
+    () => () => {
+      (
+        document.getElementById("root") ?? document.documentElement
+      ).style.removeProperty("--terminal-dock-height");
+    },
+    [],
+  );
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.code === "Backquote") {
