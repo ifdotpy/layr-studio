@@ -413,6 +413,12 @@ export function createSyncClient(options: SyncClientOptions) {
     }
   }
 
+  /** Show a resource's saved copy now, before its stream cursor is needed. */
+  async function showSavedSubscription(resource: ResourceRef) {
+    await syncDatabase();
+    await subscriptionCache?.load(resource);
+  }
+
   async function readSubscriptionCursor(resource: ResourceRef) {
     const { db, workspaceId } = await syncDatabase();
     await subscriptionCache?.load(resource);
@@ -2588,6 +2594,7 @@ export function createSyncClient(options: SyncClientOptions) {
     persistResourceEntityChanges,
     persistStagedEntityTransfer,
     readSubscriptionCursor,
+    showSavedSubscription,
     watchSyncInvalidations,
     persistProjection,
     refreshProjection,
@@ -2631,6 +2638,7 @@ export const {
   persistResourceEntityChanges,
   persistStagedEntityTransfer,
   readSubscriptionCursor,
+  showSavedSubscription,
   watchSyncInvalidations,
   persistProjection,
   refreshProjection,

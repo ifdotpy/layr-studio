@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { expect, rustUiFixture, spawnFixture, test } from "../playwright.ts";
 
 // The owner's own browser or installed app opens a second time with its saved
-// chats before the server answers. The event stream is held back to prove
+// chats and the open chat's messages before the server answers. The event stream is held back to prove
 // that the chats come from the device cache, not from the server.
 test("a second open shows saved chats before the server answers", async ({
   browser,
@@ -70,6 +70,9 @@ test("a second open shows saved chats before the server answers", async ({
       page.locator("[data-chat]", { hasText: "Release lead" }),
     ).toBeVisible({ timeout: 3_000 });
     await expect(page.getByText("Connecting to LAYR Studio")).toHaveCount(0);
+    await expect(page.getByText("Fixture reply")).toBeVisible({
+      timeout: 3_000,
+    });
   } finally {
     await context.close();
     fixture.kill("SIGTERM");

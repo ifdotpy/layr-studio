@@ -36,6 +36,7 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
       persistResourceEntityChanges: (...args) =>
         sync().persistResourceEntityChanges(...args),
       readSubscriptionCursor: (ref) => sync().readSubscriptionCursor(ref),
+      showSavedSubscription: (ref) => sync().showSavedSubscription(ref),
       persistStagedEntityTransfer: (...args) =>
         sync().persistStagedEntityTransfer(...args),
     },

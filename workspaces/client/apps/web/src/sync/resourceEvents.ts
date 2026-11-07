@@ -36,6 +36,7 @@ import {
   persistResourceEntityChanges,
   persistStagedEntityTransfer,
   readSubscriptionCursor,
+  showSavedSubscription,
   syncDatabase,
 } from "./client";
 import { subscriptionKey } from "./subscriptions/cursors";
@@ -156,7 +157,9 @@ export type ResourceEventsOptions = {
   } & Partial<
       Pick<
         ReturnType<typeof import("./client").createSyncClient>,
-        "readSubscriptionCursor" | "persistStagedEntityTransfer"
+        | "readSubscriptionCursor"
+        | "showSavedSubscription"
+        | "persistStagedEntityTransfer"
       >
     >;
   tokenRates: Pick<
@@ -1435,12 +1438,18 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     );
   }
 
-  /** Offline, today's resources still show their saved copy. The stream
-   * reads the same cache entries again when it opens. */
+  /** Today's resources show their saved copy at once, before the stream
+   * answers; offline they also prepare their cursors. The stream reuses the
+   * same loaded cache entries when it opens. */
   function showSavedResources() {
-    if (!coordinatorActive || connectionState.phase !== "offline") return;
+    if (!coordinatorActive) return;
+    const offline = connectionState.phase === "offline";
     for (const resource of localResources())
-      void options.sync.readSubscriptionCursor?.(resource).catch(() => {});
+      void (
+        offline
+          ? options.sync.readSubscriptionCursor?.(resource)
+          : options.sync.showSavedSubscription?.(resource)
+      )?.catch(() => {});
   }
 
   async function openSource() {
@@ -2145,6 +2154,7 @@ const defaultResourceEvents = createResourceEvents({
   },
   sync: {
     readSubscriptionCursor: (resource) => readSubscriptionCursor(resource),
+    showSavedSubscription: (resource) => showSavedSubscription(resource),
     persistStagedEntityTransfer: (...args) =>
       persistStagedEntityTransfer(...args),
     persistResourceEntityChanges: (

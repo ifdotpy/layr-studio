@@ -24,6 +24,7 @@ vi.mock("../servers/eventSource", () => ({
 vi.mock("./client", () => ({
   syncDatabase,
   readSubscriptionCursor: vi.fn(async () => undefined),
+  showSavedSubscription: vi.fn(async () => {}),
   persistResourceEntityChanges: vi.fn(async () => {}),
 }));
 vi.mock("../usage/tokenRate", async (original) => ({
