@@ -77,7 +77,9 @@ inherits = "ci"
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # JSON facade preserves serde_json behavior for typed, borrowed, and raw values.
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
+# Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
     (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
@@ -521,7 +523,9 @@ platform = 'cfg(target_os = "linux")'
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
+# Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
     (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |

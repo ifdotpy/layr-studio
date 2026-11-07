@@ -1639,7 +1639,10 @@ pub(super) fn load_policy_records(
                         .and_then(Value::as_array)
                         .is_some_and(|decisions| {
                             decisions.iter().all(|decision| {
-                                decision.get("resultId").and_then(Value::as_str).is_some()
+                                // WorkDecisionRecord makes resultId optional, including task cancellation.
+                                decision.as_object().is_some_and(|decision| {
+                                    decision.get("resultId").is_none_or(Value::is_string)
+                                })
                             })
                         });
                 if !valid {

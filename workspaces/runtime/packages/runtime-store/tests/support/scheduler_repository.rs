@@ -219,6 +219,56 @@ fn malformed_complaint_and_work_policy_fields_name_the_table_and_id() {
 }
 
 #[test]
+fn task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable() {
+    let mut connection = database();
+    connection.execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+        UPDATE runtime_events SET kind='work_review',text='{\"task\":\"task\",\"result\":{\"id\":\"followup\"}}' WHERE id='first';")
+        .expect("pending followup review fixture writes");
+    let work = json!({
+        "id":"task", "rootId":"agent", "title":"Followup review", "status":"review",
+        "created":1, "updated":2, "version":2,
+        "results":[{"id":"followup","agent":"child","text":"Followup fix",
+            "checks":"passed","revision":"revision","files":[],"created":2}],
+        "decisions":[{"decision":"cancel","reason":"Closed earlier work",
+            "by":"agent","created":1}]
+    });
+    assert!(studio_runtime_schema::validate("WorkItem", &work).expect("work contract validates"));
+    connection
+        .execute(
+            "INSERT INTO runtime_work VALUES('task',?1)",
+            [work.to_string()],
+        )
+        .expect("valid work record writes");
+    let transaction = connection.transaction().expect("claim begins");
+    let claim =
+        SchedulerRepository::claim_for_preparation(&transaction, "agent", 4, "attempt", 10.0, 3)
+            .expect("task cancellation does not invalidate the account worker")
+            .expect("review and user inputs are claimed");
+    assert_eq!(claim.refusal_reason, None);
+    assert_eq!(
+        claim
+            .events
+            .iter()
+            .map(|event| event.id.0.as_str())
+            .collect::<Vec<_>>(),
+        ["first", "tie", "later"]
+    );
+    assert!(
+        SchedulerRepository::reconcile_obsolete_before_submit(&transaction, "agent", 4, "attempt")
+            .expect("task cancellation does not decide the followup result")
+    );
+    transaction.commit().expect("claim commits");
+    let stored: String = connection
+        .query_row(
+            "SELECT record FROM runtime_work WHERE id='task'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("work history reads");
+    assert_eq!(stored, work.to_string());
+}
+
+#[test]
 fn resolved_complaint_and_decided_work_review_retire_before_claiming_the_remaining_input() {
     let mut connection = database();
     connection
