@@ -21,8 +21,8 @@ use studio_runtime_services::workspace_operations::ProviderTicket;
 use studio_runtime_services::{
     monitor_runtime_wiring::MonitorRuntime, process_controls as controls,
 };
+use studio_runtime_store::RuntimeStore;
 use studio_runtime_store::request_results::AdmittedRequest;
-use studio_runtime_store::{AgentRecord, RuntimeStore};
 
 pub(crate) fn routes() -> RouteGroup {
     RouteGroup::new(vec![
@@ -53,31 +53,42 @@ fn error(error: controls::Error) -> ApiError {
 fn invalid(message: &'static str) -> ApiError {
     ApiError::new(StatusCode::BAD_REQUEST, message)
 }
-fn text<'a>(value: &'a Value, key: &str) -> &'a str {
-    value[key].as_str().unwrap_or_default()
-}
+
 fn store(state: &HttpState) -> Result<Arc<RuntimeStore>, ApiError> {
     state.store.clone().ok_or_else(ApiError::internal)
 }
-fn provider(state: &HttpState, owner: &Value) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
-    let agent = <AgentRecord as serde::Deserialize>::deserialize(owner)
-        .map_err(|_| ApiError::internal())?;
-    super::agent_management::native_action_provider(&agent, state.account_session.clone())
+fn provider(
+    state: &HttpState,
+    owner: &controls::ProcessOwner,
+) -> Result<Arc<dyn AccountSessionPort>, ApiError> {
+    if owner.legacy_vm() {
+        return Err(ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "The workspace is unavailable",
+        ));
+    }
+    state.account_session.clone().ok_or_else(|| {
+        ApiError::new(
+            StatusCode::NOT_IMPLEMENTED,
+            "Not implemented: requires provider-session/native-request",
+        )
+    })
 }
+
 fn connections(
     state: &HttpState,
     tx: &studio_runtime_store::Transaction<'_>,
-    owners: &[Value],
-    rows: &[(&Value, controls::ProcessSource)],
+    owners: &[controls::ProcessOwner],
+    rows: &[(&controls::ProcessOwner, controls::ProcessSource)],
 ) -> Result<controls::Connections, controls::Error> {
     let mut connections = controls::Connections::default();
     for owner in owners {
-        let account = owner["accountKey"].as_str().unwrap_or("default");
+        let account = owner.account_key.as_deref().unwrap_or("default");
         if let Some(scope) = provider(state, owner)
             .ok()
             .and_then(|port| port.current_scope(account))
         {
-            connections.observe_owner(text(owner, "id").to_owned(), scope);
+            connections.observe_owner(owner.id.as_deref().unwrap_or_default().to_owned(), scope);
         }
     }
     if let Some(source) = &state.account_session {
@@ -125,15 +136,15 @@ async fn held_response_proof(
         return None;
     }
     let port = provider(state, &owner).ok()?;
-    let scope = port.current_scope(owner["accountKey"].as_str().unwrap_or("default"))?;
+    let scope = port.current_scope(owner.account_key.as_deref().unwrap_or("default"))?;
     let operation = format!("process-response-observation:{}", uuid::Uuid::new_v4());
     let ticket = ProviderTicket {
         operation: operation.clone(),
         request: operation.clone(),
-        agent: text(&owner, "id").to_owned(),
-        epoch: owner["epoch"].as_u64()?,
+        agent: owner.id.as_deref().unwrap_or_default().to_owned(),
+        epoch: owner.epoch.as_ref().and_then(studio_json::Number::as_u64)?,
         account: scope.account.clone(),
-        thread: Some(text(&owner, "threadId").to_owned()),
+        thread: Some(owner.thread_id.as_deref().unwrap_or_default().to_owned()),
         connection: scope.connection.clone(),
         generation: scope.generation,
     };
@@ -143,7 +154,7 @@ async fn held_response_proof(
         &ticket,
         &operation,
         "thread/read",
-        json!({"threadId":owner["threadId"],"includeTurns":false}),
+        json!({"threadId":owner.thread_id,"includeTurns":false}),
         ("", None),
     )
     .await
@@ -436,7 +447,7 @@ async fn bind(
         .current_scope(account)
         .ok_or_else(|| invalid("The native process connection is unavailable"))?;
     if Some(scope.connection.as_str()) != expected.source_connection.as_deref()
-        || owner["threadId"].as_str() != expected.source_thread.as_deref()
+        || owner.thread_id.as_deref() != expected.source_thread.as_deref()
     {
         return Err(invalid("The native process connection changed"));
     }
@@ -706,7 +717,7 @@ async fn stop_response(
             port,
             scope,
             ticket,
-            owner["provider"] == ProviderKind::Claude.key(),
+            owner.provider == Some(ProviderKind::Claude),
         ))
     }
     .await;
@@ -756,7 +767,7 @@ async fn background_command(
             .await?;
         let owner = &owners[0];
         // Only the Claude adapter implements `thread/commandExecution/background`.
-        let supported = matches!(ProviderKind::of_record(owner), Ok(ProviderKind::Claude));
+        let supported = owner.provider == Some(ProviderKind::Claude);
         let port = provider(state, owner)?;
         let scope = port
             .current_scope(expected.account_key.as_str())

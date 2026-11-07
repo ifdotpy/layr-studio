@@ -140,12 +140,27 @@ pub(crate) fn vm_workspace_unsupported(
 
 /// Whether a persisted agent belongs to a retired VM workspace.
 pub fn legacy_vm_record(record: &studio_runtime_store::AgentRecord) -> bool {
-    use studio_runtime_schema::records::WorkspaceMode;
-    record.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-        || (record.workspace_mode != Some(WorkspaceMode::LayrNative)
-            && (record.workspace_mode == Some(WorkspaceMode::Layr)
-                || record.layr_ready == Some(true)
-                || record.layr_line.value().is_some()))
+    legacy_vm_fields(
+        record.execution_mode,
+        record.workspace_mode,
+        record.layr_ready,
+        record.layr_line.value().is_some(),
+    )
+}
+
+/// Shared retired-workspace predicate for typed agent views.
+pub(crate) fn legacy_vm_fields(
+    execution_mode: Option<studio_runtime_store::AgentExecutionMode>,
+    workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
+    layr_ready: Option<bool>,
+    has_layr_line: bool,
+) -> bool {
+    vm_workspace_unsupported(
+        (execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)).then_some("vm"),
+        workspace_mode.map(studio_runtime_schema::records::WorkspaceMode::as_str),
+        layr_ready == Some(true),
+        has_layr_line,
+    )
 }
 
 pub fn unsupported(actor: &WorkspaceActor) -> Option<WorkspaceRefusal> {

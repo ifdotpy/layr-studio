@@ -17,7 +17,9 @@ use studio_runtime_store::{
 };
 
 use crate::account_session_runtime::ConnectionScope;
+mod owner_view;
 use crate::event_write::{CallerAdmission, RequestKey, begin_request};
+pub use owner_view::ProcessOwner;
 
 /// Public view plus native identity evidence, retained together until dispatch.
 #[derive(Clone, Debug)]
@@ -180,87 +182,98 @@ impl Connections {
     }
     pub fn observe_response(&mut self, proof: HeldResponseProof) {
         self.responses
-            .insert(text(&proof.owner, "id", "").into(), proof);
+            .insert(proof.owner.id.as_deref().unwrap_or_default().into(), proof);
     }
 }
 
 /// Candidate metadata is not native proof. Only a fresh, exact-scope compact
 /// thread read can authorize Stop, and its turn remains conditional at native dispatch.
-pub fn held_response_candidate(owner: &Value) -> bool {
-    owner["provider"] == "claude"
-        && owner["executionMode"] != "vm"
-        && owner["status"] == "interrupted"
-        && owner["inFlight"] == false
-        && owner["autoWake"] == false
-        && owner["deleted"] != true
-        && !studio_runtime_store::truthy(owner.get("deletedAt"))
-        && owner["archived"] != true
-        && !studio_runtime_store::truthy(owner.get("archivedAt"))
-        && owner["accountTransferId"].is_null()
-        && owner["executionMove"].is_null()
-        && owner["epoch"].as_u64().is_some()
-        && !text(owner, "id", "").is_empty()
-        && !text(owner, "threadId", "").is_empty()
-        && !text(owner, "turnId", "").is_empty()
-        && owner["nativeResponseTurn"] == owner["turnId"]
-        && owner["restartRecovery"]["stage"] == "held"
-        && owner["disconnectRecovery"]["source"] == "restart"
-        && ["restartRecovery", "disconnectRecovery"].iter().all(|key| {
-            owner[key]["epoch"] == owner["epoch"]
-                && owner[key]["accountKey"] == text(owner, "accountKey", "default")
-                && owner[key]["threadId"] == owner["threadId"]
-        })
+pub fn held_response_candidate(owner: &ProcessOwner) -> bool {
+    owner.provider == Some(ProviderKind::Claude)
+        && owner.execution_mode != Some(studio_runtime_store::AgentExecutionMode::Vm)
+        && owner.status == Some(studio_runtime_store::AgentStatus::Interrupted)
+        && owner.in_flight == Some(false)
+        && owner.auto_wake == Some(false)
+        && owner.deleted != Some(true)
+        && !owner.deleted_at.is_some_and(|at| at != 0.0)
+        && owner.archived != Some(true)
+        && !owner.archived_at.is_some_and(|at| at != 0.0)
+        && owner.account_transfer_id.is_none()
+        && owner.execution_move.is_none()
+        && owner
+            .epoch
+            .as_ref()
+            .and_then(studio_json::Number::as_u64)
+            .is_some()
+        && owner.id.as_deref().is_some_and(|id| !id.is_empty())
+        && owner.thread_id.as_deref().is_some_and(|id| !id.is_empty())
+        && owner.turn_id.as_deref().is_some_and(|id| !id.is_empty())
+        && owner.native_response_turn == owner.turn_id
+        && owner
+            .restart_recovery
+            .as_ref()
+            .and_then(|recovery| recovery.stage.as_deref())
+            == Some("held")
+        && owner
+            .disconnect_recovery
+            .as_ref()
+            .and_then(|recovery| recovery.source.as_deref())
+            == Some("restart")
+        && [&owner.restart_recovery, &owner.disconnect_recovery]
+            .iter()
+            .all(|recovery| {
+                recovery.as_ref().is_some_and(|recovery| {
+                    recovery.epoch == owner.epoch
+                        && recovery.account_key.as_deref() == Some(owner.account())
+                        && recovery.thread_id == owner.thread_id
+                })
+            })
 }
 
 /// Ephemeral observation, never a stored lifecycle transition or delivery permit.
 /// Revalidation binds the unchanged actor and complete current native scope.
 #[derive(Clone)]
 pub struct HeldResponseProof {
-    owner: Value,
+    owner: ProcessOwner,
     scope: ConnectionScope,
 }
 impl HeldResponseProof {
-    pub fn observe(owner: Value, scope: ConnectionScope, reply: &Value) -> Option<Self> {
+    pub fn observe(owner: ProcessOwner, scope: ConnectionScope, reply: &Value) -> Option<Self> {
         (held_response_candidate(&owner)
-            && scope.account == text(&owner, "accountKey", "default")
+            && scope.account == owner.account()
             && !scope.connection.is_empty()
-            && reply["thread"]["id"] == owner["threadId"]
+            && reply["thread"]["id"].as_str() == owner.thread_id.as_deref()
             && reply["thread"]["status"]["type"] == "active")
             .then_some(Self { owner, scope })
     }
-    fn matches(&self, owner: &Value, scope: &ConnectionScope) -> bool {
-        self.owner == *owner && self.scope == *scope && held_response_candidate(owner)
+    fn matches(&self, owner: &ProcessOwner, scope: &ConnectionScope) -> bool {
+        self.owner.same_record(owner) && self.scope == *scope && held_response_candidate(owner)
     }
 }
 
 fn retained_monitor_scope(
     tx: &Transaction<'_>,
     monitor: &studio_runtime_store::MonitorRecord,
-    owner: &Value,
+    owner: &ProcessOwner,
 ) -> Result<Option<ConnectionScope>, Error> {
     if monitor.status != studio_runtime_schema::studio_errors::MonitorStatus::Running
-        || monitor.agent != text(owner, "id", "")
-        || Some(monitor.epoch.get()) != owner["epoch"].as_i64()
-        || owner["deleted"] == true
-        || studio_runtime_store::truthy(owner.get("deletedAt"))
+        || monitor.agent != owner.id.as_deref().unwrap_or_default()
+        || Some(monitor.epoch.get()) != owner.epoch.as_ref().and_then(studio_json::Number::as_i64)
+        || owner.deleted == Some(true)
+        || owner.deleted_at.is_some_and(|at| at != 0.0)
     {
         return Ok(None);
     }
     let Some(operation) = &monitor.operation else {
         return Ok(None);
     };
-    if operation.agent.as_str() != text(owner, "id", "")
-        || Some(operation.epoch.get()) != owner["epoch"].as_i64()
+    if operation.agent.as_str() != owner.id.as_deref().unwrap_or_default()
+        || Some(operation.epoch.get()) != owner.epoch.as_ref().and_then(studio_json::Number::as_i64)
     {
         return Ok(None);
     }
-    let actor = studio_runtime_store::AgentRepository::get(
-        tx,
-        &studio_runtime_store::AgentId::from(operation.agent.as_str()),
-    )?;
-    if actor.is_some_and(|actor| {
-        actor.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm)
-    }) {
+    // The operation and monitor were checked against this same transaction's owner above.
+    if owner.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
         return Ok(None);
     }
     match crate::account_worker::retained::monitor_command_scope(tx, &monitor.id, operation) {
@@ -274,7 +287,7 @@ fn retained_monitor_scope(
 /// observes those accounts' existing sessions; it never starts another session.
 pub fn monitor_sources(
     tx: &Transaction<'_>,
-    rows: &[(&Value, ProcessSource)],
+    rows: &[(&ProcessOwner, ProcessSource)],
 ) -> Result<Vec<ConnectionScope>, Error> {
     let mut scopes = BTreeMap::new();
     for (owner, source) in rows {
@@ -292,7 +305,7 @@ pub fn monitor_sources(
 pub fn project_monitor(
     tx: &Transaction<'_>,
     raw: &studio_runtime_store::MonitorRecord,
-    owner: &Value,
+    owner: &ProcessOwner,
     owner_connection: Option<&str>,
     source: Option<&ConnectionScope>,
 ) -> Result<ProcessRecord, Error> {
@@ -320,13 +333,13 @@ pub fn project_monitor(
 }
 fn project_monitor_bound(
     monitor: &studio_runtime_store::MonitorRecord,
-    owner: &Value,
+    owner: &ProcessOwner,
     connection: Option<&str>,
     generation: Option<u64>,
 ) -> ProcessRecord {
     use studio_runtime_schema::studio_errors::MonitorStatus;
     let agent = monitor.agent.as_str();
-    let account = text(owner, "accountKey", "default");
+    let account = owner.account();
     let pending = matches!(
         monitor.status,
         MonitorStatus::Approval | MonitorStatus::Starting
@@ -344,13 +357,13 @@ fn project_monitor_bound(
         && monitor.reattached_connection_id.as_deref() == connection
     {
         source_connection = connection;
-        source_thread = owner["threadId"].as_str();
+        source_thread = owner.thread_id.as_deref();
     }
     if generation.is_none()
         && source_thread.is_none_or(str::is_empty)
         && operation.map(|op| op.connection_id.as_str()) == connection
     {
-        source_thread = owner["threadId"].as_str();
+        source_thread = owner.thread_id.as_deref();
     }
     let epoch = monitor.epoch.get();
     let mut native = json!([
@@ -367,12 +380,12 @@ fn project_monitor_bound(
             .push(json!(generation));
     }
     let same = (generation.is_some() || source_account == Some(account))
-        && owner["epoch"].as_i64() == Some(epoch)
+        && owner.epoch.as_ref().and_then(studio_json::Number::as_i64) == Some(epoch)
         && connection.is_some_and(|c| !c.is_empty())
         && source_connection == connection
         && (generation.is_some()
             || (source_thread.is_some_and(|v| !v.is_empty())
-                && source_thread == owner["threadId"].as_str()));
+                && source_thread == owner.thread_id.as_deref()));
     let output = monitor.tail.as_str();
     let bytes = monitor.bytes.get() as u64;
     let command = monitor.command.as_str();
@@ -384,10 +397,12 @@ fn project_monitor_bound(
     let mut actions = vec![BackgroundTaskAction::ReadOutput];
     actions.extend(crate::monitor_policy::input_actions(
         monitor,
-        same && owner["autoWake"] == true,
+        same && owner.auto_wake == Some(true),
     ));
     if same
-        || (pending && owner["epoch"].as_i64() == Some(epoch) && source_account == Some(account))
+        || (pending
+            && owner.epoch.as_ref().and_then(studio_json::Number::as_i64) == Some(epoch)
+            && source_account == Some(account))
     {
         actions.push(BackgroundTaskAction::Stop);
     }
@@ -399,7 +414,11 @@ fn project_monitor_bound(
         generation: digest(&json!(["monitor", agent, native])),
         agent: agent.to_owned(),
         account_key: account.to_owned(),
-        epoch: owner["epoch"].as_u64().expect("checked owner epoch"),
+        epoch: owner
+            .epoch
+            .as_ref()
+            .and_then(studio_json::Number::as_u64)
+            .expect("checked owner epoch"),
         source: ProcessSourceKind::Monitor,
         status,
         cancel_requested: cancelled,
@@ -454,7 +473,7 @@ fn project_monitor_bound(
     }
 }
 
-fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<Value>, Error> {
+fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<ProcessOwner>, Error> {
     let text: Option<String> = connection
         .query_row(
             &format!("SELECT record FROM {table} WHERE id=?"),
@@ -463,24 +482,20 @@ fn raw(connection: &Connection, table: &str, id: &str) -> Result<Option<Value>, 
         )
         .optional()
         .map_err(StoreError::from)?;
-    text.map(|text| {
-        studio_json::from_str(&text)
-            .map_err(StoreError::from)
-            .map_err(Error::from)
-    })
-    .transpose()
+    text.map(|text| ProcessOwner::decode(text).map_err(Error::from))
+        .transpose()
 }
-pub fn owner(connection: &Connection, scope: &str) -> Result<Value, Error> {
+pub fn owner(connection: &Connection, scope: &str) -> Result<ProcessOwner, Error> {
     let root =
         raw(connection, "runtime_agents", scope)?.ok_or(Error::Invalid("Unknown process owner"))?;
-    if studio_runtime_store::truthy(root.get("deletedAt")) {
+    if root.deleted_at.is_some_and(|at| at != 0.0) {
         return Err(Error::Invalid("This process owner was deleted"));
     }
     Ok(root)
 }
-pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<Value>, Error> {
+pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<ProcessOwner>, Error> {
     let root = owner(connection, scope)?;
-    if root["id"].as_str().is_none() {
+    if root.id.is_none() {
         return Err(Error::Invalid("Invalid process owner"));
     }
     let mut statement = connection
@@ -498,9 +513,7 @@ pub fn owners(connection: &Connection, scope: &str) -> Result<Vec<Value>, Error>
         .map_err(StoreError::from)?;
     let mut result = vec![root];
     for row in rows {
-        result.push(
-            studio_json::from_str(&row.map_err(StoreError::from)?).map_err(StoreError::from)?,
-        );
+        result.push(ProcessOwner::decode(row.map_err(StoreError::from)?)?);
     }
     Ok(result)
 }
@@ -516,8 +529,8 @@ const TASK_PROCESS_QUERY: &str = "SELECT id,record FROM runtime_tasks INDEXED BY
 /// Scoped active commands paired with their already-loaded owners.
 pub fn process_rows<'a>(
     connection: &Connection,
-    owners: &'a [Value],
-) -> Result<Vec<(&'a Value, ProcessSource)>, Error> {
+    owners: &'a [ProcessOwner],
+) -> Result<Vec<(&'a ProcessOwner, ProcessSource)>, Error> {
     let mut result = Vec::new();
     for table in ["runtime_monitors", "runtime_tasks"] {
         let sql = if table == "runtime_monitors" {
@@ -527,7 +540,7 @@ pub fn process_rows<'a>(
         };
         let mut statement = connection.prepare_cached(sql).map_err(StoreError::from)?;
         for owner in owners {
-            let id = text(owner, "id", "");
+            let id = owner.id.as_deref().unwrap_or_default();
             let statuses = studio_runtime_store::startup_recovery::ACTIVE_MONITOR_STATUSES;
             let args = [id, statuses[0], statuses[1], statuses[2]];
             let args = if table == "runtime_monitors" {
@@ -565,12 +578,6 @@ pub fn process_rows<'a>(
     Ok(result)
 }
 
-fn text<'a>(value: &'a Value, key: &str, default: &'a str) -> &'a str {
-    value[key]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .unwrap_or(default)
-}
 pub fn digest(value: &Value) -> String {
     studio_runtime_store::sha256_hex(value.to_string().as_bytes())
 }
@@ -581,11 +588,11 @@ fn request_digest(request: &ProcessControlRequest) -> Result<String, Error> {
 pub fn project(
     source: ProcessSourceKind,
     raw: &studio_runtime_store::TaskRecord,
-    owner: &Value,
+    owner: &ProcessOwner,
     connection: Option<&str>,
 ) -> ProcessRecord {
     let agent = raw.agent();
-    let account = text(owner, "accountKey", "default");
+    let account = owner.account();
     let source_account = raw.source_account_key.as_deref();
     let source_connection = raw.source_connection_id.as_deref();
     let source_thread = raw.source_thread_id.as_deref();
@@ -621,13 +628,13 @@ pub fn project(
         ])
     };
     let same = source_account == Some(account)
-        && epoch == owner["epoch"].as_i64()
+        && epoch == owner.epoch.as_ref().and_then(studio_json::Number::as_i64)
         && connection.is_some_and(|c| !c.is_empty())
         && source_connection == connection
         && source_thread.is_some_and(|thread| !thread.is_empty())
-        && source_thread == owner["threadId"].as_str();
+        && source_thread == owner.thread_id.as_deref();
     let can_input = same
-        && owner["autoWake"] == true
+        && owner.auto_wake == Some(true)
         && !claude
         && raw
             .process_id()
@@ -672,7 +679,11 @@ pub fn project(
         generation: digest(&json!([source.as_str(), agent, native])),
         agent: agent.to_owned(),
         account_key: account.to_owned(),
-        epoch: owner["epoch"].as_u64().expect("checked owner epoch"),
+        epoch: owner
+            .epoch
+            .as_ref()
+            .and_then(studio_json::Number::as_u64)
+            .expect("checked owner epoch"),
         source,
         status,
         cancel_requested: false,
@@ -795,12 +806,14 @@ pub fn monitor_record_display(
 
 pub fn processes(
     connection: &Transaction<'_>,
-    rows: &[(&Value, ProcessSource)],
+    rows: &[(&ProcessOwner, ProcessSource)],
     connections: &Connections,
 ) -> Result<Vec<ProcessRecord>, Error> {
     let mut output = Vec::new();
     for (owner, row) in rows {
-        let owner_connection = connections.get(text(owner, "id", "")).map(String::as_str);
+        let owner_connection = connections
+            .get(owner.id.as_deref().unwrap_or_default())
+            .map(String::as_str);
         match row {
             ProcessSource::Monitor(monitor) => {
                 let account = monitor
@@ -820,7 +833,7 @@ pub fn processes(
                 let provider = raw
                     .source_provider
                     .map(|provider| provider.key())
-                    .unwrap_or_else(|| text(owner, "provider", ProviderKind::Codex.key()));
+                    .unwrap_or_else(|| owner.provider.unwrap_or(ProviderKind::Codex).key());
                 let source = if raw.kind() == studio_runtime_schema::task_record::TaskKind::Command
                     && raw.process_id().is_some_and(|id| id.truthy())
                 {
@@ -849,15 +862,18 @@ pub fn processes(
     });
     Ok(output)
 }
-pub fn response_target(owner: &Value, connection: Option<&str>) -> Option<ProcessResponseTarget> {
-    if owner["inFlight"] == true {
+pub fn response_target(
+    owner: &ProcessOwner,
+    connection: Option<&str>,
+) -> Option<ProcessResponseTarget> {
+    if owner.in_flight == Some(true) {
         response_identity(owner, connection?)
     } else {
         None
     }
 }
-fn stop_target(owner: &Value, connections: &Connections) -> Option<ProcessResponseTarget> {
-    let id = text(owner, "id", "");
+fn stop_target(owner: &ProcessOwner, connections: &Connections) -> Option<ProcessResponseTarget> {
+    let id = owner.id.as_deref().unwrap_or_default();
     response_target(owner, connections.get(id).map(String::as_str)).or_else(|| {
         match (connections.responses.get(id), connections.scopes.get(id)) {
             (Some(proof), Some(scope)) if proof.matches(owner, scope) => {
@@ -867,24 +883,21 @@ fn stop_target(owner: &Value, connections: &Connections) -> Option<ProcessRespon
         }
     })
 }
-fn response_identity(owner: &Value, connection: &str) -> Option<ProcessResponseTarget> {
+fn response_identity(owner: &ProcessOwner, connection: &str) -> Option<ProcessResponseTarget> {
     Some(ProcessResponseTarget {
-        agent: owner["id"].as_str()?.to_owned().try_into().ok()?,
-        account_key: text(owner, "accountKey", "default")
-            .to_owned()
-            .try_into()
-            .ok()?,
-        epoch: owner["epoch"].as_u64()?,
+        agent: owner.id.as_deref()?.to_owned().try_into().ok()?,
+        account_key: owner.account().to_owned().try_into().ok()?,
+        epoch: owner.epoch.as_ref().and_then(studio_json::Number::as_u64)?,
         connection_id: connection.to_owned().try_into().ok()?,
-        thread_id: owner["threadId"].as_str()?.to_owned().try_into().ok()?,
-        turn_id: owner["turnId"].as_str()?.to_owned().try_into().ok()?,
+        thread_id: owner.thread_id.as_deref()?.to_owned().try_into().ok()?,
+        turn_id: owner.turn_id.as_deref()?.to_owned().try_into().ok()?,
     })
 }
 
 pub fn listing(
     connection: &Transaction<'_>,
-    owners: &[Value],
-    rows: &[(&Value, ProcessSource)],
+    owners: &[ProcessOwner],
+    rows: &[(&ProcessOwner, ProcessSource)],
     connections: &Connections,
 ) -> Result<ProcessListing, Error> {
     let processes: Vec<_> = processes(connection, rows, connections)?
@@ -897,7 +910,7 @@ pub fn listing(
     }
     let owner_ids: HashSet<_> = owners
         .iter()
-        .filter_map(|owner| owner["id"].as_str())
+        .filter_map(|owner| owner.id.as_deref())
         .collect();
     let mut statement = connection
         .prepare("SELECT payload FROM sync_entities WHERE collection='task' AND deleted=0")
@@ -960,14 +973,14 @@ fn response_matches(
     expected.as_ref() == Some(target)
 }
 pub fn validate_response(
-    owner: &Value,
+    owner: &ProcessOwner,
     target: &ProcessResponseTarget,
     connection: Option<&str>,
 ) -> bool {
     response_matches(&response_target(owner, connection), target)
 }
 pub fn validate_stop_response(
-    owner: &Value,
+    owner: &ProcessOwner,
     target: &ProcessResponseTarget,
     scope: &ConnectionScope,
     proof: Option<&HeldResponseProof>,
@@ -1006,8 +1019,8 @@ pub fn claim(
     let rows = process_rows(tx, &owners)?;
     let processes = processes(tx, &rows, connections)?;
     let owner = &owners[0];
-    if text(owner, "accountKey", "default") != command_scope.account_key.as_str()
-        || owner["epoch"].as_u64() != Some(command_scope.epoch)
+    if owner.account() != command_scope.account_key.as_str()
+        || owner.epoch.as_ref().and_then(studio_json::Number::as_u64) != Some(command_scope.epoch)
     {
         return Err(Error::Invalid(
             "The process owner changed. Refresh the process list",
@@ -1320,7 +1333,7 @@ mod claim_identity_tests {
         let process = project(
             ProcessSourceKind::CodexTask,
             &task,
-            &owner,
+            &serde::Deserialize::deserialize(&owner).unwrap(),
             Some("connection"),
         )
         .view;
@@ -1363,7 +1376,12 @@ mod claim_identity_tests {
                 crate::monitor_policy::MonitorSnapshot::checked_stored(&record, owner.clone())
                     .unwrap();
             let operation = snapshot.operation().unwrap();
-            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            let projected = project_monitor_bound(
+                &record,
+                &serde::Deserialize::deserialize(&owner).unwrap(),
+                Some("connection"),
+                None,
+            );
             for (action, resize) in [
                 (BackgroundTaskAction::Input, false),
                 (BackgroundTaskAction::Resize, true),
@@ -1408,7 +1426,12 @@ mod claim_identity_tests {
         let owner = json!({"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","autoWake":true});
         let raw = json!({"id":"task","agent":"owner","ownerEpoch":1,"itemId":"task:123","status":"running","created":1,"kind":"tool","turnId":"turn","type":"dynamicToolCall","name":"job"});
         let task: studio_runtime_store::TaskRecord = serde::Deserialize::deserialize(&raw).unwrap();
-        let projected = project(ProcessSourceKind::ClaudeTask, &task, &owner, None);
+        let projected = project(
+            ProcessSourceKind::ClaudeTask,
+            &task,
+            &serde::Deserialize::deserialize(&owner).unwrap(),
+            None,
+        );
         assert_eq!(
             projected.view.display.kind,
             BackgroundTaskKind::BackgroundTask
@@ -1427,7 +1450,12 @@ mod claim_identity_tests {
             );
             let record: studio_runtime_store::MonitorRecord =
                 studio_json::from_str(&fixture).unwrap();
-            let projected = project_monitor_bound(&record, &owner, Some("connection"), None);
+            let projected = project_monitor_bound(
+                &record,
+                &serde::Deserialize::deserialize(&owner).unwrap(),
+                Some("connection"),
+                None,
+            );
             assert_eq!(projected.source_connection.as_deref(), Some("connection"));
             assert_eq!(projected.view.id, "watch");
             assert_eq!(projected.view.tail, "x");
@@ -1569,7 +1597,7 @@ fn typed_task_keeps_numeric_process_identity_projection() {
     let after = project(
         ProcessSourceKind::CodexTask,
         &typed,
-        &owner,
+        &serde::Deserialize::deserialize(&owner).unwrap(),
         Some("connection"),
     );
     assert_eq!(after.process_id, typed.process_id().cloned());

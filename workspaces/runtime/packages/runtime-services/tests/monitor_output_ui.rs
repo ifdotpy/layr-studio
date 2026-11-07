@@ -21,7 +21,7 @@ fn monitor_budget_and_task_file_survive_renderer_projections() {
     let process = process_controls::project(
         studio_runtime_schema::process_controls::ProcessSourceKind::ClaudeTask,
         &task,
-        &json!({"id":"owner","epoch":1}),
+        &serde::Deserialize::deserialize(json!({"id":"owner","epoch":1})).unwrap(),
         None,
     );
     assert_eq!(process.view.output_file.as_deref(), Some("logs/out.txt"));

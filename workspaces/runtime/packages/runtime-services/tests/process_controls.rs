@@ -16,7 +16,7 @@ async fn task_rows_include_only_running_tasks_for_the_owner() {
             let raw = json!({"id":id,"agent":agent,"created":1,"itemId":"item","turnId":"turn","kind":"command","status":status,"type":"commandExecution","name":"commandExecution"}).to_string();
             tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)", rusqlite::params![id,raw]).map_err(StoreError::from)?;
         }
-        let owners = [json!({"id":"owner"})];
+        let owners = [serde::Deserialize::deserialize(json!({"id":"owner"})).unwrap()];
         let rows = process_controls::process_rows(tx, &owners)?;
         assert_eq!(rows.len(), 1);
         assert!(matches!(&rows[0].1, process_controls::ProcessSource::Task(task) if task.id().as_ref() == "active"));
@@ -88,7 +88,7 @@ async fn owners_follow_live_descendants_once_even_in_a_cycle() {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![id, record.to_string()]).map_err(StoreError::from)?;
         }
         let owners = process_controls::owners(tx, "root")?;
-        assert_eq!(owners.iter().map(|owner| owner["id"].as_str().unwrap()).collect::<Vec<_>>(), vec!["root", "child"]);
+        assert_eq!(owners.iter().map(|owner| owner.id.as_deref().unwrap()).collect::<Vec<_>>(), vec!["root", "child"]);
         Ok::<_, process_controls::Error>(())
     }).await.unwrap();
 }
@@ -102,7 +102,7 @@ fn python_process_identities_and_capabilities_match() {
     struct Case {
         source: String,
         raw: studio_json::Map<String, Value>,
-        owner: Value,
+        owner: process_controls::ProcessOwner,
         connection: Option<String>,
         expected: Expected,
     }
@@ -334,4 +334,51 @@ async fn action_receipt_replays_without_dispatch_and_rejects_identity_reuse() {
         process_controls::receipt(&connection, &foreign).unwrap(),
         studio_runtime_schema::process_controls::ProcessReceipt::Found(_)
     ));
+}
+
+#[test]
+fn process_owner_read_skips_unconsumed_fields() {
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE runtime_agents(id TEXT,record TEXT,parent_id TEXT,deleted_at REAL);",
+    )
+    .unwrap();
+    db.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)",
+        [r#"{"id":"owner","epoch":1,"accountKey":"default","threadId":"thread","unused":{"large":1e999}}"#]).unwrap();
+    // A narrow view skips this valid JSON number instead of materializing it.
+    let owner = process_controls::owner(&db, "owner").unwrap();
+    assert!(process_controls::response_target(&owner, Some("connection")).is_none());
+}
+
+#[cfg(feature = "perf-reporting")]
+#[test]
+fn process_owner_read_decodes_no_value_tree() {
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch(
+        "CREATE TABLE runtime_agents(id TEXT,record TEXT,parent_id TEXT,deleted_at REAL);",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO runtime_agents(id,record) VALUES('owner',?1)",
+        [r#"{"id":"owner","epoch":1,"accountKey":"default","threadId":"thread"}"#],
+    )
+    .unwrap();
+    let label = "process-owner-decode-witness";
+    studio_json::perf_reporting::with_job(label.into(), || {
+        let owners = process_controls::owners(&db, "owner").unwrap();
+        assert_eq!(owners.len(), 1);
+    });
+    let decodes = studio_json::perf_reporting::decode_snapshot();
+    let rows: Vec<_> = decodes
+        .iter()
+        .filter(|(key, _)| key.starts_with(label))
+        .collect();
+    assert_eq!(rows.iter().map(|(_, value)| value.count).sum::<u64>(), 1);
+    assert_eq!(
+        rows.iter()
+            .filter(|(key, _)| key.ends_with("serde_json::value::Value"))
+            .map(|(_, value)| value.count)
+            .sum::<u64>(),
+        0
+    );
 }

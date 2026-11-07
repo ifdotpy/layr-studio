@@ -297,8 +297,10 @@ pub async fn cancel_checked(
         .transaction_with(move |tx| {
             if let Some(expected) = &expected {
                 let (snapshot, owner) = monitor_runtime::snapshot(tx, &id_for_reservation)?;
-                let owner =
-                    studio_json::to_value(owner).map_err(studio_runtime_store::StoreError::from)?;
+                let owner = serde::Deserialize::deserialize(
+                    studio_json::to_value(owner).map_err(studio_runtime_store::StoreError::from)?,
+                )
+                .map_err(studio_runtime_store::StoreError::from)?;
                 let source = expected.source_generation.map(|generation| {
                     crate::account_session_runtime::ConnectionScope {
                         account: expected.source_account.clone().unwrap_or_default(),
