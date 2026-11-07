@@ -1032,7 +1032,7 @@ pub(crate) async fn prepare_native_action(
     attempt_id: &str,
     generation: u64,
 ) -> Result<super::PreparedNativeAction, WorkerError> {
-    let mut snapshot = prepare_native_snapshot(
+    let mut snapshot = Box::pin(prepare_native_snapshot(
         Arc::clone(&store),
         resources,
         agent_id,
@@ -1040,7 +1040,7 @@ pub(crate) async fn prepare_native_action(
         generation,
         false,
         None,
-    )
+    ))
     .await?;
     let program = daybreak_program(resources, &snapshot)?;
     let settings = native_turn_params(
@@ -1106,7 +1106,7 @@ async fn prepare_native_thread_for_transfer_owner(
     generation: u64,
     transfer_owner: Option<&str>,
 ) -> Result<super::PreparedNativeThread, WorkerError> {
-    let mut snapshot = prepare_native_snapshot(
+    let mut snapshot = Box::pin(prepare_native_snapshot(
         store,
         resources,
         agent_id,
@@ -1114,7 +1114,7 @@ async fn prepare_native_thread_for_transfer_owner(
         generation,
         true,
         transfer_owner,
-    )
+    ))
     .await?;
     if snapshot.actor.native_teleport_tool.is_none() && snapshot.actor.thread_id.is_some() {
         snapshot.actor.native_teleport_tool = Some(thread::SessionTool::Move);
