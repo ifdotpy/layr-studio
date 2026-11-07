@@ -97,6 +97,7 @@ mod m2026_11_04_work_read_time;
 mod m2026_11_05_chat_account_defaults;
 mod m2026_11_05_repair_event_order;
 pub(crate) mod m2026_11_06_idle_unload;
+mod m2026_11_06_outbox_lookup;
 mod m2026_11_06_role_account_exclusions;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1620,6 +1621,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_role_account_exclusions::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-outbox-lookup",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations with the shared runtime outbox",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_outbox_lookup::apply(c.transaction),
     },
 ];
 
