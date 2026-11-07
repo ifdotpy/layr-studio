@@ -33,6 +33,11 @@ const TASK_RETIRE_BATCH: usize = 100;
 /// Newest finished tasks the renderer task window keeps beside running ones;
 /// the workspace entity advertises it as `tasksHistoryLimit`. Unit: rows.
 pub const TASK_WINDOW_HISTORY_ROWS: usize = 100;
+// Walk the newest finished state first and test membership by PK. Starting
+// with durable_rows scans the retained tombstones and sorts the whole window.
+const TASK_WINDOW_EVICT_SQL: &str = "SELECT s.id FROM task_window_state s INDEXED BY task_window_state_history \
+    CROSS JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 \
+    WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1";
 /// Restricts a task query to tasks of live (not deleted) agents.
 const LIVE_TASK_AGENT: &str = "json_extract(t.record,'$.agent') IN \
      (SELECT id FROM runtime_agents WHERE deleted_at IS NULL)";
@@ -1596,9 +1601,7 @@ pub(crate) fn maintain_task_window_after_write(
         if !task_running {
             let evicted: Option<String> = transaction
                 .query_row(
-                    "SELECT s.id FROM task_window_state s \
-                     JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 \
-                     WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
+                    TASK_WINDOW_EVICT_SQL,
                     [TASK_WINDOW_HISTORY_ROWS as i64],
                     |row| row.get(0),
                 )
@@ -3839,6 +3842,43 @@ mod tests {
             })
             .await
             .expect("random task writes");
+    }
+
+    #[test]
+    fn task_window_eviction_cost_stops_at_history_boundary() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE task_window_state(id TEXT PRIMARY KEY,agent TEXT,created REAL,running INTEGER);
+            CREATE INDEX task_window_state_history ON task_window_state(created DESC) WHERE NOT running;
+            CREATE TABLE durable_rows(tbl TEXT,id TEXT,deleted INTEGER,PRIMARY KEY(tbl,id));
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<10000)
+            INSERT INTO task_window_state SELECT printf('task-%05d',x),'agent',x,0 FROM n;
+            INSERT INTO durable_rows SELECT 'task_window',id,created<9899 FROM task_window_state;
+            INSERT INTO task_window_state VALUES('running','agent',20000,1),('missing','agent',19999,0);
+            INSERT INTO durable_rows VALUES('task_window','running',0);").unwrap();
+        let mut query = db.prepare(TASK_WINDOW_EVICT_SQL).unwrap();
+        let evicted: String = query
+            .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
+            .unwrap();
+        assert_eq!(evicted, "task-09900");
+        let steps = query.get_status(rusqlite::StatementStatus::VmStep);
+        let mut old_query = db
+            .prepare(
+                "SELECT s.id FROM task_window_state s
+            JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0
+            WHERE NOT s.running ORDER BY s.created DESC LIMIT 1 OFFSET ?1",
+            )
+            .unwrap();
+        let old_evicted: String = old_query
+            .query_row([TASK_WINDOW_HISTORY_ROWS as i64], |row| row.get(0))
+            .unwrap();
+        assert_eq!(old_evicted, evicted);
+        let old_steps = old_query.get_status(rusqlite::StatementStatus::VmStep);
+        eprintln!("task-window history=10000 vm_steps={old_steps}->{steps}");
+        assert!(steps * 10 < old_steps);
+        assert!(
+            steps < 3000,
+            "eviction must stop after the newest live history, got {steps} VM steps"
+        );
     }
 
     #[tokio::test]

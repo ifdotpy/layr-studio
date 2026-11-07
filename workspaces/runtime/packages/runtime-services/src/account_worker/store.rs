@@ -2145,12 +2145,13 @@ fn resolve_unbound_completion(
     Ok(UnboundCompletion::Error)
 }
 
-// CROSS JOIN keeps the account's deleted agents first; unary + removes TEXT
-// affinity so SQLite can search the task expression index and only matches
-// string agent IDs (numeric agent values are corrupt task records).
-const DELETED_COMMAND_IDS_SQL: &str = "SELECT t.id FROM runtime_agents a CROSS JOIN runtime_tasks t ON +a.id=json_extract(t.record,'$.agent') \
+// TaskRecord::new owns the key: "{agent}:{itemId}". Look up that PK for
+// each deleted actor instead of parsing every task in its history. Keep the
+// payload checks, including unary + so a numeric agent cannot match a TEXT ID.
+const DELETED_COMMAND_IDS_SQL: &str = "SELECT t.id FROM runtime_agents a CROSS JOIN runtime_tasks t ON t.id=a.id||':'||?2 \
     WHERE a.account_key=?1 AND json_extract(t.record,'$.itemId')=?2 \
-    AND json_extract(t.record,'$.turnId')=?3 AND a.deleted_at IS NOT NULL LIMIT 2";
+    AND json_extract(t.record,'$.turnId')=?3 AND +a.id=json_extract(t.record,'$.agent') \
+    AND a.deleted_at IS NOT NULL LIMIT 2";
 
 /// Admit only a terminal report for the exact prior-epoch command of a deleted actor.
 fn complete_deleted_command(
@@ -4851,24 +4852,65 @@ mod pending_thread_start_tests {
 #[cfg(test)]
 mod deleted_command_query_tests {
     use super::DELETED_COMMAND_IDS_SQL;
+    use rusqlite::StatementStatus;
 
     #[test]
-    fn deleted_command_query_preserves_matches_and_uses_task_index() {
+    fn deleted_command_query_cost_is_independent_of_task_history() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, account_key TEXT, deleted_at INTEGER);
+            CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at);
+            CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC);
+            INSERT INTO runtime_agents VALUES('deleted','account',1);").unwrap();
+        let tx = db.transaction().unwrap();
+        for n in 0..10_000 {
+            tx.execute("INSERT INTO runtime_tasks VALUES(?1,?2)", rusqlite::params![
+                format!("deleted:item-{n}"),
+                studio_json::json!({"agent":"deleted","itemId":format!("item-{n}"),"turnId":"old","created":n}).to_string()
+            ]).unwrap();
+        }
+        let old_sql = "SELECT t.id FROM runtime_agents a CROSS JOIN runtime_tasks t ON +a.id=json_extract(t.record,'$.agent')
+            WHERE a.account_key=?1 AND json_extract(t.record,'$.itemId')=?2
+            AND json_extract(t.record,'$.turnId')=?3 AND a.deleted_at IS NOT NULL LIMIT 2";
+        let measure = |sql: &str, item: &str| {
+            let mut query = tx.prepare(sql).unwrap();
+            let result: Vec<String> = query
+                .query_map(["account", item, "old"], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect();
+            (result, query.get_status(StatementStatus::VmStep))
+        };
+        for item in ["missing", "item-0", "item-9999"] {
+            let (before, old_steps) = measure(old_sql, item);
+            let (after, steps) = measure(DELETED_COMMAND_IDS_SQL, item);
+            assert_eq!(before, after);
+            eprintln!("deleted-command history=10000 item={item} vm_steps={old_steps}->{steps}");
+            assert!(
+                steps < 100,
+                "item must use one task key lookup, got {steps} VM steps"
+            );
+            assert!(steps * 100 < old_steps);
+        }
+    }
+
+    #[test]
+    fn deleted_command_query_preserves_matches_and_uses_primary_key() {
         let db = rusqlite::Connection::open_in_memory().unwrap();
         db.execute_batch(r#"
             CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, account_key TEXT, deleted_at INTEGER);
             CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at);
             CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
             CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC);
-            INSERT INTO runtime_agents VALUES('live','account',NULL),('deleted','account',1),('1','account',1),('other','other',1);
+            INSERT INTO runtime_agents VALUES('live','account',NULL),('deleted','account',1),('1','account',1),('deleted2','account',1),('other','other',1);
             INSERT INTO runtime_tasks VALUES
-            ('live','{"agent":"live","itemId":"item","turnId":"turn"}'),
-            ('live-only','{"agent":"live","itemId":"live-only","turnId":"turn"}'),
-            ('one','{"agent":"deleted","itemId":"item","turnId":"turn"}'),
-            ('two','{"agent":"deleted","itemId":"duplicate","turnId":"turn"}'),
-            ('three','{"agent":"deleted","itemId":"duplicate","turnId":"turn"}'),
-            ('numeric','{"agent":1,"itemId":"numeric","turnId":"turn"}'),
-            ('other','{"agent":"other","itemId":"item","turnId":"turn"}');
+            ('live:item','{"agent":"live","itemId":"item","turnId":"turn"}'),
+            ('live:live-only','{"agent":"live","itemId":"live-only","turnId":"turn"}'),
+            ('deleted:item','{"agent":"deleted","itemId":"item","turnId":"turn"}'),
+            ('deleted:duplicate','{"agent":"deleted","itemId":"duplicate","turnId":"turn"}'),
+            ('deleted2:duplicate','{"agent":"deleted2","itemId":"duplicate","turnId":"turn"}'),
+            ('1:numeric','{"agent":1,"itemId":"numeric","turnId":"turn"}'),
+            ('other:item','{"agent":"other","itemId":"item","turnId":"turn"}');
         "#).unwrap();
         let query = |item: &str| -> Vec<String> {
             db.prepare(DELETED_COMMAND_IDS_SQL)
@@ -4880,7 +4922,7 @@ mod deleted_command_query_tests {
         };
         assert_eq!(query("missing"), Vec::<String>::new());
         assert_eq!(query("live-only"), Vec::<String>::new());
-        assert_eq!(query("item"), vec!["one"]);
+        assert_eq!(query("item"), vec!["deleted:item"]);
         assert_eq!(query("duplicate").len(), 2);
         assert_eq!(query("numeric"), Vec::<String>::new());
         let plan: Vec<String> = db
@@ -4891,8 +4933,8 @@ mod deleted_command_query_tests {
             .map(Result::unwrap)
             .collect();
         assert!(
-            plan.iter()
-                .any(|step| step.contains("SEARCH t USING INDEX runtime_task_agent_created_id")),
+            plan.iter().any(|step| step
+                .contains("SEARCH t USING INDEX sqlite_autoindex_runtime_tasks_1 (id=?)")),
             "{plan:?}"
         );
     }
