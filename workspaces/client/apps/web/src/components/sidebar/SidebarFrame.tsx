@@ -66,7 +66,24 @@ export function SidebarFrame(p: SidebarFrameProps) {
       document.querySelector<HTMLElement>(".multi-server-shell") ||
       document.getElementById("root");
     if (!host) return;
-    const measure = () => {
+    // The header minimum depends on its content and typography, not on the
+    // sidebar width. Measuring it forces layout several times, so it runs when
+    // those inputs change, never for each frame of a width drag. The inputs
+    // are read from the inline root style and classes, which forces nothing.
+    const typography = () => {
+      const root = document.documentElement;
+      return [
+        root.className,
+        root.dataset.studioTypography,
+        root.style.fontSize,
+        root.style.getPropertyValue("--studio-sidebar-font-size"),
+        root.style.getPropertyValue("--studio-font-family"),
+        document.body.className,
+      ].join("|");
+    };
+    let measuredTypography: string | undefined;
+    const measure = (headerChanged = true) => {
+      measuredTypography = typography();
       const rootFontSize = Number.parseFloat(
         getComputedStyle(document.documentElement).fontSize,
       );
@@ -79,6 +96,7 @@ export function SidebarFrame(p: SidebarFrameProps) {
         aside.current?.querySelector<HTMLElement>(".sidebar-header");
       // Drawer touch controls must not raise the desktop header minimum.
       if (
+        headerChanged &&
         header &&
         aside.current &&
         !compact &&
@@ -133,16 +151,24 @@ export function SidebarFrame(p: SidebarFrameProps) {
           : next,
       );
     };
-    const observer = new ResizeObserver(measure);
+    const remeasure = () => measure();
+    // The host width decides the layout mode; a resize keeps the header minimum.
+    const observer = new ResizeObserver(() => measure(false));
     observer.observe(host);
-    if (aside.current) {
-      const header = aside.current.querySelector(".sidebar-header");
-      if (header) {
-        observer.observe(header);
-        for (const child of header.children) observer.observe(child);
-      }
-    }
-    const attributes = new MutationObserver(measure);
+    const content = new MutationObserver(remeasure);
+    const header = aside.current?.querySelector(".sidebar-header");
+    if (header)
+      content.observe(header, {
+        subtree: true,
+        childList: true,
+        characterData: true,
+        attributes: true,
+        // Not "style": measuring sets and restores the children's style.
+        attributeFilter: ["class", "hidden"],
+      });
+    const attributes = new MutationObserver(() => {
+      if (typography() !== measuredTypography) remeasure();
+    });
     attributes.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["style", "class", "data-studio-typography"],
@@ -151,14 +177,15 @@ export function SidebarFrame(p: SidebarFrameProps) {
       attributes: true,
       attributeFilter: ["style", "class"],
     });
-    document.fonts?.addEventListener("loadingdone", measure);
-    window.addEventListener("resize", measure);
+    document.fonts?.addEventListener("loadingdone", remeasure);
+    window.addEventListener("resize", remeasure);
     measure();
     return () => {
       observer.disconnect();
+      content.disconnect();
       attributes.disconnect();
-      document.fonts?.removeEventListener("loadingdone", measure);
-      window.removeEventListener("resize", measure);
+      document.fonts?.removeEventListener("loadingdone", remeasure);
+      window.removeEventListener("resize", remeasure);
     };
   }, [compact, p.collapsed, p.opened]);
 
@@ -190,16 +217,29 @@ export function SidebarFrame(p: SidebarFrameProps) {
     reset: () => save(null),
     commit: save,
   });
+  // The committed width lives on #root, which holds every reader: the sidebar
+  // and the terminal dock below it. A custom property on #root recalculates
+  // the style of the whole app, so a drag moves only the sidebar's own inline
+  // width and gives the dock the draft width on its own element.
+  const committedWidth = policy.width;
   useLayoutEffect(() => {
     if (compact || p.collapsed) return;
-    const root = document.documentElement;
+    const root = document.getElementById("root") ?? document.documentElement;
     const previous = root.style.getPropertyValue("--studio-sidebar-width");
-    root.style.setProperty("--studio-sidebar-width", `${resize.width}px`);
+    root.style.setProperty("--studio-sidebar-width", `${committedWidth}px`);
     return () => {
       if (previous) root.style.setProperty("--studio-sidebar-width", previous);
       else root.style.removeProperty("--studio-sidebar-width");
     };
-  }, [resize.width, compact, p.collapsed]);
+  }, [committedWidth, compact, p.collapsed]);
+  useLayoutEffect(() => {
+    if (!resize.dragging) return;
+    const dock = document.querySelector<HTMLElement>("#root .terminal-dock");
+    dock?.style.setProperty("--studio-sidebar-width", `${resize.width}px`);
+    return () => {
+      dock?.style.removeProperty("--studio-sidebar-width");
+    };
+  }, [resize.dragging, resize.width]);
   const close = () => {
     restoreSidebarFocus();
     p.close();

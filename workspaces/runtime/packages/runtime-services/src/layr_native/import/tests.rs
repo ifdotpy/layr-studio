@@ -436,6 +436,7 @@ mod lifecycle_tests {
     #[test]
     #[ignore = "requires STUDIO_LAYR_NATIVE_TEST_BINARY and a root Layr daemon on btrfs or APFS"]
     fn native_import_clean_git_head_has_no_extra_commit() {
+        let _binary_override = crate::layr_native::override_layr_binary(PathBuf::from(crate::layr_native::test_binary().expect("test binary")));
         let state = tempfile::tempdir().expect("state");
         let source = tempfile::tempdir().expect("source");
         let git = |at: &Path, args: &[&str]| super::super::inventory::git(at, args).expect("git");
@@ -467,8 +468,9 @@ mod lifecycle_tests {
     }
 
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
+    #[ignore = "requires the real installed Layr binary on APFS or btrfs"]
     fn native_import_excludes_ignored_data_and_keeps_main_and_migration_caches_warm() {
+        let _binary_override = crate::layr_native::override_layr_binary(PathBuf::from(crate::layr_native::test_binary().expect("test binary")));
         let binary =
             PathBuf::from(crate::layr_native::test_binary().expect("Layr binary"));
         let state = tempfile::tempdir().expect("state");
@@ -604,8 +606,9 @@ mod lifecycle_tests {
     }
 
     #[test]
-    #[ignore = "requires the real vendored Layr binary on APFS or btrfs"]
+    #[ignore = "requires the real installed Layr binary on APFS or btrfs"]
     fn native_import_without_git_preserves_source_and_records_receipt() {
+        let _binary_override = crate::layr_native::override_layr_binary(PathBuf::from(crate::layr_native::test_binary().expect("test binary")));
         let fixture = tempfile::tempdir().expect("fixture");
         let source = fixture.path().join("source");
         fs::create_dir_all(source.join(".git/objects/info")).expect("broken Git tree");

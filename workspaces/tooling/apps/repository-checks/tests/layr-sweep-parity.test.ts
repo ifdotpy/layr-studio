@@ -6,6 +6,10 @@ import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import {
   CARGO_BUILD_JOBS,
+  CLIPPY_CONF_DIR,
+  PROVIDER_CONTRACT_CHECK_ARGS,
+  PROVIDER_CONTRACT_TARGET_DIR,
+  RUST_CLIPPY_ARGS,
   RUST_WORKSPACE_BUILD_ARGS,
 } from "../gate-config.ts";
 
@@ -79,26 +83,72 @@ test("a worker-env job count other than the owner fails the parity check", () =>
   );
 });
 
-// Undefined when the list holds exactly the gate's Rust workspace build; otherwise the difference.
+// The sweep list of the gate: its Rust workspace build, its clippy and the provider contract
+// compile witness in its own target folder.
+const GATE_SWEEP = [
+  [...RUST_WORKSPACE_BUILD_ARGS],
+  [...RUST_CLIPPY_ARGS],
+  {
+    target_dir: PROVIDER_CONTRACT_TARGET_DIR,
+    args: [...PROVIDER_CONTRACT_CHECK_ARGS],
+  },
+];
+
+// Undefined when the list holds exactly the gate's sweep commands; otherwise the difference.
 export function sweepMismatch(sweep: unknown): string | undefined {
   if (!Array.isArray(sweep))
     return "missing [workspace.metadata.layr-retest] sweep list";
-  const gate = [[...RUST_WORKSPACE_BUILD_ARGS]];
-  if (!isDeepStrictEqual(sweep, gate))
-    return `sweep ${JSON.stringify(sweep)} differs from the gate command ${JSON.stringify(gate)}`;
+  if (!isDeepStrictEqual(sweep, GATE_SWEEP))
+    return `sweep ${JSON.stringify(sweep)} differs from the gate command ${JSON.stringify(GATE_SWEEP)}`;
   return undefined;
 }
 
-test("the sweep list in Cargo.toml is the gate's Rust workspace build", () => {
+test("the sweep list in Cargo.toml is the gate's Rust workspace build, clippy and contract check", () => {
   assert.equal(sweepMismatch(sweepInManifest()), undefined);
 });
 
+test("a sweep list without the contract check fails the parity check", () => {
+  assert.match(
+    sweepMismatch([[...RUST_WORKSPACE_BUILD_ARGS], [...RUST_CLIPPY_ARGS]]) ??
+      "",
+    /differs from the gate command/,
+  );
+});
+
+// Undefined when the retest env gives clippy the ratchet's configuration, so the sweep listing
+// sees the gate's clippy units as fresh.
+export function clippyConfMismatch(env: unknown): string | undefined {
+  const value = (env as Record<string, unknown> | undefined)?.CLIPPY_CONF_DIR;
+  if (value !== CLIPPY_CONF_DIR)
+    return `retest env CLIPPY_CONF_DIR ${JSON.stringify(value)} differs from ${CLIPPY_CONF_DIR}`;
+  return undefined;
+}
+
+test("the retest env gives clippy the ratchet configuration", () => {
+  assert.equal(clippyConfMismatch(retestMetadata().env), undefined);
+});
+
+test("a retest env without the ratchet configuration fails the parity check", () => {
+  assert.match(clippyConfMismatch({}) ?? "", /differs from/);
+});
+
+test("a sweep list without the clippy command fails the parity check", () => {
+  assert.match(
+    sweepMismatch([[...RUST_WORKSPACE_BUILD_ARGS], GATE_SWEEP[2]]) ?? "",
+    /differs from the gate command/,
+  );
+});
+
 test("a sweep list without --locked fails the parity check", () => {
-  const bad = [RUST_WORKSPACE_BUILD_ARGS.filter((arg) => arg !== "--locked")];
+  const bad = [
+    RUST_WORKSPACE_BUILD_ARGS.filter((arg) => arg !== "--locked"),
+    [...RUST_CLIPPY_ARGS],
+    GATE_SWEEP[2],
+  ];
   assert.match(sweepMismatch(bad) ?? "", /differs from the gate command/);
 });
 
 test("a sweep list with an extra command fails the parity check", () => {
-  const bad = [[...RUST_WORKSPACE_BUILD_ARGS], ["test", "--workspace"]];
+  const bad = [...GATE_SWEEP, ["test", "--workspace"]];
   assert.match(sweepMismatch(bad) ?? "", /differs from the gate command/);
 });

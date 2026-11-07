@@ -50,9 +50,13 @@ function fixture() {
       callbacks.get(subscriptionKey(ref))?.({
         epoch: "epoch",
         revision: ++revision,
-        nativeLayrSettings: { storeRoot, version: null },
+        nativeLayrSettings: { configured: true, storeRoot, version: null },
       });
-      subscriptions.publish(ref, { storeRoot, version: null });
+      subscriptions.publish(ref, {
+        configured: true,
+        storeRoot,
+        version: null,
+      });
     },
   };
 }

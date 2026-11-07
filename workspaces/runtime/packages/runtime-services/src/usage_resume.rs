@@ -17,6 +17,64 @@ use studio_runtime_schema::usage_limits::{
 };
 use studio_runtime_store::AgentRecord;
 
+// This view validates only fields used by account-limit projection.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LimitAgent<'a> {
+    #[serde(borrow)]
+    pub id: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    pub account_key: std::borrow::Cow<'a, str>,
+    pub epoch: i64,
+    pub deleted_at: Option<f64>,
+    #[serde(borrow)]
+    pub model: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default)]
+    pub provider: studio_runtime_schema::queue_command::Field<ProviderKind>,
+    #[serde(default)]
+    pub error: studio_runtime_schema::queue_command::Field<
+        studio_runtime_schema::provider_errors::AgentError,
+    >,
+    #[serde(default)]
+    pub usage_resume: studio_runtime_schema::queue_command::Field<
+        studio_runtime_store::StoredTransferObject<
+            Box<studio_runtime_schema::continuation_snapshot::UsageContinuation>,
+        >,
+    >,
+    #[serde(borrow)]
+    pub thread_id: Option<std::borrow::Cow<'a, str>>,
+    #[serde(default)]
+    pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
+}
+
+impl<'a> From<&'a AgentRecord> for LimitAgent<'a> {
+    fn from(agent: &'a AgentRecord) -> Self {
+        Self {
+            id: std::borrow::Cow::Borrowed(&agent.id.0),
+            account_key: std::borrow::Cow::Borrowed(&agent.account_key),
+            epoch: agent.epoch,
+            deleted_at: agent.deleted_at,
+            model: agent.model.as_deref().map(std::borrow::Cow::Borrowed),
+            provider: agent.provider.clone(),
+            error: agent.error.clone(),
+            usage_resume: agent.usage_resume.clone(),
+            thread_id: agent.thread_id.as_deref().map(std::borrow::Cow::Borrowed),
+            last_completed_turn: agent.last_completed_turn.clone(),
+        }
+    }
+}
+
+impl LimitAgent<'_> {
+    fn usage_continuation(
+        &self,
+    ) -> Option<&studio_runtime_schema::continuation_snapshot::UsageContinuation> {
+        match self.usage_resume.value()? {
+            studio_runtime_store::StoredTransferObject::Known(value) => Some(value.as_ref()),
+            studio_runtime_store::StoredTransferObject::Unreadable(_) => None,
+        }
+    }
+}
+
 const RESET_GRACE: f64 = 5.0;
 const RESUME_MIN: f64 = 60.0;
 const AUTH_BACKOFF: [f64; 3] = [180.0, 600.0, 1800.0];
@@ -91,10 +149,12 @@ impl LimitsObservation {
             && self.fresh_for(self.account_key(), now - FRESH_SECONDS, false)
     }
     pub fn reset_at(&self, agent: &AgentRecord) -> Option<f64> {
-        self.data().and_then(|data| reset_at(data, agent))
+        self.data()
+            .and_then(|data| reset_at(data, &LimitAgent::from(agent)))
     }
     pub fn allowed(&self, agent: &AgentRecord, now: f64) -> bool {
-        self.data().is_some_and(|data| allowed(data, agent, now))
+        self.data()
+            .is_some_and(|data| allowed(data, &LimitAgent::from(agent), now))
     }
     pub fn permits_idle_compaction(&self, agent: &AgentRecord, now: f64) -> bool {
         let Some(data) = self.data() else {
@@ -112,6 +172,14 @@ impl LimitsObservation {
 pub fn eligibility(
     observation: &LimitsObservation,
     agent: &AgentRecord,
+    now: f64,
+) -> UsageEligibility {
+    eligibility_view(observation, &LimitAgent::from(agent), now)
+}
+
+fn eligibility_view(
+    observation: &LimitsObservation,
+    agent: &LimitAgent<'_>,
     now: f64,
 ) -> UsageEligibility {
     let key = if agent.account_key.is_empty() {
@@ -161,11 +229,11 @@ pub fn eligibility(
             })
             .fold(at + FRESH_SECONDS, f64::min)
     });
-    let allowed = observation.allowed(agent, now);
+    let allowed = data.is_some_and(|data| allowed(data, agent, now));
     UsageEligibility {
-        agent_id: agent.id.0.clone(),
+        agent_id: agent.id.to_string(),
         account_key: key.to_owned(),
-        model: agent.model.clone().unwrap_or_default(),
+        model: agent.model.as_deref().unwrap_or_default().to_owned(),
         provider: agent.provider.as_ref().map_or("", |p| p.key()).to_owned(),
         state: if !fresh {
             EligibilityState::Stale
@@ -186,7 +254,15 @@ pub fn agent_limit_projection(
     agent: &AgentRecord,
     now: f64,
 ) -> AgentLimitProjection {
-    let eligibility = eligibility(limits, agent, now);
+    agent_limit_projection_view(limits, &LimitAgent::from(agent), now)
+}
+
+pub(crate) fn agent_limit_projection_view(
+    limits: &LimitsObservation,
+    agent: &LimitAgent<'_>,
+    now: f64,
+) -> AgentLimitProjection {
+    let eligibility = eligibility_view(limits, agent, now);
     if eligibility.account_key != limits.account_key() {
         return AgentLimitProjection {
             eligibility,
@@ -207,10 +283,10 @@ pub fn agent_limit_projection(
                         && agent.last_completed_turn.as_ref().map(String::as_str) == Some(resume.turn_id.as_str())
                 })
                 .and_then(|resume| resume.reset_at.value().map(|time| time.get()).filter(|reset| *reset > resume.failed_at.get()));
-            let reset_at = limits.reset_at(agent).or(previous_reset);
+            let reset_at = limits.data().and_then(|data| reset_at(data, agent)).or(previous_reset);
             let confirmed = previous_reset.filter(|previous| limits.response.read_at.is_some_and(|read| read > *previous)
                 && limits.response.error.as_deref().is_none_or(str::is_empty)
-                && limits.allowed(agent, now));
+                && limits.data().is_some_and(|data| allowed(data, agent, now)));
             let timing = match (confirmed, reset_at) {
                 (Some(reset_at), _) => RecoveryTiming::Confirmed { reset_at },
                 (None, Some(reset_at)) if reset_at > now => RecoveryTiming::Waiting { reset_at },
@@ -277,7 +353,7 @@ fn claude_policy() -> &'static ClaudeUsagePolicy {
         studio_json::from_str(json).expect("shared Claude usage policy")
     })
 }
-fn model_family(agent: &AgentRecord) -> Option<&'static str> {
+fn model_family(agent: &LimitAgent<'_>) -> Option<&'static str> {
     if agent.provider.as_ref() != Some(&ProviderKind::Claude) {
         return None;
     }
@@ -292,7 +368,7 @@ fn model_family(agent: &AgentRecord) -> Option<&'static str> {
         })
         .map(String::as_str)
 }
-fn relevant_bucket(id: &str, agent: &AgentRecord) -> bool {
+fn relevant_bucket(id: &str, agent: &LimitAgent<'_>) -> bool {
     model_family(agent).is_none_or(|family| {
         claude_policy()
             .model_buckets
@@ -302,7 +378,7 @@ fn relevant_bucket(id: &str, agent: &AgentRecord) -> bool {
 }
 fn buckets<'a>(
     data: &'a UsageLimitsData,
-    agent: &'a AgentRecord,
+    agent: &'a LimitAgent<'_>,
 ) -> impl Iterator<Item = (&'a str, &'a RateLimitBucket)> {
     data.rate_limits
         .iter()
@@ -334,7 +410,7 @@ fn supported(data: &UsageLimitsData) -> bool {
                 .all(|b| valid(b.0.claude_rate_limit.as_ref()))
         })
 }
-fn overage_allowed(data: &UsageLimitsData, agent: &AgentRecord, id: &str) -> bool {
+fn overage_allowed(data: &UsageLimitsData, agent: &LimitAgent<'_>, id: &str) -> bool {
     if agent.provider.as_ref() != Some(&ProviderKind::Claude) || !supported(data) {
         return false;
     }
@@ -364,7 +440,7 @@ fn overage_allowed(data: &UsageLimitsData, agent: &AgentRecord, id: &str) -> boo
             || info.is_using_overage == Some(true)
             || info.overage_in_use == Some(true))
 }
-fn reset_at(data: &UsageLimitsData, agent: &AgentRecord) -> Option<f64> {
+fn reset_at(data: &UsageLimitsData, agent: &LimitAgent<'_>) -> Option<f64> {
     if !supported(data) {
         return None;
     }
@@ -400,7 +476,7 @@ fn reset_at(data: &UsageLimitsData, agent: &AgentRecord) -> Option<f64> {
         })
         .reduce(f64::max)
 }
-fn allowed(data: &UsageLimitsData, agent: &AgentRecord, now: f64) -> bool {
+fn allowed(data: &UsageLimitsData, agent: &LimitAgent<'_>, now: f64) -> bool {
     if !supported(data) || data.rate_limits.is_none() || data.ordinary_usage_allowed == Some(false)
     {
         return false;
@@ -486,15 +562,30 @@ fn cancel(s: &Snapshot, _r: &Value, reason: &str, now: f64) -> Decision {
 }
 fn excluded(s: &Snapshot, key: &str) -> bool {
     let agent = s.agent_view();
-    let root = if agent.id.as_str() == agent.root_id.as_str() {
-        Some(agent)
-    } else {
-        s.ancestors_view()
-            .iter()
-            .find(|a| a.id.as_str() == agent.root_id.as_str())
-    };
-    root.and_then(|root| root.excluded_account_keys.as_ref())
-        .is_some_and(|keys| keys.as_slice().iter().any(|id| id.as_str() == key))
+    if agent.id == agent.root_id {
+        return false;
+    }
+    let root = s
+        .ancestors_view()
+        .iter()
+        .find(|a| a.id.as_str() == agent.root_id.as_str());
+    root.is_some_and(|root| {
+        studio_runtime_schema::creation_intent::excluded_for(
+            agent
+                .role
+                .unwrap_or(studio_runtime_schema::creation_intent::AgentRole::Implementer),
+            root.worker_excluded_account_keys
+                .as_ref()
+                .map(|keys| keys.as_slice())
+                .unwrap_or_default(),
+            root.reviewer_excluded_account_keys
+                .as_ref()
+                .map(|keys| keys.as_slice())
+                .unwrap_or_default(),
+        )
+        .iter()
+        .any(|id| id.as_str() == key)
+    })
 }
 /// Called after an account observation; current identity and task ownership are checked anew.
 pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decision> {

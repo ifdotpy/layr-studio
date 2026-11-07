@@ -37,7 +37,6 @@ uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
 gungraun = "=0.17.2"
-studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = "../runtime-services", features = ["test-support"] }
 studio-runtime-store = { path = "../runtime-store", features = ["test-support"] }
 tempfile = { workspace = true }
@@ -58,3 +57,4 @@ required-features = ["bench-support"]
 
 [features]
 bench-support = []
+perf-reporting = ["studio-runtime-store/perf-reporting", "studio-runtime-services/perf-reporting"]

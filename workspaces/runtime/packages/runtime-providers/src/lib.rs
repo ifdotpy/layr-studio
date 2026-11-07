@@ -2,9 +2,6 @@
 //!
 //! Provider sessions are pure state machines; a thin caller owns split byte I/O.
 
-#[cfg(test)]
-extern crate studio_test_deps;
-
 mod callback_queue_limit;
 mod codec;
 mod connection;

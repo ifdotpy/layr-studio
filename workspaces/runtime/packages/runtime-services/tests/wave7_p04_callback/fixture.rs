@@ -387,6 +387,7 @@ pub fn assert_writes(before: &Value, store: &RuntimeStore, expected: &Value) {
                 continue;
             };
             crate::agent_view_fixtures::normalize_legacy_agent(value);
+            crate::agent_view_fixtures::expect_project_path(value);
             if let Some(mode) = value
                 .as_object_mut()
                 .and_then(|fields| fields.remove("yoloMode"))

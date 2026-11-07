@@ -23,7 +23,6 @@ members = [
     "workspaces/runtime/packages/request-signing",
     "workspaces/runtime/packages/runtime-schema",
     "workspaces/runtime/packages/runtime-store",
-    "workspaces/runtime/packages/test-deps",
 ]
 
 [workspace.package]
@@ -106,14 +105,22 @@ spki = { version = "=0.8.1", features = ["std"] }
 ureq = { version = "=3.5.0", default-features = false, features = ["rustls-no-provider", "platform-verifier"] }
 
 # Live set for `layr retest sweep` (docs/retest.md, "Live set"). The `sweep` list must equal
-# RUST_WORKSPACE_BUILD_ARGS in workspaces/tooling/apps/repository-checks/gate-config.ts (test:
-# tests/layr-sweep-parity.test.ts). The `env` is the gate build env (toolchain, no compiler
-# wrapper, incremental): `layr retest gate` runs every gate command with it, and `layr retest run`
-# uses it too. The env changes the unit hashes. The job count is not here: it does not change the
+# RUST_WORKSPACE_BUILD_ARGS and RUST_CLIPPY_ARGS in
+# workspaces/tooling/apps/repository-checks/gate-config.ts (test: tests/layr-sweep-parity.test.ts),
+# so the cache keeps the units of the gate build, nextest and clippy. Its object entry is the
+# provider contract compile witness (PROVIDER_CONTRACT_TARGET_DIR and PROVIDER_CONTRACT_CHECK_ARGS),
+# which checks into its own folder below target. The `env` is the gate build
+# env (toolchain, no compiler wrapper, incremental, the ratchet's CLIPPY_CONF_DIR as a relative
+# path, so a clippy unit names no checkout): `layr retest gate` runs every gate command with it,
+# and `layr retest run` uses it too. The env changes the unit hashes. The job count is not here: it does not change the
 # hashes, and focused runs keep their own count (gate-config.ts owns both counts).
 [workspace.metadata.layr-retest]
-env = { RUSTUP_TOOLCHAIN = "1.99.1-aarch64-apple-darwin", CARGO_INCREMENTAL = "1", RUSTC_WRAPPER = "", CARGO_BUILD_RUSTC_WRAPPER = "" }
-sweep = [["build", "--workspace", "--exclude", "studio-native-client", "--tests", "--bins", "--examples", "--locked"]]
+env = { RUSTUP_TOOLCHAIN = "1.99.1-aarch64-apple-darwin", CARGO_INCREMENTAL = "1", RUSTC_WRAPPER = "", CARGO_BUILD_RUSTC_WRAPPER = "", CLIPPY_CONF_DIR = "workspaces/tooling/apps/repository-checks/clippy-ratchet" }
+sweep = [
+    ["build", "--workspace", "--exclude", "studio-native-client", "--lib", "--tests", "--bins", "--examples", "--locked"],
+    ["clippy", "--workspace", "--exclude", "studio-native-client", "--all-targets", "--locked", "--", "-D", "warnings", "--cap-lints", "warn", "-W", "clippy::struct_excessive_bools", "-W", "clippy::option_option", "-W", "clippy::redundant_clone", "-W", "clippy::needless_pass_by_value", "-W", "clippy::disallowed_methods"],
+    { target_dir = "provider-contract-compile", args = ["check", "--offline", "-p", "studio-runtime-schema"] },
+]
 
 # The server hashes its own executable at startup, a file of up to a gigabyte in
 # a debug build; unoptimized hashing delayed readiness by about 20 seconds.

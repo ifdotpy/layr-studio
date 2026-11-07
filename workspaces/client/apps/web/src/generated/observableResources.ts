@@ -1419,6 +1419,7 @@ class AgentSummaryEntityDtoModel {
     | NonNullable<AgentSummaryEntityDtoDto["lastReadAt"]>
     | null
     | undefined;
+  legacyVmWorkspace: AgentSummaryEntityDtoDto["legacyVmWorkspace"] | undefined;
   manualConnectionCheck: ManualConnectionCheckModel | undefined;
   markRead: ReadStateDtoModel | null;
   markUnread: AgentSummaryEntityDtoDto["markUnread"];
@@ -1600,6 +1601,8 @@ class AgentSummaryEntityDtoModel {
         : dto.lastReadAt === null
           ? null
           : dto.lastReadAt;
+    this.legacyVmWorkspace =
+      dto.legacyVmWorkspace === undefined ? undefined : dto.legacyVmWorkspace;
     this.manualConnectionCheck =
       dto.manualConnectionCheck === undefined
         ? undefined
@@ -1804,6 +1807,7 @@ class AgentSummaryEntityDtoModel {
       lastCompletedTurn: observableRef,
       lastCompletedTurnStatus: observableRef,
       lastReadAt: observableRef,
+      legacyVmWorkspace: observableRef,
       manualConnectionCheck: observableRef,
       markRead: observableRef,
       markUnread: observableRef,
@@ -2156,6 +2160,15 @@ class AgentSummaryEntityDtoModel {
                 ? dto.lastReadAt
                 : dto.lastReadAt;
       if (this.lastReadAt !== next) this.lastReadAt = next;
+    }
+    {
+      const next =
+        dto.legacyVmWorkspace === undefined
+          ? undefined
+          : this.legacyVmWorkspace === undefined
+            ? dto.legacyVmWorkspace
+            : dto.legacyVmWorkspace;
+      if (this.legacyVmWorkspace !== next) this.legacyVmWorkspace = next;
     }
     {
       const next =
@@ -3282,6 +3295,14 @@ class ProjectEntityDtoModel {
     | null
     | undefined;
   id: ProjectEntityDtoDto["id"];
+  layrStoreRoot:
+    | NonNullable<ProjectEntityDtoDto["layrStoreRoot"]>
+    | null
+    | undefined;
+  layrStoreRootRevision:
+    | NonNullable<ProjectEntityDtoDto["layrStoreRootRevision"]>
+    | null
+    | undefined;
   locations: ProjectLocationDtoModel[] | null | undefined;
   locationsRevision:
     | NonNullable<ProjectEntityDtoDto["locationsRevision"]>
@@ -3365,6 +3386,18 @@ class ProjectEntityDtoModel {
           ? null
           : dto.homeServerId;
     this.id = dto.id;
+    this.layrStoreRoot =
+      dto.layrStoreRoot === undefined
+        ? undefined
+        : dto.layrStoreRoot === null
+          ? null
+          : dto.layrStoreRoot;
+    this.layrStoreRootRevision =
+      dto.layrStoreRootRevision === undefined
+        ? undefined
+        : dto.layrStoreRootRevision === null
+          ? null
+          : dto.layrStoreRootRevision;
     this.locations =
       dto.locations === undefined
         ? undefined
@@ -3451,6 +3484,8 @@ class ProjectEntityDtoModel {
       folders: observableRef,
       homeServerId: observableRef,
       id: observableRef,
+      layrStoreRoot: observableRef,
+      layrStoreRootRevision: observableRef,
       locations: observableRef,
       locationsRevision: observableRef,
       name: observableRef,
@@ -3603,6 +3638,37 @@ class ProjectEntityDtoModel {
     {
       const next = dto.id;
       if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.layrStoreRoot === undefined
+          ? undefined
+          : this.layrStoreRoot === undefined
+            ? dto.layrStoreRoot === null
+              ? null
+              : dto.layrStoreRoot
+            : dto.layrStoreRoot === null
+              ? null
+              : this.layrStoreRoot === null
+                ? dto.layrStoreRoot
+                : dto.layrStoreRoot;
+      if (this.layrStoreRoot !== next) this.layrStoreRoot = next;
+    }
+    {
+      const next =
+        dto.layrStoreRootRevision === undefined
+          ? undefined
+          : this.layrStoreRootRevision === undefined
+            ? dto.layrStoreRootRevision === null
+              ? null
+              : dto.layrStoreRootRevision
+            : dto.layrStoreRootRevision === null
+              ? null
+              : this.layrStoreRootRevision === null
+                ? dto.layrStoreRootRevision
+                : dto.layrStoreRootRevision;
+      if (this.layrStoreRootRevision !== next)
+        this.layrStoreRootRevision = next;
     }
     {
       const next =

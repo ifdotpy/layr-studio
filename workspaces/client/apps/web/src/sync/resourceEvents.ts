@@ -1435,8 +1435,19 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     );
   }
 
+  /** Offline, today's resources still show their saved copy. The stream
+   * reads the same cache entries again when it opens. */
+  function showSavedResources() {
+    if (!coordinatorActive || connectionState.phase !== "offline") return;
+    for (const resource of localResources())
+      void options.sync.readSubscriptionCursor?.(resource).catch(() => {});
+  }
+
   async function openSource() {
-    if (!canOpenSource()) return;
+    if (!canOpenSource()) {
+      showSavedResources();
+      return;
+    }
     if (
       openingSource ||
       (connectionState.phase === "reconnecting" &&
@@ -1951,6 +1962,7 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     if (pageHidden() || connectionState.phase === "offline") {
       if (connectionState.phase !== "offline")
         setConnection({ phase: "paused" });
+      showSavedResources();
       return;
     }
     void initialize();
@@ -1992,6 +2004,7 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     // shared stream and can be replayed immediately to a late resource reader.
     if (known) callback(known);
     startCoordinator();
+    showSavedResources();
     announceSubscriptions();
     if (
       options.waitForBaseline &&

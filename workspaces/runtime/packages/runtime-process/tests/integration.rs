@@ -9,5 +9,3 @@ mod wave7_p01_factory;
 #[cfg(unix)]
 #[path = "support/mod.rs"]
 pub(crate) mod process_support;
-
-extern crate studio_test_deps;

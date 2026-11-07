@@ -78,12 +78,32 @@ pub(crate) fn effective_yolo_mode(role: Role, yolo_mode: Option<bool>) -> Option
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThreadSandbox {
+    #[default]
+    ReadOnly,
+    WorkspaceWrite,
+}
+
+impl ThreadSandbox {
+    #[allow(clippy::trivially_copy_pass_by_ref)] // Serde calls this predicate with a reference.
+    fn is_read_only(&self) -> bool {
+        *self == Self::ReadOnly
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(
+    clippy::struct_excessive_bools,
+    reason = "These flags mirror independent persisted agent facts"
+)]
 pub struct Actor {
     pub id: String,
     pub epoch: u64,
     pub thread_id: Option<String>,
     pub cwd: String,
+    #[serde(default, skip_serializing_if = "ThreadSandbox::is_read_only")]
+    pub thread_sandbox: ThreadSandbox,
     pub compactions: u64,
     pub prepare_attempt: Option<String>,
     pub native_teleport_tool: Option<SessionTool>,
@@ -102,10 +122,11 @@ pub struct Actor {
     /// nativeEffort was absent, persist that selection before native submission.
     pub native_effort_present: bool,
     pub deleted: bool,
-    /// A native review child (Python `nativeReview`): no Studio tools, and
-    /// the native review model is the agent model.
+    /// A legacy pending native review uses the agent model as its review model.
     #[serde(default)]
     pub native_review: bool,
+    #[serde(default)]
+    pub review_assignment: Option<studio_runtime_schema::review::ReviewAssignment>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -346,11 +367,35 @@ pub fn session_tool_of(saved: Option<SessionTool>, has_thread: bool) -> SessionT
 /// The actor and root facts that select one agent's tools from a catalog.
 pub struct CatalogFilter<'a> {
     pub provider: ProviderKind,
+    pub role: Role,
+    pub assignment: Option<&'a studio_runtime_schema::review::ReviewAssignment>,
     pub is_lead: bool,
     pub can_delegate: bool,
     pub federation_enabled: bool,
     pub cwd: &'a str,
     pub session_tool: SessionTool,
+}
+
+/// The provider-only tool difference is voice. Review tools depend on the
+/// validated assignment, so both preparation paths select the same catalog.
+fn capability_matrix(
+    role: Role,
+    provider: ProviderKind,
+    assignment: Option<&studio_runtime_schema::review::ReviewAssignment>,
+) -> (bool, bool, bool) {
+    let reviewer = role == Role::Reviewer && assignment.is_some();
+    let layr = reviewer
+        && assignment.is_some_and(|a| {
+            matches!(
+                a.target(),
+                studio_runtime_schema::review::ReviewTarget::LayrState { .. }
+            )
+        });
+    (
+        !reviewer,
+        adapter(provider).capabilities().voice_tools,
+        layr,
+    )
 }
 
 /// Uses the immutable selected catalog, never a newly discovered live catalog.
@@ -364,14 +409,12 @@ pub fn tool_definitions(s: &Snapshot) -> Result<Vec<ToolDefinition>, Refusal> {
         }
         return Ok(definitions);
     }
-    // A native reviewer gets no Studio tools.
-    if s.actor.native_review {
-        return Ok(Vec::new());
-    }
     filter_tool_definitions(
         &s.catalog.definitions,
         &CatalogFilter {
             provider: s.account.provider,
+            role: s.settings.role,
+            assignment: s.actor.review_assignment.as_ref(),
             is_lead: s.settings.is_lead,
             can_delegate: s.root.can_delegate,
             federation_enabled: s.root.federation_enabled,
@@ -388,11 +431,16 @@ pub fn filter_tool_definitions(
     f: &CatalogFilter<'_>,
 ) -> Result<Vec<ToolDefinition>, Refusal> {
     let mut result = Vec::new();
+    let (managed, voice, layr) = capability_matrix(f.role, f.provider, f.assignment);
     for mut tool in definitions.iter().cloned() {
         let name = tool.name.as_str();
-        if (!adapter(f.provider).capabilities().voice_and_review_tools
-            && matches!(name, "orchestration_speak" | "orchestration_review"))
-            || (!f.is_lead && matches!(name, "orchestration_speak" | "orchestration_servers"))
+        if (!managed && name != "orchestration_read")
+            || (!voice && name == "orchestration_speak")
+            || (!f.is_lead
+                && matches!(
+                    name,
+                    "orchestration_speak" | "orchestration_servers" | "orchestration_review"
+                ))
             || (name == "orchestration_spawn" && !f.can_delegate)
         {
             continue;
@@ -429,6 +477,12 @@ pub fn filter_tool_definitions(
             });
         }
         result.push(tool);
+    }
+    if layr
+        && let Some(assignment) = f.assignment
+        && let Some(tool) = crate::layr_read::tool_definition_for(assignment)
+    {
+        result.push(tool.clone());
     }
     Ok(result)
 }
@@ -548,7 +602,10 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
             params.insert(
                 "sandbox".into(),
                 json!(if s.settings.role == Role::Reviewer {
-                    "read-only"
+                    match s.actor.thread_sandbox {
+                        ThreadSandbox::ReadOnly => "read-only",
+                        ThreadSandbox::WorkspaceWrite => "workspace-write",
+                    }
                 } else {
                     "workspace-write"
                 }),
@@ -1074,6 +1131,96 @@ fn preparation_release_id(s: &Snapshot) -> Option<String> {
 mod archive_finished_catalog_tests {
     use super::*;
 
+    #[test]
+    fn review_catalog_matrix() {
+        use studio_runtime_schema::review::{ReviewAssignment, ReviewTarget, WorkspaceMode};
+        let layr: ReviewTarget = studio_json::from_str(r#"{"kind":"layrState","state":"0123456789abcdef0123456789abcdef","base":{"kind":"mergeBaseWithMain"}}"#).unwrap();
+        let git: ReviewTarget = studio_json::from_str(r#"{"kind":"gitRange","base":"main","head":"0123456789abcdef0123456789abcdef01234567"}"#).unwrap();
+        let layr = ReviewAssignment::new(WorkspaceMode::LayrNative, layr).unwrap();
+        let git = ReviewAssignment::new(WorkspaceMode::Worktree, git).unwrap();
+        for role in [Role::Orchestrator, Role::Implementer, Role::Reviewer] {
+            for (assignment, expected_layr) in
+                [(None, false), (Some(&layr), true), (Some(&git), false)]
+            {
+                let codex = capability_matrix(role, ProviderKind::Codex, assignment);
+                let claude = capability_matrix(role, ProviderKind::Claude, assignment);
+                assert_eq!(codex.0, claude.0);
+                assert_eq!(codex.2, role == Role::Reviewer && expected_layr);
+                assert_eq!(codex.2, claude.2);
+                assert!(codex.1);
+                assert!(!claude.1);
+            }
+        }
+        for (_, tools) in catalogs() {
+            let filtered = filter_tool_definitions(
+                &tools,
+                &CatalogFilter {
+                    provider: ProviderKind::Claude,
+                    role: Role::Orchestrator,
+                    assignment: None,
+
+                    is_lead: true,
+                    can_delegate: true,
+                    federation_enabled: false,
+                    cwd: "",
+                    session_tool: SessionTool::Move,
+                },
+            )
+            .unwrap();
+            assert!(
+                filtered
+                    .iter()
+                    .any(|tool| tool.name == "orchestration_review")
+            );
+            for provider in [ProviderKind::Codex, ProviderKind::Claude] {
+                let filtered = filter_tool_definitions(
+                    &tools,
+                    &CatalogFilter {
+                        provider,
+                        role: Role::Reviewer,
+                        assignment: Some(&layr),
+
+                        is_lead: false,
+                        can_delegate: false,
+                        federation_enabled: false,
+                        cwd: "",
+                        session_tool: SessionTool::Move,
+                    },
+                )
+                .unwrap();
+                assert!(filtered.iter().any(|tool| tool.name == "layr_read"));
+                assert!(
+                    filtered
+                        .iter()
+                        .any(|tool| tool.name == "orchestration_read")
+                );
+                assert_eq!(filtered.len(), 2);
+                let git_tools = filter_tool_definitions(
+                    &tools,
+                    &CatalogFilter {
+                        provider,
+                        role: Role::Reviewer,
+                        assignment: Some(&git),
+
+                        is_lead: false,
+                        can_delegate: false,
+                        federation_enabled: false,
+                        cwd: "",
+                        session_tool: SessionTool::Move,
+                    },
+                )
+                .unwrap();
+                assert!(!git_tools.iter().any(|tool| tool.name == "layr_read"));
+                assert!(
+                    git_tools
+                        .iter()
+                        .any(|tool| tool.name == "orchestration_read")
+                );
+                assert_eq!(git_tools.len(), 1);
+            }
+        }
+    }
+
     fn catalogs() -> [(&'static str, Vec<ToolDefinition>); 2] {
         #[derive(Deserialize)]
         struct Bundled {
@@ -1101,6 +1248,13 @@ mod archive_finished_catalog_tests {
             tools,
             &CatalogFilter {
                 provider,
+                role: if is_lead {
+                    Role::Orchestrator
+                } else {
+                    Role::Implementer
+                },
+                assignment: None,
+
                 is_lead,
                 can_delegate: true,
                 federation_enabled: false,

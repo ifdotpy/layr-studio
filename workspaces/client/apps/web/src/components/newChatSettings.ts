@@ -16,6 +16,10 @@ import {
 } from "../generated/apiSchema";
 import { serverCredentialAdapter } from "../servers/transport";
 import type { StudioServer } from "../servers/registry";
+import {
+  ACCOUNT_KEY_MIN_CHARS,
+  ACCOUNT_KEY_MAX_CHARS,
+} from "../generated/sharedValues";
 
 export type NewChatWorkspaceMode = Exclude<
   (typeof CHAT_WORKSPACE_MODES)[number],
@@ -31,8 +35,13 @@ export type NewChatSettings = Pick<
   | "worker_defaults"
   | "review_defaults"
 > &
-  Pick<PostBody<"/api/leads">, "layrStoreRoot"> & {
-    account_key?: string;
+  Pick<
+    PostBody<"/api/leads">,
+    | "layrStoreRoot"
+    | "worker_excluded_account_keys"
+    | "reviewer_excluded_account_keys"
+    | "account_key"
+  > & {
     workspaceMode: NewChatWorkspaceMode;
   };
 
@@ -41,13 +50,12 @@ export type NewChatSettingsDraft = Omit<NewChatSettings, "workspaceMode">;
 export function settingsForNewChatRequest(
   settings: NewChatSettingsDraft,
   accountKey: string,
-  accountWasChosen: boolean,
   model: string | undefined,
 ): NewChatSettingsDraft {
   const { account_key: _accountKey, ...requestSettings } = settings;
   return {
     ...requestSettings,
-    ...(accountWasChosen ? { account_key: accountKey } : {}),
+    account_key: accountKey,
     model,
   };
 }
@@ -55,14 +63,7 @@ export function settingsForNewChatRequest(
 export function settingsForNewChatAccount(
   settings: NewChatSettingsDraft,
   accountKey: string,
-  inheritedWorkerModel?: string,
 ): NewChatSettingsDraft {
-  const workerDefaults = settings.worker_defaults;
-  const pinnedWorkerDefaults = workerDefaults?.account_key
-    ? workerDefaults.model == null && inheritedWorkerModel
-      ? { ...workerDefaults, model: inheritedWorkerModel, effort: null }
-      : workerDefaults
-    : undefined;
   return {
     ...settings,
     account_key: accountKey,
@@ -70,10 +71,8 @@ export function settingsForNewChatAccount(
     effort: null,
     fast_mode: false,
     daybreak_enabled: false,
-    worker_defaults: pinnedWorkerDefaults,
-    review_defaults: settings.review_defaults?.account_key
-      ? settings.review_defaults
-      : undefined,
+    worker_defaults: settings.worker_defaults,
+    review_defaults: settings.review_defaults,
   };
 }
 
@@ -141,8 +140,9 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   if (!record(value)) return false;
   const allowed = [
     "workspaceMode",
-    "layrStoreRoot",
     "account_key",
+    "worker_excluded_account_keys",
+    "reviewer_excluded_account_keys",
     "model",
     "effort",
     "fast_mode",
@@ -158,13 +158,30 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
   )
     return false;
   if (
-    value.layrStoreRoot !== undefined &&
-    (typeof value.layrStoreRoot !== "string" || !value.layrStoreRoot.trim())
+    value.account_key !== undefined &&
+    (typeof value.account_key !== "string" || !value.account_key.trim())
   )
     return false;
   if (
-    value.account_key !== undefined &&
-    (typeof value.account_key !== "string" || !value.account_key.trim())
+    (
+      [
+        "worker_excluded_account_keys",
+        "reviewer_excluded_account_keys",
+      ] as const
+    ).some((name) => {
+      const keys = value[name];
+      return (
+        keys !== undefined &&
+        (!Array.isArray(keys) ||
+          keys.some(
+            (key) =>
+              typeof key !== "string" ||
+              !key.trim() ||
+              [...key].length < ACCOUNT_KEY_MIN_CHARS ||
+              [...key].length > ACCOUNT_KEY_MAX_CHARS,
+          ))
+      );
+    })
   )
     return false;
   if (
@@ -185,20 +202,13 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
     (!record(worker) ||
       Object.keys(worker).some(
         (key) =>
-          ![
-            "model",
-            "effort",
-            "fast_mode",
-            "daybreak_enabled",
-            "account_key",
-          ].includes(key),
+          !["model", "effort", "fast_mode", "daybreak_enabled"].includes(key),
       ) ||
       !nullableName(worker.model) ||
       !nullableName(worker.effort) ||
       typeof worker.fast_mode !== "boolean" ||
       (worker.daybreak_enabled !== undefined &&
-        typeof worker.daybreak_enabled !== "boolean") ||
-      (worker.account_key !== undefined && !nullableName(worker.account_key)))
+        typeof worker.daybreak_enabled !== "boolean"))
   )
     return false;
   const review = value.review_defaults;
@@ -206,11 +216,10 @@ export function isNewChatSettings(value: unknown): value is NewChatSettings {
     review === undefined ||
     (record(review) &&
       Object.keys(review).every((key) =>
-        ["model", "effort", "fast_mode", "account_key"].includes(key),
+        ["model", "effort", "fast_mode"].includes(key),
       ) &&
       (review.fast_mode === undefined ||
         typeof review.fast_mode === "boolean") &&
-      (review.account_key === undefined || nullableName(review.account_key)) &&
       nullableName(review.model) &&
       nullableName(review.effort))
   );

@@ -73,8 +73,11 @@ test.each([
 test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
   const current = agent({
     ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
-    workspaceMode: "layr" as Agent["workspaceMode"],
+    legacyVmWorkspace: true,
   });
+  expect(
+    renderToStaticMarkup(createElement(WorkspaceBadge, { agent: current })),
+  ).toContain(">Unavailable</span>");
   expect(workspaceBadgeInfo(current)).toEqual({
     label: "Unavailable",
     title: "Legacy workspace unavailable · /projects/example",

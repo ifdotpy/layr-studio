@@ -26,6 +26,7 @@ pub mod agent_entity_remote;
 pub mod agent_entity_transfer;
 pub mod agent_limits;
 pub mod agent_progress;
+pub mod agent_projection_fields;
 pub mod annotation_command;
 pub mod annotation_record;
 pub mod api_schema;
@@ -67,6 +68,8 @@ pub mod native_layr;
 pub mod notification_text;
 pub mod observable_resources;
 pub mod peer_team_ingress;
+#[cfg(feature = "perf-reporting")]
+pub mod perf_reporting;
 pub mod persistence;
 pub mod plan_record;
 pub mod pricing;
@@ -247,7 +250,11 @@ const SERVER_DELIVERY_URI: &str =
     "https://codex-studio.invalid/persisted-server-delivery.schema.json";
 const SERVER_DELIVERY: &[u8] = include_bytes!("schemas/persisted-server-delivery.schema.json");
 
-const OPENAPI: &[u8] = include_bytes!("../../runtime-http/openapi.json");
+/// The committed `openapi.json`, as the build script copied it to OUT_DIR. Cargo records an
+/// OUT_DIR path relative to the target folder, but `../runtime-http/openapi.json` as an
+/// absolute path, which is stale in every other checkout or copy of the workspace.
+pub(crate) const OPENAPI_TEXT: &str = include_str!(concat!(env!("OUT_DIR"), "/openapi.json"));
+const OPENAPI: &[u8] = OPENAPI_TEXT.as_bytes();
 const ACCOUNT_REGISTRY: &[u8] = include_bytes!("schemas/account-registry.schema.json");
 const USAGE_LIMITS: &[u8] = include_bytes!("schemas/workspace-usage-limits.schema.json");
 const TRANSCRIPT_ASSET: &[u8] = include_bytes!("schemas/runtime-transcript-asset.schema.json");
@@ -1675,4 +1682,32 @@ pub mod task_gate;
 
 pub mod claude_permissions;
 
+pub mod review;
 pub mod workspace_modes;
+
+#[cfg(test)]
+mod generated_agent_view_tests {
+    use super::generated::{AgentDetailEntityDto, AgentEntityDto, AgentSummaryEntityDto};
+    use studio_json::json;
+
+    #[test]
+    fn generated_agent_views_keep_shared_fields_and_nulls() {
+        let full: AgentEntityDto = studio_json::from_str(
+            r#"{"id":"agent-1","projectPath":"/project","tokensUsed":42,"accountKey":null,"startWait":null}"#,
+        )
+        .expect("full agent DTO");
+        let summary = studio_json::to_value(AgentSummaryEntityDto::from_agent(
+            &full,
+            crate::chat_operational_status::AgentOperationalStatus::Ready {},
+            None,
+            crate::chat_operational_status::MarkUnreadEligibility::Unsupported,
+        ))
+        .unwrap();
+        let detail = studio_json::to_value(AgentDetailEntityDto::from(&full)).unwrap();
+        assert_eq!(summary["projectPath"], "/project");
+        assert_eq!(detail["tokensUsed"], 42);
+        assert_eq!(summary.get("accountKey"), Some(&json!(null)));
+        assert_eq!(summary.get("startWait"), Some(&json!(null)));
+        assert_eq!(detail.get("startWait"), Some(&json!(null)));
+    }
+}

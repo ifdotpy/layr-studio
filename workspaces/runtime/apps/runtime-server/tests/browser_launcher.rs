@@ -47,9 +47,10 @@ async fn xdg_open_queues_a_link_through_the_runtime_binary() {
         state.path(),
         Arc::new(OneChat),
         HostBridgeOptions::default(),
-        Some(std::path::Path::new(env!(
-            "CARGO_BIN_EXE_studio-runtime-server"
-        ))),
+        Some(std::path::Path::new(
+            &std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
+                .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
+        )),
     )
     .expect("test step");
     let folder = state.path().join("browser-host");

@@ -3,6 +3,7 @@ mod receipts;
 mod snapshot;
 mod team_restore;
 use super::*;
+pub(crate) use pipeline::WORKSPACE_PENDING_REASON;
 #[cfg(test)]
 pub(super) use pipeline::prepare;
 pub(super) use pipeline::{
@@ -11,7 +12,6 @@ pub(super) use pipeline::{
     prepare_steer, refuse_idle, refuse_prepared_idle, refuse_prepared_steer, refuse_steer,
     snapshot_changed, workspace,
 };
-pub(crate) use pipeline::{CATALOG_PENDING_REASON, WORKSPACE_PENDING_REASON};
 pub use receipts::remember_delivered_manifests;
 pub(super) use receipts::{accept_thread, accept_turn};
 pub(crate) use snapshot::actor_tool_definitions;
@@ -43,28 +43,6 @@ pub struct PreparedNativeAction {
 pub struct PreparedNativeThread {
     pub params: studio_json::Value,
 }
-
-/// The planned fresh thread of a native review child, kept until its reply is
-/// reduced by the ordinary thread receipt reducer.
-pub(crate) struct PreparedReviewThread {
-    attempt: Box<crate::thread_prepare::PreparedAttempt>,
-}
-impl PreparedReviewThread {
-    pub(crate) fn cwd(&self) -> &str {
-        &self.attempt.snapshot.actor.cwd
-    }
-    pub(crate) fn params(&self) -> studio_json::Value {
-        studio_json::Value::Object(self.attempt.params.clone())
-    }
-    pub(crate) fn request_digest(&self) -> &str {
-        &self.attempt.request_digest
-    }
-    pub(crate) fn attempt_id(&self) -> &str {
-        &self.attempt.attempt_id
-    }
-}
-
-pub(crate) use pipeline::{accept_review_thread, prepare_review_thread, review_thread_submitted};
 
 /// Monitor thread identity and exact permission params prepared from the current
 /// actor record. Unlike turn preparation this is valid during an active turn.

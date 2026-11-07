@@ -495,7 +495,7 @@ pub fn publish_entity_changes(
             "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1 AND in_flight=1)",
             [&row.id], |row| row.get(0),
         )?;
-        if !was_in_flight || !table_exists(transaction, "runtime_account_transfers")? {
+        if !was_in_flight {
             continue;
         }
         let is_member: bool = transaction.query_row(
@@ -570,7 +570,7 @@ pub fn publish_entity_changes(
         )?;
     }
     let mut owned_work = Vec::new();
-    if table_exists(transaction, "runtime_work")? {
+    {
         // The runtime_work_owner_status index serves this owner lookup.
         let mut statement = transaction.prepare_cached(
             "SELECT id,record FROM runtime_work WHERE json_extract(record,'$.owner')=?1 ORDER BY rowid",
@@ -656,11 +656,6 @@ pub(crate) fn publish_summary_changes(
     }
     if events.is_empty() {
         return Ok(());
-    }
-    for table in ["runtime_agents", "runtime_event_meta", "runtime_items"] {
-        if !table_exists(transaction, table)? {
-            return Ok(());
-        }
     }
     for id in events {
         let agent = transaction
@@ -781,7 +776,7 @@ fn rows_by_id(
     table: &str,
     ids: &BTreeSet<String>,
 ) -> StoreResult<Vec<(i64, String, String)>> {
-    if ids.is_empty() || !table_exists(transaction, table)? {
+    if ids.is_empty() {
         return Ok(Vec::new());
     }
     let mut statement =
@@ -879,16 +874,18 @@ pub(crate) fn publish_agent_projection(
 /// `agent` DTO and `retainedWorktree`, each a value or None for a delete. None when the
 /// agent row is gone.
 pub(crate) struct AgentViewDocuments {
-    pub summary: Option<Value>,
-    pub detail: Option<Value>,
-    pub agent: Option<Value>,
-    pub retained_worktree: Option<Value>,
+    pub summary: Option<RawValue>,
+    pub detail: Option<RawValue>,
+    pub agent: Option<RawValue>,
+    pub retained_worktree: Option<RawValue>,
 }
 
 pub(crate) fn agent_view_documents(
     connection: &Connection,
     id: &str,
     project_server_id: Option<&str>,
+    include_summary: bool,
+    operational: Option<&crate::agent_operational::Context>,
 ) -> StoreResult<Option<AgentViewDocuments>> {
     let row: Option<(String, Option<String>)> = connection
         .prepare_cached("SELECT record,hold_incident FROM runtime_agents WHERE id=?1")?
@@ -900,16 +897,55 @@ pub(crate) fn agent_view_documents(
     let raw = agent_volatile::merged_text(connection, id, raw)?;
     let (record, view) = match studio_runtime_store::decode_agent_record(connection, id, &raw) {
         Ok(record) => {
-            let record = record.into_value();
+            let legacy_vm_workspace = crate::workspace_ready::legacy_vm_record(&record);
             let context = crate::sync_entity_context::agent_view_context(
                 connection,
                 &record,
                 project_server_id,
             )?;
-            let view = crate::sync_views::agent_entity_view(&record, &context);
-            (record, view)
+            let retained = crate::sync_views::retained_worktree_from_record(&record)
+                .map(|value| studio_json::to_raw_value(&value))
+                .transpose()?;
+            if record.is_deleted() {
+                return Ok(Some(AgentViewDocuments {
+                    summary: None,
+                    detail: None,
+                    agent: None,
+                    retained_worktree: retained,
+                }));
+            }
+            let Some(mut full) = crate::sync_views::agent_entity_from_record(record, &context)
+            else {
+                return Ok(Some(AgentViewDocuments {
+                    summary: None,
+                    detail: None,
+                    agent: None,
+                    retained_worktree: retained,
+                }));
+            };
+            let summary = if include_summary {
+                let mut summary = crate::agent_operational::summary(&full, operational)?;
+                summary.legacy_vm_workspace = Some(legacy_vm_workspace);
+                if summary.project_server_id.is_none() {
+                    summary.project_server_id = project_server_id.map(str::to_owned);
+                }
+                Some(studio_json::to_raw_value(&summary)?)
+            } else {
+                None
+            };
+            let detail = studio_runtime_schema::generated::AgentDetailEntityDto::from(&full);
+            full.team_counts = None;
+            full.has_question = None;
+            full.has_approval = None;
+            full.has_background_work = None;
+            return Ok(Some(AgentViewDocuments {
+                summary,
+                detail: Some(studio_json::to_raw_value(&detail)?),
+                agent: Some(studio_json::to_raw_value(&full)?),
+                retained_worktree: retained,
+            }));
         }
-        // A row that does not decode is held for repair; readers see a minimal safe view.
+        // Repair-only exception: arbitrary corrupt records require the tolerant Value fallback.
         Err(error) => {
             let parsed: Value = studio_json::from_str(&raw).unwrap_or_else(|_| json!({"id": id}));
             let diagnostic = incident
@@ -936,10 +972,22 @@ pub(crate) fn agent_view_documents(
             summary: None,
             detail: None,
             agent: None,
-            retained_worktree,
+            retained_worktree: retained_worktree
+                .map(|value| studio_json::to_raw_value(&value))
+                .transpose()?,
         }));
     };
-    let summary = project_persisted_record("agentSummary", &view);
+    let mut summary = if include_summary {
+        project_persisted_record("agentSummary", &view)
+    } else {
+        None
+    };
+    if let Some(summary) = summary.as_mut() {
+        if summary["projectServerId"].is_null() {
+            summary["projectServerId"] = studio_json::to_value(project_server_id)?;
+        }
+        crate::agent_operational::decorate(summary, operational)?;
+    }
     let detail = project_persisted_record("agentDetail", &view);
     let mut agent = view;
     if let Some(fields) = agent.as_object_mut() {
@@ -949,10 +997,16 @@ pub(crate) fn agent_view_documents(
         }
     }
     Ok(Some(AgentViewDocuments {
-        summary,
-        detail,
-        agent: Some(agent),
-        retained_worktree,
+        summary: summary
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
+        detail: detail
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
+        agent: Some(studio_json::to_raw_value(&agent)?),
+        retained_worktree: retained_worktree
+            .map(|value| studio_json::to_raw_value(&value))
+            .transpose()?,
     }))
 }
 
@@ -1234,18 +1288,6 @@ pub(crate) fn table_exists(connection: &Connection, name: &str) -> StoreResult<b
         [name],
         |row| row.get(0),
     )?)
-}
-
-/// Whether `runtime_monitors` has its owner expression index. Its indexed JSON
-/// expressions reject malformed rows at write time, so a query bounded by that
-/// index needs no per-row `json_valid` guard. Legacy and test schemas without
-/// it may hold malformed rows and keep their guarded scans.
-pub(crate) fn monitor_owner_index_exists(connection: &Connection) -> StoreResult<bool> {
-    Ok(connection
-        .prepare_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='index' AND name='runtime_monitor_agent_status')",
-        )?
-        .query_row([], |row| row.get(0))?)
 }
 
 pub(crate) fn projection_records(
@@ -4298,12 +4340,12 @@ mod work_parity_tests {
                 let record: Value = studio_json::from_str(&raw)?;
                 let item =
                     WorkItemsRepository::work_record(transaction, "w")?.expect("stored work item");
-                let refusal = crate::work_write::current_submission_refusal(transaction, &record)
+                let refusal = crate::work_write::current_submission_refusal(transaction, &item)
                     .expect("submission refusal");
                 let mut out = BTreeMap::new();
                 for (collection, view) in work_views(&item, &record, refusal, &BTreeMap::new())? {
                     let id = match &view {
-                        WorkView::Entry(entry) => entry["id"].as_str().unwrap().to_owned(),
+                        WorkView::Entry(entry) => entry.id().to_owned(),
                         WorkView::Summary(_) | WorkView::Detail(_) => "w".to_owned(),
                     };
                     out.insert((collection.to_owned(), id), studio_json::to_string(&view)?);

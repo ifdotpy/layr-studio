@@ -2183,8 +2183,13 @@ pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), Tra
     use studio_runtime_store::transfer_record::{AgentTransferState, TransferScope};
     let summary_holds = match agent.account_transfer.value() {
         None => false,
-        Some(AgentTransferState::Unreadable(_)) => true,
-        Some(AgentTransferState::Summary(summary)) => {
+        Some(
+            studio_runtime_store::StoredTransferObject::Unreadable(_)
+            | studio_runtime_store::StoredTransferObject::Known(AgentTransferState::Unreadable(_)),
+        ) => true,
+        Some(studio_runtime_store::StoredTransferObject::Known(AgentTransferState::Summary(
+            summary,
+        ))) => {
             !matches!(
                 summary.status,
                 TransferStatus::Completed | TransferStatus::Cancelled
@@ -2423,7 +2428,9 @@ impl Decision {
         if pointer.is_some_and(|value| value != operation.id.as_str()) {
             return Ok(());
         }
-        if let Some(AgentTransferState::Summary(current)) = lead.account_transfer.value()
+        if let Some(studio_runtime_store::StoredTransferObject::Known(AgentTransferState::Summary(
+            current,
+        ))) = lead.account_transfer.value()
             && current.id.as_str() != operation.id.as_str()
             && pointer != Some(operation.id.as_str())
             && (!matches!(
@@ -2434,9 +2441,9 @@ impl Decision {
         {
             return Ok(());
         }
-        lead.account_transfer = Field::Value(AgentTransferState::Summary(Box::new(
-            summary_record(operation)?,
-        )));
+        lead.account_transfer = Field::Value(studio_runtime_store::StoredTransferObject::Known(
+            AgentTransferState::Summary(Box::new(summary_record(operation)?)),
+        ));
         Ok(())
     }
     pub fn encoded(&self) -> Result<String, TransferError> {
@@ -3431,6 +3438,9 @@ mod provider_receipt_tests {
         };
         decision.stamp(2.0, None).unwrap();
         let summary = decision.agents["agent"].account_transfer.value().unwrap();
+        let studio_runtime_store::StoredTransferObject::Known(summary) = summary else {
+            panic!("expected known summary")
+        };
         let progress = progress_view(Some(summary), snapshot.can_cancel());
         let encoded =
             serde::Serialize::serialize(&(progress), studio_json::value::Serializer).unwrap();

@@ -1,114 +1,28 @@
-//! The first turn of a native review child: Python `codex_agent_review.claim`
-//! followed by `Runtime.run_native_action` for action `review`.
-//!
-//! The account worker runs this driver when it wakes a queued child whose
-//! `nativeReview.status` is `pending`. The child has no native thread yet, so
-//! the driver first starts one with the ordinary thread planner (no Studio
-//! tools, `review_model` set to the child model). Then the shared native action
-//! owner reserves, prepares settings, and hands off one `review/start` request
-//! with `delivery: "inline"`. The provider review result reaches the parent
-//! through the ordinary turn completion (`exitedReviewMode` sets `lastAnswer`).
-//!
-//! Identity rules:
-//! - The action request ID is fixed per child and epoch, so a repeated wake
-//!   replays the saved receipt and never sends a second `review/start`.
-//! - The thread start is saved as `submitted` before the provider write. A
-//!   saved `submitted` or `unknown` start is never sent again.
-
-use crate::account_session_runtime::{AccountSessionError, SessionOutcome as ReceiptOutcome};
+//! Settle queued native reviews created by older versions without starting them.
 use crate::{
-    account_session_runtime::{
-        AccountSessionPort, ConnectionScope, ProviderRequest, ProviderResponse,
-    },
-    account_worker::{WorkerError, preparation, retained::RequestActor},
-    native_action_ports::{MessageNativeAdmission, NativeActionAcceptance},
-    native_actions::{
-        self, Acceptance, Action, Admission, Delivery, NativeError, NativeRequest, Outcome, Request,
-    },
+    account_worker::{WorkerError, preparation},
+    native_actions::NativeError,
 };
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::sync::Arc;
 use studio_json::{Value, json};
-use studio_runtime_providers::Method;
-use studio_runtime_providers::ProviderKind;
-use studio_runtime_schema::persistence::NativeReviewThreadStatus;
-#[cfg(test)]
-use studio_runtime_store::path_identity::CanonicalPath;
-use studio_runtime_store::{
-    AgentId, AgentRecord, AgentRepository, NativeReviewThread, RuntimeStore, Transaction,
-};
+use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore};
 
-/// Deadline of the review thread start; Python waits for the same native call
-/// without a separate limit, and the retained session needs a finite one.
-const THREAD_START_TIMEOUT: Duration = Duration::from_secs(60);
-/// Agent field that holds the receipt of the review thread start.
-#[cfg(test)]
-const THREAD_RECEIPT: &str = "nativeReviewThread";
-
-/// The queued review child state that Python `codex_agent_review.claim`
-/// accepts. A leftover unsubmitted attempt of a refused earlier start does not
-/// block the review: it never reached the provider.
+/// Only a queued, unsubmitted legacy review may be failed here. Submitted or
+/// uncertain provider requests stay owned by their existing recovery path.
 pub fn claimable(record: &Value) -> bool {
     let attempt = record.get("startAttempt").unwrap_or(&Value::Null);
     record["nativeReview"]["status"] == "pending"
         && record["status"] == "queued"
         && record["autoWake"] == true
-        && !truthy(record.get("inFlight"))
-        && !truthy(record.get("deletedAt"))
-        && !truthy(record.get("nativeFailureHold"))
-        && ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
+        && !studio_runtime_store::truthy(record.get("inFlight"))
+        && !studio_runtime_store::truthy(record.get("deletedAt"))
+        && !studio_runtime_store::truthy(record.get("nativeFailureHold"))
         && (attempt.is_null()
             || (attempt["submitted"] == false
-                && !truthy(attempt.get("turnId"))
-                && !truthy(attempt.get("observedTurnId"))))
+                && !studio_runtime_store::truthy(attempt.get("turnId"))
+                && !studio_runtime_store::truthy(attempt.get("observedTurnId"))))
 }
 
-/// The durable native action request of this child's review turn.
-pub fn request(record: &Value) -> Result<Request, NativeError> {
-    let id = record["id"]
-        .as_str()
-        .ok_or(NativeError::Invalid("agent.id"))?;
-    let epoch = record["epoch"]
-        .as_i64()
-        .ok_or(NativeError::Invalid("agent.epoch"))?;
-    let account = record
-        .get("accountKey")
-        .and_then(Value::as_str)
-        .unwrap_or("default");
-    Ok(Request {
-        request_id: record["nativeReview"]["actionRequestId"]
-            .as_str()
-            .ok_or(NativeError::Invalid("nativeReview.actionRequestId"))?
-            .to_owned(),
-        agent: id.to_owned(),
-        action: Action::Review,
-        context: json!({"accountKey":account,"epoch":epoch}),
-    })
-}
-
-/// The start attempt identity `native_actions::execute_provider_prepared`
-/// assigns to this request; failure notices use it as their marker.
-fn attempt_id(request: &Request) -> String {
-    uuid::Uuid::new_v5(
-        &uuid::Uuid::NAMESPACE_URL,
-        format!("native-action:{}", request.request_id).as_bytes(),
-    )
-    .to_string()
-}
-
-fn truthy(value: Option<&Value>) -> bool {
-    studio_runtime_store::truthy(value)
-}
-
-fn now() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0.0, |duration| duration.as_secs_f64())
-}
-
-/// Whether the account worker should run this driver for the agent now.
 pub(crate) async fn candidate(
     store: &Arc<RuntimeStore>,
     agent_id: &str,
@@ -118,893 +32,74 @@ pub(crate) async fn candidate(
     let agent_id = agent_id.to_owned();
     let account = account.to_owned();
     store
-        .read_async("runtime-services/native_review_turn", move |tx| {
-            // A malformed record is not a review candidate: the ordinary
-            // claim owns its visible invalid-record hold.
-            let Ok(Some(record)) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))
-            else {
+        .read_async("runtime-services/legacy-review", move |tx| {
+            let Some(record) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))? else {
                 return Ok(false);
             };
             let value = record.value();
-            Ok(value["epoch"].as_i64() == Some(epoch)
-                && value
-                    .get("accountKey")
-                    .and_then(Value::as_str)
-                    .unwrap_or("default")
-                    == account
-                && claimable(&value))
+            Ok(record.epoch == epoch && record.account_key == account && claimable(&value))
         })
         .await
 }
 
-/// Run one review child's first turn. Every failure is saved on the child
-/// before this returns; the result is only for the caller's log.
 pub(crate) async fn run(
     store: Arc<RuntimeStore>,
-    resources: &preparation::PreparationResources,
+    _resources: &preparation::PreparationResources,
     agent_id: &str,
     epoch: i64,
 ) -> Result<(), NativeError> {
-    for _ in 0..2 {
-        match run_once(Arc::clone(&store), resources, agent_id, epoch).await {
-            Err(NativeError::Unavailable(preparation::CATALOG_PENDING_REASON)) => {
-                let record = read_agent(&store, agent_id).await?;
-                let account = record
-                    .get("accountKey")
-                    .and_then(Value::as_str)
-                    .unwrap_or("default")
-                    .to_owned();
-                resources
-                    .model_catalog
-                    .refreshed(&account, &resources.account_home, ProviderKind::Codex)
-                    .await;
-            }
-            result => return result,
-        }
-    }
-    Ok(())
-}
-
-async fn run_once(
-    store: Arc<RuntimeStore>,
-    resources: &preparation::PreparationResources,
-    agent_id: &str,
-    epoch: i64,
-) -> Result<(), NativeError> {
-    let record = read_agent(&store, agent_id).await?;
-    if record["epoch"] != epoch || !claimable(&record) {
-        return Ok(());
-    }
-    let request = request(&record)?;
-    let Some(port) = resources.account_session.clone() else {
-        // A host without a provider session leaves the review queued.
-        return Err(NativeError::Unavailable("provider-session/native-request"));
-    };
-    let admission_agent = agent_id.to_owned();
-    let admission = store
-        .read_async(
-            "runtime-services/native_review_turn_admission",
-            move |connection| {
-                crate::message_admission::MessageIngressAdmission::read(
-                    connection,
-                    &admission_agent,
-                )
-                .map_err(|_| NativeError::Unavailable("budget-policy/native-action"))
-            },
-        )
-        .await?;
-    let admission = admission
-        .prepare()
-        .await
-        .map_err(|_| NativeError::Unavailable("budget-policy/native-action"))?;
-    let gate: Arc<dyn Admission> = Arc::new(MessageNativeAdmission::new(Arc::new(admission)));
-    let preparation = ReviewPreparation {
-        store: Arc::clone(&store),
-        resources: resources.clone(),
-        gate: Arc::clone(&gate),
-    };
-    let result = native_actions::execute_provider_prepared(
-        &store,
-        port.as_ref(),
-        &request,
-        now(),
-        gate,
-        Arc::new(ReviewAcceptance),
-        &preparation,
-    )
-    .await;
-    finish(&store, &request, result).await
-}
-
-async fn read_agent(store: &Arc<RuntimeStore>, agent_id: &str) -> Result<Value, NativeError> {
-    let agent_id = agent_id.to_owned();
-    store
-        .read_async("runtime-services/native_review_turn", move |tx| {
-            AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                .map(|record| record.value())
-                .ok_or(NativeError::Changed)
-        })
-        .await
-}
-
-/// A refusal that leaves the review queued for a later wake, as Python's
-/// dispatcher skips a child while capacity, budget or the session are missing.
-fn transient(error: &NativeError) -> bool {
-    matches!(
-        error,
-        NativeError::Unavailable(_)
-            | NativeError::Invalid(
-                "review/global-capacity" | "review/team-capacity" | "budget" | "workspace"
-            )
-    )
-}
-
-/// Save the visible end of a review start that produced no native turn.
-/// Python `start_error` marks the child failed and tells the parent once.
-async fn finish(
-    store: &Arc<RuntimeStore>,
-    request: &Request,
-    result: Result<Value, NativeError>,
-) -> Result<(), NativeError> {
-    let error = match result {
-        Ok(value) if value["outcome"]["status"] == "pending" => {
-            NativeError::Unavailable("native-review/not-sent")
-        }
-        Ok(_) => return Ok(()),
-        Err(error) => error,
-    };
-    let message = match &error {
-        NativeError::Unknown => {
-            "The native review start outcome is unknown. Studio does not send it again.".to_owned()
-        }
-        NativeError::Unavailable("native-review/not-sent") => {
-            "The native review request was not sent.".to_owned()
-        }
-        other @ NativeError::Invalid(_)
-        | other @ NativeError::Expired
-        | other @ NativeError::InvalidStored { .. }
-        | other @ NativeError::Conflict
-        | other @ NativeError::Changed
-        | other @ NativeError::Unavailable(_)
-        | other @ NativeError::Store(_)
-        | other @ NativeError::Json(_)
-        | other @ NativeError::Sql(_) => format!("Native review could not start: {other}"),
-    };
-    let request = request.clone();
-    let not_sent = matches!(error, NativeError::Unavailable("native-review/not-sent"));
-    let keep_queued = transient(&error) && !not_sent;
+    let id = agent_id.to_owned();
     store
         .transaction_with(move |tx| {
-            let mut agent = AgentRepository::get(tx, &AgentId::from(request.agent.as_str()))?
-                .ok_or(NativeError::Changed)?
-                .value();
-            let reserved = agent["startAttempt"]["actionRequestId"] == request.request_id;
-            if !reserved {
-                // Nothing was admitted: the child is still the queued review.
-                if keep_queued || !claimable(&agent) {
-                    return Ok(());
-                }
-            } else {
-                match native_actions::outcome(tx, &request.request_id)? {
-                    Some(Outcome::Pending { .. })
-                        if agent["startAttempt"]["submitted"] == false
-                            && agent["inFlight"] == true => {}
-                    Some(Outcome::Unknown { .. }) if agent["startAttempt"]["submitted"] == true => {
-                        // The hand-off is uncertain. Keep its owner for recovery;
-                        // only show why the review has no turn yet.
-                        agent["error"] = json!(message);
-                        return AgentRepository::put(tx, &AgentRecord::from_value(agent)?)
-                            .map_err(NativeError::from);
-                    }
-                    _ => return Ok(()),
-                }
-                native_actions::fail_pending(tx, &request.request_id, &message)?;
-                agent = AgentRepository::get(tx, &AgentId::from(request.agent.as_str()))?
-                    .ok_or(NativeError::Changed)?
-                    .value();
+            let Some(record) = AgentRepository::get(tx, &AgentId::from(id.as_str()))? else {
+                return Ok(());
+            };
+            let mut value = record.value();
+            if record.epoch != epoch || !claimable(&value) {
+                return Ok(());
             }
-            let before = agent.clone();
-            agent["status"] = json!("failed");
-            agent["inFlight"] = json!(false);
-            agent["error"] = json!(message);
-            if agent["startAttempt"].is_object() {
-                agent["startAttempt"]["executionOutcome"] = json!("unsent");
+            let before = value.clone();
+            value["status"] = json!("failed");
+            value["inFlight"] = json!(false);
+            value["error"] =
+                json!("This review was requested by an older version; request it again.");
+            #[derive(serde::Serialize)]
+            #[serde(rename_all = "camelCase")]
+            enum LegacyStatus {
+                Refused,
             }
-            AgentRepository::put(tx, &AgentRecord::from_value(agent.clone())?)?;
+            value["nativeReview"]["status"] = json!(LegacyStatus::Refused);
+            AgentRepository::put(tx, &AgentRecord::from_value(value.clone())?)?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0.0, |duration| duration.as_secs_f64());
             crate::lifecycle_effects::notify_parent_of_start_failure(
                 tx,
                 &before,
-                &agent,
-                &attempt_id(&request),
-                now(),
+                &value,
+                "legacy-review",
+                now,
             )?;
             Ok::<_, NativeError>(())
         })
-        .await?;
-    Err(error)
-}
-
-/// The shared native action effects, and Python's parent notice when the
-/// provider rejects `review/start` (`start_error` with a failed child).
-struct ReviewAcceptance;
-impl Acceptance for ReviewAcceptance {
-    fn apply(
-        &self,
-        tx: &Transaction<'_>,
-        request: &NativeRequest,
-        delivery: &Delivery,
-    ) -> native_actions::Result<()> {
-        let before = AgentRepository::get(tx, &AgentId::from(request.ticket.agent.as_str()))?
-            .ok_or(NativeError::Changed)?
-            .value();
-        NativeActionAcceptance.apply(tx, request, delivery)?;
-        if matches!(delivery, Delivery::Rejected(_)) {
-            let failed = AgentRepository::get(tx, &AgentId::from(request.ticket.agent.as_str()))?
-                .ok_or(NativeError::Changed)?
-                .value();
-            crate::lifecycle_effects::notify_parent_of_start_failure(
-                tx,
-                &before,
-                &failed,
-                &request.ticket.operation,
-                now(),
-            )?;
-        }
-        Ok(())
-    }
-}
-
-struct ReviewPreparation {
-    store: Arc<RuntimeStore>,
-    resources: preparation::PreparationResources,
-    gate: Arc<dyn Admission>,
-}
-
-impl native_actions::Preparation for ReviewPreparation {
-    fn before_reserve<'a>(
-        &'a self,
-        _store: &'a RuntimeStore,
-        provider: &'a dyn AccountSessionPort,
-        request: &'a Request,
-        scope: &'a ConnectionScope,
-    ) -> native_actions::PreparationFuture<'a> {
-        Box::pin(self.ensure_thread(provider, request, scope))
-    }
-
-    fn prepare<'a>(
-        &'a self,
-        _store: &'a RuntimeStore,
-        provider: &'a dyn AccountSessionPort,
-        request: &'a Request,
-        ticket: &'a crate::workspace_operations::ProviderTicket,
-        scope: &'a ConnectionScope,
-    ) -> native_actions::PreparationFuture<'a> {
-        Box::pin(async move {
-            // Python `codex_native_action_settings.ensure` before `review/start`.
-            let prepared = preparation::prepare_native_action(
-                Arc::clone(&self.store),
-                &self.resources,
-                &request.agent,
-                &ticket.operation,
-                ticket.generation,
-            )
-            .await
-            .map_err(worker_error)?;
-            if Some(prepared.thread_id.as_str()) != ticket.thread.as_deref() {
-                return Err(NativeError::Changed);
-            }
-            let mut params = prepared.settings;
-            if let Some(params) = params.as_object_mut() {
-                params.remove("cwd");
-                params.remove("cyberAccessProgram");
-            }
-            native_actions::update_action_settings(
-                &self.store,
-                provider,
-                request,
-                ticket,
-                scope,
-                params,
-            )
-            .await
-        })
-    }
-}
-
-fn worker_error(error: WorkerError) -> NativeError {
-    match error {
-        WorkerError::Expired => NativeError::Expired,
-        WorkerError::PreparationPending(reason)
-            if reason.reason == crate::account_worker::PreparationWaitReason::ModelCatalog =>
-        {
-            NativeError::Unavailable(preparation::CATALOG_PENDING_REASON)
-        }
-        WorkerError::PreparationPending(_) | WorkerError::PreparationAwaitsAgent(_) => {
-            NativeError::Unavailable("native-review/preparation")
-        }
-        WorkerError::Recovery(_)
-        | WorkerError::Store(_)
-        | WorkerError::Scheduler(_)
-        | WorkerError::Session(_)
-        | WorkerError::Notification(_)
-        | WorkerError::PreparationRefused(_)
-        | WorkerError::UnavailableActor
-        | WorkerError::CleanupUnconfirmed(_)
-        | WorkerError::AlreadyRunning
-        | WorkerError::Closed
-        | WorkerError::ShutdownTimeout
-        | WorkerError::TaskFailed
-        | WorkerError::Capacity
-        | WorkerError::CallbackUnknown => NativeError::Invalid("native-review/preparation"),
-    }
-}
-
-impl ReviewPreparation {
-    /// Python `prepare_locked` for a child without a thread: one durable
-    /// `thread/start`, reduced by the ordinary thread receipt reducer.
-    async fn ensure_thread(
-        &self,
-        provider: &dyn AccountSessionPort,
-        request: &Request,
-        scope: &ConnectionScope,
-    ) -> native_actions::Result<()> {
-        let agent_id = request.agent.clone();
-        let stored = self
-            .store
-            .read_async("runtime-services/native_review_turn", move |tx| {
-                AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                    .ok_or(NativeError::Changed)
-            })
-            .await?;
-        let record = stored.value();
-        // A thread from an earlier wake (or a not-sent retry of this action)
-        // needs no start; the reservation rechecks the review state.
-        if record["threadId"].as_str().is_some_and(|id| !id.is_empty()) {
-            return Ok(());
-        }
-        if !claimable(&record) {
-            return Err(NativeError::Changed);
-        }
-        // Python claims the review only after dispatcher admission. Check the
-        // same gate before a native thread exists.
-        let gate = Arc::clone(&self.gate);
-        let agent_id = request.agent.clone();
-        self.store
-            .transaction_with(move |tx| {
-                let current = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                    .ok_or(NativeError::Changed)?
-                    .value();
-                gate.check(tx, &current, Action::Review)
-            })
-            .await?;
-        let saved = stored.native_review_thread;
-        let saved_status = saved.as_ref().map(|receipt| receipt.status);
-        if matches!(
-            saved_status,
-            Some(NativeReviewThreadStatus::Submitted | NativeReviewThreadStatus::Unknown)
-        ) {
-            return Err(NativeError::Unknown);
-        }
-        let sequence = if saved_status == Some(NativeReviewThreadStatus::NotSent) {
-            saved
-                .as_ref()
-                .ok_or(NativeError::Invalid("nativeReviewThread.sequence"))?
-                .sequence
-        } else {
-            saved.as_ref().map_or(0, |receipt| receipt.sequence + 1)
-        };
-        let (root_request_id, admitted_request) = if let Some(saved) = &saved {
-            (
-                saved
-                    .root_request_id
-                    .clone()
-                    .ok_or(NativeError::Invalid("nativeReviewThread.rootRequestId"))?,
-                saved.admitted_request.clone(),
-            )
-        } else {
-            (
-                studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                None,
-            )
-        };
-        let epoch = record["epoch"]
-            .as_i64()
-            .ok_or(NativeError::Invalid("agent.epoch"))?;
-        let attempt = format!("native-review-thread:{}:{epoch}:{sequence}", request.agent);
-        let prepared = Arc::new(
-            preparation::prepare_review_thread(
-                Arc::clone(&self.store),
-                &self.resources,
-                &request.agent,
-                &attempt,
-                scope.generation,
-            )
-            .await
-            .map_err(worker_error)?,
-        );
-        let operation = format!("{attempt}:start");
-        let receipt = NativeReviewThread {
-            sequence,
-            attempt: prepared.attempt_id().to_owned(),
-            operation: operation.clone(),
-            root_request_id: Some(root_request_id),
-            admitted_request,
-            generation: scope.generation,
-            connection: scope.connection.clone(),
-            request_digest: prepared.request_digest().to_owned(),
-            status: NativeReviewThreadStatus::Submitted,
-            thread_id: None,
-            extra: Default::default(),
-        };
-        let submitted = Arc::clone(&prepared);
-        let agent_id = request.agent.clone();
-        let account = scope.account.clone();
-        let expected = saved.clone();
-        let saved_receipt = receipt.clone();
-        self.store
-            .transaction_with(move |tx| {
-                let stored = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                    .ok_or(NativeError::Changed)?;
-                let mut current = stored.value();
-                if !claimable(&current)
-                    || current["epoch"] != epoch
-                    || current
-                        .get("accountKey")
-                        .and_then(Value::as_str)
-                        .unwrap_or("default")
-                        != account
-                    || current["threadId"]
-                        .as_str()
-                        .is_some_and(|id| !id.is_empty())
-                    || stored.native_review_thread != expected
-                {
-                    return Err(NativeError::Changed);
-                }
-                preparation::review_thread_submitted(&mut current, &submitted)
-                    .map_err(|_| NativeError::Invalid("native-review/thread-start"))?;
-                let mut stored = AgentRecord::from_value(current)?;
-                stored.native_review_thread = Some(Box::new(saved_receipt));
-                AgentRepository::put(tx, &stored)?;
-                Ok(())
-            })
-            .await?;
-        let response = provider
-            .provider_request(ProviderRequest {
-                root_request_id: receipt
-                    .root_request_id
-                    .clone()
-                    .ok_or(NativeError::Invalid("nativeReviewThread.rootRequestId"))?,
-                admitted_request: receipt.admitted_request.clone(),
-                account: scope.account.clone(),
-                operation: operation.clone(),
-                actor: Some(RequestActor {
-                    agent: request.agent.clone(),
-                    epoch,
-                }),
-                expected_scope: Some(scope.clone()),
-                deleted_actor_session: None,
-                method: Method::ThreadStart,
-                params: prepared.params(),
-                deadline: Instant::now() + THREAD_START_TIMEOUT,
-            })
-            .await;
-        let (status, reply) = match response {
-            Ok(receipt) if receipt.scope != *scope || receipt.operation != operation => {
-                (NativeReviewThreadStatus::Unknown, None)
-            }
-            Ok(receipt) => match receipt.outcome {
-                ReceiptOutcome::Written {
-                    response: ProviderResponse::Reply(value),
-                    ..
-                } => (NativeReviewThreadStatus::Accepted, Some(value)),
-                ReceiptOutcome::Written {
-                    response: ProviderResponse::Rejected(_),
-                    ..
-                } => (NativeReviewThreadStatus::Rejected, None),
-                ReceiptOutcome::WorkerNotSent { .. }
-                | ReceiptOutcome::NoLiveAccountWorker
-                | ReceiptOutcome::ExpectedScopeMismatch
-                | ReceiptOutcome::DeadlineExpired
-                | ReceiptOutcome::NotHandedOff(_) => (NativeReviewThreadStatus::NotSent, None),
-                ReceiptOutcome::Unknown { .. } => (NativeReviewThreadStatus::Unknown, None),
-            },
-            Err(AccountSessionError::Expired) => return Err(NativeError::Expired),
-            Err(_) => (NativeReviewThreadStatus::Unknown, None),
-        };
-        let resources = self
-            .resources
-            .for_receipt(&self.store, &request.agent, Some(prepared.cwd()))
-            .await
-            .map_err(|_| NativeError::Unavailable("native-review/filesystem"))?;
-        let root = self.store.root().to_path_buf();
-        let agent_id = request.agent.clone();
-        let accepted = self
-            .store
-            .transaction_with(move |tx| {
-                let stored = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-                    .ok_or(NativeError::Changed)?;
-                let mut receipt = stored
-                    .native_review_thread
-                    .clone()
-                    .ok_or(NativeError::Changed)?;
-                let mut current = stored.value();
-                if receipt.operation != operation
-                    || receipt.status != NativeReviewThreadStatus::Submitted
-                {
-                    return Err(NativeError::Changed);
-                }
-                let mut status = status;
-                if let Some(reply) = reply.as_ref() {
-                    match preparation::accept_review_thread(
-                        tx, &resources, &root, &current, &prepared, reply,
-                    )
-                    .map_err(|_| NativeError::Invalid("native-review/thread-receipt"))?
-                    {
-                        Some(patched) => current = patched,
-                        None => status = NativeReviewThreadStatus::Unknown,
-                    }
-                }
-                receipt.status = status;
-                if status == NativeReviewThreadStatus::Accepted {
-                    receipt.thread_id = current["threadId"].as_str().map(str::to_owned);
-                }
-                let mut stored = AgentRecord::from_value(current)?;
-                stored.native_review_thread = Some(receipt);
-                AgentRepository::put(tx, &stored)?;
-                Ok(status)
-            })
-            .await?;
-        match accepted {
-            NativeReviewThreadStatus::Accepted => Ok(()),
-            NativeReviewThreadStatus::Rejected => {
-                Err(NativeError::Invalid("native-review/thread-start-rejected"))
-            }
-            NativeReviewThreadStatus::NotSent => {
-                Err(NativeError::Invalid("native-review/thread-start-not-sent"))
-            }
-            NativeReviewThreadStatus::Submitted | NativeReviewThreadStatus::Unknown => {
-                Err(NativeError::Unknown)
-            }
-        }
-    }
+        .await
 }
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
-    use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
-    use crate::account_session_runtime::{AccountSessionFuture, SessionReceipt};
-    use std::sync::Mutex;
-    use studio_runtime_providers::{RequestId, RequestTicket};
 
-    #[test]
-    fn review_request_reuses_owner_identity_and_refuses_a_missing_root() {
-        let root = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        let mut record = json!({"id":"review","epoch":3,"nativeReview":{"actionRequestId":root}});
-        assert_eq!(request(&record).expect("owner identity").request_id, root);
-        assert_eq!(request(&record).expect("same identity").request_id, root);
-        record["nativeReview"] = json!({});
-        assert!(request(&record).is_err());
-    }
-
-    #[test]
-    fn claim_requires_a_known_codex_provider() {
-        let mut record = json!({
-            "nativeReview":{"status":"pending"}, "status":"queued", "autoWake":true,
-            "provider":ProviderKind::Codex
-        });
-        assert!(claimable(&record));
-        for provider in [
-            json!(ProviderKind::Claude),
-            json!("future"),
-            Value::Null,
-            json!(0),
-        ] {
-            record["provider"] = provider;
-            assert!(!claimable(&record));
-        }
-        record
-            .as_object_mut()
-            .expect("review record")
-            .remove("provider");
-        assert!(
-            !claimable(&record),
-            "missing identity must not claim a native review"
-        );
-    }
-
-    /// The provider outcome the fake session gives one method.
-    #[derive(Clone, Copy, PartialEq)]
-    pub(crate) enum Reply {
-        Accept,
-        Reject,
-        Unknown,
-    }
-
-    /// A fake retained session that answers the review child's requests.
-    pub(crate) struct Session {
-        requests: Mutex<Vec<(Method, Value)>>,
-        thread_start: Reply,
-        review_start: Reply,
-    }
-    impl Session {
-        pub(crate) fn new(thread_start: Reply, review_start: Reply) -> Arc<Self> {
-            Arc::new(Self {
-                requests: Mutex::new(Vec::new()),
-                thread_start,
-                review_start,
-            })
-        }
-        fn scope() -> ConnectionScope {
-            ConnectionScope {
-                account: "default".into(),
-                connection: "connection".into(),
-                generation: 7,
-            }
-        }
-        pub(crate) fn methods(&self) -> Vec<String> {
-            self.requests
-                .lock()
-                .unwrap()
-                .iter()
-                .map(|(method, _)| method.as_str().to_owned())
-                .collect()
-        }
-        fn params(&self, method: Method) -> Value {
-            self.requests
-                .lock()
-                .unwrap()
-                .iter()
-                .find(|(saved, _)| *saved == method)
-                .map(|(_, params)| params.clone())
-                .unwrap()
-        }
-    }
-    impl AccountSessionPort for Session {
-        fn current_scope(&self, _account: &str) -> Option<ConnectionScope> {
-            Some(Self::scope())
-        }
-        fn provider_request<'a>(
-            &'a self,
-            request: ProviderRequest,
-        ) -> AccountSessionFuture<'a, SessionReceipt> {
-            Box::pin(async move {
-                if request.method == Method::ThreadStart {
-                    assert_eq!(
-                        uuid::Uuid::parse_str(&request.root_request_id)
-                            .unwrap()
-                            .get_version_num(),
-                        7
-                    );
-                    assert!(request.admitted_request.is_none());
-                }
-                self.requests
-                    .lock()
-                    .unwrap()
-                    .push((request.method, request.params.clone()));
-                let (reply, value) = match request.method {
-                    Method::ThreadStart => (
-                        self.thread_start,
-                        json!({"thread":{"id":"review-thread"},"model":"gpt-6",
-                            "sandbox":{"type":"readOnly"},"approvalPolicy":"on-request"}),
-                    ),
-                    Method::ReviewStart => (
-                        self.review_start,
-                        json!({"turn":{"id":"review-turn","items":[],"status":"inProgress"},
-                            "reviewThreadId":"review-thread"}),
-                    ),
-                    Method::Initialize
-                    | Method::Initialized
-                    | Method::Ack
-                    | Method::AccountLoginCancel
-                    | Method::AccountLoginStart
-                    | Method::AccountRateLimitResetCreditConsume
-                    | Method::ThreadLoadedList
-                    | Method::ConfigRead
-                    | Method::SkillsExtraRootsSet
-                    | Method::ModelList
-                    | Method::AccountRead
-                    | Method::AccountRateLimitsRead
-                    | Method::ThreadRealtimeStart
-                    | Method::ThreadRealtimeStop
-                    | Method::ThreadRealtimeAppendSpeech
-                    | Method::ThreadRealtimeItemStarted
-                    | Method::ThreadRealtimeTranscriptDelta
-                    | Method::ThreadRealtimeTranscriptDone
-                    | Method::ThreadRealtimeSdp
-                    | Method::ThreadRealtimeError
-                    | Method::ThreadRealtimeClosed
-                    | Method::ThreadResume
-                    | Method::ThreadRead
-                    | Method::ThreadTurnsList
-                    | Method::TurnStart
-                    | Method::TurnSteer
-                    | Method::TurnInterrupt
-                    | Method::ThreadList
-                    | Method::ThreadArchive
-                    | Method::ThreadFork
-                    | Method::ThreadNameSet
-                    | Method::ThreadMetadataUpdate
-                    | Method::ThreadSettingsUpdate
-                    | Method::ThreadCompactStart
-                    | Method::ThreadRollback
-                    | Method::ThreadItemsList
-                    | Method::ThreadGoalSet
-                    | Method::ThreadGoalUpdated
-                    | Method::ThreadUnarchive
-                    | Method::ThreadUnsubscribe
-                    | Method::ProcessSpawn
-                    | Method::ProcessWriteStdin
-                    | Method::ProcessKill
-                    | Method::ProcessResizePty
-                    | Method::CommandExec
-                    | Method::CommandExecWrite
-                    | Method::CommandExecResize
-                    | Method::CommandExecTerminate
-                    | Method::ThreadBackgroundTerminalsList
-                    | Method::ThreadBackgroundTerminalsTerminate
-                    | Method::ThreadBackgroundTerminalsClean
-                    | Method::ThreadCommandExecutionBackground
-                    | Method::ThreadQueueList
-                    | Method::ClaudeState
-                    | Method::ClaudeRepairReport
-                    | Method::ClaudeFileBackups
-                    | Method::ClaudeSettings
-                    | Method::ClaudeActivity
-                    | Method::ClaudeStopTask
-                    | Method::ClaudeShellPolicy
-                    | Method::ClaudeDiagnostics
-                    | Method::ClaudeMoveVersions
-                    | Method::McpServerReconnect
-                    | Method::McpServerStatusList
-                    | Method::SkillsList
-                    | Method::OperationStatus
-                    | Method::BrowserAnswer
-                    | Method::BrowserCallback
-                    | Method::BrowserClose
-                    | Method::BrowserWait
-                    | Method::ClaudeCommands
-                    | Method::ClaudeMoveExport
-                    | Method::ClaudeMoveImport
-                    | Method::ClaudeMoveIdentity
-                    | Method::ClaudeMovePreflight
-                    | Method::ClaudeMoveProof
-                    | Method::Detach
-                    | Method::EventRead
-                    | Method::Exec
-                    | Method::Generate
-                    | Method::Health
-                    | Method::Info
-                    | Method::LayrHealth
-                    | Method::Next
-                    | Method::Open
-                    | Method::ProjectEnsure
-                    | Method::ProjectExec
-                    | Method::ProjectImport
-                    | Method::ProviderList
-                    | Method::Replay
-                    | Method::ResponseStatus
-                    | Method::RetireCommand
-                    | Method::SecretsList
-                    | Method::SecretsRemove
-                    | Method::SecretsSet
-                    | Method::ShareConfigure
-                    | Method::ShareName
-                    | Method::ShareStatus
-                    | Method::Sign
-                    | Method::Status
-                    | Method::SyncMacApply
-                    | Method::SyncMacHandoff
-                    | Method::SyncMacHashes
-                    | Method::SyncMacHead
-                    | Method::SyncMacRead
-                    | Method::SyncMacWorktree
-                    | Method::VaultConfigure
-                    | Method::VaultPush
-                    | Method::VaultStatus
-                    | Method::UploadBegin
-                    | Method::UploadChunk
-                    | Method::UploadCommit
-                    | Method::Verify
-                    | Method::Write
-                    | Method::CurrentTimeRead
-                    | Method::ItemToolCall
-                    | Method::ItemCommandExecutionRequestApproval
-                    | Method::ItemFileChangeRequestApproval
-                    | Method::ItemPermissionsRequestApproval
-                    | Method::McpServerElicitationRequest
-                    | Method::ItemToolRequestUserInput
-                    | Method::ItemStarted
-                    | Method::ItemCompleted
-                    | Method::ItemAgentMessageDelta
-                    | Method::ItemReasoningTextDelta
-                    | Method::ItemCommandExecutionOutputDelta
-                    | Method::CommandExecOutputDelta
-                    | Method::TurnStarted
-                    | Method::TurnCompleted
-                    | Method::TurnPlanUpdated
-                    | Method::TurnDiffUpdated
-                    | Method::ThreadClosed
-                    | Method::ThreadStatusChanged
-                    | Method::ThreadTokenUsageUpdated
-                    | Method::ThreadShellPolicyUpdated
-                    | Method::ThreadIdleCompactionUpdated
-                    | Method::AccountLoginCompleted
-                    | Method::AccountUpdated
-                    | Method::AccountRateLimitsUpdated
-                    | Method::ModelSafetyBufferingUpdated
-                    | Method::ProviderGenerationStarted
-                    | Method::ProtocolError => (Reply::Accept, json!({})),
-                };
-                let ticket = RequestTicket {
-                    generation: 7,
-                    id: RequestId::String(format!(
-                        "retained:default:{}",
-                        studio_runtime_store::sha256_hex(request.operation.as_bytes())
-                    )),
-                    method: request.method,
-                };
-                let outcome = match reply {
-                    Reply::Accept => ReceiptOutcome::Written {
-                        ticket,
-                        response: ProviderResponse::Reply(value),
-                    },
-                    Reply::Reject => ReceiptOutcome::Written {
-                        ticket,
-                        response: ProviderResponse::Rejected(
-                            json!({"code":-32600,"message":"refused"}),
-                        ),
-                    },
-                    Reply::Unknown => ReceiptOutcome::Unknown { ticket },
-                };
-                Ok(SessionReceipt {
-                    outcome,
-                    scope: Self::scope(),
-                    operation: request.operation,
-                    replayed: false,
-                })
-            })
-        }
-    }
-
-    struct Fixture {
-        resources: preparation::PreparationResources,
-        store: Arc<RuntimeStore>,
-        _directory: tempfile::TempDir,
-    }
-
-    /// A lead and its queued review child as `orchestration_review` saves it
-    /// (the shape of live agent 8388eb70).
-    async fn fixture(session: Arc<Session>) -> Fixture {
+    #[tokio::test]
+    async fn unsubmitted_legacy_review_fails_once_without_provider_calls() {
         let directory = tempfile::tempdir().unwrap();
-        let cwd = CanonicalPath::existing(directory.path())
-            .unwrap()
-            .join("repo");
-        std::fs::create_dir(&cwd).unwrap();
-        let state = directory.path().join("state");
-        std::fs::create_dir(&state).unwrap();
-        let store = Arc::new(RuntimeStore::open(Some(&state)).await.unwrap());
-        let cwd = cwd.to_string_lossy().into_owned();
-        let lead = json!({"compactions":0,"id":"lead","rootId":"lead","parentId":null,"epoch":0,"status":"running",
-            "name":"Lead","cwd":cwd,"isLead":true,"autoWake":true,"inFlight":true,"created":1.0,
-            "threadId":"lead-thread","turnId":"lead-turn","accountKey":"default","provider":"codex",
-            "model":"gpt-6","effort":"medium","fastMode":false,"concurrency":32});
-        let child = json!({"compactions":0,"id":"review","rootId":"lead","parentId":"lead","epoch":0,
-            "status":"queued","name":"Review","cwd":cwd,"isLead":false,"autoWake":true,
-            "inFlight":false,"created":2.0,"threadId":null,"turnId":null,"accountKey":"default",
-            "provider":"codex","role":"reviewer","model":"gpt-6","effort":"medium",
-            "nativeEffort":"medium","fastMode":false,"permissionMode":"default","worktree":false,
-            "workspaceMode":"shared","daybreakEnabled":false,
-            "prompt":"Run a native code review: {\"type\": \"uncommittedChanges\"}",
-            "nativeReview":{"target":{"type":"uncommittedChanges"},"requestId":"lead:review:r1",
-                "actionRequestId":studio_runtime_schema::persistence::RequestIdentity::issue_root(),
-                "actorId":"lead","args":{},"status":"pending","response":{}}});
+        let store = Arc::new(RuntimeStore::open(Some(directory.path())).await.unwrap());
+        let lead = json!({"compactions":0,"id":"lead","rootId":"lead","parentId":null,"epoch":0,"status":"running", "name":"Lead","cwd":directory.path().to_str().unwrap(),"isLead":true,"autoWake":true,"inFlight":true,"created":1.0,"accountKey":"default","provider":"codex","model":"gpt-6"});
+        let child = json!({"compactions":0,"id":"review","rootId":"lead","parentId":"lead","epoch":0,"status":"queued","name":"Review","cwd":directory.path().to_str().unwrap(),"isLead":false,"autoWake":true,"inFlight":false,"created":2.0,"accountKey":"default","provider":"codex","role":"reviewer","model":"gpt-6","nativeReview":{"status":"pending","target":{"type":"uncommittedChanges"}}});
         store
             .transaction_with(move |tx| {
                 AgentRepository::put(tx, &AgentRecord::from_value(lead)?)?;
-                AgentRepository::put(tx, &AgentRecord::from_value(child)?)?;
-                Ok::<_, studio_runtime_store::StoreError>(())
+                AgentRepository::put(tx, &AgentRecord::from_value(child)?)
             })
             .await
             .unwrap();
@@ -1012,193 +107,37 @@ pub(crate) mod tests {
             String::new(),
             crate::model_catalog::ModelCatalogService::new(),
         )
-        .unwrap()
-        .with_account_session(Some(session));
-        Fixture {
-            _directory: directory,
-            store,
-            resources,
-        }
-    }
-
-    async fn child(store: &Arc<RuntimeStore>) -> Value {
-        read_agent(store, "review").await.unwrap()
-    }
-
-    async fn parent_events(store: &Arc<RuntimeStore>) -> Vec<(String, String)> {
-        store
-            .read_async("test", |tx| {
-                let mut statement = tx
-                    .prepare("SELECT id,kind FROM runtime_events WHERE agent='lead' ORDER BY id")?;
-                let rows = statement
-                    .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
-                    .collect::<rusqlite::Result<Vec<_>>>()?;
-                Ok::<_, studio_runtime_store::StoreError>(rows)
-            })
-            .await
-            .unwrap()
-    }
-
-    #[tokio::test]
-    async fn a_queued_review_child_starts_one_read_only_thread_and_one_review() {
-        let session = Session::new(Reply::Accept, Reply::Accept);
-        let fixture = fixture(Arc::clone(&session)).await;
-        assert!(
-            candidate(&fixture.store, "review", 0, "default")
-                .await
-                .unwrap()
-        );
-        run(Arc::clone(&fixture.store), &fixture.resources, "review", 0)
-            .await
-            .unwrap();
-        assert_eq!(
-            session.methods(),
-            ["thread/start", "thread/settings/update", "review/start"]
-        );
-        // Python `new_thread_params` for a reviewer: no Studio tools, the
-        // review model is the child model, and the sandbox is read-only.
-        let start = session.params(Method::ThreadStart);
-        assert_eq!(start["dynamicTools"], json!([]));
-        assert_eq!(start["config"]["review_model"], "gpt-6");
-        assert_eq!(start["sandbox"], "read-only");
-        assert_eq!(start["approvalPolicy"], "on-request");
-        // Python `run_native_action` for action review.
-        assert_eq!(
-            session.params(Method::ReviewStart),
-            json!({"threadId":"review-thread","target":{"type":"uncommittedChanges"},
-                "delivery":"inline"})
-        );
-        let running = child(&fixture.store).await;
-        assert_eq!(running["threadId"], "review-thread");
-        assert_eq!(running["turnId"], "review-turn");
-        assert_eq!(running["status"], "running");
-        assert_eq!(running["nativeReview"]["status"], "started");
-        assert_eq!(running[THREAD_RECEIPT]["status"], "accepted");
-        assert_eq!(running["startAttempt"]["action"], "review");
-        assert_eq!(running["startAttempt"]["submitted"], true);
-        let stored = AgentRepository::get(
-            &fixture.store.test_reader().unwrap(),
-            &AgentId::from("review"),
-        )
-        .unwrap()
         .unwrap();
-        assert_eq!(
-            stored.native_review_thread.as_ref().unwrap().status,
-            NativeReviewThreadStatus::Accepted
-        );
-        assert_eq!(
-            stored
-                .native_review_thread
-                .as_ref()
-                .unwrap()
-                .thread_id
-                .as_deref(),
-            Some("review-thread")
-        );
-        assert_eq!(stored.start_attempt.as_ref().unwrap().submitted, Some(true));
-        // A second wake sends nothing: the child is no longer claimable.
-        assert!(
-            !candidate(&fixture.store, "review", 0, "default")
-                .await
-                .unwrap()
-        );
-        run(Arc::clone(&fixture.store), &fixture.resources, "review", 0)
+        assert!(candidate(&store, "review", 0, "default").await.unwrap());
+        run(Arc::clone(&store), &resources, "review", 0)
             .await
             .unwrap();
-        assert_eq!(session.methods().len(), 3);
-    }
-
-    #[tokio::test]
-    async fn an_ordinary_claim_leaves_queued_input_to_the_pending_review() {
-        let session = Session::new(Reply::Accept, Reply::Accept);
-        let fixture = fixture(session).await;
-        fixture
-            .store
-            .transaction_with(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) \
-                     VALUES('message','review','agent_message','{}','pending',3.0,0)",
-                    [],
-                )?;
-                let claimed =
-                    crate::scheduler::claim_preparation_in_transaction(tx, "review", 0, "a", 4.0)
-                        .map_err(|error| {
-                        studio_runtime_store::StoreError::SchemaMismatch(error.to_string())
-                    })?;
-                assert!(claimed.is_none(), "the review owns the first turn");
-                Ok::<_, studio_runtime_store::StoreError>(())
-            })
+        run(Arc::clone(&store), &resources, "review", 0)
             .await
             .unwrap();
-        let status: String = fixture
-            .store
-            .test_reader()
+        let reader = store.test_reader().unwrap();
+        let record = AgentRepository::get(&reader, &AgentId::from("review"))
             .unwrap()
+            .unwrap()
+            .value();
+        assert_eq!(record["status"], "failed");
+        assert!(record["error"].as_str().unwrap().contains("older version"));
+        assert_eq!(record["nativeReview"]["status"], "refused");
+        let events: i64 = reader
             .query_row(
-                "SELECT status FROM runtime_events WHERE id='message'",
+                "SELECT count(*) FROM runtime_events WHERE agent='lead' AND kind='child_result'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(status, "pending");
-        assert!(
-            candidate(&fixture.store, "review", 0, "default")
-                .await
-                .unwrap()
-        );
+        assert_eq!(events, 1);
     }
 
-    #[tokio::test]
-    async fn an_unknown_thread_start_fails_the_child_once_and_is_never_resent() {
-        let session = Session::new(Reply::Unknown, Reply::Accept);
-        let fixture = fixture(Arc::clone(&session)).await;
-        assert!(matches!(
-            run(Arc::clone(&fixture.store), &fixture.resources, "review", 0).await,
-            Err(NativeError::Unknown)
-        ));
-        let failed = child(&fixture.store).await;
-        assert_eq!(failed["status"], "failed");
-        assert_eq!(failed[THREAD_RECEIPT]["status"], "unknown");
-        assert!(failed["error"].as_str().unwrap().contains("unknown"));
-        assert_eq!(parent_events(&fixture.store).await.len(), 1);
-        // A later message queues the child again; the uncertain start stays unsent.
-        fixture
-            .store
-            .transaction_with(|tx| {
-                let mut agent = AgentRepository::get(tx, &AgentId::from("review"))?
-                    .unwrap()
-                    .value();
-                agent["status"] = json!("queued");
-                AgentRepository::put(tx, &AgentRecord::from_value(agent)?)
-            })
-            .await
-            .unwrap();
-        assert!(
-            run(Arc::clone(&fixture.store), &fixture.resources, "review", 0)
-                .await
-                .is_err()
-        );
-        assert_eq!(session.methods(), ["thread/start"]);
-        assert_eq!(parent_events(&fixture.store).await.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn a_rejected_review_start_fails_the_child_and_tells_the_parent() {
-        let session = Session::new(Reply::Accept, Reply::Reject);
-        let fixture = fixture(Arc::clone(&session)).await;
-        run(Arc::clone(&fixture.store), &fixture.resources, "review", 0)
-            .await
-            .unwrap();
-        let failed = child(&fixture.store).await;
-        assert_eq!(failed["status"], "failed");
-        assert_eq!(failed["inFlight"], false);
-        let events = parent_events(&fixture.store).await;
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].1, "child_result");
-        assert!(events[0].0.starts_with("child-stop:review:0:start:"));
-        assert_eq!(
-            session.methods(),
-            ["thread/start", "thread/settings/update", "review/start"]
-        );
+    #[test]
+    fn submitted_or_uncertain_legacy_review_is_not_claimed() {
+        let mut record = json!({"nativeReview":{"status":"pending"},"status":"queued","autoWake":true,"startAttempt":{"submitted":true}});
+        assert!(!claimable(&record));
+        record["startAttempt"] = json!({"submitted":false,"observedTurnId":"turn"});
+        assert!(!claimable(&record));
     }
 }

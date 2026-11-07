@@ -190,6 +190,76 @@
                 "fast_mode": {
                   "type": "boolean"
                 },
+                "review": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "base": {
+                          "oneOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "mergeBaseWithMain",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["kind"],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "kind": {
+                                  "const": "state",
+                                  "type": "string"
+                                },
+                                "state": {
+                                  "pattern": "^[0-9a-f]{32}$",
+                                  "type": "string"
+                                }
+                              },
+                              "required": ["kind", "state"],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "kind": {
+                          "const": "layrState",
+                          "type": "string"
+                        },
+                        "state": {
+                          "pattern": "^[0-9a-f]{32}$",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["kind", "state", "base"],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "base": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "head": {
+                          "pattern": "^[0-9a-f]{40}$",
+                          "type": "string"
+                        },
+                        "kind": {
+                          "const": "gitRange",
+                          "type": "string"
+                        }
+                      },
+                      "required": ["kind", "base", "head"],
+                      "type": "object"
+                    }
+                  ],
+                  "title": "ReviewTarget"
+                },
                 "base_ref": {
                   "type": "string",
                   "maxLength": 1024
@@ -857,84 +927,92 @@
     {
       "type": "function",
       "name": "orchestration_review",
-      "description": "Request native Codex review in a separate read-only Studio child. Defaults to all uncommitted changes. Choose a base branch, commit, or custom instructions through target. When model is omitted, the reviewer uses the team review default if set, then the caller model. Pass model and effort to override them. Another model without effort uses its native default. The result reports the review model and effort. cwd is the repository folder for the review; defaults to the agent cwd. It must be inside a git repository. A relative path starts at the agent cwd, and a shell cd does not change it. The reviewer does not receive your chat history. The result wakes you automatically. Finish your turn while waiting. Use a stable request_id for retries; read orchestration_request after a lost response. Available in Multi agent mode.",
+      "description": "Start a read-only reviewer for the selected target using the team review default model. The reviewer does not receive your chat history. The result wakes you automatically. Finish your turn while waiting. Use a stable request_id for retries; read orchestration_request after a lost response. Available in Multi agent mode.",
       "inputSchema": {
         "type": "object",
         "properties": {
+          "instructions": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "maxLength": 8000,
+            "title": "ReviewInstructions",
+            "type": "string"
+          },
+          "account": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "ReviewAccount",
+            "type": "string"
+          },
           "target": {
-            "anyOf": [
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "oneOf": [
               {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": ["uncommittedChanges"]
+                  "base": {
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "const": "mergeBaseWithMain",
+                            "type": "string"
+                          }
+                        },
+                        "required": ["kind"],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "kind": {
+                            "const": "state",
+                            "type": "string"
+                          },
+                          "state": {
+                            "pattern": "^[0-9a-f]{32}$",
+                            "type": "string"
+                          }
+                        },
+                        "required": ["kind", "state"],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "kind": {
+                    "const": "layrState",
+                    "type": "string"
+                  },
+                  "state": {
+                    "pattern": "^[0-9a-f]{32}$",
+                    "type": "string"
                   }
                 },
-                "required": ["type"],
-                "additionalProperties": false
+                "required": ["kind", "state", "base"],
+                "type": "object"
               },
               {
-                "type": "object",
+                "additionalProperties": false,
                 "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": ["baseBranch"]
+                  "base": {
+                    "minLength": 1,
+                    "type": "string"
                   },
-                  "branch": {
+                  "head": {
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  "kind": {
+                    "const": "gitRange",
                     "type": "string"
                   }
                 },
-                "required": ["type", "branch"],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": ["commit"]
-                  },
-                  "sha": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  }
-                },
-                "required": ["type", "sha"],
-                "additionalProperties": false
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "type": {
-                    "type": "string",
-                    "enum": ["custom"]
-                  },
-                  "instructions": {
-                    "type": "string"
-                  }
-                },
-                "required": ["type", "instructions"],
-                "additionalProperties": false
+                "required": ["kind", "base", "head"],
+                "type": "object"
               }
-            ]
-          },
-          "cwd": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 4096
-          },
-          "model": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 200
-          },
-          "effort": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 40
+            ],
+            "title": "ReviewTarget"
           },
           "request_id": {
             "type": "string",
@@ -942,7 +1020,7 @@
             "maxLength": 200
           }
         },
-        "required": [],
+        "required": ["target", "request_id"],
         "additionalProperties": false
       }
     },

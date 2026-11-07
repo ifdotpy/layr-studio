@@ -27,7 +27,6 @@ zstd-safe = { workspace = true }
 
 [dev-dependencies]
 gungraun = "=0.17.2"
-studio-test-deps = { path = "../test-deps" }
 schemars.workspace = true
 studio-runtime-store = { path = ".", features = ["test-support"] }
 tempfile = { workspace = true }
@@ -36,6 +35,7 @@ tempfile = { workspace = true }
 workspace = true
 
 [features]
+perf-reporting = ["studio-runtime-schema/perf-reporting", "studio-json/perf-reporting"]
 # Lets other crates' tests open an independent read-only canvas connection.
 test-support = []
 

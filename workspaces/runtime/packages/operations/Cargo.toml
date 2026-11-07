@@ -15,7 +15,6 @@ serde = ["dep:serde"]
 serde = { workspace = true, features = ["derive"], optional = true }
 
 [dev-dependencies]
-studio-test-deps = { path = "../test-deps" }
 studio-json = { path = "../json" }
 
 [lints]

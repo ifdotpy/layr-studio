@@ -25,8 +25,6 @@ fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ReviewDefaultsDto {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub account_key: Option<String>,
     #[serde(deserialize_with = "nullable")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -129,8 +127,7 @@ mod tests {
 
     #[test]
     fn published_components_match_owners() {
-        let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

@@ -121,6 +121,15 @@ pub trait LifecyclePorts: Send + Sync {
     /// Wake the retained owners to drain their committed effects. This is not
     /// another Stop command and must not increment epochs or resend Unknown IO.
     fn committed(&self) -> LifecycleCommitFuture<'_>;
+
+    /// Reuse the deletion request identity for cleanup of settled-turn commands.
+    fn cleanup_deleted_commands(
+        &self,
+        _agents: Vec<String>,
+        _request_id: String,
+    ) -> LifecycleCommitFuture<'_> {
+        Box::pin(async { Ok(()) })
+    }
 }
 
 pub struct UnavailableLifecyclePorts;
@@ -133,6 +142,47 @@ impl LifecyclePorts for UnavailableLifecyclePorts {
     }
 }
 
+pub enum LifecycleCommit {
+    Effects,
+    Deletion {
+        agents: Vec<String>,
+        request_id: String,
+        applied: bool,
+    },
+}
+
+/// One post-commit owner for lifecycle effects and exact deletion retries.
+pub async fn finish_commit(ports: &dyn LifecyclePorts, commit: LifecycleCommit) {
+    match commit {
+        LifecycleCommit::Effects => {
+            if let Err(error) = ports.committed().await {
+                eprintln!("Lifecycle committed; effect delivery remains pending: {error}");
+            }
+        }
+        LifecycleCommit::Deletion {
+            agents,
+            request_id,
+            applied,
+        } => {
+            dispatch_deletion(ports, agents, request_id, applied).await;
+        }
+    }
+}
+
+async fn dispatch_deletion(
+    ports: &dyn LifecyclePorts,
+    agents: Vec<String>,
+    request_id: String,
+    applied: bool,
+) {
+    if applied && let Err(error) = ports.committed().await {
+        eprintln!("Deletion committed; effect delivery remains pending: {error}");
+    }
+    if let Err(error) = ports.cleanup_deleted_commands(agents, request_id).await {
+        eprintln!("Deletion committed; command cleanup remains pending: {error}");
+    }
+}
+
 /// HTTP and managed tools share this consumer. Provider calls are deliberately
 /// absent; a successful return means the state and durable effects committed.
 pub async fn execute(
@@ -141,15 +191,58 @@ pub async fn execute(
     now: f64,
     ports: std::sync::Arc<dyn LifecyclePorts>,
 ) -> Result<Value, ManagementError> {
-    let result =
-        crate::agent_management_store::execute_prepared(store, action, now, Some(ports.clone()))
+    let (result, applied) = crate::agent_management_store::execute_prepared(
+        store.clone(),
+        action,
+        now,
+        Some(ports.clone()),
+    )
+    .await?;
+    if let Action::Delete { request_id, .. } = action {
+        let ids = deletion_ids(&result)?;
+        finish_commit(
+            ports.as_ref(),
+            LifecycleCommit::Deletion {
+                agents: ids,
+                request_id: request_id.clone(),
+                applied,
+            },
+        )
+        .await;
+    } else {
+        finish_commit(ports.as_ref(), LifecycleCommit::Effects).await;
+    }
+    deletion_result(store, action, result).await
+}
+
+pub(crate) async fn deletion_result(
+    store: std::sync::Arc<RuntimeStore>,
+    action: &Action,
+    mut result: Value,
+) -> Result<Value, ManagementError> {
+    if matches!(action, Action::Delete { .. }) {
+        let ids = deletion_ids(&result)?;
+        let stopped = store
+            .read_async("runtime-services/deletion-stop-outcome", move |conn| {
+                crate::commands::deletion_stop_outcome(conn, &ids)
+            })
             .await?;
-    // A failed wake cannot roll back the committed intent. Its retained owner
-    // retries the same effects; callers must receive the committed result.
-    if let Err(error) = ports.committed().await {
-        eprintln!("Lifecycle committed; effect delivery remains pending: {error}");
+        result["stopped"] = studio_json::json!(stopped);
     }
     Ok(result)
+}
+
+pub(crate) fn deletion_ids(result: &Value) -> Result<Vec<String>, ManagementError> {
+    result["deleted"]
+        .as_array()
+        .ok_or(ManagementError::Invalid("Invalid deletion result"))?
+        .iter()
+        .map(|id| {
+            id.as_str()
+                .map(str::to_owned)
+                .ok_or(ManagementError::Invalid("Invalid deletion result"))
+        })
+        .collect()
 }
 
 /// Actor-bound managed interrupt. Authorization against the sender epoch and

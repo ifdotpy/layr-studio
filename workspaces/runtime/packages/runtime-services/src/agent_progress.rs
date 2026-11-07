@@ -3,19 +3,8 @@ use crate::monitor_policy::MonitorStatus;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use serde::Deserialize;
 use studio_runtime_schema::agent_progress::{AgentCommandProgress, AgentStall};
-use studio_runtime_store::{AgentStatus, StoreResult, WorkItemRecord, WorkStatus};
+use studio_runtime_store::{AgentRecord, AgentStatus, StoreResult, WorkItemRecord, WorkStatus};
 
-// These are projections of open persisted records: unrelated stored fields are ignored.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentSource {
-    id: String,
-    status: Option<AgentStatus>,
-    #[serde(default)]
-    is_lead: bool,
-    deleted_at: Option<f64>,
-    active_execution: Option<ActiveExecution>,
-}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ActiveExecution {
@@ -69,77 +58,68 @@ pub(crate) fn publish_monitor_owner_change(
 
 pub(crate) fn derive<'a>(
     connection: &Connection,
-    record: &studio_json::Value,
+    agent: &AgentRecord,
     assignments: impl IntoIterator<Item = &'a Assignment>,
 ) -> StoreResult<AgentProgress> {
-    let agent: AgentSource = studio_json::from_value(record.clone())?;
+    let active_execution = agent
+        .extra
+        .get("activeExecution")
+        .filter(|value| !value.is_null())
+        .map(ActiveExecution::deserialize)
+        .transpose()?;
     let mut commands = Vec::new();
-    if crate::sync_policy::table_exists(connection, "runtime_monitors")? {
-        // This runs for every agent write inside the writer transaction. The
-        // owner index bounds it to the agent's live monitors; a guarded scan
-        // parsed every historical monitor (93,116 rows, 198 MB, for each
-        // journal batch on 22 October 2026). Without the index, guard before
-        // JSON extraction: one malformed sibling must not refuse an owner's
-        // projection (including startup recovery). Parse bad rows to report
-        // their ids while bounding valid rows to this owner.
-        let mut statement = connection.prepare_cached(
-            if crate::sync_policy::monitor_owner_index_exists(connection)? {
-                "SELECT id,record FROM runtime_monitors WHERE json_extract(record,'$.agent')=?1 \
-                 AND json_extract(record,'$.status') IN ('starting','running') ORDER BY rowid"
-            } else {
-                "SELECT id,record FROM runtime_monitors WHERE CASE WHEN json_valid(record) \
-                 THEN json_extract(record,'$.agent')=?1 ELSE 1 END ORDER BY rowid"
-            },
-        )?;
-        let rows = statement.query_map([&agent.id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?;
-        for row in rows {
-            let (id, raw) = row?;
-            let monitor: studio_runtime_store::MonitorRecord = match studio_json::from_str(&raw) {
-                Ok(monitor) => monitor,
-                Err(error) => {
-                    eprintln!(
-                        "Skipping invalid monitor {id} in agent progress projection: {error}"
-                    );
-                    continue;
-                }
-            };
-            if monitor.agent != agent.id {
+    // The idle-unload migration owns this generated-column index; malformed
+    // records have no agent and are excluded without evaluating JSON here.
+    // Malformed rows are skipped without the former per-write diagnostic.
+    let mut statement = connection.prepare_cached(&format!(
+        "SELECT id,record FROM runtime_monitors WHERE agent=?1 AND {} ORDER BY rowid",
+        studio_runtime_store::startup_recovery::active_monitor_predicate()
+    ))?;
+    let rows = statement.query_map([&agent.id.0], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (id, raw) = row?;
+        let monitor: studio_runtime_store::MonitorRecord = match studio_json::from_str(&raw) {
+            Ok(monitor) => monitor,
+            Err(error) => {
+                eprintln!("Skipping invalid monitor {id} in agent progress projection: {error}");
                 continue;
             }
-            if let Some((id, stage, started_at, last_output_line)) = command_progress(&monitor) {
-                commands.push(AgentCommandProgress {
-                    monitor_id: id.to_owned(),
-                    stage: stage.to_owned(),
-                    started_at,
-                    last_output_line: last_output_line.to_owned(),
-                });
-            }
+        };
+        if monitor.agent != agent.id.0 {
+            continue;
+        }
+        if let Some((id, stage, started_at, last_output_line)) = command_progress(&monitor) {
+            commands.push(AgentCommandProgress {
+                monitor_id: id.to_owned(),
+                stage: stage.to_owned(),
+                started_at,
+                last_output_line: last_output_line.to_owned(),
+            });
         }
     }
+
     let assignment = assignments.into_iter().find(|task| {
-        task.owner() == Some(&agent.id)
+        task.owner() == Some(&agent.id.0)
             && matches!(
                 task.status(),
                 WorkStatus::Ready | WorkStatus::Running | WorkStatus::Blocked
             )
     });
-    let stall = if !agent.is_lead
+    let stall = if agent.is_lead != Some(true)
         && agent.deleted_at.is_none()
-        && matches!(
-            agent.status,
-            Some(AgentStatus::Idle | AgentStatus::Completed)
-        )
+        && matches!(agent.status, AgentStatus::Idle | AgentStatus::Completed)
         && commands.is_empty()
     {
         if let Some(task) = assignment {
             let mut since = task.updated();
-            if let Some(execution) = &agent.active_execution {
+            if let Some(execution) = active_execution {
+                let run_id = execution.run_id;
                 let raw: Option<String> = connection
                     .query_row(
                         "SELECT record FROM runtime_execution_runs WHERE id=?1 AND agent=?2",
-                        rusqlite::params![execution.run_id, agent.id],
+                        rusqlite::params![run_id, agent.id.0],
                         |row| row.get(0),
                     )
                     .optional()?;
@@ -194,7 +174,94 @@ mod tests {
     use std::cell::Cell;
     use studio_json::json;
 
+    fn derive_value<'a>(
+        connection: &Connection,
+        value: &studio_json::Value,
+        assignments: impl IntoIterator<Item = &'a Assignment>,
+    ) -> StoreResult<AgentProgress> {
+        let mut value = value.clone();
+        let object = value.as_object_mut().expect("agent object");
+        object.entry("rootId").or_insert(json!("lead"));
+        object.entry("epoch").or_insert(json!(0));
+        object.entry("accountKey").or_insert(json!("default"));
+        object.entry("compactions").or_insert(json!(0));
+        derive(connection, &AgentRecord::from_value(value)?, assignments)
+    }
+
     thread_local! { static AGENT_PUBLICATIONS: Cell<usize> = const { Cell::new(0) }; }
+    thread_local! { static SCHEMA_READS: Cell<usize> = const { Cell::new(0) }; }
+
+    #[test]
+    fn progress_projection_does_not_read_schema() {
+        let db = studio_runtime_store::test_canvas();
+        db.trace_v2(
+            TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let TraceEvent::Stmt(statement, _) = event {
+                    let sql = statement.sql().to_ascii_lowercase();
+                    if sql.contains("sqlite_master") || sql.contains("sqlite_schema") {
+                        SCHEMA_READS.with(|count| count.set(count.get() + 1));
+                    }
+                }
+            }),
+        );
+        SCHEMA_READS.with(|count| count.set(0));
+        derive_value(&db, &json!({"id":"worker","status":"idle"}), &[]).unwrap();
+        assert_eq!(SCHEMA_READS.with(Cell::get), 0);
+    }
+
+    #[test]
+    fn generated_monitor_selection_matches_legacy_guarded_selection() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED); CREATE INDEX runtime_monitor_idle_agent ON runtime_monitors(agent) WHERE monitor_status IN ('running','starting','approval');").unwrap();
+        for (id, owner, status) in [
+            ("active", "worker", "running"),
+            ("starting", "worker", "starting"),
+            ("approval", "worker", "approval"),
+            ("finished", "worker", "completed"),
+            ("other", "other", "running"),
+        ] {
+            let record = crate::monitor_policy::complete_test_monitor(
+                json!({"id":id,"agent":owner,"status":status,"command":"build","created":5,"tail":"done"}),
+            );
+            db.execute(
+                "INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)",
+                [id, &record.to_string()],
+            )
+            .unwrap();
+        }
+        db.execute(
+            "INSERT INTO runtime_monitors(id,record) VALUES('bad','{')",
+            [],
+        )
+        .unwrap();
+        let mut statement = db.prepare("SELECT id,record FROM runtime_monitors WHERE CASE WHEN json_valid(record) THEN json_extract(record,'$.agent')=?1 ELSE 1 END ORDER BY rowid").unwrap();
+        let rows = statement
+            .query_map(["worker"], |row| row.get::<_, String>(1))
+            .unwrap();
+        let old: Vec<_> = rows
+            .filter_map(Result::ok)
+            .filter_map(|raw| {
+                studio_json::from_str::<studio_runtime_store::MonitorRecord>(&raw).ok()
+            })
+            .filter_map(|record| {
+                if record.agent != "worker" {
+                    return None;
+                }
+                command_progress(&record).map(|(id, stage, started_at, last_output_line)| {
+                    AgentCommandProgress {
+                        monitor_id: id.to_owned(),
+                        stage: stage.to_owned(),
+                        started_at,
+                        last_output_line: last_output_line.to_owned(),
+                    }
+                })
+            })
+            .collect();
+        let actual = derive_value(&db, &json!({"id":"worker","status":"idle"}), &[]).unwrap();
+        assert_eq!(actual.commands, old);
+        assert!(actual.stall.is_none());
+    }
     fn trace_agent_publication(event: TraceEvent<'_>) {
         if let TraceEvent::Stmt(statement, _) = event
             && statement.expanded_sql().is_some_and(|sql| {
@@ -263,7 +330,8 @@ mod tests {
     #[test]
     fn idle_assignment_stalls_but_live_commands_and_submitted_work_do_not() {
         let connection = Connection::open_in_memory().expect("test fixture value");
-        connection.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+        connection.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL);
+            CREATE INDEX runtime_monitor_idle_agent ON runtime_monitors(agent) WHERE monitor_status IN ('running','starting','approval');
             CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(json_extract(record,'$.agent'),json_extract(record,'$.status'));
             CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT, created REAL, record TEXT);").expect("test fixture value");
         connection
@@ -278,7 +346,7 @@ mod tests {
         .expect("test fixture value");
         let mut agent = json!({"compactions":0,"accountKey":"default","provider":studio_runtime_schema::ProviderKind::Codex,"id":"worker","rootId":"lead","epoch":0,"status":"completed","activeExecution":{"runId":"current","attemptId":"attempt"}});
         let mut tasks = vec![task];
-        let progress = derive(&connection, &agent, &tasks).expect("test fixture value");
+        let progress = derive_value(&connection, &agent, &tasks).expect("test fixture value");
         assert_eq!(
             progress.stall,
             Some(AgentStall {
@@ -313,7 +381,7 @@ mod tests {
         ] {
             agent["status"] = json!(status);
             assert!(
-                derive(&connection, &agent, &tasks)
+                derive_value(&connection, &agent, &tasks)
                     .expect("test fixture value")
                     .stall
                     .is_none(),
@@ -322,7 +390,7 @@ mod tests {
         }
         agent["status"] = json!("waiting_on_monitor");
         assert!(
-            derive(&connection, &agent, &tasks)
+            derive_value(&connection, &agent, &tasks)
                 .expect("test fixture value")
                 .stall
                 .is_none()
@@ -335,7 +403,7 @@ mod tests {
         ] {
             tasks[0].set_status(status);
             assert!(
-                derive(&connection, &agent, &tasks)
+                derive_value(&connection, &agent, &tasks)
                     .expect("test fixture value")
                     .stall
                     .is_none()
@@ -345,7 +413,7 @@ mod tests {
         for (id, status) in [("m1", "running"), ("m2", "starting"), ("old", "completed")] {
             connection.execute("INSERT INTO runtime_monitors(id,record,monitor_status) VALUES(?1,?2,COALESCE(CASE WHEN json_valid(?2) THEN json_extract(?2,'$.status') END,'lost'))",rusqlite::params![id,crate::monitor_policy::complete_test_monitor(json!({"id":id,"agent":"worker","status":status,"command":"just test-fast\nsecond line","created":5,"tail":"old output\nfinal output\n"})).to_string()]).expect("test fixture value");
         }
-        let progress = derive(&connection, &agent, &tasks).expect("test fixture value");
+        let progress = derive_value(&connection, &agent, &tasks).expect("test fixture value");
         assert!(progress.stall.is_none());
         assert_eq!(progress.commands.len(), 2);
         assert_eq!(progress.commands[0].stage, "just test-fast");
@@ -382,7 +450,7 @@ mod tests {
                 }),
             )
             .expect("progress counter");
-        let progress = derive(connection, agent, &[]).expect("projection");
+        let progress = derive_value(connection, agent, &[]).expect("projection");
         connection
             .progress_handler(1, None::<fn() -> bool>)
             .expect("progress counter");
@@ -396,7 +464,8 @@ mod tests {
     fn indexed_progress_work_is_independent_of_finished_monitor_history() {
         const HISTORY: usize = 2_000;
         let connection = Connection::open_in_memory().expect("test fixture value");
-        connection.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);
+        connection.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL);
+            CREATE INDEX runtime_monitor_idle_agent ON runtime_monitors(agent) WHERE monitor_status IN ('running','starting','approval');
             CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(json_extract(record,'$.agent'),json_extract(record,'$.status'));").expect("test fixture value");
         let insert = |from: usize| {
             for index in from..from + HISTORY {
@@ -427,7 +496,7 @@ mod tests {
         // maintained over the malformed JSON row.
         connection
             .execute_batch(
-                "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0)",
+                "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL); CREATE INDEX runtime_monitor_idle_agent ON runtime_monitors(agent) WHERE monitor_status IN ('running','starting','approval');",
             )
             .expect("test fixture value");
         for (id, raw) in [
@@ -438,7 +507,7 @@ mod tests {
         ] {
             connection.execute("INSERT INTO runtime_monitors(id,record,monitor_status) VALUES(?1,?2,COALESCE(CASE WHEN json_valid(?2) THEN json_extract(?2,'$.status') END,'lost'))", [id,&raw]).expect("test fixture value");
         }
-        let progress = derive(&connection, &json!({"id":"worker","status":"idle"}), &[])
+        let progress = derive_value(&connection, &json!({"id":"worker","status":"idle"}), &[])
             .expect("test fixture value");
         assert_eq!(progress.commands.len(), 1);
         assert_eq!(progress.commands[0].monitor_id, "live");

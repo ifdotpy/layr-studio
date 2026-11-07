@@ -121,6 +121,7 @@ test("sync-read-retry-browser", async ({ page: fixturePage }) => {
                   : JSON.stringify({ items: [] }),
             },
           ],
+          complete: true,
           checkpoint: { seq: 1 },
         } satisfies FixturePullResponse);
       } else next();

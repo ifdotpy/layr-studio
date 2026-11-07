@@ -158,8 +158,7 @@ export type SyncClientOptions = {
   databaseSuffix: string;
 };
 export function createSyncClient(options: SyncClientOptions) {
-  const { syncGet, saved, save, setWorkspace, isApiSchemaMismatch } =
-    options.api;
+  const { syncGet, saved, save, setWorkspace } = options.api;
   const { watchResourceChanges, watchResourceConnection } = options.resources;
   const { getEntitySequenceCheckpoint, setEntitySequenceProjection } =
     options.sequences;
@@ -205,23 +204,12 @@ export function createSyncClient(options: SyncClientOptions) {
       return identity;
     };
     const initialIdentity = identify();
-    let grace: ReturnType<typeof setTimeout> | undefined;
     let identity: Awaited<ReturnType<typeof identify>> | null = null;
-    try {
-      identity = await (hasCache
-        ? Promise.race([
-            initialIdentity,
-            new Promise<null>((resolve) => {
-              grace = setTimeout(() => resolve(null), 500);
-            }),
-          ])
-        : initialIdentity);
-    } catch (error) {
-      const unavailable = isApiSchemaMismatch() || retryableReadError(error);
-      if (!hasCache || !unavailable) throw error;
-    } finally {
-      clearTimeout(grace);
-    }
+    // A saved workspace opens at once, like an installed app: its cached copy
+    // shows before the server answers. verifyWorkspace checks the identity
+    // before any read or draft write, and reports its failure there.
+    if (hasCache) initialIdentity.catch(() => {});
+    else identity = await initialIdentity;
     const workspaceId = identity?.workspaceId || cached;
     setEntitySequenceProjection(workspaceId, API_SCHEMA_HASH);
     if (identity) save("codex-sync-workspace", workspaceId);
@@ -2018,10 +2006,7 @@ export function createSyncClient(options: SyncClientOptions) {
                   result.initialHigh,
                   "initial checkpoint",
                 );
-                more =
-                  result.documents.length >= ENTITY_BATCH_SIZE &&
-                  result.checkpoint.seq <
-                    requiredSyncNumber(result.maxSeq, "maximum sequence");
+                more = !result.complete;
               } else {
                 more = false;
               }

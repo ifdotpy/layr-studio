@@ -29,6 +29,22 @@ pub enum NativeLayrError {
 }
 
 type Result<T> = std::result::Result<T, NativeLayrError>;
+
+fn assigned_reviewer(record: &Value) -> Result<bool> {
+    let Some(value) = record
+        .get("reviewAssignment")
+        .filter(|value| !value.is_null())
+    else {
+        return Ok(false);
+    };
+    let assignment: studio_runtime_schema::review::ReviewAssignment =
+        serde::Deserialize::deserialize(value)
+            .map_err(|error| NativeLayrError::Refused(error.to_string()))?;
+    Ok(matches!(
+        assignment.target(),
+        studio_runtime_schema::review::ReviewTarget::LayrState { .. }
+    ))
+}
 pub type ProgressSink = Arc<dyn Fn(CopyProgress) + Send + Sync>;
 
 /// Minimum interval between progress publications, in milliseconds.
@@ -564,8 +580,23 @@ pub fn main_path(state_dir: &Path, project: &str) -> PathBuf {
     main_path_in_store(&store_path(state_dir), project)
 }
 
+/// The main line of `project`. `layr init --from-git` leaves main at the checkout path, outside
+/// the store; its metadata then names that folder.
 pub(super) fn main_path_in_store(root: &Path, project: &str) -> PathBuf {
-    root.join("projects").join(project).join("lines/main")
+    let main = root.join("projects").join(project).join("lines/main");
+    if main.exists() {
+        return main;
+    }
+    super::mapping::moved_main(root, project).unwrap_or(main)
+}
+
+/// The folder of `line` of `project`. `layr line new` makes it in the store even when main
+/// moved out of the store.
+pub(super) fn line_path_in_store(root: &Path, project: &str, line: &str) -> PathBuf {
+    if line == "main" {
+        return main_path_in_store(root, project);
+    }
+    root.join("projects").join(project).join("lines").join(line)
 }
 
 pub(super) fn admit_git_policy(state_dir: &Path, project: &str, without_git: bool) -> Result<()> {
@@ -825,7 +856,8 @@ pub(super) fn prepare_files_reporting(
     };
     let reviewer = record["role"] == "reviewer";
     let lead = record["isLead"] == true;
-    let line = if lead || reviewer {
+    let assigned = reviewer && assigned_reviewer(record)?;
+    let line = if lead || (reviewer && !assigned) {
         "main".to_owned()
     } else {
         format!(
@@ -833,11 +865,8 @@ pub(super) fn prepare_files_reporting(
             studio_runtime_store::sha256_hex(text(record, "id")?.as_bytes())
         )
     };
-    let cwd = main
-        .parent()
-        .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
-        .join(&line);
-    if !lead && !reviewer {
+    let cwd = line_path_in_store(&root, &project, &line);
+    if !lead && (!reviewer || assigned) {
         create_worker_line(
             state_dir, &root, &main, &project, &line, &cwd, record, &start, progress,
         )?;
@@ -854,31 +883,12 @@ pub(super) fn prepare_files_reporting(
     }
     result["layrCacheWarning"] = json!(cache_warning);
     if reviewer {
-        let scratch = state_dir.join(NATIVE_LAYR_DIRECTORY).join("scratch").join(
-            studio_runtime_store::sha256_hex(text(record, "id")?.as_bytes()),
-        );
-        fs::create_dir_all(&scratch)?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&scratch, fs::Permissions::from_mode(0o700))?;
-        }
-        let canonical = CanonicalPath::existing(&scratch).map(CanonicalPath::into_path_buf)?;
-        let expected = CanonicalPath::existing(state_dir)
-            .map(CanonicalPath::into_path_buf)?
-            .join(NATIVE_LAYR_DIRECTORY)
-            .join("scratch")
-            .join(studio_runtime_store::sha256_hex(
-                text(record, "id")?.as_bytes(),
-            ));
-        if canonical != expected {
-            return Err(NativeLayrError::Refused(
-                "Reviewer scratch folder has a symlink ancestor".into(),
-            ));
-        }
+        let canonical = crate::reviewer_workspace::ensure_scratch(state_dir, text(record, "id")?)?;
         result["layrScratch"] = json!(canonical);
         result["layrReadCwd"] = result["cwd"].clone();
-        result["cwd"] = result["layrScratch"].clone();
+        if !assigned {
+            result["cwd"] = result["layrScratch"].clone();
+        }
     }
     Ok(result)
 }
@@ -995,7 +1005,8 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
         ));
     }
     let project = project_id(record)?;
-    let expected_line = if record["isLead"] == true || record["role"] == "reviewer" {
+    let assigned = record["role"] == "reviewer" && assigned_reviewer(record)?;
+    let expected_line = if record["isLead"] == true || (record["role"] == "reviewer" && !assigned) {
         "main".to_owned()
     } else {
         format!(
@@ -1009,10 +1020,7 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
         ));
     }
     let root = settings::record_store(state_dir, record)?;
-    let expected = main_path_in_store(&root, &project)
-        .parent()
-        .ok_or_else(|| NativeLayrError::Refused("Invalid main path".into()))?
-        .join(expected_line);
+    let expected = line_path_in_store(&root, &project, &expected_line);
     let reviewer = record["role"] == "reviewer";
     if reviewer {
         let scratch = CanonicalPath::existing(state_dir)
@@ -1022,8 +1030,9 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
             .join(studio_runtime_store::sha256_hex(
                 text(record, "id")?.as_bytes(),
             ));
-        if CanonicalPath::existing(text(record, "cwd")?).map(CanonicalPath::into_path_buf)?
-            != scratch
+        if (!assigned
+            && CanonicalPath::existing(text(record, "cwd")?).map(CanonicalPath::into_path_buf)?
+                != scratch)
             || CanonicalPath::existing(text(record, "layrScratch")?)
                 .map(CanonicalPath::into_path_buf)?
                 != scratch
@@ -1033,9 +1042,15 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
             ));
         }
     }
-    let actual =
-        CanonicalPath::existing(text(record, if reviewer { "layrReadCwd" } else { "cwd" })?)
-            .map(CanonicalPath::into_path_buf)?;
+    let actual = CanonicalPath::existing(text(
+        record,
+        if reviewer && !assigned {
+            "layrReadCwd"
+        } else {
+            "cwd"
+        },
+    )?)
+    .map(CanonicalPath::into_path_buf)?;
     if actual != CanonicalPath::existing(expected).map(CanonicalPath::into_path_buf)? {
         return Err(NativeLayrError::Refused(
             "The native Layr cwd association changed".into(),
@@ -1134,7 +1149,7 @@ pub fn remove(state_dir: &Path, record: &Value, request_id: &str) -> Result<Valu
         &json!({"agent":record["id"],"line":record["layrLine"],"kind":"remove"}),
         || {
             if record["isLead"] != true
-                && record["role"] != "reviewer"
+                && (record["role"] != "reviewer" || assigned_reviewer(record)?)
                 && record["layrReady"] == true
             {
                 let project = project_id(record)?;
@@ -1165,7 +1180,11 @@ pub fn remove(state_dir: &Path, record: &Value, request_id: &str) -> Result<Valu
     )
 }
 
-pub fn evidence(state_dir: &Path, record: &Value, revision: &str) -> Result<Value> {
+pub fn evidence(
+    state_dir: &Path,
+    record: &Value,
+    revision: &str,
+) -> Result<studio_runtime_schema::layr_evidence::EvidenceResponse> {
     let cwd = associated_cwd(state_dir, record)?;
     let resolved = run(state_dir, &cwd, &["rev-parse", revision])?;
     if revision != resolved || run(state_dir, &cwd, &["rev-parse", "head"])? != resolved {
@@ -1173,13 +1192,11 @@ pub fn evidence(state_dir: &Path, record: &Value, revision: &str) -> Result<Valu
             "Submit the full Layr state ID".into(),
         ));
     }
-    Ok(json!(
-        studio_runtime_schema::layr_evidence::EvidenceResponse {
-            state_id: json!(resolved),
-            project_id: record["layrProjectId"].clone(),
-            line: record["layrLine"].clone(),
-        }
-    ))
+    Ok(studio_runtime_schema::layr_evidence::EvidenceResponse {
+        state_id: resolved,
+        project_id: record["layrProjectId"].as_str().map(str::to_owned),
+        line: record["layrLine"].as_str().map(str::to_owned),
+    })
 }
 
 pub fn merge(
@@ -1340,6 +1357,44 @@ pub(crate) fn stage_turn_save(
 mod review_tests {
     use super::*;
 
+    #[test]
+    fn unassigned_legacy_reviewer_keeps_main_and_scratch() {
+        let fixture = tempfile::tempdir().unwrap();
+        let id = "legacy-reviewer";
+        let main = main_path(fixture.path(), "project");
+        let scratch = crate::reviewer_workspace::ensure_scratch(fixture.path(), id).unwrap();
+        fs::create_dir_all(&main).unwrap();
+        let record = json!({"id":id,"role":"reviewer","isLead":false,
+            "layrReady":true,"layrProjectId":"project","layrLine":"main",
+            "cwd":scratch,"layrScratch":scratch,"layrReadCwd":main,
+            "layrStoreRoot":super::super::store_path(fixture.path())});
+        assert_eq!(associated_cwd(fixture.path(), &record).unwrap(), main);
+    }
+
+    #[test]
+    fn assigned_reviewer_associates_its_own_line_as_working_copy() {
+        let fixture = tempfile::tempdir().unwrap();
+        let id = "reviewer";
+        let line = format!("agent-{}", studio_runtime_store::sha256_hex(id.as_bytes()));
+        let cwd = main_path(fixture.path(), "project")
+            .parent()
+            .unwrap()
+            .join(&line);
+        fs::create_dir_all(&cwd).unwrap();
+        let scratch = fixture
+            .path()
+            .join(NATIVE_LAYR_DIRECTORY)
+            .join("scratch")
+            .join(studio_runtime_store::sha256_hex(id.as_bytes()));
+        fs::create_dir_all(&scratch).unwrap();
+        let record = json!({"id":id,"role":"reviewer","isLead":false,
+            "layrReady":true,"layrProjectId":"project","layrLine":line,"cwd":cwd,
+            "layrStoreRoot":super::super::store_path(fixture.path()), "layrScratch":scratch,
+            "reviewAssignment":{"kind":"layrState","state":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "base":{"kind":"mergeBaseWithMain"}}});
+        assert_eq!(associated_cwd(fixture.path(), &record).unwrap(), cwd);
+    }
+
     /// Linux preparation checks the daemon identity before an import.
     #[cfg(target_os = "linux")]
     fn fixture_daemon(state: &Path) -> std::thread::JoinHandle<()> {
@@ -1373,7 +1428,7 @@ esac
         );
         fs::write(&binary, script).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
-        super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        let _binary_override = super::super::override_layr_binary(binary);
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
@@ -1386,6 +1441,24 @@ esac
             fixture.path().join("removed").exists(),
             "staging remote was not removed"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn assigned_layr_reviewer_prepares_and_archives_the_requested_line() {
+        let state = tempfile::tempdir().unwrap();
+        let fixture = super::super::review_fixture::FakeReviewer::new(state.path(), "reviewer");
+        let record = &fixture.record;
+        assert_ne!(record["cwd"], record["layrScratch"]);
+        assert_eq!(record["cwd"], record["layrReadCwd"]);
+        let line = record["layrLine"].as_str().unwrap();
+        let commands =
+            fs::read_to_string(super::super::store_path(state.path()).join("commands")).unwrap();
+        assert!(commands.contains(&format!("line new {line} aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")));
+        remove(state.path(), record, "remove-reviewer").unwrap();
+        let commands =
+            fs::read_to_string(super::super::store_path(state.path()).join("commands")).unwrap();
+        assert!(commands.contains(&format!("line delete -D {line}")));
     }
 
     #[cfg(unix)]
@@ -1409,7 +1482,7 @@ esac
         );
         fs::write(&binary, script).unwrap();
         fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
-        super::super::capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+        let _binary_override = super::super::override_layr_binary(binary);
         #[cfg(target_os = "linux")]
         let _daemon = fixture_daemon(&state);
         let mut record = super::super::fixture_agent("lead", true);
@@ -1860,6 +1933,7 @@ fi
         )
         .unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _binary_override = super::super::override_layr_binary(binary);
         let lead = json!({"id":"lead","isLead":true,"layrReady":true,"layrProjectId":project,"layrLine":"main","cwd":main});
         let (sender, receiver) = mpsc::channel();
         let spawn = |id: &'static str| {
@@ -1868,15 +1942,8 @@ fi
             std::fs::create_dir_all(&cwd).unwrap();
             let worker =
                 json!({"id":id,"layrReady":true,"layrProjectId":project,"layrLine":line,"cwd":cwd});
-            let (state, binary, lead, sender) = (
-                state.path().to_owned(),
-                binary.clone(),
-                lead.clone(),
-                sender.clone(),
-            );
+            let (state, lead, sender) = (state.path().to_owned(), lead.clone(), sender.clone());
             std::thread::spawn(move || {
-                super::super::capability::TEST_BINARY
-                    .with(|slot| *slot.borrow_mut() = Some(binary));
                 sender
                     .send(merge(&state, &lead, &worker, "reviewed", id))
                     .unwrap();
@@ -1954,7 +2021,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
         )
         .unwrap();
         std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
-        super::super::capability::TEST_BINARY.with(|slot| *slot.borrow_mut() = Some(binary));
+        let _binary_override = super::super::override_layr_binary(binary);
         let record = json!({"id":"worker", "layrBaseState":"requested"});
         let observed = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let captured = observed.clone();

@@ -39,7 +39,6 @@ fn corpus() -> &'static Value {
             ("outcomes", &["agent"][..]),
             ("actions", &["agent", "after"][..]),
             ("reviews", &["actor", "root", "child"][..]),
-            ("reviewTurns", &["child", "claimed", "submitted"][..]),
             ("commands", &["agent"][..]),
             ("cancellations", &["agent"][..]),
             ("forks", &["agent"][..]),
@@ -604,6 +603,92 @@ fn invalid_worker_not_sent_receipts_keep_intent_unknown_and_unclaimable() {
 }
 
 #[test]
+fn claude_lead_can_request_review() {
+    let case = &corpus()["reviews"][0];
+    let mut actor = case["actor"].clone();
+    actor["provider"] = json!("claude");
+    actor["workspaceMode"] = json!("worktree");
+    let args = json!({"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}});
+    assert!(
+        ReviewPlan::from_records(
+            actor,
+            case["root"].clone(),
+            args,
+            "review-request".into(),
+            case["directory"].as_str().unwrap().into(),
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn reviewers_of_both_providers_queue_one_ordinary_turn_and_replay() {
+    let mut briefs = Vec::new();
+    for provider in ["codex", "claude"] {
+        let case = &corpus()["reviews"][0];
+        let mut actor = case["actor"].clone();
+        actor["provider"] = json!(provider);
+        actor["workspaceMode"] = json!("worktree");
+        let args = json!({"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}});
+        let mut plan = ReviewPlan::from_records(
+            actor.clone(),
+            actor.clone(),
+            args,
+            "review-request".into(),
+            case["directory"].as_str().unwrap().into(),
+        )
+        .unwrap();
+        resolve_review(&mut plan);
+        let mut child = case["child"].clone();
+        child["provider"] = json!(provider);
+        let mut db = db(&json!({"agent":actor}));
+        db.execute_batch("CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT); CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT); CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0); CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").unwrap();
+        for _ in 0..2 {
+            let tx = db.transaction().unwrap();
+            native_review::reserve(&tx, &plan, &Creator(child.clone())).unwrap();
+            tx.commit().unwrap();
+        }
+        let count: i64 = db
+            .query_row(
+                "SELECT count(*) FROM runtime_events WHERE agent=?1 AND kind='user'",
+                [native_review::worker_id("review-request")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+        let raw: String = db
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id=?1",
+                [native_review::worker_id("review-request")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let child: Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(child["permissionMode"], "plan");
+        assert_eq!(child["nativeReview"]["status"], "ordinaryTurn");
+        assert_eq!(child["nativeReview"]["target"]["base"], "main");
+        assert_eq!(
+            child["nativeReview"]["resolvedBase"],
+            json!({"kind":"git","value":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"})
+        );
+        assert_eq!(
+            child["reviewAssignment"]["base"],
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        );
+        let brief: String = db
+            .query_row(
+                "SELECT text FROM runtime_events WHERE agent=?1 AND kind='user'",
+                [native_review::worker_id("review-request")],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(brief.contains("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"));
+        briefs.push(brief);
+    }
+    assert_eq!(briefs[0], briefs[1]);
+}
+
+#[test]
 fn review_plan_record_boundary_preserves_optional_and_extension_fields() {
     let case = &corpus()["reviews"][0];
     for variant in 0..3 {
@@ -666,7 +751,7 @@ fn review_plan_record_boundary_preserves_optional_and_extension_fields() {
 }
 
 #[test]
-fn review_prompt_uses_compact_json() {
+fn review_prompt_describes_immutable_range() {
     let case = &corpus()["reviews"][0];
     let plan = ReviewPlan::from_records(
         case["actor"].clone(),
@@ -678,7 +763,7 @@ fn review_prompt_uses_compact_json() {
     .expect("review plan");
     assert_eq!(
         plan.spec().prompt.as_deref(),
-        Some(format!("Run a native code review: {}", case["args"]["target"]).as_str())
+        case["spec"]["prompt"].as_str()
     );
 }
 
@@ -717,13 +802,13 @@ fn review_worker_identity_and_saved_response_replay() {
 #[test]
 fn review_request_ids_match_python_whitespace_and_control_validation() {
     for request_id in [" padded", "padded ", "line\nbreak", "tab\tkey"] {
-        let args = json!({"request_id":request_id});
+        let args = json!({"request_id":request_id,"target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}});
         assert!(
             native_review::target(&args).is_err(),
             "accepted {request_id:?}"
         );
     }
-    assert!(native_review::target(&json!({"request_id":"valid-key"})).is_ok());
+    assert!(native_review::target(&json!({"request_id":"valid-key","target":{"kind":"gitRange","base":"main","head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}})).is_ok());
 }
 struct Summaries(Value);
 impl RepairEventSummary for Summaries {
@@ -891,6 +976,24 @@ async fn deadline_holds_unknown_and_expired_request_is_not_sent() {
 }
 
 struct Creator(Value);
+fn resolve_review(plan: &mut ReviewPlan) {
+    let base = native_review::ResolvedBase::Git(
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            .to_owned()
+            .try_into()
+            .expect("valid Git commit"),
+    );
+    let assignment =
+        native_review::pin_assignment(plan.assignment(), &base).expect("valid review assignment");
+    plan.set_prepared_assignment(assignment, base);
+}
+fn review_db(case: &Value) -> Connection {
+    let db = db(case);
+    studio_runtime_store::approvals::create_schema(&db).expect("approval schema");
+    db.execute_batch("CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,record TEXT); CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL, agent TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.agent' END) VIRTUAL, monitor_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN COALESCE(record->>'$.status','lost') ELSE 'lost' END) STORED);").expect("projection schema");
+    db.execute_batch("CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT); CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE agent_publication_state(id TEXT PRIMARY KEY,root_id TEXT,is_lead INTEGER,live INTEGER NOT NULL,in_flight INTEGER NOT NULL,team_counts TEXT); CREATE TABLE durable_floor(id INTEGER PRIMARY KEY,floor INTEGER NOT NULL); INSERT INTO durable_floor VALUES(1,0); CREATE TABLE sync_entities(collection TEXT,id TEXT,seq INTEGER,hash TEXT,payload TEXT,deleted INTEGER,PRIMARY KEY(collection,id)); CREATE TABLE sync_documents(seq INTEGER,scope TEXT,id TEXT,payload TEXT,deleted INTEGER); CREATE TABLE durable_rows(tbl TEXT,id TEXT,seq INTEGER,deleted INTEGER,at INTEGER,PRIMARY KEY(tbl,id)); CREATE TABLE sync_generation(id INTEGER PRIMARY KEY,value INTEGER NOT NULL); INSERT INTO sync_generation VALUES(1,0);").expect("review fixture schema");
+    db
+}
 impl native_review::ReviewCreator for Creator {
     fn child(
         &self,
@@ -934,7 +1037,7 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
             let actor_record =
                 studio_runtime_store::AgentRecord::from_value(actor.clone()).unwrap();
             let root_record = studio_runtime_store::AgentRecord::from_value(root.clone()).unwrap();
-            let plans = [
+            let mut plans = [
                 ReviewPlan::from_records(
                     actor.clone(),
                     root.clone(),
@@ -953,9 +1056,10 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
                 .unwrap(),
             ];
             let mut results = Vec::new();
-            for plan in &plans {
+            for plan in &mut plans {
+                resolve_review(plan);
                 let make_db = || {
-                    let db = db(&json!({"agent":actor}));
+                    let db = review_db(&json!({"agent":actor}));
                     studio_runtime_store::agent_volatile::put(&db, "root", &root, false).unwrap();
                     db
                 };
@@ -1003,9 +1107,7 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
                         |r| r.get(0),
                     )
                     .unwrap();
-                let mut persisted: Value = studio_json::from_str(&raw).unwrap();
-                // Each reservation issues a fresh action identity.
-                persisted["nativeReview"]["actionRequestId"] = Value::Null;
+                let persisted: Value = studio_json::from_str(&raw).unwrap();
                 results.push((receipt, persisted));
             }
             assert_eq!(results[0], results[1], "{change_root} {variant}");
@@ -1016,7 +1118,7 @@ fn review_entry_points_reserve_optional_and_unknown_actor_and_root_fields() {
 #[test]
 fn review_reservation_rolls_back_and_replays_without_second_child() {
     let case = &corpus()["reviews"][0];
-    let plan = ReviewPlan::from_records(
+    let mut plan = ReviewPlan::from_records(
         case["actor"].clone(),
         case["root"].clone(),
         case["args"].clone(),
@@ -1024,7 +1126,8 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
         case["directory"].as_str().expect("directory").into(),
     )
     .expect("plan");
-    let mut db = db(&json!({"agent":case["actor"]}));
+    resolve_review(&mut plan);
+    let mut db = review_db(&json!({"agent":case["actor"]}));
     {
         let tx = db.transaction().expect("begin");
         native_review::reserve(&tx, &plan, &Creator(case["child"].clone())).expect("reserve");
@@ -1057,30 +1160,23 @@ fn review_reservation_rolls_back_and_replays_without_second_child() {
         )
         .expect("child");
     let child: Value = studio_json::from_str(&raw).expect("JSON");
-    let action_id = child["nativeReview"]["actionRequestId"]
-        .as_str()
-        .expect("persisted action identity");
+    assert_eq!(child, case["child"]);
     assert_eq!(
-        uuid::Uuid::parse_str(action_id)
-            .expect("UUID")
-            .get_version_num(),
-        7
+        db.query_row(
+            "SELECT count(*) FROM runtime_events WHERE kind='user'",
+            [],
+            |r| r.get::<_, u32>(0)
+        )
+        .unwrap(),
+        1
     );
-    let mut expected = case["child"].clone();
-    expected["nativeReview"]["actionRequestId"] = json!(action_id);
-    // fe1e1f249 adds the canonical permissionMode to newly reserved reviews.
-    expected
-        .as_object_mut()
-        .expect("child fixture")
-        .insert("permissionMode".into(), json!("default"));
-    assert_eq!(child, expected);
 }
 
 #[test]
 fn review_reservation_accepts_provider_progress_after_preparation() {
     let case = &corpus()["reviews"][0];
     for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
-        let plan = ReviewPlan::from_records(
+        let mut plan = ReviewPlan::from_records(
             case["actor"].clone(),
             case["root"].clone(),
             case["args"].clone(),
@@ -1088,7 +1184,8 @@ fn review_reservation_accepts_provider_progress_after_preparation() {
             case["directory"].as_str().expect("directory").into(),
         )
         .expect("plan");
-        let mut db = db(&json!({"agent":case["actor"]}));
+        resolve_review(&mut plan);
+        let mut db = review_db(&json!({"agent":case["actor"]}));
         let mut current = case["actor"].clone();
         current[field] = match field {
             "events" | "tokensUsed" => json!(23),
@@ -1125,7 +1222,7 @@ fn a_worker_review_checks_lead_settings_but_accepts_lead_progress() {
         parent["rootId"] = json!("root");
         parent["parentId"] = json!("root");
         parent["isLead"] = json!(false);
-        let plan = ReviewPlan::from_records(
+        let mut plan = ReviewPlan::from_records(
             parent.clone(),
             root.clone(),
             case["args"].clone(),
@@ -1133,7 +1230,8 @@ fn a_worker_review_checks_lead_settings_but_accepts_lead_progress() {
             case["directory"].as_str().expect("directory").into(),
         )
         .expect("plan");
-        let mut db = db(&json!({"agent":parent}));
+        resolve_review(&mut plan);
+        let mut db = review_db(&json!({"agent":parent}));
         root[field] = value;
         studio_runtime_store::agent_volatile::put(&db, "root", &root, false).expect("lead change");
         let mut child = case["child"].clone();
@@ -1168,7 +1266,7 @@ fn review_reservation_refuses_identity_authority_and_settings_changes() {
         ("approvalPolicy", json!("never")),
         ("sandbox", json!("danger-full-access")),
     ] {
-        let plan = ReviewPlan::from_records(
+        let mut plan = ReviewPlan::from_records(
             case["actor"].clone(),
             case["root"].clone(),
             case["args"].clone(),
@@ -1176,7 +1274,8 @@ fn review_reservation_refuses_identity_authority_and_settings_changes() {
             case["directory"].as_str().expect("directory").into(),
         )
         .expect("plan");
-        let mut db = db(&json!({"agent":case["actor"]}));
+        resolve_review(&mut plan);
+        let mut db = review_db(&json!({"agent":case["actor"]}));
         let mut current = case["actor"].clone();
         current[field] = value;
         db.execute(
@@ -1559,114 +1658,5 @@ fn python_failed_and_unknown_receipt_errors_are_not_lost() {
             studio_json::to_value(snapshot.outcome()).expect("outcome"),
             case["outcome"]
         );
-    }
-}
-
-fn stored_agent(db: &Connection, id: &str) -> Value {
-    studio_json::from_str(
-        &db.query_row("SELECT record FROM runtime_agents WHERE id=?1", [id], |r| {
-            r.get::<_, String>(0)
-        })
-        .expect("stored agent"),
-    )
-    .expect("agent JSON")
-}
-
-/// Python `codex_agent_review.claim` and `Runtime.run_native_action` against
-/// the Rust review child owner: the same claimed agent state and the same one
-/// `review/start` request, then the same accepted turn.
-#[test]
-fn python_review_child_claim_and_review_start_match() {
-    use studio_runtime_services::{
-        native_action_ports::NativeActionAcceptance, native_review_turn,
-    };
-    let turns = corpus()["reviewTurns"].as_array().expect("review turns");
-    assert!(!turns.is_empty(), "the oracle runs review child turns");
-    for case in turns {
-        let mut child = case["child"].clone();
-        assert!(native_review_turn::claimable(&child), "{child}");
-        // Rust starts the reviewer thread before the action receipt exists;
-        // Python starts it in prepare() after its claim.
-        child["threadId"] = case["submitted"]["threadId"].clone();
-        child["nativeReview"]["actionRequestId"] = json!(request_id("review-action"));
-        let id = child["id"].as_str().expect("child id").to_owned();
-        let mut db = db(&json!({"agent":case["claimed"].clone()}));
-        db.execute("DELETE FROM runtime_agents", []).expect("reset");
-        // The accepted review binds its attempt through the scheduler owner,
-        // which also records execution history.
-        db.execute_batch(
-            "CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT NOT NULL,account TEXT NOT NULL,epoch INTEGER NOT NULL,thread TEXT,turn TEXT,created REAL NOT NULL,record TEXT NOT NULL);\
-             CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY,run TEXT NOT NULL,record TEXT NOT NULL);\
-             CREATE TABLE runtime_execution_inputs(run TEXT NOT NULL,event TEXT NOT NULL,PRIMARY KEY(run,event));\
-             CREATE TABLE runtime_events(id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,turn_id TEXT,error TEXT);",
-        )
-        .expect("scheduler table shapes");
-        db.execute(
-            "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-            [id.clone(), child.to_string()],
-        )
-        .expect("Python-written review child");
-        let request = native_review_turn::request(&child).expect("request");
-        let tx = db.transaction().expect("begin");
-        reserve(&tx, &request, "attempt", 1234567.5, &Gate).expect("review claim");
-        tx.commit().expect("commit");
-        let claimed = stored_agent(&db, &id);
-        let mut python = case["claimed"].clone();
-        python["nativeReview"]["actionRequestId"] =
-            child["nativeReview"]["actionRequestId"].clone();
-        for key in [
-            "status",
-            "inFlight",
-            "turnEpoch",
-            "nativeReview",
-            "autoWake",
-        ] {
-            assert_eq!(claimed[key], python[key], "claimed {key}");
-        }
-        for (key, value) in python["startAttempt"].as_object().expect("Python attempt") {
-            assert_eq!(&claimed["startAttempt"][key], value, "startAttempt.{key}");
-        }
-        let ticket = ProviderTicket {
-            operation: "attempt".into(),
-            agent: id.clone(),
-            epoch: 3,
-            account: "default".into(),
-            thread: child["threadId"].as_str().map(str::to_owned),
-            connection: "connection".into(),
-            generation: 1,
-            request: request.request_id.clone(),
-        };
-        let tx = db.transaction().expect("begin");
-        let native = claim(&tx, &request.request_id, &ticket).expect("hand-off");
-        tx.commit().expect("commit");
-        assert_eq!(case["requests"].as_array().map(Vec::len), Some(1));
-        assert_eq!(
-            json!([native.method, native.params]),
-            case["requests"][0],
-            "the one Python native request"
-        );
-        let tx = db.transaction().expect("begin");
-        let receipt = TransportReceipt {
-            ticket: ticket.clone(),
-            delivery: Delivery::Written(case["accepted"]["result"].clone()),
-        };
-        settle(&tx, &request.request_id, &receipt, &NativeActionAcceptance).expect("accepted");
-        tx.commit().expect("commit");
-        let running = stored_agent(&db, &id);
-        // Python `start_accepted`: the review turn binds and the child runs.
-        assert_eq!(running["turnId"], case["accepted"]["result"]["turn"]["id"]);
-        assert_eq!(
-            running["startAttempt"]["turnId"],
-            case["accepted"]["result"]["turn"]["id"]
-        );
-        assert_eq!(running["status"], "running");
-        assert_eq!(running["inFlight"], true);
-        // A repeated wake finds no claimable review and cannot hand off again.
-        assert!(!native_review_turn::claimable(&running));
-        let tx = db.transaction().expect("begin");
-        assert!(matches!(
-            claim(&tx, &request.request_id, &ticket),
-            Err(NativeError::Unknown)
-        ));
     }
 }

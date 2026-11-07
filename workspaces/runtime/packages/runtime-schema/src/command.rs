@@ -341,11 +341,31 @@ pub enum CommandOutcome {
     },
 }
 
+/// Whether all provider work selected by a deletion is confirmed stopped.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::VariantNames,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+pub enum StopOutcome {
+    Confirmed,
+    Unconfirmed,
+}
+
+/// Remote stop receipt; the outcome is recomputed when a request is replayed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteStopResult {
+    pub stop_outcome: StopOutcome,
+    pub stopped: Vec<String>,
+}
+
 /// The result of a delete: the ids of the chat and of its descendants, read when the
 /// response is built, so a replay gives the same list.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteResult {
     pub deleted: Vec<String>,
+    pub stopped: StopOutcome,
 }
 
 /// The result of a lead message: the outbox id of the queued message.
@@ -437,8 +457,7 @@ mod tests {
         let wire = studio_json::json!({"id":"0192f3a0-0000-7000-8000-000000000001","client":"c","number":1,"kind":"restore_deleted_root","target":"chat","body":{}});
         let request: CommandRequest = studio_json::from_value(wire).expect("command owner");
         let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json"))
-                .expect("OpenAPI");
+            studio_json::from_str(crate::OPENAPI_TEXT).expect("OpenAPI");
         let schemas = &openapi["components"]["schemas"];
         let kind = request.command.name();
         assert_eq!(

@@ -13,9 +13,6 @@ serde = { workspace = true, features = ["derive"] }
 studio-json = { path = "../json" }
 thiserror.workspace = true
 
-[dev-dependencies]
-studio-test-deps = { path = "../test-deps" }
-
 [lints]
 workspace = true
 

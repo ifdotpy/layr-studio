@@ -11,29 +11,29 @@ The original project folder is separate. Studio does not synchronize it with mai
 
 ## Store and roles
 
-| Value           | Runtime source                                                                         |
-| --------------- | -------------------------------------------------------------------------------------- |
-| Store           | The chat's `layrStoreRoot`. Default: `<Studio state>/layr-native/store`.               |
-| Binary          | `<Studio state>/layr-native/bin/layr`                                   |
-| Environment     | `LAYR_ROOT` selects the store. macOS uses `LAYR_DIRECT=1`. Linux uses `LAYR_DIRECT=0`. |
-| Linux socket    | `LAYR_SOCKET=<Studio state>/layr-native/layr.sock`.                                    |
-| Worker selector | `workspace: "layr-native"`. Reviewers inherit this mode.                               |
-| Ready mode      | `workspaceMode: "layr-native"`, `executionMode: "native"`.                             |
-| Command path    | The managed binary folder comes first in `PATH`.                                       |
+| Value           | Runtime source                                                                                                                |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Store           | The chat's `layrStoreRoot`. Default: `<Studio state>/layr-native/store`.                                                      |
+| Binary          | Install Layr externally on the server PATH. Studio selects it and writes a launcher at `<Studio state>/layr-native/bin/layr`. |
+| Environment     | `LAYR_ROOT` selects the store. macOS uses `LAYR_DIRECT=1`. Linux uses `LAYR_DIRECT=0`.                                        |
+| Linux socket    | `LAYR_SOCKET=<Studio state>/layr-native/layr.sock`.                                                                           |
+| Worker selector | `workspace: "layr-native"`. Reviewers inherit this mode.                                                                      |
+| Ready mode      | `workspaceMode: "layr-native"`, `executionMode: "native"`.                                                                    |
+| Command path    | The managed binary folder comes first in `PATH`.                                                                              |
 
 Use the assigned environment. Do not install over the user's layr binary or import the project again.
 
-| Role        | Folder and authority                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------------- |
-| Lead        | Main in the host store. The lead owns main.                                                          |
-| Implementer | Its own `agent-<sha256(agent ID)>` line, with warm caches from main.                                 |
-| Reviewer    | Main stays read-only. The private `layrScratch` folder permits writes. No worker line or turn saves. |
+| Role        | Folder and authority                                                 |
+| ----------- | -------------------------------------------------------------------- |
+| Lead        | Main in the host store. The lead owns main.                          |
+| Implementer | Its own `agent-<sha256(agent ID)>` line, with warm caches from main. |
+| Reviewer    | A read-only line at the assigned state. No turn saves.               |
 
 A native Layr reviewer cannot select `shared` as its workspace.
 
 Read `layrReady: true` before you edit. For a lead or implementer, `cwd` names the assigned line folder.
 The `layrProjectId`, `layrLine`, and `layrStateId` fields identify its project, line, and base state.
-A reviewer's `cwd` is its private `layrScratch` folder. Its `layrReadCwd` points to main for trusted reads.
+A reviewer's `cwd` is its read-only line at the assigned state.
 New imports use the canonical original host folder for the project ID.
 An existing project can retain its own name after Studio verifies its Git origin and shared history.
 The operator can select the store with `native-layr configure --store-root`.
@@ -77,9 +77,8 @@ After review or explicit discard, an operator can run `layr ref delete <archiveR
 
 ## Reviewer checks
 
-Use `layr_read` for history and exact-state checks.
-Codex permits writes in the private scratch folder. Main stays read-only.
-Claude uses the same scratch working directory. Its sandbox denies store writes and Unix sockets.
+Use `layr_read` for history and exact-state checks. The reviewer line is read-only.
+Claude's sandbox denies store writes and Unix sockets.
 Direct shell commands can need store writes that the reviewer's sandbox refuses.
 The try path uses a runtime sandbox wrapper inside the temporary state copy.
 It uses `sandbox-exec` on macOS and Bubblewrap on Linux.
@@ -89,13 +88,13 @@ On Linux, the try sandbox hides the store and the daemon socket.
 ## Linux service
 
 Linux btrfs operations require a root daemon.
-The daemon uses the same managed binary, store, and socket as the runtime.
+The daemon uses the installed binary, store, and socket selected by the runtime.
 
-| Task                                      | Action                                                                                          |
-| ----------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Prepare Linux                             | Install the managed binary first. Start that binary as root with the assigned store and socket. |
-| Start a native chat or migration          | Keep the daemon active before setup.                                                            |
-| Check an installed Linux binary's version | Run the version command directly. It does not need a daemon.                                    |
+| Task                                      | Action                                                                                       |
+| ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Prepare Linux                             | Install Layr externally first. Start that binary as root with the assigned store and socket. |
+| Start a native chat or migration          | Keep the daemon active before setup.                                                         |
+| Check an installed Linux binary's version | Run the version command directly. It does not need a daemon.                                 |
 
 Studio does not change mounts or install the root service.
 The `layr_native::selected_socket_path` function resolves the socket for the selected store.

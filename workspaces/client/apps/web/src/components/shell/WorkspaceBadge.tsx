@@ -8,6 +8,13 @@ export type WorkspaceBadgeInfo = {
 
 export function workspaceBadgeInfo(agent?: Agent): WorkspaceBadgeInfo | null {
   if (!agent) return null;
+  if (agent.legacyVmWorkspace) {
+    const title = "Legacy workspace unavailable";
+    return {
+      label: "Unavailable",
+      title: !agent.isLead && agent.cwd ? `${title} · ${agent.cwd}` : title,
+    };
+  }
   if (agent.remoteWorker && (!agent.cwd || !agent.workspaceMode)) return null;
   // Legacy rows without a mode keep only the inference their flags prove.
   const mode =

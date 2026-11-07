@@ -477,8 +477,9 @@ a stream revision or global cursor is not the project precondition. One canvas
 transaction records project and chat deletion, permanent room retirement, managed
 stop intents, and the exact-request receipt. The ordinary resource stream delivers
 the resulting tombstones. A successful reply does not trigger a refresh.
-An identical request recovers the committed reply even after re-registration;
-changed content or a stale project precondition requires a new confirmation.
+An identical request recovers the committed deletion receipt even after re-registration;
+its stop outcome reflects the current command state. Changed content or a stale
+project precondition requires a new confirmation.
 Membership follows parent links; a root identifier alone does not assign an
 orphan to a project. An associated orphan without explicit ownership, or an
 associated malformed ancestry, refuses the whole deletion. Project deletion
@@ -554,7 +555,7 @@ and page resume do not replenish it. Retries pause while hidden or offline and
 stop when the consumer unsubscribes. Successful reads do not schedule retries.
 Draft storage bootstrap permits three delayed retries (1, 3 and 10 seconds) after
 its initial attempt, then pauses until explicit activity or resume. Pending-write
-recovery keeps its existing journal and operation identities.
+recovery keeps its existing journal and operation identities. A replayed chat deletion reports the current stop confirmation from durable agent state.
 
 An unchanged reconnect baseline still reconciles a subscribed consumer once.
 For transcript prefetch, repeated notifications for the same version during an

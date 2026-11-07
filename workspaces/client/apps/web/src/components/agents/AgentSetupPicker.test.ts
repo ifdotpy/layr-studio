@@ -1,3 +1,4 @@
+import { AccountStatus, ProviderKind } from "../../generated/api";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
@@ -68,4 +69,61 @@ test("no provider picked yet keeps both fields visible", () => {
   const markup = render({ provider: "" });
   expect(markup).toContain("Test model");
   expect(markup).toContain("Test reasoning");
+});
+
+test("workers can browse Claude models with a Codex lead", () => {
+  const markup = render({
+    role: "worker",
+    provider: "codex",
+    providers: ["codex", "claude"],
+    showAccountChooser: false,
+    accounts: [
+      {
+        id: "lead",
+        label: "Lead",
+        home: "",
+        source: "fixture",
+        provider: ProviderKind.codex,
+        status: AccountStatus.ready,
+      },
+      {
+        id: "claude",
+        label: "Claude",
+        home: "",
+        source: "fixture",
+        provider: ProviderKind.claude,
+        status: AccountStatus.ready,
+      },
+    ],
+    excludedKeys: [],
+    onExcludedKeysChange: () => {},
+  });
+  expect(markup).toContain('aria-label="Subagent account provider"');
+  expect(markup).toContain("Claude");
+  expect(markup).toContain("Use Lead for workers");
+});
+
+test("the lead has no account checkboxes and reviewers have their own", () => {
+  const accounts: AgentSetupPickerProps["accounts"] = [
+    {
+      id: "one",
+      label: "One",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: AccountStatus.ready,
+    },
+  ];
+  const props = {
+    provider: "codex",
+    accounts,
+    excludedKeys: [],
+    onExcludedKeysChange: () => {},
+  };
+  expect(render({ ...props, role: "orchestrator" })).not.toContain(
+    "Use One for",
+  );
+  const reviewer = render({ ...props, role: "review" });
+  expect(reviewer).toContain("Use One for reviewers");
+  expect(reviewer).toContain("disabled");
 });

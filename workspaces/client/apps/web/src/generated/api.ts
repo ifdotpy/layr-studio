@@ -3653,13 +3653,7 @@ export interface components {
       /** Environment */
       environment?: ("host" | "linux") | null | undefined;
       /** Error */
-      error?:
-        | components["schemas"]["NativeProviderError"]
-        | null
-        | string
-        | undefined;
-      /** Excludedaccountkeys */
-      excludedAccountKeys?: string[] | null | undefined;
+      error?: components["schemas"]["AgentError"] | null | undefined;
       /** Executionmode */
       executionMode?: ("vm" | "native") | null | undefined;
       /** Fastmode */
@@ -3707,8 +3701,7 @@ export interface components {
         | undefined;
       /** Nativestatus */
       nativeStatus?:
-        | components["schemas"]["AgentNativeStatus"]
-        | components["schemas"]["AgentNativeStatusValue"]
+        | components["schemas"]["AgentNativeState"]
         | null
         | undefined;
       nativeThreadBlock?:
@@ -3737,7 +3730,7 @@ export interface components {
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
       permissionMode?:
-        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | components["schemas"]["AgentPermissionMode"]
         | null
         | undefined;
       /** Projectserverid */
@@ -3753,6 +3746,8 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /** reviewerExcludedAccountKeys */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       startAttempt?:
         | components["schemas"]["AgentStartAttempt"]
         | null
@@ -3780,6 +3775,8 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /** workerExcludedAccountKeys */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -3789,9 +3786,12 @@ export interface components {
       /** Workspaceoperation */
       workspaceOperation?: null | string | undefined;
       /** Worktree */
-      worktree?: boolean | null | string | undefined;
+      worktree?: components["schemas"]["AgentWorktree"] | null | undefined;
       /** Worktreepreparation */
-      worktreePreparation?: ("waiting" | "preparing") | null | undefined;
+      worktreePreparation?:
+        | components["schemas"]["AgentWorktreePreparation"]
+        | null
+        | undefined;
     };
     /** AgentDetailResource */
     AgentDetailResource: {
@@ -3950,13 +3950,7 @@ export interface components {
       /** Epoch */
       epoch?: number | null | undefined;
       /** Error */
-      error?:
-        | components["schemas"]["NativeProviderError"]
-        | null
-        | string
-        | undefined;
-      /** Excludedaccountkeys */
-      excludedAccountKeys?: string[] | null | undefined;
+      error?: components["schemas"]["AgentError"] | null | undefined;
       /** Executionmode */
       executionMode?: ("vm" | "native") | null | undefined;
       /** Fastmode */
@@ -3978,7 +3972,7 @@ export interface components {
       /** Islead */
       isLead?: boolean | null | undefined;
       /** Kind */
-      kind?: "agent" | null | undefined;
+      kind?: components["schemas"]["AgentKind"] | null | undefined;
       /** Lastanswer */
       lastAnswer?: null | string | undefined;
       /** Lastcompletedturn */
@@ -4001,6 +3995,7 @@ export interface components {
       layrReady?: boolean | null | undefined;
       /** Layrstateid */
       layrStateId?: null | string | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
@@ -4034,8 +4029,7 @@ export interface components {
         | undefined;
       /** Nativestatus */
       nativeStatus?:
-        | components["schemas"]["AgentNativeStatus"]
-        | components["schemas"]["AgentNativeStatusValue"]
+        | components["schemas"]["AgentNativeState"]
         | null
         | undefined;
       nativeThreadBlock?:
@@ -4068,7 +4062,7 @@ export interface components {
       /** Pendingsettingsaccountkey */
       pendingSettingsAccountKey?: null | string | undefined;
       permissionMode?:
-        | ("default" | "acceptEdits" | "auto" | "plan" | "bypassPermissions")
+        | components["schemas"]["AgentPermissionMode"]
         | null
         | undefined;
       /** Pinned */
@@ -4081,6 +4075,8 @@ export interface components {
       projectFolderRevision?: number | null | undefined;
       /** Projectid */
       projectId?: null | string | undefined;
+      /** Projectpath */
+      projectPath?: string | null | undefined;
       /** Projectserverid */
       projectServerId?: null | string | undefined;
       provider?: components["schemas"]["AgentProvider"] | null | undefined;
@@ -4110,6 +4106,8 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /** reviewerExcludedAccountKeys */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       role?: components["schemas"]["AgentRole"] | null | undefined;
       /** Rootid */
       rootId?: null | string | undefined;
@@ -4138,6 +4136,8 @@ export interface components {
       teamCounts?: components["schemas"]["TeamCounts"] | undefined;
       /** Threadid */
       threadId?: null | string | undefined;
+      /** Tokensused */
+      tokensUsed?: number | null | undefined;
       /** Turnid */
       turnId?: null | string | undefined;
       turnStatus?: components["schemas"]["AgentStatus"] | null | undefined;
@@ -4154,6 +4154,8 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /** workerExcludedAccountKeys */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -4163,9 +4165,12 @@ export interface components {
       /** Workspaceoperation */
       workspaceOperation?: null | string | undefined;
       /** Worktree */
-      worktree?: boolean | null | string | undefined;
+      worktree?: components["schemas"]["AgentWorktree"] | null | undefined;
       /** Worktreepreparation */
-      worktreePreparation?: ("waiting" | "preparing") | null | undefined;
+      worktreePreparation?:
+        | components["schemas"]["AgentWorktreePreparation"]
+        | null
+        | undefined;
     };
     /**
      * @description One epoch-scoped wait. `until` is a retry deadline in Unix seconds.
@@ -4306,6 +4311,7 @@ export interface components {
       /** Updatedat */
       updatedAt: number;
     };
+    AgentError: components["schemas"]["NativeProviderError"] | string;
     /** @description Identity of the agent that owns the turn. */
     AgentId: string;
     /** AgentInboxEntry */
@@ -4324,6 +4330,8 @@ export interface components {
       /** Title */
       title: string;
     };
+    /** @constant */
+    AgentKind: "agent";
     AgentLimitProjection: {
       eligibility: components["schemas"]["UsageEligibility"];
       recovery: components["schemas"]["LimitRecovery"] | null;
@@ -4345,6 +4353,9 @@ export interface components {
        */
       resetPending?: boolean | null | undefined;
     };
+    AgentNativeState:
+      | components["schemas"]["AgentNativeStatus"]
+      | components["schemas"]["AgentNativeStatusValue"];
     /** AgentNativeStatus */
     AgentNativeStatus: {
       /**
@@ -4510,6 +4521,13 @@ export interface components {
        */
       taskTruncated?: boolean | null | undefined;
     };
+    /** @enum {string} */
+    AgentPermissionMode:
+      | "default"
+      | "acceptEdits"
+      | "auto"
+      | "plan"
+      | "bypassPermissions";
     AgentProvider: components["schemas"]["ProviderKind"];
     /** AgentRecordResponse */
     AgentRecordResponse: {
@@ -4773,11 +4791,6 @@ export interface components {
        * @default null
        */
       events?: number | undefined;
-      /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | undefined;
       /**
        * Executionarchives
        * @default null
@@ -5327,6 +5340,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsRecordResponse"]
         | undefined;
       /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | undefined;
+      /**
        * Role
        * @default null
        * @enum {string}
@@ -5470,6 +5488,11 @@ export interface components {
       workerDefaults?:
         | components["schemas"]["WorkerDefaultsRecordResponse"]
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | undefined;
       /**
        * Workspaceingit
        * @default null
@@ -5687,11 +5710,6 @@ export interface components {
         | string
         | undefined;
       /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | null | undefined;
-      /**
        * Executionmode
        * @default null
        */
@@ -5795,6 +5813,7 @@ export interface components {
        * @default null
        */
       layrStateId?: null | string | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
@@ -5938,6 +5957,8 @@ export interface components {
        * @default null
        */
       projectId?: null | string | undefined;
+      /** Projectpath */
+      projectPath?: string | null | undefined;
       /**
        * Projectserverid
        * @default null
@@ -5984,6 +6005,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       /** @default null */
       role?:
         | components["schemas"]["studio_api__sync__models__AgentRole"]
@@ -6042,6 +6068,8 @@ export interface components {
        * @default null
        */
       threadId?: null | string | undefined;
+      /** Tokensused */
+      tokensUsed?: number | null | undefined;
       /**
        * Turnid
        * @default null
@@ -6071,6 +6099,11 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -6210,13 +6243,14 @@ export interface components {
       /** Islead */
       isLead?: boolean | null | undefined;
       /** Kind */
-      kind?: "agent" | null | undefined;
+      kind?: components["schemas"]["AgentKind"] | null | undefined;
       /** Lastcompletedturn */
       lastCompletedTurn?: null | string | undefined;
       /** Lastcompletedturnstatus */
       lastCompletedTurnStatus?: null | string | undefined;
       /** Lastreadat */
       lastReadAt?: null | number | undefined;
+      legacyVmWorkspace?: boolean | undefined;
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
@@ -6396,6 +6430,9 @@ export interface components {
        */
       workspaceMode: "layr-native";
     };
+    AgentWorktree: boolean | string;
+    /** @enum {string} */
+    AgentWorktreePreparation: "waiting" | "preparing";
     /** AmbiguousToolRequestResponse */
     AmbiguousToolRequestResponse: {
       /** Id */
@@ -8810,11 +8847,6 @@ export interface components {
         | string
         | undefined;
       /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | null | undefined;
-      /**
        * Executionmode
        * @default null
        */
@@ -9098,6 +9130,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       /** @default null */
       role?:
         | components["schemas"]["studio_api__sync__models__AgentRole"]
@@ -9184,6 +9221,11 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**
@@ -9822,6 +9864,11 @@ export interface components {
        */
       turnId?: null | string | undefined;
     };
+    /**
+     * Excluded Account Keys
+     * @default []
+     */
+    ChatAccountExclusions: string[];
     ChatEntityDto: {
       id: string;
       kind?: components["schemas"]["ChatKind"] | null | undefined;
@@ -9855,6 +9902,12 @@ export interface components {
       seq: number;
       /** Text */
       text: string;
+    };
+    /** @enum {string} */
+    ChatOperationalKind: "answer" | "error" | "working" | "paused" | "none";
+    ChatOperationalStatus: {
+      kind: components["schemas"]["ChatOperationalKind"];
+      label: string;
     };
     /** ChatRead */
     ChatRead: {
@@ -11119,6 +11172,7 @@ export interface components {
       ref_kind: string;
       result: {
         deleted: string[];
+        stopped: components["schemas"]["StopOutcome"];
       };
       rev: number;
       rows: components["schemas"]["CommandRow"][];
@@ -12002,11 +12056,6 @@ export interface components {
        */
       effort?: string | null | undefined;
       /**
-       * Excluded Account Keys
-       * @default []
-       */
-      excluded_account_keys?: string[] | undefined;
-      /**
        * Expected Account Key
        * @default default
        */
@@ -12043,6 +12092,9 @@ export interface components {
         | components["schemas"]["ReviewDefaults"]
         | null
         | undefined;
+      reviewer_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /**
        * Subagent Concurrency
        * @default 32
@@ -12052,6 +12104,9 @@ export interface components {
       worker_defaults?:
         | components["schemas"]["WorkerDefaults"]
         | null
+        | undefined;
+      worker_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
         | undefined;
       /**
        * Yolo Mode
@@ -12357,10 +12412,16 @@ export interface components {
         | components["schemas"]["ReviewDefaults"]
         | null
         | undefined;
+      reviewer_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /** @default null */
       worker_defaults?:
         | components["schemas"]["WorkerDefaults"]
         | null
+        | undefined;
+      worker_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
         | undefined;
       /**
        * Workspacemode
@@ -14010,6 +14071,8 @@ export interface components {
        */
       wait: "queued" | "slot" | "pause" | "behind";
     };
+    GitCommit: string;
+    GitRef: string;
     GlobalStateResource: unknown;
     /** @enum {string} */
     Grant: "full" | "observe";
@@ -14198,6 +14261,17 @@ export interface components {
     };
     /** JsonValue */
     JsonValue: JsonValue;
+    LayrBase:
+      | {
+          /** @constant */
+          kind: "mergeBaseWithMain";
+        }
+      | {
+          /** @constant */
+          kind: "state";
+          state: components["schemas"]["LayrStateId"];
+        };
+    LayrStateId: string;
     /** LazyAccountTransferRecordResponse */
     LazyAccountTransferRecordResponse: {
       /**
@@ -15691,7 +15765,8 @@ export interface components {
         };
     /** NativeLayrSettingsRequest */
     NativeLayrSettingsRequest: {
-      storeRoot?: string | undefined;
+      /** Store Root */
+      storeRoot?: string | null | undefined;
     };
     /** NativeLayrSettingsResource */
     NativeLayrSettingsResource: {
@@ -15703,6 +15778,8 @@ export interface components {
     };
     /** NativeLayrSettingsResponse */
     NativeLayrSettingsResponse: {
+      /** Configured */
+      configured: boolean;
       error?: string | undefined;
       readiness?: components["schemas"]["NativeLayrCapability"] | undefined;
       storeRoot: string | null;
@@ -17772,6 +17849,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /**
        * Locations
        * @default null
@@ -17952,6 +18033,7 @@ export interface components {
       /** @constant */
       outcome: "deleted";
       request_id: string;
+      stopped: components["schemas"]["StopOutcome"];
     };
     /** ProjectEntityDto */
     ProjectEntityDto: {
@@ -17973,6 +18055,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /** Locations */
       locations?:
         | components["schemas"]["ProjectLocationDto"][]
@@ -18191,6 +18277,10 @@ export interface components {
       homeServerId?: null | string | undefined;
       /** Id */
       id: string;
+      /** Layr Store Root */
+      layrStoreRoot?: null | string | undefined;
+      /** Layr Store Root Revision */
+      layrStoreRootRevision?: number | null | undefined;
       /**
        * Locations
        * @default null
@@ -18346,6 +18436,7 @@ export interface components {
             | "remove_folder"
             | "set_account_groups"
             | "set_workspace_policy"
+            | "set_layr_store_root"
           )
         | null
         | undefined;
@@ -18369,6 +18460,8 @@ export interface components {
        * @default null
        */
       folder_id?: null | string | undefined;
+      /** Layr Store Root */
+      layr_store_root?: null | string | undefined;
       /**
        * Name
        * @default null
@@ -19073,6 +19166,11 @@ export interface components {
       role?: null | string | undefined;
       /** Status */
       status?: null | string | undefined;
+    };
+    /** @description Remote stop receipt; the outcome is recomputed when a request is replayed. */
+    RemoteStopResult: {
+      stopOutcome: components["schemas"]["StopOutcome"];
+      stopped: string[];
     };
     /** RemoteWorkerLinkDto */
     RemoteWorkerLinkDto: {
@@ -20027,7 +20125,6 @@ export interface components {
     };
     /** ReviewDefaults */
     ReviewDefaults: {
-      account_key?: string | null | undefined;
       /** Effort */
       effort: string | null;
       /** @description Override Fast mode for native reviews and reviewer tasks. Omission preserves caller inheritance for native reviews and worker-default inheritance for reviewer tasks. */
@@ -20037,7 +20134,6 @@ export interface components {
     };
     /** ReviewDefaultsDto */
     ReviewDefaultsDto: {
-      accountKey?: string | null | undefined;
       /** Effort */
       effort?: null | string | undefined;
       fastMode?: boolean | null | undefined;
@@ -20054,6 +20150,20 @@ export interface components {
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
     };
+    /** ReviewTarget */
+    ReviewTarget:
+      | {
+          base: components["schemas"]["LayrBase"];
+          /** @constant */
+          kind: "layrState";
+          state: components["schemas"]["LayrStateId"];
+        }
+      | {
+          base: components["schemas"]["GitRef"];
+          head: components["schemas"]["GitCommit"];
+          /** @constant */
+          kind: "gitRange";
+        };
     /** ReviewUncommittedTargetDto */
     ReviewUncommittedTargetDto: {
       /**
@@ -22390,6 +22500,11 @@ export interface components {
        */
       protocol: 1;
     };
+    /**
+     * @description Whether all provider work selected by a deletion is confirmed stopped.
+     * @enum {string}
+     */
+    StopOutcome: "confirmed" | "unconfirmed";
     /** StopRequest */
     StopRequest: {
       /**
@@ -23659,6 +23774,8 @@ export interface components {
     /** SyncPullResponse */
     SyncPullResponse: {
       checkpoint: components["schemas"]["SyncCheckpoint"];
+      /** Complete */
+      complete: boolean;
       /** Documents */
       documents: (
         | components["schemas"]["SyncDocument"]
@@ -27094,11 +27211,6 @@ export interface components {
     /** WorkerDefaults */
     WorkerDefaults: {
       /**
-       * Account Key
-       * @default null
-       */
-      account_key?: string | null | undefined;
-      /**
        * Daybreak Enabled
        * @default null
        */
@@ -27117,11 +27229,6 @@ export interface components {
     };
     /** WorkerDefaultsDto */
     WorkerDefaultsDto: {
-      /**
-       * Accountkey
-       * @default null
-       */
-      accountKey?: null | string | undefined;
       /**
        * Cyberaccessprogram
        * @default null
@@ -37442,6 +37549,14 @@ export const AgentNativeStatusValue = {
 } as const;
 export type AgentNativeStatusValue =
   components["schemas"]["AgentNativeStatusValue"];
+export const AgentPermissionMode = {
+  default: "default",
+  acceptEdits: "acceptEdits",
+  auto: "auto",
+  plan: "plan",
+  bypassPermissions: "bypassPermissions",
+} as const;
+export type AgentPermissionMode = components["schemas"]["AgentPermissionMode"];
 export const AgentRole = {
   lead: "lead",
   worker: "worker",
@@ -37483,6 +37598,12 @@ export const AgentStatus = {
   waiting_on_monitor: "waiting_on_monitor",
 } as const;
 export type AgentStatus = components["schemas"]["AgentStatus"];
+export const AgentWorktreePreparation = {
+  waiting: "waiting",
+  preparing: "preparing",
+} as const;
+export type AgentWorktreePreparation =
+  components["schemas"]["AgentWorktreePreparation"];
 export const AnalyticsScope = {
   agent: "agent",
   team: "team",
@@ -37587,6 +37708,14 @@ export const CapacityRetryStatus = {
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
 export const ChatKind = { chat: "chat" } as const;
 export type ChatKind = components["schemas"]["ChatKind"];
+export const ChatOperationalKind = {
+  answer: "answer",
+  error: "error",
+  working: "working",
+  paused: "paused",
+  none: "none",
+} as const;
+export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
 export const ChatWorkspaceMode = {
   "layr-native": "layr-native",
   worktree: "worktree",
@@ -38209,6 +38338,11 @@ export const StartWaitReason = {
   workspace_copy: "workspace_copy",
 } as const;
 export type StartWaitReason = components["schemas"]["StartWaitReason"];
+export const StopOutcome = {
+  confirmed: "confirmed",
+  unconfirmed: "unconfirmed",
+} as const;
+export type StopOutcome = components["schemas"]["StopOutcome"];
 export const studio_api__agents__models__AgentRole = {
   orchestrator: "orchestrator",
   implementer: "implementer",

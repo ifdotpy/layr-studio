@@ -1,3 +1,4 @@
+import { StopOutcome } from "./generated/api.ts";
 import { ApiError, errorText, type post } from "./api";
 import { definiteDeleteRejection } from "./chatDeleteScope";
 import type { components } from "./generated/api";
@@ -93,6 +94,7 @@ function confirmedReply(
     reply.id === request.id &&
     reply.request_id === request.request_id &&
     reply.outcome === "deleted" &&
+    Object.values(StopOutcome).some((outcome) => outcome === reply.stopped) &&
     Array.isArray(reply.deletedAgentIds) &&
     reply.deletedAgentIds.every((id) => typeof id === "string") &&
     Array.isArray(reply.deletedRoomIds) &&

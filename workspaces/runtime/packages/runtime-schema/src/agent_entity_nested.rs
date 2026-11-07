@@ -167,8 +167,6 @@ pub struct WorkerDefaultsDto {
     pub fast_mode: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daybreak_enabled: Option<bool>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delegation_depth: Option<WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -400,7 +398,6 @@ pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 14], Stri
     for (name, label, default) in [
         ("model", "Model", false),
         ("effort", "Effort", false),
-        ("accountKey", "Accountkey", true),
         ("cyberAccessProgram", "Cyberaccessprogram", true),
     ] {
         nullable(&mut defaults, name, label, default)?;
@@ -501,7 +498,7 @@ mod tests {
     }
 
     #[test]
-    fn worker_defaults_preserve_keys_and_reject_missing_or_null_required_fields() {
+    fn worker_defaults_reject_account_keys_and_invalid_required_fields() {
         let valid = json!({"model":null,"effort":null,"fastMode":false});
         assert!(studio_json::from_value::<WorkerDefaultsDto>(valid.clone()).is_ok());
         let null_options = json!({"model":null,"effort":null,"fastMode":false,"daybreakEnabled":null,"delegationDepth":null});
@@ -516,8 +513,7 @@ mod tests {
         }
         for key in [String::new(), "x".repeat(201)] {
             let value = json!({"model":null,"effort":null,"fastMode":false,"accountKey":key});
-            let defaults: WorkerDefaultsDto = studio_json::from_value(value.clone()).unwrap();
-            assert_eq!(studio_json::to_value(defaults).unwrap(), value);
+            assert!(studio_json::from_value::<WorkerDefaultsDto>(value).is_err());
         }
     }
 
@@ -572,8 +568,7 @@ mod tests {
 
     #[test]
     fn published_native_status_error_matches_serde() {
-        let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let root = json!({"$ref":"#/components/schemas/AgentNativeStatus","components":document["components"]});
         let validator = jsonschema::validator_for(&root).unwrap();
         for (value, valid) in [
@@ -606,8 +601,7 @@ mod tests {
             .into_generator();
         let mut changed = ChangedActivity::json_schema(&mut generator).to_value();
         nullable(&mut changed, "tools", "Tools", true).unwrap();
-        let published: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let published: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         assert_ne!(
             changed["properties"]["tools"],
             published["components"]["schemas"]["AgentActivity"]["properties"]["tools"]
@@ -616,8 +610,7 @@ mod tests {
 
     #[test]
     fn published_components_match_owners() {
-        let document: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let document: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         for (name, schema) in schemas().unwrap() {
             assert_eq!(document["components"]["schemas"][name], schema, "{name}");
         }

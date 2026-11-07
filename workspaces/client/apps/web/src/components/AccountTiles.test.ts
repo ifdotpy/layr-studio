@@ -1,11 +1,108 @@
-import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
+import {
+  AccountStatus as GeneratedApiAccountStatus,
+  ProviderKind,
+} from "../generated/api.ts";
 import { createElement } from "react";
+import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
 import { projectedLimits } from "../usage/accountLimits.fixture";
 import type { AccountLimitsSnapshot } from "../usage/accountUsage";
 import type { Account } from "./Accounts";
-import { accountLimitView, AccountTileLabel } from "./AccountTiles";
+import {
+  accountLimitView,
+  AccountTileLabel,
+  AccountTiles,
+} from "./AccountTiles";
+
+const checkboxProps = vi.hoisted(() => vi.fn());
+const tooltipProps = vi.hoisted(() => vi.fn());
+vi.mock("@mantine/core", async (load) => {
+  const actual = await load<typeof import("@mantine/core")>();
+  return {
+    ...actual,
+    Checkbox: (props: Parameters<typeof actual.Checkbox>[0]) => {
+      checkboxProps(props);
+      return createElement("input", {
+        type: "checkbox",
+        "aria-label": props["aria-label"],
+      });
+    },
+    Tooltip: (props: {
+      label: string;
+      children: React.ReactNode;
+      events?: object;
+    }) => {
+      tooltipProps(props);
+      return createElement("span", { title: props.label }, props.children);
+    },
+  };
+});
+
+test("account tiles show an allow checkbox for workers", () => {
+  checkboxProps.mockClear();
+  tooltipProps.mockClear();
+  const onExcludedChange = vi.fn();
+  const accounts: Account[] = [
+    {
+      id: "lead",
+      label: "Lead",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: GeneratedApiAccountStatus.ready,
+    },
+    {
+      id: "worker",
+      label: "Worker",
+      home: "",
+      source: "fixture",
+      provider: ProviderKind.codex,
+      status: GeneratedApiAccountStatus.ready,
+    },
+  ];
+  const html = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(AccountTiles, {
+        label: "Chat accounts",
+        accounts,
+        value: "lead",
+        onChange: () => {},
+        excludedKeys: ["lead"],
+        onExcludedKeysChange: onExcludedChange,
+        exclusionRole: "worker",
+      }),
+    ),
+  );
+  expect(html).toContain('aria-label="Use Lead for workers"');
+  expect(html).toContain('aria-label="Select account Lead"');
+  expect(html).toContain('aria-label="Use Worker for workers"');
+  expect(html).not.toContain("Exclude for workers and reviewers");
+  expect(checkboxProps.mock.calls[0]![0].label).toBeUndefined();
+  expect(checkboxProps.mock.calls[0]![0].checked).toBe(false);
+  expect(checkboxProps.mock.calls[1]![0].checked).toBe(true);
+  expect(checkboxProps.mock.calls[1]![0].disabled).toBe(true);
+  expect(html).toContain('title="Use for workers"');
+  expect(tooltipProps).toHaveBeenCalledWith(
+    expect.objectContaining({
+      label: "Use for workers",
+      events: { hover: true, focus: true, touch: false },
+    }),
+  );
+  expect(html.indexOf('aria-label="Use Lead')).toBeLessThan(
+    html.indexOf('aria-label="Select account Lead"'),
+  );
+  checkboxProps.mock.calls[0]![0].onChange({
+    currentTarget: { checked: true },
+  });
+  expect(onExcludedChange).toHaveBeenCalledWith([]);
+  checkboxProps.mock.calls[1]![0].onChange({
+    currentTarget: { checked: false },
+  });
+  expect(onExcludedChange).toHaveBeenCalledWith(["lead", "worker"]);
+});
 
 const reading = (fields: object = {}) =>
   ({

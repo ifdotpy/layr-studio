@@ -39,7 +39,6 @@ describe("new chat actions", () => {
     expect(
       markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0],
     ).toContain('disabled=""');
-    expect(markup).not.toContain("Layr VM");
     expect(markup).toContain("WT");
     expect(markup).toContain('aria-label="Agent role" role="radiogroup"');
     expect(markup).toMatch(/<input[^>]*type="radio"[^>]*value="worker"/);
@@ -150,5 +149,5 @@ it("selects the server's default when Layr is ready", () => {
   const option = markup.match(/<input(?=[^>]*value="layr-native")[^>]*>/)?.[0];
   expect(option).toContain('checked=""');
   expect(option).not.toContain('disabled=""');
-  expect(markup).toContain("Store directory (optional)");
+  expect(markup).not.toContain("Store directory (optional)");
 });

@@ -5,11 +5,24 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod review_state_tests {
     #[test]
-    fn reviewer_spawn_retains_review_state() {
-        let value = studio_json::json!({"role":"reviewer","review_state":"01a1a137-e462-7190-8be9-3f0f87ff4513"});
-        let intent: super::CreationIntent =
-            studio_json::from_value(value.clone()).expect("review target is accepted");
-        assert_eq!(studio_json::to_value(intent).unwrap(), value);
+    fn legacy_review_state_maps_to_typed_review() {
+        let state = "0123456789abcdef0123456789abcdef";
+        let intent: super::CreationIntent = studio_json::from_str(
+            r#"{"role":"reviewer","review_state":"0123456789abcdef0123456789abcdef"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            intent.review,
+            Some(crate::review::ReviewTarget::LayrState {
+                state: crate::review::LayrStateId::try_from(state.to_owned()).unwrap(),
+                base: crate::review::LayrBase::MergeBaseWithMain,
+            })
+        );
+    }
+    #[test]
+    fn invalid_legacy_review_state_is_refused() {
+        let value = studio_json::json!({"role":"reviewer","review_state":"invalid"});
+        assert!(studio_json::from_value::<super::CreationIntent>(value).is_err());
     }
 }
 
@@ -90,6 +103,15 @@ impl AgentRole {
     }
 }
 
+/// Select the chat exclusion list for the affected agent's role.
+pub fn excluded_for<'a, T>(role: AgentRole, workers: &'a [T], reviewers: &'a [T]) -> &'a [T] {
+    match role {
+        AgentRole::Implementer => workers,
+        AgentRole::Reviewer => reviewers,
+        AgentRole::Orchestrator => &[],
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreationIntent {
@@ -111,6 +133,10 @@ pub struct CreationIntent {
         skip_serializing_if = "Option::is_none"
     )]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worker_excluded_account_keys: Option<Vec<crate::account_key::AccountKey>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_excluded_account_keys: Option<Vec<crate::account_key::AccountKey>>,
     #[serde(
         rename = "layrStoreRoot",
         default,
@@ -202,10 +228,11 @@ pub struct CreationIntent {
     pub base_ref: Option<String>,
     #[serde(
         default,
-        deserialize_with = "present",
+        alias = "review_state",
+        deserialize_with = "review_target",
         skip_serializing_if = "Option::is_none"
     )]
-    pub review_state: Option<String>,
+    pub review: Option<crate::review::ReviewTarget>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -232,9 +259,22 @@ pub struct CreationIntent {
     pub workspace: Option<crate::records::WorkspaceMode>,
 }
 
-/// Advertise the reviewer target from the creation intent's field owner.
-pub fn review_state_tool_schema() -> studio_json::Value {
-    studio_json::json!({"type":"string", "description":"Exact native Layr state ID for a reviewer."})
+fn review_target<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<crate::review::ReviewTarget>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Input {
+        Target(crate::review::ReviewTarget),
+        Legacy(crate::review::LayrStateId),
+    }
+    Ok(Some(match Input::deserialize(d)? {
+        Input::Target(target) => target,
+        Input::Legacy(state) => crate::review::ReviewTarget::LayrState {
+            state,
+            base: crate::review::LayrBase::MergeBaseWithMain,
+        },
+    }))
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -248,6 +288,7 @@ pub struct WorkerDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    /// Historical request identity only; new requests must leave this missing.
     pub account_key: Field<String>,
     #[serde(
         default,
@@ -261,6 +302,7 @@ pub struct WorkerDefaults {
 #[serde(deny_unknown_fields)]
 pub struct ReviewDefaults {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
+    /// Historical request identity only; new requests must leave this missing.
     pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
@@ -297,9 +339,15 @@ mod tests {
     }
 
     #[test]
+    fn historical_account_defaults_preserve_request_identity_bytes() {
+        let raw = r#"{"review_defaults":{"account_key":"reviewer","model":"gpt-6-astra","effort":"high"},"worker_defaults":{"model":"gpt-6-luna","effort":"high","fast_mode":false,"account_key":"worker"}}"#;
+        let intent: CreationIntent = studio_json::from_str(raw).unwrap();
+        assert_eq!(studio_json::to_string(&intent).unwrap(), raw);
+    }
+
+    #[test]
     fn agent_role_matches_openapi_and_its_wire_names() {
-        let openapi: studio_json::Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let openapi: studio_json::Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let roles = [
             AgentRole::Orchestrator,
             AgentRole::Implementer,

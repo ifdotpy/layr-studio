@@ -1049,6 +1049,20 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         "remoteWorker".into(),
         json!({"server":"home-server","link":"remote-link"}),
     );
+    let mut descendant = worker.clone();
+    descendant.id = AgentId::from("remote-descendant");
+    descendant.parent_id = Some("remote-worker".into());
+    descendant.extra.remove("remoteWorker");
+    descendant.extra.remove("movedTo");
+    descendant.start_attempt = Some(Box::new(
+        studio_json::from_str(
+            &json!({
+                "id":"descendant-attempt", "epoch":4, "interrupt":{"outcome":"unknown"}
+            })
+            .to_string(),
+        )
+        .unwrap(),
+    ));
     store
         .transaction(move |tx| {
             tx.execute(
@@ -1060,6 +1074,7 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
             )?;
             AgentRepository::put(tx, &parent)?;
             AgentRepository::put(tx, &worker)?;
+            AgentRepository::put(tx, &descendant)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })
         .await
@@ -1076,12 +1091,20 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         .execute("home-server", &typed_request(&envelope))
         .await
         .expect("remote stop");
-    assert_eq!(first, applied(&json!({"stopped":["remote-worker"]})));
+    assert_eq!(
+        first,
+        applied(
+            &json!({"stopped":["remote-descendant","remote-worker"],"stopOutcome":"unconfirmed"})
+        )
+    );
     let replay = effects
         .execute("home-server", &typed_request(&envelope))
         .await
         .expect("same request replay");
-    assert_eq!(replay, applied(&json!({"stopped":["remote-worker"]})));
+    assert_eq!(
+        replay,
+        applied(&json!({"stopped":["remote-worker"],"stopOutcome":"unconfirmed"}))
+    );
     let reader = store.test_reader().expect("read replayed worker");
     let current = AgentRepository::get(&reader, &AgentId::from("remote-worker"))
         .expect("worker row")
@@ -1092,6 +1115,30 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         Some(&json!("remote-stop-request-1"))
     );
     drop(reader);
+
+    store
+        .transaction(|tx| {
+            let mut child = AgentRepository::get(tx, &AgentId::from("remote-descendant"))?.unwrap();
+            child
+                .start_attempt
+                .as_mut()
+                .unwrap()
+                .interrupt
+                .as_mut()
+                .unwrap()
+                .outcome = Some(studio_runtime_store::InterruptOutcome::Accepted);
+            AgentRepository::put(tx, &child)?;
+            Ok::<_, studio_runtime_store::StoreError>(())
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        effects
+            .execute("home-server", &typed_request(&envelope))
+            .await
+            .unwrap(),
+        applied(&json!({"stopped":["remote-worker"],"stopOutcome":"confirmed"}))
+    );
 
     store
         .transaction(|tx| {
@@ -1187,10 +1234,11 @@ async fn stopping_remote_proxy_persists_and_replays_the_same_signed_intent() {
                     },
                 };
                 self.calls.lock().unwrap().push(envelope.clone());
-                if self.attempts.fetch_add(1, Ordering::SeqCst) == 0 {
+                let attempt = self.attempts.fetch_add(1, Ordering::SeqCst);
+                if attempt == 0 {
                     return Err(refused(503, "exchange_unknown", "reply was lost"));
                 }
-                Ok(applied(&json!({"stopped": [envelope.payload.worker]}))
+                Ok(applied(&json!({"stopped": [envelope.payload.worker], "stopOutcome": if attempt == 1 { "unconfirmed" } else { "confirmed" }}))
                     .to_reply(&envelope.request_id))
             })
         }
@@ -1318,9 +1366,41 @@ async fn stopping_remote_proxy_persists_and_replays_the_same_signed_intent() {
             .expect("replay due intent"),
         1
     );
+    let reader = store.test_reader().unwrap();
+    assert_eq!(
+        studio_runtime_services::commands::deletion_stop_outcome(
+            &reader,
+            &["remote-stop-proxy".to_owned()]
+        )
+        .unwrap(),
+        studio_runtime_schema::command::StopOutcome::Unconfirmed
+    );
+    let next: f64 = reader
+        .query_row(
+            "SELECT next_at/1000.0 FROM runtime_outbox WHERE request_id=?1",
+            [&outbox_key],
+            |row| row.get(0),
+        )
+        .unwrap();
+    drop(reader);
+    assert_eq!(driver.pump_due(next.ceil() as i64).await.unwrap(), 1);
+    let reader = store.test_reader().unwrap();
+    assert_eq!(
+        studio_runtime_services::commands::deletion_stop_outcome(
+            &reader,
+            &["remote-stop-proxy".to_owned()]
+        )
+        .unwrap(),
+        studio_runtime_schema::command::StopOutcome::Confirmed
+    );
+    drop(reader);
     let calls = peer.calls.lock().unwrap();
-    assert_eq!(calls.len(), 2);
+    assert_eq!(calls.len(), 3);
     assert_eq!(calls[1], first, "retry reuses exact signed stop content");
+    assert_eq!(
+        calls[2], first,
+        "confirmation retry keeps the same identity"
+    );
     let saved_signature: String = store
         .test_reader()
         .unwrap()

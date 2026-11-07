@@ -1,4 +1,8 @@
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ConversationStart from "../components/conversation/ConversationStart";
+import ProjectFolderDialog from "../components/ProjectFolderDialog";
 import { LimitColor, RunwayColor } from "../generated/api";
 import { StudioErrorLevel } from "../generated/api";
 import {
@@ -71,6 +75,43 @@ it("revives a locally evicted source version without reviving authoritative tomb
   const stale = applyEntityChanges(state, [row], true);
 
   assert.equal(stale.threads.length, 0);
+});
+
+it("renders project location identically from merged and full agent rows", () => {
+  const agent = { id: "a", isLead: false, projectPath: "/projects/example" };
+  const merged = applyEntityChanges(
+    emptyEntityProjection(),
+    [
+      entityRow("agentSummary", "a", agentSummaryFixture("a", agent), 1),
+      entityRow("agentDetail", "a", { id: "a", tokensUsed: 42 }, 2),
+    ],
+    true,
+  ).threads[0]!;
+  const fallback = applyEntityChanges(
+    emptyEntityProjection(),
+    [entityRow("agent", "a", { ...agent, tokensUsed: 42 }, 1)],
+    true,
+  ).threads[0]!;
+  const projectUi = (row: Agent) => ({
+    folderEnabled: Boolean(row.projectPath),
+    folder: renderToStaticMarkup(
+      createElement(ProjectFolderDialog, {
+        agent: row,
+        canReveal: false,
+        onReveal: () => {},
+      }),
+    ),
+    start: renderToStaticMarkup(
+      createElement(ConversationStart, {
+        projectName:
+          row.projectPath?.split("/").filter(Boolean).at(-1) || "Your project",
+        location: row.projectPath || "Project location unavailable",
+      }),
+    ),
+  });
+  assert.deepEqual(projectUi(fallback), projectUi(merged));
+  assert.match(projectUi(fallback).start, /example/);
+  assert.match(projectUi(fallback).folder, /\/projects\/example/);
 });
 
 it("retains other agents when one streamed summary or detail changes", () => {

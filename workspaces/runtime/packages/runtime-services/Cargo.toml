@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [features]
+perf-reporting = []
 test-support = []
 bench-support = ["rustix/use-libc-auxv"]
 
@@ -79,7 +80,6 @@ linux-raw-sys = { version = "=0.12.1", features = ["btrfs", "ioctl"] }
 [dev-dependencies]
 gungraun = "=0.17.2"
 strum.workspace = true
-studio-test-deps = { path = "../test-deps" }
 studio-runtime-services = { path = ".", features = ["test-support"] }
 studio-runtime-store = { path = "../runtime-store", features = ["test-support"] }
 rusqlite = { workspace = true }

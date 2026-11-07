@@ -51,8 +51,7 @@ mod tests {
 
     #[test]
     fn request_bounds_match_openapi_and_reject_invalid_shapes() {
-        let doc: Value =
-            studio_json::from_str(include_str!("../../runtime-http/openapi.json")).unwrap();
+        let doc: Value = studio_json::from_str(crate::OPENAPI_TEXT).unwrap();
         let properties = &doc["components"]["schemas"]["ResourceNotifyRequest"]["properties"];
         assert_eq!(
             properties["requestId"]["maxLength"],

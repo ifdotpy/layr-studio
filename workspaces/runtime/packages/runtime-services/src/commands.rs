@@ -460,6 +460,43 @@ pub fn chat_tree(conn: &Connection, chat: &str) -> Result<Vec<String>, CommandEr
     Ok(ids)
 }
 
+/// Replays report the current stop confirmation from the durable agent records.
+pub fn deletion_stop_outcome(
+    conn: &Connection,
+    ids: &[String],
+) -> studio_runtime_store::StoreResult<studio_runtime_schema::command::StopOutcome> {
+    use studio_runtime_schema::command::StopOutcome;
+    for id in ids {
+        let Some(agent) = AgentRepository::get(conn, &AgentId::from(id.as_str()))? else {
+            return Ok(StopOutcome::Unconfirmed);
+        };
+        if let Some(request_id) = agent
+            .extra
+            .get("remoteStopRequest")
+            .and_then(studio_json::Value::as_str)
+            && crate::server_outbox::stop_pending(conn, request_id, id)?
+        {
+            return Ok(StopOutcome::Unconfirmed);
+        }
+        if !crate::task_settlement::running_commands(conn, id)?.is_empty() {
+            return Ok(StopOutcome::Unconfirmed);
+        }
+        let pending_interrupt = agent
+            .start_attempt
+            .as_ref()
+            .and_then(|attempt| attempt.interrupt.as_ref())
+            .is_some_and(|interrupt| {
+                interrupt.outcome != Some(studio_runtime_store::InterruptOutcome::Accepted)
+            });
+        if pending_interrupt
+            || crate::account_worker::stopped_turns::disconnected_stop_unconfirmed(&agent)
+        {
+            return Ok(StopOutcome::Unconfirmed);
+        }
+    }
+    Ok(StopOutcome::Confirmed)
+}
+
 pub fn response(
     conn: &Connection,
     reference: &RequestReference,
@@ -667,6 +704,7 @@ pub fn execute_sync(
                 tx,
                 &Action::Delete {
                     target: target.as_str().to_owned(),
+                    request_id: request.id.as_str().to_owned(),
                 },
                 now,
                 ports,

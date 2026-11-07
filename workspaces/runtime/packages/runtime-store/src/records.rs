@@ -370,6 +370,8 @@ pub struct AgentRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_assignment: Option<studio_runtime_schema::review::ReviewAssignment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub concurrency: Option<studio_runtime_schema::agent_limits::SubagentConcurrency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_mode: Option<studio_runtime_schema::agent_entity_nested::AgentMode>,
@@ -512,7 +514,16 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
+    pub worker_excluded_account_keys: studio_runtime_schema::queue_command::Field<
+        Vec<studio_runtime_schema::account_key::AccountKey>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub reviewer_excluded_account_keys: studio_runtime_schema::queue_command::Field<
+        Vec<studio_runtime_schema::account_key::AccountKey>,
+    >,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -735,11 +746,13 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub account_transfer:
-        studio_runtime_schema::queue_command::Field<crate::transfer_record::AgentTransferState>,
+    pub account_transfer: studio_runtime_schema::queue_command::Field<
+        StoredTransferObject<crate::transfer_record::AgentTransferState>,
+    >,
     #[serde(
         default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing",
+        deserialize_with = "deserialize_transfer_id"
     )]
     pub account_transfer_id:
         studio_runtime_schema::queue_command::Field<crate::transfer_record::TransferId>,
@@ -778,6 +791,95 @@ pub struct AgentRecord {
     )]
     pub moved_from:
         studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub connection_check:
+        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_summary_prepared:
+        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_compaction_episode:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCompactionEpisode>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub idle_cache: studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCache>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_thread_block:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeThreadBlock>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub native_turn_error:
+        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeTurnError>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+/// The episode identity is read by the runtime; other fields retain their wire representation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleCompactionEpisode {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdleCache {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub ttl: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub request_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeThreadBlock {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub thread_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeTurnError {
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub turn_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -830,6 +932,21 @@ pub enum StoredTransferObject<T> {
     Unreadable(Value),
 }
 
+fn deserialize_transfer_id<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<studio_runtime_schema::queue_command::Field<crate::transfer_record::TransferId>, D::Error>
+{
+    use studio_runtime_schema::queue_command::Field;
+    match Option::<String>::deserialize(deserializer)? {
+        None => Ok(Field::Null),
+        Some(value) if value.is_empty() => Ok(Field::Missing),
+        Some(value) => value
+            .try_into()
+            .map(Field::Value)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 /// Typed defaults or an unreadable legacy value.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
@@ -848,6 +965,24 @@ impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaul
 }
 
 impl AgentRecord {
+    /// Account exclusions for the role being scheduled; the lead is unrestricted.
+    pub fn exclusions_for(
+        &self,
+        role: studio_runtime_schema::creation_intent::AgentRole,
+    ) -> &[studio_runtime_schema::account_key::AccountKey] {
+        studio_runtime_schema::creation_intent::excluded_for(
+            role,
+            self.worker_excluded_account_keys
+                .value()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+            self.reviewer_excluded_account_keys
+                .value()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+    }
+
     pub fn moved_from_active(&self) -> bool {
         crate::schema::raw_truthy(self.moved_from.value().map(|raw| &raw.0))
     }
@@ -1260,7 +1395,8 @@ impl AgentRecord {
             checkpoint_history_head: Default::default(),
             workspace_reservation_id: Default::default(),
             workspace_operation: Default::default(),
-            excluded_account_keys: Default::default(),
+            worker_excluded_account_keys: Default::default(),
+            reviewer_excluded_account_keys: Default::default(),
             role: Default::default(),
             provider: Default::default(),
             created: Default::default(),
@@ -1319,6 +1455,7 @@ impl AgentRecord {
             vm_auth_bootstrap: None,
             native_release: None,
             creation_intent: None,
+            review_assignment: None,
             account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             account_transfer_id: studio_runtime_schema::queue_command::Field::Missing,
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
@@ -1327,6 +1464,12 @@ impl AgentRecord {
             project_folder_revision: studio_runtime_schema::queue_command::Field::Missing,
             task_default_gate: studio_runtime_schema::queue_command::Field::Missing,
             moved_from: studio_runtime_schema::queue_command::Field::Missing,
+            connection_check: studio_runtime_schema::queue_command::Field::Missing,
+            idle_summary_prepared: studio_runtime_schema::queue_command::Field::Missing,
+            idle_compaction_episode: studio_runtime_schema::queue_command::Field::Missing,
+            idle_cache: studio_runtime_schema::queue_command::Field::Missing,
+            native_thread_block: studio_runtime_schema::queue_command::Field::Missing,
+            native_turn_error: studio_runtime_schema::queue_command::Field::Missing,
             extra: BTreeMap::new(),
         }
     }
@@ -3399,6 +3542,42 @@ mod tests {
     }
 
     #[test]
+    fn legacy_unreadable_transfer_without_reason_decodes() {
+        let input = studio_json::json!({"id":"a", "rootId":"a", "epoch":1,
+            "status":"idle", "accountKey":"default", "accountTransfer":{"kind":"unreadable"}});
+        let record = super::AgentRecord::from_value(input.clone()).expect("legacy transfer");
+        assert_eq!(record.value()["accountTransfer"], input["accountTransfer"]);
+    }
+
+    #[test]
+    fn legacy_empty_transfer_id_is_absent() {
+        let input = studio_json::json!({"id":"a", "rootId":"a", "epoch":1,
+            "status":"idle", "accountKey":"default", "accountTransferId":""});
+        let record = super::AgentRecord::from_value(input).expect("legacy empty transfer id");
+        assert!(record.account_transfer_id.value().is_none());
+        assert!(record.value().get("accountTransferId").is_none());
+    }
+
+    #[test]
+    fn agent_connection_check_keeps_stored_shapes_without_duplicate_key() {
+        for value in [
+            r#"{"at":1001.0,"nativeState":"active"}"#,
+            r#"{"epoch":4,"accountKey":"default","threadId":"thread-1","turnId":"turn-1","at":10,"previousError":{},"nativeState":"idle"}"#,
+            "null",
+        ] {
+            let raw = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"connectionCheck":{value}}}"#
+            );
+            let agent: super::AgentRecord = studio_json::from_str(&raw).unwrap();
+            assert!(!agent.extra.contains_key("connectionCheck"));
+            let encoded = studio_json::to_string(&agent).unwrap();
+            assert_eq!(encoded.matches("\"connectionCheck\"").count(), 1);
+            let parsed: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            assert_eq!(agent.value()["connectionCheck"], parsed["connectionCheck"]);
+        }
+    }
+
+    #[test]
     fn agent_write_rejects_extra_keys_owned_by_named_fields() {
         for (key, value) in [
             ("error", studio_json::json!(null)),
@@ -3410,6 +3589,7 @@ mod tests {
             ("projectFolderRevision", studio_json::json!(null)),
             ("taskDefaultGate", studio_json::json!(null)),
             ("movedFrom", studio_json::json!(null)),
+            ("connectionCheck", studio_json::json!(null)),
             ("id", studio_json::json!(null)),
         ] {
             let mut agent = super::AgentRecord::from_value(studio_json::json!({
@@ -3632,7 +3812,7 @@ mod tests {
 
     #[test]
     fn agent_excluded_accounts_are_strings() {
-        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"workerExcludedAccountKeys":["blocked",42]}"#;
         assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
         let valid = raw.replace(",42", "");
         assert!(studio_json::from_str::<AgentRecord>(&valid).is_ok());
@@ -4283,10 +4463,7 @@ mod tests {
             record.worker_defaults.value(),
             Some(super::StoredWorkerDefaults::Known(_))
         ));
-        assert_eq!(
-            record.value().get("workerDefaults"),
-            Some(&json!({"accountKey":"source"}))
-        );
+        assert_eq!(record.value().get("workerDefaults"), Some(&json!({})));
     }
 
     #[test]
@@ -5230,6 +5407,55 @@ mod agent_projection_tests {
         let value = record.into_value();
         for (key, expected) in raw.as_object().unwrap() {
             assert_eq!(&value[key], expected);
+        }
+    }
+
+    #[test]
+    fn stored_agent_private_fields_preserve_legacy_bytes() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL)")
+            .unwrap();
+        db.execute_batch(crate::agent_volatile::agent_volatile_table_sql())
+            .unwrap();
+        for fields in [
+            json!({}),
+            json!({"idleCompactionEpisode":{"id":"episode","future":1},"idleSummaryPrepared":"episode","idleCache":{"ttl":"1h","requestId":"r"},"nativeThreadBlock":{"threadId":"t","error":{"future":true}},"nativeTurnError":{"turnId":"u","error":"legacy"},"workspaceCleanupIntent":{"phase":"queued","future":1}}),
+            json!({"idleCompactionEpisode":null,"idleSummaryPrepared":null,"idleCache":null,"nativeThreadBlock":null,"nativeTurnError":null,"workspaceCleanupIntent":null}),
+            json!({"idleCompactionEpisode":false,"idleSummaryPrepared":42,"idleCache":[1],"nativeThreadBlock":"legacy","nativeTurnError":{"turnId":null,"extra":true},"workspaceCleanupIntent":false}),
+        ] {
+            let mut raw = json!({"id":"a","rootId":"r","epoch":1,"status":"idle","accountKey":"default","compactions":0,"capacity":{"kind":"automatic","max":64},"naming":"automatic"});
+            raw.as_object_mut()
+                .unwrap()
+                .extend(fields.as_object().unwrap().clone());
+            let bytes = raw.to_string();
+            db.execute(
+                "INSERT OR REPLACE INTO runtime_agents(id,record) VALUES('a',?1)",
+                [&bytes],
+            )
+            .unwrap();
+            let stored: String = db
+                .query_row(
+                    "SELECT record FROM runtime_agents WHERE id='a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let record = Table::<AgentRecord>::new(&db)
+                .get(&AgentId::from("a"))
+                .unwrap()
+                .unwrap();
+            if fields["idleSummaryPrepared"] == "episode" {
+                assert!(
+                    matches!(record.idle_summary_prepared.value(), Some(StoredTransferValue::Known(value)) if value == "episode")
+                );
+                assert!(
+                    matches!(record.idle_compaction_episode.value(), Some(StoredTransferObject::Known(value)) if matches!(value.id.value(), Some(StoredTransferValue::Known(id)) if id == "episode"))
+                );
+                assert!(
+                    matches!(record.native_thread_block.value(), Some(StoredTransferObject::Known(value)) if matches!(value.thread_id.value(), Some(StoredTransferValue::Known(id)) if id == "t"))
+                );
+            }
+            assert_eq!(record.into_value().to_string(), stored);
         }
     }
 

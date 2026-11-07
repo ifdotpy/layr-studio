@@ -3,7 +3,6 @@
 //! while none holds; any doubt (an unknown start, unsettled input or request)
 //! keeps the thread loaded.
 use super::*;
-use crate::schema::table_exists;
 use crate::startup_recovery::{active_monitor_predicate, unsettled_tool_request_predicate};
 
 /// Agent statuses whose turn may still be starting or running.
@@ -15,7 +14,7 @@ const ACTIVE_SOURCE_CLEANUP_PHASES: &str = "'planned','submitted'";
 
 /// SQL predicate over the `runtime_agents` row (unqualified `record`): the
 /// agent has a turn, input, request, monitor, or operation in progress.
-fn agent_in_use(connection: &Connection) -> StoreResult<String> {
+fn agent_in_use() -> String {
     let mut checks = vec![
         format!(
             "COALESCE({},'') IN ({ACTIVE_AGENT_STATUSES})",
@@ -28,9 +27,9 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
             crate::agent_volatile::field_sql("runtime_agents", "activeTools")
         ),
         "workspace_operation IS NOT NULL".to_owned(),
-        "COALESCE(json_extract(record,'$.accountTransferId'),'')!=''".to_owned(),
+        "COALESCE(account_transfer_id,'')!=''".to_owned(),
         "COALESCE(native_tool_refresh_id,'')!=''".to_owned(),
-        "COALESCE(json_extract(record,'$.nativeRelease.resetPending'),0)!=0".to_owned(),
+        "COALESCE(native_release_reset_pending,0)!=0".to_owned(),
         format!("context_repair_phase IN ({ACTIVE_CONTEXT_REPAIR_PHASES})"),
         format!("({})", unresolved_sql()),
         format!(
@@ -38,26 +37,26 @@ fn agent_in_use(connection: &Connection) -> StoreResult<String> {
              AND e.status IN ({UNSETTLED_EVENT_STATUSES}))"
         ),
     ];
-    for (table, predicate) in [
-        ("runtime_monitors", active_monitor_predicate()),
-        ("runtime_tool_requests", unsettled_tool_request_predicate()),
+    for (table, predicate, agent) in [
+        ("runtime_monitors", active_monitor_predicate(), "agent"),
+        (
+            "runtime_tool_requests",
+            unsettled_tool_request_predicate(),
+            "json_extract(record,'$.agent')",
+        ),
     ] {
-        if table_exists(connection, table)? {
-            checks.push(format!(
-                "EXISTS(SELECT 1 FROM {table} WHERE {predicate} \
-                 AND json_extract(record,'$.agent')=runtime_agents.id)"
-            ));
-        }
+        checks.push(format!(
+            "EXISTS(SELECT 1 FROM {table} WHERE {predicate} \
+             AND {agent}=runtime_agents.id)"
+        ));
     }
     // An open approval (pending or being answered) holds the thread.
-    if table_exists(connection, "approvals")? {
-        checks.push(
-            "EXISTS(SELECT 1 FROM approvals WHERE state IN ('pending','answering') \
+    checks.push(
+        "EXISTS(SELECT 1 FROM approvals WHERE state IN ('pending','answering') \
              AND agent=runtime_agents.id)"
-                .to_owned(),
-        );
-    }
-    Ok(checks.join(" OR "))
+            .to_owned(),
+    );
+    checks.join(" OR ")
 }
 
 fn exists(connection: &Connection, sql: &str, values: &[&str]) -> StoreResult<bool> {
@@ -70,42 +69,32 @@ fn exists(connection: &Connection, sql: &str, values: &[&str]) -> StoreResult<bo
 
 /// A pending account transfer that reads from or writes to `?1`.
 fn transfer_pending(connection: &Connection, account: &str) -> StoreResult<bool> {
-    if !table_exists(connection, "runtime_account_transfers")? {
-        return Ok(false);
-    }
     exists(
         connection,
         "SELECT 1 FROM runtime_account_transfers t WHERE json_extract(t.record,'$.status')='pending' \
-         AND (json_extract(t.record,'$.targetAccountKey')=?1 OR EXISTS(SELECT 1 FROM \
+         AND (t.target_account_key=?1 OR EXISTS(SELECT 1 FROM \
          json_each(t.record,'$.members') m WHERE json_extract(m.value,'$.sourceAccountKey')=?1))",
         &[account],
     )
 }
 
-fn transfer_pending_predicate(connection: &Connection) -> StoreResult<String> {
-    if !table_exists(connection, "runtime_account_transfers")? {
-        return Ok("0".to_owned());
-    }
-    Ok("EXISTS(SELECT 1 FROM runtime_account_transfers t \
+fn transfer_pending_predicate() -> String {
+    "EXISTS(SELECT 1 FROM runtime_account_transfers t \
         WHERE json_extract(t.record,'$.status')='pending' \
-        AND (json_extract(t.record,'$.targetAccountKey')=?1 OR EXISTS(SELECT 1 FROM \
+        AND (t.target_account_key=?1 OR EXISTS(SELECT 1 FROM \
         json_each(t.record,'$.members') m WHERE json_extract(m.value,'$.sourceAccountKey')=?1)))"
-        .to_owned())
+        .to_owned()
 }
 
 /// A running command keeps its original provider after its actor changes account.
 /// `?1` is the source account key, not the actor's current model account.
-fn monitor_source_in_use(connection: &Connection) -> StoreResult<Option<String>> {
-    if !table_exists(connection, "runtime_monitors")? {
-        return Ok(None);
-    }
-    // Reuse the startup owner's partial active-monitor index, so old command
-    // history is not decoded on every provider idle decision.
-    Ok(Some(format!(
+fn monitor_source_in_use() -> String {
+    // The partial source-account index excludes settled command history.
+    format!(
         "EXISTS(SELECT 1 FROM runtime_monitors WHERE {} \
-        AND COALESCE(json_extract(record,'$.operation.accountKey'),json_extract(record,'$.accountKey'))=?1)",
+        AND source_account_key=?1)",
         active_monitor_predicate()
-    )))
+    )
 }
 
 /// Work item statuses that are done: the owner expects no further turn for them.
@@ -118,24 +107,31 @@ const SETTLED_WORK_STATUSES: &str = "'accepted','cancelled'";
 /// `waiting` state (pending children, watches, or a hold), and it owns no open
 /// work item. A waiting worker will likely get another turn soon, so it keeps
 /// the ordinary idle timer.
-fn finished_worker_sql(connection: &Connection) -> StoreResult<String> {
+fn finished_worker_sql() -> String {
     let mut predicate = format!(
-        "COALESCE(json_extract(record,'$.isLead'),0)=0 \
+        "COALESCE(is_lead,0)=0 \
          AND COALESCE({},'')!='waiting'",
         crate::domain::chat_status_sql("runtime_agents.id")
     );
-    if table_exists(connection, "runtime_work")? {
-        predicate.push_str(&format!(
-            " AND NOT EXISTS(SELECT 1 FROM runtime_work w \
-             WHERE json_extract(w.record,'$.owner')=runtime_agents.id \
+    predicate.push_str(&format!(
+        " AND NOT EXISTS(SELECT 1 FROM runtime_work w \
+             WHERE w.owner=runtime_agents.id \
              AND json_extract(w.record,'$.status') NOT IN ({SETTLED_WORK_STATUSES}))"
-        ));
-    }
-    Ok(predicate)
+    ));
+    predicate
 }
 
-const ACCOUNT_AGENT_SQL: &str =
-    "SELECT 1 FROM runtime_agents WHERE account_key=?1 AND deleted_at IS NULL";
+const ACCOUNT_AGENT_SQL: &str = "SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload WHERE account_key=?1 AND deleted_at IS NULL";
+
+/// Find session owners by primary key rather than scanning every account agent
+/// for each loaded thread. CROSS JOIN keeps the indexed session lookup first.
+fn thread_agent_sql(thread: &str) -> String {
+    format!(
+        "SELECT 1 FROM sessions s CROSS JOIN runtime_agents \
+         WHERE s.thread_id={thread} AND s.state<>'ended' AND runtime_agents.id=s.chat \
+         AND runtime_agents.account_key=?1 AND runtime_agents.deleted_at IS NULL"
+    )
+}
 
 impl SchedulerRepository {
     /// Read the durable status of known loaded threads and the account in one
@@ -152,22 +148,22 @@ impl SchedulerRepository {
         std::collections::BTreeSet<String>,
         bool,
     )> {
-        let transfer = transfer_pending_predicate(connection)?;
-        let in_use = agent_in_use(connection)?;
-        let source_monitor = monitor_source_in_use(connection)?.unwrap_or_else(|| "0".into());
+        let transfer = transfer_pending_predicate();
+        let in_use = agent_in_use();
+        let source_monitor = monitor_source_in_use();
+        let thread_agents = thread_agent_sql("c.thread_id");
         let account_in_use = format!(
             "({transfer} OR {source_monitor} OR EXISTS({ACCOUNT_AGENT_SQL} AND ({in_use})))"
         );
         let thread_in_use = format!(
-            "({transfer} OR EXISTS({ACCOUNT_AGENT_SQL} \
-               AND id IN (SELECT chat FROM sessions WHERE thread_id=c.thread_id AND state<>'ended') AND ({in_use})) \
-             OR EXISTS(SELECT 1 FROM runtime_agents WHERE \
-               source_cleanup_phase IN ({ACTIVE_SOURCE_CLEANUP_PHASES}) \
-               AND source_cleanup_account_key=?1 AND source_cleanup_thread_id=c.thread_id))"
+            "({transfer} OR EXISTS({thread_agents} AND ({in_use})) \
+             OR c.thread_id IN (SELECT thread_id FROM cleanup_threads))"
         );
         let sql = format!(
             "WITH candidates(thread_id) AS (SELECT value FROM json_each(?2)), \
-             account_usage(in_use) AS (SELECT {account_in_use}), \
+             account_usage(in_use) AS MATERIALIZED (SELECT {account_in_use}), \
+             cleanup_threads(thread_id) AS MATERIALIZED (SELECT source_cleanup_thread_id FROM runtime_agents \
+               WHERE source_cleanup_phase IN ({ACTIVE_SOURCE_CLEANUP_PHASES}) AND source_cleanup_account_key=?1), \
              candidate_usage AS (SELECT c.thread_id, \
                CASE WHEN {thread_in_use} THEN 1 ELSE 0 END AS busy \
                FROM candidates c) \
@@ -212,11 +208,10 @@ impl SchedulerRepository {
         threads: &std::collections::BTreeSet<String>,
     ) -> StoreResult<std::collections::BTreeSet<String>> {
         let encoded_threads = studio_json::to_string(threads)?;
-        let finished = finished_worker_sql(connection)?;
+        let finished = finished_worker_sql();
+        let thread_agents = thread_agent_sql("c.value");
         let mut statement = connection.prepare_cached(&format!(
-            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS(SELECT 1 FROM runtime_agents \
-             WHERE account_key=?1 AND deleted_at IS NULL AND NOT ({finished}) \
-             AND id IN (SELECT chat FROM sessions WHERE thread_id=c.value AND state<>'ended'))"
+            "SELECT c.value FROM json_each(?2) c WHERE NOT EXISTS({thread_agents} AND NOT ({finished}))"
         ))?;
         let rows = statement.query_map([account, &encoded_threads], |row| row.get(0))?;
         Ok(rows.collect::<Result<_, _>>()?)
@@ -233,7 +228,7 @@ impl SchedulerRepository {
         if transfer_pending(connection, account)? {
             return Ok(true);
         }
-        let in_use = agent_in_use(connection)?;
+        let in_use = agent_in_use();
         Ok(exists(
             connection,
             &format!(
@@ -258,14 +253,13 @@ impl SchedulerRepository {
         if transfer_pending(connection, account)? {
             return Ok(true);
         }
-        if let Some(source_monitor) = monitor_source_in_use(connection)?
-            && connection.query_row(&format!("SELECT {source_monitor}"), [account], |row| {
-                row.get::<_, bool>(0)
-            })?
-        {
+        let source_monitor = monitor_source_in_use();
+        if connection.query_row(&format!("SELECT {source_monitor}"), [account], |row| {
+            row.get::<_, bool>(0)
+        })? {
             return Ok(true);
         }
-        let in_use = agent_in_use(connection)?;
+        let in_use = agent_in_use();
         exists(
             connection,
             &format!("{ACCOUNT_AGENT_SQL} AND ({in_use})"),
@@ -276,12 +270,93 @@ impl SchedulerRepository {
 
 #[cfg(test)]
 mod tests {
-    use super::{SchedulerRepository, monitor_source_in_use};
+    use super::{
+        ACCOUNT_AGENT_SQL, SchedulerRepository, agent_in_use, finished_worker_sql,
+        monitor_source_in_use, transfer_pending_predicate,
+    };
     use rusqlite::Connection;
     use studio_json::{Value, json};
 
+    thread_local! {
+        static SCHEMA_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+        static SNAPSHOT_STEPS: std::cell::Cell<i32> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn idle_unload_snapshot_work_is_linear_in_loaded_threads() {
+        let small = snapshot_steps(50);
+        let large = snapshot_steps(100);
+        assert!(
+            large < 40_000,
+            "100 loaded threads must use indexed owner lookups, got {large} VM steps"
+        );
+        assert!(
+            large * 4 < small * 9,
+            "doubling agents and threads must stay near linear: {small} -> {large}"
+        );
+    }
+
+    fn snapshot_steps(agents: usize) -> i32 {
+        let connection = database();
+        let mut threads = std::collections::BTreeSet::new();
+        for n in 0..agents {
+            let thread = format!("thread-{n}");
+            agent(
+                &connection,
+                &format!("agent-{n}"),
+                json!({"threadId":thread,"isLead":true}),
+            );
+            threads.insert(thread);
+        }
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    SNAPSHOT_STEPS.with(|count| {
+                        count.set(
+                            count.get() + statement.get_status(rusqlite::StatementStatus::VmStep),
+                        )
+                    });
+                }
+            }),
+        );
+        SNAPSHOT_STEPS.with(|count| count.set(0));
+        let start = std::time::Instant::now();
+        let (busy, immediate, account_busy) =
+            SchedulerRepository::idle_unload_usage_snapshot(&connection, "acct", &threads).unwrap();
+        let steps = SNAPSHOT_STEPS.with(std::cell::Cell::get);
+        eprintln!(
+            "idle snapshot: agents={agents} threads={agents} steps={steps} elapsed={:?}",
+            start.elapsed()
+        );
+        assert!(busy.is_empty());
+        assert!(immediate.is_empty());
+        assert!(!account_busy);
+        steps
+    }
+
+    #[test]
+    fn idle_unload_snapshot_does_not_read_schema() {
+        let connection = crate::test_canvas();
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Stmt(statement, _) = event {
+                    let sql = statement.sql().to_ascii_lowercase();
+                    if sql.contains("sqlite_master") || sql.contains("sqlite_schema") {
+                        SCHEMA_READS.with(|count| count.set(count.get() + 1));
+                    }
+                }
+            }),
+        );
+        SCHEMA_READS.with(|count| count.set(0));
+        SchedulerRepository::idle_unload_usage_snapshot(&connection, "acct", &Default::default())
+            .expect("idle snapshot");
+        assert_eq!(SCHEMA_READS.with(std::cell::Cell::get), 0);
+    }
+
     fn database() -> Connection {
-        let connection = Connection::open_in_memory().expect("memory database opens");
+        let mut connection = Connection::open_in_memory().expect("memory database opens");
         connection
             .execute_batch(crate::agent_columns::agent_table_sql())
             .expect("agents table creates");
@@ -289,9 +364,9 @@ mod tests {
             .execute_batch(
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
-                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT);
+                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT); CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(json_extract(record,'$.agent'),json_extract(record,'$.status'));
                  CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
-                 CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);",
+                 CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL, kind TEXT, status TEXT);",
             )
             .expect("schema creates");
         crate::approvals::create_schema(&connection).expect("approvals table creates");
@@ -301,6 +376,11 @@ mod tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        {
+            let tx = connection.transaction().expect("migration transaction");
+            crate::migrations::m2026_11_06_idle_unload::apply(&tx).expect("idle indexes");
+            tx.commit().expect("migration commit");
+        }
         connection
     }
 
@@ -328,6 +408,54 @@ mod tests {
     }
 
     #[test]
+    fn idle_query_plans_use_their_indexes() {
+        let db = database();
+        db.execute_batch("CREATE INDEX runtime_work_owner_status ON runtime_work(json_extract(record,'$.owner'),json_extract(record,'$.status'));").unwrap();
+        let plans = [
+            (
+                format!(
+                    "SELECT 1 FROM runtime_agents INDEXED BY runtime_agent_idle_unload WHERE account_key=?1 AND deleted_at IS NULL AND ({})",
+                    agent_in_use()
+                ),
+                vec![
+                    "runtime_agent_idle_unload",
+                    "runtime_monitor_idle_agent",
+                    "runtime_event_idle_agent_status",
+                ],
+            ),
+            (
+                format!("{ACCOUNT_AGENT_SQL} AND NOT ({})", finished_worker_sql()),
+                vec!["runtime_agent_idle_unload", "runtime_work_idle_owner"],
+            ),
+            (
+                format!("SELECT {}", transfer_pending_predicate()),
+                vec!["runtime_transfer_target_account_key"],
+            ),
+            (
+                format!("SELECT {}", monitor_source_in_use()),
+                vec!["runtime_monitor_idle_account"],
+            ),
+        ];
+        for (sql, indexes) in plans {
+            let mut statement = db.prepare(&format!("EXPLAIN QUERY PLAN {sql}")).unwrap();
+            let plan = statement
+                .query_map(["acct"], |row| row.get::<_, String>(3))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap()
+                .join("\n");
+            eprintln!("{plan}");
+            for index in indexes {
+                assert!(
+                    plan.lines()
+                        .any(|line| line.contains("SEARCH") && line.contains(index)),
+                    "missing indexed search {index}: {plan}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_settled_agent_or_an_unowned_thread_releases_the_thread() {
         let connection = database();
         assert!(!thread_in_use(&connection), "no owner holds nothing");
@@ -347,12 +475,7 @@ mod tests {
         let connection = database();
         crate::StartupRecoveryRepository::prepare_indexes(&connection)
             .expect("active monitor index");
-        let sql = format!(
-            "EXPLAIN QUERY PLAN SELECT {}",
-            monitor_source_in_use(&connection)
-                .expect("monitor source predicate")
-                .expect("monitor table exists")
-        );
+        let sql = format!("EXPLAIN QUERY PLAN SELECT {}", monitor_source_in_use());
         let plan = connection
             .prepare(&sql)
             .expect("prepare source plan")
@@ -362,7 +485,7 @@ mod tests {
             .expect("collect source plan")
             .join("\n");
         assert!(
-            plan.contains("USING INDEX runtime_monitor_startup_active"),
+            plan.contains("USING INDEX runtime_monitor_idle_account"),
             "{plan}"
         );
         agent(&connection, "a", json!({"accountKey":"target"}));
@@ -387,13 +510,6 @@ mod tests {
         assert!(
             !account_in_use(&connection),
             "the real exit releases its source"
-        );
-        connection
-            .execute_batch("DROP TABLE runtime_monitors")
-            .expect("remove optional monitor table");
-        assert!(
-            !account_in_use(&connection),
-            "the optional monitor schema can be absent"
         );
     }
 
@@ -451,6 +567,19 @@ mod tests {
             agent(&connection, "a", fields.clone());
             assert!(thread_in_use(&connection), "{fields} holds the thread");
             assert!(account_in_use(&connection), "{fields} holds the account");
+            let (busy, immediate, account_busy) = SchedulerRepository::idle_unload_usage_snapshot(
+                &connection,
+                "acct",
+                &std::collections::BTreeSet::from(["thread".into(), "other".into()]),
+            )
+            .unwrap();
+            assert_eq!(
+                busy,
+                std::collections::BTreeSet::from(["thread".into()]),
+                "snapshot parity: {fields}"
+            );
+            assert!(account_busy, "snapshot account parity: {fields}");
+            assert!(immediate.contains("other"));
             assert!(
                 !SchedulerRepository::idle_unload_thread_in_use(&connection, "acct", "other")
                     .expect("reads"),
@@ -576,17 +705,25 @@ mod tests {
             thread_in_use(&connection),
             "source cleanup still owns the thread"
         );
-    }
-
-    #[test]
-    fn missing_transfer_table_is_a_clear_idle_state() {
-        let connection = database();
-        connection
-            .execute("DROP TABLE runtime_account_transfers", [])
-            .expect("legacy schema drops transfer table");
-
-        assert!(!thread_in_use(&connection));
-        assert!(!account_in_use(&connection));
+        for phase in ["planned", "submitted", "completed"] {
+            for account in ["acct", "another-account"] {
+                agent(
+                    &connection,
+                    "repair",
+                    json!({"threadId":"new","deletedAt":1.0,
+                    "contextRepair":{"sourceCleanup":{"phase":phase,"accountKey":account,"threadId":"thread"}}}),
+                );
+                let (busy, _, account_busy) = SchedulerRepository::idle_unload_usage_snapshot(
+                    &connection,
+                    "acct",
+                    &std::collections::BTreeSet::from(["thread".into(), "cold".into()]),
+                )
+                .unwrap();
+                assert_eq!(busy.contains("thread"), thread_in_use(&connection));
+                assert!(!busy.contains("cold"));
+                assert_eq!(account_busy, account_in_use(&connection));
+            }
+        }
     }
 
     #[test]

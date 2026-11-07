@@ -99,26 +99,23 @@ If a cell still waits for an uncertain external result, save its ID in your chec
 Do not cancel the cell or repeat the external operation without checking its receipt.
 See the [native cell diagnosis](../../../docs/verification/2026-10-05-sqlite-owners-and-code-cells.md).
 
-Codex agents use `orchestration_review` for native code review. Supply a stable
-`request_id`. Omit `target` to review uncommitted changes. Other targets use
-`type: "baseBranch"` with `branch`, `type: "commit"` with `sha`, or
-`type: "custom"` with `instructions`. Pass `model` (for example `gpt-6-astra`)
-and optional `effort` to override the team review default. Without that default,
-the reviewer uses the caller's model and effort. A different model without
-`effort` uses its native default. The result reports both selected values.
-A Claude agent cannot run native review. To get a managed review, use
-`orchestration_spawn` with `role: "reviewer"`; omitted model and effort honor the
-team review defaults. Supply another model only when the user requests it.
-Studio creates a separate reviewer with read-only access to `cwd`. `cwd`
-defaults to the caller's folder; a relative path starts there, and a shell `cd`
-does not change it. `cwd` must be inside a git repository, or the call fails
-before a reviewer exists. Studio sets `review_model` on the reviewer thread,
-so the account's `review_model` does not override this choice. The caller continues its current
-turn. Findings arrive as a child result; the reviewer chat retains the complete
-output. Use `orchestration_request` to recover the receipt after a lost reply.
-Use `orchestration_interrupt` with the returned reviewer ID to stop the review.
-Claude agents do not expose this native Codex tool.
-Give layr reviewers the full state ID and the relevant diff. Use try for checks of that state.
+Leads use `orchestration_review` with a stable `request_id` and a `target`.
+For a Layr chat use `{"kind":"layrState","state":"<full state id>","base":{"kind":"mergeBaseWithMain"}}`,
+or specify `base` as `{"kind":"state","state":"<full state id>"}`.
+For a worktree chat use `{"kind":"gitRange","base":"<ref>","head":"<full commit>"}`.
+The reviewer uses the team review default model and a read-only working copy of
+the target. Findings arrive as a child result. Recover a lost receipt with
+`orchestration_request`; do not repeat the request with a new identity.
+Optional `instructions` add context to the review brief, and `account` selects
+an eligible account that offers the review model.
+
+The same targets may be supplied as `review` when spawning a reviewer. A Layr
+reviewer receives `layr_read` for exact-state reads and checks; a Git reviewer
+uses the Git working copy. Reviewers use `orchestration_read` to retrieve their
+own saved output when a response includes an outputRef. Shared workspaces do not accept review assignments.
+Leads using either provider receive `orchestration_review`. Voice is the only
+provider-specific difference in this tool matrix: `orchestration_speak` is
+available to Codex leads. Implementers and reviewers do not receive voice.
 
 Use `orchestration_send` for a new or revised assignment, or an explicit resumption.
 Choose `delivery=current_turn` for input the recipient should act on during its active turn,

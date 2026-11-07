@@ -273,29 +273,66 @@ pub(crate) fn load(
     Ok(result)
 }
 
-pub(crate) fn decorate(summary: &mut Value, context: Option<&Context>) -> StoreResult<()> {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Source {
+    status: Option<String>,
+    auto_wake: Option<bool>,
+    empty: Option<bool>,
+    in_flight: Option<bool>,
+    thread_id: Option<String>,
+    last_completed_turn: Option<String>,
+    last_completed_turn_status: Option<String>,
+    read_state: Option<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>,
+    read_state_supported: Option<bool>,
+    has_question: Option<bool>,
+    has_approval: Option<bool>,
+    has_background_work: Option<bool>,
+    account_key: Option<String>,
+    epoch: Option<i64>,
+    capacity_retry:
+        Option<studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto>,
+}
+
+/// Combine the typed agent projection with the request-local operational context.
+pub(crate) fn summary(
+    full: &studio_runtime_schema::generated::AgentEntityDto,
+    context: Option<&Context>,
+) -> StoreResult<studio_runtime_schema::generated::AgentSummaryEntityDto> {
+    let source = Source {
+        status: full.status.clone().flatten(),
+        auto_wake: full.auto_wake.flatten(),
+        empty: full.empty.as_ref().and_then(Option::as_ref).and_then(Value::as_bool),
+        in_flight: full.in_flight.flatten(),
+        thread_id: full.thread_id.clone().flatten(),
+        last_completed_turn: full.last_completed_turn.clone().flatten(),
+        last_completed_turn_status: full.last_completed_turn_status.clone().flatten(),
+        read_state: full.read_state.as_ref().and_then(Option::as_ref).map(Option::<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>::deserialize).transpose()?.flatten(),
+        read_state_supported: full.read_state_supported.flatten(),
+        has_question: full.has_question.flatten(),
+        has_approval: full.has_approval.flatten(),
+        has_background_work: full.has_background_work,
+        account_key: full.account_key.clone().flatten(),
+        epoch: full.epoch.flatten(),
+        capacity_retry: full.capacity_retry.as_ref().and_then(Option::as_ref).map(Option::<studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto>::deserialize).transpose()?.flatten(),
+    };
+    let (status, mark, eligible) = operational(&source, context);
+    Ok(
+        studio_runtime_schema::generated::AgentSummaryEntityDto::from_agent(
+            full, status, mark, eligible,
+        ),
+    )
+}
+
+fn operational(
+    source: &Source,
+    context: Option<&Context>,
+) -> (
+    studio_runtime_schema::chat_operational_status::AgentOperationalStatus,
+    Option<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>,
+    MarkUnreadEligibility,
+) {
     let context = context.cloned().unwrap_or_default();
-    #[derive(Deserialize)]
-    #[serde(rename_all = "camelCase")]
-    struct Source {
-        status: Option<AgentStatus>,
-        auto_wake: Option<bool>,
-        empty: Option<bool>,
-        in_flight: Option<bool>,
-        thread_id: Option<String>,
-        last_completed_turn: Option<String>,
-        last_completed_turn_status: Option<String>,
-        read_state: Option<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>,
-        read_state_supported: Option<bool>,
-        has_question: Option<bool>,
-        has_approval: Option<bool>,
-        has_background_work: Option<bool>,
-        account_key: Option<String>,
-        epoch: Option<i64>,
-        capacity_retry:
-            Option<studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto>,
-    }
-    let source = Source::deserialize(&*summary)?;
     let mark = if source.read_state_supported == Some(true) {
         studio_read_models::chat_status::mark_read_target(
             source.thread_id.as_deref(),
@@ -324,8 +361,11 @@ pub(crate) fn decorate(summary: &mut Value, context: Option<&Context>) -> StoreR
             && retry.accepted_turn_id.as_ref().is_none_or(String::is_empty)
             && retry.cause.as_ref()==Some(&studio_runtime_schema::continuation_snapshot::CapacityContinuationCause::DiskFull)
     });
+    let status = source.status.as_ref().map(|status| {
+        AgentStatus::deserialize(Value::String(status.clone())).unwrap_or(AgentStatus::Unknown)
+    });
     let facts = studio_read_models::chat_status::ChatStatusFacts {
-        status: source.status.as_ref(),
+        status: status.as_ref(),
         auto_wake: source.auto_wake,
         empty: source.empty == Some(true),
         in_flight: source.in_flight == Some(true),
@@ -340,6 +380,13 @@ pub(crate) fn decorate(summary: &mut Value, context: Option<&Context>) -> StoreR
         wait: context.wait.as_ref(),
     };
     let operational = studio_read_models::chat_status::derive_chat_status(&facts);
+    (operational, mark, eligible)
+}
+
+// Corrupt-record repair alone retains the tolerant JSON projection.
+pub(crate) fn decorate(summary: &mut Value, context: Option<&Context>) -> StoreResult<()> {
+    let source = Source::deserialize(&*summary)?;
+    let (operational, mark, eligible) = operational(&source, context);
     summary["operationalStatus"] = studio_json::to_value(operational)?;
     summary["markRead"] = studio_json::to_value(mark)?;
     summary["markUnread"] = studio_json::to_value(eligible)?;

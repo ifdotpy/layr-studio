@@ -1,4 +1,5 @@
 import BottomSheet from "../ui/BottomSheet";
+import { AgentPermissionMode } from "../../generated/api";
 import { appendAppLog } from "../../appLog";
 import { AgentStatus } from "../../generated/api";
 import { randomUUID } from "../../uuid";
@@ -8,7 +9,6 @@ import {
   providerSupports,
 } from "../../generated/providerKind.ts";
 import { clearSettingsRequest, settingsRequestId } from "../settingsRequestId";
-import { isModelEnabled, useModelChoices } from "../models/modelChoices";
 import { useServerApi } from "../../servers/ServerServicesContext";
 import { accountCanStart } from "../../accountName";
 import {
@@ -57,6 +57,7 @@ import {
 import { ProviderMark, setupAccountName } from "../AccountTiles";
 import { useMediaQuery } from "@mantine/hooks";
 import { AgentSetupPicker, type SetupRole } from "./AgentSetupPicker";
+import { subagentsOff } from "./SubagentConcurrencyControl";
 import "./execution-settings.css";
 import { SettingsSection } from "../ui/primitives";
 import {
@@ -67,7 +68,6 @@ import {
 type Catalog = ReturnType<typeof useWorkerModels>;
 type ConversationBody = PostBody<"/api/conversation">;
 type SettingsValue = {
-  account_key?: string | null;
   model: string | null;
   effort: string | null;
   fast_mode: boolean;
@@ -131,6 +131,10 @@ type SettingsProps = {
   inline?: boolean;
   permissionsTargetId?: string;
   onAccountChange?: (key: string) => void;
+  workerExcludedAccountKeys?: readonly string[] | undefined;
+  reviewerExcludedAccountKeys?: readonly string[] | undefined;
+  onWorkerExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
+  onReviewerExcludedAccountKeysChange?: ((keys: string[]) => void) | undefined;
   accountDisabled?: boolean;
   accountModalOpen?: boolean;
   onDraftChange?: (patch: Partial<ConversationBody>) => void;
@@ -149,7 +153,6 @@ export const settingsFor = (
 ): SettingsValue => {
   if (teamDefaults)
     return {
-      account_key: agent.workerDefaults?.accountKey ?? null,
       model:
         agent.workerDefaults?.model === undefined
           ? "gpt-6-luna"
@@ -172,9 +175,6 @@ export const settingsFor = (
   };
 };
 const reviewSettingsFor = (agent: Agent): ReviewSettings => ({
-  ...(agent.reviewDefaults?.accountKey != null
-    ? { account_key: agent.reviewDefaults.accountKey }
-    : {}),
   model: agent.reviewDefaults?.model ?? null,
   effort: agent.reviewDefaults?.effort ?? null,
   ...(agent.reviewDefaults?.fastMode != null
@@ -182,7 +182,6 @@ const reviewSettingsFor = (agent: Agent): ReviewSettings => ({
     : {}),
 });
 const sameSettings = (left: SettingsValue, right: SettingsValue) =>
-  left.account_key === right.account_key &&
   left.model === right.model &&
   left.effort === right.effort &&
   left.fast_mode === right.fast_mode &&
@@ -211,8 +210,7 @@ type ControllerProps = SettingsProps & {
 type SettingsReceipt = { version: object; value: Agent };
 const sameRoleSettings = (left: Agent, right: Agent, role: SetupRole) =>
   role === "review"
-    ? left.reviewDefaults?.accountKey === right.reviewDefaults?.accountKey &&
-      left.reviewDefaults?.model === right.reviewDefaults?.model &&
+    ? left.reviewDefaults?.model === right.reviewDefaults?.model &&
       left.reviewDefaults?.effort === right.reviewDefaults?.effort &&
       left.reviewDefaults?.fastMode === right.reviewDefaults?.fastMode
     : sameSettings(
@@ -370,9 +368,15 @@ function ExecutionSettingsController(props: ControllerProps) {
         : props.agent,
     [props.agent, main, worker, review],
   );
-  const [role, setRole] = useState<SetupRole>(
+  const [selectedRole, setRole] = useState<SetupRole>(
     props.initialRole || (props.agent.isLead ? "orchestrator" : "worker"),
   );
+  // With subagents off, the composer picker of a lead has no Workers role; the
+  // settings rows still set the defaults for later subagents.
+  const workersHidden =
+    !props.settingsRow && !!props.agent.isLead && subagentsOff(props.agent);
+  const role =
+    workersHidden && selectedRole === "worker" ? "orchestrator" : selectedRole;
   const [opened, setOpened] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -460,6 +464,7 @@ function ExecutionSettingsController(props: ControllerProps) {
       roleSwitchId={roleSwitchId}
       teamDefaults={role === "review" || (role === "worker" && !!agent.isLead)}
       role={role}
+      workersHidden={workersHidden}
       onRole={(value) => {
         focusRole.current = true;
         setRole(value);
@@ -508,6 +513,7 @@ function ScopedExecutionSettings({
   readOnlyReason,
   inheritedUnavailable,
   roleSwitchId,
+  workersHidden = false,
   catalog: parentCatalog,
   accounts = [],
   refresh,
@@ -520,6 +526,10 @@ function ScopedExecutionSettings({
   extrasTargetId,
   permissionsTargetId,
   onAccountChange,
+  workerExcludedAccountKeys,
+  reviewerExcludedAccountKeys,
+  onWorkerExcludedAccountKeysChange,
+  onReviewerExcludedAccountKeysChange,
   accountDisabled = false,
   accountModalOpen = false,
   onDraftChange,
@@ -546,6 +556,7 @@ function ScopedExecutionSettings({
   inheritedUnavailable: boolean;
   roleSwitchId: string;
   role: SetupRole;
+  workersHidden?: boolean;
   onRole: (role: SetupRole) => void;
   opened: boolean;
   triggerRef: RefObject<HTMLButtonElement | null>;
@@ -627,8 +638,10 @@ function ScopedExecutionSettings({
     if (
       !saving &&
       pendingYolo &&
-      (pendingYolo.value === (agent.permissionMode === "bypassPermissions") ||
-        pendingYolo.baseline !== (agent.permissionMode === "bypassPermissions"))
+      (pendingYolo.value ===
+        (agent.permissionMode === AgentPermissionMode["bypassPermissions"]) ||
+        pendingYolo.baseline !==
+          (agent.permissionMode === AgentPermissionMode["bypassPermissions"]))
     )
       setPendingYolo(null);
   }, [saving, pendingYolo, agent.permissionMode]);
@@ -639,10 +652,6 @@ function ScopedExecutionSettings({
   const [reviewPending, setReviewPending] = useState<{
     values: ReviewSettings;
     baseline: ReviewSettings;
-  } | null>(null);
-  const [accountPending, setAccountPending] = useState<{
-    target: string;
-    baseline: string | null;
   } | null>(null);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<{
@@ -671,10 +680,7 @@ function ScopedExecutionSettings({
           setError(`${confirmation} ${errorText(failure)}`);
       });
   };
-  const effectiveAccount =
-    role === "review"
-      ? reviewCurrent.account_key || agent.workerDefaults?.accountKey
-      : current.account_key;
+  const effectiveAccount = teamDefaults ? null : accountOf(agent);
   const accountCatalog = useWorkerModels(
     effectiveAccount || accountOf(agent),
     teamDefaults && (opened || settingsRow || presentation === "panel"),
@@ -689,8 +695,9 @@ function ScopedExecutionSettings({
     : readOnlyReason
       ? inheritedCatalog
       : parentCatalog;
-  const allowedModels = useModelChoices();
   const connectedAccounts = accounts.filter((account) =>
+    workerExcludedAccountKeys !== undefined ||
+    reviewerExcludedAccountKeys !== undefined ||
     role === "review"
       ? true
       : teamDefaults
@@ -717,41 +724,17 @@ function ScopedExecutionSettings({
     role === "review"
       ? browsedProvider || ProviderKind.Codex
       : browsedProvider ||
-        (effectiveAccount ? providerOf(activeAccount) : automaticProvider) ||
+        (teamDefaults ? automaticProvider : providerOf(activeAccount)) ||
+        automaticProvider ||
         "";
   const pickerProviders = [
     ...new Set(connectedAccounts.map((account) => account.provider)),
   ];
   const chooseAccount = (key: string | null) => {
-    if (teamDefaults) void changeAccount(key);
-    else if (key) onAccountChange?.(key);
+    if (!teamDefaults && key) onAccountChange?.(key);
   };
-  // Subagent settings apply to new subagents only. An explicit account lists its own
-  // models on its provider's tab. Automatic, and any other provider's tab, list the
-  // models of all ready accounts of that provider; the server picks the account for
-  // each new subagent from the model.
-  const crossProvider =
-    role === "worker" &&
-    teamDefaults &&
-    !!effectiveAccount &&
-    pickerProvider !== (activeAccount?.provider || "");
-  const allWorkerModels = useWorkerModels(
-    accountOf(agent),
-    crossProvider && (opened || settingsRow || presentation === "panel"),
-    true,
-  );
   const catalogReader = useModelCatalogReader();
 
-  useEffect(() => {
-    // Keep the confirmed default until the snapshot carries the change.
-    if (
-      !saving &&
-      accountPending &&
-      (stored.account_key === accountPending.target ||
-        stored.account_key !== accountPending.baseline)
-    )
-      setAccountPending(null);
-  }, [saving, accountPending, stored.account_key]);
   useEffect(() => {
     // Keep the acknowledged response while replication still has the old values.
     // A settings change in the snapshot hands ownership back to replication.
@@ -765,7 +748,6 @@ function ScopedExecutionSettings({
   }, [
     saving,
     pending,
-    stored.account_key,
     stored.model,
     stored.effort,
     stored.fast_mode,
@@ -851,7 +833,7 @@ function ScopedExecutionSettings({
   const reviewOptions: ModelOption[] = [
     {
       value: DEFAULT,
-      label: "Same as caller",
+      label: "Use caller’s model",
       provider: ProviderKind.Codex,
       badges: [],
       description: "Use the caller model and reasoning level.",
@@ -866,11 +848,7 @@ function ScopedExecutionSettings({
       badges: [],
       disabledReason: "Unavailable for review.",
     });
-  const submit = async (
-    request: ConversationBody,
-    notice = "",
-    freshWorkerSelection?: { accountKey: string | null; model: string | null },
-  ) => {
+  const submit = async (request: ConversationBody, notice = "") => {
     if (readOnlyReason) return;
     if (onDraftChange) {
       onDraftChange(request);
@@ -920,22 +898,14 @@ function ScopedExecutionSettings({
     let confirmed = false;
     try {
       const defaults = request.worker_defaults;
-      const accountKey = defaults?.account_key ?? null;
       const model = defaults?.model ?? null;
-      const changedSelection =
-        defaults &&
-        (accountKey !== (current.account_key ?? null) ||
-          model !== current.model);
-      const alreadyFresh =
-        freshWorkerSelection?.accountKey === accountKey &&
-        freshWorkerSelection?.model === model;
-      if (changedSelection && !alreadyFresh) {
+      if (defaults && model !== current.model) {
         // Model choices and automatic model repair can change future-worker
         // selection without going through the account tile's preflight.
         const offered = await readWorkerModels(
           catalogReader,
-          accountKey || accountOf(agent),
-          !accountKey,
+          accountOf(agent),
+          true,
         );
         if (!mounted.current) return;
         const selected = modelForValue(offered, model || agent.model);
@@ -1009,154 +979,6 @@ function ScopedExecutionSettings({
       if (mounted.current) setSaving(false);
     }
   };
-  // A new account for new subagents keeps the model when the account offers it, else
-  // the account's recommended model. Existing subagents keep theirs.
-  const changeAccount = async (target: string | null) => {
-    const review = role === "review";
-    if (
-      readOnlyReason ||
-      saveLock.current ||
-      target ===
-        (review ? (reviewCurrent.account_key ?? null) : current.account_key)
-    )
-      return;
-    saveLock.current = true;
-    setSaving(true);
-    setError("");
-    setStatus({ kind: "saving", text: "" });
-    let next: ConversationBody | undefined;
-    let nextReview: ReviewSettings | undefined;
-    try {
-      const offered = await readWorkerModels(
-        catalogReader,
-        target || accountOf(agent),
-        !target,
-      );
-      if (!mounted.current) return;
-      const usable = offered.filter(
-        (row) =>
-          !row.hidden &&
-          (!review ||
-            (row.model.startsWith("gpt-") &&
-              (!row.provider || row.provider === ProviderKind.Codex))) &&
-          isModelEnabled(
-            {
-              ...row,
-              provider:
-                row.provider ||
-                providerOf(
-                  accounts.find(
-                    (account) => account.id === (target || accountOf(agent)),
-                  ),
-                ),
-            },
-            allowedModels,
-          ) &&
-          !isDaybreakAlias(row.model) &&
-          supportsDaybreakMode(row, false),
-      );
-      const wanted = review ? reviewCurrent.model : current.model;
-      const kept = modelForValue(usable, wanted);
-      const model = kept
-        ? wanted
-        : target
-          ? (usable.find((row) => row.isDefault) || usable[0])?.model
-          : null;
-      if (target && !model) {
-        setError(
-          review
-            ? "This account offers no model for review."
-            : "This account offers no model for subagents.",
-        );
-        return;
-      }
-      const row = modelForValue(usable, model || agent.model);
-      const currentEffort = review ? reviewCurrent.effort : current.effort;
-      const effort = row?.supportedReasoningEfforts?.some(
-        (item) => item.reasoningEffort === currentEffort,
-      )
-        ? currentEffort
-        : row?.defaultReasoningEffort || null;
-      if (review) {
-        nextReview = {
-          ...reviewCurrent,
-          account_key: target,
-          model: model || null,
-          effort,
-          ...((reviewCurrent.fast_mode ?? !!agent.fastMode) && !fastTier(row)
-            ? { fast_mode: false }
-            : {}),
-        };
-      } else {
-        next = {
-          id: agent.id,
-          worker_defaults: {
-            ...current,
-            account_key: target,
-            model: model || null,
-            effort,
-            fast_mode: current.fast_mode && !!fastTier(row),
-            daybreak_enabled: false,
-          },
-        };
-      }
-    } catch (failure) {
-      if (mounted.current) setError(errorText(failure));
-    } finally {
-      // Hand the lock to submit synchronously. A failed or cancelled read
-      // releases the controls without making a settings request.
-      saveLock.current = false;
-      if (
-        mounted.current &&
-        ((!next && !nextReview) || onDraftChange || nextReview)
-      ) {
-        setSaving(false);
-        setStatus(null);
-      }
-    }
-    if (next)
-      await submit(next, "", {
-        accountKey: target,
-        model: next.worker_defaults?.model ?? null,
-      });
-    if (nextReview) await changeReview(nextReview, true);
-  };
-  const checkedModel = useRef("");
-  useEffect(() => {
-    if (
-      role !== "worker" ||
-      !opened ||
-      saving ||
-      accountPending ||
-      !stored.account_key ||
-      !catalogKnown
-    )
-      return;
-    const key = JSON.stringify([
-      stored.account_key,
-      stored.model,
-      stored.daybreak_enabled,
-    ]);
-    if (checkedModel.current === key) return;
-    checkedModel.current = key;
-    const wanted = stored.model || agent.model || "";
-    if (supportsMode(infoFor(catalog, wanted), !!stored.daybreak_enabled))
-      return;
-    const eligible = models.filter((row) => supportsMode(row, false));
-    const replacement = eligible.find((row) => row.isDefault) || eligible[0];
-    if (!replacement) return;
-    const next = {
-      ...stored,
-      model: replacement.model,
-      effort: null,
-      fast_mode: false,
-      daybreak_enabled: false,
-    };
-    void submit(
-      { id: agent.id, worker_defaults: next },
-      `${modelDisplayName(wanted)} is not available on ${setupAccountName(accounts.find((account) => account.id === stored.account_key))}. Using ${modelDisplayName(replacement)}, the account default.`,
-    );
-  });
   const shownTransfer = teamDefaults
     ? undefined
     : agent.accountTransferProgress;
@@ -1269,7 +1091,6 @@ function ScopedExecutionSettings({
       ? {
           id: agent.id,
           worker_defaults: {
-            account_key: next.account_key,
             model: next.model,
             effort: next.effort,
             fast_mode: next.fast_mode,
@@ -1383,7 +1204,8 @@ function ScopedExecutionSettings({
       if (!mounted.current) return;
       setPendingYolo({
         value: canonical.permissionMode === "bypassPermissions",
-        baseline: agent.permissionMode === "bypassPermissions",
+        baseline:
+          agent.permissionMode === AgentPermissionMode["bypassPermissions"],
       });
       refreshSavedSettings(generation);
     } catch (failure) {
@@ -1399,80 +1221,40 @@ function ScopedExecutionSettings({
       if (mounted.current) setSaving(false);
     }
   };
-  const chooseAutomaticModel = (model: string) => {
-    const row = infoFor(allWorkerModels, model);
-    const effort = row?.supportedReasoningEfforts?.some(
-      (item) => item.reasoningEffort === current.effort,
-    )
-      ? current.effort
-      : row?.defaultReasoningEffort || null;
-    void submit({
-      id: agent.id,
-      worker_defaults: {
-        ...current,
-        account_key: null,
-        model,
-        effort,
-        fast_mode: current.fast_mode && !!fastTier(row),
-        daybreak_enabled: false,
-      },
-    });
-  };
   const selectedOptions = role === "review" ? reviewOptions : modelOptions;
   const storedPickerModel =
     (role === "review" ? reviewCurrent.model : current.model) || DEFAULT;
-  const pickerModel = crossProvider
-    ? ""
-    : modelForValue(selectedOptions, storedPickerModel)?.value ||
-      storedPickerModel;
-  const crossOptions = toModelOptions(
-    allWorkerModels.models.filter(
-      (row) =>
-        !isDaybreakAlias(row.model) &&
-        !row.hidden &&
-        (row.provider || pickerProvider) === pickerProvider,
-    ),
-    {
-      provider: pickerProvider,
-      disabledReason: (row) =>
-        supportsDaybreakMode(row, false)
-          ? undefined
-          : "Unavailable in standard mode.",
-    },
-  ).map((row) => ({ ...row, label: displayModel(allWorkerModels, row.value) }));
-  const pickerModels = (
-    crossProvider
-      ? crossOptions
-      : (role === "review" ? reviewOptions : modelOptions).filter((row) => {
-          if (row.value === DEFAULT)
-            return (
-              role === "review" ||
-              (role === "worker" && leadProvider === pickerProvider)
-            );
-          const model = infoFor(catalog, row.value);
-          if (!model)
-            return !!row.disabledReason && row.provider === pickerProvider;
-          return (
-            !!model &&
-            !model.hidden &&
-            (role === "review" ||
-              (model.provider ||
-                providerOf(activeAccount) ||
-                agent.provider ||
-                "") === pickerProvider)
-          );
-        })
-  )
+  const pickerModel =
+    modelForValue(selectedOptions, storedPickerModel)?.value ||
+    storedPickerModel;
+  const pickerModels = (role === "review" ? reviewOptions : modelOptions)
+    .filter((row) => {
+      if (row.value === DEFAULT)
+        return (
+          role === "review" ||
+          (role === "worker" && leadProvider === pickerProvider)
+        );
+      const model = infoFor(catalog, row.value);
+      if (!model)
+        return !!row.disabledReason && row.provider === pickerProvider;
+      return (
+        !!model &&
+        !model.hidden &&
+        (role === "review" ||
+          (model.provider ||
+            providerOf(activeAccount) ||
+            agent.provider ||
+            "") === pickerProvider)
+      );
+    })
     .map((row) => ({
       ...row,
       label:
         row.value === DEFAULT
           ? role === "review"
-            ? "Same as caller"
+            ? "Use caller’s model"
             : "Same as main agent"
-          : crossProvider
-            ? row.label
-            : displayModel(catalog, row.value),
+          : displayModel(catalog, row.value),
     }))
     // One row per model name: a default alias and the model it resolves to
     // read the same. Keep the current choice, else the recommended alias.
@@ -1522,6 +1304,7 @@ function ScopedExecutionSettings({
         retainCurrentModel={!onDraftChange}
         role={role}
         onRole={onRole}
+        workersHidden={workersHidden}
         roleSwitchId={roleSwitchId}
         readOnlyReason={readOnlyReason}
         provider={pickerProvider}
@@ -1550,19 +1333,23 @@ function ScopedExecutionSettings({
                     : undefined;
                 }
         }
-        accountKey={
-          teamDefaults
-            ? (role === "review"
-                ? reviewCurrent.account_key
-                : current.account_key) ||
-              // Automatic belongs to the tab of the current model's provider.
-              (role === "worker" && automaticProvider !== pickerProvider
-                ? "\u0000"
-                : "")
-            : accountOf(agent)
-        }
+        accountKey={accountOf(agent)}
         onAccount={chooseAccount}
-        automaticAccount={teamDefaults}
+        excludedKeys={
+          role === "worker"
+            ? workerExcludedAccountKeys
+            : role === "review"
+              ? reviewerExcludedAccountKeys
+              : undefined
+        }
+        onExcludedKeysChange={
+          role === "worker"
+            ? onWorkerExcludedAccountKeysChange
+            : role === "review"
+              ? onReviewerExcludedAccountKeysChange
+              : undefined
+        }
+        showAccountChooser={!teamDefaults}
         accountDisabled={
           !!readOnlyReason ||
           saving ||
@@ -1589,8 +1376,7 @@ function ScopedExecutionSettings({
           role === "review" ? "Default review model" : prefix + " model"
         }
         onModel={(value) => {
-          if (crossProvider) chooseAutomaticModel(value);
-          else if (role === "review")
+          if (role === "review")
             void changeReview({ model: value === DEFAULT ? null : value });
           else void change({ model: value === DEFAULT ? null : value });
         }}
@@ -1637,9 +1423,7 @@ function ScopedExecutionSettings({
         !readOnlyReason &&
         !onDraftChange && (
           <p className="notice">
-            {crossProvider
-              ? `A model here is for new subagents on any ready ${providerLabel(pickerProvider)} account. Choose an account above to use only that one.`
-              : "For new subagents. Existing subagents keep their account and model."}
+            For new subagents. Existing subagents keep their account and model.
           </p>
         )}
       {!readOnlyReason && (blockedTransfer || transferOpen) && (
@@ -1719,7 +1503,8 @@ function ScopedExecutionSettings({
     </>
   );
   const fullAccess =
-    pendingYolo?.value ?? agent.permissionMode === "bypassPermissions";
+    pendingYolo?.value ??
+    agent.permissionMode === AgentPermissionMode["bypassPermissions"];
   const askingNextTurn =
     (!!agent.inFlight || busy.has(agent.status ?? "")) && !fullAccess;
   const permissions =
@@ -1808,14 +1593,11 @@ function ScopedExecutionSettings({
     summaryRole === "review"
       ? summaryReview.model || mainModel
       : summary.model || mainModel;
-  const summaryAccount =
-    summaryRole === "orchestrator"
-      ? accountOf(agent)
-      : summary.account_key || accountOf(agent);
+  const summaryAccount = accountOf(agent);
   const summaryWorkerCatalog = useWorkerModels(
     summaryAccount,
     settingsRow && summaryRole !== "orchestrator",
-    !summary.account_key,
+    summaryRole !== "orchestrator",
   );
   const summaryCatalog =
     summaryRole === "orchestrator" ? parentCatalog : summaryWorkerCatalog;
@@ -1837,7 +1619,7 @@ function ScopedExecutionSettings({
     mainSettings.effort ||
     mainInfo?.defaultReasoningEffort;
   const summaryAccountName =
-    summaryRole !== "review" &&
+    summaryRole === "orchestrator" &&
     (showAccountSummary ||
       connectedAccounts.filter(
         (account) => account.provider === summaryProvider,
@@ -1860,7 +1642,7 @@ function ScopedExecutionSettings({
       </span>
       <span className="execution-model">
         {inheritedReview
-          ? "Same as caller"
+          ? "Use caller’s model"
           : displayModel(summaryCatalog, summaryModel)}
       </span>
       {!inheritedReview && summaryEffort && (
@@ -1893,12 +1675,12 @@ function ScopedExecutionSettings({
               ? "Lead"
               : "Agent",
         inheritedReview
-          ? "Same as caller"
+          ? "Use caller’s model"
           : displayModel(summaryCatalog, summaryModel),
         !inheritedReview && summaryEffort ? title(summaryEffort) : "",
         !inheritedReview ? providerLabel(summaryProvider) : "",
         summaryFast ? "Fast" : "",
-        summaryRole !== "review"
+        summaryRole === "orchestrator"
           ? setupAccountName(
               accounts.find((account) => account.id === summaryAccount),
             )

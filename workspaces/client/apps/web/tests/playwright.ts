@@ -2618,6 +2618,7 @@ export function entityPullFixture(
       .slice(0, limit);
     return {
       generation,
+      complete: page.length < limit,
       documents: page,
       checkpoint: {
         seq: page.length === limit ? page.at(-1)!.seq : high,
@@ -2652,6 +2653,7 @@ export function entityPullFixture(
       .slice(0, limit);
     return {
       generation,
+      complete: true,
       documents: page,
       checkpoint: {
         seq:
@@ -2709,6 +2711,7 @@ export function entityPullFixture(
   const checkpoint = page.length === limit ? page.at(-1)!.seq : high;
   return {
     generation,
+    complete: checkpoint >= high,
     documents: page,
     checkpoint: { seq: checkpoint },
     maxSeq: high,

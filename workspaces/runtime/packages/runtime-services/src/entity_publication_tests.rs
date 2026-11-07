@@ -11,6 +11,181 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+#[ignore = "manual fixture timing"]
+async fn agent_read_fixture_timing() {
+    let (_dir, store) = store().await;
+    let record = chat(json!({}));
+    store
+        .transaction(move |tx| {
+            for n in 0..100 {
+                let id = format!("fixture-{n}");
+                let mut record = record.clone();
+                record["id"] = json!(id);
+                record["rootId"] = json!(id);
+                tx.execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    [&id, &record.to_string()],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let path = std::env::var("STUDIO_BENCH_PATH").unwrap();
+    store
+        .test_read_transaction(|tx| {
+            if path == "setup" {
+                return Ok(());
+            }
+            for _ in 0..100 {
+                if path == "transcript" {
+                    crate::transcript_runtime::page_in_transaction(
+                        &store,
+                        tx,
+                        "fixture-0",
+                        &Default::default(),
+                        1.0,
+                    )
+                    .unwrap();
+                } else {
+                    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+                        r#"{"accountKey":"default","at":1}"#,
+                        "default",
+                        1.0,
+                    )
+                    .unwrap();
+                    crate::account_session_runtime::limits::populate_agents(tx, &mut view, 1.0)?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn transcript_page_does_not_decode_agent_record() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store
+        .test_read_transaction(|tx| {
+            let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+            crate::transcript_runtime::page_in_transaction(
+                &store,
+                tx,
+                CHAT,
+                &Default::default(),
+                1.0,
+            )
+            .unwrap();
+            let calls = studio_runtime_store::agent_volatile::publication_work::take();
+            assert_eq!(calls.values().map(|c| c.decodes).sum::<usize>(), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn account_limits_do_not_decode_agent_records() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store
+        .test_read_transaction(|tx| {
+            let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+                r#"{"accountKey":"default","at":1}"#,
+                "default",
+                1.0,
+            )
+            .unwrap();
+            let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+            crate::account_session_runtime::limits::populate_agents(tx, &mut view, 1.0)?;
+            let calls = studio_runtime_store::agent_volatile::publication_work::take();
+            assert_eq!(calls.values().map(|c| c.decodes).sum::<usize>(), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn narrow_agent_reads_validate_consumed_fields() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
+    let tx = db.transaction().unwrap();
+    let page = || {
+        crate::transcript_runtime::page_in_transaction(&store, &tx, CHAT, &Default::default(), 1.0)
+    };
+    let limits = || {
+        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+            r#"{"accountKey":"default","at":1}"#,
+            "default",
+            1.0,
+        )
+        .unwrap();
+        crate::account_session_runtime::limits::populate_agents(&tx, &mut view, 1.0)
+    };
+    tx.execute(
+        "UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode',42) WHERE id=?1",
+        [CHAT],
+    )
+    .unwrap();
+    assert!(page().is_ok());
+    assert!(limits().is_ok());
+    tx.execute(
+        "UPDATE runtime_agents SET record=json_set(record,'$.id','wrong') WHERE id=?1",
+        [CHAT],
+    )
+    .unwrap();
+    assert!(page().is_err());
+    assert!(limits().is_err());
+    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.id',?1,'$.status',42,'$.model',42) WHERE id=?1", [CHAT]).unwrap();
+    assert!(page().is_err());
+    assert!(limits().is_err());
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn account_limit_projection_rejects_malformed_json() {
+    let mut db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT); INSERT INTO runtime_agents VALUES('a','{');").unwrap();
+    let tx = db.transaction().unwrap();
+    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+        r#"{"accountKey":"default","at":1}"#,
+        "default",
+        1.0,
+    )
+    .unwrap();
+    assert!(crate::account_session_runtime::limits::populate_agents(&tx, &mut view, 1.0).is_err());
+}
+
+#[tokio::test]
+async fn summary_marks_legacy_vm_records() {
+    for extra in [
+        json!({"workspaceMode":"layr"}),
+        json!({"layrReady":true}),
+        json!({"layrLine":"old-line"}),
+        json!({"executionMode":"vm"}),
+    ] {
+        let (_dir, store) = store().await;
+        seed_chat(&store, chat(extra.clone())).await;
+        assert_eq!(
+            client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+            true,
+            "{extra}"
+        );
+    }
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"workspaceMode":"layr-native", "layrReady":true})),
+    )
+    .await;
+    assert_eq!(
+        client_entity(&store, "agentSummary", CHAT).unwrap().1["legacyVmWorkspace"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn unreadable_limits_do_not_block_publication_or_startup() {
     let (_dir, store) = store().await;
     store
@@ -839,7 +1014,8 @@ async fn work_detail_refusal_is_derived_on_every_publish() {
                     tx.query_row("SELECT record FROM runtime_work WHERE id=?1", [id], |row| {
                         row.get(0)
                     })?;
-                let record: Value = studio_json::from_str(&raw).expect("stored work record");
+                let record: studio_runtime_store::WorkItemRecord =
+                    studio_json::from_str(&raw).expect("stored work record");
                 Ok(crate::work_write::current_submission_refusal(tx, &record)
                     .expect("derived refusal"))
             })
@@ -2114,6 +2290,161 @@ async fn a_write_that_cannot_change_studio_errors_does_not_rebuild_them() {
     assert_published_list(&store);
 }
 
+#[tokio::test]
+async fn studio_error_unrelated_writes_to_a_failed_agent_do_not_rebuild_studio_errors() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"status":"failed","error":"unclassified"})),
+    )
+    .await;
+    assert_published_list(&store);
+    let before = full_publications(&store).await;
+    let started = std::time::Instant::now();
+    for n in 0..10 {
+        write(
+            &store,
+            "UPDATE runtime_agents SET record=json_set(record,'$.model',?2) WHERE id=?1",
+            vec![CHAT.into(), format!("model-{n}")],
+        )
+        .await;
+    }
+    let builds = full_publications(&store).await - before;
+    eprintln!(
+        "failed agent fixture: 10 unrelated writes, {builds} builds, {:?}",
+        started.elapsed()
+    );
+    assert_eq!(builds, 0);
+    assert_published_list(&store);
+    for sql in [
+        "UPDATE runtime_agents SET record=json_set(record,'$.name','Renamed') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.error','different failure') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.epoch',2) WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.turnId','new-turn') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_remove(record,'$.deletedAt') WHERE id=?1",
+    ] {
+        let before = full_publications(&store).await;
+        write(&store, sql, vec![CHAT.into()]).await;
+        assert_eq!(full_publications(&store).await, before + 1, "{sql}");
+        assert_published_list(&store);
+    }
+}
+
+async fn assert_failed_agent_liveness_dependency_rebuilds(extra: Value, sql: &'static str) {
+    let (_dir, store) = store().await;
+    let mut record = chat(json!({"status":"failed","error":"unclassified"}));
+    record
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    seed_chat(&store, record).await;
+    store
+        .transaction(move |tx| {
+            tx.execute(sql, [CHAT])?;
+            Ok(())
+        })
+        .await
+        .expect("dependency fixture");
+    let before = full_publications(&store).await;
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.model','changed') WHERE id=?1",
+        vec![CHAT.into()],
+    )
+    .await;
+    assert_eq!(full_publications(&store).await, before + 1);
+    assert_published_list(&store);
+}
+
+#[tokio::test]
+async fn studio_error_pending_input_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(json!({}),
+        "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('pending',?1,'user','fixture','pending',unixepoch(),1)").await;
+}
+
+#[tokio::test]
+async fn studio_error_schedule_pointers_keep_conservative_rebuilds() {
+    for extra in [
+        json!({"usageResume":{"id":"resume"}}),
+        json!({"capacityRetry":{"id":"retry"}}),
+    ] {
+        assert_failed_agent_liveness_dependency_rebuilds(
+            extra,
+            "UPDATE runtime_agents SET record=record WHERE id=?1",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn studio_error_existing_liveness_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(json!({}),
+        "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT collection,'liveness:fixture',seq,hash,json_set(payload,'$.id','liveness:fixture','$.value.id','liveness:fixture'),0 FROM sync_entities WHERE collection='studioError' AND id='agent:'||?1||':'").await;
+}
+
+#[tokio::test]
+async fn studio_error_pending_transfer_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(
+        json!({}),
+        "INSERT INTO runtime_account_transfers(id,record) VALUES(?1,'{\"status\":\"pending\"}')",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn studio_error_paused_active_turn_publishes_when_its_last_tool_stops() {
+    let (_dir, store) = store().await;
+    let now = crate::event_write::unix_time().expect("clock");
+    let mut record = AgentRecord::from_value(chat(json!({
+        "status":"running","inFlight":true,"turnId":"turn","turnEpoch":1,"threadId":"thread",
+        "error":"WorkspaceRecoveryRequired: fixture", "activity":{"at":now-1000.0},
+        "activeTools":[{"id":"tool","name":"fixture"}],
+        "startAttempt":{"id":"attempt","epoch":1,"accountKey":"default","threadId":"thread",
+            "turnId":"turn","requestTicket":"ticket","connectionGeneration":1,"submitted":true,"events":[]}
+    }))).expect("active turn");
+    studio_runtime_store::SchedulerRepository::hold_recovered_delivery(&mut record)
+        .expect("manual hold");
+    assert!(studio_runtime_store::SchedulerRepository::manual_delivery_hold_tracks(&record));
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::ExecutionHistoryRepository::record_current(tx, &mut record)?;
+            AgentRepository::put(tx, &record)
+        })
+        .await
+        .expect("persist active held turn");
+    assert!(client_entity(&store, "studioError", &format!("agent:{CHAT}:turn")).is_some());
+    let stalled = format!("liveness:turn_stalled:{CHAT}:turn");
+    assert!(client_entity(&store, "studioError", &stalled).is_none());
+    let before = full_publications(&store).await;
+    store
+        .transaction(|tx| {
+            let mut record = AgentRepository::get(tx, &CHAT.into())?.unwrap();
+            record.active_tools = Some(Vec::new());
+            // A stored metadata change invokes the same source-write publication check.
+            record.model = Some("gpt-6-mini".into());
+            AgentRepository::put(tx, &record)
+        })
+        .await
+        .expect("last tool stops");
+    let listed = store
+        .test_read_transaction(move |tx| crate::studio_errors::list(tx, now))
+        .expect("list");
+    assert!(
+        listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == stalled)
+    );
+    assert_eq!(full_publications(&store).await, before + 1);
+    assert!(
+        !client_entity(&store, "studioError", &stalled)
+            .expect("stall published with source")
+            .0
+    );
+}
+
 /// Targeted publication must still follow every change that can alter the
 /// list: a new error, an owner rename, deletion and restoration of the owner,
 /// a dismissal and its removal, and removal of the source row.
@@ -2296,9 +2627,49 @@ async fn work_detail_publishes_acceptance_gate_requirement() {
 }
 
 #[tokio::test]
+async fn agent_projections_keep_detail_and_legacy_without_summary_validation() {
+    for legacy in [
+        json!({"readState":{}}),
+        json!({"capacityRetry":{"status":"scheduled"}}),
+    ] {
+        let (_directory, store) = store().await;
+        let mut record = chat(json!({"lastAnswer":"Kept detail"}));
+        record
+            .as_object_mut()
+            .expect("agent")
+            .extend(legacy.as_object().expect("legacy fields").clone());
+        seed_chat(&store, record).await;
+        for collection in ["agentDetail", "agent"] {
+            let collections = format!("[\"{collection}\"]");
+            let page = store
+                .test_read_transaction(|tx| {
+                    crate::entity_scope::resume(
+                        tx,
+                        None,
+                        Some(&collections),
+                        None,
+                        None,
+                        false,
+                        100,
+                    )
+                })
+                .expect("detail-only pull");
+            let row = page
+                .rows
+                .iter()
+                .find(|row| row.id == CHAT && row.collection == collection)
+                .expect("summary validation must not omit the requested detail or legacy agent");
+            let payload: Value =
+                studio_json::from_str(row.payload.as_deref().expect("payload")).expect("wire");
+            assert_eq!(payload["value"]["lastAnswer"], "Kept detail");
+        }
+    }
+}
+
+#[tokio::test]
 async fn v5_summary_domain_status_and_tail_stream_are_independent() {
     let (_directory, store) = store().await;
-    seed_chat(&store,chat(json!({"status":"completed","threadId":"thread","lastCompletedTurn":"turn","lastCompletedTurnStatus":"completed","autoWake":true}))).await;
+    seed_chat(&store,chat(json!({"status":"completed","threadId":"thread","lastCompletedTurn":"turn","lastCompletedTurnStatus":"completed","autoWake":true,"readState":null,"capacityRetry":null}))).await;
     let summary = client_entity(&store, "agentSummary", CHAT)
         .expect("summary")
         .1;

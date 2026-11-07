@@ -1,5 +1,5 @@
 import { agentIndicators } from "./status/operationalStatus.ts";
-import { MessageSendStatus } from "./generated/api.ts";
+import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
 import {
   AgentStatus as GeneratedApiAgentStatus,
   AgentSource as GeneratedApiAgentSource,
@@ -21,7 +21,11 @@ import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
 import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
 import { layoutQueries } from "./layout/layout-contract.generated";
 import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import { sendsTextFile, type SendMessageBody } from "./commands";
+import {
+  codePointsExceed,
+  sendsTextFile,
+  type SendMessageBody,
+} from "./commands";
 import {
   StudioErrorsScope,
   useStudioErrorsState,
@@ -176,7 +180,7 @@ type LeadCreateRequest = Omit<
   reuse_empty: boolean;
   cwd?: string;
   project_folder?: string;
-  account_key?: string;
+  account_key?: string | undefined;
 };
 function isLeadCreateRequest(value: Json): value is LeadCreateRequest {
   return (
@@ -971,7 +975,7 @@ export default function App({ active = true }: { active?: boolean }) {
     (text: string | ((current: string) => string), id = opened || "new") =>
       setDrafts((old) => {
         const value = typeof text === "function" ? text(old[id] || "") : text;
-        if (Array.from(value).length > MAX_DRAFT_TEXT_CODEPOINTS) {
+        if (codePointsExceed(value, MAX_DRAFT_TEXT_CODEPOINTS)) {
           notify(
             `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
           );
@@ -1768,6 +1772,11 @@ export default function App({ active = true }: { active?: boolean }) {
       throw e;
     }
   };
+  const deletionStopNotice: Record<StopOutcome, string | undefined> = {
+    [StopOutcome.confirmed]: undefined,
+    [StopOutcome.unconfirmed]:
+      "The chat was deleted, but stopping its commands could not be confirmed.",
+  };
   const remove = (id: string, isRoom: boolean, isWorker = false) => {
     setModal({
       title: isWorker ? "Delete?" : "Delete chat?",
@@ -1819,6 +1828,12 @@ export default function App({ active = true }: { active?: boolean }) {
                 finishConversationDelete,
                 controller.signal,
               )
+                .then((result) => {
+                  if (result.kind === "delete") {
+                    const notice = deletionStopNotice[result.result.stopped];
+                    if (notice) notify(notice);
+                  }
+                })
                 .catch((error: unknown) => {
                   if (controller.signal.aborted) return;
                   notify(

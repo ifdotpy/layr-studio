@@ -15,17 +15,30 @@ struct Inspection {
     binary: Identity,
     store: Option<Identity>,
     compatible: bool,
-    state: String,
-    #[serde(default)]
-    upgrade: Option<Upgrade>,
+    state: StoreState,
 }
 
+// Temporary local contract until Studio consumes layr-api's StoreState (ifdotpy/layr#364).
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct Upgrade {
-    from_format: u64,
-    to_format: u64,
-    metadata_only: bool,
+#[serde(rename_all = "lowercase")]
+enum StoreState {
+    Absent,
+    Empty,
+    Unmarked,
+    Compatible,
+    Incompatible,
+}
+
+impl std::fmt::Display for StoreState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Absent => "absent",
+            Self::Empty => "empty",
+            Self::Unmarked => "unmarked",
+            Self::Compatible => "compatible",
+            Self::Incompatible => "incompatible",
+        })
+    }
 }
 
 fn inspect(binary: &Path, root: &Path) -> Result<Inspection> {
@@ -53,29 +66,23 @@ pub(super) fn verify(state: &Path, root: &Path) -> Result<Option<String>> {
     #[cfg(target_os = "linux")]
     let socket = Some(super::socket_path_in_store(state, root));
     #[cfg(not(target_os = "linux"))]
-    let socket: Option<std::path::PathBuf> = None;
-    verify_with_binary(state, root, &executable, socket.as_deref(), true)
+    let socket: Option<PathBuf> = {
+        let _ = state;
+        None
+    };
+    verify_with_binary(root, &executable, socket.as_deref())
 }
 
 pub(super) fn readiness(state: &Path, root: &Path) -> Result<()> {
-    let executable = super::capability::resolve_binary().map_err(|c| {
-        NativeLayrError::Refused(c.message().unwrap_or("Layr is unavailable").into())
-    })?;
-    #[cfg(target_os = "linux")]
-    let socket = Some(super::socket_path_in_store(state, root));
-    #[cfg(not(target_os = "linux"))]
-    let socket: Option<PathBuf> = None;
-    verify_with_binary(state, root, &executable, socket.as_deref(), false).map(|_| ())
+    verify(state, root).map(|_| ())
 }
 
 fn verify_with_binary(
-    state: &Path,
     root: &Path,
     executable: &Path,
     socket: Option<&Path>,
-    allow_upgrade: bool,
 ) -> Result<Option<String>> {
-    let mut installed = inspect(executable, root)?;
+    let installed = inspect(executable, root)?;
     #[cfg(target_os = "linux")]
     if let Some(socket) = socket {
         let daemon = daemon_identity(socket).map_err(NativeLayrError::Refused)?;
@@ -83,37 +90,6 @@ fn verify_with_binary(
     }
     #[cfg(not(target_os = "linux"))]
     let _ = socket;
-    if !installed.compatible
-        && allow_upgrade
-        && settings::owns_store(state, root)
-        && let Some(upgrade) = &installed.upgrade
-        && upgrade.metadata_only
-        && upgrade.from_format < upgrade.to_format
-        && upgrade.to_format == installed.binary.format
-        && (installed.state == "legacy"
-            || installed
-                .store
-                .as_ref()
-                .is_some_and(|version| version.format == upgrade.from_format))
-    {
-        super::runtime::operation_in_store(
-            state,
-            root,
-            &format!("store-upgrade:{}", upgrade.to_format),
-            &json!({"kind":"store-upgrade","root":root,"fromFormat":upgrade.from_format,"toFormat":upgrade.to_format}),
-            || {
-                super::runtime::run_with_binary(
-                    state,
-                    root,
-                    state,
-                    &["store-version", "--upgrade"],
-                    executable,
-                )?;
-                Ok(json!({"storeRoot":root,"format":upgrade.to_format}))
-            },
-        )?;
-        installed = inspect(executable, root)?;
-    }
     if !installed.compatible {
         let written = installed
             .store
@@ -124,9 +100,9 @@ fn verify_with_binary(
                     store.version, store.format, store.build
                 )
             })
-            .unwrap_or_else(|| installed.state.clone());
+            .unwrap_or_else(|| installed.state.to_string());
         return Err(NativeLayrError::Refused(format!(
-            "Store {} was written by {written}. Studio uses {} (format {}, build {}). Use native-layr upgrade-store for a legacy store; see docs/native-layr.md for the switch procedure.",
+            "Store {} was written by {written}. Studio uses {} (format {}, build {}). See docs/native-layr.md for the switch procedure.",
             root.display(),
             installed.binary.version,
             installed.binary.format,
@@ -228,6 +204,74 @@ pub(super) fn serve_daemon_identity(
 mod tests {
     use super::*;
 
+    #[test]
+    fn native_layr_store_version_rejects_unknown_states() {
+        for state in ["legacy", "current", "future", "Compatible"] {
+            let response = format!(
+                r#"{{"binary":{{"format":1,"version":"0.36.0","build":"fixture"}},"store":null,"compatible":true,"state":"{state}"}}"#
+            );
+            let error = studio_json::from_str::<Inspection>(&response)
+                .err()
+                .expect("unknown state must fail decoding");
+            assert!(error.to_string().contains("unknown variant"), "{error}");
+        }
+    }
+
+    #[test]
+    fn native_layr_store_version_accepts_the_five_supported_states() {
+        for state in ["absent", "empty", "unmarked", "compatible", "incompatible"] {
+            let response = format!(
+                r#"{{"binary":{{"format":1,"version":"0.36.0","build":"fixture"}},"store":null,"compatible":true,"state":"{state}"}}"#
+            );
+            assert!(
+                studio_json::from_str::<Inspection>(&response).is_ok(),
+                "{state}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn native_layr_store_inspection_never_invokes_upgrade() {
+        use std::{fs, os::unix::fs::PermissionsExt};
+        let fixture = tempfile::tempdir().expect("fixture");
+        let state = fixture.path().join("state");
+        let owned = store_path(&state);
+        let selected = fixture.path().join("selected-store");
+        let binary = fixture.path().join("layr");
+        fs::write(
+            &binary,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$2/calls"
+if [ "$#" != 4 ] || [ "$1" != --root ] || [ "$3" != store-version ] || [ "$4" != --json ]; then
+  printf '%s\n' 'layr store-version: unknown option' >&2
+  exit 1
+fi
+cat "$2/response"
+"#,
+        )
+        .expect("binary fixture");
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).expect("executable");
+        for root in [owned, selected] {
+            fs::create_dir_all(&root).expect("store");
+            fs::write(root.join("response"), r#"{"binary":{"format":1,"version":"0.36.0","build":"fixture"},"store":null,"compatible":true,"state":"unmarked"}"#).expect("unmarked response");
+            assert_eq!(
+                verify_with_binary(&root, &binary, None).expect("compatible unmarked store"),
+                None
+            );
+            fs::write(root.join("response"), r#"{"binary":{"format":1,"version":"0.36.0","build":"fixture"},"store":{"format":0,"version":"old","build":"old"},"compatible":false,"state":"incompatible","upgrade":{"fromFormat":0,"toFormat":1,"metadataOnly":true}}"#).expect("incompatible response");
+            let error = verify_with_binary(&root, &binary, None)
+                .expect_err("incompatible store")
+                .to_string();
+            assert!(error.contains("was written by old"), "{error}");
+            let expected = format!("--root {} store-version --json\n", root.display());
+            assert_eq!(
+                fs::read_to_string(root.join("calls")).expect("calls"),
+                expected.repeat(2)
+            );
+        }
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn daemon_handshake_reads_identity_without_a_command() {
@@ -284,59 +328,6 @@ mod tests {
         assert_eq!(check_daemon_identity(&client, &matching), Ok(()));
         assert!(
             matches!(check_daemon_identity(&client, &different), Err(reason) if reason.contains("0.11.0") && reason.contains("0.14.2"))
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn native_layr_owned_store_adopts_metadata_once_and_selected_store_remains_untouched() {
-        use std::{fs, os::unix::fs::PermissionsExt};
-        let fixture = tempfile::tempdir().expect("fixture");
-        let state = fixture.path().join("state");
-        let root = store_path(&state);
-        fs::create_dir_all(&root).expect("legacy store");
-        fs::write(root.join("legacy-data"), "preserved").expect("legacy data");
-        let script = r#"#!/bin/sh
-case "$*" in
-  *--json)
-    if [ -f "$2/upgraded" ]; then
-      printf '%s\n' '{"binary":{"format":1,"version":"0.5.1","build":"fixture"},"store":{"format":1,"version":"0.5.1","build":"fixture"},"compatible":true,"state":"compatible"}'
-    else
-      printf '%s\n' '{"binary":{"format":1,"version":"0.5.1","build":"fixture"},"store":null,"compatible":false,"state":"legacy","upgrade":{"fromFormat":0,"toFormat":1,"metadataOnly":true}}'
-    fi ;;
-  *--upgrade)
-    printf 'upgrade\n' >> "$LAYR_ROOT/calls"
-    printf 'complete\n' > "$LAYR_ROOT/upgraded" ;;
-esac
-"#;
-        fs::create_dir_all(binary_path(&state).parent().expect("bin")).expect("bin");
-        let binary = binary_path(&state);
-        fs::write(&binary, script).expect("binary fixture");
-        fs::set_permissions(binary, fs::Permissions::from_mode(0o755)).expect("executable");
-        verify_with_binary(&state, &root, &binary_path(&state), None, true)
-            .expect("metadata adoption");
-        verify_with_binary(&state, &root, &binary_path(&state), None, true)
-            .expect("repeat is a no-op");
-        assert_eq!(
-            fs::read_to_string(root.join("calls")).expect("calls"),
-            "upgrade\n"
-        );
-        assert_eq!(
-            fs::read_to_string(root.join("legacy-data")).expect("data"),
-            "preserved"
-        );
-        let developer = fixture.path().join("developer-store");
-        fs::create_dir(&developer).expect("developer store");
-        let error = verify_with_binary(&state, &developer, &binary_path(&state), None, true)
-            .expect_err("operator store requires explicit upgrade")
-            .to_string();
-        assert!(error.contains("upgrade-store"));
-        assert!(!developer.join("upgraded").exists());
-        assert!(
-            fs::read_dir(developer)
-                .expect("developer store")
-                .next()
-                .is_none()
         );
     }
 }

@@ -217,7 +217,7 @@ for (const provider of ["claude", "codex"] as const)
       await expect(roles.locator(".settings-role-model")).toHaveCount(0);
       await expect(
         page.locator("#composer .execution-summary-trigger"),
-      ).toHaveAttribute("title", /Review same as caller/);
+      ).toHaveAttribute("title", /Review uses caller’s model/);
       for (const role of ["Lead", "Workers"]) {
         await roles.getByText(role, { exact: true }).click();
         const selected = dialog.locator(
@@ -234,7 +234,7 @@ for (const provider of ["claude", "codex"] as const)
       }
       await roles.getByText("Review", { exact: true }).click();
       await expect(
-        dialog.getByRole("option", { name: "Same as caller", exact: true }),
+        dialog.getByRole("option", { name: "Use caller’s model", exact: true }),
       ).toHaveAttribute("aria-selected", "true");
       if (provider === "claude")
         await expect(

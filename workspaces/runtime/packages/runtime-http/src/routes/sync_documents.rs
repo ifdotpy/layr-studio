@@ -90,6 +90,8 @@ pub(crate) async fn protocol(
 const SYNC_PULL_SCOPE_MAX_CHARS: usize = 299;
 /// Maximum synchronization priority ID length, in Unicode code points.
 const SYNC_PULL_PRIORITY_ID_MAX_CHARS: usize = 4096;
+/// Maximum internal entity pages scanned by one pull request, in pages.
+const MAX_INTERNAL_PAGES_PER_PULL: usize = 4;
 type SyncCursor = studio_runtime_schema::bounded_integer::BoundedInteger<
     0,
     { studio_runtime_schema::shared_values::MAX_SAFE_INTEGER as u64 },
@@ -158,6 +160,7 @@ pub(crate) async fn pull(
             .map_err(super::transcript::map_transcript_error)?;
         // Python samples generation after transcript maintenance commits.
         let generation_store = store.clone();
+        response["complete"] = json!(true);
         response["generation"] = json!(
             studio_runtime_process::blocking_pool::spawn_blocking(
                 "runtime-http/routes/sync_documents/transcript-generation",
@@ -194,6 +197,7 @@ pub(crate) async fn pull(
                         .map_err(|_| ApiError::internal())?;
                     let checkpoint = documents.last().map_or(after, |document| document.sequence);
                     let response = crate::generated::SyncPullResponse {
+                        complete: (documents.len() as i64) < limit,
                         checkpoint: crate::generated::SyncCheckpoint { seq: checkpoint },
                         documents: documents
                             .into_iter()
@@ -718,8 +722,9 @@ fn pull_entities(
     let mut seen_sequences = std::collections::HashSet::new();
     let mut checkpoint = after;
     let mut scan_after = after;
+    let mut scanned_pages = 0;
     loop {
-        let raw_count = page.rows.len();
+        scanned_pages += 1;
         let mut reached_limit = false;
         for (index, row) in page.rows.iter().enumerate() {
             // The limit cuts only between change numbers: the rest of a unit that shares
@@ -727,7 +732,16 @@ fn pull_entities(
             if reached_limit && page.rows[index - 1].sequence != row.sequence {
                 break;
             }
-            checkpoint = row.sequence;
+            // The priority summary is sent ahead of sequence order and must
+            // never advance the scan cursor past intervening records.
+            if !(fresh
+                && scan_after == 0
+                && index == 0
+                && priority_id == Some(row.id.as_str())
+                && row.collection == "agentSummary")
+            {
+                checkpoint = row.sequence;
+            }
             // Rows built from one main-table change share its number, so the key is
             // the document and its number, not the number alone.
             if !seen_sequences.insert((row.collection.clone(), row.id.clone(), row.sequence)) {
@@ -745,13 +759,12 @@ fn pull_entities(
         if reached_limit {
             break;
         }
-        if raw_count < page_limit {
-            checkpoint = page.checkpoint;
+        let next_after = page.checkpoint;
+        checkpoint = next_after;
+        if next_after >= max_sequence || scanned_pages >= MAX_INTERNAL_PAGES_PER_PULL {
             break;
         }
-        let next_after = page.rows.last().map_or(checkpoint, |row| row.sequence);
         if next_after <= scan_after {
-            checkpoint = max_sequence;
             break;
         }
         scan_after = next_after;
@@ -771,13 +784,9 @@ fn pull_entities(
                 reset_support,
             )?
         };
-        if page.rows.is_empty() {
-            checkpoint = page.checkpoint;
-            break;
-        }
-        checkpoint = next_after;
     }
     let response = crate::generated::SyncPullResponse {
+        complete: checkpoint >= max_sequence,
         checkpoint: crate::generated::SyncCheckpoint { seq: checkpoint },
         documents,
         floor: None,
@@ -1196,6 +1205,7 @@ mod maintenance_tests {
         let page_json = json!({
             "workspaceId":"workspace-1",
             "generation":7,
+            "complete":false,
             "documents":[{"id":"entity:agent:a","payload":"{}","seq":8,"_deleted":false}],
             "checkpoint":{"seq":8},
             "maxSeq":10,
@@ -1204,6 +1214,7 @@ mod maintenance_tests {
         let page: crate::generated::SyncPullResponse =
             studio_json::from_value(page_json.clone()).expect("legacy page projects to DTO");
         let direct_page = crate::generated::SyncPullResponse {
+            complete: false,
             checkpoint: crate::generated::SyncCheckpoint { seq: 8 },
             documents: vec![
                 crate::generated::SyncPullResponseDocumentsItemUnion::SyncDocument(
@@ -1349,6 +1360,7 @@ mod maintenance_tests {
         .expect("pull retries against the updated room snapshot");
 
         assert!(response_value(&response)["documents"].is_array());
+        assert_eq!(response_value(&response)["complete"], true);
         assert_eq!(
             interleavings.load(std::sync::atomic::Ordering::Relaxed),
             2,
@@ -1776,6 +1788,7 @@ mod maintenance_tests {
         let cold_elapsed = started.elapsed();
         let response = response_value(&response);
         assert_eq!(response["documents"].as_array().unwrap().len(), 100);
+        assert_eq!(response["complete"], false);
         assert_eq!(store.committed_change_generation(), seeded_generation);
         let reader = store.test_reader().expect("store reader");
         assert!(sync_policy::has_complete_entity_seed(&reader).expect("seed marker reads"));

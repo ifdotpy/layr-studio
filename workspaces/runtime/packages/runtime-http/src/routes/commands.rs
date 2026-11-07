@@ -88,14 +88,14 @@ async fn command(
         | Command::Delete { .. }
         | Command::LeadMessage { .. } => {
             let ports = ports.map(|Extension(ports)| ports);
-            let (for_transaction, request) = (ports.clone(), request.clone());
+            let (for_transaction, transaction_request) = (ports.clone(), request.clone());
             let now = now_ms as f64 / 1000.0;
             let executed = store
                 .transaction_with_error(move |tx| {
                     commands::execute_sync(
                         tx,
                         &principal,
-                        &request,
+                        &transaction_request,
                         now_ms,
                         now,
                         for_transaction.as_deref(),
@@ -105,12 +105,21 @@ async fn command(
                 .map_err(command_error)?;
             if !executed.replayed {
                 state.event_wake.notify_one();
-                if let Some(ports) = ports {
-                    // A failed wake cannot roll back the committed stop. The effect owner
-                    // retries the staged effects.
-                    if let Err(error) = ports.committed().await {
-                        eprintln!("Lifecycle committed; effect delivery remains pending: {error}");
-                    }
+            }
+            if let Some(ports) = &ports {
+                if let Command::Delete { target, .. } = &request.command {
+                    let target = target.as_str().to_owned();
+                    let ids = store
+                        .read_async("runtime-http/delete-dispatch", move |conn| {
+                            commands::chat_tree(conn, &target)
+                        })
+                        .await
+                        .map_err(command_error)?;
+                    studio_runtime_services::agent_lifecycle_runtime::finish_commit(ports.as_ref(), studio_runtime_services::agent_lifecycle_runtime::LifecycleCommit::Deletion { agents: ids, request_id: request.id.as_str().to_owned(), applied: !executed.replayed }).await;
+                } else if !executed.replayed
+                    && let Err(error) = ports.committed().await
+                {
+                    eprintln!("Lifecycle committed; effect delivery remains pending: {error}");
                 }
             }
             executed.reference
@@ -233,16 +242,15 @@ async fn command(
         (Some(result), _) => CommandOutcome::Answer { result },
         (None, Command::Delete { target, .. }) => {
             let chat = target.as_str().to_owned();
-            CommandOutcome::Delete {
-                result: DeleteResult {
-                    deleted: store
-                        .read_async("runtime-http/routes/commands/delete", move |connection| {
-                            commands::chat_tree(connection, &chat)
-                        })
-                        .await
-                        .map_err(command_error)?,
-                },
-            }
+            let result = store
+                .read_async("runtime-http/routes/commands/delete", move |connection| {
+                    let deleted = commands::chat_tree(connection, &chat)?;
+                    let stopped = commands::deletion_stop_outcome(connection, &deleted)?;
+                    Ok::<_, CommandError>(DeleteResult { deleted, stopped })
+                })
+                .await
+                .map_err(command_error)?;
+            CommandOutcome::Delete { result }
         }
         (None, Command::LeadMessage { .. }) => CommandOutcome::LeadMessage {
             result: LeadMessageResult {
@@ -979,6 +987,7 @@ mod tests {
         assert_eq!(status, 200, "{first}");
         assert_eq!(first["kind"], "delete");
         assert_eq!(first["result"]["deleted"], json!(["other", "worker"]));
+        assert_eq!(first["result"]["stopped"], "confirmed");
         let deleted = |id: &'static str| {
             let store = store.clone();
             async move {
@@ -999,10 +1008,48 @@ mod tests {
             !deleted("workspace").await,
             "only the target tree is deleted"
         );
-        let (status, again) = post(&app, None, body).await;
+        let (status, again) = post(&app, None, body.clone()).await;
         assert_eq!(status, 200, "{again}");
         assert_eq!(again["result"], first["result"]);
         assert_eq!(again["rev"], first["rev"]);
+
+        store
+            .transaction(|tx| {
+                let mut agent = AgentRepository::get(tx, &"worker".into())?.unwrap();
+                agent.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView {
+                    interrupt: Some(Box::new(studio_runtime_store::StartInterruptView {
+                        outcome: Some(studio_runtime_store::InterruptOutcome::Unknown),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                }));
+                AgentRepository::put(tx, &agent)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (status, pending) = post(&app, None, body.clone()).await;
+        assert_eq!(status, 200, "{pending}");
+        assert_eq!(pending["result"]["stopped"], "unconfirmed");
+        store
+            .transaction(|tx| {
+                let mut agent = AgentRepository::get(tx, &"worker".into())?.unwrap();
+                agent
+                    .start_attempt
+                    .as_mut()
+                    .unwrap()
+                    .interrupt
+                    .as_mut()
+                    .unwrap()
+                    .outcome = Some(studio_runtime_store::InterruptOutcome::Accepted);
+                AgentRepository::put(tx, &agent)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (status, confirmed) = post(&app, None, body).await;
+        assert_eq!(status, 200, "{confirmed}");
+        assert_eq!(confirmed["result"]["stopped"], "confirmed");
     }
 
     #[tokio::test]

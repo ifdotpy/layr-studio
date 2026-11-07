@@ -89,6 +89,7 @@ list. Workspace crates must use the facade.
 | Cargo dependency bans                                | `just deny-bans`                         |
 | Browser smoke                                        | `just test-browser-smoke`                |
 | Layout shifts across UI states, manual               | `just layout-shift-matrix`               |
+| UI responsiveness on a throttled phone, manual       | `just ui-responsiveness`                 |
 | Real entity stream, manual heavy                     | `just test-entity-server-heavy`          |
 | Full browser project, manual heavy                   | `just test-browser` or `just test-heavy` |
 | Multi-server browser recovery, manual heavy          | `just test-browser-multi-server`         |
@@ -125,6 +126,13 @@ the on-screen keyboard, and writes `index.html` with the layout-shift score and
 the moved controls of each edge. The browser smoke witness for the same rule is
 `tests/layout/agent-turn-stability.spec.ts`.
 
+`just ui-responsiveness` is a manual measurement, not a test. It opens the
+fixture on a phone viewport with the CPU throttled (4x by default), builds a
+chat of scripted Markdown turns, and reports per scenario the duration, frames
+over 20 ms, long tasks and time blocked past 50 ms. `--profile` prints the
+largest self and total times of a scenario, and `--trace` the main-thread time
+per trace event. Compare runs taken on the same machine only.
+
 Heavy runs are announced and selected by hand. A test that needs repeated runs
 to be trusted must be rewritten or moved to the heavy tier. New tests fit the
 short tier. Load, stress, and contention runs require a separate explicit selection,
@@ -154,7 +162,7 @@ behavior. The full corpus recipe selects the expanded scenario matrices.
 
 ## Developing in layr lines
 
-Studio development runs in layr lines (layr 0.4.0 or later). A line is a folder
+Studio development runs in layr lines (layr 0.38 or later). A line is a folder
 with a real `.git`, so git, just, cargo, and pnpm work in it.
 
 Make the project once:
@@ -164,17 +172,18 @@ export LAYR_ROOT=~/Projects/layr-store
 layr git clone git@github.com:ifdotpy/codex-studio.git studio
 ```
 
-Start a line with a warm build:
+Start a line with a warm build: in the main line folder, run
+`layr line new <name> main`, then enter the folder that it prints.
 
-1. In the main line folder, run `layr git fetch origin`.
-2. Run `layr line new <name> origin/main`.
-3. Enter it: `cd ../<name>`.
+The line gets the saved caches of main (`target/`, `node_modules`,
+`.layr-retest`) as APFS clones in about 15 seconds. Layr rewrites main's paths
+in the Cargo units, so the gate build in a new line compiles 0 crates. Main
+follows origin main: `layr follow --run` (the layr daemon also runs it) fetches,
+runs the `sweep` commands, prunes stale units, and saves the caches. Do not save
+main's caches by hand. The caches of a line go back to main after
+`layr git push` or a local merge.
 
-After a build in main, run `layr save --caches` once. New lines then start warm.
-`target/` (about 11 GB) is regenerable. Starting the line copies it as an APFS
-clone in 5 to 15 seconds. Cargo rebuilds only what changed.
-
-Two traps in a line started from an automatic state:
+Two traps in a new line:
 
 - Its index also holds ignored files, such as `node_modules`. Stage named
   paths with `layr add <path>`. Do not use `layr add -A`.
@@ -187,7 +196,7 @@ Two traps in a line started from an automatic state:
 
 Every agent and developer follows these rules:
 
-1. Start each task in a new line from `origin/main`: `layr line new <name> origin/main`.
+1. Start each task in a new line from main: `layr line new <name> main`.
    Never use a git clone or a copied folder. The line gets `target/` and `node_modules`
    from the cache overlays, so a build after a small change compiles only the changed crates.
 2. Do not set `CARGO_TARGET_DIR`, do not use `sccache`, and do not run `cargo clean`.
@@ -205,11 +214,24 @@ Every agent and developer follows these rules:
    `rust-lint-policy.test.ts` rejects absolute paths in build script output and in
    `include!`, `include_str!`, `include_bytes!`, and `#[path]`. `layr retest doctor`
    reports the same check. `tauri-build` is the known exception (see "Build script paths").
+   Do not include a file through `..` either (`include_str!("../../x.json")`): Cargo
+   stores that path as absolute in the unit, so every other line or copy of the
+   workspace compiles the crate again. Copy the file to `OUT_DIR` in `build.rs` and
+   include it from there, as `runtime-schema` does for `openapi.json`.
 6. `layr retest run` runs only the Rust tests whose executed code changed. It is opt-in
    with `STUDIO_RETEST=1` (see "Retest" below). It is not the default. It builds a second
    copy of the tests with coverage, and the measured runs below were slower than the
    default path.
-7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same command as the gate (checked by `layr-sweep-parity.test.ts`).
+7. The sweep config lives in the root `Cargo.toml` under `[workspace.metadata.layr-retest]`, and its `sweep` list must name the same commands as the gate: the Rust workspace build (with `--lib`, which builds the libraries that nextest needs) and the clippy of `clippy-ratchet.ts`. Its `env` sets the ratchet's `CLIPPY_CONF_DIR` as a relative path. Then a new line takes warm units for the build, the first nextest run and clippy (checked by `layr-sweep-parity.test.ts`).
+8. Run Cargo with the workspace arguments of the gate (`--workspace --exclude studio-native-client`),
+   also for doctests. `-p <crate>` resolves the features of one crate, so 20 to 50
+   dependencies get other features than the workspace build and compile cold.
+
+Rust test runners do not inherit `LAYR_SOCKET`, `LAYR_DIRECT`, or
+`LAYR_ROOT` from the agent environment. This keeps tests from connecting to the
+agent's live Layr daemon; the agent itself retains its connection. Node and
+Vitest tests and the opt-in retest runner retain these variables; the Git shim
+needs them, and retest can still reach the inherited daemon.
 
 ### Child scheduling and priority-sensitive tests
 

@@ -19,6 +19,7 @@ junit.path = "junit.xml"
 # Single owner of fast Rust witnesses. Cargo still builds the complete workspace;
 # this nextest execution profile changes selection only, never Cargo's feature graph.
 [profile.fast]
+# Idle unload query counts and compaction deadline parity cover repeated reconciliation.
 # Idle compaction lookup searches its deadline index; upgrades retain episodes and roll back atomically.
 # Supervisor admission witnesses cover typed capabilities and exact operator recovery.
 # T17 clauses cover transactional errors, startup readiness, and native delivery.
@@ -78,6 +79,7 @@ inherits = "ci"
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 default-filter = '''
     package(=studio-observable-codegen) |
+    (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
     (package(=studio-runtime-store) & kind(lib) & test(native_layr_line_preserves_presence_and_rejects_invalid_type)) |
@@ -85,6 +87,11 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(/task_process_query_uses_status_index|process_claim_reuses_its_admitted_token_after_expiry_without_another_effect|repair_events_use_ordered_index_without_a_temp_sort|repair_event_order_preserves_id_ties/)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=process_controls::task_rows_include_only_running_tasks_for_the_owner)) |
     (package(=studio-runtime-store) & kind(lib) & test(=migrations::m2026_11_05_repair_event_order::tests::replaces_old_index_and_is_repeatable_on_fresh_schema)) |
+    (package(=studio-runtime-services) & kind(lib) & test(account_worker::store::deleted_command_query_tests::)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/account_worker::tests::stop_after_reattach::(late_interrupt_confirmation_|late_cleanup_confirmation_|disconnected_late_interrupt_confirmation_|remote_delete_waits_|deletion_reports_success_when_|deletion_lost_interrupt_reply_|disconnected_delete_refused_cleanup_|delete_settled_turn_cleans_|project_delete_stops_settled_|deleted_command_without_process_id_|deletion_of_unreachable_remote_worker_|completed_interrupted_turn_|delete_after_worker_reattach_|delete_before_worker_reattach_)/)) |
+    (package(=studio-runtime-http) & kind(lib) & test(delete_removes_the_chat_tree_once_and_replays_the_same_list)) |
+    (package(=studio-runtime-http) & kind(lib) & test(workspace_policy_http_sets_replays_and_clears_with_revision)) |
+    (package(=studio-runtime-http) & kind(lib) & test(lead_intent_preserves_native_store_override_for_replay)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
@@ -94,8 +101,9 @@ default-filter = '''
     (package(=studio-json) & binary(=parity)) |
     (package(=studio-runtime-services) & binary(=integration) & test(=portable_history_python_parity::readable_transcript_keeps_the_whole_studio_history_beyond_the_excerpt)) |
     (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
-    (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
-    (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(briefs_match_each_workspace) | test(review_catalog_matrix))) |
+    (package(=studio-runtime-schema) & kind(lib) & (test(legacy_review_state_maps_to_typed_review) | test(invalid_legacy_review_state_is_refused) | test(assignment_validates_ids_and_workspace) | test(submission_revision_can_be_omitted_at_ingress))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding) | test(spawned_reviewer_prefers_eligible_caller) | test(spawned_git_reviewer_uses_worktree_workspace) | test(spawned_git_reviewer_receives_pinned_brief) | test(review_selects_an_account_that_offers_the_model))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
     (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
     (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
@@ -173,6 +181,16 @@ default-filter = '''
 (package(=studio-runtime-services) & kind(lib) & test(historical_message_info_keeps_partial_and_ambiguous_rows)) |
 (package(=studio-runtime-schema) & kind(lib) & (test(account_registry::tests::) | test(invite_view_tracks_schema_and_preserves_extensions))) |
 (package(=studio-runtime-store) & kind(lib) & test(typed_registry_decode_preserves_order_and_error_location)) |
+(package(=studio-runtime-store) & kind(lib) & test(migration_removes_legacy_role_account_defaults)) |
+(package(=studio-runtime-schema) & kind(lib) & test(historical_account_defaults_preserve_request_identity_bytes)) |
+(package(=studio-runtime-http) & kind(lib) & (test(lead_request_refuses_multiple_accounts) | test(lead_request_keeps_chat_exclusions_in_creation_identity))) |
+(package(=studio-runtime-services) & kind(test) & binary(=integration) & test(empty_lead_can_select_an_account_excluded_for_workers)) |
+(package(=studio-runtime-services) & kind(lib) & (test(lead_account_can_be_excluded_from_worker_selection) | test(reviewer_account_selection_uses_eligible_resolver) | test(chat_exclusions_require_an_allowed_account))) |
+(package(=studio-runtime-services) & kind(lib) & (test(destination_eligibility_includes_chat_exclusions) | test(invalid_scope_and_excluded_account_refuse_without_writes))) |
+(package(=studio-runtime-services) & kind(lib) & (test(single_allowed_account_is_selected) | test(implicit_selection_prefers_the_least_loaded_ready_account) | test(exclusions_do_not_block_the_lead_but_block_workers) | test(managed_message_preserves_python_profile_fields_on_agent_write))) |
+(package(=studio-runtime-services) & kind(lib) & test(exclusion_blocks_worker_native_actions_but_not_the_lead)) |
+(package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(automatic_capacity_retry_allows_the_excluded_lead_account) | test(automatic_capacity_retry_stops_an_excluded_worker) | test(usage_resume_allows_the_excluded_lead_account))) |
+(package(=studio-runtime-store) & kind(lib) & test(historical_transfer_worker_account_is_not_republished)) |
 (package(=studio-runtime-services) & kind(lib) & (test(account_order_file_filters_entries_and_preserves_fallbacks) | test(cursor_preserves_object_offsets_extras_and_scope) | test(invite_snapshot_retains_extensions_and_refuses_invalid_identity))) |
 (package(=studio-runtime-http) & kind(lib) & test(forward_starts_for_a_local_window_with_the_runtime_available)) |
     (package(=studio-runtime-schema) & kind(lib) & (test(/^(json_object|claude_options|recovery_record|terminal_record|annotation_record|plan_record)::tests::/) | test(discovery_view_tracks_schema_fields_and_valid_formats) | test(typed_gate_normalization_preserves_formats_and_bounds))) |
@@ -229,6 +247,7 @@ default-filter = '''
     ((package(=studio-runtime-services) | package(=studio-runtime-store)) & kind(test) & binary(=integration) & test(::provider_identity_)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(only_a_claude_worker_turns_user_mcp_servers_off)) |
     (package(=studio-runtime-services) & test(/^idle_compaction::/)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(/^notification_runtime_effects::tests::/) | test(/^notification_dispatch::effects::tests::/) | test(notification_agent_write_preserves_legacy_row_bytes))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^turn_prepare::budget_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::preparation::team_restore::idle_return_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::idle_unload::tests::/)) |
@@ -331,6 +350,8 @@ default-filter = '''
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(unchanged_drafts_ignore_unrelated_commits_and_publications)))
     | ((package(=studio-runtime-process)) & ((kind(lib) | kind(bin) | kind(test))) & (binary(studio_runtime_process) & test(/^provider_task::tests::(shutdown_waits_for_supervisor_detach_on_both_connections|shutdown_reports_control_detach_timeout|shutdown_reports_event_detach_timeout|shutdown_reports_both_detach_timeouts_within_one_budget)$/) | binary(integration) & test(/^wave7_p01_factory::(prepare_reports_handshake_error_and_unconfirmed_detach|prepare_preserves_handshake_error_after_confirmed_detach)$/)))
     | ((package(=studio-runtime-server)) & ((kind(test) & binary(=integration))) & (test(/^wave7_p01_registry::backend_shutdown_reports_both_supervisor_detach_timeouts$/)))
+    | (package(=studio-runtime-store) & kind(lib) & test(repositories::scheduler::idle_unload::tests::))
+    | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
     | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
@@ -431,6 +452,7 @@ default-filter = '''
     | (package(=studio-runtime-store) & kind(lib) & test(accepted_completion_retains_merge_receipt))
     | (package(=studio-runtime-http) & kind(lib) & test(routes::work_write::layr_error_tests::native_merge_conflict_keeps_its_message_and_is_not_uncertain))
     | (package(=studio-runtime-services) & kind(lib) & test(layr_native::runtime::merge_conflict_tests::merge_conflict_after_long_output_keeps_its_type_and_message))
+    | (package(=studio-runtime-services) & kind(lib) & (test(assigned_reviewer_associates_its_own_line_as_working_copy) | test(assigned_layr_reviewer_model_cwd_is_scratch) | test(native_reviewer_retry_turn_params_override_inherited_yolo) | test(reviewer_workspace_checks_out_the_assigned_git_head) | test(assigned_layr_reviewer_prepares_and_archives_the_requested_line) | test(test_binary_override_is_visible_on_other_threads) | test(assigned_git_reviewer_model_cwd_is_scratch) | test(assigned_git_claude_reviewer_sandbox_denies_worktree_writes) | test(unassigned_legacy_reviewer_keeps_main_and_scratch) | test(reviewer_thread_sandbox_tracks_the_typed_workspace_policy)))
     | (package(=studio-runtime-services) & kind(lib) & (test(message_resolves_queued_worker_name) | test(task_brief_retains_accept_merge_receipt) | test(concurrent_accepts_record_serial_main_states) | test(reviewer_result_is_accepted_without)))
     | (package(=studio-runtime-schema) & kind(lib) & test(contracts::tests::transfer_notices_use_the_provider_identity_contract))
     | (package(=studio-runtime-schema) & kind(lib) & (test(usage::ledger::typed_analytics_tests::ledger_deserialization_rejects_mismatched_observation_identity) | test(process_controls::) | test(contracts::tests::account_limit_consumers_share_checked_fields_and_open_vendor_windows)))
@@ -501,6 +523,7 @@ platform = 'cfg(target_os = "linux")'
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 default-filter = '''
     package(=studio-observable-codegen) |
+    (package(=studio-runtime-services) & binary(=integration) & test(rollout_characterization::)) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
     (package(=studio-runtime-store) & kind(lib) & test(native_layr_line_preserves_presence_and_rejects_invalid_type)) |
@@ -508,6 +531,11 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(/task_process_query_uses_status_index|process_claim_reuses_its_admitted_token_after_expiry_without_another_effect|repair_events_use_ordered_index_without_a_temp_sort|repair_event_order_preserves_id_ties/)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(=process_controls::task_rows_include_only_running_tasks_for_the_owner)) |
     (package(=studio-runtime-store) & kind(lib) & test(=migrations::m2026_11_05_repair_event_order::tests::replaces_old_index_and_is_repeatable_on_fresh_schema)) |
+    (package(=studio-runtime-services) & kind(lib) & test(account_worker::store::deleted_command_query_tests::)) |
+    (package(=studio-runtime-services) & kind(lib) & test(/account_worker::tests::stop_after_reattach::(late_interrupt_confirmation_|late_cleanup_confirmation_|disconnected_late_interrupt_confirmation_|remote_delete_waits_|deletion_reports_success_when_|deletion_lost_interrupt_reply_|disconnected_delete_refused_cleanup_|delete_settled_turn_cleans_|project_delete_stops_settled_|deleted_command_without_process_id_|deletion_of_unreachable_remote_worker_|completed_interrupted_turn_|delete_after_worker_reattach_|delete_before_worker_reattach_)/)) |
+    (package(=studio-runtime-http) & kind(lib) & test(delete_removes_the_chat_tree_once_and_replays_the_same_list)) |
+    (package(=studio-runtime-http) & kind(lib) & test(workspace_policy_http_sets_replays_and_clears_with_revision)) |
+    (package(=studio-runtime-http) & kind(lib) & test(lead_intent_preserves_native_store_override_for_replay)) |
     (package(=studio-runtime-schema) & kind(lib) & test(json_compat::serialization_tests::)) |
     (package(=studio-json) & binary(=parity) & test(serde_raw_marker_matches_backend)) |
     (package(=studio-runtime-http) & kind(lib) & (test(=json_body::tests::serde_private_number_key_remains_an_object_in_raw_json) | test(=validation::tests::parsed_numbers_follow_json_schema_and_object_keys_remain_data))) |
@@ -517,8 +545,9 @@ default-filter = '''
     (package(=studio-json) & binary(=parity)) |
     (package(=studio-runtime-services) & binary(=integration) & test(=portable_history_python_parity::readable_transcript_keeps_the_whole_studio_history_beyond_the_excerpt)) |
     (package(=studio-runtime-services) & kind(lib) & (test(create_refuses_line_in_symlinked_default_store) | test(unresolved_store_still_checks_lexical_line_paths) | test(agent_projection_uses_host_project_path_or_legacy_cwd) | test(agent_projections_fresh_seed_and_upgrade_marker_are_complete))) |
-    (package(=studio-runtime-schema) & kind(lib) & (test(reviewer_spawn_retains_review_state) | test(submission_revision_can_be_omitted_at_ingress))) |
-    (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(briefs_match_each_workspace) | test(review_catalog_matrix))) |
+    (package(=studio-runtime-schema) & kind(lib) & (test(legacy_review_state_maps_to_typed_review) | test(invalid_legacy_review_state_is_refused) | test(assignment_validates_ids_and_workspace) | test(submission_revision_can_be_omitted_at_ingress))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding) | test(spawned_reviewer_prefers_eligible_caller) | test(spawned_git_reviewer_uses_worktree_workspace) | test(spawned_git_reviewer_receives_pinned_brief) | test(review_selects_an_account_that_offers_the_model))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
     (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
     (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
@@ -596,6 +625,16 @@ default-filter = '''
 (package(=studio-runtime-services) & kind(lib) & test(historical_message_info_keeps_partial_and_ambiguous_rows)) |
 (package(=studio-runtime-schema) & kind(lib) & (test(account_registry::tests::) | test(invite_view_tracks_schema_and_preserves_extensions))) |
 (package(=studio-runtime-store) & kind(lib) & test(typed_registry_decode_preserves_order_and_error_location)) |
+(package(=studio-runtime-store) & kind(lib) & test(migration_removes_legacy_role_account_defaults)) |
+(package(=studio-runtime-schema) & kind(lib) & test(historical_account_defaults_preserve_request_identity_bytes)) |
+(package(=studio-runtime-http) & kind(lib) & (test(lead_request_refuses_multiple_accounts) | test(lead_request_keeps_chat_exclusions_in_creation_identity))) |
+(package(=studio-runtime-services) & kind(test) & binary(=integration) & test(empty_lead_can_select_an_account_excluded_for_workers)) |
+(package(=studio-runtime-services) & kind(lib) & (test(lead_account_can_be_excluded_from_worker_selection) | test(reviewer_account_selection_uses_eligible_resolver) | test(chat_exclusions_require_an_allowed_account))) |
+(package(=studio-runtime-services) & kind(lib) & (test(destination_eligibility_includes_chat_exclusions) | test(invalid_scope_and_excluded_account_refuse_without_writes))) |
+(package(=studio-runtime-services) & kind(lib) & (test(single_allowed_account_is_selected) | test(implicit_selection_prefers_the_least_loaded_ready_account) | test(exclusions_do_not_block_the_lead_but_block_workers) | test(managed_message_preserves_python_profile_fields_on_agent_write))) |
+(package(=studio-runtime-services) & kind(lib) & test(exclusion_blocks_worker_native_actions_but_not_the_lead)) |
+(package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(automatic_capacity_retry_allows_the_excluded_lead_account) | test(automatic_capacity_retry_stops_an_excluded_worker) | test(usage_resume_allows_the_excluded_lead_account))) |
+(package(=studio-runtime-store) & kind(lib) & test(historical_transfer_worker_account_is_not_republished)) |
 (package(=studio-runtime-services) & kind(lib) & (test(account_order_file_filters_entries_and_preserves_fallbacks) | test(cursor_preserves_object_offsets_extras_and_scope) | test(invite_snapshot_retains_extensions_and_refuses_invalid_identity))) |
 (package(=studio-runtime-http) & kind(lib) & test(forward_starts_for_a_local_window_with_the_runtime_available)) |
     (package(=studio-runtime-schema) & kind(lib) & (test(/^(json_object|claude_options|recovery_record|terminal_record|annotation_record|plan_record)::tests::/) | test(discovery_view_tracks_schema_fields_and_valid_formats) | test(typed_gate_normalization_preserves_formats_and_bounds))) |
@@ -652,6 +691,7 @@ default-filter = '''
     ((package(=studio-runtime-services) | package(=studio-runtime-store)) & kind(test) & binary(=integration) & test(::provider_identity_)) |
     (package(=studio-runtime-services) & kind(test) & binary(=integration) & test(only_a_claude_worker_turns_user_mcp_servers_off)) |
     (package(=studio-runtime-services) & test(/^idle_compaction::/)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(/^notification_runtime_effects::tests::/) | test(/^notification_dispatch::effects::tests::/) | test(notification_agent_write_preserves_legacy_row_bytes))) |
     (package(=studio-runtime-services) & kind(lib) & test(/^turn_prepare::budget_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::preparation::team_restore::idle_return_tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::idle_unload::tests::/)) |
@@ -754,6 +794,8 @@ default-filter = '''
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(unchanged_drafts_ignore_unrelated_commits_and_publications)))
     | ((package(=studio-runtime-process)) & ((kind(lib) | kind(bin) | kind(test))) & (binary(studio_runtime_process) & test(/^provider_task::tests::(shutdown_waits_for_supervisor_detach_on_both_connections|shutdown_reports_control_detach_timeout|shutdown_reports_event_detach_timeout|shutdown_reports_both_detach_timeouts_within_one_budget)$/) | binary(integration) & test(/^wave7_p01_factory::(prepare_reports_handshake_error_and_unconfirmed_detach|prepare_preserves_handshake_error_after_confirmed_detach)$/)))
     | ((package(=studio-runtime-server)) & ((kind(test) & binary(=integration))) & (test(/^wave7_p01_registry::backend_shutdown_reports_both_supervisor_detach_timeouts$/)))
+    | (package(=studio-runtime-store) & kind(lib) & test(repositories::scheduler::idle_unload::tests::))
+    | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
     | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
@@ -854,6 +896,7 @@ default-filter = '''
     | (package(=studio-runtime-store) & kind(lib) & test(accepted_completion_retains_merge_receipt))
     | (package(=studio-runtime-http) & kind(lib) & test(routes::work_write::layr_error_tests::native_merge_conflict_keeps_its_message_and_is_not_uncertain))
     | (package(=studio-runtime-services) & kind(lib) & test(layr_native::runtime::merge_conflict_tests::merge_conflict_after_long_output_keeps_its_type_and_message))
+    | (package(=studio-runtime-services) & kind(lib) & (test(assigned_reviewer_associates_its_own_line_as_working_copy) | test(assigned_layr_reviewer_model_cwd_is_scratch) | test(native_reviewer_retry_turn_params_override_inherited_yolo) | test(reviewer_workspace_checks_out_the_assigned_git_head) | test(assigned_layr_reviewer_prepares_and_archives_the_requested_line) | test(test_binary_override_is_visible_on_other_threads) | test(assigned_git_reviewer_model_cwd_is_scratch) | test(assigned_git_claude_reviewer_sandbox_denies_worktree_writes) | test(unassigned_legacy_reviewer_keeps_main_and_scratch) | test(reviewer_thread_sandbox_tracks_the_typed_workspace_policy)))
     | (package(=studio-runtime-services) & kind(lib) & (test(message_resolves_queued_worker_name) | test(task_brief_retains_accept_merge_receipt) | test(concurrent_accepts_record_serial_main_states) | test(reviewer_result_is_accepted_without)))
     | (package(=studio-runtime-schema) & kind(lib) & test(contracts::tests::transfer_notices_use_the_provider_identity_contract))
     | (package(=studio-runtime-schema) & kind(lib) & (test(usage::ledger::typed_analytics_tests::ledger_deserialization_rejects_mismatched_observation_identity) | test(process_controls::) | test(contracts::tests::account_limit_consumers_share_checked_fields_and_open_vendor_windows)))

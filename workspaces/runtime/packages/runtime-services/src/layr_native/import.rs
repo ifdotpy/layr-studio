@@ -737,7 +737,7 @@ pub(super) fn existing_ancestor(path: &Path) -> std::io::Result<&Path> {
 
 fn case_key(path: &str) -> String {
     let normalizer = icu_normalizer::DecomposingNormalizerBorrowed::new_nfd();
-    // Match the vendored Layr APFS case key, including compatibility case variants.
+    // Match the installed Layr APFS case key, including compatibility case variants.
     let folded: String = normalizer
         .normalize(path)
         .chars()

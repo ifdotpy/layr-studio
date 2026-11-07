@@ -1,6 +1,3 @@
-#[cfg(test)]
-extern crate studio_test_deps;
-
 #[cfg(unix)]
 use studio_runtime_server::account_registry;
 #[cfg(unix)]
@@ -352,6 +349,19 @@ fn panic_observed_log(location: Option<&std::panic::Location<'_>>) -> String {
     format!("runtime server observed panic{location} (payload redacted)")
 }
 
+#[cfg(feature = "perf-reporting")]
+macro_rules! profiled_spawn {
+    ($label:literal, $future:expr) => {
+        studio_runtime_store::perf_reporting::spawn($label, $future)
+    };
+}
+#[cfg(not(feature = "perf-reporting"))]
+macro_rules! profiled_spawn {
+    ($label:literal, $future:expr) => {
+        tokio::spawn($future)
+    };
+}
+
 async fn run(
     shutdown_requested: Sender<()>,
 ) -> Result<Option<handover::Handed>, Box<dyn std::error::Error>> {
@@ -379,6 +389,17 @@ async fn run(
         return Ok(None);
     }
     let port = parse_port(args.into_iter())?;
+    #[cfg(feature = "perf-reporting")]
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(
+            studio_runtime_store::perf_reporting::REPORT_INTERVAL_SECONDS,
+        ));
+        interval.tick().await;
+        loop {
+            interval.tick().await;
+            studio_runtime_store::perf_reporting::log_top();
+        }
+    });
     studio_runtime_schema::initialize()?;
     startup_trace("backend-identity-started");
     let backend_build = studio_runtime_process::blocking_pool::spawn_blocking(
@@ -1047,10 +1068,13 @@ async fn run(
         Arc::clone(&store),
         monitor_shutdown.subscribe(),
     ));
-    let retention_task = tokio::spawn(studio_runtime_services::storage_retention::run(
-        Arc::clone(&store),
-        monitor_shutdown.subscribe(),
-    ));
+    let retention_task = profiled_spawn!(
+        "storage retention",
+        studio_runtime_services::storage_retention::run(
+            Arc::clone(&store),
+            monitor_shutdown.subscribe(),
+        )
+    );
     let stored_text_task = tokio::spawn(studio_runtime_services::stored_text_compaction::run(
         Arc::clone(&store),
         monitor_shutdown.subscribe(),
@@ -1095,13 +1119,16 @@ async fn run(
         Arc::new(studio_runtime_services::shell_pressure::HostPressure::default()),
         monitor_shutdown.subscribe(),
     ));
-    let continuation_task = tokio::spawn(continuation_scheduler(
-        Arc::clone(&store),
-        continuation_scheduler_wake,
-        Arc::clone(&account_session),
-        Arc::clone(&registry_wake),
-        monitor_shutdown.subscribe(),
-    ));
+    let continuation_task = profiled_spawn!(
+        "continuation scheduler",
+        continuation_scheduler(
+            Arc::clone(&store),
+            continuation_scheduler_wake,
+            Arc::clone(&account_session),
+            Arc::clone(&registry_wake),
+            monitor_shutdown.subscribe(),
+        )
+    );
     let orchestration_task = state.orchestration_driver_handle().map(|driver| {
         let wake = Arc::clone(&orchestration_wake);
         let mut shutdown = monitor_shutdown.subscribe();
@@ -2079,6 +2106,10 @@ mod targeted_scheduler_wake_tests {
     use studio_runtime_store::RuntimeStore;
     use tokio::sync::Notify;
 
+    /// Empty object payload of the typed outbox fixtures.
+    #[derive(serde::Serialize)]
+    struct EmptyObject {}
+
     #[tokio::test]
     #[ignore]
     async fn outbox_wake_measurement() {
@@ -2121,7 +2152,7 @@ mod targeted_scheduler_wake_tests {
                             generation: None,
                             ordinal: None,
                             next_at: None,
-                            payload: studio_test_deps::EmptyObject {},
+                            payload: EmptyObject {},
                             created: 1,
                         },
                     )?;
@@ -2181,7 +2212,7 @@ mod targeted_scheduler_wake_tests {
                             generation: None,
                             ordinal: None,
                             next_at: None,
-                            payload: studio_test_deps::EmptyObject {},
+                            payload: EmptyObject {},
                             created: 1,
                         },
                     )?;
@@ -2225,7 +2256,7 @@ mod targeted_scheduler_wake_tests {
                             owner_kind: OwnerKind::Account, owner_id: "account".into(), request_id: None,
                             signature: "sig".into(), status: OutboxStatus::Pending, account: None,
                             stream_id: None, generation: None, ordinal: None, next_at: None,
-                            payload: studio_test_deps::EmptyObject {}, created: 1,
+                            payload: EmptyObject {}, created: 1,
                         })?;
                     }
                 }
@@ -2236,7 +2267,7 @@ mod targeted_scheduler_wake_tests {
                     tx.execute("DELETE FROM runtime_outbox WHERE id='raw-0'", [])?;
                 }
                 if scenario == 3 || scenario == 4 || scenario == 7 {
-                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), studio_test_deps::EmptyObject {}, 1)?;
+                    RemoteOutbox::put(tx, if scenario == 3 { RemoteEffect::ServerRequest } else { RemoteEffect::FederationMessage }, "peer", &format!("remote-{scenario}"), "sig", OutboxStatus::Pending, Some(1), EmptyObject {}, 1)?;
                 }
                 Ok(())
             }).await.unwrap();
@@ -2270,7 +2301,7 @@ mod targeted_scheduler_wake_tests {
                         generation: None,
                         ordinal: None,
                         next_at: None,
-                        payload: studio_test_deps::EmptyObject {},
+                        payload: EmptyObject {},
                         created: 1,
                     },
                 )?;
@@ -2317,7 +2348,7 @@ mod targeted_scheduler_wake_tests {
                         generation: None,
                         ordinal: None,
                         next_at: None,
-                        payload: studio_test_deps::EmptyObject {},
+                        payload: EmptyObject {},
                         created: 1,
                     },
                 )?;

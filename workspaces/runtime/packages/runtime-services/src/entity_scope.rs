@@ -50,6 +50,22 @@ struct Unit {
     rows: Vec<EntityRow>,
 }
 
+/// Advance by examined candidates, including those with no visible documents.
+fn page_units(units: &mut Vec<Unit>, limit: usize, after: i64, through: i64) -> i64 {
+    units.sort_by_key(|unit| unit.seq);
+    let truncated = units.len() > limit;
+    let mut count = limit.min(units.len());
+    while count > 0 && count < units.len() && units[count].seq == units[count - 1].seq {
+        count += 1;
+    }
+    units.truncate(count);
+    if truncated {
+        units.last().map_or(after, |unit| unit.seq)
+    } else {
+        through
+    }
+}
+
 /// Start a scoped read: resolve the reset decision over both sources, then read the
 /// first page. `since` is the client cursor; None or an out-of-range cursor resets.
 pub fn resume(
@@ -190,7 +206,11 @@ pub fn pull_global_fresh(
         studio_runtime_schema::shared_values::SYNC_ENTITY_PAGE_LIMIT,
     );
     let collections = studio_runtime_schema::sync_protocol::global_entity_collections_json();
-    let priority_id = if after == 0 { priority_id } else { None };
+    let priority_id = if after == 0 && limit > 1 {
+        priority_id
+    } else {
+        None
+    };
     let rows = SyncDocumentsRepository::global_rows(
         transaction,
         after,
@@ -249,17 +269,10 @@ pub fn pull_global_fresh(
             limit + 1,
         )?);
     }
-    units.sort_by_key(|unit| unit.seq);
     let room = limit as usize - head.len();
-    let truncated = units.len() > room;
-    units.truncate(room);
+    let checkpoint = page_units(&mut units, room, after, max_sequence);
     let mut rows = head;
     rows.extend(units.into_iter().flat_map(|unit| unit.rows));
-    let checkpoint = if truncated {
-        rows.last().map_or(after, |row| row.sequence)
-    } else {
-        max_sequence
-    };
     Ok(EntityPage {
         rows: dedupe(rows),
         max_sequence,
@@ -381,14 +394,7 @@ pub fn continue_page(
             fetch,
         )?);
     }
-    units.sort_by_key(|unit| unit.seq);
-    let truncated = units.len() as i64 > limit;
-    units.truncate(limit as usize);
-    let checkpoint = if truncated {
-        units.last().map_or(after, |unit| unit.seq)
-    } else {
-        through
-    };
+    let checkpoint = page_units(&mut units, limit as usize, after, through);
     let rows = dedupe(units.into_iter().flat_map(|unit| unit.rows).collect());
     Ok(EntityPage {
         rows,
@@ -475,10 +481,7 @@ fn direct_units(
         return Ok(units);
     }
     for source in &DIRECT_SOURCES {
-        if !source.collections.iter().any(|c| wanted.contains(c))
-            || source.table != durable_seq::CHAT_VIEW_MARK
-                && !crate::sync_policy::table_exists(connection, source.table)?
-        {
+        if !source.collections.iter().any(|c| wanted.contains(c)) {
             continue;
         }
         let changed: Vec<(String, i64, bool)> = connection
@@ -500,9 +503,7 @@ fn direct_units(
             } else {
                 direct_docs(connection, source.table, &row_id, seq, wanted, snapshot)?
             };
-            if !rows.is_empty() {
-                units.push(Unit { seq, rows });
-            }
+            units.push(Unit { seq, rows });
         }
     }
     Ok(units)
@@ -661,9 +662,8 @@ fn agent_units(
             eprintln!("agent {agent_id} views are not streamed: {error}");
             Ok::<_, StoreError>(Vec::new())
         })?;
-        if !rows.is_empty() {
-            units.push(Unit { seq, rows });
-        }
+        // Filtered candidates occupy the SQL page and must advance its cursor.
+        units.push(Unit { seq, rows });
     }
     Ok(units)
 }
@@ -705,9 +705,8 @@ fn tail_units(
             _ if !snapshot => tombstones(&["agentTail"], &BTreeSet::from(["agentTail"]), &id, seq),
             _ => Vec::new(),
         };
-        if !rows.is_empty() {
-            units.push(Unit { seq, rows });
-        }
+        // Filtered candidates occupy the SQL page and must advance its cursor.
+        units.push(Unit { seq, rows });
     }
     Ok(units)
 }
@@ -758,8 +757,13 @@ fn agent_docs_with_context(
         }
     };
     let server = server_id(connection)?;
-    let Some(documents) =
-        crate::sync_policy::agent_view_documents(connection, id, server.as_deref())?
+    let Some(documents) = crate::sync_policy::agent_view_documents(
+        connection,
+        id,
+        server.as_deref(),
+        wanted.contains("agentSummary"),
+        context,
+    )?
     else {
         return Ok(if snapshot {
             Vec::new()
@@ -768,17 +772,8 @@ fn agent_docs_with_context(
         });
     };
     let mut rows = Vec::new();
-    let mut summary = documents.summary;
-    if wanted.contains("agentSummary")
-        && let Some(summary) = summary.as_mut()
-    {
-        if summary["projectServerId"].is_null() {
-            summary["projectServerId"] = studio_json::to_value(&server)?;
-        }
-        crate::agent_operational::decorate(summary, context)?;
-    }
     for (collection, value) in [
-        ("agentSummary", summary),
+        ("agentSummary", documents.summary),
         ("agentDetail", documents.detail),
         ("agent", documents.agent),
         ("retainedWorktree", documents.retained_worktree),
@@ -867,11 +862,12 @@ fn window_units(
                         && owner != agent
                         && !(team && team_member(connection, &owner, agent)?)
                     {
-                        continue;
+                        Vec::new()
+                    } else {
+                        vec![upsert(collection, &member, seq, value)?]
                     }
-                    vec![upsert(collection, &member, seq, value)?]
                 }
-                None if snapshot => continue,
+                None if snapshot => Vec::new(),
                 None => tombstones(&[collection], wanted, &member, seq),
             };
             units.push(Unit { seq, rows });
@@ -975,9 +971,7 @@ fn work_units(
         } else {
             work_docs(transaction, id, *seq, wanted, false)?
         };
-        if !rows.is_empty() {
-            units.push(Unit { seq: *seq, rows });
-        }
+        units.push(Unit { seq: *seq, rows });
     }
     // History rows: one entry per row, keyed `{work}:{index}`.
     for kind in WorkHistoryKind::ALL {
@@ -1015,20 +1009,18 @@ fn work_units(
             let rows = match (deleted, record, work, index, root) {
                 (true, ..) => tombstones(&[collection], wanted, &id, seq),
                 (false, Some(raw), Some(work), Some(index), Some(root)) => {
-                    let value: Value = studio_json::from_str(&raw)?;
                     let entry = crate::sync_views::work_history_entry(
+                        kind,
                         &work,
-                        &json!(root),
+                        studio_json::to_raw_value(&root)?,
                         index as usize,
-                        &value,
+                        studio_json::OwnedRawJson::from_string(raw)?,
                     );
                     vec![upsert(collection, &id, seq, &entry)?]
                 }
                 _ => Vec::new(),
             };
-            if !rows.is_empty() {
-                units.push(Unit { seq, rows });
-            }
+            units.push(Unit { seq, rows });
         }
     }
     if deletes_after == i64::MAX || !wanted.contains("workDetail") {
@@ -1067,9 +1059,7 @@ fn work_units(
         for work in works {
             rows.extend(work_docs(transaction, &work, *seq, wanted, true)?);
         }
-        if !rows.is_empty() {
-            units.push(Unit { seq: *seq, rows });
-        }
+        units.push(Unit { seq: *seq, rows });
     }
     let changed_works: Vec<(String, i64)> = transaction
         .prepare(
@@ -1093,9 +1083,7 @@ fn work_units(
         for dependent in dependents {
             rows.extend(work_docs(transaction, &dependent, seq, wanted, true)?);
         }
-        if !rows.is_empty() {
-            units.push(Unit { seq, rows });
-        }
+        units.push(Unit { seq, rows });
     }
     Ok(units)
 }
@@ -1134,7 +1122,7 @@ fn work_docs(
         rows.push(upsert("work", id, seq, summary)?);
     }
     if wanted.contains("workDetail") {
-        let refusal = current_submission_refusal(transaction, &record).map_err(work_error)?;
+        let refusal = current_submission_refusal(transaction, &item).map_err(work_error)?;
         let mut statuses: BTreeMap<String, WorkStatus> = BTreeMap::new();
         for dependency in item.dependencies() {
             match WorkItemsRepository::work_record(transaction, dependency) {

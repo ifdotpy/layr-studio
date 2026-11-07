@@ -2,11 +2,15 @@
 
 /// Maximum account identity length, in Unicode code points.
 pub const ACCOUNT_KEY_MAX_CHARS: usize = 200;
+/// Minimum account identity length, in Unicode code points.
+pub const ACCOUNT_KEY_MIN_CHARS: usize = 1;
 
 /// A nonempty account identity, at most 200 Unicode code points.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-pub struct AccountKey(crate::bounded_text::BoundedText<1, ACCOUNT_KEY_MAX_CHARS>);
+pub struct AccountKey(
+    crate::bounded_text::BoundedText<ACCOUNT_KEY_MIN_CHARS, ACCOUNT_KEY_MAX_CHARS>,
+);
 
 impl schemars::JsonSchema for AccountKey {
     fn inline_schema() -> bool {
@@ -16,7 +20,7 @@ impl schemars::JsonSchema for AccountKey {
         "AccountKey".into()
     }
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <crate::bounded_text::BoundedText<1, ACCOUNT_KEY_MAX_CHARS> as schemars::JsonSchema>::json_schema(generator)
+        <crate::bounded_text::BoundedText<ACCOUNT_KEY_MIN_CHARS, ACCOUNT_KEY_MAX_CHARS> as schemars::JsonSchema>::json_schema(generator)
     }
 }
 

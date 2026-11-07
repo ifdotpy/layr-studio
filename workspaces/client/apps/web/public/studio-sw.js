@@ -175,7 +175,6 @@ if (worker.STUDIO_SHELL) {
               headers,
             });
           }
-          let timer;
           const network = fetch(request).then(async (response) => {
             if (!valid(response)) throw new Error("Studio page unavailable.");
             if (await currentHTML(response)) {
@@ -184,22 +183,10 @@ if (worker.STUDIO_SHELL) {
             } else void worker.registration.update().catch(() => {});
             return response;
           });
-          // Keep a late same-build response, but do not hold a cached page behind
-          // a laptop that sleeps or an unreliable mobile connection.
+          // A cached shell opens at once, like an installed app. The network
+          // response refreshes the cache or finds a new build for next start.
           event.waitUntil(network.catch(() => {}));
-          if (!cached) return network;
-          try {
-            return await Promise.race([
-              network,
-              new Promise((resolve) => {
-                timer = setTimeout(() => resolve(cached), 1200);
-              }),
-            ]);
-          } catch {
-            return cached;
-          } finally {
-            clearTimeout(timer);
-          }
+          return cached || network;
         })(),
       );
       return;

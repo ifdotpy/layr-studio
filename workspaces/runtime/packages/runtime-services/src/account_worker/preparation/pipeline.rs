@@ -605,7 +605,7 @@ fn changed_fields(
 /// A workspace operation or the actor's readiness defers the turn.
 pub(crate) const WORKSPACE_PENDING_REASON: &str = "workspace-readiness/pending";
 /// Pending reason of a turn that waits for a model catalog refresh.
-pub(crate) const CATALOG_PENDING_REASON: &str = "model-catalog/refresh-pending";
+const CATALOG_PENDING_REASON: &str = "model-catalog/refresh-pending";
 fn catalog_pending() -> WorkerError {
     WorkerError::PreparationPending(super::super::PreparationBlock::new(
         crate::account_worker::PreparationWaitReason::ModelCatalog,
@@ -751,10 +751,14 @@ fn native_turn_params(
         && snapshot
             .guidance
             .thread_config
-            .contains_key("shell_environment_policy.set.LAYR_ROOT")
+            .contains_key("shell_environment_policy.set.TMPDIR")
     {
-        let permissions = native_reviewer_permissions(
-            &json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":snapshot.actor.cwd}),
+        let scratch = snapshot
+            .guidance
+            .thread_config
+            .get("shell_environment_policy.set.TMPDIR");
+        let permissions = layr_reviewer_permissions(
+            &json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":scratch}),
         );
         apply_native_reviewer_permissions(&mut params, permissions.as_ref());
     }
@@ -938,6 +942,20 @@ async fn workspace_for_action(
         return Err(refusal(
             "workspace-readiness/unsupported-execution-mode".into(),
         ));
+    }
+    let agent = record;
+    if let Some(assignment) = agent.review_assignment.as_ref() {
+        return match crate::reviewer_workspace::prepare(&store, &intent.agent_id, assignment).await
+        {
+            Ok(workspace) => Ok(workspace.token),
+            Err(crate::reviewer_workspace::ReviewerWorkspaceError::Deferred) => Err(
+                WorkerError::PreparationPending(WORKSPACE_PENDING_REASON.into()),
+            ),
+            Err(crate::reviewer_workspace::ReviewerWorkspaceError::ActorDeferred) => Err(
+                WorkerError::PreparationAwaitsAgent(WORKSPACE_PENDING_REASON.into()),
+            ),
+            Err(error) => Err(refusal(error.to_string())),
+        };
     }
     // Git provisioning acquires its own short transactions. No store transaction is held here.
     match Box::pin(crate::workspace_ready_git::prepare(
@@ -1123,109 +1141,6 @@ async fn prepare_native_thread_for_transfer_owner(
     }
 }
 
-/// The fresh `thread/start` of a queued native review child: the same checked
-/// snapshot and planner as ordinary startup (Python `prepare_locked`), before
-/// the review action receipt exists. Role snapshots are written here, like the
-/// ordinary thread request.
-pub(crate) async fn prepare_review_thread(
-    store: Arc<RuntimeStore>,
-    resources: &PreparationResources,
-    agent_id: &str,
-    attempt_id: &str,
-    generation: u64,
-) -> Result<super::PreparedReviewThread, WorkerError> {
-    let mut snapshot = prepare_native_snapshot(
-        Arc::clone(&store),
-        resources,
-        agent_id,
-        attempt_id,
-        generation,
-        true,
-        None,
-    )
-    .await?;
-    if !snapshot.actor.native_review || snapshot.actor.thread_id.is_some() {
-        return Err(refusal("native-review/thread-start-required".into()));
-    }
-    let attempt = match plan_native_thread(
-        &mut snapshot,
-        attempt_id,
-        &format!("native-review-thread:{agent_id}:{attempt_id}"),
-    ) {
-        thread::Outcome::Start(attempt) => attempt,
-        thread::Outcome::Refuse(reason) => {
-            return Err(thread_refusal(reason));
-        }
-        thread::Outcome::Ready(_) | thread::Outcome::Resume(_) => {
-            return Err(refusal("native-review/thread-start-required".into()));
-        }
-    };
-    for artifact in &attempt.artifacts {
-        let thread::ArtifactIntent::RememberRole { version, text } = artifact;
-        let state_root = store.root().to_path_buf();
-        let relative_path = format!("context-snapshots/{version}.txt");
-        let text = text.clone();
-        studio_runtime_process::blocking_pool::spawn_blocking(
-            "runtime-services/account_worker_review_materialize_context",
-            move || materialize(&state_root, &relative_path, &text),
-        )
-        .await
-        .map_err(|_| WorkerError::TaskFailed)??;
-    }
-    Ok(super::PreparedReviewThread { attempt })
-}
-
-/// The agent fields saved before a review thread start is sent: the ordinary
-/// pre-submission patch, with the effort the snapshot selected.
-pub(crate) fn review_thread_submitted(
-    record: &mut Value,
-    prepared: &super::PreparedReviewThread,
-) -> Result<(), WorkerError> {
-    apply_patch(record, &prepared.attempt.before_submit)?;
-    record["nativeEffort"] = json!(prepared.attempt.snapshot.settings.native_effort);
-    Ok(())
-}
-
-/// Reduce an accepted review `thread/start` reply against the current record
-/// with the ordinary receipt reducer. `None` means the reply is stale or has no
-/// thread identity; the caller keeps the outcome uncertain.
-pub(crate) fn accept_review_thread(
-    tx: &Transaction<'_>,
-    resources: &PreparationResources,
-    root: &Path,
-    record: &Value,
-    prepared: &super::PreparedReviewThread,
-    reply: &Value,
-) -> Result<Option<Value>, WorkerError> {
-    let attempt = &prepared.attempt;
-    let mut current = thread_snapshot(
-        tx,
-        resources,
-        record,
-        &attempt.snapshot.account.connection_id,
-        root,
-        None,
-    )?;
-    align_receipt_cwd(&mut current, &attempt.snapshot, resources);
-    let receipt = thread::ProviderReceipt {
-        identity: attempt.receipt_identity(),
-        thread_id: reply["thread"]["id"].as_str().map(str::to_owned),
-        fields: reply
-            .as_object()
-            .ok_or_else(|| invalid("review thread receipt"))?
-            .clone(),
-        reattached: false,
-    };
-    let thread::ReceiptOutcome::Accepted { patch, .. } =
-        thread::reduce_receipt(attempt, &current, Some(&receipt), None, json!(now()))
-    else {
-        return Ok(None);
-    };
-    let mut record = record.clone();
-    apply_patch(&mut record, &patch)?;
-    Ok(Some(record))
-}
-
 /// Prepare the permission portion of Python's monitor command path. Monitor
 /// ownership is checked by the monitor service; this snapshot only rechecks
 /// the actor epoch/deletion state and intentionally has no startAttempt gate.
@@ -1303,20 +1218,35 @@ fn validate_monitor_actor(
 }
 
 fn execution_cwd(record: &Value, validated_workspace_cwd: &Path) -> Option<String> {
+    if record
+        .get("reviewAssignment")
+        .is_some_and(|value| !value.is_null())
+    {
+        let agent = studio_runtime_store::AgentRecord::from_value(record.clone()).ok()?;
+        return crate::reviewer_workspace::scratch_dir(&agent).map(str::to_owned);
+    }
     if crate::layr_native::is_native(record) && record["role"] == "reviewer" {
         return record["layrScratch"].as_str().map(str::to_owned);
     }
     Some(validated_workspace_cwd.to_string_lossy().into_owned())
 }
 
-/// Native reviewers may write only to their private scratch folder.
-fn native_reviewer_permissions(record: &Value) -> Option<Value> {
-    if !crate::layr_native::is_native(record) || record["role"] != "reviewer" {
+/// Keep native Layr reviewers read-only except for their private scratch folder.
+fn layr_reviewer_permissions(record: &Value) -> Option<Value> {
+    if record["role"] != "reviewer" {
         return None;
     }
-    let scratch = record["layrScratch"]
-        .as_str()
-        .filter(|path| !path.is_empty());
+    let scratch = if record
+        .get("reviewAssignment")
+        .is_some_and(|value| !value.is_null())
+    {
+        let agent = studio_runtime_store::AgentRecord::from_value(record.clone()).ok()?;
+        crate::reviewer_workspace::scratch_dir(&agent).map(str::to_owned)
+    } else if crate::layr_native::is_native(record) {
+        record["layrScratch"].as_str().map(str::to_owned)
+    } else {
+        return None;
+    };
     let sandbox = match scratch {
         Some(scratch) => {
             json!({"type":"workspaceWrite","writableRoots":[scratch],"networkAccess":false})
@@ -1344,7 +1274,7 @@ fn monitor_command_settings(
     yolo_mode: Option<bool>,
 ) -> Result<Value, WorkerError> {
     let permissions = if let Some(permissions) =
-        native_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
+        layr_reviewer_permissions(record).filter(|_| role == thread::Role::Reviewer)
     {
         permissions
     } else {
@@ -1422,12 +1352,12 @@ async fn prepare_native_snapshot(
     };
     let admission =
         admit_for_purpose(Arc::clone(&store), resources, &intent, allow_paused_start).await?;
-    let token = if allow_paused_start {
+    let token = if allow_paused_start && agent_record.review_assignment.is_none() {
         None
     } else {
         Some(workspace_for_action(Arc::clone(&store), &intent).await?)
     };
-    let restore_cwd = if allow_paused_start {
+    let restore_cwd = if token.is_none() {
         let cwd = intent
             .cwd
             .as_ref()
@@ -1494,7 +1424,9 @@ async fn prepare_native_snapshot(
                 .to_path_buf()
         };
         let mut frozen = frozen;
-        frozen["cwd"] = json!(cwd);
+        let execution_cwd = execution_cwd(&frozen, &cwd)
+            .ok_or_else(|| refusal("native-reviewer/scratch-required".into()))?;
+        frozen["cwd"] = json!(execution_cwd);
         thread_snapshot(
             tx,
             &resources_for_snapshot,
@@ -1707,7 +1639,7 @@ pub(crate) async fn prepare_ready(
             let cwd = token_for_snapshot
                 .validate(tx)?
                 .map_err(|_| refusal(WORKSPACE_TOKEN_STALE.into()))?;
-            let native_reviewer = native_reviewer_permissions(&frozen);
+            let native_reviewer = layr_reviewer_permissions(&frozen);
             if let Some(execution_cwd) = execution_cwd(&frozen, &cwd) {
                 frozen["cwd"] = json!(execution_cwd);
             }
@@ -1821,12 +1753,11 @@ pub(crate) async fn prepare_ready(
             .read_async(
                 "runtime-services/idle_compaction_input_mode",
                 move |connection| {
-                    let agent =
+                    let is_lead =
                         AgentRepository::get(connection, &AgentId::from(agent_id.as_str()))?
-                            .map(|agent| agent.value())
-                            .unwrap_or_default();
+                            .is_some_and(|agent| agent.is_lead == Some(true));
                     studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(
-                        connection, &agent,
+                        connection, is_lead,
                     )
                     .map(|settings| settings.mode)
                 },
@@ -1911,8 +1842,11 @@ pub(crate) fn commit(
         )
     })?;
     if let Some(expected) = guard.idle_compaction_mode
-        && studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(tx, &record)?
-            .mode
+        && studio_runtime_store::OrchestrationSettingsRepository::idle_compaction_for(
+            tx,
+            record["isLead"] == true,
+        )?
+        .mode
             != expected
     {
         return Err(refusal("idle-compaction/mode-changed".into()));
@@ -1924,11 +1858,13 @@ pub(crate) fn commit(
         .map_err(|e| refusal(e.to_string()))?;
     let cwd = stage("turn_submission.commit.token", || guard.token.validate(tx))?
         .map_err(|_| refusal(WORKSPACE_TOKEN_STALE.into()))?;
-    if context.intent.cwd.as_deref() != cwd.to_str() {
+    let execution_cwd = execution_cwd(&frozen, &cwd)
+        .ok_or_else(|| refusal("native-reviewer/scratch-required".into()))?;
+    if context.intent.cwd.as_deref() != Some(execution_cwd.as_str()) {
         return Err(refusal("workspace-readiness/cwd-changed".into()));
     }
     let mut current = frozen.clone();
-    current["cwd"] = json!(cwd);
+    current["cwd"] = json!(execution_cwd);
     if current.get("nativeEffort").is_none() {
         current["effort"] = json!(guard.selection.settings.effort);
         current["nativeEffort"] = json!(guard.selection.settings.native_effort);
@@ -2181,6 +2117,7 @@ mod daybreak_tests {
                 epoch: 1,
                 thread_id: Some("thread".into()),
                 cwd: "/tmp/project".into(),
+                thread_sandbox: thread::ThreadSandbox::ReadOnly,
                 compactions: 0,
                 prepare_attempt: None,
                 native_teleport_tool: None,
@@ -2195,6 +2132,7 @@ mod daybreak_tests {
                 native_effort_present: false,
                 deleted: false,
                 native_review: false,
+                review_assignment: None,
             },
             root: thread::Root {
                 can_delegate: true,
@@ -2245,6 +2183,27 @@ mod daybreak_tests {
     }
 
     #[test]
+    fn reviewer_thread_sandbox_tracks_the_typed_workspace_policy() {
+        for (policy, expected) in [
+            (thread::ThreadSandbox::ReadOnly, "read-only"),
+            (thread::ThreadSandbox::WorkspaceWrite, "workspace-write"),
+        ] {
+            let mut snapshot = action_snapshot(false);
+            snapshot.actor.thread_id = None;
+            snapshot.actor.cwd = "/private/scratch".into();
+            snapshot.actor.thread_sandbox = policy;
+            snapshot.settings.role = thread::Role::Reviewer;
+            snapshot.guidance.role = "Review".into();
+            let thread::Outcome::Start(attempt) = thread::plan(&snapshot, "attempt", "ticket")
+            else {
+                panic!("review thread should start")
+            };
+            assert_eq!(attempt.params["cwd"], "/private/scratch");
+            assert_eq!(attempt.params["sandbox"], expected);
+        }
+    }
+
+    #[test]
     fn native_reviewer_retry_turn_params_override_inherited_yolo() {
         let mut snapshot = action_snapshot(false);
         snapshot.settings.role = thread::Role::Reviewer;
@@ -2253,6 +2212,10 @@ mod daybreak_tests {
             "shell_environment_policy.set.LAYR_ROOT".into(),
             json!("/studio/store"),
         );
+        snapshot.guidance.thread_config.insert(
+            "shell_environment_policy.set.TMPDIR".into(),
+            json!("/private/review-scratch"),
+        );
         let params = native_turn_params(&mut snapshot, &thread::TurnInput::default(), None)
             .expect("fixture operation succeeds");
         assert_eq!(
@@ -2260,7 +2223,7 @@ mod daybreak_tests {
             json!({"type":"workspaceWrite","writableRoots":["/private/review-scratch"],"networkAccess":false})
         );
         assert_eq!(params["approvalPolicy"], "never");
-        let monitor=monitor_command_settings(&json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":snapshot.actor.cwd}),&snapshot.actor.cwd,thread::Role::Reviewer,Some(true)).expect("fixture operation succeeds");
+        let monitor=monitor_command_settings(&json!({"workspaceMode":"layr-native","role":"reviewer","layrScratch":"/private/review-scratch"}),&snapshot.actor.cwd,thread::Role::Reviewer,Some(true)).expect("fixture operation succeeds");
         assert_eq!(monitor["sandboxPolicy"], params["sandboxPolicy"]);
     }
 
@@ -2398,6 +2361,74 @@ mod daybreak_tests {
                 Some("/private/review-scratch".into())
             );
         }
+    }
+
+    #[test]
+    fn assigned_layr_reviewer_model_cwd_is_scratch() {
+        let record = complete_reviewer(json!({"workspaceMode":"layr-native", "role":"reviewer",
+            "layrScratch":"/private/scratch", "reviewAssignment":{
+                "kind":"layrState", "state":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "base":{"kind":"mergeBaseWithMain"}}}));
+        assert_eq!(
+            execution_cwd(&record, Path::new("/store/review")),
+            Some("/private/scratch".into())
+        );
+    }
+
+    #[test]
+    fn assigned_git_reviewer_model_cwd_is_scratch() {
+        let record = complete_reviewer(json!({"workspaceMode":"worktree", "role":"reviewer",
+            "layrScratch":"/private/scratch", "reviewAssignment":{
+                "kind":"gitRange", "base":"main", "head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}));
+        assert_eq!(
+            execution_cwd(&record, Path::new("/worktree/review")),
+            Some("/private/scratch".into())
+        );
+        assert_eq!(
+            monitor_command_settings(
+                &record,
+                "/private/scratch",
+                thread::Role::Reviewer,
+                Some(true)
+            )
+            .unwrap()["sandboxPolicy"],
+            json!({"type":"workspaceWrite","writableRoots":["/private/scratch"],"networkAccess":false})
+        );
+    }
+
+    #[test]
+    fn assigned_git_claude_reviewer_sandbox_denies_worktree_writes() {
+        let record = complete_reviewer(json!({"workspaceMode":"worktree", "role":"reviewer",
+            "layrScratch":"/private/scratch", "layrReadCwd":"/worktree/review", "reviewAssignment":{
+                "kind":"gitRange", "base":"main", "head":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}));
+        let resources = PreparationResources::bundled(
+            String::new(),
+            crate::model_catalog::ModelCatalogService::new(),
+        )
+        .unwrap();
+        let options =
+            snapshot::native_claude_options(&resources, &record, Path::new("/state")).unwrap();
+        assert_eq!(
+            options["sandbox"]["filesystem"]["allowWrite"],
+            json!(["/private/scratch"])
+        );
+        assert_eq!(
+            options["sandbox"]["filesystem"]["denyWrite"],
+            json!(["/worktree/review"])
+        );
+        assert_eq!(
+            options["nativeReviewerEnvironment"]["TMPDIR"],
+            "/private/scratch"
+        );
+    }
+
+    fn complete_reviewer(fields: Value) -> Value {
+        let Value::Object(fields) = fields else {
+            panic!("review fixture fields must be an object")
+        };
+        let mut record = studio_runtime_store::AgentRecord::test_defaults().value();
+        record.as_object_mut().unwrap().extend(fields);
+        record
     }
 }
 

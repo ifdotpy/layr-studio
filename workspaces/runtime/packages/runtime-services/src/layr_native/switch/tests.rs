@@ -340,8 +340,11 @@ fn assert_sealed(line: &Path) {
 }
 
 #[tokio::test]
-#[ignore = "requires the vendored Layr host binary and APFS or btrfs"]
+#[ignore = "requires the installed Layr host binary and APFS or btrfs"]
 async fn real_host_switch_moves_a_lead_to_main_and_a_worker_branch_to_its_line() {
+    let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+        crate::layr_native::test_binary().expect("test binary"),
+    ));
     let binary = crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY");
     let (_folder, project, tree) = git_fixture();
     git(&tree, &["push", "-q", "origin", "codex-agent/wt-worker"]);

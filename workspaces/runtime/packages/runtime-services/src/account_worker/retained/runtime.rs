@@ -418,14 +418,39 @@ impl Worker {
                 .await
             })
             .await?;
+        let mut late_interrupts = Vec::new();
         self.retained_requests.retain(|id, pending| {
             let scope = request_scopes
                 .get(id)
                 .cloned()
                 .unwrap_or_else(|| retained_account.clone());
             let checkpoint = checkpoints.get(&scope).copied().unwrap_or(0);
+            if matches!(
+                pending.call.method,
+                Method::TurnInterrupt | Method::ThreadBackgroundTerminalsClean
+            ) && pending.result_cursor <= checkpoint
+                && pending.reply.as_ref().is_none_or(|reply| reply.is_closed())
+                && let Some(RequestResult::Reply(reply)) = pending.result.as_ref()
+                && let Some(actor) = pending.call.actor.as_ref()
+            {
+                late_interrupts.push((
+                    actor.agent.clone(),
+                    pending.call.operation.clone(),
+                    reply.clone(),
+                ));
+            }
             pending.complete_result(checkpoint, &committed_replies, scope)
         });
+        for (agent, operation, reply) in late_interrupts {
+            tokio::spawn(super::super::stopped_turns::finish_late_interrupt(
+                Arc::clone(&self.bridge.store),
+                self.retained_scope(),
+                self.retained_session.clone(),
+                agent,
+                operation,
+                reply,
+            ));
+        }
         if self.retained_barriers.is_empty() {
             return Ok(());
         }

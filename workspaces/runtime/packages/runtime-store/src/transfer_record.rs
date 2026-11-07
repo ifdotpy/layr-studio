@@ -963,6 +963,9 @@ impl From<AgentTransferSummary>
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferWorkerDefaults {
+    /// Consume the retired account pin without restoring it from old transfers.
+    #[serde(rename = "accountKey", default, skip_serializing)]
+    pub legacy_account_key: serde::de::IgnoredAny,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub model: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -971,8 +974,6 @@ pub struct TransferWorkerDefaults {
     pub fast_mode: Field<bool>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub daybreak_enabled: Field<bool>,
-    #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub account_key: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -1073,6 +1074,16 @@ pub struct LazySourceState {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn historical_transfer_worker_account_is_not_republished() {
+        let raw = r#"{"workerDefaults":{"model":"m","accountKey":"legacy","extra":"kept"}}"#;
+        let settings: super::TransferSettings = studio_json::from_str(raw).unwrap();
+        assert_eq!(
+            studio_json::to_string(&settings).unwrap(),
+            r#"{"workerDefaults":{"model":"m","extra":"kept"}}"#
+        );
+    }
+
     #[test]
     fn transfer_record_rejects_out_of_bounds_identifiers() {
         for id in [String::new(), "x".repeat(201)] {

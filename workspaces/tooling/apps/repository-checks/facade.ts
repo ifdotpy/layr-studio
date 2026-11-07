@@ -149,6 +149,10 @@ const SOURCE_SKIP = new Set([
 ]);
 const UNSAFE_RUST_ALLOWLIST: [string, string][] = [
   [
+    "workspaces/runtime/packages/runtime-store/src/perf_reporting.rs",
+    "Opt-in SQLite prepared-statement counter enumeration on the owning connection.",
+  ],
+  [
     "workspaces/runtime/packages/runtime-priority-sys/src/lib.rs",
     "OS priority syscall.",
   ],
@@ -1022,34 +1026,19 @@ export function gateSteps(root: string, name: string): GateStep[] {
         ]),
       ),
       {
-        ...cargo("schema-doctests", "Schema compile-fail doctests", [
+        // `--workspace` keeps the feature set of the workspace build, so the doctests
+        // link the warm units; `-p` resolves other features and rebuilds the dependencies.
+        ...cargo("doctests", "Rust doctests", [
           "test",
           "--locked",
-          "-p",
-          "studio-runtime-schema",
+          "--workspace",
+          "--exclude",
+          NATIVE_PACKAGE,
           "--doc",
         ]),
         requires: "workspace",
         crateReuse: true,
       },
-      ...(fast ? ["ControlInvocation", "provider_receipt"] : [""]).map(
-        (filter) => ({
-          ...cargo(
-            `services-doctests${filter ? `-${filter}` : ""}`,
-            "Runtime services doctests",
-            [
-              "test",
-              "--locked",
-              "-p",
-              "studio-runtime-services",
-              "--doc",
-              ...(filter ? [filter] : []),
-            ],
-          ),
-          requires: "workspace",
-          crateReuse: true,
-        }),
-      ),
       ...(!fast
         ? [
             {
@@ -1885,7 +1874,7 @@ export async function execute(
     const baseEnv =
       bin === "cargo"
         ? {
-            ...scrubAgentEnvironment({ ...process.env }),
+            ...scrubAgentEnvironment({ ...process.env }, bin, args),
             CARGO_TARGET_DIR: cargoTarget(root),
             ...(args[0] === "nextest"
               ? {
@@ -1901,7 +1890,7 @@ export async function execute(
                 }
               : {}),
           }
-        : scrubAgentEnvironment({ ...process.env });
+        : scrubAgentEnvironment({ ...process.env }, bin, args);
     const retestEnv: NodeJS.ProcessEnv = isRetest(bin, args)
       ? retestEnvironment()
       : {};

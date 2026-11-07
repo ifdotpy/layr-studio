@@ -94,6 +94,12 @@ fn cases() -> Vec<Value> {
             .expect("frozen lifecycle cases");
     // The frozen corpus names the former stop, which is now the `pause` action.
     for case in &mut cases {
+        if case["action"]["action"] == "delete" {
+            case["action"]["request_id"] =
+                json!(studio_runtime_schema::persistence::RequestIdentity::issue_root());
+            // This fixture has no running commands or unresolved provider interrupt.
+            case["expected"]["result"]["stopped"] = json!("confirmed");
+        }
         if case["action"]["action"] == "stop" {
             case["action"]["action"] = json!("pause");
         }
@@ -575,6 +581,7 @@ async fn committed_delete_succeeds_when_post_commit_delivery_fails() {
         store.clone(),
         &Action::Delete {
             target: "lead".into(),
+            request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
         },
         case["now"].as_f64().expect("now"),
         Arc::new(FailedDelivery),
@@ -626,6 +633,7 @@ async fn committed_delete_drains_its_intent_despite_unrelated_cleanup_failure() 
         .execute(
             &Action::Delete {
                 target: "lead".into(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("now"),
         )
@@ -690,6 +698,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
         .execute(
             &Action::Delete {
                 target: "lead".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("delete timestamp"),
         )
@@ -1179,6 +1188,8 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
                     studio_json::from_str(payload.as_str().expect("agent payload"))
                         .expect("agent JSON");
                 if let Some(agent) = value["value"].as_object_mut() {
+                    // The additive full-agent project path postdates the frozen oracle.
+                    assert!(agent.contains_key("projectPath"));
                     for field in [
                         "accountChange",
                         "accountTransferProgress",
@@ -1204,6 +1215,9 @@ fn assert_records(store: &RuntimeStore, case: &Value) {
                 payload["value"]["accountKey"] = json!("default");
             }
             use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
+            crate::agent_view_fixtures::expect_project_path(
+                payload.get_mut("value").expect("agent projection"),
+            );
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }
@@ -1476,12 +1490,12 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
                     assert_eq!(interrupt["outcome"], "unknown");
                     assert_eq!(interrupt["requestTicket"], request.operation);
                 } else {
-                    // The command cleanup follows the settled interrupt.
+                    // The receipt is recorded after command cleanup completes.
                     assert_eq!(
                         request.method,
                         studio_runtime_providers::Method::ThreadBackgroundTerminalsClean
                     );
-                    assert_eq!(interrupt["outcome"], "accepted");
+                    assert_eq!(interrupt["outcome"], "unknown");
                     assert_eq!(request.params, json!({"threadId":agent["threadId"]}));
                 }
                 self.calls.lock().expect("calls lock").push(request.clone());
@@ -1742,6 +1756,9 @@ async fn production_child_notification_matches_python_corpus() {
                 payload["value"]["accountKey"] = json!("default");
             }
             use_current_ticket_shape(payload.get_mut("value").expect("agent projection"));
+            crate::agent_view_fixtures::expect_project_path(
+                payload.get_mut("value").expect("agent projection"),
+            );
             crate::normalize_agent_nulls(&mut payload);
             row[2] = json!(payload.to_string());
         }
@@ -1937,6 +1954,7 @@ async fn composed_delete_stages_voice_sessions_before_rows_are_removed_and_stops
         .execute(
             &Action::Delete {
                 target: "lead".into(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             case["now"].as_f64().expect("time"),
         )
@@ -2124,11 +2142,8 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
         .collect::<Vec<_>>();
     assert_eq!(
         sent.iter().map(|(method, _)| *method).collect::<Vec<_>>(),
-        [
-            studio_runtime_providers::Method::TurnInterrupt,
-            studio_runtime_providers::Method::ThreadBackgroundTerminalsClean
-        ],
-        "an unknown interrupt is still followed by the command cleanup once"
+        [studio_runtime_providers::Method::TurnInterrupt],
+        "cleanup waits until the unknown interrupt is confirmed"
     );
     ports
         .execute(&action, case["now"].as_f64().expect("time"))

@@ -1796,6 +1796,16 @@
       "scope": "local"
     },
     {
+      "path": "src/components/conversation/transcript/message-info.css",
+      "kind": "layer",
+      "signature": "z-index: 1",
+      "count": 1,
+      "key": "messageActions.hintLayer",
+      "plannedOwner": "main visual component",
+      "purpose": "A message action hover hint stays over the next action in its row",
+      "scope": "local"
+    },
+    {
       "path": "src/components/agents/execution-settings.css",
       "kind": "layer",
       "signature": "z-index: 1",

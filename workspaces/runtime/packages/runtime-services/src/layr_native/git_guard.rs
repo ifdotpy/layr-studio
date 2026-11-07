@@ -580,6 +580,9 @@ mod tests {
     }
 
     fn real_managed_layr_git_operation(operation: &str) {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         let binary = PathBuf::from(
             crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
         );

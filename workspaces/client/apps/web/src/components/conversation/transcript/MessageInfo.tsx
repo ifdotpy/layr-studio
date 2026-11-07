@@ -44,6 +44,7 @@ export default function MessageInfo({
   const { get } = useServerApi();
 
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const [metadata, setMetadata] = useState<Metadata | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -191,6 +192,32 @@ export default function MessageInfo({
         ? "< $0.0001"
         : `$${cost.totalUSD.toLocaleString(undefined, { maximumFractionDigits: 4 })}`,
     ]);
+  // A long transcript mounts no popover per message: the popover mounts on the
+  // first opening and stays. The trigger is the plain message action button.
+  const trigger = (
+    <button
+      ref={target}
+      type="button"
+      className="message-action-button message-info-control"
+      aria-label="Message information"
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      onClick={() => {
+        setMounted(true);
+        setOpen(!open);
+      }}
+      onKeyDown={(event) => {
+        if (open && event.key === "Escape") {
+          event.preventDefault();
+          event.stopPropagation();
+          close();
+        }
+      }}
+    >
+      <Info size={14} />
+    </button>
+  );
+  if (!mounted) return trigger;
   return (
     <Popover
       opened={open}
@@ -205,26 +232,7 @@ export default function MessageInfo({
       shadow="md"
       transitionProps={{ duration: 0 }}
     >
-      <Popover.Target>
-        <ActionIcon
-          ref={target}
-          size="sm"
-          className="message-info-control"
-          aria-label="Message information"
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          onKeyDown={(event) => {
-            if (open && event.key === "Escape") {
-              event.preventDefault();
-              event.stopPropagation();
-              close();
-            }
-          }}
-        >
-          <Info size={14} />
-        </ActionIcon>
-      </Popover.Target>
+      <Popover.Target>{trigger}</Popover.Target>
       <Popover.Dropdown
         className="message-info-popover"
         role="dialog"

@@ -1,3 +1,4 @@
+import { AgentWorktreePreparation } from "../../generated/api";
 import { AgentStatus } from "../../generated/api";
 import {
   Brain,
@@ -99,7 +100,7 @@ export default function AgentPhase({
     : currentCapacityRetry(agent)?.status === "scheduled"
       ? "capacity-retry"
       : agent.status === AgentStatus.starting && agent.worktreePreparation
-        ? agent.worktreePreparation === "waiting"
+        ? agent.worktreePreparation === AgentWorktreePreparation["waiting"]
           ? "folder-wait"
           : "folder-prepare"
         : awaitingResponse

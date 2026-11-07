@@ -155,11 +155,14 @@ struct FakeCleanup;
 impl CleanupPorts for FakeCleanup {
     fn perform(
         &self,
-        _agent: &Value,
+        _agent: &studio_runtime_store::AgentRecord,
         _effect: &CleanupEffect,
         _request_id: &str,
-    ) -> Result<Value, EffectFailure> {
-        Ok(json!({"state":"done"}))
+    ) -> Result<studio_json::OwnedRawJson, EffectFailure> {
+        Ok(
+            studio_json::OwnedRawJson::from_string(json!({"state":"done"}).to_string())
+                .expect("fixture receipt is valid JSON"),
+        )
     }
 }
 
@@ -482,6 +485,7 @@ fn missing_native_and_remote_effects_produce_no_decision() {
             &snapshot,
             &Action::Delete {
                 target: "lead".to_owned(),
+                request_id: studio_runtime_schema::persistence::RequestIdentity::issue_root(),
             },
             42.0,
         );

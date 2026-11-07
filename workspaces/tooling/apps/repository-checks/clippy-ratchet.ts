@@ -4,7 +4,11 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { CARGO_BUILD_JOBS, NATIVE_PACKAGE } from "./gate-config.ts";
+import {
+  CARGO_BUILD_JOBS,
+  CLIPPY_CONF_DIR,
+  RUST_CLIPPY_ARGS,
+} from "./gate-config.ts";
 import {
   checkRatchet,
   fingerprintMatches,
@@ -159,38 +163,27 @@ export async function run(
   shrink = false,
   excludeNative = false,
 ): Promise<number> {
+  // The gate's command (gate-config.ts), with the job count and the message format before `--`.
+  const end = RUST_CLIPPY_ARGS.indexOf("--");
+  const cargoArgs = RUST_CLIPPY_ARGS.slice(0, end).filter(
+    (arg, i, all) =>
+      excludeNative || (arg !== "--exclude" && all[i - 1] !== "--exclude"),
+  );
   const args = [
-    "clippy",
-    "--workspace",
-    ...(excludeNative ? ["--exclude", NATIVE_PACKAGE] : []),
-    "--all-targets",
-    "--locked",
+    ...cargoArgs,
+    ...(process.env.STUDIO_PERF_REPORTING === "1"
+      ? ["--features", "studio-runtime-server/perf-reporting"]
+      : []),
     "-j",
     // The gate (facade.ts) sets CARGO_BUILD_JOBS to the gate count; just exports the focused count.
     process.env.CARGO_BUILD_JOBS ?? String(CARGO_BUILD_JOBS),
     "--message-format=json",
-    "--",
-    "-D",
-    "warnings",
-    "--cap-lints",
-    "warn",
-    ...[
-      "struct_excessive_bools",
-      "option_option",
-      "redundant_clone",
-      "needless_pass_by_value",
-      "disallowed_methods",
-    ].flatMap((lint) => ["-W", `clippy::${lint}`]),
+    ...RUST_CLIPPY_ARGS.slice(end),
   ];
   const child = spawn("cargo", args, {
     cwd: root,
     stdio: ["ignore", "pipe", "inherit"],
-    env: {
-      ...process.env,
-      CLIPPY_CONF_DIR: fileURLToPath(
-        new URL("./clippy-ratchet", import.meta.url),
-      ),
-    },
+    env: { ...process.env, CLIPPY_CONF_DIR },
   });
   const exit = once(child, "close");
   const scan = collector();
@@ -203,7 +196,6 @@ export async function run(
     }
   }
   const [status] = await exit;
-  if (status !== 0) throw new Error(`cargo clippy exited ${status}`);
   if (failures.length)
     throw new Error(
       failures
@@ -212,6 +204,7 @@ export async function run(
         )
         .join("\n\n"),
     );
+  if (status !== 0) throw new Error(`cargo clippy exited ${status}`);
   const found = scan.finish();
   const baseline = readBaseline();
   if (shrink) {

@@ -2859,7 +2859,7 @@
           "reason": null,
           "taskClaims": []
         },
-        "excludedAccountKeys": ["default"]
+        "workerExcludedAccountKeys": ["default"]
       },
       "record": {
         "id": "resume",

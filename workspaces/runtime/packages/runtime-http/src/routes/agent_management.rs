@@ -34,10 +34,10 @@ pub(super) fn native_action_provider(
     >,
 ) -> Result<Arc<dyn studio_runtime_services::account_session_runtime::AccountSessionPort>, ApiError>
 {
-    if agent.execution_mode == Some(studio_runtime_store::AgentExecutionMode::Vm) {
+    if studio_runtime_services::workspace_ready::legacy_vm_record(agent) {
         return Err(ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "VM agents are no longer supported",
+            StatusCode::NOT_IMPLEMENTED,
+            "The workspace is unavailable",
         ));
     }
     host_port.ok_or_else(|| {
@@ -70,10 +70,9 @@ async fn native_action(
                         .map_err(super::work_items::write_error)?;
                 let episode =
                     agent
-                        .extra
-                        .get("idleCompactionEpisode")
-                        .filter(|value| !value.is_null())
-                        .cloned()
+                        .idle_compaction_episode
+                        .value()
+                        .map(studio_runtime_store::projection_value)
                         .map(
                             studio_json::from_value::<
                                 studio_runtime_services::idle_compaction::Episode,
@@ -367,6 +366,9 @@ impl NativeActionPreparationRun {
         &self,
         agent: &AgentRecord,
     ) -> native_actions::Result<Option<std::path::PathBuf>> {
+        if studio_runtime_services::workspace_ready::legacy_vm_record(agent) {
+            return Ok(None);
+        }
         let account = agent.account_key.as_str();
         let account_driver = self
             .account_driver
@@ -1001,12 +1003,12 @@ mod native_review_preflight_tests {
 
     #[test]
     fn legacy_vm_native_action_is_refused() {
-        let agent = AgentRecord::from_value(json!({"id":"vm", "rootId":"vm", "epoch":1, "status":"idle", "executionMode":"vm", "accountKey":"default"})).unwrap();
+        let agent = AgentRecord::from_value(json!({"id":"vm", "rootId":"vm", "epoch":1, "status":"idle", "workspaceMode":"layr", "accountKey":"default"})).unwrap();
         let error =
             native_action_provider(&agent, Some(Arc::new(ProviderSpy(AtomicUsize::new(0)))))
                 .err()
                 .expect("legacy VM refused");
-        assert_eq!(error.status(), StatusCode::BAD_REQUEST);
-        assert!(error.message().contains("VM"));
+        assert_eq!(error.status(), StatusCode::NOT_IMPLEMENTED);
+        assert_eq!(error.message(), "The workspace is unavailable");
     }
 }

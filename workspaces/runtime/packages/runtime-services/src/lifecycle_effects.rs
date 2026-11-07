@@ -16,7 +16,7 @@
 use crate::account_session_runtime::SessionOutcome as ReceiptOutcome;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Deserialize;
 use studio_json::{Value, json};
@@ -206,20 +206,9 @@ impl ProductionLifecyclePorts {
         action: &Action,
         now: f64,
     ) -> Result<Value, ManagementError> {
-        // Retry startup settlement here and surface storage failures before
-        // making a new lifecycle decision.
         self.reconcile_deleted_tombstones().await?;
-        let concrete_ports = Arc::clone(self);
-        let lifecycle_ports: Arc<dyn LifecyclePorts> = concrete_ports;
-        let result = crate::agent_management_store::execute_prepared(
-            Arc::clone(&self.store),
-            action,
-            now,
-            Some(lifecycle_ports),
-        )
-        .await?;
-        self.committed().await?;
-        Ok(result)
+        let ports: Arc<dyn LifecyclePorts> = Arc::clone(self) as _;
+        crate::agent_lifecycle_runtime::execute(Arc::clone(&self.store), action, now, ports).await
     }
 
     fn stage_interrupt(
@@ -399,25 +388,56 @@ impl ProductionLifecyclePorts {
             if !persisted {
                 continue;
             }
-            let outcome = request_interrupt(self.interrupt_broker.as_ref(), &request).await;
-            let (state, error) = match &outcome {
-                InterruptWriteResult::Accepted(_) => ("accepted", None),
-                InterruptWriteResult::Rejected(_) => ("rejected", None),
-                InterruptWriteResult::NotSent => ("unsent", None),
-                InterruptWriteResult::Unknown => ("unknown", None),
+            let outcome =
+                request_interrupt(&self.store, self.interrupt_broker.as_ref(), &request).await;
+            // A live turn can start more commands until its interrupt is accepted.
+            let cleanup = match &outcome {
+                InterruptWriteResult::Accepted(_) => match &request.terminals {
+                    Some(cleanup) => {
+                        request_terminal_cleanup(
+                            &self.store,
+                            self.interrupt_broker.as_ref(),
+                            &request,
+                            cleanup,
+                        )
+                        .await
+                    }
+                    None => InterruptWriteResult::Accepted(Value::Null),
+                },
+                InterruptWriteResult::Rejected(_)
+                | InterruptWriteResult::NotSent
+                | InterruptWriteResult::Unknown => InterruptWriteResult::Unknown,
+            };
+            // Unknown keeps this stop eligible for reattachment. The retained
+            // ledger replays each written request under its original identity.
+            use studio_runtime_schema::command::StopOutcome;
+            let confirmation = match (&outcome, &cleanup) {
+                (InterruptWriteResult::Accepted(_), InterruptWriteResult::Accepted(_)) => {
+                    StopOutcome::Confirmed
+                }
+                (
+                    InterruptWriteResult::Rejected(_)
+                    | InterruptWriteResult::NotSent
+                    | InterruptWriteResult::Unknown,
+                    _,
+                )
+                | (
+                    InterruptWriteResult::Accepted(_),
+                    InterruptWriteResult::Rejected(_)
+                    | InterruptWriteResult::NotSent
+                    | InterruptWriteResult::Unknown,
+                ) => StopOutcome::Unconfirmed,
             };
             let request_ticket = request.ticket.clone();
             let generation = request.scope.generation;
-            let settled_outcome = outcome.clone();
             let settled_request = request.clone();
             self.store
                 .transaction_with_error(move |tx| {
-                    let response = match &settled_outcome {
+                    let response = match &outcome {
                         InterruptWriteResult::Accepted(response) => response,
-                        InterruptWriteResult::Rejected(error) => &error["data"]["interruptReceipt"],
-                        InterruptWriteResult::NotSent | InterruptWriteResult::Unknown => {
-                            &Value::Null
-                        }
+                        InterruptWriteResult::Rejected(_)
+                        | InterruptWriteResult::NotSent
+                        | InterruptWriteResult::Unknown => &Value::Null,
                     };
                     SchedulerRepository::settle_interrupt_inputs(
                         tx,
@@ -431,29 +451,20 @@ impl ProductionLifecyclePorts {
                         tx,
                         &request_ticket,
                         generation,
-                        state,
-                        error,
+                        match confirmation {
+                            StopOutcome::Confirmed => "accepted",
+                            StopOutcome::Unconfirmed => match &outcome {
+                                InterruptWriteResult::NotSent => "unsent",
+                                InterruptWriteResult::Accepted(_)
+                                | InterruptWriteResult::Rejected(_)
+                                | InterruptWriteResult::Unknown => "unknown",
+                            },
+                        },
+                        None,
                     )?;
                     Ok::<_, ManagementError>(())
                 })
                 .await?;
-            // An interrupt ends the turn, not the commands it left running.
-            // Unless the interrupt provably never left Studio, end them on the
-            // same provider process. The request has its own operation id and
-            // is sent once; a lost reply is not resent.
-            if let Some(cleanup) = &request.terminals
-                && outcome != InterruptWriteResult::NotSent
-            {
-                let cleaned =
-                    request_terminal_cleanup(self.interrupt_broker.as_ref(), &request, cleanup)
-                        .await;
-                if !matches!(cleaned, InterruptWriteResult::Accepted(_)) {
-                    eprintln!(
-                        "stopped agent {} command cleanup on thread {} was not confirmed: {cleaned:?}",
-                        request.agent, request.thread
-                    );
-                }
-            }
         }
         Ok(())
     }
@@ -542,10 +553,12 @@ impl ProductionLifecyclePorts {
 }
 
 async fn request_interrupt(
+    store: &RuntimeStore,
     port: &dyn AccountSessionPort,
     request: &InterruptRequest,
 ) -> InterruptWriteResult {
-    request_stop_work(
+    request_admitted_stop_work(
+        store,
         port,
         request,
         &request.ticket,
@@ -556,11 +569,13 @@ async fn request_interrupt(
 }
 
 async fn request_terminal_cleanup(
+    store: &RuntimeStore,
     port: &dyn AccountSessionPort,
     request: &InterruptRequest,
     cleanup: &TerminalCleanup,
 ) -> InterruptWriteResult {
-    request_stop_work(
+    request_admitted_stop_work(
+        store,
         port,
         request,
         &cleanup.operation,
@@ -568,6 +583,28 @@ async fn request_terminal_cleanup(
         json!({"threadId":request.thread}),
     )
     .await
+}
+
+async fn request_admitted_stop_work(
+    store: &RuntimeStore,
+    port: &dyn AccountSessionPort,
+    request: &InterruptRequest,
+    operation: &str,
+    method: studio_runtime_providers::Method,
+    params: Value,
+) -> InterruptWriteResult {
+    let Ok(admitted) = crate::account_worker::stopped_turns::reserve_initial_stop(
+        store,
+        request,
+        operation,
+        method,
+        params.clone(),
+    )
+    .await
+    else {
+        return InterruptWriteResult::Unknown;
+    };
+    request_stop_work(port, request, operation, method, params, Some(admitted)).await
 }
 
 /// Send one request that ends a stopped turn's provider work on the stop's
@@ -578,13 +615,14 @@ async fn request_stop_work(
     operation: &str,
     method: studio_runtime_providers::Method,
     params: Value,
+    admitted: Option<studio_runtime_store::request_results::AdmittedRequest>,
 ) -> InterruptWriteResult {
     let expected = request.scope.clone();
     let receipt = port
         .provider_request(ProviderRequest {
             account: request.scope.account.clone(),
             root_request_id: request.root_request_id.clone(),
-            admitted_request: None,
+            admitted_request: admitted,
             operation: operation.to_owned(),
             actor: Some(RequestActor {
                 agent: request.agent.clone(),
@@ -594,7 +632,7 @@ async fn request_stop_work(
             expected_scope: Some(expected.clone()),
             method,
             params,
-            deadline: Instant::now() + INTERRUPT_TIMEOUT,
+            deadline: (tokio::time::Instant::now() + INTERRUPT_TIMEOUT).into_std(),
         })
         .await;
     // The receipt names the exact operation; the retained worker derives the
@@ -665,6 +703,108 @@ impl LifecyclePorts for ProductionLifecyclePorts {
             return Err(ManagementError::Unavailable("voice-driver/agent-stop"));
         }
         Ok(())
+    }
+
+    fn cleanup_deleted_commands(
+        &self,
+        agents: Vec<String>,
+        request_id: String,
+    ) -> crate::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
+        Box::pin(async move {
+            let agents = self
+                .store
+                .read_async(
+                    "runtime-services/deleted-background-commands",
+                    move |conn| {
+                        let mut selected = Vec::new();
+                        for id in agents {
+                            let Some(agent) =
+                                AgentRepository::get(conn, &AgentId::from(id.as_str()))?
+                            else {
+                                continue;
+                            };
+                            let commands = crate::task_settlement::running_commands(conn, &id)?;
+                            for task in commands {
+                                if task.process_id().is_some_and(|id| id.truthy())
+                                    && task.source_account_key() == Some(agent.account_key.as_str())
+                                    && task.source_thread_id() == agent.thread_id.as_deref()
+                                    && task.owner_epoch == agent.epoch.checked_sub(1)
+                                    && agent
+                                        .start_attempt
+                                        .as_ref()
+                                        .and_then(|attempt| attempt.epoch)
+                                        == task.owner_epoch
+                                    && !agent
+                                        .start_attempt
+                                        .as_ref()
+                                        .and_then(|attempt| attempt.interrupt.as_ref())
+                                        .is_some_and(|interrupt| {
+                                            interrupt.thread_id.as_deref()
+                                                == task.source_thread_id()
+                                        })
+                                    && studio_runtime_store::domain::turn_completed(
+                                        conn,
+                                        &id,
+                                        task.turn_id(),
+                                    )?
+                                {
+                                    selected.push(agent);
+                                    break;
+                                }
+                            }
+                        }
+                        Ok::<_, crate::commands::CommandError>(selected)
+                    },
+                )
+                .await
+                .map_err(|_| ManagementError::Invalid("Cannot read background commands"))?;
+            for agent in agents {
+                let (Some(thread), Some(epoch), Some(method), Some(scope)) = (
+                    agent.thread_id.clone(),
+                    agent.epoch.checked_sub(1),
+                    agent
+                        .provider
+                        .value()
+                        .copied()
+                        .and_then(studio_runtime_providers::stop_terminals_method),
+                    self.interrupt_broker.current_scope(&agent.account_key),
+                ) else {
+                    continue;
+                };
+                if agent
+                    .start_attempt
+                    .as_ref()
+                    .and_then(|attempt| attempt.connection_generation)
+                    != Some(scope.generation)
+                {
+                    continue;
+                }
+                let operation = format!(
+                    "{TERMINALS_OPERATION_PREFIX}delete:{request_id}:{}",
+                    agent.id.0
+                );
+                let request = InterruptRequest {
+                    ticket: String::new(),
+                    root_request_id: request_id.clone(),
+                    agent: agent.id.0,
+                    epoch,
+                    thread: thread.clone(),
+                    turn: String::new(),
+                    scope,
+                    terminals: None,
+                };
+                let _outcome = request_stop_work(
+                    self.interrupt_broker.as_ref(),
+                    &request,
+                    &operation,
+                    method,
+                    json!({"threadId":thread}),
+                    None,
+                )
+                .await;
+            }
+            Ok(())
+        })
     }
 
     fn committed(&self) -> crate::agent_lifecycle_runtime::LifecycleCommitFuture<'_> {
@@ -1459,7 +1599,7 @@ fn enqueue_turn_result(
             .to_owned(),
     };
     let assignments = crate::agent_progress::assignments(tx, &agent.id.0)?;
-    let progress = crate::agent_progress::derive(tx, value, &assignments)?;
+    let progress = crate::agent_progress::derive(tx, agent, &assignments)?;
     let payload = ChildTurnResultPayload {
         agent_id: Some(agent.id.0.clone()),
         name: agent.name.clone(),
@@ -1828,7 +1968,15 @@ mod tests {
         };
 
         assert_eq!(
-            request_interrupt(&broker, &request).await,
+            request_stop_work(
+                &broker,
+                &request,
+                &request.ticket,
+                studio_runtime_providers::Method::TurnInterrupt,
+                json!({"threadId":request.thread,"turnId":request.turn}),
+                None
+            )
+            .await,
             InterruptWriteResult::Accepted(json!({"cancelled":["studio:input"],"still_queued":[]}))
         );
         let observed = broker.observed.lock().expect("observed request lock");
@@ -1860,7 +2008,15 @@ mod tests {
             observed: Mutex::new(None),
         };
         assert_eq!(
-            request_interrupt(&broker, &request).await,
+            request_stop_work(
+                &broker,
+                &request,
+                &request.ticket,
+                studio_runtime_providers::Method::TurnInterrupt,
+                json!({"threadId":request.thread,"turnId":request.turn}),
+                None
+            )
+            .await,
             InterruptWriteResult::NotSent
         );
         {
@@ -1880,7 +2036,15 @@ mod tests {
             observed: Mutex::new(None),
         };
         assert_eq!(
-            request_interrupt(&broker, &request).await,
+            request_stop_work(
+                &broker,
+                &request,
+                &request.ticket,
+                studio_runtime_providers::Method::TurnInterrupt,
+                json!({"threadId":request.thread,"turnId":request.turn}),
+                None
+            )
+            .await,
             InterruptWriteResult::Unknown
         );
     }
@@ -1895,7 +2059,15 @@ mod tests {
             observed: Mutex::new(None),
         };
         assert_eq!(
-            request_interrupt(&broker, &request).await,
+            request_stop_work(
+                &broker,
+                &request,
+                &request.ticket,
+                studio_runtime_providers::Method::TurnInterrupt,
+                json!({"threadId":request.thread,"turnId":request.turn}),
+                None
+            )
+            .await,
             InterruptWriteResult::Rejected(json!({"code":"rejected"}))
         );
     }

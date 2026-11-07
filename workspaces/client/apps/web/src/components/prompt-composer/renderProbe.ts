@@ -8,7 +8,8 @@ export type PromptComposerRenderProbe = (
     | "prompt-composer"
     | "turn-history"
     | "history-window-row"
-    | "history-row",
+    | "history-row"
+    | "message",
   id?: string,
   text?: string,
 ) => void;

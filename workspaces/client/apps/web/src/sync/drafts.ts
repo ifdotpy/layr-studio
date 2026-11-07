@@ -45,7 +45,17 @@ export function createBrowserDrafts(options: {
     const versions = useRef<DraftVersion[]>([]);
     const dismissed = useRef(new Set<string>());
     const [conflicts, setConflicts] = useState<DraftVersion[]>([]);
-    const [error, setError] = useState("");
+    const [error, setErrorState] = useState("");
+    // Draft saves and server echoes run for typed text; an unchanged error
+    // must not schedule a render of the application that owns this hook.
+    const shownError = useRef("");
+    const setError = (next: string | ((previous: string) => string)) => {
+      const value =
+        typeof next === "function" ? next(shownError.current) : next;
+      if (value === shownError.current) return;
+      shownError.current = value;
+      setErrorState(value);
+    };
     const [unsentError, setUnsentError] = useState("");
     const quiet = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const maximum = useRef<ReturnType<typeof setTimeout> | undefined>(

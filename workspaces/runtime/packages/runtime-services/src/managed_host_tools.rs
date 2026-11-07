@@ -43,7 +43,6 @@ use rusqlite::Transaction;
 use serde::Deserialize;
 use std::{future::Future, pin::Pin};
 use studio_json::{Value, json};
-use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::WorkItemsRepository;
 use thiserror::Error;
 
@@ -87,8 +86,6 @@ pub(crate) struct Actor {
     root_id: String,
     parent_id: Option<String>,
     is_lead: bool,
-    reviewer: bool,
-    provider: Option<String>,
     remote_origin: bool,
     execution_move: bool,
 }
@@ -113,12 +110,6 @@ impl Actor {
             root_id: record.root_id.0.clone(),
             parent_id: record.parent_id.as_deref().map(str::to_owned),
             is_lead: record.is_lead == Some(true),
-            reviewer: record.role.value().copied()
-                == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer),
-            provider: record
-                .provider
-                .value()
-                .map(|provider| provider.key().to_owned()),
             remote_origin: truthy(record.extra.get("remoteOrigin")),
             execution_move: truthy(record.extra.get("executionMove")),
             record,
@@ -726,13 +717,6 @@ pub(crate) fn execute(
         ManagedHostTool::Watch => ports.watch(tx, actor, &call.args, &call.request_id, now)?,
         ManagedHostTool::Monitor => ports.monitor(tx, actor, &call.args, &call.request_id, now)?,
         ManagedHostTool::Review => {
-            if actor
-                .provider
-                .as_deref()
-                .is_some_and(|provider| provider != ProviderKind::Codex.key())
-            {
-                return Err(Error::Invalid("Native review requires a Codex agent"));
-            }
             if truthy(actor.record.extra.get("nativeReview")) {
                 return Err(Error::Invalid(
                     "A native reviewer cannot create another review",
@@ -803,7 +787,9 @@ fn spawn(
     now: f64,
     ports: &(impl Ports + ?Sized),
 ) -> Result<OperationResult, Error> {
-    if actor.reviewer {
+    if actor.record.role.value().copied()
+        == Some(studio_runtime_schema::creation_intent::AgentRole::Reviewer)
+    {
         return Err(Error::Invalid("Reviewers cannot create agents"));
     }
     if !permits(tx, actor, CommandClass::Spawn, "")? {

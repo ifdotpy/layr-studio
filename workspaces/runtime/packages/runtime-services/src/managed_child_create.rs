@@ -10,7 +10,6 @@ use crate::event_write;
 use rusqlite::{OptionalExtension, Transaction};
 use std::path::{Path, PathBuf};
 use studio_json::{Value, json};
-use studio_runtime_providers::ProviderKind;
 use studio_runtime_schema::queue_command::Field;
 use studio_runtime_store::path_identity::CanonicalPath;
 use studio_runtime_store::{AgentId, AgentRecord, AgentRepository, RuntimeStore, StoreError};
@@ -54,6 +53,12 @@ pub enum ManagedCreationEnvironmentError {
 /// Host account facts and model admission. Production implementations resolve
 /// model settings through the retained `AccountSessionPort` broker.
 pub trait ManagedCreationEnvironment: Send + Sync {
+    /// Whether the caller's catalog offers this review model.
+    fn account_offers_model(
+        &self,
+        account_key: &str,
+        model: &str,
+    ) -> Result<bool, ManagedCreationEnvironmentError>;
     /// Wait for the actor and worker-candidate model catalogs at the callback's async
     /// boundary. Implementations keep this bounded and never run it at worker
     /// startup or inside the synchronous store callback.
@@ -70,8 +75,7 @@ pub trait ManagedCreationEnvironment: Send + Sync {
         Box::pin(async { Ok(()) })
     }
     /// Resolve the account and model as `codex_worker_accounts.resolve` does.
-    /// `requested_account_key` is the per-worker `account_key`; the default is
-    /// kept separate so an explicit value can be checked against chat settings.
+    /// `requested_account_key` is the optional per-worker `account_key`.
     /// `excluded_account_keys` comes from the root agent. Project keys are the
     /// resolved project settings allowlist, when the root has a project binding.
     /// Implicit selection picks the ready account with the fewest active agents
@@ -204,12 +208,13 @@ pub(crate) struct WorkerSettingsRequest<'a> {
 async fn account_scope(
     store: &RuntimeStore,
     root: &AgentRecord,
+    role: studio_runtime_schema::creation_intent::AgentRole,
 ) -> Result<(Vec<String>, Option<Vec<String>>, Option<Vec<String>>), StoreError> {
     let excluded = root
-        .excluded_account_keys
-        .value()
-        .cloned()
-        .unwrap_or_default();
+        .exclusions_for(role)
+        .iter()
+        .map(|key| key.as_str().to_owned())
+        .collect();
     let project = match root
         .project_id
         .as_deref()
@@ -242,6 +247,43 @@ async fn account_scope(
         })
     });
     Ok((excluded, keys, groups))
+}
+
+async fn select_review_account(
+    store: &RuntimeStore,
+    environment: &dyn ManagedCreationEnvironment,
+    parent: &AgentRecord,
+    root: &AgentRecord,
+    explicit: Option<&str>,
+    model: &str,
+    account_load: &std::collections::HashMap<String, i64>,
+) -> Result<(String, crate::host_worker_create::AccountIdentity), WorkerSettingsError> {
+    let selected = explicit;
+    let (excluded, keys, groups) = account_scope(
+        store,
+        root,
+        studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+    )
+    .await?;
+    let caller_eligible = !excluded.contains(&parent.account_key)
+        && keys
+            .as_ref()
+            .is_none_or(|keys| keys.is_empty() || keys.contains(&parent.account_key));
+    let caller_offers = selected.is_none()
+        && caller_eligible
+        && environment.account_offers_model(&parent.account_key, model)?;
+    Ok(
+        environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
+            parent_account_key: &parent.account_key,
+            requested_account_key: selected
+                .or_else(|| caller_offers.then_some(parent.account_key.as_str())),
+            model,
+            excluded_account_keys: &excluded,
+            project_account_keys: keys.as_deref(),
+            project_account_groups: groups.as_deref(),
+            active_agents: account_load,
+        })?,
+    )
 }
 
 pub(crate) async fn resolve_worker_settings(
@@ -281,13 +323,6 @@ pub(crate) async fn resolve_worker_settings(
                 .and_then(|value| value.get("effort"))
                 .and_then(Value::as_str)
         });
-    let default_account = known
-        .and_then(|value| value.account_key.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("accountKey"))
-                .and_then(Value::as_str)
-        });
     let default_fast = known
         .and_then(|value| value.fast_mode.value().copied())
         .or_else(|| {
@@ -314,37 +349,35 @@ pub(crate) async fn resolve_worker_settings(
         .or(default_model)
         .or(root.model.as_deref())
         .unwrap_or(crate::agents_create::DEFAULT_LEAD_MODEL);
-    let (excluded, keys, groups) = account_scope(store, root).await?;
-    let (account_key, account) =
+    let (account_key, account) = if role == "reviewer" {
+        select_review_account(
+            store,
+            environment,
+            parent,
+            root,
+            requested_account_key,
+            requested_model,
+            account_load,
+        )
+        .await?
+    } else {
+        let (excluded, keys, groups) = account_scope(
+            store,
+            root,
+            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+        )
+        .await?;
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: &parent.account_key,
-            requested_account_key: if role == "reviewer" {
-                requested_account_key.or_else(|| {
-                    root.review_defaults
-                        .as_ref()
-                        .and_then(|value| value.account_key.as_deref())
-                })
-            } else {
-                requested_account_key
-            },
-            default_account_key: if role == "reviewer"
-                && (requested_account_key.is_some()
-                    || root
-                        .review_defaults
-                        .as_ref()
-                        .and_then(|value| value.account_key.as_deref())
-                        .is_some())
-            {
-                None
-            } else {
-                default_account
-            },
+            requested_account_key,
+
             model: requested_model,
             excluded_account_keys: &excluded,
             project_account_keys: keys.as_deref(),
             project_account_groups: groups.as_deref(),
             active_agents: account_load,
-        })?;
+        })?
+    };
     let adapter = crate::provider_adapter::adapter(account.provider);
     let model = if requested_model == crate::agents_create::DEFAULT_LEAD_MODEL
         && root.model.is_none()
@@ -432,6 +465,138 @@ struct Draft {
     epoch: i64,
     account: crate::host_worker_create::AccountIdentity,
     workspace_admission: Box<dyn crate::monitor_runtime::WorkspaceAdmission + Send + Sync>,
+}
+
+async fn prepare_reviewer(
+    store: &RuntimeStore,
+    directory: &str,
+    assignment: &studio_runtime_schema::review::ReviewAssignment,
+) -> Result<
+    (
+        studio_runtime_schema::review::ReviewAssignment,
+        crate::native_review::ResolvedBase,
+    ),
+    Error,
+> {
+    use crate::native_review::ResolvedBase;
+    use studio_runtime_schema::review::{GitCommit, LayrBase, LayrStateId, ReviewTarget};
+    let invalid = || crate::managed_host_tools::Error::Invalid("Could not resolve review base");
+    if let ReviewTarget::LayrState { state, .. } = assignment.target() {
+        let resolved = crate::layr_native::run(
+            store.state_dir(),
+            Path::new(directory),
+            &["rev-parse", state.as_str()],
+        )
+        .map_err(|_| {
+            crate::managed_host_tools::Error::Invalid("Review state must exist in this project")
+        })?;
+        if resolved != state.as_str() {
+            return Err(crate::managed_host_tools::Error::Invalid(
+                "Review state must exist in this project",
+            )
+            .into());
+        }
+    }
+    let base = match assignment.target() {
+        ReviewTarget::LayrState {
+            state,
+            base: LayrBase::MergeBaseWithMain,
+        } => {
+            let root = store.root().to_owned();
+            let cwd = PathBuf::from(directory);
+            let state = state.to_string();
+            let output = studio_runtime_process::blocking_pool::spawn_blocking(
+                "runtime-services/review-layr-base",
+                move || {
+                    // workerBaseRef is a Git-worktree setting, not a Layr integration ref.
+                    let main =
+                        if crate::layr_native::run(&root, &cwd, &["rev-parse", "origin/main"])
+                            .is_ok()
+                        {
+                            "origin/main"
+                        } else {
+                            "main"
+                        };
+                    crate::layr_native::run(&root, &cwd, &["merge-base", main, &state])
+                },
+            )
+            .await
+            .map_err(|_| invalid())?
+            .map_err(|_| invalid())?;
+            ResolvedBase::Layr(
+                LayrStateId::try_from(output.trim().to_owned()).map_err(|_| invalid())?,
+            )
+        }
+        ReviewTarget::LayrState {
+            base: LayrBase::State { state },
+            ..
+        } => ResolvedBase::Layr(state.clone()),
+        ReviewTarget::GitRange { base, .. } => {
+            let cwd = PathBuf::from(directory);
+            let revision = format!("{}^{{commit}}", base.as_str());
+            let output = studio_runtime_process::blocking_pool::spawn_blocking(
+                "runtime-services/review-git-base",
+                move || {
+                    crate::native_review::git_read(
+                        &cwd,
+                        &["rev-parse", "--verify", "--end-of-options", &revision],
+                        256,
+                    )
+                },
+            )
+            .await
+            .map_err(|_| invalid())?
+            .map_err(|_| invalid())?
+            .ok_or_else(invalid)?;
+            ResolvedBase::Git(GitCommit::try_from(output.trim().to_owned()).map_err(|_| invalid())?)
+        }
+    };
+    let assignment = crate::native_review::pin_assignment(assignment, &base)
+        .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid review base"))?;
+    Ok((assignment, base))
+}
+
+pub(crate) fn reviewer_brief(
+    assignment: &studio_runtime_schema::review::ReviewAssignment,
+) -> String {
+    use studio_runtime_schema::review::{LayrBase, ReviewTarget};
+    match assignment.target() {
+        ReviewTarget::LayrState { state, base } => {
+            let comparison = match base {
+                LayrBase::MergeBaseWithMain => format!(
+                    "Find the merge base with main using layr_read, then compare it with {state} using layr_read diff."
+                ),
+                LayrBase::State { state: base } => {
+                    format!("Compare using layr_read diff {base} {state}.")
+                }
+            };
+            format!(
+                "\n\n[Studio review] Review Layr state {state}. Use the review line and layr_read to inspect files. {comparison}"
+            )
+        }
+        ReviewTarget::GitRange { base, head } => format!(
+            "\n\n[Studio review] Review Git commit {head} against {base}. Inspect the working copy and use git diff {base}..{head}."
+        ),
+    }
+}
+
+#[cfg(test)]
+mod review_brief_tests {
+    use super::*;
+    use studio_runtime_schema::review::{ReviewAssignment, ReviewTarget, WorkspaceMode};
+    #[test]
+    fn briefs_match_each_workspace() {
+        let layr: ReviewTarget = studio_json::from_str(r#"{"kind":"layrState","state":"0123456789abcdef0123456789abcdef","base":{"kind":"mergeBaseWithMain"}}"#).unwrap();
+        let git: ReviewTarget = studio_json::from_str(r#"{"kind":"gitRange","base":"main","head":"0123456789abcdef0123456789abcdef01234567"}"#).unwrap();
+        assert_eq!(
+            reviewer_brief(&ReviewAssignment::new(WorkspaceMode::LayrNative, layr).unwrap()),
+            "\n\n[Studio review] Review Layr state 0123456789abcdef0123456789abcdef. Use the review line and layr_read to inspect files. Find the merge base with main using layr_read, then compare it with 0123456789abcdef0123456789abcdef using layr_read diff."
+        );
+        assert_eq!(
+            reviewer_brief(&ReviewAssignment::new(WorkspaceMode::Worktree, git).unwrap()),
+            "\n\n[Studio review] Review Git commit 0123456789abcdef0123456789abcdef01234567 against main. Inspect the working copy and use git diff main..0123456789abcdef0123456789abcdef01234567."
+        );
+    }
 }
 
 /// Create a local host batch using the P02 typed draft and recheck contract.
@@ -591,46 +756,38 @@ pub(crate) async fn spawn_agents(
             )
             .into());
         }
-        let workspace = spec
-            .workspace
-            .map(|mode| mode.as_str())
-            .unwrap_or_else(|| default_workspace(role, &parent_value));
-        if let Some(state) = &spec.review_state {
-            if role != "reviewer" || workspace != "layr-native" || alternate_directory.is_some() {
+        let assignment = if let Some(target) = &spec.review {
+            if role != "reviewer" || alternate_directory.is_some() {
                 return Err(crate::managed_host_tools::Error::Invalid(
-                    "review_state requires a native Layr reviewer in the parent's project",
+                    "A review target requires a reviewer in the parent's project",
                 )
                 .into());
             }
-            if uuid::Uuid::parse_str(state).is_err() {
-                return Err(crate::managed_host_tools::Error::Invalid(
-                    "review_state must be a full state ID in this project",
-                )
-                .into());
-            }
-            let resolved = crate::layr_native::run(
-                store.state_dir(),
-                Path::new(parent_cwd),
-                &["rev-parse", state],
-            )
-            .map_err(|_| {
-                crate::managed_host_tools::Error::Invalid(
-                    "review_state must be a full state ID in this project",
-                )
-            })?;
-            if state != &resolved {
-                return Err(crate::managed_host_tools::Error::Invalid(
-                    "review_state must be a full state ID in this project",
-                )
-                .into());
-            }
-        }
-        if matches!(workspace, "layr" | "linux") {
-            return Err(crate::managed_host_tools::Error::Invalid(
-                "A VM workspace requires a VM parent",
-            )
-            .into());
-        }
+            let mode = actor_record
+                .workspace_mode
+                .unwrap_or(studio_runtime_schema::records::WorkspaceMode::Shared);
+            let assignment =
+                studio_runtime_schema::review::ReviewAssignment::new(mode, target.clone())
+                    .map_err(|_| {
+                        crate::managed_host_tools::Error::Invalid(
+                            "Review target does not match the project workspace",
+                        )
+                    })?;
+            Some(prepare_reviewer(store, parent_cwd, &assignment).await?.0)
+        } else {
+            None
+        };
+        let workspace = assignment
+            .as_ref()
+            .map(|assignment| match assignment.target() {
+                studio_runtime_schema::review::ReviewTarget::LayrState { .. } => "layr-native",
+                studio_runtime_schema::review::ReviewTarget::GitRange { .. } => "worktree",
+            })
+            .unwrap_or_else(|| {
+                spec.workspace
+                    .map(|mode| mode.as_str())
+                    .unwrap_or_else(|| default_workspace(role, &parent_value))
+            });
         if workspace == "layr-native" && !crate::layr_native::is_native(&parent_value) {
             return Err(crate::managed_host_tools::Error::Invalid(
                 "A native Layr workspace requires a native Layr parent",
@@ -672,7 +829,8 @@ pub(crate) async fn spawn_agents(
         }
         // Python `select_workspace`: the parent's default worktree mode uses
         // the shared folder, with a note, where the folder has no Git.
-        let workspace_note = (worktree
+        let workspace_note = (role == "implementer"
+            && worktree
             && !in_git
             && explicit_workspace.is_none()
             && parent_value.get("workspaceMode").and_then(Value::as_str) == Some("worktree"))
@@ -764,6 +922,14 @@ pub(crate) async fn spawn_agents(
         );
         let mut record =
             crate::host_worker_create::persisted_record(&draft).map_err(map_create_error)?;
+        if assignment.is_some() {
+            record.workspace_mode = Some(if workspace == "layr-native" {
+                studio_runtime_schema::records::WorkspaceMode::LayrNative
+            } else {
+                studio_runtime_schema::records::WorkspaceMode::Worktree
+            });
+        }
+        record.review_assignment = assignment;
         if workspace == "layr-native" {
             crate::layr_native::configure_child(&mut record, &actor_record, &root);
             if let Some(base_ref) = requested_base_ref {
@@ -885,8 +1051,8 @@ pub(crate) async fn spawn_agents(
             }
             crate::child_permissions::inherit_claude_permissions(&mut draft.record, &current_parent, &current_root, draft.intent.permission_mode).map_err(crate::managed_host_tools::Error::Invalid)?;
             let mut text = draft.prompt.clone();
-            if let Some(state) = &draft.intent.review_state {
-                text.push_str(&format!("\n\n[Studio review state] {state}. Read files with layr_read args [\"show\", \"{state}:<path>\"] and compare with [\"diff\", \"<base>\", \"{state}\"]."));
+            if let Some(assignment) = &draft.record.review_assignment {
+                text.push_str(&reviewer_brief(assignment));
             }
             if draft.worktree {
                 text.push_str(&format!("\n\n[Studio worker base] Commit {} from ref {}.", draft.record.worker_base_commit.as_deref().unwrap_or_default(), draft.record.worker_base_ref.as_deref().unwrap_or("HEAD")));
@@ -1322,7 +1488,6 @@ fn map_create_error(error: crate::agents_create::CreateError) -> Error {
         | crate::agents_create::CreateError::IdentityChanged
         | crate::agents_create::CreateError::Internal
         | crate::agents_create::CreateError::Stale
-        | crate::agents_create::CreateError::CurrentAccountExcluded
         | crate::agents_create::CreateError::InFlight
         | crate::agents_create::CreateError::Request(_)
         | crate::agents_create::CreateError::InvalidStoredObject { .. } => Error::Refused,
@@ -1349,7 +1514,6 @@ fn map_recheck_error(
         | crate::agents_create::MutationError::IdentityChanged
         | crate::agents_create::MutationError::Internal
         | crate::agents_create::MutationError::Stale
-        | crate::agents_create::MutationError::CurrentAccountExcluded
         | crate::agents_create::MutationError::InFlight
         | crate::agents_create::MutationError::InvalidStoredObject { .. }
         | crate::agents_create::MutationError::Request(_)) => {
@@ -1366,8 +1530,7 @@ struct ReviewDraft {
     workspace_admission: Box<dyn crate::monitor_runtime::WorkspaceAdmission + Send + Sync>,
 }
 
-/// Reserve a native Codex review child. `nativeReview` is its durable first-turn
-/// intent; the account worker claims it after the callback commits and wakes it.
+/// Reserve a review child and its durable first-turn intent before waking it.
 pub(crate) async fn request_review(
     store: &RuntimeStore,
     actor: &crate::managed_host_tools::Actor,
@@ -1378,13 +1541,6 @@ pub(crate) async fn request_review(
 ) -> Result<crate::managed_host_tools::DispatchedOperation, Error> {
     let actor_record = Box::new(actor.record().clone());
     refuse_legacy_parent(&actor_record)?;
-    if actor_record.provider.value().copied() != Some(studio_runtime_providers::ProviderKind::Codex)
-    {
-        return Err(crate::managed_host_tools::Error::Invalid(
-            "Native review requires a Codex agent",
-        )
-        .into());
-    }
     if actor_record
         .extra
         .get("nativeReview")
@@ -1414,14 +1570,7 @@ pub(crate) async fn request_review(
             .ok_or(crate::managed_host_tools::Error::Invalid(
                 "Select a project directory",
             ))?;
-    let mut directory_path = args
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map(|path| expand_review_home(path, std::env::var("HOME").ok().as_deref()))
-        .unwrap_or_else(|| PathBuf::from(parent_cwd));
-    if !directory_path.is_absolute() {
-        directory_path = Path::new(parent_cwd).join(directory_path);
-    }
+    let directory_path = PathBuf::from(parent_cwd);
     let directory = CanonicalPath::existing_utf8_directory(&directory_path)
         .map_err(|_| {
             crate::managed_host_tools::Error::Invalid("Select an existing project directory")
@@ -1432,7 +1581,7 @@ pub(crate) async fn request_review(
         .and_then(|()| crate::native_actions::validate_agent(&parent_value))
         .and_then(|()| crate::native_actions::validate_agent(&root_value))
         .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid native review request"))?;
-    let plan = crate::native_review::ReviewPlan::from_checked_records(
+    let mut plan = crate::native_review::ReviewPlan::from_checked_records(
         &actor_record,
         &root,
         args.clone(),
@@ -1440,10 +1589,15 @@ pub(crate) async fn request_review(
         directory.clone(),
     )
     .map_err(|_| crate::managed_host_tools::Error::Invalid("Invalid native review request"))?;
-    let child_id = plan.spec().id.value().map(String::as_str).ok_or(
-        crate::managed_host_tools::Error::Invalid("Invalid native review request"),
-    )?;
-    let saved_id = child_id.to_owned();
+    let child_id =
+        plan.spec()
+            .id
+            .value()
+            .cloned()
+            .ok_or(crate::managed_host_tools::Error::Invalid(
+                "Invalid native review request",
+            ))?;
+    let saved_id = child_id.clone();
     if let Some(saved) = store
         .read_async("runtime-services/managed_child_create", move |read| {
             studio_runtime_store::ContextRepairRepository::agent(read, &saved_id)
@@ -1457,6 +1611,10 @@ pub(crate) async fn request_review(
             crate::managed_host_tools::OperationResult::reply(&value),
         ));
     }
+    use studio_runtime_schema::review::ReviewTarget;
+    let (assignment, resolved_base) =
+        prepare_reviewer(store, &directory, plan.assignment()).await?;
+    plan.set_prepared_assignment(assignment, resolved_base);
     let parent_account_key = parent_value
         .get("accountKey")
         .and_then(Value::as_str)
@@ -1469,33 +1627,24 @@ pub(crate) async fn request_review(
             .ok_or(crate::managed_host_tools::Error::Invalid(
                 "Invalid native review model",
             ))?;
-    let review_account = root_value["reviewDefaults"]
-        .get("accountKey")
-        .and_then(Value::as_str);
-    let (excluded, keys, groups) = if review_account.is_some() {
-        account_scope(store, &root).await?
-    } else {
-        (Vec::new(), None, None)
-    };
-    let (account_key, account) =
-        environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
-            parent_account_key,
-            requested_account_key: review_account.or(Some(parent_account_key)),
-            default_account_key: None,
-            model,
-            excluded_account_keys: &excluded,
-            project_account_keys: keys.as_deref(),
-            project_account_groups: groups.as_deref(),
-            active_agents: &std::collections::HashMap::new(),
-        })?;
-    // Review is read-only in the parent's managed workspace. Its requested
-    // repository is validated separately and may differ from the actor's cwd.
+    let (account_key, account) = select_review_account(
+        store,
+        environment,
+        &actor_record,
+        &root,
+        plan.account(),
+        model,
+        &std::collections::HashMap::new(),
+    )
+    .await?;
+    // Workspace preparation runs after the reservation has committed.
     let workspace_admission = environment.prepare_workspace(store, &actor_record, request_id)?;
     let effort = spec.effort.selected().map(String::as_str);
     let fast_mode = spec.fast_mode.value().copied().unwrap_or(false);
-    let (base_ref, base_commit, _, _) =
-        crate::host_worker_create::resolve_worker_base(Path::new(&directory), None)
-            .map_err(map_create_error)?;
+    let (base_ref, base_commit) = match plan.assignment().target() {
+        ReviewTarget::GitRange { base, head } => (base.to_string(), head.to_string()),
+        ReviewTarget::LayrState { .. } => (String::new(), String::new()),
+    };
     let project = stored_project(
         store,
         parent_value
@@ -1512,7 +1661,7 @@ pub(crate) async fn request_review(
     let mut prepared = crate::host_worker_create::prepare_work_item(
         &body,
         Path::new(&directory),
-        AgentId::from(child_id),
+        AgentId::from(child_id.as_str()),
         actor_record.root_id.clone(),
         actor_record.id.clone(),
         &base_ref,
@@ -1544,14 +1693,10 @@ pub(crate) async fn request_review(
     let mut record = crate::host_worker_create::persisted_record(&prepared)
         .map_err(map_create_error)?
         .value();
-    record["provider"] = json!(ProviderKind::Codex.key());
     record["permissionMode"] =
         json!(studio_runtime_schema::claude_permissions::PermissionMode::Default);
+    record["workspaceMode"] = json!(actor_record.workspace_mode);
     record["worktree"] = json!(false);
-    record["workspaceMode"] = json!("shared");
-    record["workspaceInGit"] = json!(false);
-    record["workerBaseRef"] = Value::Null;
-    record["workerBaseCommit"] = Value::Null;
     crate::agents_create::set_capacity(
         &mut record,
         crate::agents_create::capacity_max(&root_value),

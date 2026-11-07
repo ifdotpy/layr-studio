@@ -30,11 +30,19 @@
   color: var(--text);
   overflow-wrap: anywhere;
 }
+/* Request details wrap inside the card, so its actions stay in view. */
 .request-card pre {
   max-height: 160px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  background: var(--inset);
+  border: 1px solid var(--line);
+  border-radius: var(--studio-radius-card);
+  padding: 16px;
+  font-family: var(--studio-font-mono);
+  font-size: var(--studio-text-code);
+  line-height: 1.7;
 }
 .request-card pre.request-command {
   margin: 10px 0 0;

@@ -1,13 +1,12 @@
 ---
 name: layr
-description: Task recipes for Layr 0.3.0 local version control and Layr Cloud changes, review, checks, queue, and release files.
+description: Task recipes for Layr local version control, Studio development in layr lines with warm caches, and Layr Cloud changes, review, checks, queue, and release files.
 ---
 
 # Layr by task
 
-Use the real **Layr 0.3.0** CLI. Check `layr --version` and `layr --help`.
-This skill requires the `change show --json` check-results addition from
-`cloud/agent-json`; older 0.3.0 builds omit `versions[].checks`.
+Use the real Layr CLI (0.38 or later on the owner's Mac). Check `layr --version`
+and `layr --help`. Older builds omit `versions[].checks` in `change show --json`.
 Report a missing command or field instead of treating missing evidence as success.
 Studio's older bundled CLI uses different names; do not apply these recipes to it.
 
@@ -27,7 +26,7 @@ The old Git verbs are removed. Git commands inside the Git bridge retain Git nam
 | Task                               | Command                                               |
 | ---------------------------------- | ----------------------------------------------------- |
 | See changes                        | `layr status`, `layr diff`                            |
-| Save a named state                 | `layr add -A && layr save -m "<message>"`             |
+| Save a named state                 | `layr add <paths> && layr save -m "<message>"`        |
 | Save an automatic state            | `layr save`                                           |
 | Get the current state ID           | `layr rev-parse head`                                 |
 | Read a file from a state or line   | `layr show <rev>:<path>`                              |
@@ -40,6 +39,8 @@ The old Git verbs are removed. Git commands inside the Git bridge retain Git nam
 Each named save starts a change. `layr save --amend -m "<message>"` makes a
 new version of the current change, preserving its ChangeId. A separate named
 save starts a separate change. Stage new files with `layr add` first.
+In a Studio line, stage named paths. Do not use `layr add -A`: the index can hold
+ignored folders such as `node_modules`.
 
 ## Recover from a mistake
 
@@ -335,9 +336,11 @@ Ignore regenerable folders in `.gitignore` or `.layrignore`. Add
 `<folder> regenerable` to `.layrattributes` and save it, or use
 `layr config regenerable` with `config` permission. `layr overlay list` identifies
 cache folders. `layr overlay repair <overlay>` repairs a plain replacement folder.
-`layr save --caches` gives new lines a warm cache copy.
+`layr save --caches --cache <folder>` saves one cache folder for new lines.
+Name the folder: a bare `layr save --caches` saves every cache folder of the line.
+`layr overlay set <overlay> --prune none` stops the prune of a cache overlay;
+`--prune auto` starts it again.
 Caches stay outside source history and diffs. Keep dependency lockfiles in source history.
-Save warm caches before parallel line creation. Repair them after tools replace their folders.
 
 ## Keep .env private with overlays
 
@@ -365,10 +368,45 @@ Routing patterns, ephemeral overlays, and folder overlays are unavailable in the
 
 ## Studio development in lines
 
-For Studio work in layr lines (warm `target/`, gate result reuse, disk cleanup),
-read the "Developing in layr lines" section of `docs/testing.md` first.
-Studio lines need layr 0.4.0 or later. Use the state ID from
-`layr log --auto -n 1` to start a line with warm caches, not the line name.
+Read the "Developing in layr lines" section of `docs/testing.md` first. It has
+the build and test speed rules. The short form:
+
+| Task                                 | Command                                                                                                |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| Start a warm line (in the main line) | `layr line new <name> main`                                                                            |
+| Take the latest origin main          | `layr git fetch -q <remote>`, then `layr merge <remote>/main --expect $(layr rev-parse <remote>/main)` |
+| Push the line for a pull request     | `layr git push <remote> <line>:<branch>`                                                               |
+| Run the fast gate                    | `~/Projects/studio-ops/layr-test-fast.sh` (owner's Mac), else `just test-fast`                         |
+| Check main's cache garbage           | `layr retest sweep --dry-run` in the main line                                                         |
+| Repair a damaged `node_modules`      | `pnpm install --frozen-lockfile --offline --force`                                                     |
+
+Read the Git remote name from `layr git remote -v`.
+
+The cache flow:
+
+- A new line gets the saved caches of main (`target/`, `node_modules`,
+  `.layr-retest`). Layr rewrites main's paths in the Cargo units, so the line
+  starts warm: the gate build compiles 0 crates.
+- Main follows origin main. `layr follow --run` (the daemon also runs it)
+  fetches, runs the `sweep` commands of `[workspace.metadata.layr-retest]` in the
+  root `Cargo.toml`, prunes stale units, and saves the caches. Do not save main's
+  caches by hand.
+- The caches of your line go back to main after `layr git push` or a local merge.
+
+Cargo rules that keep the units warm:
+
+- Run Cargo with the gate arguments (`--workspace --exclude studio-native-client`).
+  `-p <crate>` resolves the features of one crate, so dependencies compile cold.
+- Add each new Cargo command of the gate to the `sweep` list
+  (`layr-sweep-parity.test.ts` checks it).
+- Do not include a file through `..` (`include_str!("../../x.json")`). Cargo
+  stores that path as absolute, so every other line or copy compiles again.
+  Copy the file to `OUT_DIR` in `build.rs` and include it from there.
+
+A damaged `node_modules` misses files inside installed packages, for example
+"Rolldown failed to resolve import" for a package that is in `pnpm-lock.yaml`.
+`pnpm install` alone does not see it; `--force` relinks every package from the
+pnpm store in about 15 seconds.
 
 ## Diagnose a refusal and use a Git mirror
 

@@ -3,6 +3,7 @@ import { runtimeBinaries, runtimeBinaryName } from "./runtime-binaries.ts";
 import { pythonResources } from "./python-resources.ts";
 import {
   cargoReleaseArguments,
+  cleanLocalCrates,
   prebuiltReleaseDirectory,
 } from "./release-binaries.ts";
 import { execFileSync } from "node:child_process";
@@ -36,6 +37,9 @@ const prebuiltRelease = uiOnly
   : await prebuiltReleaseDirectory(repositoryRoot);
 if (!uiOnly && !prebuiltRelease) {
   try {
+    // The checkout's target is a layr cache that may hold another state's
+    // local crates as fresh (release-binaries.ts, cleanLocalCrates).
+    cleanLocalCrates({ repository: repositoryRoot });
     execFileSync("cargo", cargoReleaseArguments(), {
       cwd: repositoryRoot,
       stdio: "inherit",

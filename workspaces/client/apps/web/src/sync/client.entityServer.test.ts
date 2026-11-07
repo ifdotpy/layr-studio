@@ -61,6 +61,9 @@ let origin: string;
 let headers: Record<string, string>;
 let server: ReturnType<typeof spawn>;
 let directory: string;
+let compactServer: ReturnType<typeof spawn>;
+let compactDirectory: string;
+let compact: { origin: string; headers: Record<string, string> };
 let stopProjection: (() => void) | undefined;
 let coldResponse: Response | undefined;
 const coldController = new AbortController();
@@ -102,6 +105,32 @@ beforeAll(async () => {
   } finally {
     lines.close();
   }
+  compactDirectory = await mkdtemp(join(tmpdir(), "studio-entity-compact-"));
+  compactServer = spawn(binary, [compactDirectory, "--entity-small"], {
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  const compactLines = createInterface({ input: compactServer.stdout! });
+  try {
+    const [line] = await Promise.race([
+      once(compactLines, "line", {
+        signal: AbortSignal.timeout(DRAFT_SERVER_READY_TIMEOUT_MS),
+      }),
+      once(compactServer, "exit").then(([code]) => {
+        throw new Error(`Compact entity fixture exited: ${code}`);
+      }),
+    ]);
+    const ready = JSON.parse(line);
+    compact = {
+      origin: `http://127.0.0.1:${ready.port}`,
+      headers: {
+        "content-type": "application/json",
+        "x-canvas-token": "draft-witness",
+        "x-canvas-workspace": ready.workspaceId,
+      },
+    };
+  } finally {
+    compactLines.close();
+  }
   await Promise.all([
     import("./client"),
     import("./entitySequence"),
@@ -124,33 +153,48 @@ afterAll(async () => {
   stopProjection?.();
   coldController.abort();
   try {
-    if (server?.pid && server.exitCode === null && server.signalCode === null) {
-      const exited = once(server, "exit", {
-        signal: AbortSignal.timeout(10_000),
-      });
-      server.stdin?.end();
-      try {
-        await exited;
-      } catch (error) {
-        if (server.exitCode === null && server.signalCode === null) {
-          const killed = once(server, "exit");
-          server.kill("SIGKILL");
-          await killed;
+    for (const process of [server, compactServer]) {
+      if (
+        process?.pid &&
+        process.exitCode === null &&
+        process.signalCode === null
+      ) {
+        const exited = once(process, "exit", {
+          signal: AbortSignal.timeout(10_000),
+        });
+        process.stdin?.end();
+        try {
+          await exited;
+        } catch (error) {
+          if (process.exitCode === null && process.signalCode === null) {
+            const killed = once(process, "exit");
+            process.kill("SIGKILL");
+            await killed;
+          }
+          throw error;
         }
-        throw error;
       }
     }
   } finally {
     if (directory) await rm(directory, { recursive: true, force: true });
+    if (compactDirectory)
+      await rm(compactDirectory, { recursive: true, force: true });
     vi.unstubAllGlobals();
   }
 });
-async function request(path: string, body?: unknown) {
-  const response = await fetch(`${origin}${path}`, {
-    headers,
+async function request(
+  path: string,
+  body?: unknown,
+  signal?: AbortSignal,
+  target = { origin, headers },
+) {
+  const response = await fetch(`${target.origin}${path}`, {
+    headers: target.headers,
     method: body === undefined ? "GET" : "POST",
+    ...(signal ? { signal } : {}),
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
+  if (signal) return response;
   const value = await response.json();
   expect(response.ok, JSON.stringify(value)).toBe(true);
   return value;
@@ -204,6 +248,187 @@ async function* wireFrames(
     await reader.cancel().catch(() => {});
   }
 }
+
+it("includes a live agent after a full page of deleted agents in a cold snapshot", async () => {
+  const query = new URLSearchParams({
+    protocol: String(SYNC_PROTOCOL_VERSION),
+    resources: JSON.stringify([{ kind: "state" }]),
+    tokenRates: "false",
+  });
+  const controller = new AbortController();
+  const response = await request(
+    `/api/sync/stream?${query}`,
+    undefined,
+    controller.signal,
+  );
+  const found = new Set<string>();
+  try {
+    for await (const frame of wireFrames(response)) {
+      if (frame.name === "resources") {
+        const value =
+          frame.value as components["schemas"]["ResourceChangeEvent"];
+        for (const entry of value.resourceVersions ?? [])
+          for (const row of entry.entityChanges?.documents ?? [])
+            if (row.collection === "agentSummary") found.add(row.id);
+        if (value.resourceVersions?.some((entry) => entry.entityChanges)) break;
+      }
+      if (frame.name === "entity-transfer") {
+        const value =
+          frame.value as components["schemas"]["ResourceEntityTransferEvent"];
+        for (const row of JSON.parse(value.data).documents ?? [])
+          if (row.collection === "agentSummary") found.add(row.id);
+        if (value.complete) break;
+      }
+    }
+    expect(found.has("lead")).toBe(true);
+  } finally {
+    controller.abort();
+  }
+});
+
+it("advances fresh pulls past deleted candidates without skipping live agents", async () => {
+  for (const priorityId of [undefined, "lead"]) {
+    let after = 0;
+    let initialHigh = 0;
+    const found = new Set<string>();
+    for (let page = 0; page < 20; page++) {
+      const value = await request(
+        "/fixture/fresh",
+        {
+          after,
+          initialHigh,
+          limit: page < 3 ? 10 : 500,
+          priorityId: after === 0 ? priorityId : undefined,
+        },
+        undefined,
+        compact,
+      );
+      for (const row of value.documents)
+        if (row.collection === "agentSummary") found.add(row.id);
+      expect(value.checkpoint).toBeGreaterThan(after);
+      after = value.checkpoint;
+      initialHigh = value.initialHigh;
+      if (after === value.maxSeq) break;
+    }
+    expect(found.has("older-0")).toBe(true);
+    expect(found.has("lead")).toBe(true);
+  }
+});
+
+it("bounds a fresh HTTP pull through filtered pages and continues later", async () => {
+  let after = 1;
+  let initialHigh = 0;
+  const found = new Set<string>();
+  for (let page = 0; page < 30; page++) {
+    const value = await request(
+      `/api/sync/pull?fresh=1&limit=${page === 0 ? 10 : 500}&after=${after}&initialHigh=${initialHigh}`,
+      undefined,
+      undefined,
+      compact,
+    );
+    expect(value.checkpoint.seq).toBeGreaterThan(after);
+    if (page === 0) {
+      expect(value.documents).toHaveLength(0);
+      expect(value.checkpoint.seq).toBeLessThan(value.maxSeq);
+    }
+    for (const row of value.documents)
+      if (row.collection === "agentSummary") found.add(row.id);
+    after = value.checkpoint.seq;
+    initialHigh = value.initialHigh;
+    if (after === value.maxSeq) break;
+  }
+  expect(found.has("lead")).toBe(true);
+});
+
+it("completes a recovery pull only after server pages with no documents", async () => {
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    matchMedia: vi.fn(() => ({ matches: false })),
+  });
+  vi.stubGlobal("document", { hidden: false });
+  vi.stubGlobal("navigator", {
+    onLine: true,
+    locks: {
+      request: (_key: string, write: () => Promise<unknown>) => write(),
+    },
+  });
+  const module = await import("./client");
+  const { createEntitySequenceScope } = await import("./entitySequence");
+  const { createTranscriptCache } = await import("./transcriptCache");
+  const registered =
+    Promise.withResolvers<(version?: ResourceVersion) => void>();
+  const completed = Promise.withResolvers<void>();
+  const pages: number[] = [];
+  let db: Awaited<
+    ReturnType<ReturnType<typeof module.createSyncClient>["syncDatabase"]>
+  >["db"];
+  const syncGet = vi.fn();
+  syncGet.mockImplementation(
+    async (path: string, options?: { query?: Record<string, string> }) => {
+      const query = { ...options?.query };
+      if (path === "/api/sync/pull") {
+        query.limit = pages.length < 2 ? "10" : "500";
+        expect(
+          await db.projections.findOne("state:entities:complete").exec(),
+        ).toBeNull();
+      }
+      const value = await request(
+        `${path}${options?.query ? `?${new URLSearchParams(query)}` : ""}`,
+        undefined,
+        undefined,
+        compact,
+      );
+      if (path === "/api/sync/pull") pages.push(value.documents.length);
+      return value;
+    },
+  );
+  const client = module.createSyncClient({
+    api: {
+      syncGet,
+      syncPost: vi.fn(),
+      saved: (_key, fallback) => fallback,
+      save: vi.fn(),
+      setWorkspace: vi.fn(),
+      isApiSchemaMismatch: () => false,
+    },
+    resources: {
+      watchResourceChanges: (resource, callback) => {
+        if (resource.kind === "state") registered.resolve(callback);
+        return () => {};
+      },
+      watchResourceConnection: () => () => {},
+    },
+    sequences: createEntitySequenceScope(),
+    transcripts: createTranscriptCache(),
+    databaseSuffix: "empty-recovery",
+  });
+  ({ db } = await client.syncDatabase());
+  const stop = client.subscribeStateProjection(
+    (value) => {
+      if (value?.entitiesComplete) completed.resolve();
+    },
+    (error) => {
+      if (error) completed.reject(error);
+    },
+  );
+  try {
+    const notify = await registered.promise;
+    notify({ epoch: "fixture", revision: 1, reason: "overflow" });
+    await completed.promise;
+    expect(pages).toContain(0);
+    expect(
+      await db.projections.findOne("state:entities:complete").exec(),
+    ).not.toBeNull();
+    expect(
+      await db.projections.findOne("entity:agentSummary:lead").exec(),
+    ).not.toBeNull();
+  } finally {
+    stop();
+    client.disposeCache();
+    vi.unstubAllGlobals();
+  }
+});
 async function* resourceFrames(
   response: Response,
 ): AsyncGenerator<ResourceChangeEvent> {

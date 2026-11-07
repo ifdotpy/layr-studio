@@ -7,9 +7,6 @@
 //! provider or the server. Route modules in `studio-runtime-http` call
 //! services; services never depend on HTTP types.
 
-#[cfg(test)]
-extern crate studio_test_deps;
-
 pub mod account_auth_gate;
 pub mod account_driver;
 pub mod account_policy;
@@ -179,6 +176,7 @@ pub mod relocation;
 pub mod remote_access;
 pub mod remote_transport;
 pub mod resource_notify;
+pub mod reviewer_workspace;
 pub(crate) mod room_projection;
 pub mod rules;
 pub mod rules_engine;

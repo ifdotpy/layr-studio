@@ -1,3 +1,4 @@
+import { StopOutcome } from "./generated/api.ts";
 import { required } from "./components/componentTestFixtures.ts";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { SidebarServices } from "./components/sidebar/services";
@@ -89,6 +90,7 @@ function fixture() {
     id: body.id,
     request_id: body.request_id,
     outcome: "deleted",
+    stopped: StopOutcome.confirmed,
     deletedAgentIds: ["lead"],
     deletedRoomIds: [],
   }));
@@ -145,6 +147,26 @@ it("cancel posts nothing; repeated confirmation and effect replay send once to s
     expected_workspace_id: "workspace",
   });
   expect(f.options.onFinish).toHaveBeenCalledWith(["lead"]);
+});
+
+it("notifies when project commands remain unconfirmed", async () => {
+  const f = fixture();
+  f.post.mockImplementationOnce(async (_path, body) => ({
+    id: body.id,
+    request_id: body.request_id,
+    outcome: "deleted",
+    stopped: StopOutcome.unconfirmed,
+    deletedAgentIds: ["lead"],
+    deletedRoomIds: [],
+  }));
+  f.render().open("project");
+  f.render().dialog.onConfirm();
+  f.render();
+  await f.settle();
+  expect(f.options.onFinish).toHaveBeenCalledWith(["lead"]);
+  expect(f.options.notify).toHaveBeenCalledWith(
+    "The project was deleted, but stopping its commands could not be confirmed.",
+  );
 });
 
 it("keeps unknown visible across SSE retirement and recovers only the saved request", async () => {
@@ -289,6 +311,7 @@ it("never applies an old workspace's late deletion response to the current draft
     id: request.id,
     request_id: request.request_id,
     outcome: "deleted",
+    stopped: StopOutcome.confirmed,
     deletedAgentIds: ["lead"],
     deletedRoomIds: [],
   });
@@ -365,6 +388,7 @@ it("does not release confirmed IDs from an incomplete projection", async () => {
     id: request.id,
     request_id: request.request_id,
     outcome: "deleted",
+    stopped: StopOutcome.confirmed,
     deletedAgentIds: ["lead"],
     deletedRoomIds: [],
   });

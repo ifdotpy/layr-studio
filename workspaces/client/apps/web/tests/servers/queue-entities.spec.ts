@@ -19,9 +19,6 @@ test("bounded entities render initial and live changes with zero resource GETs",
 }) => {
   const state = await mkdtemp(join(tmpdir(), "studio-queue-entities-"));
   const backend = await fixture("Queue", false, { entityFrames: true });
-  const accounts = backend.snapshot.runtime.accountsSummary?.accounts;
-  assert.ok(accounts?.[0]);
-  accounts.push({ ...accounts[0], id: "outside-team", label: "Other account" });
   const queue = (
     text: string,
     revision: string,
@@ -139,7 +136,7 @@ test("bounded entities render initial and live changes with zero resource GETs",
     ).toBeVisible({ timeout: 20_000 });
     await expect(
       page.locator(
-        '.account-limits-dot-target[data-account-key="outside-team"]',
+        '.account-limits-dot-target[data-role="Lead"][data-account-key="default"]',
       ),
     ).toBeVisible();
     await expect(

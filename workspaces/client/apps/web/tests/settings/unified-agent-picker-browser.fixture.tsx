@@ -48,6 +48,7 @@ import "@mantine/core/styles.css";
 import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import { ExecutionSettings } from "../../src/components/agents/ExecutionSettings.tsx";
+import { ModelCatalogReader } from "../../src/components/agents/WorkerModelPicker.tsx";
 import { SettingsRow } from "../../src/components/ui/primitives.tsx";
 import "../../src/appearance.css";
 import { AccountTiles } from "../../src/components/AccountTiles.tsx";
@@ -63,6 +64,10 @@ const accounts: Account[] = Array.from({ length: 7 }, (_, i) => ({
   source: "fixture",
   provider: i < 4 ? "codex" : "claude",
   status: i === 6 ? "signedOut" : "ready",
+  eligibility:
+    i === 6
+      ? { kind: "unavailable", reason: "Sign in required" }
+      : { kind: "available" },
 }));
 const codex = ["gpt-6-astra", "gpt-6-luna"].map(
   (model, i) =>
@@ -178,7 +183,6 @@ window.fetch = async (input, options) => {
           effort: body.worker_defaults.effort,
           fastMode: body.worker_defaults.fast_mode,
           daybreakEnabled: body.worker_defaults.daybreak_enabled!,
-          accountKey: body.worker_defaults.account_key,
         };
       else if (body.review_defaults) next.reviewDefaults = body.review_defaults;
       else
@@ -204,7 +208,6 @@ window.fetch = async (input, options) => {
       window.updateAgent!({
         ...window.agent,
         workerDefaults: {
-          accountKey: required(body.account_key),
           model:
             Number(required(body.account_key).split("-")[1]) >= 4
               ? required(claude[0]).model
@@ -269,6 +272,16 @@ function Fixture() {
           <ExecutionSettings
             agent={agent}
             accounts={accounts}
+            workerExcludedAccountKeys={agent.workerExcludedAccountKeys ?? []}
+            reviewerExcludedAccountKeys={
+              agent.reviewerExcludedAccountKeys ?? []
+            }
+            onWorkerExcludedAccountKeysChange={(keys) =>
+              setAgent({ ...agent, workerExcludedAccountKeys: keys })
+            }
+            onReviewerExcludedAccountKeysChange={(keys) =>
+              setAgent({ ...agent, reviewerExcludedAccountKeys: keys })
+            }
             catalog={{
               models: agent.provider === "claude" ? claude : codex,
               loading: false,
@@ -363,4 +376,33 @@ function Fixture() {
     </MantineProvider>
   );
 }
-createRoot(fixtureRoot!).render(<Fixture />);
+createRoot(fixtureRoot!).render(
+  <ModelCatalogReader.Provider
+    value={{
+      scope: "fixture-model-catalog",
+      read: async () => ({ data: [...codex, ...claude] }),
+      subscribeState: (accept) => {
+        accept({
+          entitiesComplete: true,
+          runtime: {
+            modelsByAccount: {
+              "account-0": codex.map((model, catalogPosition) => ({
+                ...model,
+                accountKey: "account-0",
+                catalogPosition,
+              })),
+              "account-4": claude.map((model, catalogPosition) => ({
+                ...model,
+                accountKey: "account-4",
+                catalogPosition,
+              })),
+            },
+          },
+        });
+        return () => {};
+      },
+    }}
+  >
+    <Fixture />
+  </ModelCatalogReader.Provider>,
+);

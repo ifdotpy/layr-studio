@@ -51,6 +51,8 @@ export function useSidebarResize(input: {
     if (width !== null) setDraft(width);
   };
   return {
+    /** A pointer drag is in progress; `width` is its draft. */
+    dragging: draft !== null,
     width:
       draft === null
         ? input.width

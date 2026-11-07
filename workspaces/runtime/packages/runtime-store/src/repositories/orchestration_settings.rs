@@ -101,9 +101,6 @@ impl OrchestrationSettingsRepository {
     pub fn shell_policy(
         connection: &Connection,
     ) -> StoreResult<studio_runtime_schema::shell_policy::Settings> {
-        if !crate::schema::table_exists(connection, TABLE)? {
-            return Ok(Default::default());
-        }
         let raw: Option<String> = connection
             .query_row(
                 &format!("SELECT json_extract(record,'$.shellPolicy') FROM {TABLE} WHERE id=?1"),
@@ -141,12 +138,8 @@ impl OrchestrationSettingsRepository {
         Ok(())
     }
 
-    /// The stored value of `setting`. A state without the table, the row, or
-    /// the field uses the setting's default; a stored value out of range is refused.
+    /// A missing row or field uses the default; an out-of-range value is refused.
     pub fn value(connection: &Connection, setting: Setting) -> StoreResult<u64> {
-        if !crate::schema::table_exists(connection, TABLE)? {
-            return Ok(setting.default);
-        }
         let raw: Option<String> = connection
             .query_row(
                 &format!("SELECT record FROM {TABLE} WHERE id=?1"),
@@ -202,9 +195,6 @@ impl OrchestrationSettingsRepository {
     pub fn idle_compaction(
         connection: &Connection,
     ) -> StoreResult<studio_runtime_schema::idle_compaction::Settings> {
-        if !crate::schema::table_exists(connection, TABLE)? {
-            return Ok(Default::default());
-        }
         let raw: Option<String> = connection
             .query_row(
                 &format!("SELECT json_extract(record,'$.idleCompaction') FROM {TABLE} WHERE id=?1"),
@@ -229,9 +219,9 @@ impl OrchestrationSettingsRepository {
     /// The setting with the default mode resolved for a lead or a worker chat.
     pub fn idle_compaction_for(
         connection: &Connection,
-        agent: &studio_json::Value,
+        is_lead: bool,
     ) -> StoreResult<studio_runtime_schema::idle_compaction::Settings> {
-        Ok(Self::idle_compaction(connection)?.resolved(agent["isLead"] == true))
+        Ok(Self::idle_compaction(connection)?.resolved(is_lead))
     }
 
     pub fn set_idle_compaction(
@@ -294,12 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_table_or_row_uses_the_default() {
-        let empty = Connection::open_in_memory().expect("memory database opens");
-        assert_eq!(
-            OrchestrationSettingsRepository::child_result_coalesce(&empty).expect("reads"),
-            CHILD_RESULT_COALESCE_DEFAULT
-        );
+    fn missing_row_uses_the_default() {
         assert_eq!(
             OrchestrationSettingsRepository::child_result_coalesce(&database()).expect("reads"),
             CHILD_RESULT_COALESCE_DEFAULT

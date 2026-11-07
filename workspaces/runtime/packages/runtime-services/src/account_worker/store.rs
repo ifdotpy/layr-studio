@@ -5,7 +5,7 @@ use super::*;
 use crate::continuation_runtime::CapacityStartOutcome;
 use crate::diagnostics::measure_runtime_stage as stage;
 use crate::notification_dispatch::{
-    NotificationEffects, NotificationPublicationBatch, PreparedSubmission,
+    NotificationAgent, NotificationEffects, NotificationPublicationBatch, PreparedSubmission,
     ProviderDeliveryIdentity, dispatch_notification_with_effects, flush_notification_streams,
 };
 use rusqlite::{OptionalExtension, params};
@@ -2145,6 +2145,93 @@ fn resolve_unbound_completion(
     Ok(UnboundCompletion::Error)
 }
 
+// CROSS JOIN keeps the account's deleted agents first; unary + removes TEXT
+// affinity so SQLite can search the task expression index and only matches
+// string agent IDs (numeric agent values are corrupt task records).
+const DELETED_COMMAND_IDS_SQL: &str = "SELECT t.id FROM runtime_agents a CROSS JOIN runtime_tasks t ON +a.id=json_extract(t.record,'$.agent') \
+    WHERE a.account_key=?1 AND json_extract(t.record,'$.itemId')=?2 \
+    AND json_extract(t.record,'$.turnId')=?3 AND a.deleted_at IS NOT NULL LIMIT 2";
+
+/// Admit only a terminal report for the exact prior-epoch command of a deleted actor.
+fn complete_deleted_command(
+    tx: &rusqlite::Transaction<'_>,
+    account: &str,
+    generation: u64,
+    method: &str,
+    params: &Value,
+) -> Result<bool, WorkerError> {
+    let item = &params["item"];
+    let (Some(thread), Some(turn), Some(item_id)) = (
+        params["threadId"].as_str(),
+        params["turnId"].as_str(),
+        item["id"].as_str(),
+    ) else {
+        return Ok(false);
+    };
+    if method != "item/completed"
+        || item["type"] != "commandExecution"
+        || !matches!(item["status"].as_str(), Some("completed" | "failed"))
+    {
+        return Ok(false);
+    }
+    let mut statement = tx.prepare_cached(DELETED_COMMAND_IDS_SQL)?;
+    let ids = statement
+        .query_map(params![account, item_id, turn], |row| {
+            row.get::<_, String>(0)
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let [id] = ids.as_slice() else {
+        return Ok(false);
+    };
+    let Some(task) = studio_runtime_store::TaskRepository::get(
+        tx,
+        &studio_runtime_store::TaskId::from(id.as_str()),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(agent) = studio_runtime_store::AgentRepository::get(
+        tx,
+        &studio_runtime_store::AgentId::from(task.agent()),
+    )?
+    else {
+        return Ok(false);
+    };
+    let Some(attempt) = agent.start_attempt.as_ref() else {
+        return Ok(false);
+    };
+    let Some(epoch) = task.owner_epoch else {
+        return Ok(false);
+    };
+    if !agent.is_deleted()
+        || agent.account_key != account
+        || agent.thread_id.as_deref() != Some(thread)
+        || attempt.connection_generation != Some(generation)
+        || attempt.epoch != Some(epoch)
+        || epoch.checked_add(1) != Some(agent.epoch)
+        || crate::workspace_ready::legacy_vm_record(&agent)
+        || task.source_account_key() != Some(account)
+        || task.source_thread_id() != Some(thread)
+        || task.kind() != studio_runtime_schema::task_record::TaskKind::Command
+        || task.status() != studio_runtime_schema::task_record::TaskStatus::Running
+        || item
+            .get("processId")
+            .zip(task.process_id())
+            .is_some_and(|(value, saved)| {
+                <studio_runtime_schema::task_record::ProcessId as serde::Deserialize>::deserialize(
+                    value.clone(),
+                )
+                .ok()
+                .as_ref()
+                    != Some(saved)
+            })
+    {
+        return Ok(false);
+    }
+    crate::notification_dispatch::recover_task_in_transaction(tx, &agent, &task, item, now())?;
+    Ok(true)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn journal_batch(
     store: Arc<RuntimeStore>,
@@ -2619,6 +2706,10 @@ fn journal_one(
             // Delivered busy-turn input frees the agent for its next queued input.
             effect = Some(Effect::Wake(agent, epoch));
         } else if let Some((method, params)) = notice
+            && complete_deleted_command(tx, account, entry.generation.0, method, params)?
+        {
+            // The exact deleted command completion updates only its existing task.
+        } else if let Some((method, params)) = notice
             && let Some(thread) = params["threadId"].as_str()
         {
             let turn = params["turn"]["id"]
@@ -2690,11 +2781,12 @@ fn journal_one(
                                 generation: entry.generation.0,
                                 cursor: entry.cursor.0,
                             };
+                            let observation_agent = NotificationAgent::from(&agent);
                             next.queue_effects(
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
-                                        Some(&agent),
-                                        Some(&agent),
+                                        Some(&observation_agent),
+                                        Some(&observation_agent),
                                         &frame,
                                         &delivery,
                                         crate::notification_dispatch::ObservationTime::new(now())
@@ -2741,7 +2833,13 @@ fn journal_one(
                             NotificationDispatchRepository::agent_record(tx, &identity.agent_id)?
                                 .ok_or_else(|| invalid(&identity.agent_id))?;
                         if scheduler::settle_terminal_in_transaction(tx, &identity, params)? {
-                            if agent_before["lastCompletedTurn"] != params["turn"]["id"] {
+                            if agent_before
+                                .last_completed_turn
+                                .value()
+                                .map_or(!params["turn"]["id"].is_null(), |last| {
+                                    params["turn"]["id"] != last.as_str()
+                                })
+                            {
                                 crate::shell_policy::note_activity(tx, &identity.agent_id, now())?;
                             }
                             invalidate_auth_on_failure(
@@ -2776,8 +2874,8 @@ fn journal_one(
                             next.queue_effects(
                                 crate::notification_runtime_effects::RuntimeNotificationEffects
                                     .post_commit(
-                                        Some(&agent_before),
-                                        Some(&agent_after),
+                                        Some(&NotificationAgent::from(&agent_before)),
+                                        Some(&NotificationAgent::from(&agent_after)),
                                         &frame,
                                         &delivery,
                                         crate::notification_dispatch::ObservationTime::new(now())
@@ -4267,9 +4365,9 @@ mod pending_preparation_scan_tests {
 /// A failed turn whose error proves the account's credentials rejected ends
 /// the account's cached auth status, for every provider; the next read probes
 /// once. `account_pin` is the worker account's auth pin (provider and home).
-fn invalidate_auth_on_failure(agent: &Value, account_pin: &Value, turn: &Value) {
+fn invalidate_auth_on_failure(agent: &AgentRecord, account_pin: &Value, turn: &Value) {
     use crate::account_driver::{AuthProfile, ProviderAuthReader, SystemProviderAuthReader};
-    let Ok(provider) = studio_runtime_providers::ProviderKind::of_record(agent) else {
+    let Some(provider) = agent.provider.value().copied() else {
         return;
     };
     if turn["status"] != "failed"
@@ -4747,5 +4845,55 @@ mod pending_thread_start_tests {
         submit(&db, "account", "lead", Method::ThreadStart);
         let plan:String=db.query_row("EXPLAIN QUERY PLAN SELECT payload FROM runtime_outbox WHERE owner_kind=?1 AND owner_id=?2 AND kind=?3 ORDER BY id",params![OwnerKind::Agent,"lead",OutboxKind::ProviderCall],|row|row.get(3)).expect("plan");
         assert!(plan.contains("runtime_outbox_owner"), "{plan}");
+    }
+}
+
+#[cfg(test)]
+mod deleted_command_query_tests {
+    use super::DELETED_COMMAND_IDS_SQL;
+
+    #[test]
+    fn deleted_command_query_preserves_matches_and_uses_task_index() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(r#"
+            CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, account_key TEXT, deleted_at INTEGER);
+            CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at);
+            CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+            CREATE INDEX runtime_task_agent_created_id ON runtime_tasks(json_extract(record,'$.agent'),json_extract(record,'$.created') DESC,id DESC);
+            INSERT INTO runtime_agents VALUES('live','account',NULL),('deleted','account',1),('1','account',1),('other','other',1);
+            INSERT INTO runtime_tasks VALUES
+            ('live','{"agent":"live","itemId":"item","turnId":"turn"}'),
+            ('live-only','{"agent":"live","itemId":"live-only","turnId":"turn"}'),
+            ('one','{"agent":"deleted","itemId":"item","turnId":"turn"}'),
+            ('two','{"agent":"deleted","itemId":"duplicate","turnId":"turn"}'),
+            ('three','{"agent":"deleted","itemId":"duplicate","turnId":"turn"}'),
+            ('numeric','{"agent":1,"itemId":"numeric","turnId":"turn"}'),
+            ('other','{"agent":"other","itemId":"item","turnId":"turn"}');
+        "#).unwrap();
+        let query = |item: &str| -> Vec<String> {
+            db.prepare(DELETED_COMMAND_IDS_SQL)
+                .unwrap()
+                .query_map(["account", item, "turn"], |row| row.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(query("missing"), Vec::<String>::new());
+        assert_eq!(query("live-only"), Vec::<String>::new());
+        assert_eq!(query("item"), vec!["one"]);
+        assert_eq!(query("duplicate").len(), 2);
+        assert_eq!(query("numeric"), Vec::<String>::new());
+        let plan: Vec<String> = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {DELETED_COMMAND_IDS_SQL}"))
+            .unwrap()
+            .query_map(["account", "item", "turn"], |row| row.get(3))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("SEARCH t USING INDEX runtime_task_agent_created_id")),
+            "{plan:?}"
+        );
     }
 }

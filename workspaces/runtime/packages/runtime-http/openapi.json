@@ -4307,30 +4307,13 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
-          },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Excludedaccountkeys"
           },
           "executionMode": {
             "anyOf": [
@@ -4532,10 +4515,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -4656,14 +4636,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -4721,6 +4694,22 @@
                 "type": "null"
               }
             ]
+          },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "reviewerExcludedAccountKeys"
           },
           "startAttempt": {
             "anyOf": [
@@ -4833,6 +4822,22 @@
               }
             ]
           },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "workerExcludedAccountKeys"
+          },
           "workspaceCleanupIntent": {
             "anyOf": [
               {
@@ -4868,13 +4873,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -4882,11 +4884,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -5416,30 +5414,13 @@
           "error": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/NativeProviderError"
+                "$ref": "#/components/schemas/AgentError"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Error"
-          },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Excludedaccountkeys"
           },
           "executionMode": {
             "anyOf": [
@@ -5544,8 +5525,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -5674,6 +5654,9 @@
             ],
             "title": "Layrstateid"
           },
+          "legacyVmWorkspace": {
+            "type": "boolean"
+          },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
@@ -5782,10 +5765,7 @@
           "nativeStatus": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/AgentNativeStatus"
-              },
-              {
-                "$ref": "#/components/schemas/AgentNativeStatusValue"
+                "$ref": "#/components/schemas/AgentNativeState"
               },
               {
                 "type": "null"
@@ -5928,14 +5908,7 @@
           "permissionMode": {
             "anyOf": [
               {
-                "enum": [
-                  "default",
-                  "acceptEdits",
-                  "auto",
-                  "plan",
-                  "bypassPermissions"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentPermissionMode"
               },
               {
                 "type": "null"
@@ -5998,6 +5971,17 @@
               }
             ],
             "title": "Projectid"
+          },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
           },
           "projectServerId": {
             "anyOf": [
@@ -6111,6 +6095,22 @@
                 "type": "null"
               }
             ]
+          },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "reviewerExcludedAccountKeys"
           },
           "role": {
             "anyOf": [
@@ -6257,6 +6257,19 @@
             ],
             "title": "Threadid"
           },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
+          },
           "turnId": {
             "anyOf": [
               {
@@ -6332,6 +6345,22 @@
               }
             ]
           },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "workerExcludedAccountKeys"
+          },
           "workspaceCleanupIntent": {
             "anyOf": [
               {
@@ -6367,13 +6396,10 @@
           "worktree": {
             "anyOf": [
               {
-                "type": "boolean"
+                "$ref": "#/components/schemas/AgentWorktree"
               },
               {
                 "type": "null"
-              },
-              {
-                "type": "string"
               }
             ],
             "title": "Worktree"
@@ -6381,11 +6407,7 @@
           "worktreePreparation": {
             "anyOf": [
               {
-                "enum": [
-                  "waiting",
-                  "preparing"
-                ],
-                "type": "string"
+                "$ref": "#/components/schemas/AgentWorktreePreparation"
               },
               {
                 "type": "null"
@@ -6791,6 +6813,16 @@
         "title": "AgentEntityUsageResumeDto",
         "type": "object"
       },
+      "AgentError": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/NativeProviderError"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
       "AgentId": {
         "description": "Identity of the agent that owns the turn.",
         "type": "string"
@@ -6829,6 +6861,10 @@
         ],
         "title": "AgentInboxEntry",
         "type": "object"
+      },
+      "AgentKind": {
+        "const": "agent",
+        "type": "string"
       },
       "AgentLimitProjection": {
         "additionalProperties": false,
@@ -6898,6 +6934,16 @@
         },
         "title": "AgentNativeRelease",
         "type": "object"
+      },
+      "AgentNativeState": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/AgentNativeStatus"
+          },
+          {
+            "$ref": "#/components/schemas/AgentNativeStatusValue"
+          }
+        ]
       },
       "AgentNativeStatus": {
         "additionalProperties": false,
@@ -7301,6 +7347,16 @@
         "title": "AgentOverview",
         "type": "object"
       },
+      "AgentPermissionMode": {
+        "enum": [
+          "default",
+          "acceptEdits",
+          "auto",
+          "plan",
+          "bypassPermissions"
+        ],
+        "type": "string"
+      },
       "AgentProvider": {
         "$ref": "#/components/schemas/ProviderKind"
       },
@@ -7660,14 +7716,6 @@
             "minimum": 0,
             "title": "Events",
             "type": "integer"
-          },
-          "excludedAccountKeys": {
-            "default": null,
-            "items": {
-              "type": "string"
-            },
-            "title": "Excludedaccountkeys",
-            "type": "array"
           },
           "executionArchives": {
             "default": null,
@@ -8387,6 +8435,16 @@
             "$ref": "#/components/schemas/ReviewDefaultsRecordResponse",
             "default": null
           },
+          "reviewerExcludedAccountKeys": {
+            "default": null,
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "reviewerExcludedAccountKeys",
+            "type": "array"
+          },
           "role": {
             "default": null,
             "enum": [
@@ -8599,6 +8657,16 @@
           "workerDefaults": {
             "$ref": "#/components/schemas/WorkerDefaultsRecordResponse",
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "default": null,
+            "items": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            },
+            "title": "workerExcludedAccountKeys",
+            "type": "array"
           },
           "workspaceInGit": {
             "default": null,
@@ -9072,21 +9140,6 @@
             "default": null,
             "title": "Error"
           },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Excludedaccountkeys"
-          },
           "executionMode": {
             "anyOf": [
               {
@@ -9339,6 +9392,9 @@
             ],
             "default": null,
             "title": "Layrstateid"
+          },
+          "legacyVmWorkspace": {
+            "type": "boolean"
           },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
@@ -9692,6 +9748,17 @@
             "default": null,
             "title": "Projectid"
           },
+          "projectPath": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Projectpath"
+          },
           "projectServerId": {
             "anyOf": [
               {
@@ -9815,6 +9882,23 @@
               }
             ],
             "default": null
+          },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "reviewerExcludedAccountKeys"
           },
           "role": {
             "anyOf": [
@@ -9974,6 +10058,19 @@
             "default": null,
             "title": "Threadid"
           },
+          "tokensUsed": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tokensused"
+          },
           "turnId": {
             "anyOf": [
               {
@@ -10055,6 +10152,23 @@
               }
             ],
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceCleanupIntent": {
             "anyOf": [
@@ -10408,8 +10522,7 @@
           "kind": {
             "anyOf": [
               {
-                "const": "agent",
-                "type": "string"
+                "$ref": "#/components/schemas/AgentKind"
               },
               {
                 "type": "null"
@@ -10449,6 +10562,9 @@
               }
             ],
             "title": "Lastreadat"
+          },
+          "legacyVmWorkspace": {
+            "type": "boolean"
           },
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
@@ -11162,6 +11278,23 @@
         ],
         "title": "AgentWorkspaceModeResponse",
         "type": "object"
+      },
+      "AgentWorktree": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string"
+          }
+        ]
+      },
+      "AgentWorktreePreparation": {
+        "enum": [
+          "waiting",
+          "preparing"
+        ],
+        "type": "string"
       },
       "AmbiguousToolRequestResponse": {
         "additionalProperties": {
@@ -17853,21 +17986,6 @@
             "default": null,
             "title": "Error"
           },
-          "excludedAccountKeys": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Excludedaccountkeys"
-          },
           "executionMode": {
             "anyOf": [
               {
@@ -18573,6 +18691,23 @@
             ],
             "default": null
           },
+          "reviewerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "reviewerExcludedAccountKeys"
+          },
           "role": {
             "anyOf": [
               {
@@ -18809,6 +18944,23 @@
               }
             ],
             "default": null
+          },
+          "workerExcludedAccountKeys": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "workerExcludedAccountKeys"
           },
           "workspaceMode": {
             "anyOf": [
@@ -20189,6 +20341,19 @@
         "title": "ChangesResponse",
         "type": "object"
       },
+      "ChatAccountExclusions": {
+        "default": [],
+        "items": {
+          "maxLength": 200,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "maxItems": 512,
+        "title": "Excluded Account Keys",
+        "type": "array",
+        "uniqueItems": true
+      },
       "ChatEntityDto": {
         "additionalProperties": false,
         "properties": {
@@ -20315,6 +20480,32 @@
           "deliveries"
         ],
         "title": "ChatMessage",
+        "type": "object"
+      },
+      "ChatOperationalKind": {
+        "enum": [
+          "answer",
+          "error",
+          "working",
+          "paused",
+          "none"
+        ],
+        "type": "string"
+      },
+      "ChatOperationalStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/ChatOperationalKind"
+          },
+          "label": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
         "type": "object"
       },
       "ChatRead": {
@@ -23399,10 +23590,14 @@
                   "type": "string"
                 },
                 "type": "array"
+              },
+              "stopped": {
+                "$ref": "#/components/schemas/StopOutcome"
               }
             },
             "required": [
-              "deleted"
+              "deleted",
+              "stopped"
             ],
             "type": "object"
           },
@@ -25168,18 +25363,6 @@
             "default": null,
             "title": "Effort"
           },
-          "excluded_account_keys": {
-            "default": [],
-            "items": {
-              "minLength": 1,
-              "pattern": "\\S",
-              "type": "string"
-            },
-            "maxItems": 512,
-            "title": "Excluded Account Keys",
-            "type": "array",
-            "uniqueItems": true
-          },
           "expected_account_key": {
             "default": "default",
             "maxLength": 200,
@@ -25271,6 +25454,9 @@
             ],
             "default": null
           },
+          "reviewer_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
+          },
           "subagent_concurrency": {
             "default": 32,
             "maximum": 2048,
@@ -25288,6 +25474,9 @@
               }
             ],
             "default": null
+          },
+          "worker_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "yolo_mode": {
             "default": true,
@@ -25984,6 +26173,9 @@
             ],
             "default": null
           },
+          "reviewer_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
+          },
           "worker_defaults": {
             "anyOf": [
               {
@@ -25994,6 +26186,9 @@
               }
             ],
             "default": null
+          },
+          "worker_excluded_account_keys": {
+            "$ref": "#/components/schemas/ChatAccountExclusions"
           },
           "workspaceMode": {
             "description": "When omitted, the server selects native Layr when available; otherwise it selects worktree.",
@@ -30200,6 +30395,14 @@
         ],
         "type": "object"
       },
+      "GitCommit": {
+        "pattern": "^[0-9a-f]{40}$",
+        "type": "string"
+      },
+      "GitRef": {
+        "minLength": 1,
+        "type": "string"
+      },
       "GlobalStateResource": {
         "x-studio-entity-scope": {
           "collections": null
@@ -30712,6 +30915,44 @@
           }
         ],
         "title": "JsonValue"
+      },
+      "LayrBase": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "mergeBaseWithMain",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "const": "state",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/components/schemas/LayrStateId"
+              }
+            },
+            "required": [
+              "kind",
+              "state"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LayrStateId": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
       },
       "LazyAccountTransferRecordResponse": {
         "additionalProperties": {
@@ -34196,7 +34437,15 @@
         "additionalProperties": false,
         "properties": {
           "storeRoot": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store Root"
           }
         },
         "title": "NativeLayrSettingsRequest",
@@ -34220,6 +34469,10 @@
       "NativeLayrSettingsResponse": {
         "additionalProperties": false,
         "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
           "error": {
             "type": "string"
           },
@@ -34262,7 +34515,8 @@
         },
         "required": [
           "version",
-          "storeRoot"
+          "storeRoot",
+          "configured"
         ],
         "title": "NativeLayrSettingsResponse",
         "type": "object"
@@ -39108,6 +39362,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -39548,6 +39826,9 @@
           },
           "request_id": {
             "type": "string"
+          },
+          "stopped": {
+            "$ref": "#/components/schemas/StopOutcome"
           }
         },
         "required": [
@@ -39555,7 +39836,8 @@
           "request_id",
           "outcome",
           "deletedAgentIds",
-          "deletedRoomIds"
+          "deletedRoomIds",
+          "stopped"
         ],
         "title": "ProjectDeleteResponse",
         "type": "object"
@@ -39667,6 +39949,30 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
           },
           "locations": {
             "anyOf": [
@@ -40298,6 +40604,30 @@
             "title": "Id",
             "type": "string"
           },
+          "layrStoreRoot": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
+          },
+          "layrStoreRootRevision": {
+            "anyOf": [
+              {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Layr Store Root Revision"
+          },
           "locations": {
             "anyOf": [
               {
@@ -40669,7 +40999,8 @@
                   "rename_folder",
                   "remove_folder",
                   "set_account_groups",
-                  "set_workspace_policy"
+                  "set_workspace_policy",
+                  "set_layr_store_root"
                 ],
                 "type": "string"
               },
@@ -40733,6 +41064,17 @@
             ],
             "default": null,
             "title": "Folder Id"
+          },
+          "layr_store_root": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Layr Store Root"
           },
           "name": {
             "anyOf": [
@@ -42815,6 +43157,25 @@
           "id"
         ],
         "title": "RemoteRoomMemberDto",
+        "type": "object"
+      },
+      "RemoteStopResult": {
+        "description": "Remote stop receipt; the outcome is recomputed when a request is replayed.",
+        "properties": {
+          "stopOutcome": {
+            "$ref": "#/components/schemas/StopOutcome"
+          },
+          "stopped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "stopOutcome",
+          "stopped"
+        ],
         "type": "object"
       },
       "RemoteWorkerLinkDto": {
@@ -45122,17 +45483,6 @@
       "ReviewDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -45174,12 +45524,6 @@
       "ReviewDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "effort": {
             "anyOf": [
               {
@@ -45252,6 +45596,53 @@
         ],
         "title": "ReviewDefaultsRecordResponse",
         "type": "object"
+      },
+      "ReviewTarget": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "$ref": "#/components/schemas/LayrBase"
+              },
+              "kind": {
+                "const": "layrState",
+                "type": "string"
+              },
+              "state": {
+                "$ref": "#/components/schemas/LayrStateId"
+              }
+            },
+            "required": [
+              "kind",
+              "state",
+              "base"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "base": {
+                "$ref": "#/components/schemas/GitRef"
+              },
+              "head": {
+                "$ref": "#/components/schemas/GitCommit"
+              },
+              "kind": {
+                "const": "gitRange",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "base",
+              "head"
+            ],
+            "type": "object"
+          }
+        ],
+        "title": "ReviewTarget"
       },
       "ReviewUncommittedTargetDto": {
         "additionalProperties": false,
@@ -51281,6 +51672,14 @@
         "title": "StatusRequest",
         "type": "object"
       },
+      "StopOutcome": {
+        "description": "Whether all provider work selected by a deletion is confirmed stopped.",
+        "enum": [
+          "confirmed",
+          "unconfirmed"
+        ],
+        "type": "string"
+      },
       "StopRequest": {
         "additionalProperties": false,
         "properties": {
@@ -54616,6 +55015,10 @@
           "checkpoint": {
             "$ref": "#/components/schemas/SyncCheckpoint"
           },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
           "documents": {
             "items": {
               "oneOf": [
@@ -54699,6 +55102,7 @@
         "required": [
           "workspaceId",
           "generation",
+          "complete",
           "documents",
           "checkpoint"
         ],
@@ -64285,19 +64689,6 @@
       "WorkerDefaults": {
         "additionalProperties": false,
         "properties": {
-          "account_key": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Account Key"
-          },
           "daybreak_enabled": {
             "anyOf": [
               {
@@ -64360,18 +64751,6 @@
       "WorkerDefaultsDto": {
         "additionalProperties": false,
         "properties": {
-          "accountKey": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "string"
-              }
-            ],
-            "default": null,
-            "title": "Accountkey"
-          },
           "cyberAccessProgram": {
             "anyOf": [
               {

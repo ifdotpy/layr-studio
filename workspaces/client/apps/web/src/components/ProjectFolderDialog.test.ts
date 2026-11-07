@@ -66,9 +66,8 @@ describe("Project folder dialog", () => {
     const markup = render(
       createElement(ProjectFolderDialog, {
         agent: agent({
-          executionMode: "vm" as Agent["executionMode"],
-          layrProjectId: "app",
-          cwd: "/guest/path",
+          legacyVmWorkspace: true,
+          projectPath: "/guest/path",
         }),
         canReveal: true,
         onReveal: vi.fn(),

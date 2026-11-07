@@ -113,6 +113,7 @@ test("Session Poll Browser", async ({
                   seq: 1,
                 },
               ],
+          complete: true,
           checkpoint: { seq: 1 },
           maxSeq: 1,
           initialHigh: 1,

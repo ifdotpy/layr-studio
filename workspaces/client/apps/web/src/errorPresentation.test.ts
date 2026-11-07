@@ -93,20 +93,33 @@ it("breaks repeated message references and continues to a readable fallback", ()
 });
 
 it("returns complete diagnostics if service-time display conversion throws", () => {
-  const originalToLocaleString = Date.prototype.toLocaleString;
+  // Local times print through cached Intl formatters (local-time.ts).
+  const originalFormat = Object.getOwnPropertyDescriptor(
+    Intl.DateTimeFormat.prototype,
+    "format",
+  )!;
   const diagnostic = {
     message: "You've hit a failure at 2026-01-01T00:00:00Z",
     context: "preserved",
   };
   try {
-    Date.prototype.toLocaleString = function () {
-      throw new Error("Locale conversion failed");
-    };
+    Object.defineProperty(Intl.DateTimeFormat.prototype, "format", {
+      configurable: true,
+      get() {
+        return () => {
+          throw new Error("Locale conversion failed");
+        };
+      },
+    });
     assert.equal(
       displayError(diagnostic),
       '{\n  "message": "You\'ve hit a failure at 2026-01-01T00:00:00Z",\n  "context": "preserved"\n}',
     );
   } finally {
-    Date.prototype.toLocaleString = originalToLocaleString;
+    Object.defineProperty(
+      Intl.DateTimeFormat.prototype,
+      "format",
+      originalFormat,
+    );
   }
 });

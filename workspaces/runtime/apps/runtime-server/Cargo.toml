@@ -32,7 +32,6 @@ tokio-util = { workspace = true, features = ["rt"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-studio-test-deps = { path = "../../packages/test-deps" }
 studio-runtime-services = { path = "../../packages/runtime-services", features = ["test-support"] }
 studio-runtime-store = { path = "../../packages/runtime-store", features = ["test-support"] }
 tempfile = { workspace = true }
@@ -41,6 +40,9 @@ tower = { workspace = true }
 
 [lints]
 workspace = true
+
+[features]
+perf-reporting = ["studio-runtime-http/perf-reporting", "studio-runtime-store/perf-reporting"]
 
 [[test]]
 name = "integration"

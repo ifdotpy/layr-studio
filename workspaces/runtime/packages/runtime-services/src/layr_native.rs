@@ -182,16 +182,16 @@ mod warm_store_tests;
 pub use capability::{NativeLayrCapability, capability, resolve_binary};
 #[cfg(test)]
 fn test_binary() -> Option<std::ffi::OsString> {
-    let binary = std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")?;
-    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(PathBuf::from(&binary)));
-    Some(binary)
+    std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")
 }
 #[cfg(test)]
-pub(crate) fn set_test_binary(binary: PathBuf) {
-    capability::TEST_BINARY.with(|value| *value.borrow_mut() = Some(binary));
+pub(crate) fn override_layr_binary(binary: PathBuf) -> capability::BinaryOverride {
+    capability::override_binary(binary)
 }
 mod failed_import;
 mod private_tree;
+#[cfg(test)]
+pub(crate) mod review_fixture;
 mod runtime;
 pub use runtime::{
     NativeLayrError, agent_value, evidence, main_path, merge, operation, prepare, project_id,
@@ -377,8 +377,11 @@ mod receipt_tests {
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr host binary and APFS or btrfs"]
+    #[ignore = "requires the installed Layr host binary and APFS or btrfs"]
     fn real_host_import_worker_merge_archive_and_warm_caches() {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         use std::{fs, path::PathBuf};
         let binary = PathBuf::from(
             crate::layr_native::test_binary().expect("Set STUDIO_LAYR_NATIVE_TEST_BINARY"),
@@ -516,7 +519,9 @@ mod receipt_tests {
         let state_id =
             run(state.path(), &cwd, &["rev-parse", "head"]).expect("fixture operation succeeds");
         assert_eq!(
-            evidence(state.path(), &worker, &state_id).expect("fixture operation succeeds")["stateId"],
+            evidence(state.path(), &worker, &state_id)
+                .expect("fixture operation succeeds")
+                .state_id,
             state_id
         );
         assert!(evidence(state.path(), &worker, &state_id[..8]).is_err());
@@ -803,7 +808,7 @@ mod review_regressions {
     use std::{fs, path::PathBuf};
 
     #[cfg(unix)]
-    fn fast_fixture() -> (tempfile::TempDir, Value) {
+    fn fast_fixture() -> (tempfile::TempDir, Value, capability::BinaryOverride) {
         use std::os::unix::fs::PermissionsExt;
         let state = tempfile::tempdir().expect("fixture operation succeeds");
         fs::create_dir_all(
@@ -825,8 +830,7 @@ esac
         fs::set_permissions(binary_path(state.path()), fs::Permissions::from_mode(0o755))
             .expect("fixture operation succeeds");
         // Cargo's test runner can execute fixtures concurrently in one process.
-        capability::TEST_BINARY
-            .with(|binary| *binary.borrow_mut() = Some(binary_path(state.path())));
+        let binary_override = override_layr_binary(binary_path(state.path()));
         let project = studio_runtime_store::sha256_hex(b"/fast-source");
         let line = format!("agent-{}", studio_runtime_store::sha256_hex(b"fast-worker"));
         let cwd = main_path(state.path(), &project)
@@ -836,14 +840,14 @@ esac
         fs::create_dir_all(&cwd).expect("fixture operation succeeds");
         fs::create_dir_all(main_path(state.path(), &project)).expect("fixture operation succeeds");
         let worker = json!({"id":"fast-worker","workspaceMode":"layr-native","role":"implementer","isLead":false,"layrReady":true,"layrProjectId":project,"layrLine":line,"cwd":cwd});
-        (state, worker)
+        (state, worker, binary_override)
     }
 
     #[cfg(unix)]
     #[test]
     fn resolved_merge_conflict_is_accepted_without_repeating_merge() {
         use std::os::unix::fs::PermissionsExt;
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         let root = store_path(state.path());
         let main = main_path(state.path(), worker["layrProjectId"].as_str().unwrap());
         let lead = json!({"id":"lead","workspaceMode":"layr-native","role":"lead","isLead":true,"layrReady":true,"layrProjectId":worker["layrProjectId"],"layrLine":"main","cwd":main});
@@ -888,7 +892,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn interrupted_merge_never_runs_again() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         let main = main_path(state.path(), worker["layrProjectId"].as_str().unwrap());
         let lead = json!({"id":"lead","workspaceMode":"layr-native","role":"lead","isLead":true,"layrReady":true,"layrProjectId":worker["layrProjectId"],"layrLine":"main","cwd":main});
         let intent = json!({"lead":"lead","worker":"fast-worker","revision":"worker-state"});
@@ -910,12 +914,14 @@ esac
     #[cfg(unix)]
     #[test]
     fn native_layr_fake_evidence_retains_transport_fields() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         let response = evidence(state.path(), &worker, "full-named-state").unwrap();
+        assert_eq!(response.state_id, "full-named-state");
         assert_eq!(
-            response,
-            json!({"stateId":"full-named-state","projectId":worker["layrProjectId"],"line":worker["layrLine"]})
+            response.project_id.as_deref(),
+            worker["layrProjectId"].as_str()
         );
+        assert_eq!(response.line.as_deref(), worker["layrLine"].as_str());
         let mut unassociated = worker.clone();
         unassociated["cwd"] = json!(state.path().join("elsewhere"));
         assert!(evidence(state.path(), &unassociated, "full-named-state").is_err());
@@ -925,7 +931,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn native_layr_unchanged_save_replays_only_explicit_failures() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         let cwd =
             CanonicalPath::existing(worker["cwd"].as_str().expect("fixture operation succeeds"))
                 .map(CanonicalPath::into_path_buf)
@@ -974,7 +980,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn pending_save_without_a_save_operation_retries() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         leave_pending(state.path(), "pending-save", &save_intent(&worker));
         assert_eq!(
             save(state.path(), &worker, "pending-save").expect("retry after proof")["stateId"],
@@ -986,7 +992,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn pending_save_with_a_save_operation_becomes_completed_and_does_not_run_again() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         leave_pending(state.path(), "pending-save", &save_intent(&worker));
         fs::write(
             store_path(state.path()).join("oplog"),
@@ -1005,7 +1011,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn pending_save_ignores_a_save_operation_from_before_the_receipt() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         leave_pending(state.path(), "pending-save", &save_intent(&worker));
         fs::write(
             store_path(state.path()).join("oplog"),
@@ -1019,7 +1025,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn pending_import_stays_unknown() {
-        let (state, _worker) = fast_fixture();
+        let (state, _worker, _binary_override) = fast_fixture();
         let intent = json!({"kind":"import","project":"p"});
         leave_pending(state.path(), "pending-import", &intent);
         fs::write(
@@ -1038,7 +1044,7 @@ esac
     #[cfg(unix)]
     #[test]
     fn native_layr_archive_sets_the_nonexpiring_pin_before_deleting_the_line() {
-        let (state, worker) = fast_fixture();
+        let (state, worker, _binary_override) = fast_fixture();
         fs::write(
             store_path(state.path()).join("automatic"),
             "full-automatic-state\n",
@@ -1069,7 +1075,16 @@ esac
         assert!(commands[pin].ends_with("full-automatic-state"));
     }
 
-    fn fixture() -> (tempfile::TempDir, tempfile::TempDir, Value, Value) {
+    fn fixture() -> (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        Value,
+        Value,
+        capability::BinaryOverride,
+    ) {
+        let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+            crate::layr_native::test_binary().expect("test binary"),
+        ));
         let state = tempfile::tempdir().expect("fixture operation succeeds");
         let source = tempfile::tempdir().expect("fixture operation succeeds");
         fs::write(source.path().join("code.txt"), "base\n").expect("fixture operation succeeds");
@@ -1110,13 +1125,13 @@ esac
         for (key, value) in fields.as_object().expect("fixture operation succeeds") {
             worker[key] = value.clone();
         }
-        (state, source, lead, worker)
+        (state, source, lead, worker, _binary_override)
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr on APFS or root on btrfs"]
+    #[ignore = "requires the installed Layr on APFS or root on btrfs"]
     fn native_layr_unchanged_turn_save_and_previously_failed_save_can_finish() {
-        let (state, _source, _lead, worker) = fixture();
+        let (state, _source, _lead, worker, _binary_override) = fixture();
         let expected = run(
             state.path(),
             Path::new(worker["cwd"].as_str().expect("fixture operation succeeds")),
@@ -1146,9 +1161,9 @@ esac
     }
 
     #[test]
-    #[ignore = "requires the vendored Layr on APFS or root on btrfs"]
+    #[ignore = "requires the installed Layr on APFS or root on btrfs"]
     fn native_layr_archive_pins_an_unmerged_automatic_state_without_expiry() {
-        let (state, _source, lead, worker) = fixture();
+        let (state, _source, lead, worker, _binary_override) = fixture();
         fs::write(
             PathBuf::from(worker["cwd"].as_str().expect("fixture operation succeeds"))
                 .join("code.txt"),

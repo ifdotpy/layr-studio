@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 use studio_json::{Value, json};
 use studio_runtime_store::{
     AgentId, AgentRepository, QueueEventId, QueueEventRepository, RuntimeStore,
-    TranscriptRepository, truthy,
+    StoredTranscriptView, TranscriptRepository,
 };
 use thiserror::Error;
 
@@ -202,6 +202,38 @@ pub enum PortableHistoryError {
     Transcript(#[from] studio_runtime_store::TranscriptStoreError),
 }
 
+#[derive(Clone, Debug)]
+struct ArchivedStudioItem {
+    raw: studio_json::OwnedRawJson,
+    view: StoredTranscriptView,
+}
+
+impl ArchivedStudioItem {
+    fn from_raw(raw: studio_json::OwnedRawJson) -> Result<Self, studio_json::Error> {
+        let view = studio_json::from_str(raw.as_str())?;
+        Ok(Self { raw, view })
+    }
+}
+
+impl<'de> Deserialize<'de> for ArchivedStudioItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = studio_json::OwnedRawJson::deserialize(deserializer)?;
+        Self::from_raw(raw).map_err(serde::de::Error::custom)
+    }
+}
+impl Serialize for ArchivedStudioItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let raw = self.raw.as_str();
+        if raw.contains(['\r', '\n']) {
+            let single_line = studio_json::OwnedRawJson::from_string(raw.replace(['\r', '\n'], ""))
+                .map_err(serde::ser::Error::custom)?;
+            single_line.serialize(serializer)
+        } else {
+            self.raw.serialize(serializer)
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum ArchiveRecord {
@@ -217,7 +249,7 @@ enum ArchiveRecord {
     StudioItem {
         id: String,
         created: f64,
-        item: Value,
+        item: ArchivedStudioItem,
         #[serde(
             default,
             rename = "fullText",
@@ -252,6 +284,68 @@ enum ArchiveRecord {
         #[serde(rename = "emptyProof", skip_serializing_if = "Option::is_none")]
         empty_proof: Option<Value>,
     },
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ArchiveKind {
+    Header,
+    Footer,
+    Ancestor,
+    StudioItem,
+    NativeThread,
+    NativeTurnPage,
+    NativeItemPage,
+    NativeUnmaterialized,
+}
+impl ArchiveKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Header => "header",
+            Self::Footer => "footer",
+            Self::Ancestor => "ancestor",
+            Self::StudioItem => "studio_item",
+            Self::NativeThread => "native_thread",
+            Self::NativeTurnPage => "native_turn_page",
+            Self::NativeItemPage => "native_item_page",
+            Self::NativeUnmaterialized => "native_unmaterialized",
+        }
+    }
+}
+
+// Serde's internally tagged enum buffers fields, which cannot retain raw JSON.
+// Dispatch Studio items before that buffering so the stored item stays unchanged.
+fn decode_archive_record(encoded: &[u8]) -> Result<ArchiveRecord, studio_json::Error> {
+    #[derive(Deserialize)]
+    struct Kind {
+        kind: ArchiveKind,
+    }
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct StudioRecord {
+        kind: serde::de::IgnoredAny,
+        id: String,
+        created: f64,
+        item: ArchivedStudioItem,
+        #[serde(default, rename = "fullText", deserialize_with = "non_null_optional")]
+        full_text: Option<String>,
+        #[serde(default, rename = "inputEvents")]
+        input_events: Vec<Value>,
+    }
+    let kind: Kind = studio_json::from_slice(encoded)?;
+    if kind.kind == ArchiveKind::StudioItem {
+        let record: StudioRecord = studio_json::from_slice(encoded)?;
+        let _ = record.kind;
+        Ok(ArchiveRecord::StudioItem {
+            id: record.id,
+            created: record.created,
+            item: record.item,
+            full_text: record.full_text,
+            input_events: record.input_events,
+        })
+    } else {
+        studio_json::from_slice(encoded)
+    }
 }
 
 #[derive(Default)]
@@ -679,7 +773,7 @@ fn append_studio_transcript(
 ) -> Result<(), PortableHistoryError> {
     let file = open_archive_file(state_root, path)?;
     for line in BufReader::new(file).lines() {
-        let record: ArchiveRecord = studio_json::from_str(&line?)?;
+        let record = decode_archive_record(line?.as_bytes())?;
         if let ArchiveRecord::StudioItem {
             item,
             full_text,
@@ -687,16 +781,13 @@ fn append_studio_transcript(
             ..
         } = record
         {
-            if truthy(item.get("afterRestore")) {
+            if item.view.after_restore() {
                 continue;
             }
-            let role = item
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or("History");
+            let role = item.view.role.as_deref().unwrap_or("History");
             let body = full_text
                 .as_deref()
-                .or_else(|| item.get("text").and_then(Value::as_str))
+                .or_else(|| item.view.text.value().map(String::as_str))
                 .unwrap_or_default();
             text.push_str(&format!("{role}: {body}\n\n"));
             for event in input_events {
@@ -855,7 +946,7 @@ where
                 maximum: MAX_ARCHIVE_BYTES,
             })?;
         enforce_archive_size(bytes_count, record_index)?;
-        let record: ArchiveRecord = studio_json::from_slice(&line)
+        let record = decode_archive_record(&line)
             .map_err(|_| PortableHistoryError::InvalidArchive("record"))?;
         if let ArchiveRecord::Footer {
             counts,
@@ -923,20 +1014,14 @@ where
                 input_events,
                 ..
             } => {
-                if id.is_empty()
-                    || !item.is_object()
-                    || input_events.iter().any(|event| !event.is_object())
-                {
+                if id.is_empty() || input_events.iter().any(|event| !event.is_object()) {
                     return Err(PortableHistoryError::InvalidArchive("Studio item"));
                 }
-                if !truthy(item.get("afterRestore")) {
-                    let role = item
-                        .get("role")
-                        .and_then(Value::as_str)
-                        .unwrap_or("History");
+                if !item.view.after_restore() {
+                    let role = item.view.role.as_deref().unwrap_or("History");
                     let text = full_text
                         .as_deref()
-                        .or_else(|| item.get("text").and_then(Value::as_str))
+                        .or_else(|| item.view.text.value().map(String::as_str))
                         .unwrap_or_default();
                     studio.add(&format!("{role}: {text}"));
                     for event in input_events {
@@ -1041,32 +1126,26 @@ fn stored_items(
     })?;
     for row in rows {
         let (id, created, encoded) = row?;
-        let item: Value = studio_json::from_str(&encoded)
+        let raw = studio_json::OwnedRawJson::from_string(encoded)
             .map_err(|_| PortableHistoryError::InvalidArchive("Studio item"))?;
-        if !item.is_object() || item.get("id").and_then(Value::as_str) != Some(&id) {
+        let item = ArchivedStudioItem::from_raw(raw)
+            .map_err(|_| PortableHistoryError::InvalidArchive("Studio item"))?;
+        if item.view.id.as_deref() != Some(&id) {
             return Err(PortableHistoryError::InvalidArchive("Studio item identity"));
         }
-        let full_text = TranscriptRepository::full_text_raw(transaction, &id, &item)?;
-        let inputs = match item.get("inputs") {
-            None => Vec::new(),
-            Some(Value::Array(inputs)) => inputs.clone(),
-            _ => return Err(PortableHistoryError::InvalidArchive("input metadata")),
+        let full_text = TranscriptRepository::full_text_view(transaction, &id, &item.view)?;
+        let inputs = match &item.view.inputs {
+            studio_runtime_schema::queue_command::Field::Missing => &[][..],
+            studio_runtime_schema::queue_command::Field::Value(inputs) => inputs.as_slice(),
+            studio_runtime_schema::queue_command::Field::Null => {
+                return Err(PortableHistoryError::InvalidArchive("input metadata"));
+            }
         };
-        if inputs.iter().any(|input| !input.is_object()) {
-            return Err(PortableHistoryError::InvalidArchive("input metadata"));
-        }
         let mut input_events = Vec::new();
         for input in inputs {
-            let input_id = input.get("id").cloned().unwrap_or(Value::Null);
-            let input_id = match input_id {
-                Value::String(value) => Some(value),
-                Value::Null => None,
-                Value::Bool(_) | Value::Number(_) | Value::Array(_) | Value::Object(_) => {
-                    return Err(PortableHistoryError::InvalidArchive("input identity"));
-                }
-            };
+            let input_id = input.id.as_deref();
             let event = if let Some(input_id) = input_id {
-                QueueEventRepository::get(transaction, &QueueEventId::from(input_id.as_str()))?
+                QueueEventRepository::get(transaction, &QueueEventId::from(input_id))?
                     .filter(|event| event.agent.0 == agent_id)
             } else {
                 None
@@ -1083,13 +1162,11 @@ fn stored_items(
                     "turn_id": event.turn_id,
                     "error": event.error,
                 }));
-            } else if input.get("truncated").and_then(Value::as_bool) == Some(true) {
+            } else if input.truncated == Some(true) {
                 return Err(PortableHistoryError::MissingStudioInput);
             }
         }
-        if item.get("truncated").and_then(Value::as_bool) == Some(true)
-            && full_text.as_deref().is_none_or(str::is_empty)
-        {
+        if item.view.truncated == Some(true) && full_text.as_deref().is_none_or(str::is_empty) {
             return Err(PortableHistoryError::MissingStudioItem);
         }
         records.push(ArchiveRecord::StudioItem {
@@ -1150,7 +1227,7 @@ fn checked_native_records(
         }
         let record_index = writer.record_count + 1;
         let encoded_value = encode_record(&value, record_index)?;
-        let record: ArchiveRecord = studio_json::from_slice(&encoded_value)
+        let record = decode_archive_record(&encoded_value)
             .map_err(|_| PortableHistoryError::InvalidArchive("native record"))?;
         match &record {
             ArchiveRecord::NativeThread { thread } => {
@@ -1575,16 +1652,17 @@ fn encode_record<T: Serialize>(
 }
 
 fn record_kind(record: &ArchiveRecord) -> &'static str {
-    match record {
-        ArchiveRecord::Header { .. } => "header",
-        ArchiveRecord::Footer { .. } => "footer",
-        ArchiveRecord::Ancestor { .. } => "ancestor",
-        ArchiveRecord::StudioItem { .. } => "studio_item",
-        ArchiveRecord::NativeThread { .. } => "native_thread",
-        ArchiveRecord::NativeTurnPage { .. } => "native_turn_page",
-        ArchiveRecord::NativeItemPage { .. } => "native_item_page",
-        ArchiveRecord::NativeUnmaterialized { .. } => "native_unmaterialized",
-    }
+    let kind = match record {
+        ArchiveRecord::Header { .. } => ArchiveKind::Header,
+        ArchiveRecord::Footer { .. } => ArchiveKind::Footer,
+        ArchiveRecord::Ancestor { .. } => ArchiveKind::Ancestor,
+        ArchiveRecord::StudioItem { .. } => ArchiveKind::StudioItem,
+        ArchiveRecord::NativeThread { .. } => ArchiveKind::NativeThread,
+        ArchiveRecord::NativeTurnPage { .. } => ArchiveKind::NativeTurnPage,
+        ArchiveRecord::NativeItemPage { .. } => ArchiveKind::NativeItemPage,
+        ArchiveRecord::NativeUnmaterialized { .. } => ArchiveKind::NativeUnmaterialized,
+    };
+    kind.as_str()
 }
 
 /// Capture the account-transfer source settings used to bind native history.
@@ -1700,7 +1778,7 @@ mod tests {
                 account_key: "default".into(),
                 epoch: 2,
                 thread_id: None,
-                source_settings: json!({}),
+                source_settings: source_settings(),
                 source_connection_generation: None,
                 transfer_id: "transfer-a".into(),
                 native_history: None,
@@ -1711,6 +1789,10 @@ mod tests {
             ));
             assert!(!root.path().join("portable-history").exists());
         }
+    }
+
+    fn source_settings() -> Value {
+        super::source_settings_snapshot(&json!({"provider": "codex"})).unwrap()
     }
 
     fn source() -> HistorySource {
@@ -1732,6 +1814,78 @@ mod tests {
             source: source(),
             transfer_id: "transfer-a".to_owned(),
         }
+    }
+
+    #[test]
+    fn archive_kind_matches_each_record_tag() {
+        let item = super::ArchivedStudioItem::from_raw(
+            studio_json::OwnedRawJson::from_string(
+                r#"{"id":"i","role":"assistant","text":"body","extra":{ "n": 1 }}"#.into(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let records = [
+            super::ArchiveRecord::Header {
+                version: 1,
+                source: source(),
+                transfer_id: "t".into(),
+            },
+            super::ArchiveRecord::Ancestor {
+                archive: descriptor(),
+            },
+            super::ArchiveRecord::StudioItem {
+                id: "i".into(),
+                created: 1.0,
+                item,
+                full_text: None,
+                input_events: vec![],
+            },
+            super::ArchiveRecord::NativeThread { thread: json!({}) },
+            super::ArchiveRecord::NativeTurnPage {
+                request: json!({}),
+                page: json!({}),
+            },
+            super::ArchiveRecord::NativeItemPage {
+                request: json!({}),
+                page: json!({}),
+            },
+            super::ArchiveRecord::Footer {
+                counts: BTreeMap::new(),
+                content_sha256: "x".into(),
+            },
+            super::ArchiveRecord::NativeUnmaterialized {
+                thread_id: "t".into(),
+                error: None,
+                empty_proof: None,
+            },
+        ];
+        for record in records {
+            let encoded = studio_json::to_vec(&record).unwrap();
+            #[derive(serde::Deserialize)]
+            struct KindView {
+                kind: super::ArchiveKind,
+            }
+            let kind: KindView = studio_json::from_slice(&encoded).unwrap();
+            let kind = kind.kind;
+            assert_eq!(super::record_kind(&record), kind.as_str());
+            let decoded = super::decode_archive_record(&encoded).unwrap();
+            assert_eq!(super::record_kind(&decoded), kind.as_str());
+        }
+        assert!(super::decode_archive_record(br#"{"kind":"future"}"#).is_err());
+    }
+
+    #[test]
+    fn archive_item_preserves_original_json_bytes() {
+        let raw = r#"{"kind":"studio_item","id":"i","created":1,"item":{"id":"i","role":"assistant","text":"body","provider":{ "n": 1e400 }},"inputEvents":[]}"#;
+        let record = super::decode_archive_record(raw.as_bytes()).unwrap();
+        let super::ArchiveRecord::StudioItem { item, .. } = record else {
+            panic!("Studio item")
+        };
+        assert_eq!(
+            item.raw.as_str(),
+            r#"{"id":"i","role":"assistant","text":"body","provider":{ "n": 1e400 }}"#
+        );
     }
 
     #[test]
@@ -1845,11 +1999,14 @@ mod tests {
                 "rolloutMissing":true
             }
         });
+        let settings = source_settings();
+        let mut changed_settings = settings.clone();
+        changed_settings["model"] = json!("changed");
         let mut capture = NativeHistory {
             account_key: "default".to_owned(),
             thread_id: "thread-a".to_owned(),
             epoch: 2,
-            settings: Value::Null,
+            settings: settings.clone(),
             connection_generation: 4,
             records: Box::new(std::iter::empty()),
             checked_empty_proof: Some(proof),
@@ -1861,7 +2018,7 @@ mod tests {
             Some(&mut capture),
             Some(4),
             2,
-            &Value::Null,
+            &settings,
             "transfer-a",
             &mut writer,
         )
@@ -1873,7 +2030,7 @@ mod tests {
                 Some(&mut capture),
                 Some(4),
                 2,
-                &Value::Null,
+                &settings,
                 "transfer-b",
                 &mut writer,
             )
@@ -1885,7 +2042,7 @@ mod tests {
                 Some(&mut capture),
                 Some(4),
                 3,
-                &Value::Null,
+                &settings,
                 "transfer-a",
                 &mut writer,
             )
@@ -1897,7 +2054,7 @@ mod tests {
                 Some(&mut capture),
                 Some(4),
                 2,
-                &json!({"changed":true}),
+                &changed_settings,
                 "transfer-a",
                 &mut writer,
             )
@@ -1909,7 +2066,7 @@ mod tests {
                 Some(&mut capture),
                 Some(5),
                 2,
-                &Value::Null,
+                &settings,
                 "transfer-a",
                 &mut writer,
             )

@@ -168,15 +168,12 @@ export function scaleAccountKeys(
   return [first, ...rest];
 }
 
-// With several accounts the lead's defaults must not pin one: the create path
-// rejects a worker whose explicit account differs from a pinned default.
 export function scaleWorkerDefaults(
   model: string,
   profile: ScaleProfile,
-  accountKeys: string[],
+  _accountKeys: string[],
 ): Schema["WorkerDefaults"] {
   return {
-    ...(accountKeys.length === 1 ? { account_key: accountKeys[0] } : {}),
     model,
     effort: profile.effort,
     fast_mode: profile.fastMode,

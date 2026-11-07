@@ -6,7 +6,6 @@ import { useMediaQuery } from "@mantine/hooks";
 import type { Agent, Snapshot } from "../../types";
 import type { Account, useAccounts } from "../Accounts";
 import { DelegationSettings, ExecutionPermissions } from "./ExecutionSettings";
-import { AccountExclusionsControl } from "./AccountExclusionsControl";
 import SubagentConcurrencyControl from "./SubagentConcurrencyControl";
 import type { useWorkerModels } from "./WorkerModelPicker";
 import "./chat-settings-dialog.css";
@@ -72,14 +71,6 @@ export function ChatSettingsDialog(p: Props) {
                 />
               </div>
             </section>
-          )}
-          {root?.isLead && (
-            <AccountExclusionsControl
-              lead={root}
-              accounts={p.accounts.data}
-              refresh={p.refresh}
-              onError={p.notify}
-            />
           )}
           <section aria-label="Permissions">
             <Stack gap="sm" id="chat-settings-permissions">

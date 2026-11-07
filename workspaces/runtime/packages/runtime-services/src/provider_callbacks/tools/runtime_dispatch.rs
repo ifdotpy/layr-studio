@@ -15,7 +15,6 @@ use crate::managed_host_tools::{Actor, DispatchedOperation, Error, OperationResu
 pub struct WorkerAccountRequest<'a> {
     pub parent_account_key: &'a str,
     pub requested_account_key: Option<&'a str>,
-    pub default_account_key: Option<&'a str>,
     pub model: &'a str,
     pub excluded_account_keys: &'a [String],
     pub project_account_keys: Option<&'a [String]>,
@@ -45,7 +44,6 @@ pub fn select_worker_account(
             WorkerAccountRequest {
                 parent_account_key,
                 requested_account_key,
-                default_account_key,
                 model,
                 excluded_account_keys,
                 project_account_keys,
@@ -54,16 +52,7 @@ pub fn select_worker_account(
             },
         model_available,
     } = selection;
-    let selected_default = default_account_key.filter(|key| !key.is_empty());
-    if selected_default.is_some()
-        && requested_account_key.is_some()
-        && requested_account_key != selected_default
-    {
-        return Err(CreationError::Invalid(
-            "Use the subagent account selected in chat settings",
-        ));
-    }
-    if let Some(account_key) = requested_account_key.or(selected_default) {
+    if let Some(account_key) = requested_account_key {
         validate_selected_account(account_key, excluded_account_keys, project_account_keys)?;
         let identity = accounts
             .resolve_identity(account_key, parent_account_key)
@@ -683,10 +672,10 @@ pub(super) async fn dispatch(
             }
         }
         crate::layr_read::TOOL => {
-            if !crate::layr_native::is_native(&actor.record().value()) {
-                return Ok(Some(not_sent(Error::Unavailable("native-layr/read"))));
-            }
-            crate::layr_read::run_native(&store, actor, args, request_id).await
+            let Some(assignment) = actor.record().review_assignment.as_ref() else {
+                return Ok(Some(not_sent(Error::Unavailable("layr/read"))));
+            };
+            crate::layr_read::run_native(&store, actor, assignment, args, request_id).await
         }
         "orchestration_agent_manage" if args["action"] == "maintenance_report" => {
             if execution_move {
@@ -1394,7 +1383,7 @@ mod account_identity_tests {
             request: WorkerAccountRequest {
                 parent_account_key: "parent",
                 requested_account_key: requested,
-                default_account_key: None,
+
                 model,
                 excluded_account_keys: &[],
                 project_account_keys: None,
@@ -1462,17 +1451,11 @@ mod account_identity_tests {
     }
 
     #[test]
-    fn empty_transfer_default_inherits_automatic_account() {
-        let defaults: studio_runtime_store::transfer_record::TransferWorkerDefaults =
-            studio_runtime_store::transfer_record::TransferWorkerDefaults {
-                account_key: studio_runtime_schema::queue_command::Field::Value(String::new()),
-                ..Default::default()
-            };
-        let stored = studio_runtime_store::StoredWorkerDefaults::from(defaults);
-        let studio_runtime_store::StoredWorkerDefaults::Known(defaults) = stored else {
-            panic!("transfer defaults remain typed");
-        };
-        let accounts = accounts(&[("ready", ProviderKind::Codex, true)]);
+    fn single_allowed_account_is_selected() {
+        let accounts = accounts(&[
+            ("ready", ProviderKind::Codex, true),
+            ("blocked", ProviderKind::Codex, true),
+        ]);
         let counts = Counts::new();
         let mut available = |_: &str, _: &ManagedAccountIdentity, _: &str| Ok(true);
         let selected = select_worker_account(WorkerAccountSelection {
@@ -1480,9 +1463,9 @@ mod account_identity_tests {
             request: WorkerAccountRequest {
                 parent_account_key: "parent",
                 requested_account_key: None,
-                default_account_key: defaults.account_key.value().map(String::as_str),
+
                 model: "gpt-5",
-                excluded_account_keys: &[],
+                excluded_account_keys: &["blocked".into()],
                 project_account_keys: None,
                 project_account_groups: None,
                 active_agents: &counts,
@@ -1517,7 +1500,7 @@ mod account_identity_tests {
                 request: WorkerAccountRequest {
                     parent_account_key: "parent",
                     requested_account_key: None,
-                    default_account_key: None,
+
                     model: "gpt-5",
                     excluded_account_keys: &[],
                     project_account_keys: None,

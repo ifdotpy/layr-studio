@@ -93,6 +93,17 @@ fn running_tasks(tx: &rusqlite::Connection, agent: &str) -> StoreResult<Vec<Task
     TaskRepository::running_for_agent(tx, agent)
 }
 
+/// Running provider command tasks are the authoritative command stop set.
+pub(crate) fn running_commands(
+    tx: &rusqlite::Connection,
+    agent: &str,
+) -> StoreResult<Vec<TaskRecord>> {
+    Ok(running_tasks(tx, agent)?
+        .into_iter()
+        .filter(|task| task.kind() == studio_runtime_schema::task_record::TaskKind::Command)
+        .collect())
+}
+
 fn write_task(tx: &Transaction<'_>, task: &TaskRecord) -> StoreResult<()> {
     crate::notification_dispatch::put_checked_task_record(tx, task).map_err(|error| match error {
         crate::notification_dispatch::NotificationDispatchError::Store(error) => error,

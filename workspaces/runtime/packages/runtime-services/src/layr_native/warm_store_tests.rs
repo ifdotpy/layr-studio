@@ -58,6 +58,9 @@ fn cargo_build(cwd: &Path) -> (Duration, Vec<Value>) {
 #[test]
 #[ignore = "requires STUDIO_LAYR_NATIVE_TEST_BINARY, the cached memchr crate, and APFS or btrfs"]
 fn real_native_preparation_reuses_an_existing_projects_saved_rust_cache() {
+    let _binary_override = crate::layr_native::override_layr_binary(std::path::PathBuf::from(
+        crate::layr_native::test_binary().expect("test binary"),
+    ));
     let binary = PathBuf::from(crate::layr_native::test_binary().expect("host binary"));
     let fixture = tempfile::tempdir().expect("fixture");
     let fixture_root = CanonicalPath::existing(fixture.path())

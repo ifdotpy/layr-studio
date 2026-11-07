@@ -1,8 +1,5 @@
 //! Axum HTTP edge for the Studio runtime.
 
-#[cfg(test)]
-extern crate studio_test_deps;
-
 mod bounded_entities;
 pub mod error;
 mod http_body_limits;

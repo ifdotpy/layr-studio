@@ -19,6 +19,8 @@ pub struct ChangeSnapshot {
     /// Last broad invalidation; token and explicit-resource publications leave it unchanged.
     pub resource_revision: i64,
     pub closed: bool,
+    #[cfg(feature = "perf-reporting")]
+    pub changed_at: std::time::Instant,
 }
 
 /// A process-local post-commit change publisher backed by Tokio watch.
@@ -40,6 +42,8 @@ impl ChangeNotificationHub {
             revision: 0,
             resource_revision: 0,
             closed: false,
+            #[cfg(feature = "perf-reporting")]
+            changed_at: std::time::Instant::now(),
         });
         Self { sender }
     }
@@ -69,6 +73,10 @@ impl ChangeNotificationHub {
         self.sender.send_if_modified(|snapshot| {
             if snapshot.closed {
                 return false;
+            }
+            #[cfg(feature = "perf-reporting")]
+            {
+                snapshot.changed_at = std::time::Instant::now();
             }
             snapshot.revision = snapshot
                 .revision

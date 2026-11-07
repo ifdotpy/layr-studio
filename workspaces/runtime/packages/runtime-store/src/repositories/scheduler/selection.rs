@@ -2064,7 +2064,9 @@ mod account_wake_index_tests {
                 "CREATE TABLE runtime_events(
                    id TEXT PRIMARY KEY,agent TEXT NOT NULL,kind TEXT NOT NULL,text TEXT NOT NULL,
                    status TEXT NOT NULL,created REAL NOT NULL,epoch INTEGER NOT NULL,
-                   turn_id TEXT,error TEXT);",
+                   turn_id TEXT,error TEXT);
+                 CREATE TABLE runtime_orchestration_settings (
+                   id TEXT PRIMARY KEY, record TEXT NOT NULL);",
             )
             .expect("pre-index schema creates");
         connection

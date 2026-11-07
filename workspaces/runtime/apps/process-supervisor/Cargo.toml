@@ -15,7 +15,6 @@ studio-runtime-process = { path = "../../packages/runtime-process" }
 tokio.workspace = true
 
 [dev-dependencies]
-studio-test-deps = { path = "../../packages/test-deps" }
 notify.workspace = true
 rusqlite.workspace = true
 studio-runtime-store = { path = "../../packages/runtime-store", features = ["test-support"] }

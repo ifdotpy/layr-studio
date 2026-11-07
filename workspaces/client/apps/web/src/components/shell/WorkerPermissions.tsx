@@ -1,3 +1,4 @@
+import { AgentPermissionMode } from "../../generated/api";
 import { ProviderKind, isProviderKind } from "../../generated/providerKind.ts";
 import { NativeSelect } from "@mantine/core";
 import type { Agent } from "../../types";
@@ -49,14 +50,14 @@ export function WorkerPermissions({
     case ProviderKind.Codex: {
       const sandbox =
         lead.permissionMode == null ||
-        lead.permissionMode === "bypassPermissions"
+        lead.permissionMode === AgentPermissionMode["bypassPermissions"]
           ? "danger-full-access"
           : reviewer
             ? "read-only"
             : "workspace-write";
       const approval =
         lead.permissionMode == null ||
-        lead.permissionMode === "bypassPermissions"
+        lead.permissionMode === AgentPermissionMode["bypassPermissions"]
           ? "never"
           : "on-request";
       return (

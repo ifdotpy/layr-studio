@@ -215,7 +215,10 @@ function MultiServerShell({
       }
     >
   >({});
-  const [shellSidebarWidth, setShellSidebarWidth] = useState(0);
+  // The shell reads the sidebar width from its own style. React keeps only
+  // whether there is a sidebar, so a width drag renders nothing here.
+  const [shellSidebar, setShellSidebar] = useState(false);
+  const shellRef = useRef<HTMLDivElement>(null);
   const toggleSidebar = useCallback(() => {
     restoreSidebarFocus();
     if (sidebarCompact) setMobileOpen((old) => !old);
@@ -892,7 +895,8 @@ function MultiServerShell({
   useEffect(() => {
     const narrow = window.matchMedia(layoutQueries.navigationCompact);
     let observed: Element | null = null;
-    const measure = () => {
+    // A resize reports the new width; reading it again would force layout.
+    const measure = (reported?: number) => {
       const sidebar = document.querySelector(".multi-server-shell > #sidebar");
       if (sidebar !== observed) {
         if (observed) observer.unobserve(observed);
@@ -902,21 +906,27 @@ function MultiServerShell({
       const width =
         sidebarHidden || narrow.matches || !sidebar
           ? 0
-          : Math.round(sidebar.getBoundingClientRect().width);
-      setShellSidebarWidth(width);
-      document.documentElement.style.setProperty(
+          : Math.round(reported ?? sidebar.getBoundingClientRect().width);
+      shellRef.current?.style.setProperty(
         "--shell-sidebar-width",
         `${width}px`,
       );
-      if (width > 0) document.documentElement.dataset.shellSidebar = "true";
-      else delete document.documentElement.dataset.shellSidebar;
+      setShellSidebar(width > 0);
+      const root = document.documentElement;
+      if (width > 0 && root.dataset.shellSidebar !== "true")
+        root.dataset.shellSidebar = "true";
+      else if (width === 0 && "shellSidebar" in root.dataset)
+        delete root.dataset.shellSidebar;
     };
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver((entries) =>
+      measure(entries.at(-1)?.borderBoxSize[0]?.inlineSize),
+    );
+    const remeasure = () => measure();
     measure();
-    narrow.addEventListener("change", measure);
+    narrow.addEventListener("change", remeasure);
     return () => {
       observer.disconnect();
-      narrow.removeEventListener("change", measure);
+      narrow.removeEventListener("change", remeasure);
     };
   }, [
     sidebarHidden,
@@ -943,20 +953,20 @@ function MultiServerShell({
     );
   const terminal = preferences.showTerminals ? terminals[current] : undefined;
   const terminalLayout =
-    terminal && shellSidebarWidth > 0
+    terminal && shellSidebar
       ? terminal.opened
         ? "open"
         : "closed"
       : undefined;
   return (
     <div
+      ref={shellRef}
       className={`multi-server-shell ${sidebarHidden ? "server-sidebar-hidden" : ""}`}
       data-navigation="combined"
       data-navigation-compact={sidebarCompact}
       data-shell-terminal={terminalLayout}
       style={
         {
-          "--shell-sidebar-width": `${shellSidebarWidth}px`,
           "--shell-terminal-height": `${terminal?.height || 0}px`,
         } as CSSProperties
       }

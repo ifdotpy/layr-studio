@@ -6,7 +6,7 @@ import {
   RoomKind as GeneratedApiRoomKind,
 } from "../generated/api.ts";
 import { randomUUID } from "../uuid";
-import { sendsTextFile } from "../commands";
+import { codePointsExceed, sendsTextFile } from "../commands";
 import { ProviderKind, providerSupports } from "../generated/providerKind.ts";
 import type { ComponentProps, ReactNode } from "react";
 import { IdleCompactionNotice } from "./IdleCompactionNotice";
@@ -60,6 +60,7 @@ import {
   Ellipsis,
 } from "lucide-react";
 import {
+  memo,
   useCallback,
   useLayoutEffect,
   useEffect,
@@ -172,6 +173,31 @@ function LiveTurnHistory({
   return <TurnHistory {...props} items={items} />;
 }
 
+/**
+ * One transcript message. A streamed token or an agent status change renders
+ * the whole history again, so a message skips its render while its item and
+ * the other values it shows (`context`) are unchanged. Its actions are stable
+ * (useMessageAction), so a skipped render keeps no stale handler.
+ */
+const MessageRow = memo(
+  function MessageRow({
+    render,
+    item,
+  }: {
+    render: (item: Message) => ReactNode;
+    item: Message;
+    context: readonly unknown[];
+  }) {
+    return render(item);
+  },
+  (previous, next) =>
+    previous.item === next.item &&
+    previous.context.length === next.context.length &&
+    previous.context.every((value, index) =>
+      Object.is(value, next.context[index]),
+    ),
+);
+
 // Message controls keep stable identities while their actions read the latest
 // committed draft and chat. These callbacks run from events, never during render.
 function useMessageAction<Args extends unknown[], Result>(
@@ -249,37 +275,62 @@ function FollowLatest(p: {
   );
 }
 
+// The root style also carries values that change every frame, such as the
+// sidebar width while it is dragged. Only the typography inputs change the main
+// font size, and the inline style reads them without a style recalculation, so
+// the computed size is read again only when they change.
+let mainFontKey: string | undefined;
+let mainFontPx = Number.NaN;
+function mainFontSize() {
+  const root = document.documentElement;
+  const key = `${root.dataset.studioTypography}|${root.style.getPropertyValue("--studio-main-font-size")}`;
+  if (key !== mainFontKey) {
+    mainFontKey = key;
+    mainFontPx = Number.parseFloat(
+      getComputedStyle(root).getPropertyValue("--studio-main-font-size"),
+    );
+  }
+  return mainFontPx;
+}
+
 function useCompactHeaderTools() {
-  const isCompact = () => {
-    const fontSize = Number.parseFloat(
-      getComputedStyle(document.documentElement).getPropertyValue(
-        "--studio-main-font-size",
-      ),
+  const isCompact = (workspaceWidth?: number) =>
+    window.matchMedia(layoutQueries.navigationCompact).matches ||
+    isCompactTools(
+      workspaceWidth ??
+        document
+          .querySelector<HTMLElement>(".workspace")
+          ?.getBoundingClientRect().width ??
+        window.innerWidth,
+      mainFontSize(),
     );
-    const workspaceWidth =
-      document.querySelector<HTMLElement>(".workspace")?.getBoundingClientRect()
-        .width ?? window.innerWidth;
-    return (
-      window.matchMedia(layoutQueries.navigationCompact).matches ||
-      isCompactTools(workspaceWidth, fontSize)
-    );
-  };
   const [compact, setCompact] = useState(() =>
     typeof window === "undefined" ? false : isCompact(),
   );
   useEffect(() => {
     const viewport = window.matchMedia(layoutQueries.navigationCompact);
     const workspace = document.querySelector<HTMLElement>(".workspace");
-    const update = () => setCompact(isCompact());
-    const preferences = new MutationObserver(update);
+    let width: number | undefined;
+    const update = () => setCompact(isCompact(width));
+    // A root style change matters only when it changes the typography inputs.
+    const preferences = new MutationObserver(() => {
+      if (mainFontKey === undefined) return update();
+      const before = mainFontKey;
+      mainFontSize();
+      if (mainFontKey !== before) update();
+    });
+    // The observer reports the new width; reading it again would force layout.
     const workspaceObserver = workspace
-      ? new ResizeObserver(update)
+      ? new ResizeObserver((entries) => {
+          width = entries.at(-1)?.borderBoxSize[0]?.inlineSize ?? width;
+          update();
+        })
       : undefined;
     if (workspace) workspaceObserver?.observe(workspace);
     viewport.addEventListener("change", update);
     preferences.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["style"],
+      attributeFilter: ["style", "data-studio-typography"],
     });
     update();
     return () => {
@@ -989,7 +1040,7 @@ export default function Conversation(p: {
     asTextFile = false,
   ) => {
     const draft = p.getDraft(p.id || "new");
-    const draftTooLong = Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
+    const draftTooLong = codePointsExceed(draft, MAX_DRAFT_TEXT_CODEPOINTS);
     const modelCommand = /^\/model(?:\s|$)/i.test(draft.trim());
     const exactModelCommand = /^\/model$/i.test(draft.trim());
     if (!sendsTextFile(draft, asTextFile) && modelCommand) {
@@ -1385,7 +1436,11 @@ export default function Conversation(p: {
       p.notify(`Could not remove this message: ${errorText(error)}`);
     }
   });
-  const renderMessage = (m: Message) => (
+  const renderMessage = (m: Message) => {
+    reportPromptComposerRender("message", m.id);
+    return renderMessageArticle(m);
+  };
+  const renderMessageArticle = (m: Message) => (
     <article
       key={messageRenderKey(m)}
       data-message={m.id}
@@ -1604,6 +1659,32 @@ export default function Conversation(p: {
       />
     </article>
   );
+  // Every value besides the item that renderMessage shows or passes down.
+  const messageContext = (m: Message): readonly unknown[] => [
+    highlighted === m.id,
+    p.room,
+    first,
+    managed,
+    agent?.id,
+    agent?.rootId,
+    agent?.turnId,
+    agent?.inFlight,
+    controls.fork,
+    removingSending,
+    editLoading === m.id,
+    !!editLoading,
+    branching,
+    !!m.turnId && lastAssistantByTurn.get(m.turnId) === m.id,
+    m.localDelivery
+      ? p.outgoing?.find((entry) => entry.id === m.clientMessageId)
+      : undefined,
+    p.offlineSendPending,
+    p.data.stateDir,
+    p.limitsAccounts,
+    p.room ? p.data.threads : undefined,
+    p.notify,
+    p.onObserved,
+  ];
   const transcript = useMemo(
     () => (
       <>
@@ -1631,7 +1712,12 @@ export default function Conversation(p: {
                 <NativeNotice key={item.id} item={item} planType={planType} />
               )
             ) : (
-              renderMessage(item)
+              <MessageRow
+                key={messageRenderKey(item)}
+                item={item}
+                render={renderMessage}
+                context={messageContext(item)}
+              />
             )
           }
           agentId={managed ? agent?.id : undefined}
@@ -1747,6 +1833,153 @@ export default function Conversation(p: {
     () => () => p.onRailToolsChange?.(null),
     [p.onRailToolsChange],
   );
+  // The composer renders again for every keystroke. Its parts that do not
+  // read the draft are built here, with the chat, so React reuses them.
+  const attachTool = managed && (
+    <ComposerAttachments
+      notify={p.notify}
+      assets={assets}
+      uploading={uploading}
+      disabled={!canSend || p.sending}
+      add={addFiles}
+      remove={(id) => {
+        const agentId = p.id || "";
+        void uploadRecovery
+          .remove(id, () => {
+            setAttachments((current) => ({
+              ...current,
+              [agentId]: (current[agentId] || []).filter(
+                (asset) => asset.id !== id,
+              ),
+            }));
+          })
+          .catch((error) => p.notify(errorText(error)));
+      }}
+    />
+  );
+  const voiceTool = managed &&
+    agent?.isLead &&
+    agent?.provider === ProviderKind.Codex &&
+    p.id &&
+    !threadBlock && (
+      <RealtimeVoice key={`voice:${p.id}`} agentId={p.id} notify={p.notify} />
+    );
+  const transferChip = managed && p.agent?.isLead && (
+    <AccountTransferChip transfer={p.agent.accountTransferProgress} />
+  );
+  const draftVersions = (
+    <div className="composer-draft-control">
+      <DraftVersions
+        key={`drafts:${p.id || "new"}`}
+        versions={p.draftConflicts || []}
+        useVersion={(version, mode) =>
+          p.setDraft((current) =>
+            mode === "append" && current
+              ? `${current}\n\n${version.text}`
+              : version.text,
+          )
+        }
+        dismiss={(version) => p.dismissDraft?.(version)}
+      />
+    </div>
+  );
+  const pendingUploads = managed && (
+    <>
+      {!!pendingFiles.length && (
+        <div className="attachment-list" role="status">
+          {pendingFiles.map((file) => (
+            <div className="attachment-chip" key={file.id}>
+              <span>{file.name}: saved on this device, waiting for upload</span>
+              <Button
+                size="compact-xs"
+                onClick={() => {
+                  void uploadRecovery
+                    .remove(file.id, () => {
+                      setAttachments((current) => ({
+                        ...current,
+                        [file.agent]: (current[file.agent] || []).filter(
+                          (asset) => asset.id !== file.id,
+                        ),
+                      }));
+                    })
+                    .catch((error) => p.notify(errorText(error)));
+                }}
+              >
+                Remove pending {file.name}
+              </Button>
+            </div>
+          ))}
+        </div>
+      )}
+      {uploadRecovery.error && (
+        <p role="status">
+          {uploadRecovery.error}{" "}
+          <button type="button" onClick={uploadRecovery.retry}>
+            Retry file upload
+          </button>
+        </p>
+      )}
+    </>
+  );
+  const dictation = managed && p.id && (
+    <Dictation
+      key={`${p.data.stateDir}:${p.id}`}
+      chatId={`${p.data.stateDir}:${p.id}`}
+      disabled={!canSend || p.sending}
+      onInsert={(text) =>
+        p.setDraft(
+          (current) =>
+            current + (current && !current.endsWith("\n") ? "\n" : "") + text,
+        )
+      }
+    />
+  );
+  const stopControl = (
+    <>
+      {!(
+        agent &&
+        ["running", "starting", "approval"].includes(agent.status || "")
+      ) && <span className="composer-stop-slot" aria-hidden="true" />}
+      {agent &&
+        ["running", "starting", "approval"].includes(agent.status || "") && (
+          <ActionIcon
+            type="button"
+            id="stop"
+            aria-label="Stop agent"
+            title={
+              ["running", "starting", "approval"].includes(agent.status || "")
+                ? "Stop agent"
+                : "No active turn to stop"
+            }
+            disabled={
+              stopShown ||
+              !["running", "starting", "approval"].includes(agent.status || "")
+            }
+            aria-busy={stopShown}
+            onClick={() => {
+              const agentId = p.id;
+              if (stopShown || !agentId) return;
+              const attempt = ++stopAttempt.current;
+              setStopping(true);
+              void command
+                .stop(agentId, false)
+                .then(p.refresh)
+                .catch((e) => p.notify(errorText(e)))
+                .finally(() => {
+                  if (stopAttempt.current === attempt) setStopping(false);
+                });
+            }}
+          >
+            {stopShown ? (
+              <Loader size={14} color="currentColor" />
+            ) : (
+              <Square size={14} fill="currentColor" />
+            )}
+          </ActionIcon>
+        )}
+    </>
+  );
+
   return (
     <section
       id="conversation"
@@ -2124,8 +2357,10 @@ export default function Conversation(p: {
             }}
           >
             {(draft) => {
-              const draftTooLong =
-                Array.from(draft).length > MAX_DRAFT_TEXT_CODEPOINTS;
+              const draftTooLong = codePointsExceed(
+                draft,
+                MAX_DRAFT_TEXT_CODEPOINTS,
+              );
               const willAttachText = sendsTextFile(draft);
               const modelCommand =
                 !willAttachText && /^\/model(?:\s|$)/i.test(draft.trim());
@@ -2151,46 +2386,9 @@ export default function Conversation(p: {
                     <ListEnd size={18} />
                   </ActionIcon>
                 ) : null;
-              const attachTool = managed && (
-                <ComposerAttachments
-                  notify={p.notify}
-                  assets={assets}
-                  uploading={uploading}
-                  disabled={!canSend || p.sending}
-                  add={addFiles}
-                  remove={(id) => {
-                    const agentId = p.id || "";
-                    void uploadRecovery
-                      .remove(id, () => {
-                        setAttachments((current) => ({
-                          ...current,
-                          [agentId]: (current[agentId] || []).filter(
-                            (asset) => asset.id !== id,
-                          ),
-                        }));
-                      })
-                      .catch((error) => p.notify(errorText(error)));
-                  }}
-                />
-              );
-              const voiceTool = managed &&
-                agent?.isLead &&
-                agent?.provider === ProviderKind.Codex &&
-                p.id &&
-                !threadBlock && (
-                  <RealtimeVoice
-                    key={`voice:${p.id}`}
-                    agentId={p.id}
-                    notify={p.notify}
-                  />
-                );
               return (
                 <>
-                  {managed && p.agent?.isLead && (
-                    <AccountTransferChip
-                      transfer={p.agent.accountTransferProgress}
-                    />
-                  )}
+                  {transferChip}
                   <PromptInput
                     value={draft}
                     session={p.id || "new"}
@@ -2272,20 +2470,7 @@ export default function Conversation(p: {
                     </div>
                   )}
                   <div className="composer-bar">
-                    <div className="composer-draft-control">
-                      <DraftVersions
-                        key={`drafts:${p.id || "new"}`}
-                        versions={p.draftConflicts || []}
-                        useVersion={(version, mode) =>
-                          p.setDraft((current) =>
-                            mode === "append" && current
-                              ? `${current}\n\n${version.text}`
-                              : version.text,
-                          )
-                        }
-                        dismiss={(version) => p.dismissDraft?.(version)}
-                      />
-                    </div>
+                    {draftVersions}
                     <div className="composer-tools">
                       {attachTool}
                       <div className="composer-tools-inline">{voiceTool}</div>
@@ -2305,68 +2490,8 @@ export default function Conversation(p: {
                       )}
                       {executionControls}
 
-                      {managed && (
-                        <>
-                          {!!pendingFiles.length && (
-                            <div className="attachment-list" role="status">
-                              {pendingFiles.map((file) => (
-                                <div className="attachment-chip" key={file.id}>
-                                  <span>
-                                    {file.name}: saved on this device, waiting
-                                    for upload
-                                  </span>
-                                  <Button
-                                    size="compact-xs"
-                                    onClick={() => {
-                                      void uploadRecovery
-                                        .remove(file.id, () => {
-                                          setAttachments((current) => ({
-                                            ...current,
-                                            [file.agent]: (
-                                              current[file.agent] || []
-                                            ).filter(
-                                              (asset) => asset.id !== file.id,
-                                            ),
-                                          }));
-                                        })
-                                        .catch((error) =>
-                                          p.notify(errorText(error)),
-                                        );
-                                    }}
-                                  >
-                                    Remove pending {file.name}
-                                  </Button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                          {uploadRecovery.error && (
-                            <p role="status">
-                              {uploadRecovery.error}{" "}
-                              <button
-                                type="button"
-                                onClick={uploadRecovery.retry}
-                              >
-                                Retry file upload
-                              </button>
-                            </p>
-                          )}
-                        </>
-                      )}
-                      {managed && p.id && (
-                        <Dictation
-                          key={`${p.data.stateDir}:${p.id}`}
-                          chatId={`${p.data.stateDir}:${p.id}`}
-                          disabled={!canSend || p.sending}
-                          onInsert={(text) => {
-                            const next =
-                              draft +
-                              (draft && !draft.endsWith("\n") ? "\n" : "") +
-                              text;
-                            p.setDraft(next);
-                          }}
-                        />
-                      )}
+                      {pendingUploads}
+                      {dictation}
                     </div>
                     <span id="send-state" role="status" aria-live="polite">
                       {p.sending ? "Sending…" : ""}
@@ -2381,61 +2506,7 @@ export default function Conversation(p: {
                       {queueControl("composer-queue-primary")}
                       {/* The stop slot keeps its width while idle, so Stop
                           appearing during a turn moves no other control. */}
-                      {!(
-                        agent &&
-                        ["running", "starting", "approval"].includes(
-                          agent.status || "",
-                        )
-                      ) && (
-                        <span
-                          className="composer-stop-slot"
-                          aria-hidden="true"
-                        />
-                      )}
-                      {agent &&
-                        ["running", "starting", "approval"].includes(
-                          agent.status || "",
-                        ) && (
-                          <ActionIcon
-                            type="button"
-                            id="stop"
-                            aria-label="Stop agent"
-                            title={
-                              ["running", "starting", "approval"].includes(
-                                agent.status || "",
-                              )
-                                ? "Stop agent"
-                                : "No active turn to stop"
-                            }
-                            disabled={
-                              stopShown ||
-                              !["running", "starting", "approval"].includes(
-                                agent.status || "",
-                              )
-                            }
-                            aria-busy={stopShown}
-                            onClick={() => {
-                              const agentId = p.id;
-                              if (stopShown || !agentId) return;
-                              const attempt = ++stopAttempt.current;
-                              setStopping(true);
-                              void command
-                                .stop(agentId, false)
-                                .then(p.refresh)
-                                .catch((e) => p.notify(errorText(e)))
-                                .finally(() => {
-                                  if (stopAttempt.current === attempt)
-                                    setStopping(false);
-                                });
-                            }}
-                          >
-                            {stopShown ? (
-                              <Loader size={14} color="currentColor" />
-                            ) : (
-                              <Square size={14} fill="currentColor" />
-                            )}
-                          </ActionIcon>
-                        )}
+                      {stopControl}
                       <ActionIcon
                         type="submit"
                         variant="filled"

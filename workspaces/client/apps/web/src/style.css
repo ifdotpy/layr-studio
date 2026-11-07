@@ -352,8 +352,7 @@ p {
   margin: 5px 0;
 }
 .prose pre,
-.tool-group pre,
-.request pre {
+.tool-group pre {
   overflow: auto;
   white-space: pre;
   background: var(--inset);
