@@ -867,7 +867,21 @@ it("applies source commits beyond a full entity page through real SSE and the pr
         ),
     );
     expect(running.threads).toHaveLength(shown.threads.length);
-    for (const status of ["interrupted", "completed"] as const) {
+    const runningLead = running.threads.find((agent) => agent.id === "lead");
+    expect(runningLead).not.toBe(
+      shown.threads.find((agent) => agent.id === "lead"),
+    );
+    expect(runningLead).toMatchObject({
+      operationalStatus: {
+        reason: "waiting",
+        wait: { agents: 1, commands: 0, monitors: 0, inputs: 0, event: null },
+      },
+    });
+    let previousLead = runningLead;
+    for (const [status, sameLead] of [
+      ["interrupted", false],
+      ["completed", true],
+    ] as const) {
       await request("/fixture/entity", {
         agent: { ...worker, status, model: "model-after" },
       });
@@ -876,9 +890,13 @@ it("applies source commits beyond a full entity page through real SSE and the pr
           (agent) => agent.id === "worker" && agent.status === status,
         ),
       );
-      expect(next.threads.find((agent) => agent.id === "lead")).toBe(
-        shown.threads.find((agent) => agent.id === "lead"),
-      );
+      const nextLead = next.threads.find((agent) => agent.id === "lead");
+      expect(nextLead).toMatchObject({
+        operationalStatus: { reason: "working" },
+      });
+      if (sameLead) expect(nextLead).toBe(previousLead);
+      else expect(nextLead).not.toBe(previousLead);
+      previousLead = nextLead;
     }
     const leadChanged = await request("/fixture/entity", {
       agent: {
