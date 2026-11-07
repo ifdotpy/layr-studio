@@ -1,6 +1,10 @@
 import type { ScreenSearchResultsMessage } from "./screenChannel";
 import { useScreenChannel } from "./ScreenContext";
-import { useServerApi, useServerResources, useServerStore } from "./ServerServicesContext";
+import {
+  useServerApi,
+  useServerResources,
+  useServerStore,
+} from "./ServerServicesContext";
 import {
   normalizeStudioPreferences,
   studioPreferencesStorageKey,
@@ -29,7 +33,7 @@ export function useServerFrame(
   opened: string | null,
   error: string,
   run: (command: ServerCommand) => void | Promise<void>,
-  _unread: Set<string>,
+  unread: Set<string>,
   accounts: ServerAccount[],
   creating = false,
 ) {
@@ -48,8 +52,8 @@ export function useServerFrame(
   const now = useAlertClock(data);
   const handler = useRef(run);
   handler.current = run;
-  const latest = useRef({ data, opened, error, creating });
-  latest.current = { data, opened, error, creating };
+  const latest = useRef({ data, opened, error, unread, creating });
+  latest.current = { data, opened, error, unread, creating };
   useEffect(() => {
     if (!screen) return;
     const unbind = screen.bind(async (command) => {
@@ -83,20 +87,25 @@ export function useServerFrame(
   }, [screen, get, watchResourceConnection]);
   useEffect(() => {
     if (!screen) return;
-    return reaction(() => ({
-      kind: "studio-server-navigation" as const,
-      navigation: {
-        ...navigationSnapshot(
-          data,
-          opened,
-          error,
-          sidebarRows(),
-          data ? desktopAlerts(data, now) : [],
-          saved,
-        ),
-        creating,
-      },
-    }), (message) => screen.publish(message), { fireImmediately: true });
+    return reaction(
+      () => ({
+        kind: "studio-server-navigation" as const,
+        navigation: {
+          ...navigationSnapshot(
+            data,
+            opened,
+            error,
+            sidebarRows(),
+            data ? desktopAlerts(data, now) : [],
+            saved,
+            unread,
+          ),
+          creating,
+        },
+      }),
+      (message) => screen.publish(message),
+      { fireImmediately: true },
+    );
   }, [
     screen,
     store,
@@ -106,6 +115,7 @@ export function useServerFrame(
     creating,
     saved,
     now,
+    [...unread].join(":"),
   ]);
   useEffect(() => {
     const safeAccounts = readServerAccounts(accounts);
@@ -159,6 +169,8 @@ export function useServerFrame(
                 value.error,
                 sidebarRows(),
                 value.data ? desktopAlerts(value.data) : [],
+                saved,
+                value.unread,
               ),
               creating: value.creating,
             };
@@ -266,15 +278,39 @@ export function useServerFrame(
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const navigation = () => ({
-      ...navigationSnapshot(data, opened, error, sidebarRows(), data ? desktopAlerts(data, now) : []),
+      ...navigationSnapshot(
+        data,
+        opened,
+        error,
+        sidebarRows(),
+        data ? desktopAlerts(data, now) : [],
+        saved,
+        unread,
+      ),
       creating,
     });
-    const publish = () => window.parent.postMessage({
-      kind: "studio-server-navigation", serverId: serverViewId, navigation: navigation(),
-    }, serverParentOrigin);
-    const stopRows = reaction(navigation, (value) => window.parent.postMessage({
-      kind: "studio-server-navigation", serverId: serverViewId, navigation: value,
-    }, serverParentOrigin), { fireImmediately: true });
+    const publish = () =>
+      window.parent.postMessage(
+        {
+          kind: "studio-server-navigation",
+          serverId: serverViewId,
+          navigation: navigation(),
+        },
+        serverParentOrigin,
+      );
+    const stopRows = reaction(
+      navigation,
+      (value) =>
+        window.parent.postMessage(
+          {
+            kind: "studio-server-navigation",
+            serverId: serverViewId,
+            navigation: value,
+          },
+          serverParentOrigin,
+        ),
+      { fireImmediately: true },
+    );
     const keys = new Set([
       `codex-project-compact:${data?.stateDir}`,
       `codex-project-tree:${data?.stateDir}`,
@@ -298,7 +334,7 @@ export function useServerFrame(
       window.removeEventListener(preferenceEvent, preferencesChanged);
       window.removeEventListener("storage", preferencesChanged);
     };
-  }, [data, opened, error, creating, now, store]);
+  }, [data, opened, error, unread, creating, now, store]);
   useEffect(() => {
     if (screen || !serverViewId || window.parent === window) return;
     const safeAccounts = readServerAccounts(accounts);

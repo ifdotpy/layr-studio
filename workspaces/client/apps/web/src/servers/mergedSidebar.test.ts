@@ -10,11 +10,7 @@ import {
   localSidebarBackend,
   type SidebarBackend,
 } from "../components/sidebar/services";
-import {
-  createSidebarCatalogSelector,
-  createSidebarSearchSelector,
-  itemGroup,
-} from "../components/sidebar/catalog";
+import { itemGroup } from "../components/sidebar/catalog";
 import {
   createMergedSidebarSelector,
   createSidebarSourceStore,
@@ -44,7 +40,12 @@ function source(
     sidebar: {
       stateDir: scope,
       projects,
-      rows: [agent("same", { pinned: true, indicator: { kind: "answer", label: "Needs an answer" } })],
+      rows: [
+        agent("same", {
+          pinned: true,
+          indicator: { kind: "answer", label: "Needs an answer" },
+        }),
+      ],
       rooms: [
         {
           id: "room",
@@ -257,7 +258,9 @@ describe("complete multi-server sidebar projection", () => {
     const local = source("local");
     local.sidebar.rows = [agent("visible", { projectPath: "/elsewhere/lead" })];
     const model = mergeSidebar([local, source("remote")]);
-    expect(model.data.runtime.projects.map((project) => project.path)).toContain(model.projectKey("local", "/elsewhere/lead"));
+    expect(
+      model.data.runtime.projects.map((project) => project.path),
+    ).toContain(model.projectKey("local", "/elsewhere/lead"));
     expect(model.data.threads).toEqual([]);
     expect(model.data.runtime.agents).toEqual([]);
   });
@@ -269,10 +272,9 @@ describe("complete multi-server sidebar projection", () => {
       assert.ok(value.sidebar.projects[0] != null);
       value.sidebar.projects[0].folders = [{ id: "folder", name: "Notes" }];
       assert.ok(value.sidebar.rows[0] != null);
-      value.sidebar.rows[0] = {
-        ...value.sidebar.rows[0],
-        projectFolder: "folder",
-      };
+      value.sidebar.rows = [
+        { ...value.sidebar.rows[0], projectFolder: "folder" },
+      ];
       value.sidebar.peerTeams = [
         { id: "team", name: value.id, projectPath: path, members: ["same"] },
       ];
@@ -374,17 +376,15 @@ describe("complete multi-server sidebar projection", () => {
       "Child",
     ]);
     assert.ok(model.rows[0] != null);
-    const folder = model.folderReferences.get(
-      model.rows[0].projectFolder!,
-    );
+    const folder = model.folderReferences.get(model.rows[0].projectFolder!);
     expect(folder?.owner).toBe("remote");
     const nested = project.folders!.find(
       (row) => row.id === required(model.rows[0]).projectFolder,
     );
     expect(model.folderReferences.get(nested!.parentId!)?.owner).toBe("remote");
-    expect(
-      model.rows.every((row) => row.projectPath === project.path),
-    ).toBe(true);
+    expect(model.rows.every((row) => row.projectPath === project.path)).toBe(
+      true,
+    );
     expect(required(model.data.runtime.peerTeams[0]).projectPath).toBe(
       project.path,
     );
@@ -394,9 +394,25 @@ describe("complete multi-server sidebar projection", () => {
 
   it("retains server ordering, archive, search text, indicator and read CAS proof", () => {
     const local = source("local");
-    local.sidebar.rows = [agent("z", { sortKey: "a", archived: true, searchText: "server search", markRead: { threadId: "native", turnId: "turn", revision: 9, read: true }}), agent("a", {sortKey: "b"})];
+    local.sidebar.rows = [
+      agent("z", {
+        sortKey: "a",
+        archived: true,
+        searchText: "server search",
+        markRead: {
+          threadId: "native",
+          turnId: "turn",
+          revision: 9,
+          read: true,
+        },
+      }),
+      agent("a", { sortKey: "b" }),
+    ];
     const model = mergeSidebar([local, source("remote")]);
-    expect(model.rows.slice(0,2).map((row) => row.id)).toEqual([model.chatKey("local","z"),model.chatKey("local","a")]);
+    expect(model.rows.slice(0, 2).map((row) => row.id)).toEqual([
+      model.chatKey("local", "z"),
+      model.chatKey("local", "a"),
+    ]);
     expect(model.rows[0]?.markRead).toBe(local.sidebar.rows[0]?.markRead);
     expect(model.rows[0]?.searchText).toBe("server search");
     expect(model.rows[0]?.archived).toBe(true);

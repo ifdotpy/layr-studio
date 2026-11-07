@@ -63,8 +63,14 @@ export default function ProjectGroupsSidebar({
   const needle = query.trim().toLocaleLowerCase();
   const lastServer = (group: LogicalProject) =>
     saved<string>(`project-last-server:${group.key}`, "") ||
-    [...group.chats].sort(
-      (a, b) => b.activityAt - a.activityAt,
+    [...group.chats].sort((a, b) =>
+      a.kind === "room"
+        ? b.kind === "room"
+          ? 0
+          : 1
+        : b.kind === "room"
+          ? -1
+          : b.activityAt - a.activityAt,
     )[0]?.serverId;
   return (
     <>

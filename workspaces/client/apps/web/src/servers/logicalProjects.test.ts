@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
 import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
@@ -54,7 +55,9 @@ describe("project locations", () => {
       },
     ]);
     const groups = logicalProjects({
-      local: navigationSnapshot(data, null, ""),
+      local: navigationSnapshot(data, null, "", [
+        sidebarRowFixture("lead", { projectPath: "/lead-only" }),
+      ]),
     });
     expect(groups).toHaveLength(1);
     expect(groups[0]?.path).toBe("/lead-only");
@@ -115,12 +118,17 @@ describe("project locations", () => {
         [project],
         [
           {
+            kind: "chat",
             id: "same",
             name: "Local chat",
             path: "/Projects/chrompile",
             archived: false,
-            status: "",
-            unread: false,
+            projectId: null,
+            projectServerId: null,
+            provider: "codex",
+            indicator: { kind: "none", label: "Ready" },
+            compactPinned: false,
+            activityAt: 1,
           },
         ],
       ),
@@ -138,14 +146,17 @@ describe("project locations", () => {
         ],
         [
           {
+            kind: "chat",
             id: "same",
             name: "Remote chat",
             path: "/Projects/attar",
             projectId: project.id,
             projectServerId: "mac-id",
             archived: false,
-            status: "",
-            unread: false,
+            provider: "codex",
+            indicator: { kind: "none", label: "Ready" },
+            compactPinned: false,
+            activityAt: 1,
           },
         ],
       ),
@@ -343,20 +354,30 @@ it("only registered logical projects expose a native deletion target", () => {
       [{ id: "saved", name: "Saved", path: "/saved" }],
       [
         {
+          kind: "chat",
           id: "inferred",
           name: "Inferred",
           path: "/inferred",
           archived: false,
-          status: "",
-          unread: false,
+          projectId: null,
+          projectServerId: null,
+          provider: "codex",
+          indicator: { kind: "none", label: "Ready" },
+          compactPinned: false,
+          activityAt: 1,
         },
         {
+          kind: "chat",
           id: "other",
           name: "Other",
           path: "",
           archived: false,
-          status: "",
-          unread: false,
+          projectId: null,
+          projectServerId: null,
+          provider: "codex",
+          indicator: { kind: "none", label: "Ready" },
+          compactPinned: false,
+          activityAt: 1,
         },
       ],
     ),

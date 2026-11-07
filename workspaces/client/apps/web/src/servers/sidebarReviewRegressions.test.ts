@@ -1,3 +1,4 @@
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -25,17 +26,11 @@ function source(id: string, count = 1, directories = false): SidebarSource {
     online: true,
     sidebar: {
       stateDir: "/same/state",
-      threads: Array.from(
-        { length: count },
-        (_, i) =>
-          ({
-            id: "chat-" + i,
-            cwd: directories ? path + "/" + i : path,
-            projectPath: directories ? path + "/" + i : path,
-            source: AgentSource.managed,
-            isLead: true,
-            name: "Chat " + i,
-          }) as Agent,
+      rows: Array.from({ length: count }, (_, i) =>
+        sidebarRowFixture("chat-" + i, {
+          projectPath: directories ? path + "/" + i : path,
+          name: "Chat " + i,
+        }),
       ),
       projects: [{ id: "p-" + id, path, name: id, folders: [] }],
       rooms: [],
@@ -43,8 +38,6 @@ function source(id: string, count = 1, directories = false): SidebarSource {
       savedOrder: {},
       compact: {},
       collapsed: { [path]: true },
-      indicators: [],
-      unread: [],
       sidebarOrder: {
         revision: 1,
         groups: {
@@ -131,9 +124,9 @@ it.each([false, true])(
   (registered) => {
     const a = source("local", 3, true);
     if (registered)
-      a.sidebar.projects = a.sidebar.threads.map((chat) => ({
-        id: chat.cwd!,
-        path: chat.cwd!,
+      a.sidebar.projects = a.sidebar.rows.map((chat) => ({
+        id: chat.projectPath,
+        path: chat.projectPath,
         folders: [],
       }));
     const select = createMergedSidebarSelector();
@@ -149,9 +142,9 @@ it.runIf(process.env.CODEX_SIDEBAR_BENCHMARK === "1").each([false, true])(
   (registered) => {
     const a = source("local", 6000, true);
     if (registered)
-      a.sidebar.projects = a.sidebar.threads.map((chat) => ({
-        id: chat.cwd!,
-        path: chat.cwd!,
+      a.sidebar.projects = a.sidebar.rows.map((chat) => ({
+        id: chat.projectPath,
+        path: chat.projectPath,
         folders: [],
       }));
     const select = createMergedSidebarSelector();

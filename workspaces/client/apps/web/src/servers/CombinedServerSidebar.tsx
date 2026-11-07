@@ -253,11 +253,7 @@ export default function CombinedServerSidebar({
       }
       markUnread={(id, target) => {
         const reference = model.chatReferences.get(id);
-        if (
-          !reference ||
-          !online(reference.owner)
-        )
-          return;
+        if (!reference || !online(reference.owner)) return;
         setMarking((old) => new Set([...old, id]));
         void executeCommand(reference.owner, {
           action: "mark-unread",

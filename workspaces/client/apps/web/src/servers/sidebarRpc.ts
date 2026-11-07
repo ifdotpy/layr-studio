@@ -1,7 +1,6 @@
 import { randomUUID } from "../uuid";
 import { frameMessageOrigin } from "./frameOrigin";
-import { sidebarAgent } from "./sidebarSnapshot";
-import type { Agent } from "../types";
+import type { PostResult } from "../apiTypes.ts";
 import {
   ApiError,
   NetworkTimeoutError,
@@ -251,7 +250,16 @@ export async function executeSidebarRequest(
     ...options,
     sessionToken,
   });
-  return request.path === "/api/organization"
-    ? sidebarAgent(result as Agent)
-    : result;
+  if (request.path === "/api/organization") {
+    const source = result as PostResult<"/api/organization">;
+    const receipt: Pick<
+      typeof source,
+      "projectFolder" | "projectFolderRevision"
+    > = {};
+    if ("projectFolder" in source) receipt.projectFolder = source.projectFolder;
+    if ("projectFolderRevision" in source)
+      receipt.projectFolderRevision = source.projectFolderRevision;
+    return receipt;
+  }
+  return result;
 }

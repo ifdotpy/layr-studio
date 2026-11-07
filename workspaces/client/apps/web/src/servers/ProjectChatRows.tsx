@@ -8,8 +8,36 @@ import { DEFAULT_LOCAL_SERVER_ALIAS } from "./serverAliases";
 import "./sidebar-status.css";
 import { providerLabel } from "../generated/providerKind.ts";
 
-export type ProjectChat = Pick<SidebarChatRow, "id" | "name" | "activityAt" | "compactPinned"> & Partial<Pick<SidebarChatRow, "provider" | "indicator">> & { serverId?: string | null };
-export const keepCompactChat = keepCompactSidebarChat;
+export type ProjectChat =
+  | (Pick<SidebarChatRow, "id" | "name" | "activityAt" | "compactPinned"> &
+      Partial<Pick<SidebarChatRow, "provider" | "indicator">> & {
+        kind: "chat";
+        serverId?: string | null;
+      })
+  | {
+      kind: "room";
+      id: string;
+      name: string;
+      unread: boolean;
+      serverId?: string | null;
+      provider?: never;
+      indicator?: never;
+    };
+export function keepCompactChat(
+  chat: ProjectChat,
+  now = Date.now() / 1000,
+): boolean {
+  switch (chat.kind) {
+    case "chat":
+      return keepCompactSidebarChat(chat, now);
+    case "room":
+      return chat.unread;
+    default: {
+      const exhaustive: never = chat;
+      return exhaustive;
+    }
+  }
+}
 
 export function compactVisibleChats(
   chats: ProjectChat[],
@@ -21,7 +49,9 @@ export function compactVisibleChats(
   return chats.filter(
     (chat) =>
       !shouldCompact ||
-      (selected?.id === chat.id && selected.serverId === chat.serverId) ||
+      (selected &&
+        selected.id === chat.id &&
+        selected.serverId === chat.serverId) ||
       keepCompactChat(chat),
   );
 }
@@ -101,7 +131,7 @@ export default function ProjectChatRows({
   setCompact: (value: boolean) => void;
 }) {
   const isSelected = (chat: ProjectChat) =>
-    selected?.id === chat.id && selected.serverId === chat.serverId;
+    selected && selected.id === chat.id && selected.serverId === chat.serverId;
   const shouldCompact = compact && chats.length >= hideOldChatsThreshold;
   const visible = query
     ? chats

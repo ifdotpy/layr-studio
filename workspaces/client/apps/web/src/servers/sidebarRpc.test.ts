@@ -274,11 +274,12 @@ it("runs prefetch and unread callbacks in the owning frame and returns its fresh
   expect(post).not.toHaveBeenCalled();
 });
 
-it("organization replies use only the sidebar agent whitelist", async () => {
+it("organization replies expose only the folder action receipt", async () => {
   post.mockResolvedValue({
     id: "same",
     pinned: true,
-    tail: "Preview",
+    projectFolder: "nested",
+    projectFolderRevision: 7,
     prompt: "PRIVATE_PROMPT",
     lastAnswer: "PRIVATE_ANSWER",
     runtime: { token: "PRIVATE_TOKEN" },
@@ -293,5 +294,5 @@ it("organization replies use only the sidebar agent whitelist", async () => {
     vi.fn(),
     "owner-session-token",
   );
-  expect(result).toEqual({ id: "same", pinned: true, tail: "Preview" });
+  expect(result).toEqual({ projectFolder: "nested", projectFolderRevision: 7 });
 });

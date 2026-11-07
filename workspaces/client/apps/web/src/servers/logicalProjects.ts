@@ -83,7 +83,7 @@ export function logicalProjects(
   for (const [source, view] of Object.entries(navigation)) {
     for (const chat of view.chats) {
       const binding =
-        chat.projectId && chat.projectServerId
+        chat.kind === "chat" && chat.projectId && chat.projectServerId
           ? keyFor(chat.projectServerId, chat.projectId)
           : undefined;
       const group =

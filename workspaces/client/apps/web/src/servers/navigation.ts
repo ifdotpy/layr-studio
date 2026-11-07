@@ -53,11 +53,32 @@ export function readServerAccounts(value: unknown): ServerAccount[] | null {
   }
   return accounts;
 }
+export type ServerChatSummary = Pick<
+  SidebarChatRow,
+  | "id"
+  | "name"
+  | "archived"
+  | "projectId"
+  | "projectServerId"
+  | "provider"
+  | "indicator"
+  | "compactPinned"
+  | "activityAt"
+> & { kind: "chat"; path: string; serverId?: string | null };
+export type ServerRoomSummary = {
+  kind: "room";
+  id: string;
+  name: string;
+  path: string;
+  archived: false;
+  unread: boolean;
+  serverId?: string | null;
+};
 export type ServerNavigation = {
   workspaceId?: string | undefined;
   sidebar?: ServerSidebarSnapshot;
   projects: (Omit<LocationProject, "id"> & { id?: string })[];
-  chats: (Pick<SidebarChatRow, "id" | "name" | "archived" | "projectId" | "projectServerId" | "provider" | "indicator" | "compactPinned" | "activityAt"> & { path: string; serverId?: string | null })[];
+  chats: (ServerChatSummary | ServerRoomSummary)[];
   ready: boolean;
   busy?: boolean;
   creating?: boolean;
@@ -125,6 +146,7 @@ export function navigationSnapshot(
   rows: readonly SidebarChatRow[] = [],
   alerts: DesktopAlert[] = [],
   readSaved: typeof saved = saved,
+  unread: ReadonlySet<string> = new Set(),
 ): ServerNavigation {
   const projects = new Map<string, ServerNavigation["projects"][number]>();
   for (const project of data?.runtime?.projects || []) {
@@ -153,12 +175,14 @@ export function navigationSnapshot(
             project.homeServerId === chat.projectServerId) ||
           project.locations?.some(
             (location) =>
-              location.path === path && location.serverId === chat.projectServerId,
+              location.path === path &&
+              location.serverId === chat.projectServerId,
           ),
       )
     )
       projects.set(path, { path, name: path || "Other chats" });
     chats.push({
+      kind: "chat",
       id: chat.id,
       name: chat.name || "Chat",
       path,
@@ -169,6 +193,20 @@ export function navigationSnapshot(
       activityAt: chat.activityAt,
       compactPinned: chat.compactPinned,
       indicator: chat.indicator,
+    });
+  }
+  for (const room of data?.runtime?.rooms || []) {
+    if (!room.radio || room.userHidden) continue;
+    const path = room.projectPath || "";
+    if (!projects.has(path))
+      projects.set(path, { path, name: path || "Other chats" });
+    chats.push({
+      kind: "room",
+      id: room.id,
+      name: room.name || "Shared chat",
+      path,
+      archived: false,
+      unread: (room.members || []).some((id) => unread.has(id)),
     });
   }
   return {

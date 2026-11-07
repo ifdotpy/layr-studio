@@ -53,11 +53,18 @@ describe("server sidebar projection", () => {
   it("forwards server rows unchanged, with their indicator and CAS proof", () => {
     const data = snapshot();
     data.threads = [{ id: "lead", name: "Stale Agent title", inFlight: true }];
-    const rows = [sidebarRowFixture("lead", {
-      indicator: { kind: "answer", label: "Server decides precedence" },
-      markRead: { threadId: "native", turnId: "turn", read: true, revision: 5 },
-      copyProgress: { phase: "staging", done: 2, total: 4, unit: "files" },
-    })];
+    const rows = [
+      sidebarRowFixture("lead", {
+        indicator: { kind: "answer", label: "Server decides precedence" },
+        markRead: {
+          threadId: "native",
+          turnId: "turn",
+          read: true,
+          revision: 5,
+        },
+        copyProgress: { phase: "staging", done: 2, total: 4, unit: "files" },
+      }),
+    ];
     const projected = sidebarSnapshot(data, rows);
     expect(projected.rows).toBe(rows);
     expect(projected.rows[0]).toBe(rows[0]);
@@ -196,6 +203,8 @@ describe("server sidebar projection", () => {
     expect(navigation.sidebar).toEqual(sidebarSnapshot(data, rows));
     expect(navigation.busy).toBe(true);
     expect(navigation.chats[0]?.indicator).toBe(rows[0]?.indicator);
-    expect(navigationSnapshot(null, null, "", rows)).not.toHaveProperty("sidebar");
+    expect(navigationSnapshot(null, null, "", rows)).not.toHaveProperty(
+      "sidebar",
+    );
   });
 });

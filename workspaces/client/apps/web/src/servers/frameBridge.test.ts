@@ -1,3 +1,6 @@
+import { observable, runInAction } from "mobx";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { AgentSource } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -7,12 +10,20 @@ import type { ServerNavigation, ServerAccount } from "./navigation";
 import { createScreenChannel, type ScreenChannel } from "./screenChannel";
 
 const hooks = vi.hoisted(() => ({
+  list: { rows: [] as readonly SidebarChatRow[] },
   effects: [] as (() => void | (() => void))[],
   screen: null as ScreenChannel | null,
 }));
 vi.mock("./ScreenContext", async (original) => ({
   ...(await original<typeof import("./ScreenContext")>()),
   useScreenChannel: () => hooks.screen,
+}));
+vi.mock("./ServerServicesContext", () => ({
+  useServerStore: () => ({
+    sidebar: () => ({ current: { status: "live", data: hooks.list } }),
+  }),
+  useServerApi: () => ({ get: vi.fn(), saved: api.saved }),
+  useServerResources: () => ({ watchResourceConnection: () => stopConnection }),
 }));
 vi.mock("react", async (importOriginal) => ({
   ...(await importOriginal<typeof import("react")>()),
@@ -42,6 +53,7 @@ vi.mock("../sync/subscriptions/events", () => ({
   defaultSubscriptions: { watchResourceConnection: () => stopConnection },
 }));
 
+import * as api from "../api";
 import { useServerFrame } from "./frameBridge";
 import * as sidebarRpc from "./sidebarRpc";
 import { ApiError } from "../api";
@@ -65,6 +77,14 @@ let records: Map<string, string>;
 let cleanup: (() => void)[];
 beforeEach(() => {
   preferenceMemory.clear();
+  hooks.list = observable({
+    rows: [
+      sidebarRowFixture("lead", {
+        name: "Real chat",
+        indicator: { kind: "unread", label: "Unread result" },
+      }),
+    ],
+  });
   hooks.effects = [];
   hooks.screen = null;
   cleanup = [];
@@ -192,9 +212,9 @@ it("publishes a real scoped snapshot and republishes after a saved preference ed
   const [initial, origin] = required(navigationMessages()[0]);
   expect(origin).toBe("https://parent.example");
   expect(initial.serverId).toBe("remote");
-  expect(initial.navigation.sidebar?.threads[0]?.name).toBe("Real chat");
+  expect(initial.navigation.sidebar?.rows[0]?.name).toBe("Real chat");
   expect(initial.navigation.sidebar?.compact).toEqual({});
-  expect(initial.navigation.sidebar?.unread).toEqual(["lead"]);
+  expect(initial.navigation.sidebar?.rows[0]?.indicator.kind).toBe("unread");
   expect(JSON.stringify(initial.navigation.sidebar)).not.toContain(
     "session-token",
   );
@@ -437,3 +457,41 @@ it("forwards typed operational diagnostics and only documented validation detail
     "https://parent.example",
   );
 });
+
+it.each(["parent", "screen"])(
+  "publishes an observable row update without a Snapshot render through %s",
+  (mode) => {
+    const publish = vi.fn();
+    if (mode === "screen")
+      hooks.screen = createScreenChannel("remote", publish);
+    mount();
+    const calls =
+      mode === "screen"
+        ? publish.mock.calls
+        : surface.parent.postMessage.mock.calls;
+    const messages = () =>
+      calls.filter(([message]) => message.kind === "studio-server-navigation");
+    expect(messages()).toHaveLength(1);
+    runInAction(() => {
+      hooks.list.rows = [
+        sidebarRowFixture("lead", {
+          name: "Updated from stream",
+          indicator: { kind: "answer", label: "Server precedence" },
+        }),
+      ];
+    });
+    expect(messages()).toHaveLength(2);
+    expect(messages().at(-1)?.[0].navigation.sidebar.rows[0].name).toBe(
+      "Updated from stream",
+    );
+    expect(
+      messages().at(-1)?.[0].navigation.sidebar.rows[0].indicator.kind,
+    ).toBe("answer");
+    cleanup.forEach((stop) => stop());
+    cleanup = [];
+    runInAction(() => {
+      hooks.list.rows = [];
+    });
+    expect(messages()).toHaveLength(2);
+  },
+);

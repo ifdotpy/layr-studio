@@ -1,3 +1,5 @@
+import { snapshotFixture } from "../snapshotFixture";
+import { sidebarRowFixture } from "./sidebarRowFixture";
 import { expect, it } from "vitest";
 import assert from "node:assert/strict";
 import {
@@ -99,44 +101,15 @@ it("rejects malformed account providers and operations", () => {
   ).toBe(false);
 });
 
-// These upstream fixtures omit snapshot metadata, thread timestamps and move IDs.
-const partialSnapshot = (data: object) =>
-  data as NonNullable<Parameters<typeof navigationSnapshot>[0]>;
-
-it("shows the active target chat and hides the source move record", () => {
-  const chat = {
-    id: "same-id",
-    source: "managed",
-    isLead: true,
-    cwd: "/project",
-    projectPath: "/source/project",
-  };
-  const source = navigationSnapshot(
-    partialSnapshot({ threads: [{ ...chat, movedTo: { server: "target" } }] }),
-    null,
-    "",
-  );
-  const target = navigationSnapshot(
-    partialSnapshot({
-      entityWorkspaceId: "workspace-target",
-      threads: [{ ...chat, movedFrom: { server: "source" } }],
-    }),
-    null,
-    "",
-  );
-  assert.equal(target.workspaceId, "workspace-target");
-  assert.equal(target.chats[0]?.path, "/source/project");
-  assert.deepEqual(source.chats, []);
-  assert.deepEqual(
-    navigationSnapshot(
-      partialSnapshot({ threads: [{ ...chat, moveImportPending: true }] }),
-      null,
-      "",
-    ).chats,
-    [],
-  );
-  assert.deepEqual(
-    target.chats.map((row) => row.id),
-    ["same-id"],
-  );
+it("uses the server-visible rows instead of stale move records", () => {
+  const data = snapshotFixture([
+    { id: "moved", movedTo: { server: "target", agentId: "moved", move: "m" } },
+  ]);
+  expect(navigationSnapshot(data, null, "", []).chats).toEqual([]);
+  const row = sidebarRowFixture("moved", { projectPath: "/source/project" });
+  data.entityWorkspaceId = "workspace-target";
+  const target = navigationSnapshot(data, null, "", [row]);
+  expect(target.workspaceId).toBe("workspace-target");
+  expect(target.chats[0]?.path).toBe("/source/project");
+  expect(target.chats.map((row) => row.id)).toEqual(["moved"]);
 });
