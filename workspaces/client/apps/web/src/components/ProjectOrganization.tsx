@@ -100,7 +100,7 @@ export function MoveChatForm({
   saved,
 }: {
   project: Project;
-  agent: Agent;
+  agent: Pick<Agent, "id" | "projectFolder" | "projectFolderRevision">;
   saved: () => Promise<void>;
 }) {
   const [folder, setFolder] = useState(agent.projectFolder || "");
@@ -160,8 +160,8 @@ export function ConvertChatForm({
   saved,
 }: {
   project: Project;
-  source: Agent;
-  target: Agent;
+  source: Pick<Agent, "id" | "name">;
+  target: Pick<Agent, "id" | "name">;
   scope: string;
   saved: () => Promise<void>;
 }) {

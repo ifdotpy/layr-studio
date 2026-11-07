@@ -76,6 +76,7 @@ export function useChatReadState(
     key,
     states: new Map<string, ChatReadState>(),
     requests: new Map<string, Promise<void>>(),
+    pendingReadTargets: new Map<string, ChatReadState>(),
     suppressed: new Set<string>(),
     attempted: new Set<string>(),
     uncertain: new Set<string>(),
@@ -86,6 +87,7 @@ export function useChatReadState(
       key,
       states: new Map(),
       requests: new Map(),
+      pendingReadTargets: new Map(),
       suppressed: new Set(),
       attempted: new Set(),
       uncertain: new Set(),
@@ -111,7 +113,7 @@ export function useChatReadState(
     },
     [key, metadataVersion],
   );
-  const write = async (proof: ChatReadProof, read: boolean) => {
+  const write = async (proof: ChatReadProof, read: boolean, target?: ChatReadState) => {
     const current = scope.current;
     const valid = () => mounted.current && scope.current === current;
     const pending = current.requests.get(proof.id);
@@ -119,18 +121,18 @@ export function useChatReadState(
       if (read) return;
       await pending;
       if (!valid()) return;
-      return write(proof, read);
+      return write(proof, read, target);
     }
     const agent = latest.current.data?.threads.find(
       (value) => value.id === proof.id,
     );
     const result = agent && completed(agent);
-    if (
+    if (!target && (
       !agent ||
       agent.readStateSupported !== true ||
       !result ||
       !sameResult(result, proof)
-    )
+    ))
       return;
     if (
       read &&
@@ -140,7 +142,7 @@ export function useChatReadState(
         !document.hasFocus())
     )
       return;
-    const saved = readStateFor(agent);
+    const saved = target ?? (agent ? readStateFor(agent) : null);
     if (
       saved?.threadId === proof.threadId &&
       saved.turnId === proof.turnId &&
@@ -156,6 +158,12 @@ export function useChatReadState(
     ]);
     if (read && current.attempted.has(attempt)) return;
     if (read) current.attempted.add(attempt);
+    if (read) current.pendingReadTargets.set(proof.id, {
+      threadId: proof.threadId,
+      turnId: proof.turnId,
+      revision: saved?.revision || 0,
+      read: false,
+    });
     const request = (async () => {
       try {
         const body = {
@@ -247,6 +255,7 @@ export function useChatReadState(
     } finally {
       if (current.requests.get(proof.id) === request)
         current.requests.delete(proof.id);
+      current.pendingReadTargets.delete(proof.id);
       if (valid()) redraw((value) => value + 1);
     }
   };
@@ -266,6 +275,10 @@ export function useChatReadState(
       scope.current.suppressed.add(agent.id);
     await writeCurrent.current(proof, false);
   }, []);
+  const markSidebarUnread = useCallback(async (id: string, target: ChatReadState) => {
+    if (latest.current.opened === id) scope.current.suppressed.add(id);
+    await writeCurrent.current({id, threadId: target.threadId, turnId: target.turnId}, false, target);
+  }, []);
   const observeRead = useCallback((proof: ChatReadProof) => {
     if (selected.current !== proof.id) return;
     selected.current = null;
@@ -284,6 +297,8 @@ export function useChatReadState(
   return {
     readStateFor,
     marking: new Set(scope.current.requests.keys()),
+    pendingReadTargets: scope.current.pendingReadTargets,
+    markSidebarUnread,
     markUnread,
     observeRead,
     select,

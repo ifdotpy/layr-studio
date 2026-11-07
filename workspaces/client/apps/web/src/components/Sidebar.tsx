@@ -1,4 +1,8 @@
 import { outboxRequests } from "../browserPersistence";
+import { observer } from "mobx-react-lite";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import { keepCompactSidebarChat } from "./sidebar/compact.ts";
 import {
   localSidebarServices,
   SidebarBackendProvider,
@@ -48,11 +52,10 @@ import {
   ProjectNameForm,
   MoveChatForm,
   ConvertChatForm,
-  folderLabel,
   type Project,
   type ProjectFolder,
 } from "./ProjectOrganization";
-import { type Agent, type Snapshot } from "../types";
+import { type Snapshot } from "../types";
 import {
   PeerTeamForm,
   PeerTeamGroup,
@@ -60,8 +63,6 @@ import {
 } from "./shell/messages/PeerTeams";
 
 import SidebarRow from "./SidebarRow";
-import { needsYou, projectStateCounts } from "./sidebar/fleet";
-import ProjectStateCounts from "./sidebar/ProjectStateCounts";
 import RemoteProjects, {
   remoteProjectGroups,
   type RemoteProjectList,
@@ -73,16 +74,14 @@ import {
   useServerAliases,
 } from "../servers/serverAliases";
 import { serverViewId } from "../servers/environment";
-import { ChatServerLine, keepCompactChat } from "../servers/ProjectChatRows";
+import { ChatServerLine } from "../servers/ProjectChatRows";
 import {
   countProjectChats,
-  createSidebarCatalogSelector,
-  createSidebarSearchSelector,
   itemGroup,
-  chatGroup as catalogChatGroup,
 } from "./sidebar/catalog";
 export { isVisibleSidebarAgent } from "./sidebar/catalog";
-import type { ChatIndicator } from "./chat-status/chatStatusModel";
+import { sidebarRows } from "./sidebar/rows.ts";
+import { SidebarAttention, SidebarProjectStates } from "./sidebar/RowStatus.tsx";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
 import { DEFAULT_HIDE_OLD_CHATS_THRESHOLD } from "../studioPreferences";
 
@@ -97,11 +96,11 @@ export type SidebarProps = {
   settings?: () => void;
   notice?: string;
   data: Snapshot;
+  rows?: readonly SidebarChatRow[];
   /** Registered project paths when data also contains inferred view projects. */
   registeredProjectPaths?: ReadonlySet<string>;
   opened: string | null;
   selectionIdentity?: string;
-  lead?: Agent | undefined;
   open: (id: string) => void;
   prepareChat?: (id: string) => void;
   newChat: (path?: string, folder?: string) => void;
@@ -109,7 +108,7 @@ export type SidebarProps = {
   addProject: () => void;
   /** Projects of paired servers, listed read-only below this server's projects. */
   remoteProjects?: RemoteProjectList;
-  changeProject: (agent: Agent) => void;
+  changeProject: (id: string) => void;
   projectAccount: (path: string) => void;
   projectFolders?: (path: string) => void;
   deleteProject?: (path: string) => void;
@@ -123,10 +122,10 @@ export type SidebarProps = {
   close: () => void;
   refresh?: () => Promise<void>;
   notify?: (message: string) => void;
-  indicators: Map<string, ChatIndicator>;
   offlineServers?: ReadonlySet<string>;
-  markUnread: (agent: Agent) => void;
+  markUnread: (id: string, target: NonNullable<SidebarChatRow["markRead"]>) => void;
   markingRead: Set<string>;
+  pendingReadTargets?: ReadonlyMap<string, NonNullable<SidebarChatRow["markRead"]>>;
   hideOldChatsThreshold?: number;
 };
 type NavigableProject = Project & { path: string; name: string };
@@ -155,8 +154,11 @@ export default function Sidebar(p: SidebarProps) {
   );
 }
 
-function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
+const SidebarContents = observer(function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   const services = p.services;
+  const store = useServerStore();
+  const resource = p.rows === undefined ? store.sidebar().current : undefined;
+  const rows = p.rows ?? (resource?.status === "live" || resource?.status === "stale" ? resource.data.rows : []);
   const lastOpened = useRef(p.opened);
   if (p.opened) lastOpened.current = p.opened;
   const canEdit = (target: SidebarTarget) =>
@@ -177,7 +179,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   ): Project => services.project?.(project.path, target) || project;
   const ownsFolder = (
     project: NavigableProject,
-    chat: Agent,
+    chat: SidebarChatRow,
     folder: ProjectFolder | null,
   ) => {
     if (!services.project || !folder) return true;
@@ -258,7 +260,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   );
   const [organizing, setOrganizing] = useState<string | null>(null);
   const organizationLock = useRef(false);
-  type Conversion = { source: Agent; target: Agent; project: NavigableProject };
+  type Conversion = { source: SidebarChatRow; target: SidebarChatRow; project: NavigableProject };
   const [conversion, setConversion] = useState<Conversion | null>(null);
   const closeConversion = () => {
     try {
@@ -426,7 +428,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       const next = { ...old };
       let changed = false;
       for (const [id, values] of Object.entries(old)) {
-        const thread = p.data.threads.find((a) => a.id === id);
+        const thread = rows.find((a) => a.id === id);
         if (
           !thread ||
           ((values.pinned === undefined || thread.pinned === values.pinned) &&
@@ -439,15 +441,8 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       }
       return changed ? next : old;
     });
-  }, [p.data.threads]);
-  const catalogSelector = useMemo(createSidebarCatalogSelector, []);
-  const projectThreads = p.data.threads;
-  const catalog = catalogSelector(
-    projectThreads,
-    overrides,
-    peerTeams,
-    sorting.order,
-  );
+  }, [rows]);
+  const catalog = sidebarRows(rows, peerTeams);
   const { agents, byProject, grouped } = catalog;
   const teamFor = (id: string) => catalog.byTeam.get(id);
   const sharedRooms = useMemo(
@@ -528,8 +523,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   }, [p.opened, selectedFolder, p.selectionIdentity]);
   const teamKey = (path: string, id: string) =>
     JSON.stringify([path, "team", id]);
-  const chatGroup = (agent: Agent) =>
-    catalogChatGroup(agent, teamFor(agent.id));
+  const chatGroup = (agent: SidebarChatRow) => agent.groupKey;
   const middleDrop = (event: React.DragEvent<HTMLElement>) => {
     const title = (event.target as Element).closest(
       ".peer-team-toggle, .project-tree-toggle",
@@ -604,28 +598,10 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       reorder,
     );
   const orderedAgents = catalog.ordered;
-  const searchSelector = useMemo(createSidebarSearchSelector, []);
-  const sourceSearchKey = services.chatPath
-    ? JSON.stringify(p.data.threads.map((row) => services.chatPath!(row.id)))
-    : "";
-  const searchContext = useMemo(
-    () => ({ projects, peerTeams }),
-    [projects, peerTeams, sourceSearchKey],
-  );
-  const projectsByPath = useMemo(
-    () => new Map(projects.map((project) => [project.path, project])),
-    [projects],
-  );
-  const filtered = useMemo(() => {
-    const archived = orderedAgents.filter((row) => !!row.archived === archive);
-    const matching = searchSelector(archived, searchContext, query, (a) => {
-      const project = projectsByPath.get(a.projectPath || "");
-      const legacyProjectName = "project" in a ? a.project : undefined;
-      const team = catalog.byTeam.get(a.id);
-      const teamName =
-        team && team.projectPath === a.projectPath ? team.name : "";
-      return `${teamName || ""} ${a.name || ""} ${services.chatPath?.(a.id) || a.projectPath || ""} ${projectSearchLabel(project?.name, legacyProjectName)} ${folderLabel(project?.folders || [], a.projectFolder || "")} ${a.tail || ""}`;
-    });
+  const filtered = (() => {
+    const archived = orderedAgents.filter((row) => (overrides[row.id]?.archived ?? row.archived) === archive);
+    const needle = query.toLowerCase();
+    const matching = needle ? archived.filter((row) => `${row.searchText} ${services.chatPath?.(row.id) || ""}`.toLowerCase().includes(needle)) : archived;
     // Keep the selected team member visible under a search, as before.
     const selected = catalog.byId.get(p.opened || "");
     if (
@@ -639,15 +615,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       return archived.filter((row) => row === selected || matches.has(row));
     }
     return matching;
-  }, [
-    orderedAgents,
-    archive,
-    query,
-    searchContext,
-    projectsByPath,
-    p.opened,
-    grouped,
-  ]);
+  })();
   const rename = async (e: React.FormEvent, id: string) => {
     e.preventDefault();
     try {
@@ -661,19 +629,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     () => new Set(sharedRooms.map((room) => room.projectPath)),
     [sharedRooms],
   );
-  const keptInCompact = (a: Agent) =>
-    keepCompactChat({
-      id: a.id,
-      name: a.name || "",
-      team: !!teamFor(a.id),
-      pinned: !!a.pinned,
-      inFlight: !!a.inFlight,
-      status: a.status || "",
-      unread: !!(a.hasUnread || a.unreadCount),
-      indicator: p.indicators.get(a.id),
-      updated: a.updated || undefined,
-      created: a.created || undefined,
-    });
+  const keptInCompact = keepCompactSidebarChat;
   const viewChatCounts = useMemo(
     () => countProjectChats(agents, archive),
     [agents, archive],
@@ -681,19 +637,11 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
   const isCompactProject = (path: string) =>
     compactProjects[path] !== false &&
     (viewChatCounts.get(path) || 0) >= hideOldChatsThreshold;
-  const compactIndicatorKey = agents
-    .filter(
-      (agent) =>
-        isCompactProject(agent.projectPath || "") &&
-        p.indicators.get(agent.id)?.kind === "unread",
-    )
-    .map((agent) => agent.id)
-    .join("\n");
   const groupMap = useMemo(() => {
     const groups = new Map<
       string,
       NavigableProject & {
-        chats: Agent[];
+        chats: SidebarChatRow[];
         registered: boolean;
         hasChats: boolean;
       }
@@ -753,7 +701,6 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     compactProjects,
     viewChatCounts,
     hideOldChatsThreshold,
-    compactIndicatorKey,
     p.opened,
   ]);
   const itemIds = (group: NavigableProject, parent: string | null = null) =>
@@ -812,8 +759,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
           .toLowerCase()
           .includes(query.toLowerCase())),
   );
-  const attention = needsYou(filtered, p.indicators);
-  const renderRow = (row: Agent, priority = false) => (
+  const renderRow = (row: SidebarChatRow, priority = false) => (
     <SidebarRow
       key={row.id}
       row={row}
@@ -821,15 +767,9 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       showServer={services.serverForChat(row.id) !== services.cache.ownerId}
       serverAlias={
         services.alias?.({ kind: "chat", id: row.id }) ||
-        aliases[
-          (row as Agent & { serverId?: string }).serverId ||
-            serverViewId ||
-            "local"
-        ] ||
         aliases[services.serverForChat(row.id)] ||
         DEFAULT_LOCAL_SERVER_ALIAS
       }
-      indicator={p.indicators.get(row.id)}
       serverOffline={
         p.offlineServers?.has(services.serverForChat(row.id)) ?? false
       }
@@ -839,6 +779,8 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       disabled={!canEdit({ kind: "chat", id: row.id })}
       compact={compact}
       markingRead={p.markingRead.has(row.id)}
+      pendingRead={p.pendingReadTargets?.get(row.id)}
+      pinned={overrides[row.id]?.pinned}
       bindings={{
         ...sorting.dropBindings(
           `convert:${row.id}`,
@@ -899,7 +841,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
           setRenameInPriority(priority);
           setRenaming(row.id);
         },
-        unread: () => p.markUnread(row),
+        unread: () => { if (row.markRead) p.markUnread(row.id, row.markRead); },
         move: () => {
           if (!requireProjectSupport()) return;
           const project = groupMap.get(row.projectPath || "")!;
@@ -909,7 +851,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
             agentId: row.id,
           });
         },
-        changeProject: () => p.changeProject(row),
+        changeProject: () => p.changeProject(row.id),
         archive: () => {
           void organize(row.id, { archived: !row.archived });
         },
@@ -918,7 +860,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     />
   );
   const renderPeerTeam = (
-    group: NavigableProject & { chats: Agent[] },
+    group: NavigableProject & { chats: SidebarChatRow[] },
     team: (typeof peerTeams)[number],
   ): ReactNode => {
     const teamMembers = team.members ?? [];
@@ -1035,7 +977,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
     );
   };
   const renderProjectChats = (
-    group: NavigableProject & { chats: Agent[] },
+    group: NavigableProject & { chats: SidebarChatRow[] },
     parent: ProjectFolder | null = null,
   ): ReactNode => {
     const folders = group.folders || [];
@@ -1316,14 +1258,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       />
       {teamMove.feedback}
       <nav id="chat-list" className="chat-scroll" aria-label="Chats">
-        {!!attention.length && (
-          <section className="fleet-attention" aria-label="Needs you">
-            <h2 className="fleet-lane-heading">
-              Needs you <span>{attention.length}</span>
-            </h2>
-            {attention.map((row) => renderRow(row, true))}
-          </section>
-        )}
+        <SidebarAttention rows={filtered} renderRow={renderRow} />
         <div className="projects-heading">
           <span className="projects-heading-label">
             {archive ? "Archived projects" : "Projects"}
@@ -1406,14 +1341,7 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
                   <span className="project-tree-name" title={group.name}>
                     {group.name}
                   </span>
-                  <ProjectStateCounts
-                    counts={projectStateCounts(
-                      (byProject.get(group.path) || []).filter(
-                        (chat) => !!chat.archived === archive,
-                      ),
-                      p.indicators,
-                    )}
-                  />
+                  <SidebarProjectStates rows={byProject.get(group.path) || []} archived={archive} />
                 </UnstyledButton>
                 {!archive &&
                   (!compact || !!group.path) &&
@@ -1709,8 +1637,8 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
         closeOnClickOutside={false}
       >
         {conversion &&
-          (p.data.threads.some((row) => row.id === conversion.source.id) &&
-          p.data.threads.some((row) => row.id === conversion.target.id) ? (
+          (rows.some((row) => row.id === conversion.source.id) &&
+          rows.some((row) => row.id === conversion.target.id) ? (
             <SidebarBackendProvider
               value={services.owner({ kind: "chat", id: conversion.source.id })}
             >
@@ -1789,4 +1717,4 @@ function SidebarContents(p: SidebarProps & { services: SidebarServices }) {
       </Modal>
     </>
   );
-}
+});

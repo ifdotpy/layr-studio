@@ -1,5 +1,4 @@
 import {
-  memo,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -26,12 +25,9 @@ import {
   Trash2,
   WifiOff,
 } from "lucide-react";
-import type { Agent } from "../types";
-import { AgentStatus } from "../generated/api";
-import {
-  hasCompletedResult,
-  type ChatIndicator,
-} from "./chat-status/chatStatusModel";
+import { observer } from "mobx-react-lite";
+import type { SidebarChatRow } from "../generated/observableResources.ts";
+import { ChatOperationalKind, MarkUnreadEligibility } from "../generated/api.ts";
 import ChatStatus from "./agents/ChatStatus";
 import { offlineServerDescription } from "../servers/ProjectChatRows";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
@@ -59,11 +55,12 @@ type Bindings = HTMLAttributes<HTMLElement> & {
 };
 type Props = {
   disabled?: boolean | undefined;
-  row: Agent;
+  row: SidebarChatRow;
   selected: boolean;
   serverAlias: string;
   showServer: boolean;
-  indicator?: ChatIndicator | undefined;
+  pendingRead?: SidebarChatRow["markRead"] | undefined;
+  pinned?: boolean | undefined;
   serverOffline?: boolean | undefined;
   renaming: boolean;
   organizing: boolean;
@@ -123,17 +120,14 @@ export default function SidebarRow(props: Props) {
     }),
     [draggable, folderDrop, sidebarGroup, sidebarId, dropEdge],
   );
-  const indicator = useMemo(
-    () => props.indicator,
-    [props.indicator?.kind, props.indicator?.label],
-  );
   return (
     <SidebarRowView
       row={props.row}
       selected={props.selected}
       serverAlias={props.serverAlias}
       showServer={props.showServer}
-      indicator={indicator}
+      pendingRead={props.pendingRead}
+      pinned={props.pinned}
       serverOffline={props.serverOffline}
       renaming={props.renaming}
       organizing={props.organizing}
@@ -148,12 +142,13 @@ export default function SidebarRow(props: Props) {
   );
 }
 
-const SidebarRowView = memo(function SidebarRowView({
+const SidebarRowView = observer(function SidebarRowView({
   row,
   selected,
   serverAlias,
   showServer,
-  indicator,
+  pendingRead,
+  pinned,
   serverOffline = false,
   renaming,
   organizing,
@@ -167,6 +162,13 @@ const SidebarRowView = memo(function SidebarRowView({
 }: Omit<Props, "bindings"> & { bindingValues: Bindings; events: Bindings }) {
   reportPromptComposerRender("sidebar-row", row.id);
   const a = row;
+  const target = row.markRead;
+  const reading = pendingRead && target &&
+    pendingRead.threadId === target.threadId && pendingRead.turnId === target.turnId && pendingRead.revision === target.revision;
+  const indicator = reading && row.indicator.kind === ChatOperationalKind.unread
+    ? { kind: ChatOperationalKind.none, label: "Read" }
+    : row.indicator;
+  const unreadHelp = markingRead ? "The read status is changing." : markUnreadHelp(row.markUnread);
   const offlineDescription = serverOffline
     ? offlineServerDescription(serverAlias)
     : undefined;
@@ -198,17 +200,12 @@ const SidebarRowView = memo(function SidebarRowView({
             model={a.model ?? undefined}
           />
           <strong>
-            {a?.pinned && <Pin size={11} className="chat-pin" />}
+            {(pinned ?? a.pinned) && <Pin size={11} className="chat-pin" />}
             {row.name ?? ""}
           </strong>
         </span>
-        {(row.status === AgentStatus.queued ||
-          row.status === AgentStatus.starting) &&
-          row.startWait?.reason === "workspace_copy" &&
-          row.startWait.epoch === row.epoch && (
-            <LayrCopyProgress progress={row.startWait.progress} />
-          )}
-        {(showServer || serverOffline || row.stall) && (
+        {row.copyProgress && <LayrCopyProgress progress={row.copyProgress} />}
+        {(showServer || serverOffline || row.waitingForLead) && (
           <span className="fleet-chat-meta">
             {(showServer || serverOffline) && (
               <span
@@ -223,7 +220,7 @@ const SidebarRowView = memo(function SidebarRowView({
                 {showServer ? serverAlias : "Offline"}
               </span>
             )}
-            {row.stall && (
+            {row.waitingForLead && (
               <span className="agent-stall" role="status">
                 Waiting for lead
               </span>
@@ -281,22 +278,15 @@ const SidebarRowView = memo(function SidebarRowView({
               aria-label="Mark unread"
               disabled={
                 disabled ||
-                !a.readStateSupported ||
-                !hasCompletedResult(a) ||
+                a.markUnread !== MarkUnreadEligibility.allowed ||
                 markingRead
               }
               onClick={() => actions.unread()}
             >
               Mark unread
-              {(!a.readStateSupported ||
-                !hasCompletedResult(a) ||
-                markingRead) && (
+              {unreadHelp && (
                 <small className="menu-action-help">
-                  {!a.readStateSupported
-                    ? "Read status is unavailable for this chat."
-                    : !hasCompletedResult(a)
-                      ? "Available after an answer."
-                      : "The read status is changing."}
+                  {unreadHelp}
                 </small>
               )}
             </Menu.Item>
@@ -305,11 +295,11 @@ const SidebarRowView = memo(function SidebarRowView({
                 <Menu.Item
                   disabled={disabled || organizing}
                   leftSection={
-                    a.pinned ? <PinOff size={14} /> : <Pin size={14} />
+                    (pinned ?? a.pinned) ? <PinOff size={14} /> : <Pin size={14} />
                   }
                   onClick={() => actions.pin()}
                 >
-                  {a.pinned ? "Unpin" : "Pin"}
+                  {(pinned ?? a.pinned) ? "Unpin" : "Pin"}
                 </Menu.Item>
                 <Menu.Divider />
                 {a.projectPath && (
@@ -324,7 +314,7 @@ const SidebarRowView = memo(function SidebarRowView({
                 {!compact && (
                   <Menu.Item
                     leftSection={<FolderOpen size={14} />}
-                    disabled={disabled || !!a.threadId || !!a.inFlight}
+                    disabled={disabled || !a.canChangeProject}
                     onClick={() => actions.changeProject()}
                   >
                     Change project directory
@@ -339,7 +329,7 @@ const SidebarRowView = memo(function SidebarRowView({
                       <Archive size={14} />
                     )
                   }
-                  disabled={disabled || !!a.inFlight}
+                  disabled={disabled || !a.canArchive}
                   onClick={() => actions.archive()}
                 >
                   {a.archived ? "Restore chat" : "Archive"}
@@ -361,3 +351,13 @@ const SidebarRowView = memo(function SidebarRowView({
     </div>
   );
 });
+
+function markUnreadHelp(eligibility: SidebarChatRow["markUnread"]): string | null {
+  switch (eligibility) {
+    case MarkUnreadEligibility.allowed: return null;
+    case MarkUnreadEligibility.unsupported: return "Read status is unavailable for this chat.";
+    case MarkUnreadEligibility.no_completed_result: return "Available after an answer.";
+    case MarkUnreadEligibility.already_unread: return "This answer is already unread.";
+  }
+  return eligibility satisfies never;
+}

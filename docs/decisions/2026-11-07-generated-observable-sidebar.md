@@ -79,6 +79,9 @@ pilot. This temporarily duplicates the projection across those screens and Rust;
 sidebar callers are migrated without an Agent compatibility projection. Future
 migration removes a helper only when its final caller has moved.
 
+Radio rooms retain their existing sidebar summary path. They are the next
+read-model candidate and are not represented as `SidebarChatRow` values.
+
 ## Alternatives
 
 A handwritten mutable renderer model would create a second contract owner.

@@ -1,4 +1,3 @@
-import { AgentSource as GeneratedApiAgentSource } from "../../../generated/api.ts";
 import { randomUUID } from "../../../uuid";
 import {
   ActionIcon,
@@ -22,7 +21,8 @@ import type { CommandRequest } from "../../../commands";
 import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../generated/sharedValues.ts";
 import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
 import type { paths } from "../../../generated/api";
-import type { Agent, PeerTeam } from "../../../types";
+import type { PeerTeam } from "../../../types";
+import type { SidebarChatRow } from "../../../generated/observableResources.ts";
 import type { Project } from "../../ProjectOrganization";
 import "./peer-teams.css";
 import { ChatServerLine } from "../../../servers/ProjectChatRows";
@@ -316,7 +316,7 @@ export function PeerTeamForm({
   project: Project;
   team?: PeerTeam | undefined;
   teams: PeerTeam[];
-  agents: Agent[];
+  agents: readonly SidebarChatRow[];
   action: "save" | "delete";
   refresh?: (() => Promise<void>) | undefined;
   close: () => void;
@@ -336,9 +336,6 @@ export function PeerTeamForm({
   const revision = useRef(project.peerTeamsRevision || 0);
   const available = agents.filter(
     (a) =>
-      a.source === GeneratedApiAgentSource.managed &&
-      a.isLead &&
-      !a.deletedAt &&
       a.projectPath === project.path &&
       !teams.some((t) => t.id !== team?.id && (t.members ?? []).includes(a.id)),
   );

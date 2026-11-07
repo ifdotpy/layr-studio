@@ -2071,9 +2071,7 @@ export default function App({ active = true }: { active?: boolean }) {
       return undefined;
     },
     new Set(
-      agents
-        .filter((agent) => unreadResult(agent, readState.readStateFor(agent)))
-        .map((agent) => agent.id),
+      agents.filter((agent) => unreadResult(agent, readState.readStateFor(agent))).map((agent) => agent.id),
     ),
     publicAccounts,
     creating,
@@ -2430,7 +2428,6 @@ export default function App({ active = true }: { active?: boolean }) {
           services={sidebarServices}
           data={data}
           opened={opened}
-          lead={lead}
           open={open}
           prepareChat={prepareChat}
           newChat={(path, folder) => void newChat(path, folder)}
@@ -2442,16 +2439,16 @@ export default function App({ active = true }: { active?: boolean }) {
           remoteProjects={
             isServerView ? undefined : data.runtime.remoteProjects
           }
-          changeProject={folders}
+          changeProject={(id) => { const agent = catalog.byId.get(id); if (agent) folders(agent); }}
           projectFolders={(path) => openProjectFolders(path)}
           deleteProject={projectDeletion.open}
           projectAccount={openSidebarProjectAccount}
           creating={creating}
           refresh={refresh}
           notify={notify}
-          indicators={indicators}
-          markUnread={(a) => void readState.markUnread(a)}
+          markUnread={(id, target) => void readState.markSidebarUnread(id, target)}
           markingRead={readState.marking}
+          pendingReadTargets={readState.pendingReadTargets}
           hideOldChatsThreshold={studioPreferences.hideOldChatsThreshold}
           rename={rename}
           remove={remove}
