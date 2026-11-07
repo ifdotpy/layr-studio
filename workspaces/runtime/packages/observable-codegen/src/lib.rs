@@ -78,6 +78,14 @@ pub enum UnsupportedShape {
     MissingSchema,
     #[error("unsupported schema shape")]
     Shape,
+    #[error("open object or map")]
+    OpenObject,
+    #[error("unsupported schema composition")]
+    Composition,
+    #[error("tuple array")]
+    Tuple,
+    #[error("mixed non-null types")]
+    MixedTypes,
     #[error("recursive model")]
     Recursive,
     #[error("invalid or colliding identifier")]

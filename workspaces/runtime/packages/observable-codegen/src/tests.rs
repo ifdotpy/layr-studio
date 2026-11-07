@@ -73,17 +73,30 @@ fn deterministic_fixture_and_typed_path_failures() {
         assert_eq!(error.path, "#/components/schemas/Row/properties/missing");
         assert_eq!(error.kind, UnsupportedShape::UnknownField);
     }
-    for invalid in [
-        json!({}),
-        json!({"type":"object","additionalProperties":true}),
-        json!({"allOf":[{"type":"string"}]}),
-        json!({"type":["string","number"]}),
+    for (invalid, kind) in [
+        (json!({}), UnsupportedShape::Shape),
+        (
+            json!({"type":"object","additionalProperties":true}),
+            UnsupportedShape::OpenObject,
+        ),
+        (
+            json!({"allOf":[{"type":"string"}]}),
+            UnsupportedShape::Composition,
+        ),
+        (
+            json!({"type":["string","number"]}),
+            UnsupportedShape::MixedTypes,
+        ),
+        (
+            json!({"type":"array","prefixItems":[{"type":"string"}]}),
+            UnsupportedShape::Tuple,
+        ),
     ] {
         let mut bad = document.clone();
         bad["components"]["schemas"]["Row"]["properties"]["nested"] = invalid;
         let error = render(&bad, &models(), &resources()).expect_err("unsupported");
         assert!(error.path.contains("/Row/properties/nested"), "{error}");
-        assert_eq!(error.kind, UnsupportedShape::Shape);
+        assert_eq!(error.kind, kind);
     }
     let mut recursive = document.clone();
     recursive["components"]["schemas"]["Row"]["properties"]["nested"] =

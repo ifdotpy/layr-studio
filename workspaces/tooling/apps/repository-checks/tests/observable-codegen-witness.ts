@@ -92,7 +92,7 @@ try {
     `
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
-import { createObservableResources, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
+import { createObservableResources, createFixtureMirror, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
 import type { components } from './src/generated/api.ts';
 import type { DeepReadonly } from './src/deepReadonly.ts';
 import type { ObservableResourceRuntime } from './src/store/index.ts';
@@ -146,17 +146,29 @@ const initialRuns = runs;
 latest = { rows: [row('b', '2'), row('a', '1')], plain: [1, 2] }; publish();
 assert.equal(runs, initialRuns, 'equal replay produces no reactions');
 assert.equal(data.rows[0], first); assert.equal(first.nested, nested); assert.equal(first.tags, tags); assert.equal(first.choice, choice);
-latest = { rows: [{...row('a', '3'), nested: {count: 2}, title: 'changed', choice: {kind:'text', text:'new'}, optional: undefined, maybe: {value: 'present'}}, row('b', '2'), row('c', '0')], plain: [1, 3] }; publish();
+const withoutOptional = row('a', '3'); delete withoutOptional.optional;
+latest = { rows: [{...withoutOptional, nested: {count: 2}, title: 'changed', choice: {kind:'text', text:'new'}, maybe: {value: 'present'}}, row('b', '2'), row('c', '0')], plain: [1, 3] }; publish();
 assert.deepEqual(data.rows.map(row => row.id), ['c', 'b', 'a']);
 assert.equal(data.rows[2], first); assert.equal(first.nested, nested); assert.equal(first.nested.count, 2);
 assert.equal(first.optional, undefined); assert.equal(first.maybe?.value, 'present'); assert.equal(first.title, 'changed'); assert.notEqual(first.choice, choice); assert.equal(first.choice.kind, 'text');
-latest = { rows: [{...row('a', '3'), tags: ['two'], opaque: {payload: 'new'}}], plain: [] }; publish();
+latest = { rows: [{...withoutOptional, tags: ['two'], opaque: {payload: 'new'}}], plain: [] }; publish();
 assert.deepEqual(data.rows.map(row => row.id), ['a']); assert.equal(first.title, null); assert.notEqual(first.tags, tags); assert.notEqual(first.opaque, opaque); assert.equal(first.maybe, null); assert.equal(first.nil, null);
 latest = { rows: [row('a', '1'), row('a', '2')], plain: [] };
 assert.throws(publish, /Duplicate identity/); assert.deepEqual(data.rows.map(row => row.id), ['a']);
 stop();
 const secondStore = createObservableResources(runtime); latest = {rows:[row('x','0'),row('x','1')],plain:[]};
 assert.throws(() => secondStore.fixture(a,t), /Duplicate identity/);
+const mirror = createFixtureMirror();
+assert.equal(mirror.current.rows.length, 0);
+mirror.apply({rows:[row('a','1'), row('b','2')],plain:[]});
+const mirrorFirst=mirror.current.rows[0]; const mirrorSecond=mirror.current.rows[1];
+assert.ok(mirrorFirst); assert.ok(mirrorSecond);
+let mirrorRuns=0; const stopMirror=autorun(()=>{mirror.current.rows.map(row=>[row.title,row.nested.count]);mirrorRuns+=1;});
+mirror.apply({rows:[row('a','1'),row('b','2')],plain:[]});assert.equal(mirrorRuns,1);
+mirror.apply({rows:[{...row('a','1'),title:'updated'},row('b','2')],plain:[]});
+assert.equal(mirror.current.rows[0],mirrorFirst);assert.equal(mirror.current.rows[1],mirrorSecond);assert.equal(mirrorFirst.title,'updated');assert.equal(mirrorRuns,2);stopMirror();
+// @ts-expect-error A mirror's exposed snapshot remains readonly.
+if (false) mirror.current.rows = [];
 console.log('observable generator type and behavior witnesses passed');
 `,
   );
