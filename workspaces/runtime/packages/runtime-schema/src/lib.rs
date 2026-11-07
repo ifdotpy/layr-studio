@@ -93,7 +93,6 @@ pub mod rule_record;
 pub mod shared_values;
 pub mod sidebar;
 pub mod shell_policy;
-pub mod sidebar;
 pub mod start_attempt;
 mod stored_record;
 pub use stored_record::AgentCounter;

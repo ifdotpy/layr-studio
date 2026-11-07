@@ -79,6 +79,7 @@ const ENTITY_COLLECTIONS = [
   "messageReceipt",
   "plan",
   "annotation",
+  "sidebarChatRow",
 ] as const satisfies readonly EntityCollection[];
 type Assert<T extends true> = T;
 type EntityCollectionsAreComplete = Assert<
@@ -129,6 +130,7 @@ function emptyEntityValues(): EntityValues {
     messageReceipt: new Map(),
     plan: new Map(),
     annotation: new Map(),
+    sidebarChatRow: new Map(),
     agent: new Map<string, AgentEntityDto>(),
     agentSummary: new Map(),
     agentDetail: new Map(),
@@ -590,6 +592,9 @@ export function applyEntityChanges(
       case "workspace":
         state.values.workspace.set(payload.id, payload.value);
         break;
+      case "sidebarChatRow":
+        // Sidebar data is consumed by its generated resource, not Snapshot.
+        continue;
       default: {
         const exhaustive: never = payload;
         void exhaustive;
