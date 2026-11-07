@@ -3020,26 +3020,69 @@ async fn sidebar_review_rolled_back_mark_cannot_suppress_later_invalidation() {
     for later_broad_mark in [false, true] {
         let (_directory, store) = store().await;
         seed_chat(&store, chat(json!({}))).await;
-        store.transaction(|tx| {
-            studio_runtime_store::ProjectsRepository::put_project(tx, &json!({"id":"savepoint-project","path":"/fixture","name":"Before rename"}))
-        }).await.expect("project");
-        let before = store.test_read_transaction(|tx| studio_runtime_store::durable_seq::high(tx)).expect("cursor");
-        store.transaction(move |tx| {
-            use studio_runtime_store::durable_seq::{mark, AGENT_VIEW_MARK};
-            tx.execute_batch("SAVEPOINT recoverable")?;
-            mark(tx, AGENT_VIEW_MARK, CHAT)?;
-            tx.execute_batch("ROLLBACK TO recoverable; RELEASE recoverable")?;
-            studio_runtime_store::ProjectsRepository::put_project(tx, &json!({"id":"savepoint-project","path":"/fixture","name":"After savepoint"}))?;
-            if later_broad_mark {
+        store
+            .transaction(|tx| {
+                studio_runtime_store::ProjectsRepository::put_project(
+                    tx,
+                    &json!({"id":"savepoint-project","path":"/fixture","name":"Before rename"}),
+                )
+            })
+            .await
+            .expect("project");
+        let before = store
+            .test_read_transaction(|tx| studio_runtime_store::durable_seq::high(tx))
+            .expect("cursor");
+        store
+            .transaction(move |tx| {
+                use studio_runtime_store::durable_seq::{AGENT_VIEW_MARK, mark};
+                tx.execute_batch("SAVEPOINT recoverable")?;
                 mark(tx, AGENT_VIEW_MARK, CHAT)?;
-                let sequence: i64 = tx.query_row("SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2", rusqlite::params![AGENT_VIEW_MARK,CHAT], |r|r.get(0))?;
-                assert!(sequence > before, "a rolled-back proof cannot skip a later broad mark");
-            }
-            Ok(())
-        }).await.expect("recoverable transaction");
-        let delta = store.test_read_transaction(|tx| crate::entity_scope::resume(tx,Some(before),Some("[\"sidebarChatRow\"]"),None,None,false,100)).expect("resume");
-        let row = delta.rows.iter().find(|r|r.id==CHAT && !r.deleted).expect("project rename after rollback must invalidate sidebar");
-        let payload: Value = studio_json::from_str(row.payload.as_deref().expect("payload")).expect("JSON");
-        assert!(payload["value"]["searchText"].as_str().expect("search").contains("after savepoint"));
+                tx.execute_batch("ROLLBACK TO recoverable; RELEASE recoverable")?;
+                studio_runtime_store::ProjectsRepository::put_project(
+                    tx,
+                    &json!({"id":"savepoint-project","path":"/fixture","name":"After savepoint"}),
+                )?;
+                if later_broad_mark {
+                    mark(tx, AGENT_VIEW_MARK, CHAT)?;
+                    let sequence: i64 = tx.query_row(
+                        "SELECT seq FROM durable_rows WHERE tbl=?1 AND id=?2",
+                        rusqlite::params![AGENT_VIEW_MARK, CHAT],
+                        |r| r.get(0),
+                    )?;
+                    assert!(
+                        sequence > before,
+                        "a rolled-back proof cannot skip a later broad mark"
+                    );
+                }
+                Ok(())
+            })
+            .await
+            .expect("recoverable transaction");
+        let delta = store
+            .test_read_transaction(|tx| {
+                crate::entity_scope::resume(
+                    tx,
+                    Some(before),
+                    Some("[\"sidebarChatRow\"]"),
+                    None,
+                    None,
+                    false,
+                    100,
+                )
+            })
+            .expect("resume");
+        let row = delta
+            .rows
+            .iter()
+            .find(|r| r.id == CHAT && !r.deleted)
+            .expect("project rename after rollback must invalidate sidebar");
+        let payload: Value =
+            studio_json::from_str(row.payload.as_deref().expect("payload")).expect("JSON");
+        assert!(
+            payload["value"]["searchText"]
+                .as_str()
+                .expect("search")
+                .contains("after savepoint")
+        );
     }
 }

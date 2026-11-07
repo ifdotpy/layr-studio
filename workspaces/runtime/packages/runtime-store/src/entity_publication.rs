@@ -212,7 +212,11 @@ fn mark_survives(connection: &Connection, id: &str, seq: i64) -> StoreResult<boo
 }
 
 pub(crate) fn agent_view_marked(connection: &Connection, id: &str) -> StoreResult<bool> {
-    let seq = JOURNAL.with(|j| j.borrow().as_ref().and_then(|j| j.agent_view_marks.get(id).copied()));
+    let seq = JOURNAL.with(|j| {
+        j.borrow()
+            .as_ref()
+            .and_then(|j| j.agent_view_marks.get(id).copied())
+    });
     match seq {
         Some(seq) => mark_survives(connection, id, seq),
         None => Ok(false),
@@ -242,14 +246,18 @@ pub(crate) fn queue_sidebar_mark(id: &str) -> bool {
 /// Clear transaction-local proofs even on rollback; return only uncovered marks.
 pub(crate) fn end(connection: &Connection) -> StoreResult<BTreeSet<String>> {
     let journal = JOURNAL.with(|j| j.borrow_mut().take());
-    let Some(journal) = journal else { return Ok(BTreeSet::new()); };
+    let Some(journal) = journal else {
+        return Ok(BTreeSet::new());
+    };
     let mut uncovered = BTreeSet::new();
     for id in journal.sidebar_marks {
         let covered = match journal.agent_view_marks.get(&id) {
             Some(seq) => mark_survives(connection, &id, *seq)?,
             None => false,
         };
-        if !covered { uncovered.insert(id); }
+        if !covered {
+            uncovered.insert(id);
+        }
     }
     Ok(uncovered)
 }

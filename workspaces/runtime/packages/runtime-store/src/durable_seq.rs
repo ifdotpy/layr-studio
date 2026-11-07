@@ -307,7 +307,11 @@ pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
          ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
     );
     if tbl == AGENT_VIEW_MARK {
-        let seq = connection.query_row(&format!("{sql} RETURNING seq"), rusqlite::params![tbl, id], |row| row.get(0))?;
+        let seq = connection.query_row(
+            &format!("{sql} RETURNING seq"),
+            rusqlite::params![tbl, id],
+            |row| row.get(0),
+        )?;
         crate::entity_publication::note_agent_view_mark(id, seq);
     } else {
         connection.execute(&sql, rusqlite::params![tbl, id])?;
