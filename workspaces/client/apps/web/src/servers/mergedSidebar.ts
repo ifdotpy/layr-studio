@@ -4,11 +4,12 @@ import {
   createStateMirror,
   type StateCollections,
 } from "../generated/observableResources.ts";
-import { observable, runInAction } from "mobx";
+import { computed, observable, runInAction } from "mobx";
 import {
   createSidebarViewModel,
   type SidebarAgent,
   type SidebarIdentity,
+  type SidebarChatView,
 } from "../components/sidebar/viewModel.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
 import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
@@ -40,6 +41,7 @@ export function mergeSidebar(
     source: SidebarSource,
     identity: SidebarIdentity,
   ) => ReturnType<typeof createSidebarViewModel>,
+  combinedRows?: () => readonly SidebarChatView[],
 ) {
   const identities = new Set(sources.map((source) => source.id));
   if (identities.size !== sources.length)
@@ -608,7 +610,7 @@ export function mergeSidebar(
     compact,
     collapsed,
     get rows() {
-      return views.flatMap((view) => view.rows);
+      return combinedRows ? combinedRows() : views.flatMap((view) => view.rows);
     },
     offlineServers,
     chatReferences,
@@ -694,13 +696,16 @@ export function createSidebarSourceStore() {
 
 export function createMergedSidebarSelector(combined = true) {
   const routing = observable.box<MergedSidebar | null>(null, { deep: false });
-  const views = new Map<
+  const views = observable.map<
     string,
     {
       collections: StateCollections;
       view: ReturnType<typeof createSidebarViewModel>;
     }
-  >();
+  >(undefined, { deep: false });
+  const rows = computed(() =>
+    [...views.values()].flatMap(({ view }) => view.rows),
+  );
   const route = () => {
     const value = routing.get();
     if (!value) throw new Error("Sidebar routing is unavailable.");
@@ -708,89 +713,111 @@ export function createMergedSidebarSelector(combined = true) {
   };
   let previous: MergedSidebar | undefined;
   let revision = 0;
-  return (sources: readonly SidebarSource[]) => {
-    if (
-      previous &&
-      sources.length === previous.sources.length &&
-      sources.every((source, index) => {
-        const prior = previous?.sources[index];
-        return (
-          source.id === prior?.id &&
-          source.online === prior.online &&
-          source.sidebar === prior.sidebar
+  return (sources: readonly SidebarSource[]) =>
+    runInAction(() => {
+      if (
+        previous &&
+        sources.length === previous.sources.length &&
+        sources.every((source, index) => {
+          const prior = previous?.sources[index];
+          return (
+            source.id === prior?.id &&
+            source.online === prior.online &&
+            source.sidebar === prior.sidebar
+          );
+        })
+      )
+        return previous;
+      const nextViews = new Map<
+        string,
+        NonNullable<ReturnType<typeof views.get>>
+      >();
+      const next = mergeSidebar(
+        sources,
+        revision + 1,
+        combined,
+        (source) => {
+          const previous = views.get(source.id);
+          if (previous?.collections === source.collections) {
+            nextViews.set(source.id, previous);
+            return previous.view;
+          }
+          const identity: SidebarIdentity = {
+            chatKey: (id) => route().chatKey(source.id, id),
+            projectKey: (agent) => route().boundProject(source, agent),
+            folderKey: (path, id) => route().folderKey(source.id, path, id),
+            teamKey: (id) => route().teamKey(source.id, id),
+          };
+          const view = createSidebarViewModel(
+            () => source.collections,
+            () => membershipInputs,
+            identity,
+          );
+          nextViews.set(source.id, { collections: source.collections, view });
+          return view;
+        },
+        () => rows.get(),
+      );
+      // The merged order revision grows only when the merged order changes. A snapshot for
+      // another reason must not replace an order move that waits for its server.
+      const previousOrder = previous?.data.runtime.sidebarOrder;
+      const nextOrder = next.data.runtime.sidebarOrder;
+      const merged = combined || sources.length !== 1;
+      if (
+        merged &&
+        previousOrder &&
+        nextOrder &&
+        previous!.data.stateDir === next.data.stateDir &&
+        JSON.stringify(previousOrder.groups) ===
+          JSON.stringify(nextOrder.groups)
+      )
+        next.data.runtime.sidebarOrder = previousOrder;
+      else revision++;
+      if (previous) {
+        const retain = <T extends { id: string }>(rows: T[], old: T[]) => {
+          const prior = new Map(old.map((row) => [row.id, row]));
+          const retained = rows.map((row) => {
+            const existing = prior.get(row.id);
+            return existing && JSON.stringify(existing) === JSON.stringify(row)
+              ? existing
+              : row;
+          });
+          return retained.length === old.length &&
+            retained.every((row, index) => row === old[index])
+            ? old
+            : retained;
+        };
+        next.data.runtime.projects = retain(
+          next.data.runtime.projects,
+          previous.data.runtime.projects,
         );
-      })
-    )
-      return previous;
-    const next = mergeSidebar(sources, revision + 1, combined, (source) => {
-      const previous = views.get(source.id);
-      if (previous?.collections === source.collections) return previous.view;
-      const identity: SidebarIdentity = {
-        chatKey: (id) => route().chatKey(source.id, id),
-        projectKey: (agent) => route().boundProject(source, agent),
-        folderKey: (path, id) => route().folderKey(source.id, path, id),
-        teamKey: (id) => route().teamKey(source.id, id),
-      };
-      const view = createSidebarViewModel(
-        () => source.collections,
-        () => membershipInputs,
-        identity,
-      );
-      views.set(source.id, { collections: source.collections, view });
-      return view;
+        next.data.runtime.rooms = retain(
+          next.data.runtime.rooms,
+          previous.data.runtime.rooms,
+        );
+        next.data.runtime.peerTeams = retain(
+          next.data.runtime.peerTeams,
+          previous.data.runtime.peerTeams,
+        );
+      }
+      if (
+        !previous ||
+        next.data.runtime.projects !== previous.data.runtime.projects ||
+        next.data.runtime.peerTeams !== previous.data.runtime.peerTeams
+      )
+        routing.set(next);
+      const entries = [...views.entries()];
+      if (
+        entries.length !== nextViews.size ||
+        [...nextViews].some(
+          ([id, value], index) =>
+            entries[index]?.[0] !== id || entries[index]?.[1] !== value,
+        )
+      )
+        views.replace(nextViews);
+      previous = next;
+      return next;
     });
-    // The merged order revision grows only when the merged order changes. A snapshot for
-    // another reason must not replace an order move that waits for its server.
-    const previousOrder = previous?.data.runtime.sidebarOrder;
-    const nextOrder = next.data.runtime.sidebarOrder;
-    const merged = combined || sources.length !== 1;
-    if (
-      merged &&
-      previousOrder &&
-      nextOrder &&
-      previous!.data.stateDir === next.data.stateDir &&
-      JSON.stringify(previousOrder.groups) === JSON.stringify(nextOrder.groups)
-    )
-      next.data.runtime.sidebarOrder = previousOrder;
-    else revision++;
-    if (previous) {
-      const retain = <T extends { id: string }>(rows: T[], old: T[]) => {
-        const prior = new Map(old.map((row) => [row.id, row]));
-        const retained = rows.map((row) => {
-          const existing = prior.get(row.id);
-          return existing && JSON.stringify(existing) === JSON.stringify(row)
-            ? existing
-            : row;
-        });
-        return retained.length === old.length &&
-          retained.every((row, index) => row === old[index])
-          ? old
-          : retained;
-      };
-      next.data.runtime.projects = retain(
-        next.data.runtime.projects,
-        previous.data.runtime.projects,
-      );
-      next.data.runtime.rooms = retain(
-        next.data.runtime.rooms,
-        previous.data.runtime.rooms,
-      );
-      next.data.runtime.peerTeams = retain(
-        next.data.runtime.peerTeams,
-        previous.data.runtime.peerTeams,
-      );
-    }
-    if (
-      !previous ||
-      next.data.runtime.projects !== previous.data.runtime.projects ||
-      next.data.runtime.peerTeams !== previous.data.runtime.peerTeams
-    )
-      runInAction(() => routing.set(next));
-    for (const id of views.keys())
-      if (!next.sourceById.has(id)) views.delete(id);
-    previous = next;
-    return next;
-  };
 }
 
 /** Classic mode does not construct or traverse a merged model. */

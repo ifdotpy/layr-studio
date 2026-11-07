@@ -1,4 +1,8 @@
-import { createElement } from "react";
+// @vitest-environment happy-dom
+import { act, createElement, useMemo } from "react";
+import { createRoot } from "react-dom/client";
+import { observer } from "mobx-react-lite";
+import { createSidebarList } from "../components/sidebar/viewModel.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import type { SidebarProps } from "../components/Sidebar.tsx";
@@ -17,12 +21,26 @@ import { navigationSnapshot } from "./navigation.ts";
 import { localSidebarBackend } from "../components/sidebar/services.tsx";
 import { required } from "../components/componentTestFixtures.ts";
 
-const captured = vi.hoisted(() => ({ props: null as SidebarProps | null }));
+const captured = vi.hoisted(() => ({
+  props: null as SidebarProps | null,
+  lists: 0,
+  groups: null as unknown,
+  ordered: null as unknown,
+}));
 vi.mock("../components/Sidebar", () => ({
-  default: (props: SidebarProps) => {
+  default: observer((props: SidebarProps) => {
     captured.props = props;
+    const list = useMemo(() => {
+      captured.lists++;
+      return createSidebarList(
+        () => props.rows || [],
+        () => ({ query: "", archived: false, opened: null, rank: () => 0 }),
+      );
+    }, [props.rows]);
+    captured.groups = list.groups;
+    captured.ordered = list.orderedRows;
     return null;
-  },
+  }),
 }));
 
 it("routes overlapping row ids and the completed-result CAS target to their owning server", async () => {
@@ -72,35 +90,40 @@ function renderCombined(
   executeCommand: (owner: string, command: ServerCommand) => Promise<void>,
   send: (owner: string, command: ServerCommand) => void = vi.fn(),
 ) {
-  renderToStaticMarkup(
-    createElement(CombinedServerSidebar, {
-      model,
-      backends: new Map(
-        ["local", "remote"].map((id) => [
-          id,
-          { ...localSidebarBackend, ownerId: id },
-        ]),
-      ),
-      online: () => true,
-      refreshOwner: async () => navigationSnapshot(null, null, ""),
-      executeCommand,
-      aliases: {},
-      current: "remote",
-      navigation: {},
-      send,
-      applyNavigation: vi.fn(),
-      mobile: false,
-      hidden: false,
-      close: vi.fn(),
-      settings: vi.fn(),
-      search: vi.fn(),
-      notify: vi.fn(),
-      notice: "",
-      hideOldChatsThreshold: 3,
-    }),
-  );
-
+  renderToStaticMarkup(combinedElement(model, executeCommand, send));
   return required(captured.props);
+}
+
+function combinedElement(
+  model: ReturnType<typeof mergeSidebar>,
+  executeCommand: (owner: string, command: ServerCommand) => Promise<void>,
+  send: (owner: string, command: ServerCommand) => void = vi.fn(),
+) {
+  return createElement(CombinedServerSidebar, {
+    model,
+    backends: new Map(
+      ["local", "remote"].map((id) => [
+        id,
+        { ...localSidebarBackend, ownerId: id },
+      ]),
+    ),
+    online: () => true,
+    refreshOwner: async () => navigationSnapshot(null, null, ""),
+    executeCommand,
+    aliases: {},
+    current: "remote",
+    navigation: {},
+    send,
+    applyNavigation: vi.fn(),
+    mobile: false,
+    hidden: false,
+    close: vi.fn(),
+    settings: vi.fn(),
+    search: vi.fn(),
+    notify: vi.fn(),
+    notice: "",
+    hideOldChatsThreshold: 3,
+  });
 }
 
 it("freezes a queued read CAS target while its generated row mirror advances", async () => {
@@ -166,4 +189,61 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
   expect(delivered).toEqual([
     { action: "mark-unread", id: "same", target: initial },
   ]);
+});
+
+it("preserves combined list computations on a tail rerender and replaces rows once per source change", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const store = createSidebarSourceStore();
+  const snapshot = (tail = "") =>
+    sidebarSnapshot(snapshotFixture([]), [
+      ...agentEntities([agentSummaryFixture("same")]),
+      { collection: "agentTail", id: "same", value: { id: "same", tail } },
+    ]);
+  store.update("local", snapshot());
+  const select = createMergedSidebarSelector();
+  let ids = ["local"];
+  const sources = () => store.sources(ids, new Set(ids));
+  const host = document.createElement("div");
+  const root = createRoot(host);
+  const render = () =>
+    root.render(
+      combinedElement(
+        select(sources()),
+        vi.fn(async () => {}),
+      ),
+    );
+  try {
+    await act(async () => {
+      render();
+    });
+    const rows = required(captured.props).rows;
+    const groups = captured.groups,
+      ordered = captured.ordered,
+      lists = captured.lists;
+    await act(async () => {
+      store.update("local", snapshot("tail-only update"));
+      render();
+    });
+    expect(required(captured.props).rows).toBe(rows);
+    expect(captured.groups).toBe(groups);
+    expect(captured.ordered).toBe(ordered);
+    expect(captured.lists).toBe(lists);
+    await act(async () => {
+      store.update("remote", snapshot());
+      ids = ["local", "remote"];
+      render();
+    });
+    expect(required(captured.props).rows).not.toBe(rows);
+    expect(captured.lists).toBe(lists + 1);
+    const added = required(captured.props).rows;
+    await act(async () => {
+      ids = ["local"];
+      render();
+    });
+    expect(required(captured.props).rows).not.toBe(added);
+    expect(captured.lists).toBe(lists + 2);
+  } finally {
+    await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
 });
