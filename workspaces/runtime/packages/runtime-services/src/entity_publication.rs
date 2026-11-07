@@ -36,6 +36,7 @@ impl EntityPublisher for DefaultPublisher {
             &|_, _, _, _| true,
         )?;
         crate::sync_policy::publish_summary_changes(transaction, pending)?;
+        crate::sidebar::publish_changes(transaction, pending)?;
         if !pending.studio_errors.is_empty() {
             crate::studio_errors::publish_changes(transaction, &pending.studio_errors)?;
         }

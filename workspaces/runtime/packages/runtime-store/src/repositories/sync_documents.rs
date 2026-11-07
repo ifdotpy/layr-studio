@@ -126,8 +126,13 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its
 /// view reads. They have no copy in `sync_entities`.
-pub const AGENT_VIEW_COLLECTIONS: &[&str] =
-    &["agent", "agentSummary", "agentDetail", "retainedWorktree"];
+pub const AGENT_VIEW_COLLECTIONS: &[&str] = &[
+    "agent",
+    "agentSummary",
+    "agentDetail",
+    "retainedWorktree",
+    studio_runtime_schema::sidebar::COLLECTION,
+];
 
 /// Window collections: a document per member of a window in `durable_rows`
 /// (`durable_seq::TASK_WINDOW`, `durable_seq::MONITOR_WINDOW`), built at read time.

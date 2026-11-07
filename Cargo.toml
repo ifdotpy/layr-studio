@@ -11,7 +11,11 @@ members = [
     "workspaces/runtime/apps/process-supervisor",
     "workspaces/runtime/apps/runtime-server",
     "workspaces/runtime/packages/operations",
+<<<<<<< head
     "workspaces/runtime/packages/observable-codegen",
+=======
+    "workspaces/runtime/packages/read-models",
+>>>>>>> b4b476f
     "workspaces/runtime/packages/json",
     "workspaces/runtime/packages/runtime-providers",
     "workspaces/runtime/packages/runtime-priority-sys",

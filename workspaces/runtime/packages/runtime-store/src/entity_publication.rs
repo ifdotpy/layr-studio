@@ -42,6 +42,10 @@ pub struct PendingEntities {
     pub studio_errors: StudioErrorSources,
     pub queues: BTreeSet<String>,
     pub terminals: BTreeSet<String>,
+    /// Project/team/folder or saved sidebar order changed, or an attention source was deleted.
+    pub sidebar_structure_changed: bool,
+    /// Lead search tails changed in the existing flush/completion transaction.
+    pub sidebar_rows: BTreeSet<String>,
 }
 
 impl PendingEntities {
@@ -55,6 +59,8 @@ impl PendingEntities {
             && self.studio_errors.is_empty()
             && self.queues.is_empty()
             && self.terminals.is_empty()
+            && !self.sidebar_structure_changed
+            && self.sidebar_rows.is_empty()
     }
 }
 
@@ -124,6 +130,8 @@ enum Source {
     Monitor,
     /// Read only by the Studio error list (dismissals).
     Incident,
+    Project,
+    SidebarOrder,
 }
 
 impl Source {
@@ -140,6 +148,8 @@ impl Source {
             "user_terminals" => Some(Self::Terminal),
             "runtime_monitors" => Some(Self::Monitor),
             "runtime_error_incidents" => Some(Self::Incident),
+            "runtime_projects" => Some(Self::Project),
+            "runtime_sidebar_order" => Some(Self::SidebarOrder),
             _ => None,
         }
     }
@@ -166,6 +176,8 @@ impl Source {
             Self::Terminal => "user_terminals",
             Self::Monitor => "runtime_monitors",
             Self::Incident => "runtime_error_incidents",
+            Self::Project => "runtime_projects",
+            Self::SidebarOrder => "runtime_sidebar_order",
         }
     }
 }
@@ -179,6 +191,7 @@ enum Event {
     /// A partial projection write needs a full publication.
     Stale(Source, String),
     TeamRoot(String),
+    SidebarRow(String),
 }
 
 thread_local! {
@@ -248,6 +261,11 @@ pub(crate) fn mark_published(collection: &str, id: &str) {
     }
 }
 
+/// Coalesce lead tail changes at the existing transaction boundary.
+pub(crate) fn mark_sidebar_row(id: &str) {
+    push(Event::SidebarRow(id.to_owned()));
+}
+
 /// Journal that `collection/id` needs a full publication before commit.
 pub fn mark_stale(collection: &str, id: &str) {
     if let Some(source) = Source::of_collection(collection) {
@@ -281,7 +299,9 @@ pub(crate) fn pending(
                     | Source::Work
                     | Source::Terminal
                     | Source::Monitor
-                    | Source::Incident => {
+                    | Source::Incident
+                    | Source::Project
+                    | Source::SidebarOrder => {
                         format!("SELECT id FROM {} WHERE rowid=?1", source.table())
                     }
                 })?
@@ -291,6 +311,10 @@ pub(crate) fn pending(
         }
     }
     let mut pending = PendingEntities::default();
+    pending.sidebar_structure_changed = ids.iter().any(|((source, _), id)| {
+        matches!(source, Source::Project | Source::SidebarOrder)
+            || (id.is_none() && matches!(source, Source::Task | Source::Monitor | Source::Request))
+    });
     for ((source, _), id) in &ids {
         if *source == Source::Agent {
             if let Some(id) = id {
@@ -407,9 +431,19 @@ pub(crate) fn pending(
             Event::Published(source, id) => {
                 published.insert((source, id), index);
             }
+            Event::SidebarRow(id) => {
+                pending.sidebar_rows.insert(id);
+            }
             Event::TeamRoot(id) => {
                 pending.team_roots.insert(id);
             }
+        }
+    }
+    // An ordinary agent row change already carries every current sidebar fact.
+    // Completion therefore needs no additional tail mark, even after an explicit publication.
+    for (source, id) in changed.keys() {
+        if *source == Source::Agent {
+            pending.sidebar_rows.remove(id);
         }
     }
     for ((source, id), index) in changed {
@@ -429,7 +463,9 @@ pub(crate) fn pending(
             | Source::QueueAsset
             | Source::Terminal
             | Source::Monitor
-            | Source::Incident => false,
+            | Source::Incident
+            | Source::Project
+            | Source::SidebarOrder => false,
         };
     }
     Ok(pending)

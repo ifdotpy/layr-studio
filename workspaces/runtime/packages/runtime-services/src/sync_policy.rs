@@ -1966,16 +1966,16 @@ fn compare_created_desc(
     right.created.seconds().total_cmp(&left.created.seconds())
 }
 
-#[derive(serde::Serialize)]
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PeerTeamProjection {
-    id: String,
-    name: String,
-    project_path: String,
-    members: Vec<String>,
-    revision: Option<u64>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
+pub(crate) struct PeerTeamProjection {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) project_path: String,
+    pub(crate) members: Vec<String>,
+    pub(crate) revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) peer_leads: Vec<studio_runtime_schema::project_record::PeerLead>,
 }
 
 /// Republish every peer team entity from the project records and the project grants.
@@ -2074,12 +2074,26 @@ fn maintain_peer_team_entities(
             }
         }
     }
+    let before: i64 = transaction.query_row(
+        "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='peerTeam'",
+        [],
+        |r| r.get(0),
+    )?;
     let mut kept = BTreeSet::new();
     for (id, record) in current {
         kept.insert(id.clone());
         SyncDocumentsRepository::put_entity(transaction, "peerTeam", &id, record, false)?;
     }
-    retire_unkept(transaction, "peerTeam", &kept, None, validate)
+    retire_unkept(transaction, "peerTeam", &kept, None, validate)?;
+    let after: i64 = transaction.query_row(
+        "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='peerTeam'",
+        [],
+        |r| r.get(0),
+    )?;
+    if after != before {
+        crate::sidebar::invalidate_all(transaction)?;
+    }
+    Ok(())
 }
 
 fn retire_unkept(

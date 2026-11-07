@@ -3,11 +3,18 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// Entity collection identity of full sidebar rows; excluded from the state scope.
+pub const COLLECTION: &str = "sidebarChatRow";
+
 fn nullable_schema<T: JsonSchema>(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
     Option::<T>::json_schema(generator)
 }
 
-fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { Option::<T>::deserialize(d) }
+fn nullable<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<T>, D::Error> {
+    Option::<T>::deserialize(d)
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -62,7 +69,10 @@ pub struct SidebarChatRow {
     pub indicator: crate::chat_operational_status::ChatOperationalStatus,
     /// Existing completed-result read CAS proof; null means no completed result.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required, schema_with = "nullable_schema::<crate::agent_entity_nested_extra::ReadStateDto>")]
+    #[schemars(
+        required,
+        schema_with = "nullable_schema::<crate::agent_entity_nested_extra::ReadStateDto>"
+    )]
     pub mark_read: Option<crate::agent_entity_nested_extra::ReadStateDto>,
     /// Eligibility of an explicit mark-unread action.
     pub mark_unread: MarkUnreadEligibility,
@@ -76,7 +86,10 @@ pub struct SidebarChatRow {
     pub search_text: String,
     /// Current epoch workspace copy progress; counts use the progress owner unit.
     #[serde(deserialize_with = "nullable")]
-    #[schemars(required, schema_with = "nullable_schema::<crate::layr_progress::CopyProgress>")]
+    #[schemars(
+        required,
+        schema_with = "nullable_schema::<crate::layr_progress::CopyProgress>"
+    )]
     pub copy_progress: Option<crate::layr_progress::CopyProgress>,
     /// Whether the existing stall owner reports waiting for lead action.
     pub waiting_for_lead: bool,
@@ -118,24 +131,47 @@ mod tests {
         let mut document = studio_json::json!({"components":{"schemas":{}}});
         // Use the same owner renderer as committed OpenAPI generation.
         let mut generator = schemars::generate::SchemaSettings::draft2020_12()
-            .for_serialize().with(|s| s.definitions_path = "/components/schemas".into()).into_generator();
+            .for_serialize()
+            .with(|s| s.definitions_path = "/components/schemas".into())
+            .into_generator();
         generator.subschema_for::<SidebarChatRow>();
-        for (name, schema) in generator.take_definitions(true) { document["components"]["schemas"][name] = schema; }
+        for (name, schema) in generator.take_definitions(true) {
+            document["components"]["schemas"][name] = schema;
+        }
         let schema = &document["components"]["schemas"]["SidebarChatRow"];
         let properties = schema["properties"].as_object().expect("properties");
         let required = schema["required"].as_array().expect("required");
         assert_eq!(properties.len(), required.len(), "all row fields required");
-        for key in properties.keys() { assert!(required.contains(&json!(key)), "{key}"); }
+        for key in properties.keys() {
+            assert!(required.contains(&json!(key)), "{key}");
+        }
         let mut validation = document.clone();
         validation["$ref"] = json!("#/components/schemas/SidebarChatRow");
         let validator = jsonschema::validator_for(&validation).expect("schema compiles");
-        assert!(validator.is_valid(&value), "canonical null fixture must validate: {:?}", validator.iter_errors(&value).collect::<Vec<_>>());
+        assert!(
+            validator.is_valid(&value),
+            "canonical null fixture must validate: {:?}",
+            validator.iter_errors(&value).collect::<Vec<_>>()
+        );
         let row: SidebarChatRow = studio_json::from_value(value.clone()).expect("canonical row");
-        assert_eq!(studio_json::to_value(row).expect("row serialization"), value);
-        for field in ["projectFolder", "teamId", "orderRank", "model", "copyProgress", "markRead"] {
+        assert_eq!(
+            studio_json::to_value(row).expect("row serialization"),
+            value
+        );
+        for field in [
+            "projectFolder",
+            "teamId",
+            "orderRank",
+            "model",
+            "copyProgress",
+            "markRead",
+        ] {
             let mut missing = value.clone();
             missing.as_object_mut().expect("object").remove(field);
-            assert!(studio_json::from_value::<SidebarChatRow>(missing).is_err(), "{field} required");
+            assert!(
+                studio_json::from_value::<SidebarChatRow>(missing).is_err(),
+                "{field} required"
+            );
         }
         let mut invalid = value.clone();
         invalid["extra"] = json!(true);
@@ -144,7 +180,10 @@ mod tests {
             for number in [-1_i64, 4_294_967_296] {
                 let mut invalid = value.clone();
                 invalid[field] = json!(number);
-                assert!(studio_json::from_value::<SidebarChatRow>(invalid).is_err(), "{field}");
+                assert!(
+                    studio_json::from_value::<SidebarChatRow>(invalid).is_err(),
+                    "{field}"
+                );
             }
         }
     }
@@ -160,34 +199,61 @@ pub(crate) fn refresh_openapi(openapi: &mut studio_json::Value) -> Result<(), St
     generator.subschema_for::<SidebarChatList>();
     // Existing leaf contracts retain their own schema renderer/normalization.
     for (name, schema) in generator.take_definitions(true) {
-        if !openapi["components"]["schemas"].get(&name).is_some()
-            || matches!(name.as_str(), "SidebarChatRow" | "SidebarChatList" | "MarkUnreadEligibility")
+        if openapi["components"]["schemas"].get(&name).is_none()
+            || matches!(
+                name.as_str(),
+                "SidebarChatRow" | "SidebarChatList" | "MarkUnreadEligibility"
+            )
         {
             openapi["components"]["schemas"][name] = schema;
         }
     }
     let schemas = &mut openapi["components"]["schemas"];
-    schemas["SidebarResource"] = json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","const":"sidebar"}},"required":["kind"],"x-studio-entity-scope":{"collections":["sidebarChatRow"]}});
-    schemas["ResourceRef"]["discriminator"]["mapping"]["sidebar"] = json!("#/components/schemas/SidebarResource");
-    let resources = schemas["ResourceRef"]["oneOf"].as_array_mut().ok_or("ResourceRef variants missing")?;
+    schemas["SidebarResource"] = json!({"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","const":"sidebar"}},"required":["kind"],"x-studio-entity-scope":{"collections":[COLLECTION]}});
+    schemas["ResourceRef"]["discriminator"]["mapping"]["sidebar"] =
+        json!("#/components/schemas/SidebarResource");
+    let resources = schemas["ResourceRef"]["oneOf"]
+        .as_array_mut()
+        .ok_or("ResourceRef variants missing")?;
     let reference = json!({"$ref":"#/components/schemas/SidebarResource"});
-    if !resources.contains(&reference) { resources.push(reference); }
-    schemas["SubscriptionDataMap"]["properties"]["sidebar"] = json!({"$ref":"#/components/schemas/SidebarChatList"});
-    let required = schemas["SubscriptionDataMap"]["required"].as_array_mut().ok_or("SubscriptionDataMap required missing")?;
-    if !required.contains(&json!("sidebar")) { required.push(json!("sidebar")); }
-    schemas["SyncSidebarChatRowEntityPayload"] = json!({"type":"object","additionalProperties":false,"properties":{"collection":{"type":"string","const":"sidebarChatRow"},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/SidebarChatRow"}},"required":["collection","id","value"]});
-    schemas["SyncEntityPayload"]["discriminator"]["mapping"]["sidebarChatRow"] = json!("#/components/schemas/SyncSidebarChatRowEntityPayload");
-    let variants = schemas["SyncEntityPayload"]["oneOf"].as_array_mut().ok_or("payload variants missing")?;
+    if !resources.contains(&reference) {
+        resources.push(reference);
+    }
+    schemas["SubscriptionDataMap"]["properties"]["sidebar"] =
+        json!({"$ref":"#/components/schemas/SidebarChatList"});
+    let required = schemas["SubscriptionDataMap"]["required"]
+        .as_array_mut()
+        .ok_or("SubscriptionDataMap required missing")?;
+    if !required.contains(&json!("sidebar")) {
+        required.push(json!("sidebar"));
+    }
+    schemas["SyncSidebarChatRowEntityPayload"] = json!({"type":"object","additionalProperties":false,"properties":{"collection":{"type":"string","const":COLLECTION},"id":{"type":"string"},"value":{"$ref":"#/components/schemas/SidebarChatRow"}},"required":["collection","id","value"]});
+    schemas["SyncEntityPayload"]["discriminator"]["mapping"][COLLECTION] =
+        json!("#/components/schemas/SyncSidebarChatRowEntityPayload");
+    let variants = schemas["SyncEntityPayload"]["oneOf"]
+        .as_array_mut()
+        .ok_or("payload variants missing")?;
     let reference = json!({"$ref":"#/components/schemas/SyncSidebarChatRowEntityPayload"});
-    if !variants.contains(&reference) { variants.push(reference); }
-    let variants = schemas["SyncEntity"]["oneOf"].as_array_mut().ok_or("entity variants missing")?;
-    if !variants.iter().any(|v| v["properties"]["collection"]["const"] == "sidebarChatRow") {
-        variants.push(json!({"type":"object","properties":{"op":{"type":"string","const":"upsert"},"collection":{"type":"string","const":"sidebarChatRow"},"value":{"$ref":"#/components/schemas/SidebarChatRow"}},"required":["op","collection","value"]}));
+    if !variants.contains(&reference) {
+        variants.push(reference);
+    }
+    let variants = schemas["SyncEntity"]["oneOf"]
+        .as_array_mut()
+        .ok_or("entity variants missing")?;
+    if !variants
+        .iter()
+        .any(|v| v["properties"]["collection"]["const"] == COLLECTION)
+    {
+        variants.push(json!({"type":"object","properties":{"op":{"type":"string","const":"upsert"},"collection":{"type":"string","const":COLLECTION},"value":{"$ref":"#/components/schemas/SidebarChatRow"}},"required":["op","collection","value"]}));
     }
     for variant in variants {
         if variant["properties"]["op"]["const"] == "delete" {
-            let collections = variant["properties"]["collection"]["enum"].as_array_mut().ok_or("delete collections missing")?;
-            if !collections.contains(&json!("sidebarChatRow")) { collections.push(json!("sidebarChatRow")); }
+            let collections = variant["properties"]["collection"]["enum"]
+                .as_array_mut()
+                .ok_or("delete collections missing")?;
+            if !collections.contains(&json!(COLLECTION)) {
+                collections.push(json!(COLLECTION));
+            }
         }
     }
     Ok(())

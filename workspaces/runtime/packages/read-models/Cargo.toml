@@ -1,0 +1,15 @@
+[package]
+name = "studio-read-models"
+version.workspace = true
+edition.workspace = true
+description = "Pure render-ready projections of Studio domain facts"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+studio-json = { path = "../json" }
+studio-runtime-schema = { path = "../runtime-schema" }
+
+[lints]
+workspace = true

@@ -193,18 +193,28 @@ pub fn ui_summary(
         .filter(|a| !truthy(a.get("deletedAt")))
         .map(|a| (a["id"].as_str().unwrap_or_default(), a))
         .collect::<std::collections::BTreeMap<_, _>>();
-    let unread = agents
-        .iter()
-        .filter(|(_, a)| {
-            truthy(a.get("threadId"))
-                && truthy(a.get("lastCompletedTurn"))
-                && a["lastCompletedTurnStatus"] == "completed"
-                && !(a["readState"]["read"] == true
-                    && a["readState"]["threadId"] == a["threadId"]
-                    && a["readState"]["turnId"] == a["lastCompletedTurn"])
-        })
-        .map(|(id, _)| *id)
-        .collect::<std::collections::BTreeSet<_>>();
+    let mut unread = std::collections::BTreeSet::new();
+    for (id, agent) in &agents {
+        let receipt = agent
+            .get("readState")
+            .filter(|v| !v.is_null())
+            .map(|v| {
+                studio_json::from_value::<
+                    studio_runtime_schema::agent_entity_nested_extra::ReadStateDto,
+                >(v.clone())
+            })
+            .transpose()?;
+        if studio_read_models::chat_status::mark_read_target(
+            agent.get("threadId").and_then(Value::as_str),
+            agent.get("lastCompletedTurn").and_then(Value::as_str),
+            agent.get("lastCompletedTurnStatus").and_then(Value::as_str),
+            receipt.as_ref(),
+        )
+        .is_some_and(|target| !target.read)
+        {
+            unread.insert(*id);
+        }
+    }
     let running = agents
         .values()
         .filter(|a| truthy(a.get("inFlight")))

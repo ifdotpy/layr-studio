@@ -6850,6 +6850,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-read-models"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "studio-json",
+ "studio-runtime-schema",
+]
+
+[[package]]
 name = "studio-request-signing"
 version = "0.1.0"
 dependencies = [
@@ -7038,6 +7047,7 @@ dependencies = [
  "strum",
  "studio-json",
  "studio-operations",
+ "studio-read-models",
  "studio-request-signing",
  "studio-runtime-process",
  "studio-runtime-providers",

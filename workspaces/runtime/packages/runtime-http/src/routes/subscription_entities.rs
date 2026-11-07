@@ -17,6 +17,7 @@ pub(super) fn selection(
 ) -> Option<(&'static SubscriptionEntityScope, Option<&str>, Option<&str>)> {
     let (kind, id, agent) = match resource {
         ResourceRef::StateResource(_) => ("state", None, None),
+        ResourceRef::SidebarResource(_) => ("sidebar", None, None),
         ResourceRef::CostsResource(_) => ("costs", None, None),
         ResourceRef::DesktopResource(_) => ("desktop", None, None),
         ResourceRef::TerminalsResource(_) => ("terminals", None, None),
@@ -133,6 +134,86 @@ mod tests {
     use studio_runtime_store::{
         AgentRecord, AgentRepository, RuntimeStore, StoreError, SyncDocumentsRepository,
     };
+
+    #[tokio::test]
+    async fn sidebar_registry_delivers_snapshot_delta_tombstone_and_resume() {
+        let directory = tempfile::tempdir().expect("state");
+        let store = Arc::new(
+            RuntimeStore::open(Some(directory.path()))
+                .await
+                .expect("store"),
+        );
+        studio_runtime_services::entity_publication::install(&store)
+            .await
+            .expect("publisher");
+        store.transaction_with(|tx| AgentRepository::put(tx,&AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"sidebar-chat","rootId":"sidebar-chat","isLead":true,"epoch":1,"status":"idle","autoWake":true,"name":"Sidebar"}))?)).await.expect("seed");
+        let workspace = store
+            .test_read_transaction(|tx| SyncDocumentsRepository::workspace_id(tx))
+            .expect("workspace");
+        let state = HttpState::new(
+            "token".into(),
+            workspace,
+            directory.path().to_string_lossy().into_owned(),
+            4620,
+            None,
+            Some(store.clone()),
+            None,
+        );
+        let resource: ResourceRef =
+            studio_json::from_value(json!({"kind":"sidebar"})).expect("resource");
+        let baseline =
+            super::super::subscriptions::initial_snapshot(state.clone(), resource.clone(), None)
+                .await
+                .expect("registry snapshot");
+        let cursor = baseline.cursor.clone();
+        let value = studio_json::to_value(baseline).expect("baseline");
+        assert_eq!(value["replyKind"], "snapshot");
+        assert_eq!(
+            value["entityChanges"]["documents"][0]["collection"],
+            "sidebarChatRow"
+        );
+        assert_eq!(
+            value["entityChanges"]["documents"][0]["value"]["name"],
+            "Sidebar"
+        );
+        let replay = super::super::subscriptions::initial_snapshot(
+            state.clone(),
+            resource.clone(),
+            cursor.clone(),
+        )
+        .await
+        .expect("covered resume");
+        assert_eq!(
+            studio_json::to_value(replay).expect("replay")["entityChanges"]["documents"],
+            json!([])
+        );
+        store.transaction(|tx|{tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.pinned',json('true')) WHERE id='sidebar-chat'",[])?;Ok(())}).await.expect("pin");
+        let delta =
+            super::super::subscriptions::initial_snapshot(state.clone(), resource.clone(), cursor)
+                .await
+                .expect("delta");
+        let cursor = delta.cursor.clone();
+        let value = studio_json::to_value(delta).expect("delta");
+        assert_eq!(value["replyKind"], "delta");
+        assert_eq!(
+            value["entityChanges"]["documents"][0]["value"]["pinned"],
+            true
+        );
+        store
+            .transaction(|tx| {
+                tx.execute("DELETE FROM runtime_agents WHERE id='sidebar-chat'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("delete");
+        let delta = super::super::subscriptions::initial_snapshot(state, resource, cursor)
+            .await
+            .expect("tombstone");
+        assert_eq!(
+            studio_json::to_value(delta).expect("tombstone")["entityChanges"]["documents"][0]["op"],
+            "delete"
+        );
+    }
 
     #[test]
     fn typed_entity_selectors_match_every_openapi_scope() {

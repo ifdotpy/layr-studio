@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use rusqlite::{Connection, OptionalExtension, params};
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
+use studio_runtime_schema::sidebar::COLLECTION as SIDEBAR_COLLECTION;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
     AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult,
@@ -670,6 +671,17 @@ fn agent_docs(
         }
     };
     let server = server_id(connection)?;
+    let mut sidebar = Vec::new();
+    if wanted.contains(SIDEBAR_COLLECTION) {
+        match crate::sidebar::row(connection, id, server.as_deref())? {
+            Some(value) => sidebar.push(upsert(SIDEBAR_COLLECTION, id, seq, value)?),
+            None if !snapshot => sidebar.extend(tombstones(&[SIDEBAR_COLLECTION], wanted, id, seq)),
+            None => {}
+        }
+        if wanted.len() == 1 {
+            return Ok(sidebar);
+        }
+    }
     let Some(documents) =
         crate::sync_policy::agent_view_documents(connection, id, server.as_deref())?
     else {
@@ -679,7 +691,7 @@ fn agent_docs(
             tombstones(AGENT_VIEW_COLLECTIONS, wanted, id, seq)
         });
     };
-    let mut rows = Vec::new();
+    let mut rows = sidebar;
     for (collection, value) in [
         ("agentSummary", documents.summary),
         ("agentDetail", documents.detail),
@@ -700,7 +712,11 @@ fn agent_docs(
 
 /// The view documents of every live agent, as a fresh pull sends them.
 pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
-    let wanted = AGENT_VIEW_COLLECTIONS.iter().copied().collect();
+    let wanted = AGENT_VIEW_COLLECTIONS
+        .iter()
+        .copied()
+        .filter(|name| *name != SIDEBAR_COLLECTION)
+        .collect();
     let high = durable_seq::high(connection)?;
     Ok(
         agent_units(connection, 0, high, i64::MAX, &wanted, None, None, i64::MAX)?

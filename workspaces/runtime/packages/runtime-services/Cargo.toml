@@ -12,6 +12,7 @@ test-support = []
 bench-support = ["rustix/use-libc-auxv"]
 
 [dependencies]
+studio-read-models = { path = "../read-models" }
 base64 = { workspace = true }
 bytes.workspace = true
 chrono = { workspace = true }

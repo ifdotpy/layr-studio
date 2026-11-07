@@ -15,6 +15,7 @@ ownership, boundary validation, and current migration coverage.
 - [`apps/runtime-server/`](apps/runtime-server/): Rust HTTP server and operator CLI.
 - [`packages/runtime-services/`](packages/runtime-services/): runtime operations and integration tests.
 - [`packages/runtime-store/`](packages/runtime-store/): SQLite state ownership.
+- [`packages/read-models/`](packages/read-models/): pure render-ready domain projections.
 - [`packages/runtime-schema/`](packages/runtime-schema/): generated API and state contracts.
 
 Use `just packages` to discover manifest-owned packages. For one hypothesis,

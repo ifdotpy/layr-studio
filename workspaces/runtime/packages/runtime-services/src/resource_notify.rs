@@ -47,6 +47,7 @@ struct ResourceScope {
 #[cfg_attr(any(test, feature = "test-support"), serde(rename_all = "kebab-case"))]
 pub enum ResourceKind {
     State,
+    Sidebar,
     #[cfg_attr(any(test, feature = "test-support"), serde(rename = "agentDetail"))]
     AgentDetail,
     Costs,
@@ -93,6 +94,7 @@ impl ResourceKind {
         matches!(
             self,
             Self::State
+                | Self::Sidebar
                 | Self::AgentDetail
                 | Self::Costs
                 | Self::Desktop
@@ -457,6 +459,7 @@ impl ResourceNotifications {
                 | ResourceKind::Terminal
                 | ResourceKind::Terminals
                 | ResourceKind::State
+                | ResourceKind::Sidebar
                 | ResourceKind::Transcript
                 | ResourceKind::Transcripts
                 | ResourceKind::Room

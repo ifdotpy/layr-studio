@@ -75,6 +75,7 @@ inherits = "ci"
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # JSON facade preserves serde_json behavior for typed, borrowed, and raw values.
+# Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 default-filter = '''
     package(=studio-observable-codegen) |
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
@@ -320,6 +321,10 @@ default-filter = '''
     | ((package(=studio-runtime-http) | package(=studio-client-core)) & (kind(lib)) & (test(desktop_content_ignores_healthy_disk_writes_but_delivers_visible_changes) | test(desktop_http_) | test(existing_backend_must_supply_a_valid_build_identity)))
     | ((package(=studio-runtime-services)) & (kind(lib)) & test(limit_failure_refresh_))
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(routes::sync_stream::tests::state_stream_) | test(routes::subscriptions::tests::) | test(unchanged_open_chat_ignores_unrelated_agent_commits) | test(brotli_stream_route_negotiates_encoding_and_flushes_the_initial_event)))
+    | (package(=studio-runtime-schema) & kind(lib) & test(sidebar::tests::))
+    | (package(=studio-read-models) & kind(lib))
+    | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::sidebar_))
+    | (package(=studio-runtime-http) & kind(lib) & test(sidebar_registry_delivers_))
     | (package(=studio-runtime-http) & kind(lib) & test(view_scoped_entities_))
     | (package(=studio-client-core) & kind(lib) & test(agent_summary_renders_without_detail_and_owns_list_fields))
     | ((package(=studio-runtime-http) | package(=studio-runtime-services)) & kind(test) & binary(=integration) & test(live_permissions_))
@@ -493,6 +498,7 @@ platform = 'cfg(target_os = "linux")'
 # Reviewer permissions stay read-only under yolo across preparation, turns, and monitors.
 # Command replay witnesses feed recorded management commands through decide and compare the canonical outcome.
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
+# Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(legacy_vm_move_is_refused_before_writing_host_transcript)) |
     (package(=studio-runtime-services) & kind(lib) & (test(legacy_vm_monitor_command_is_refused) | test(legacy_vm_safety_retry_is_refused))) |
@@ -737,6 +743,10 @@ default-filter = '''
     | ((package(=studio-runtime-http) | package(=studio-client-core)) & (kind(lib)) & (test(desktop_content_ignores_healthy_disk_writes_but_delivers_visible_changes) | test(desktop_http_) | test(existing_backend_must_supply_a_valid_build_identity)))
     | ((package(=studio-runtime-services)) & (kind(lib)) & test(limit_failure_refresh_))
     | ((package(=studio-runtime-http)) & (kind(lib)) & (test(routes::sync_stream::tests::state_stream_) | test(routes::subscriptions::tests::) | test(unchanged_open_chat_ignores_unrelated_agent_commits) | test(brotli_stream_route_negotiates_encoding_and_flushes_the_initial_event)))
+    | (package(=studio-runtime-schema) & kind(lib) & test(sidebar::tests::))
+    | (package(=studio-read-models) & kind(lib))
+    | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::sidebar_))
+    | (package(=studio-runtime-http) & kind(lib) & test(sidebar_registry_delivers_))
     | (package(=studio-runtime-http) & kind(lib) & test(view_scoped_entities_))
     | (package(=studio-client-core) & kind(lib) & test(agent_summary_renders_without_detail_and_owns_list_fields))
     | ((package(=studio-runtime-http) | package(=studio-runtime-services)) & kind(test) & binary(=integration) & test(live_permissions_))

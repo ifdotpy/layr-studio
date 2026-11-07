@@ -471,10 +471,32 @@ fn put_fields(connection: &Connection, id: &str, agent: &Map<String, Value>) -> 
             *slot = Some(studio_json::to_string(value)?);
         }
     }
+    let tail_changed = crate::entity_publication::active()
+        && agent.get("isLead").and_then(Value::as_bool) == Some(true)
+        && {
+            let prior: Option<String> = connection
+                .query_row_cached(
+                    "SELECT tail FROM runtime_agent_volatile WHERE id=?1",
+                    [id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .optional()?
+                .flatten();
+            let next = AGENT_VOLATILE_FIELDS
+                .iter()
+                .zip(&values)
+                .find(|(name, _)| **name == "tail")
+                .expect("tail is an owned volatile field")
+                .1;
+            prior.as_deref() != next.as_deref()
+        };
     connection.execute_cached(
         &UPSERT_SQL,
         params_from_iter(std::iter::once(Some(id.to_owned())).chain(values)),
     )?;
+    if tail_changed {
+        crate::entity_publication::mark_sidebar_row(id);
+    }
     Ok(())
 }
 
