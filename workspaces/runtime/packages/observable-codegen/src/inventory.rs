@@ -1,4 +1,5 @@
 //! Collection inventory derives from the same Rust-owned payload union as transport.
+use crate::metadata::resolve_variant;
 use crate::{GenerationError, UnsupportedShape, fail, identifier, quote, schema};
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -11,16 +12,7 @@ pub fn render_entity_collections(document: &Value) -> Result<String, GenerationE
         .ok_or_else(|| fail(path, UnsupportedShape::Union))?;
     let mut names = BTreeSet::new();
     for variant in variants {
-        let variant = if let Some(reference) = variant["$ref"].as_str() {
-            schema(
-                document,
-                reference
-                    .strip_prefix("#/components/schemas/")
-                    .ok_or_else(|| fail(path, UnsupportedShape::MissingSchema))?,
-            )?
-        } else {
-            variant
-        };
+        let variant = resolve_variant(document, variant, path, UnsupportedShape::MissingSchema)?;
         let name = variant["properties"]["collection"]["const"]
             .as_str()
             .ok_or_else(|| fail(path, UnsupportedShape::Union))?;

@@ -60,7 +60,7 @@ function arraySelection<T>() {
 
 // Keep each collection's identity until a member changes. Global projections
 // can publish another tree without invalidating this conversation's consumers.
-export function createChatSnapshotSelector(includeUnassignedRequests = false) {
+export function createChatSnapshotSelector() {
   let previous: Snapshot | null = null;
   let root: string | undefined;
   let ids = new Set<string>();
@@ -109,11 +109,8 @@ export function createChatSnapshotSelector(includeUnassignedRequests = false) {
         threads,
         (room) => !!rootId && roomLeadIds(room).includes(rootId),
       ),
-      requests: requests(
-        source.requests,
-        ids,
-        (request) =>
-          owns(request.agent) || (includeUnassignedRequests && !request.agent),
+      requests: requests(source.requests, ids, (request) =>
+        owns(request.agent),
       ),
       complaints: complaints(
         source.complaints,

@@ -80,7 +80,7 @@ describe("chat snapshot selection", () => {
     );
   });
   it("retains the selected tree after unrelated updates but publishes its real changes", () => {
-    const select = createChatSnapshotSelector(true);
+    const select = createChatSnapshotSelector();
     const initial = fixture();
     const chosen = select(initial, "lead")!;
     const other = changeAgent(initial, "other", {
@@ -102,7 +102,7 @@ describe("chat snapshot selection", () => {
   });
 
   it("keeps relevant questions and monitors fresh while excluding another tree", () => {
-    const select = createChatSnapshotSelector(true);
+    const select = createChatSnapshotSelector();
     const initial = fixture();
     const chosen = select(initial, "lead")!;
     const another = {
@@ -133,7 +133,7 @@ describe("chat snapshot selection", () => {
       },
       "lead",
     )!;
-    expect(next.runtime.requests).toEqual([question, globalQuestion]);
+    expect(next.runtime.requests).toEqual([question]);
     expect(next.runtime.monitors).toEqual([monitor]);
     expect(next).not.toBe(chosen);
   });

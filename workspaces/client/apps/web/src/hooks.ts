@@ -88,15 +88,8 @@ export function useRetainedUsageAccounts(values: UsageAccount[]) {
   return selected;
 }
 
-export function useChatSnapshot(
-  data: Snapshot | null,
-  rootId?: string,
-  includeUnassignedRequests = false,
-) {
-  const select = useMemo(
-    () => createChatSnapshotSelector(includeUnassignedRequests),
-    [includeUnassignedRequests],
-  );
+export function useChatSnapshot(data: Snapshot | null, rootId?: string) {
+  const select = useMemo(createChatSnapshotSelector, []);
   return select(data, rootId);
 }
 

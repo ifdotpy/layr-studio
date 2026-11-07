@@ -77,7 +77,7 @@ function changeWorker(
 
 // Exercise the selectors used by App; identity changes are not React render counts.
 function pipeline() {
-  const chat = createChatSnapshotSelector(true);
+  const chat = createChatSnapshotSelector();
   const generated = observableFixture();
   const mirror = generated.mirror;
   const catalog = createAgentCatalog(generated.store);

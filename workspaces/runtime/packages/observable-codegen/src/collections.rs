@@ -1,3 +1,4 @@
+use crate::metadata::resolve_variant;
 use crate::shape::{Parser, Shape};
 use crate::{
     GenerationError, ObservableResource, UnsupportedShape, fail, identifier, quote, schema,
@@ -30,16 +31,8 @@ pub(crate) fn parse(
         }
         let mut matched = false;
         for variant in variants {
-            let variant = if let Some(reference) = variant["$ref"].as_str() {
-                schema(
-                    document,
-                    reference
-                        .strip_prefix("#/components/schemas/")
-                        .ok_or_else(|| fail(&path, UnsupportedShape::MissingSchema))?,
-                )?
-            } else {
-                variant
-            };
+            let variant =
+                resolve_variant(document, variant, &path, UnsupportedShape::MissingSchema)?;
             let properties = &variant["properties"];
             if properties["collection"]["const"] != collection.collection {
                 continue;

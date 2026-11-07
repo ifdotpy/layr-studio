@@ -1,6 +1,23 @@
 use crate::{GenerationError, ObservableResource, UnsupportedShape, fail, schema};
 use studio_json::Value;
 
+pub(crate) fn resolve_variant<'a>(
+    document: &'a Value,
+    variant: &'a Value,
+    path: &str,
+    unsupported: UnsupportedShape,
+) -> Result<&'a Value, GenerationError> {
+    match variant["$ref"].as_str() {
+        Some(reference) => schema(
+            document,
+            reference
+                .strip_prefix("#/components/schemas/")
+                .ok_or_else(|| fail(path, unsupported))?,
+        ),
+        None => Ok(variant),
+    }
+}
+
 /// Metadata must refer to the existing transport contract, rather than invent a registry.
 pub(crate) fn validate(
     document: &Value,
@@ -27,15 +44,7 @@ pub(crate) fn validate(
         .as_array()
         .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?;
     for variant in variants {
-        let variant = match variant["$ref"].as_str() {
-            Some(reference) => schema(
-                document,
-                reference
-                    .strip_prefix("#/components/schemas/")
-                    .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?,
-            )?,
-            None => variant,
-        };
+        let variant = resolve_variant(document, variant, &path, UnsupportedShape::Resource)?;
         let kind = &variant["properties"]["kind"];
         if kind["const"] != resource.kind && kind["enum"] != studio_json::json!([resource.kind]) {
             continue;
@@ -78,16 +87,7 @@ pub(crate) fn argument(
         .as_array()
         .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?;
     for variant in variants {
-        let variant = if let Some(reference) = variant["$ref"].as_str() {
-            schema(
-                document,
-                reference
-                    .strip_prefix("#/components/schemas/")
-                    .ok_or_else(|| fail(&path, UnsupportedShape::Resource))?,
-            )?
-        } else {
-            variant
-        };
+        let variant = resolve_variant(document, variant, &path, UnsupportedShape::Resource)?;
         let kind = &variant["properties"]["kind"];
         if kind["const"] != resource.kind && kind["enum"] != studio_json::json!([resource.kind]) {
             continue;
