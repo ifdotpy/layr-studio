@@ -28,6 +28,39 @@ fn catalog_generation_mismatch_still_denies_freeze() {
     );
 }
 
+/// Agent 01a1b57e on 7 November 2026: a bridge restart left the catalog
+/// pending between selection and commit. The commit waits for the catalog
+/// instead of comparing the selected generation with a placeholder.
+#[test]
+fn a_pending_catalog_at_commit_waits_instead_of_a_mismatch() {
+    let now = Instant::now();
+    let identity = CatalogIdentity {
+        account_key: "claude-profile".into(),
+        home: "/account".into(),
+        provider: "claude".parse().unwrap(),
+        generation: 1,
+    };
+    let record = json!({"id":"agent", "accountKey":"claude-profile", "executionSettingsAccountKey":"claude-profile", "model":"claude-opus-5-5", "effort":"medium", "workspaceMode":"worktree"});
+    let observed = ExecutionSnapshot::from_record(&record, identity.clone()).unwrap();
+    let mut selection = select_execution(&observed, &observed, None, now, "agent").unwrap();
+    selection.catalog_precondition = Some((identity.clone(), now + Duration::from_secs(60)));
+    let mut pending = identity.clone();
+    pending.generation = 0;
+    assert_eq!(
+        selection.commit_identity((pending, None)),
+        Err(ExecutionDenial::CatalogRequired)
+    );
+    let fresh = CatalogObservation {
+        identity: identity.clone(),
+        expires_at: now + Duration::from_secs(60),
+        models: Vec::new(),
+    };
+    assert_eq!(
+        selection.commit_identity((identity.clone(), Some(fresh))),
+        Ok(identity)
+    );
+}
+
 struct CapturedExpectations(crate::turn_fixtures::FrozenResponses);
 impl CapturedExpectations {
     fn new() -> Self {
