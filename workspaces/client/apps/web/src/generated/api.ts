@@ -6311,19 +6311,59 @@ export interface components {
           monitors: number;
         }
       | {
-          agents?: unknown | undefined;
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string | null;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
         }
       | {
-          commands?: unknown | undefined;
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string | null;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
         }
       | {
-          monitors?: unknown | undefined;
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string | null;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
         }
       | {
-          inputs?: unknown | undefined;
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string | null;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
         }
       | {
-          event?: string | undefined;
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
         };
     /**
      * AgentWorkspaceModeRequest

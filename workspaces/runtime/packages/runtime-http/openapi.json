@@ -10835,40 +10835,222 @@
         "additionalProperties": false,
         "anyOf": [
           {
+            "additionalProperties": false,
+            "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
             "properties": {
               "agents": {
-                "minimum": 1
-              }
-            }
-          },
-          {
-            "properties": {
+                "format": "uint32",
+                "minimum": 1,
+                "type": "integer"
+              },
               "commands": {
-                "minimum": 1
-              }
-            }
-          },
-          {
-            "properties": {
-              "monitors": {
-                "minimum": 1
-              }
-            }
-          },
-          {
-            "properties": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "event": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "inputs": {
-                "minimum": 1
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "monitors": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
               }
-            }
+            },
+            "required": [
+              "agents",
+              "commands",
+              "monitors",
+              "inputs",
+              "event"
+            ],
+            "type": "object"
           },
           {
+            "additionalProperties": false,
+            "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
             "properties": {
+              "agents": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "commands": {
+                "format": "uint32",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "event": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "inputs": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "monitors": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "agents",
+              "commands",
+              "monitors",
+              "inputs",
+              "event"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
+            "properties": {
+              "agents": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "commands": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "event": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "inputs": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "monitors": {
+                "format": "uint32",
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "agents",
+              "commands",
+              "monitors",
+              "inputs",
+              "event"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
+            "properties": {
+              "agents": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "commands": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "event": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "inputs": {
+                "format": "uint32",
+                "minimum": 1,
+                "type": "integer"
+              },
+              "monitors": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "agents",
+              "commands",
+              "monitors",
+              "inputs",
+              "event"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
+            "properties": {
+              "agents": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "commands": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
               "event": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "inputs": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "monitors": {
+                "format": "uint32",
+                "minimum": 0,
+                "type": "integer"
               }
-            }
+            },
+            "required": [
+              "agents",
+              "commands",
+              "monitors",
+              "inputs",
+              "event"
+            ],
+            "type": "object"
           }
         ],
         "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",

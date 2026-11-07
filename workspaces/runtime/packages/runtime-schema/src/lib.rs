@@ -5,7 +5,13 @@ extern crate self as studio_runtime_schema;
 
 pub mod ingress_pattern;
 pub mod non_null;
-#[allow(clippy::all, clippy::option_option, clippy::struct_excessive_bools)]
+// openapi-to-rust emits an unused object binding for empty tagged payloads.
+#[allow(
+    unused_variables,
+    clippy::all,
+    clippy::option_option,
+    clippy::struct_excessive_bools
+)]
 pub mod generated {
     include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 }

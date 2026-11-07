@@ -136,6 +136,10 @@ fn shared_values_ts() -> String {
             ),
             ("MAX_SAFE_INTEGER", values::MAX_SAFE_INTEGER.to_string()),
             (
+                "AGENT_TAIL_MAX_CHARS",
+                values::AGENT_TAIL_MAX_CHARS.to_string(),
+            ),
+            (
                 "COMPACT_RECENT_WINDOW_SECONDS",
                 values::COMPACT_RECENT_WINDOW_SECONDS.to_string(),
             ),

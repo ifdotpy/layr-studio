@@ -107,16 +107,18 @@ impl JsonSchema for AgentWaitReasons {
             "required".into(),
             studio_json::json!(["agents", "commands", "monitors", "inputs", "event"]),
         );
-        schema.insert(
-            "anyOf".into(),
-            studio_json::json!([
-                {"properties":{"agents":{"minimum":1}}},
-                {"properties":{"commands":{"minimum":1}}},
-                {"properties":{"monitors":{"minimum":1}}},
-                {"properties":{"inputs":{"minimum":1}}},
-                {"properties":{"event":{"type":"string","minLength":1}}}
-            ]),
-        );
+        let base = schema.clone().to_value();
+        let mut variants = Vec::new();
+        for field in ["agents", "commands", "monitors", "inputs", "event"] {
+            let mut variant = base.clone();
+            if field == "event" {
+                variant["properties"][field] = studio_json::json!({"type":"string","minLength":1});
+            } else {
+                variant["properties"][field]["minimum"] = studio_json::json!(1);
+            }
+            variants.push(variant);
+        }
+        schema.insert("anyOf".into(), studio_json::json!(variants));
         schema
     }
 }
