@@ -128,7 +128,9 @@ test("paired screen preference writes keep their server API and storage", async 
     await dialog
       .getByRole("button", { name: "Add with an invitation", exact: true })
       .click();
-    await dialog.getByLabel("Server address").fill(remote.invitation.origin);
+    await dialog
+      .getByLabel("Server address", { exact: true })
+      .fill(remote.invitation.origin);
     await dialog
       .getByLabel("Pairing invitation")
       .fill(JSON.stringify(remote.invitation));

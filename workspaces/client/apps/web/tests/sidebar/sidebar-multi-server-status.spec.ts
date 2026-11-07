@@ -84,7 +84,9 @@ test("paired sidebar shows the chat provider and server alias", async ({
     await dialog
       .getByRole("button", { name: "Add with an invitation", exact: true })
       .click();
-    await dialog.getByLabel("Server address").fill(remote.invitation.origin);
+    await dialog
+      .getByLabel("Server address", { exact: true })
+      .fill(remote.invitation.origin);
     await dialog
       .getByLabel("Pairing invitation")
       .fill(JSON.stringify(remote.invitation));
