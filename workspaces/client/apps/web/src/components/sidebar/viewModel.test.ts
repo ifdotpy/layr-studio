@@ -134,3 +134,31 @@ it("owns compact recency, team membership, and summary visibility in the shared 
     model.rows.filter((row) => row.compactVisible(now)).map((row) => row.id),
   ).toEqual(["recent", "pinned", "running", "unread", "team"]);
 });
+
+it("retains legacy saved chat order when no effective items rank exists", () => {
+  const mirror = createStateMirror();
+  const agents = [
+    agentSummaryFixture("older", { updated: 1 }),
+    agentSummaryFixture("newer", { updated: 999 }),
+  ];
+  mirror.apply(
+    agents.map((value) => ({
+      collection: "agentSummary" as const,
+      id: value.id,
+      value,
+    })),
+  );
+  const legacy = JSON.stringify(["chats", "/same/project", false, false]);
+  const saved = ["older", "newer"];
+  const model = createSidebarViewModel(
+    () => mirror.current,
+    () => ({
+      query: "",
+      archived: false,
+      opened: null,
+      rank: (group, id) =>
+        group === legacy ? saved.indexOf(id) : Number.MAX_SAFE_INTEGER,
+    }),
+  );
+  expect(model.orderedRows.map((row) => row.id)).toEqual(saved);
+});

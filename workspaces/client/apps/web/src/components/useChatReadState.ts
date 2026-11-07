@@ -62,7 +62,7 @@ export function useChatReadState(
   const { post } = useServerApi();
   const { refreshProjection } = useServerSync();
 
-  const [, redraw] = useState(0);
+  const [readVersion, redraw] = useState(0);
   const [metadataVersion, changedMetadata] = useState(0);
   const mounted = useRef(true);
   useEffect(() => {
@@ -309,10 +309,15 @@ export function useChatReadState(
       void writeCurrent.current(proof, true);
     }
   }, []);
+  // Callers memoize against this snapshot while the request map mutates in place.
+  const pendingReadTargets: ReadonlyMap<string, ChatReadState> = useMemo(
+    () => new Map(scope.current.pendingReadTargets),
+    [key, readVersion],
+  );
   return {
     readStateFor,
     marking: new Set(scope.current.requests.keys()),
-    pendingReadTargets: scope.current.pendingReadTargets,
+    pendingReadTargets,
     markSidebarUnread,
     markUnread,
     observeRead,

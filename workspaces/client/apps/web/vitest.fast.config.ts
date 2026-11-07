@@ -37,6 +37,7 @@ export default {
       "src/store/contracts.test.ts",
       "src/store/render.test.ts",
       "src/components/sidebar/viewModel.test.ts",
+      "src/components/useChatReadState.render.test.ts",
       "src/status/operationalStatus.test.ts",
       "src/components/chat-row/render.test.ts",
       "src/servers/CombinedServerSidebar.test.ts",

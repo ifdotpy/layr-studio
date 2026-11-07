@@ -40,6 +40,7 @@ export class SidebarChatView {
       team: computed,
       teamId: computed,
       groupKey: computed,
+      legacyGroupKey: computed,
       activityAt: computed,
       indicator: computed,
       canArchive: computed,
@@ -74,6 +75,9 @@ export class SidebarChatView {
   get groupKey() {
     if (!this.teamId && !this.agent.pinned)
       return JSON.stringify(["items", this.projectPath, this.projectFolder]);
+    return this.legacyGroupKey;
+  }
+  get legacyGroupKey() {
     return JSON.stringify([
       "chats",
       this.projectPath,
@@ -184,10 +188,16 @@ export function createSidebarList(
   const rows = computed(getRows);
   const ordered = computed(() => {
     const { rank } = getInputs();
+    const chatRank = (row: SidebarChatView) => {
+      const value = rank(row.groupKey, row.id);
+      return value === Number.MAX_SAFE_INTEGER
+        ? rank(row.legacyGroupKey, row.id)
+        : value;
+    };
     return [...rows.get()].sort(
       (a, b) =>
         Number(!!b.agent.pinned) - Number(!!a.agent.pinned) ||
-        rank(a.groupKey, a.id) - rank(b.groupKey, b.id) ||
+        chatRank(a) - chatRank(b) ||
         b.activityAt - a.activityAt,
     );
   });
