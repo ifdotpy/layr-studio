@@ -244,7 +244,7 @@ export default observer(function CombinedServerSidebar({
     >
       <Sidebar
         services={services}
-        data={model.data}
+        sidebar={model.sidebar}
         rows={model.rows}
         registeredProjectPaths={registeredProjectPaths}
         opened={opened ? model.chatKey(current, opened) : null}

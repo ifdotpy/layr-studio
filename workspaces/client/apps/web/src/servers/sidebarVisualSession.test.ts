@@ -91,7 +91,7 @@ it("opens an offline saved folder without writes and restores its saved value af
     "folder",
     model.folderKey("remote", "/remote", "folder"),
   ]);
-  const key = `codex-project-tree:${model.data.stateDir}`;
+  const key = `codex-project-tree:${model.sidebar.stateDir}`;
   const previous = backend.saved<Record<string, boolean>>(key, {});
   expect(previous[field]).toBe(true);
   expect(
@@ -125,7 +125,7 @@ it("keeps offline Show more in memory and saves only an explicit later online ed
   const { sources, writes, records, wrap } = setup();
   let { model, backend } = wrap();
   const field = model.projectKey("remote", "/remote");
-  const key = `codex-project-compact:${model.data.stateDir}`;
+  const key = `codex-project-compact:${model.sidebar.stateDir}`;
   let previous = backend.saved<Record<string, boolean>>(key, {});
   expect(
     backend.editPreference(key, previous, { ...previous, [field]: false })[
@@ -169,7 +169,7 @@ it("reports unrelated write failures without a visual override", () => {
     },
     failed,
   );
-  const key = `codex-project-compact:${model.data.stateDir}`;
+  const key = `codex-project-compact:${model.sidebar.stateDir}`;
   const previous = broken.saved<Record<string, boolean>>(key, {});
   expect(broken.editPreference(key, previous, {})).toEqual(previous);
   expect(broken.saved(key, {})).toEqual(previous);
@@ -182,7 +182,7 @@ it("selection expansion stays in the session across snapshots and never writes o
   sources[1].sidebar.collapsed = { "/remote": true };
   const { model, backend } = wrap();
   const field = model.projectKey("remote", "/remote");
-  const key = `codex-project-tree:${model.data.stateDir}`;
+  const key = `codex-project-tree:${model.sidebar.stateDir}`;
   const previous = backend.saved<Record<string, boolean>>(key, {});
   expect(
     backend.viewPreference!(key, previous, { ...previous, [field]: false })[
@@ -214,7 +214,7 @@ it("ignores saved project collapse from the home and remote owners", () => {
   sources[1].sidebar.collapsed = { "/remote": false };
   const { model, backend } = wrap();
   const field = model.projectKey("local", "/local");
-  const key = `codex-project-tree:${model.data.stateDir}`;
+  const key = `codex-project-tree:${model.sidebar.stateDir}`;
   expect(
     backend.saved<Record<string, boolean>>(key, {})[field],
   ).toBeUndefined();

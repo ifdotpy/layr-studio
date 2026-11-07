@@ -7,7 +7,10 @@ import Sidebar from "../Sidebar.tsx";
 import { SidebarCommandsProvider } from "./commands.ts";
 import { ServerStoreProvider } from "../../servers/ServerServicesContext.tsx";
 import { observableFixture } from "../observableFixture.tsx";
-import { createStateMirror } from "../../generated/observableResources.ts";
+import {
+  createStateMirror,
+  serializeStateCollections,
+} from "../../generated/observableResources.ts";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
 import { snapshotFixture } from "../../snapshotFixture.ts";
 
@@ -114,6 +117,20 @@ it("folder field edits render only the folder branch and preserve unrelated head
       ),
     );
     renders.length = 0;
+    const unchanged = serializeStateCollections(mirror.current);
+    for (const name of ["Created", "Updated", "Updated again"]) {
+      await act(async () =>
+        mirror.apply([
+          ...unchanged,
+          {
+            collection: "rule",
+            id: "unrelated",
+            value: { id: "unrelated", name },
+          },
+        ]),
+      );
+      expect(renders).toEqual([]);
+    }
     await act(async () => apply("After"));
     expect(host.textContent).toContain("After");
     expect(renders).not.toContain("sidebar");
@@ -189,7 +206,7 @@ it("resolves a newly arrived combined row against the current services before la
               },
             },
             createElement(Sidebar, {
-              data: model.data,
+              sidebar: model.sidebar,
               rows: model.rows,
               services,
               opened: null,

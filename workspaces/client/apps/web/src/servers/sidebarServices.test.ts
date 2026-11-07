@@ -473,8 +473,8 @@ describe("owner sidebar services", () => {
         .owner({ kind: "chat", id })
         .post("/api/organization", { id, pinned: true }),
     ).rejects.toThrow("offline");
-    assert.ok(model.data.runtime.projects[0] != null);
-    const path = model.data.runtime.projects[0].path!;
+    assert.ok(model.sidebar.projects[0] != null);
+    const path = model.sidebar.projects[0].path!;
     await expect(
       services.owner({ kind: "project", path }).post("/api/projects", {
         action: "rename",

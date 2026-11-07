@@ -19,7 +19,8 @@ import { type RemoteProjectList } from "./sidebar/RemoteProjects";
 export type SidebarProps = {
   services?: SidebarServices;
   notice?: string;
-  data: DeepReadonly<Snapshot>;
+  data?: DeepReadonly<Snapshot>;
+  sidebar?: import("../servers/mergedSidebar.ts").MergedSidebar["sidebar"];
   rows?: readonly SidebarChatView[];
   collections?: StateCollections;
   /** Registered project paths when data also contains inferred view projects. */

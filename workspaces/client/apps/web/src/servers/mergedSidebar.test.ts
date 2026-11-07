@@ -185,14 +185,14 @@ describe("complete multi-server sidebar projection", () => {
     const select = createMergedSidebarSelector();
     const first = select([local]);
     const complete = select([local, remote]);
-    expect(first.data.stateDir).toBe(complete.data.stateDir);
+    expect(first.sidebar.stateDir).toBe(complete.sidebar.stateDir);
     assert.ok(first.rows[0] != null);
     assert.ok(complete.rows[0] != null);
     expect(first.rows[0].id).toBe(complete.rows[0].id);
-    assert.ok(first.data.runtime.projects[0] != null);
-    assert.ok(complete.data.runtime.projects[0] != null);
-    expect(first.data.runtime.projects[0].path).toBe(
-      complete.data.runtime.projects[0].path,
+    assert.ok(first.sidebar.projects[0] != null);
+    assert.ok(complete.sidebar.projects[0] != null);
+    expect(first.sidebar.projects[0].path).toBe(
+      complete.sidebar.projects[0].path,
     );
   });
 
@@ -212,7 +212,7 @@ describe("complete multi-server sidebar projection", () => {
       },
     ]);
     const model = mergeSidebar([remote], 1, true);
-    const project = model.data.runtime.projects[0];
+    const project = model.sidebar.projects[0];
     assert.ok(project != null);
     expect(model.projectReferences.get(project.path!)?.owner).toBe(
       "unpaired-home",
@@ -250,11 +250,11 @@ describe("complete multi-server sidebar projection", () => {
     const original = backend(local);
     expect(model.rows.map((row) => row.agent)).toEqual(sourceAgents(local));
     expect(model.rows[0]?.agent).toBe(sourceAgents(local)[0]);
-    expect(model.data.runtime.projects[0]).toBe(local.sidebar.projects[0]);
-    expect(model.data.runtime.rooms[0]).toBe(local.sidebar.rooms[0]);
-    expect(model.data.runtime.sidebarOrder).toBe(local.sidebar.sidebarOrder);
-    expect(model.data.runtime.studioErrors).toBe(local.sidebar.studioErrors);
-    expect(model.data.stateDir).toBe(scope);
+    expect(model.sidebar.projects[0]).toBe(local.sidebar.projects[0]);
+    expect(model.sidebar.rooms[0]).toBe(local.sidebar.rooms[0]);
+    expect(model.sidebar.sidebarOrder).toBe(local.sidebar.sidebarOrder);
+    expect(model.sidebar.studioErrors).toBe(local.sidebar.studioErrors);
+    expect(model.sidebar.stateDir).toBe(scope);
     expect(
       mergedSidebarPreferences(model, new Map([["local", original.backend]])),
     ).toBe(original.backend);
@@ -267,11 +267,9 @@ describe("complete multi-server sidebar projection", () => {
       agent("visible", { projectPath: "/elsewhere/lead" }),
     ]);
     const model = mergeSidebar([local, source("remote")]);
-    expect(
-      model.data.runtime.projects.map((project) => project.path),
-    ).toContain(model.projectKey("local", "/elsewhere/lead"));
-    expect(model.data.threads).toEqual([]);
-    expect(model.data.runtime.agents).toEqual([]);
+    expect(model.sidebar.projects.map((project) => project.path)).toContain(
+      model.projectKey("local", "/elsewhere/lead"),
+    );
   });
 
   it("separates overlapping chat, room, folder and team IDs", () => {
@@ -289,12 +287,10 @@ describe("complete multi-server sidebar projection", () => {
       ];
     }
     const model = mergeSidebar([a, b]);
-    expect(model.data.runtime.projects).toHaveLength(2);
+    expect(model.sidebar.projects).toHaveLength(2);
     expect(new Set(model.rows.map((row) => row.id)).size).toBe(2);
-    expect(new Set(model.data.runtime.rooms.map((row) => row.id)).size).toBe(2);
-    expect(
-      new Set(model.data.runtime.peerTeams.map((row) => row.id)).size,
-    ).toBe(2);
+    expect(new Set(model.sidebar.rooms.map((row) => row.id)).size).toBe(2);
+    expect(new Set(model.sidebar.peerTeams.map((row) => row.id)).size).toBe(2);
     for (const value of [a, b]) {
       const lead = model.rows.find(
         (row) => row.id === model.chatKey(value.id, "same"),
@@ -373,8 +369,8 @@ describe("complete multi-server sidebar projection", () => {
       },
     ];
     const model = mergeSidebar([remote, home]);
-    expect(model.data.runtime.projects).toHaveLength(1);
-    const project = model.data.runtime.projects[0];
+    expect(model.sidebar.projects).toHaveLength(1);
+    const project = model.sidebar.projects[0];
     assert.ok(project != null);
     expect(project.name).toBe("Home project");
     expect(project.folders?.map((row) => row.name)).toEqual([
@@ -394,9 +390,7 @@ describe("complete multi-server sidebar projection", () => {
     expect(model.rows.every((row) => row.projectPath === project.path)).toBe(
       true,
     );
-    expect(required(model.data.runtime.peerTeams[0]).projectPath).toBe(
-      project.path,
-    );
+    expect(required(model.sidebar.peerTeams[0]).projectPath).toBe(project.path);
     expect(model.wireProject("remote", project.path!)).toBe("/remote/path");
     expect(model.wireProject("local", project.path!)).toBe("project:shared");
   });
@@ -464,9 +458,7 @@ describe("complete multi-server sidebar projection", () => {
     ]);
     expect(next.rows[0]?.agent).toBe(before.rows[0]?.agent);
     // A snapshot for another reason keeps the order revision, so a waiting move stays.
-    expect(next.data.runtime.sidebarOrder).toBe(
-      before.data.runtime.sidebarOrder,
-    );
+    expect(next.sidebar.sidebarOrder).toBe(before.sidebar.sidebarOrder);
     const moved = select([
       {
         ...sources[0],
@@ -483,8 +475,8 @@ describe("complete multi-server sidebar projection", () => {
       },
       sources[1],
     ]);
-    expect(moved.data.runtime.sidebarOrder!.revision).toBeGreaterThan(
-      before.data.runtime.sidebarOrder!.revision,
+    expect(moved.sidebar.sidebarOrder!.revision).toBeGreaterThan(
+      before.sidebar.sidebarOrder!.revision,
     );
     store.forget("remote");
     expect(
@@ -582,19 +574,19 @@ describe("original saved sidebar state", () => {
     );
     expect(
       cache.saved<Record<string, boolean>>(
-        `codex-project-tree:${model.data.stateDir}`,
+        `codex-project-tree:${model.sidebar.stateDir}`,
         {},
       )[model.projectKey("local", path)],
     ).toBeUndefined();
     expect(
       cache.saved<Record<string, boolean>>(
-        `codex-project-compact:${model.data.stateDir}`,
+        `codex-project-compact:${model.sidebar.stateDir}`,
         {},
       )[model.projectKey("remote", path)],
     ).toBe(true);
     expect(a.writes).toEqual([]);
     expect(b.writes).toEqual([]);
-    const compactKey = `codex-project-compact:${model.data.stateDir}`;
+    const compactKey = `codex-project-compact:${model.sidebar.stateDir}`;
     const field = model.projectKey("remote", path);
     cache.editPreference(compactKey, { [field]: true }, { [field]: false });
     expect(b.values.get(`codex-project-compact:${scope}`)).toBe(
@@ -636,11 +628,11 @@ describe("original saved sidebar state", () => {
       ]),
     );
     expect(
-      cache.saved(`codex-project-compact:${model.data.stateDir}`, {}),
+      cache.saved(`codex-project-compact:${model.sidebar.stateDir}`, {}),
     ).toEqual({ [model.projectKey("local", path)]: false });
     // The saved bare path of the earlier project collapse stays unused.
     expect(
-      cache.saved(`codex-project-tree:${model.data.stateDir}`, {}),
+      cache.saved(`codex-project-tree:${model.sidebar.stateDir}`, {}),
     ).toEqual({
       [JSON.stringify([model.projectKey("local", path), "project"])]: false,
     });
@@ -663,7 +655,7 @@ describe("original saved sidebar state", () => {
     const heading = JSON.stringify([path, "project"]);
     const field = JSON.stringify([`codex-project-tree:${scope}`, heading]);
     const tree = (model: ReturnType<typeof mergeSidebar>) =>
-      `codex-project-tree:${model.data.stateDir}`;
+      `codex-project-tree:${model.sidebar.stateDir}`;
     const shown = (model: ReturnType<typeof mergeSidebar>, key: string) =>
       mergedSidebarPreferences(model, backends).saved<Record<string, boolean>>(
         tree(model),
@@ -730,7 +722,7 @@ describe("original saved sidebar state", () => {
         ["remote", b.backend],
       ]),
     );
-    const tree = `codex-project-tree:${model.data.stateDir}`;
+    const tree = `codex-project-tree:${model.sidebar.stateDir}`;
     const previous = cache.saved<Record<string, boolean>>(tree, {});
     expect(
       cache.editPreference(tree, previous, { ...previous, [key]: true }),
@@ -766,7 +758,7 @@ describe("original saved sidebar state", () => {
         ["remote", b.backend],
       ]),
     );
-    const key = `codex-project-tree:${model.data.stateDir}`;
+    const key = `codex-project-tree:${model.sidebar.stateDir}`;
     const previous = cache.saved<Record<string, boolean>>(key, {});
     const mapped = model.mapTreeKey("remote", treeKey("folder"));
     let updates = 0;
@@ -806,7 +798,7 @@ describe("original saved sidebar state", () => {
         ["remote", b.backend],
       ]),
     );
-    const key = `codex-project-compact:${model.data.stateDir}`;
+    const key = `codex-project-compact:${model.sidebar.stateDir}`;
     const previous = cache.saved<Record<string, boolean>>(key, {});
     expect(() =>
       cache.editPreference(key, previous, {
@@ -835,7 +827,7 @@ describe("original saved sidebar state", () => {
         ["remote", b.backend],
       ]),
     );
-    const key = `codex-project-tree:${model.data.stateDir}`;
+    const key = `codex-project-tree:${model.sidebar.stateDir}`;
     const native = JSON.stringify([path, "team", "legacy-team"]);
     const previous = cache.saved<Record<string, boolean>>(key, {});
     cache.editPreference(key, previous, {

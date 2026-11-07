@@ -1,3 +1,4 @@
+import { useSidebarCommands } from "./commands.ts";
 import { ActionIcon, Menu, Tooltip, UnstyledButton } from "@mantine/core";
 import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -13,6 +14,7 @@ export const ProjectHeading = observer(function ProjectHeading({
   group: NavigableProject;
 }) {
   const sidebar = useSidebarState();
+  const commands = useSidebarCommands();
   sidebarRender("ProjectHeading");
   const editable = sidebar.canEdit(sidebar.projectTarget(group.path));
   const blocked = sidebar.unavailableReason(sidebar.projectTarget(group.path));
@@ -52,7 +54,7 @@ export const ProjectHeading = observer(function ProjectHeading({
             {...(blocked ? { "aria-disabled": true } : {})}
             {...(blocked ? { "data-disabled": true } : {})}
             onClick={() => {
-              if (!blocked) sidebar.commands.newChat(group.path || undefined);
+              if (!blocked) commands.newChat(group.path || undefined);
             }}
             disabled={sidebar.p.creating}
           >
@@ -78,10 +80,10 @@ export const ProjectHeading = observer(function ProjectHeading({
             >
               New chat folder
             </Menu.Item>
-            {sidebar.commands.newSharedChat && (
+            {commands.newSharedChat && (
               <Menu.Item
                 disabled={!editable}
-                onClick={() => sidebar.commands.newSharedChat?.(group.path)}
+                onClick={() => commands.newSharedChat?.(group.path)}
               >
                 New shared chat
               </Menu.Item>
@@ -126,25 +128,25 @@ export const ProjectHeading = observer(function ProjectHeading({
             >
               Rename project
             </Menu.Item>
-            {sidebar.commands.projectFolders && (
+            {commands.projectFolders && (
               <Menu.Item
                 disabled={!editable}
-                onClick={() => sidebar.commands.projectFolders?.(group.path)}
+                onClick={() => commands.projectFolders?.(group.path)}
               >
                 Folders
               </Menu.Item>
             )}
             <Menu.Item
               disabled={!editable}
-              onClick={() => sidebar.commands.projectAccount(group.path)}
+              onClick={() => commands.projectAccount(group.path)}
             >
               Project account
             </Menu.Item>
-            {group.registered && sidebar.commands.deleteProject && (
+            {group.registered && commands.deleteProject && (
               <Menu.Item
                 color="red"
                 disabled={!editable}
-                onClick={() => sidebar.commands.deleteProject?.(group.path)}
+                onClick={() => commands.deleteProject?.(group.path)}
               >
                 Delete project…
               </Menu.Item>

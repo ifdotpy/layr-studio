@@ -75,7 +75,7 @@ it("routes overlapping row ids and the completed-result CAS target to their owni
   expect(props.rows?.map((row) => row.agent)).toEqual(
     model.rows.map((row) => row.agent),
   );
-  expect(props.data.threads).toEqual([]);
+  expect(props.sidebar).toBe(model.sidebar);
   const id = model.chatKey("remote", "same");
   required(captured.commands).open(id);
   required(captured.commands).changeProject(id);

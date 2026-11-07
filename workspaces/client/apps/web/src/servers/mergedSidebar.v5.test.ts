@@ -32,7 +32,6 @@ it("keeps equal native summary ids in separate generated source mirrors", () => 
   expect(model.rows[0]?.agent).toBe(sources[0]?.collections.agents.get("same"));
   expect(model.rows[1]?.agent).toBe(sources[1]?.collections.agents.get("same"));
   expect(model.rows[0]?.agent.id).toBe("same");
-  expect(model.data.threads).toEqual([]);
 });
 it("status and tail updates leave combined routing and group membership untouched", () => {
   const store = createSidebarSourceStore();
@@ -148,12 +147,10 @@ it("observes in-place generated project edits without replacing the source envel
   store.update("local", snapshot("After", "Folder after"));
   expect(sources[0]!.collections.projects.get("p")).toBe(native);
   const changed = select(sources);
-  expect(changed.data.runtime.projects[0]?.name).toBe("After");
-  expect(changed.data.runtime.projects[0]?.folders?.[0]?.name).toBe(
-    "Folder after",
-  );
-  expect(changed.data.runtime.projects[0]?.path).toBe(
-    initial.data.runtime.projects[0]?.path,
+  expect(changed.sidebar.projects[0]?.name).toBe("After");
+  expect(changed.sidebar.projects[0]?.folders?.[0]?.name).toBe("Folder after");
+  expect(changed.sidebar.projects[0]?.path).toBe(
+    initial.sidebar.projects[0]?.path,
   );
 });
 
@@ -177,7 +174,7 @@ it("tracks generated membership and folder compatibility through a retained sour
   const select = createMergedSidebarSelector();
   const names: string[][] = [];
   const stop = autorun(() =>
-    names.push(select(sources).data.runtime.projects.map((p) => p.name || "")),
+    names.push(select(sources).sidebar.projects.map((p) => p.name || "")),
   );
   try {
     store.update(

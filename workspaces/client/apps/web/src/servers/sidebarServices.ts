@@ -44,7 +44,7 @@ export function sidebarProject(
   const source = model.groups
     .get(path)
     ?.members.find((member) => member.source.id === owner);
-  const projected = model.data.runtime.projects.find(
+  const projected = model.sidebar.projects.find(
     (project) => project.path === path,
   );
   if (!projected) throw new Error("The project is unavailable on this server.");
@@ -312,12 +312,12 @@ export function createMergedSidebarServices(
                   }
                 : source,
             ),
-            (model.data.runtime.sidebarOrder?.revision || 0) + 1,
+            (model.sidebar.sidebarOrder?.revision || 0) + 1,
             true,
           );
           return {
             ...result,
-            revision: updated.data.runtime.sidebarOrder!.revision,
+            revision: updated.sidebar.sidebarOrder!.revision,
             groups: updated.order,
           } as PostResult<Path>;
         }

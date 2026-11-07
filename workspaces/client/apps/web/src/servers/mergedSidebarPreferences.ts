@@ -107,7 +107,7 @@ export function mergedSidebarPreferences(
   for (const source of model.sources) backendFor(source.id);
   const [single] = model.sources;
   if (
-    model.data.stateDir !== "studio-combined-sidebar" &&
+    model.sidebar.stateDir !== "studio-combined-sidebar" &&
     model.sources.length === 1 &&
     single
   )
@@ -115,7 +115,7 @@ export function mergedSidebarPreferences(
   const coordinator = backends.has("local") ? "local" : model.sources[0]?.id;
   if (!coordinator) throw new Error("The sidebar has no server.");
   const base = backendFor(coordinator);
-  const scope = model.data.stateDir;
+  const scope = model.sidebar.stateDir;
   const compactKey = compactPrefix + scope;
   const treeKey = treePrefix + scope;
   const orderKey = orderPrefix + scope;

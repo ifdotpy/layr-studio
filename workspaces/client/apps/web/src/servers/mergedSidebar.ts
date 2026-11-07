@@ -1,6 +1,6 @@
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
-import type { PeerTeam, Project, Room, Snapshot } from "../types";
+import type { PeerTeam, Project, Room } from "../types";
 import {
   createStateMirror,
   type StateCollections,
@@ -558,51 +558,27 @@ export function mergeSidebar(
     }
     return requireReference(projectReferences, parts[1]).owner;
   };
-  const data: Omit<Snapshot, "runtime"> & {
-    runtime: Omit<
-      Snapshot["runtime"],
-      "projects" | "peerTeams" | "sidebarOrder"
-    > & {
-      projects: DeepReadonly<Project>[];
-      peerTeams: DeepReadonly<PeerTeam>[];
-      sidebarOrder: DeepReadonly<Snapshot["runtime"]["sidebarOrder"]>;
-    };
-  } = {
-    token: "",
+  const sidebar = {
     stateDir: scope,
-    threads: [],
-    nodes: [],
-    chats: [],
-    edges: [],
-    runtime: {
-      agents: [],
-      projects,
-      rooms,
-      peerTeams,
-      tasks: [],
-      monitors: [],
-      complaints: [],
-      requests: [],
-      rules: [],
-      events: [],
-      work: [],
-      studioErrors:
-        sources.find((source) => source.id === "local")?.sidebar.studioErrors ||
-        [],
-      peerTeamsVersion: sources.some(
-        (source) => source.sidebar.peerTeamsVersion === 1,
-      )
-        ? 1
-        : undefined,
-      projectOrganizationVersion: sources.some(
-        (source) => source.sidebar.projectOrganizationVersion,
-      )
-        ? 1
-        : undefined,
-      sidebarOrder: single
-        ? single.sidebar.sidebarOrder
-        : { revision, groups: order },
-    },
+    projects,
+    rooms,
+    peerTeams,
+    studioErrors:
+      sources.find((source) => source.id === "local")?.sidebar.studioErrors ||
+      [],
+    peerTeamsVersion: sources.some(
+      (source) => source.sidebar.peerTeamsVersion === 1,
+    )
+      ? 1
+      : undefined,
+    projectOrganizationVersion: sources.some(
+      (source) => source.sidebar.projectOrganizationVersion,
+    )
+      ? 1
+      : undefined,
+    sidebarOrder: single
+      ? single.sidebar.sidebarOrder
+      : { revision, groups: order },
   };
   const views = sources.map((source) => {
     const identity: SidebarIdentity = {
@@ -620,7 +596,7 @@ export function mergeSidebar(
         );
   });
   return {
-    data,
+    sidebar,
     sources,
     sourceById,
     groups,
@@ -771,17 +747,17 @@ export function createMergedSidebarSelector(combined = true) {
       );
       // The merged order revision grows only when the merged order changes. A snapshot for
       // another reason must not replace an order move that waits for its server.
-      const previousOrder = previous?.data.runtime.sidebarOrder;
-      const nextOrder = next.data.runtime.sidebarOrder;
+      const previousOrder = previous?.sidebar.sidebarOrder;
+      const nextOrder = next.sidebar.sidebarOrder;
       const merged = combined || sources.length !== 1;
       if (
         merged &&
         previousOrder &&
         nextOrder &&
-        previous!.data.stateDir === next.data.stateDir &&
+        previous!.sidebar.stateDir === next.sidebar.stateDir &&
         compareStructural(previousOrder.groups, nextOrder.groups)
       )
-        next.data.runtime.sidebarOrder = previousOrder;
+        next.sidebar.sidebarOrder = previousOrder;
       else revision++;
 
       const entries = [...views.entries()];

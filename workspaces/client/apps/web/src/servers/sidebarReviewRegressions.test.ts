@@ -84,7 +84,7 @@ it("ignores explicit shared project heading edits", () => {
     { serverId: "local", projectId: "p-local", name: "local" },
   ];
   const { model, writes, cache } = preferences(a, b);
-  const key = "codex-project-tree:" + model.data.stateDir;
+  const key = "codex-project-tree:" + model.sidebar.stateDir;
   const previous = cache.saved<Record<string, boolean>>(key, {});
   cache.editPreference(key, previous, {
     ...previous,
@@ -97,7 +97,7 @@ it("ignores saved collapse state for an unregistered project directory", () => {
   const a = source("local");
   a.sidebar.projects = [];
   const { model, writes, cache } = preferences(a);
-  const key = "codex-project-tree:" + model.data.stateDir;
+  const key = "codex-project-tree:" + model.sidebar.stateDir;
   const field = model.projectKey("local", "/local");
   expect(cache.saved<Record<string, boolean>>(key, {})[field]).toBeUndefined();
   expect(model.collapsed[field]).toBeUndefined();
@@ -141,7 +141,7 @@ it.each([false, true])(
       }));
     const select = createMergedSidebarSelector();
     const model = select([a]);
-    expect(model.data.runtime.projects).toHaveLength(registered ? 3 : 4);
+    expect(model.sidebar.projects).toHaveLength(registered ? 3 : 4);
     expect(select([a])).toBe(model);
   },
 );
@@ -162,9 +162,7 @@ it.runIf(process.env.CODEX_SIDEBAR_BENCHMARK === "1").each([false, true])(
     for (let i = 0; i < 3; i++) {
       const start = performance.now();
       const model = select([{ ...a, sidebar: { ...a.sidebar } }]);
-      expect(model.data.runtime.projects).toHaveLength(
-        registered ? 6000 : 6001,
-      );
+      expect(model.sidebar.projects).toHaveLength(registered ? 6000 : 6001);
       times.push(performance.now() - start);
     }
     console.info("Merge 6000 directories (ms):", times);

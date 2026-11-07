@@ -88,7 +88,7 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
                       sidebar.services.cache.ownerId && (
                       <ChatServerLine
                         provider={
-                          sidebar.p.data.threads.find((agent) =>
+                          sidebar.p.data?.threads.find((agent) =>
                             room.members?.includes(agent.id),
                           )?.provider || undefined
                         }

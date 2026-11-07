@@ -1,3 +1,4 @@
+import { localSidebarServices } from "../sidebar/services.tsx";
 import { observable } from "mobx";
 import type { SidebarRowActions, ChatRowActions } from "./actions.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
@@ -26,6 +27,9 @@ export function rowArea(
   return {
     commands,
     ui: {
+      services: localSidebarServices,
+      aliases: observable.map<string, string>(),
+      offline: observable.set<string>(),
       dragTarget: null,
       dropDestination: null,
       opened: props.selected ? id : null,
@@ -38,9 +42,10 @@ export function rowArea(
       pendingReadTargets: new Map(
         props.pendingRead == null ? [] : [[id, props.pendingRead]],
       ),
-      overrides: observable.map(
-        props.pinned === undefined ? [] : [[id, { pinned: props.pinned }]],
-      ),
+      overrides: observable.map<
+        string,
+        { pinned?: boolean; archived?: boolean }
+      >(props.pinned === undefined ? [] : [[id, { pinned: props.pinned }]]),
     },
     disabled: () => props.disabled || false,
     server: () => ({

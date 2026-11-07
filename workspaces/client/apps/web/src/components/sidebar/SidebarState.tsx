@@ -100,7 +100,7 @@ export function useSidebarController(
   };
   const { editPreference: writePreferenceEdit } = services.cache;
   reportPromptComposerRender("sidebar");
-  const runtime = p.data.runtime;
+  const runtime = p.sidebar ?? p.data?.runtime;
   const aliases = useServerAliases(readServerAliases);
   // Local controls have one observable owner; external inputs synchronize at the root.
   const [ui] = useState(() =>
@@ -183,14 +183,16 @@ export function useSidebarController(
   const workspace = p.rows
     ? undefined
     : collections.workspaces.values().next().value;
-  const stateDir = p.rows ? p.data.stateDir : workspace?.stateDir || "";
+  const stateDir = p.rows
+    ? p.sidebar?.stateDir || p.data?.stateDir || ""
+    : workspace?.stateDir || "";
   const sorting = useSidebarOrder(
     `codex-sidebar-order:${stateDir}`,
     (p.rows ? runtime?.sidebarOrder : workspace?.sidebarOrder) ?? undefined,
     commands.refresh,
     commands.notify,
     services,
-    p.data.token,
+    p.data?.token,
   );
   const model = useMemo(() => {
     const input = () => ({
@@ -745,7 +747,6 @@ export function useSidebarController(
   return {
     p,
     services,
-    commands,
     lastOpened,
     canEdit,
     unavailableReason,

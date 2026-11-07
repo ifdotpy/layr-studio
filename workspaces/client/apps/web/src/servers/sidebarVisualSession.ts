@@ -24,9 +24,9 @@ export function createSidebarVisualSession() {
     failed: (failure: unknown) => void,
   ): SidebarBackend => {
     const kindFor = (key: string) =>
-      key === `codex-project-compact:${model.data.stateDir}`
+      key === `codex-project-compact:${model.sidebar.stateDir}`
         ? "compact"
-        : key === `codex-project-tree:${model.data.stateDir}`
+        : key === `codex-project-tree:${model.sidebar.stateDir}`
           ? "collapsed"
           : null;
     const read = <T>(key: string, fallback: T): T => {

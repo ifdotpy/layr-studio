@@ -1,5 +1,6 @@
 import { createStateMirror } from "../../generated/observableResources.ts";
 import { useSidebarOrder, type SidebarDragTarget } from "../useSidebarOrder.ts";
+import { localSidebarServices } from "../sidebar/services.tsx";
 import { rowArea } from "./actions.fixture.ts";
 import { SidebarRowActionsProvider } from "./actions.ts";
 import type { Summary } from "./testFixture.ts";
@@ -63,134 +64,174 @@ it("the count leaf observes status without observing chat names", async () => {
   await f.close();
 });
 
-it("isolates sibling rows from rename and pending-read UI changes", async () => {
-  const f = fixture();
-  const ui = observable({
-    aliases: new Map<string, string>(),
-    dragTarget: null as SidebarDragTarget | null,
-    dropDestination: null as string | null,
-    offline: new Set<string>(),
-    opened: null,
-    pendingReadTargets: undefined,
-    renaming: null as string | null,
-    renameInPriority: false,
-    name: "",
-    organizing: null,
-    compact: false,
-    markingRead: new Set<string>(),
-    overrides: new Map(),
-  });
-  let sorting: ReturnType<typeof useSidebarOrder>;
-  const area: SidebarRowActions = {
-    ui,
-    commands: () => actions,
-    disabled: (row) => ui.offline.has(row.id),
-    server: (row) => ({
-      alias: ui.aliases.get(row.id) || "Server",
-      show: true,
-      offline: ui.offline.has(row.id),
-    }),
-    bindings: (row) =>
-      sorting.bindings(
-        row.groupKey,
-        row.id,
-        f.model.rows.map((item) => item.id),
-      ),
-  };
-  const renders = new Map<string, number>();
-  const Rows = observer(() => {
-    sorting = useSidebarOrder("codex-sidebar-order:/row-isolation", undefined);
-    useLayoutEffect(() =>
-      runInAction(() => {
-        ui.dragTarget = sorting.target;
-        ui.dropDestination = sorting.destination;
+it.each([false, true])(
+  "isolates sibling rows and priority copies from UI changes (priority=%s)",
+  async (priority) => {
+    const f = fixture();
+    const ui = observable({
+      services: localSidebarServices,
+      aliases: observable.map<string, string>(),
+      dragTarget: null as SidebarDragTarget | null,
+      dropDestination: null as string | null,
+      offline: observable.set<string>(),
+      opened: null as string | null,
+      pendingReadTargets: new Map<
+        string,
+        NonNullable<SidebarAgent["markRead"]>
+      >(),
+      renaming: null as string | null,
+      renameInPriority: false,
+      name: "",
+      organizing: null as string | null,
+      compact: false,
+      markingRead: new Set<string>(),
+      overrides: observable.map<
+        string,
+        { pinned?: boolean; archived?: boolean }
+      >(),
+    });
+    let sorting: ReturnType<typeof useSidebarOrder>;
+    const area: SidebarRowActions = {
+      ui,
+      commands: () => actions,
+      disabled: (row) => ui.offline.has(row.id),
+      server: (row) => ({
+        alias: ui.aliases.get(row.id) || "Server",
+        show: true,
+        offline: ui.offline.has(row.id),
       }),
-    );
-    return f.model.rows.map((row) =>
-      createElement(
-        Profiler,
-        {
-          key: row.id,
-          id: row.id,
-          onRender: (id) => renders.set(id, (renders.get(id) || 0) + 1),
-        },
-        createElement(SidebarRow, { row }),
-      ),
-    );
-  });
-  await act(async () =>
-    f.root.render(
-      createElement(
-        MantineProvider,
-        null,
+      bindings: (row) =>
+        sorting.bindings(
+          row.groupKey,
+          row.id,
+          f.model.rows.map((item) => item.id),
+        ),
+    };
+    const renders = new Map<string, number>();
+    const Rows = observer(() => {
+      sorting = useSidebarOrder(
+        "codex-sidebar-order:/row-isolation",
+        undefined,
+      );
+      useLayoutEffect(() =>
+        runInAction(() => {
+          ui.dragTarget = sorting.target;
+          ui.dropDestination = sorting.destination;
+        }),
+      );
+      return f.model.rows.flatMap((row) =>
+        [false, true].map((copy) =>
+          createElement(
+            Profiler,
+            {
+              key: `${row.id}:${copy}`,
+              id: `${row.id}:${copy}`,
+              onRender: (id) => renders.set(id, (renders.get(id) || 0) + 1),
+            },
+            createElement(SidebarRow, { row, priority: copy }),
+          ),
+        ),
+      );
+    });
+    await act(async () =>
+      f.root.render(
         createElement(
-          SidebarRowActionsProvider,
-          { value: area },
-          createElement(Rows),
+          MantineProvider,
+          null,
+          createElement(
+            SidebarRowActionsProvider,
+            { value: area },
+            createElement(Rows),
+          ),
         ),
       ),
-    ),
-  );
-  await act(async () => {
-    f.publish([agentSummaryFixture("a"), agentSummaryFixture("b")]);
-    await vi.advanceTimersByTimeAsync(100);
-  });
-  renders.clear();
-  await act(async () =>
-    runInAction(() => {
-      ui.renaming = "a";
-    }),
-  );
-  expect(renders.get("a")).toBeGreaterThan(0);
-  expect(renders.get("b") || 0).toBe(0);
-  await act(async () =>
-    runInAction(() => {
-      ui.renaming = null;
-    }),
-  );
-  await act(async () =>
-    document.querySelector<HTMLButtonElement>(".row-actions")?.click(),
-  );
-  await act(async () => vi.advanceTimersByTimeAsync(200));
-  renders.clear();
-  await act(async () =>
-    runInAction(() => {
-      ui.markingRead.add("a");
-    }),
-  );
-  expect(renders.get("a")).toBeGreaterThan(0);
-  expect(renders.get("b") || 0).toBe(0);
-  for (const update of [
-    () => ui.offline.add("a"),
-    () => ui.aliases.set("a", "Changed server"),
-    () => {
-      ui.dropDestination = "convert:a";
-    },
-    () => {
-      ui.dragTarget = {
-        group: f.model.rows[0]!.groupKey,
-        id: "a",
-        after: true,
-      };
-    },
-  ]) {
+    );
+    await act(async () => {
+      f.publish([agentSummaryFixture("a"), agentSummaryFixture("b")]);
+      await vi.advanceTimersByTimeAsync(100);
+    });
     renders.clear();
     await act(async () =>
       runInAction(() => {
-        update();
+        ui.renaming = "a";
+        ui.renameInPriority = priority;
       }),
     );
-    expect(renders.get("a")).toBeGreaterThan(0);
-    expect(renders.get("b") || 0).toBe(0);
-  }
-  expect(
-    document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.folderDrop,
-  ).toBe("true");
-  expect(
-    document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.dropEdge,
-  ).toBe("after");
-  await f.close();
-});
+    expect(renders.get(`a:${priority}`)).toBeGreaterThan(0);
+    expect(renders.get(`a:${!priority}`) || 0).toBe(0);
+    expect(renders.get("b:false") || 0).toBe(0);
+    expect(renders.get("b:true") || 0).toBe(0);
+    renders.clear();
+    await act(async () =>
+      runInAction(() => {
+        ui.name = "Typed draft";
+      }),
+    );
+    expect(renders.get(`a:${priority}`)).toBeGreaterThan(0);
+    expect(renders.get(`a:${!priority}`) || 0).toBe(0);
+    expect(renders.get("b:false") || 0).toBe(0);
+    expect(renders.get("b:true") || 0).toBe(0);
+    await act(async () =>
+      runInAction(() => {
+        ui.renaming = null;
+      }),
+    );
+    await act(async () =>
+      document.querySelector<HTMLButtonElement>(".row-actions")?.click(),
+    );
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+    renders.clear();
+    await act(async () =>
+      runInAction(() => {
+        ui.markingRead.add("a");
+      }),
+    );
+    expect(renders.get("a:false")).toBeGreaterThan(0);
+    expect(renders.get("b:false") || 0).toBe(0);
+    expect(renders.get("b:true") || 0).toBe(0);
+    for (const update of [
+      () =>
+        ui.pendingReadTargets.set("a", {
+          threadId: "thread",
+          turnId: "turn",
+          revision: 2,
+          read: false,
+        }),
+      () => ui.pendingReadTargets.delete("a"),
+      () => ui.offline.add("a"),
+      () => ui.aliases.set("a", "Changed server"),
+      () => {
+        ui.dropDestination = "convert:a";
+      },
+      () => {
+        ui.dragTarget = {
+          group: f.model.rows[0]!.groupKey,
+          id: "a",
+          after: true,
+        };
+      },
+    ]) {
+      renders.clear();
+      await act(async () =>
+        runInAction(() => {
+          update();
+        }),
+      );
+      expect(renders.get("a:false")).toBeGreaterThan(0);
+      expect(renders.get("a:true")).toBeGreaterThan(0);
+      expect(renders.get("b:false") || 0).toBe(0);
+      expect(renders.get("b:true") || 0).toBe(0);
+    }
+    expect(
+      document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset
+        .folderDrop,
+    ).toBe("true");
+    expect(
+      document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.dropEdge,
+    ).toBe("after");
+    await f.close();
+  },
+);
 
 const commits = vi.hoisted(() => new Map<string, number>());
 function counted<P extends object>(View: ComponentType<P>, id: string) {

@@ -1,9 +1,4 @@
-import {
-  useMemo,
-  type DragEvent,
-  type KeyboardEvent,
-  type HTMLAttributes,
-} from "react";
+import { useMemo, type DragEvent, type KeyboardEvent } from "react";
 import { computed, compareShallow, makeAutoObservable } from "mobx";
 import { createArea } from "../area.ts";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
@@ -11,18 +6,7 @@ type RowArea = ReturnType<
   typeof import("../sidebar/sidebarActions.ts").useSidebarActions
 >["rows"];
 export type ChatRowActions = ReturnType<RowArea["commands"]>;
-export type SidebarRowActions = Omit<RowArea, "ui" | "bindings"> & {
-  bindings(row: SidebarChatView): HTMLAttributes<HTMLElement> & {
-    "data-sidebar-id"?: string;
-    "data-sidebar-group"?: string;
-  };
-  ui: Omit<RowArea["ui"], "services" | "aliases" | "offline" | "overrides"> & {
-    overrides: ReadonlyMap<
-      string,
-      ReturnType<RowArea["ui"]["overrides"]["get"]>
-    >;
-  };
-};
+export type SidebarRowActions = RowArea;
 
 export const [SidebarRowActionsProvider, useSidebarRowActions] =
   createArea<SidebarRowActions>("SidebarRowActions");

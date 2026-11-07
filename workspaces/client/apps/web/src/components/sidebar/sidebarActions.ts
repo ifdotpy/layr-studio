@@ -1,7 +1,8 @@
+import { useSidebarCommands } from "./commands.ts";
 import { runInAction } from "mobx";
 import { useRef, useState } from "react";
 import type { SidebarChatView } from "./viewModel.ts";
-import type { FormEvent } from "react";
+import type { FormEvent, HTMLAttributes } from "react";
 import type { PeerTeamActions } from "../shell/messages/PeerTeams";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../servers/serverAliases.ts";
 import type { useSidebarController } from "./SidebarState.tsx";
@@ -10,19 +11,22 @@ import type { useSidebarController } from "./SidebarState.tsx";
 export function useSidebarActions(
   state: ReturnType<typeof useSidebarController>,
 ) {
-  const current = useRef(state);
-  current.current = state;
+  const commands = useSidebarCommands();
+  const current = useRef({ state, commands });
+  current.current = { state, commands };
   const ui = state.ui;
   const [rows] = useState(() => ({
     ui,
     commands: (row: SidebarChatView, priority: boolean) => ({
       prepare: () => current.current.commands.prepareChat?.(row.id),
-      open: () => current.current.openChat(row.id),
+      open: () => current.current.state.openChat(row.id),
       pin: () => {
-        void current.current.organize(row.id, { pinned: !row.agent.pinned });
+        void current.current.state.organize(row.id, {
+          pinned: !row.agent.pinned,
+        });
       },
       rename: (event: FormEvent) => {
-        void current.current.rename(event, row.id);
+        void current.current.state.rename(event, row.id);
       },
       name: (value: string) =>
         runInAction(() => {
@@ -45,7 +49,7 @@ export function useSidebarActions(
           });
       },
       move: () => {
-        const s = current.current;
+        const s = current.current.state;
         if (s.requireProjectSupport())
           s.setDialog({
             title: "Move chat",
@@ -55,7 +59,7 @@ export function useSidebarActions(
       },
       changeProject: () => current.current.commands.changeProject(row.id),
       archive: () => {
-        void current.current.organize(row.id, {
+        void current.current.state.organize(row.id, {
           archived: !row.agent.archived,
         });
       },
@@ -63,9 +67,14 @@ export function useSidebarActions(
     }),
     disabled: (row: SidebarChatView) =>
       !(ui.services.available?.({ kind: "chat", id: row.id }) ?? true),
-    bindings: (row: SidebarChatView) => current.current.rowBindings(row),
+    bindings: (
+      row: SidebarChatView,
+    ): HTMLAttributes<HTMLElement> & {
+      "data-sidebar-id"?: string;
+      "data-sidebar-group"?: string;
+    } => current.current.state.rowBindings(row),
     server: (row: SidebarChatView) => {
-      const services = current.current.services,
+      const services = current.current.state.services,
         owner = services.serverForChat(row.id);
       return {
         alias:
@@ -79,35 +88,35 @@ export function useSidebarActions(
   }));
   const [teams] = useState<PeerTeamActions>(() => ({
     get scope() {
-      return current.current.stateDir;
+      return current.current.state.stateDir;
     },
-    openRoom: (id) => current.current.openChat(id),
+    openRoom: (id) => current.current.state.openChat(id),
     refresh: async () => {
       await current.current.commands.refresh?.();
     },
-    closeForm: () => current.current.setTeamDialog(null),
+    closeForm: () => current.current.state.setTeamDialog(null),
     edit: (team, action) =>
-      current.current.setTeamDialog({
+      current.current.state.setTeamDialog({
         path: team.projectPath || "",
         id: team.id,
         action,
       }),
     toggle: (team) =>
-      current.current.toggleTree(
+      current.current.state.toggleTree(
         JSON.stringify([team.projectPath, "team", team.id]),
       ),
     room: (team) =>
-      current.current.runtime?.rooms?.find(
+      current.current.state.runtime?.rooms?.find(
         (room) => room.radio?.teamId === team.id,
       )?.id,
     disabled: (team) => {
-      const s = current.current;
+      const s = current.current.state;
       return !s.canEdit(
         s.projectTarget(team.projectPath || "", undefined, team.id),
       );
     },
     candidates: (project, team) => {
-      const s = current.current;
+      const s = current.current.state;
       return s.model.rows.filter(
         (row) =>
           row.projectPath === project.path &&

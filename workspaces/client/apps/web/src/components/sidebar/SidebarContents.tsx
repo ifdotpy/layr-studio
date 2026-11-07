@@ -1,3 +1,4 @@
+import { useSidebarCommands } from "./commands.ts";
 import { ActionIcon, Menu, TextInput } from "@mantine/core";
 import {
   MoreHorizontal,
@@ -26,6 +27,7 @@ import { SidebarProjectList } from "./SidebarProjectList.tsx";
 import { useSidebarState } from "./SidebarState.tsx";
 export const SidebarContents = observer(function SidebarContents() {
   const sidebar = useSidebarState();
+  const commands = useSidebarCommands();
   sidebarRender("SidebarContents");
   const content = (
     <>
@@ -47,16 +49,16 @@ export const SidebarContents = observer(function SidebarContents() {
           aria-label="Search chats"
           title="Search chats (Ctrl+K / ⌘K)"
           aria-keyshortcuts="Control+k Meta+k"
-          onClick={sidebar.commands.onSearch}
+          onClick={commands.onSearch}
         >
           <Search size={18} />
         </ActionIcon>
-        {sidebar.commands.settings && (
+        {commands.settings && (
           <ActionIcon
             variant="subtle"
             aria-label="Studio settings"
             title="Settings"
-            onClick={sidebar.commands.settings}
+            onClick={commands.settings}
           >
             <Settings size={18} />
           </ActionIcon>
@@ -109,14 +111,12 @@ export const SidebarContents = observer(function SidebarContents() {
                 {sidebar.archive ? "Show active chats" : "Show archived chats"}
               </Menu.Item>
               {/* A narrow sidebar hides these two buttons; the menu keeps them. */}
-              {sidebar.commands.newSharedChat && (
-                <Menu.Item onClick={() => sidebar.commands.newSharedChat?.()}>
+              {commands.newSharedChat && (
+                <Menu.Item onClick={() => commands.newSharedChat?.()}>
                   New shared chat
                 </Menu.Item>
               )}
-              <Menu.Item onClick={sidebar.commands.addProject}>
-                Add project
-              </Menu.Item>
+              <Menu.Item onClick={commands.addProject}>Add project</Menu.Item>
             </Menu.Dropdown>
           </Menu>
           <ActionIcon
@@ -124,16 +124,16 @@ export const SidebarContents = observer(function SidebarContents() {
             aria-label="New chat"
             title="New chat"
             disabled={sidebar.p.creating}
-            onClick={() => sidebar.commands.newChat()}
+            onClick={() => commands.newChat()}
           >
             <SquarePen size={16} />
           </ActionIcon>
-          {sidebar.commands.newSharedChat && (
+          {commands.newSharedChat && (
             <ActionIcon
               className="sidebar-shared-chat"
               aria-label="New shared chat"
               title="New shared chat"
-              onClick={() => sidebar.commands.newSharedChat?.()}
+              onClick={() => commands.newSharedChat?.()}
             >
               <Users size={16} />
             </ActionIcon>
@@ -141,7 +141,7 @@ export const SidebarContents = observer(function SidebarContents() {
           <ActionIcon
             className="sidebar-add-project"
             aria-label="Add project"
-            onClick={sidebar.commands.addProject}
+            onClick={commands.addProject}
           >
             <Plus size={18} />
           </ActionIcon>
@@ -168,7 +168,7 @@ export const SidebarContents = observer(function SidebarContents() {
           : {})}
         close={sidebar.closeSidebar}
         onCompactChange={sidebar.reportCompact}
-        {...(sidebar.commands.settings
+        {...(commands.settings
           ? { drawerZIndex: layoutValues.layers.navigation }
           : {})}
         onEntered={() => {

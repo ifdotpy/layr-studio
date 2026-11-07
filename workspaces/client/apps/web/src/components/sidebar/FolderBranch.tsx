@@ -1,3 +1,4 @@
+import { useSidebarCommands } from "./commands.ts";
 import { ActionIcon, Menu, UnstyledButton } from "@mantine/core";
 import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -20,6 +21,7 @@ export const FolderBranch = observer(function FolderBranch({
   parent: ProjectFolder | null;
 }) {
   const sidebar = useSidebarState();
+  const commands = useSidebarCommands();
   sidebarRender("FolderBranch");
   const folders = group.folders || [];
   const target = sidebar.projectTarget(group.path, folder.id);
@@ -82,7 +84,7 @@ export const FolderBranch = observer(function FolderBranch({
             disabled={sidebar.p.creating || !editable}
             onClick={() => {
               if (sidebar.requireProjectSupport())
-                sidebar.commands.newChat(group.path, folder.id);
+                commands.newChat(group.path, folder.id);
             }}
           >
             <Plus size={15} />
@@ -121,9 +123,9 @@ export const FolderBranch = observer(function FolderBranch({
                     folder_id: folder.id,
                     expected_revision: group.organizationRevision || 0,
                   });
-                  await sidebar.commands.refresh?.();
+                  await commands.refresh?.();
                 } catch (error) {
-                  sidebar.commands.notify?.(errorText(error));
+                  commands.notify?.(errorText(error));
                 }
               }}
             >
