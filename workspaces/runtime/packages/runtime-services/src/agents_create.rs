@@ -587,7 +587,8 @@ fn update_exclusions(
     transaction: &Transaction<'_>,
     id: &str,
     expected_account: Option<&str>,
-    excluded: Option<&[String]>,
+    worker_excluded: Option<&[studio_runtime_schema::account_key::AccountKey]>,
+    reviewer_excluded: Option<&[studio_runtime_schema::account_key::AccountKey]>,
     non_defaults: bool,
     validate: impl Fn(&str, &Value) -> bool,
 ) -> Result<Value, SettingsError> {
@@ -608,7 +609,7 @@ fn update_exclusions(
     }) {
         return Err(SettingsError::Stale);
     }
-    if (excluded.is_none() || non_defaults)
+    if ((worker_excluded.is_none() && reviewer_excluded.is_none()) || non_defaults)
         && (crate::event_write::truthy(record.get("inFlight"))
             || matches!(
                 record.get("status").and_then(Value::as_str),
@@ -617,13 +618,18 @@ fn update_exclusions(
     {
         return Err(SettingsError::InFlight);
     }
-    let Some(excluded) = excluded else {
+    if worker_excluded.is_none() && reviewer_excluded.is_none() {
         return Ok(sync_projection(transaction, &record)?);
-    };
+    }
     if record.get("isLead").and_then(Value::as_bool) != Some(true) {
         return Err(SettingsError::LeadRequired);
     }
-    record["excludedAccountKeys"] = json!(excluded);
+    if let Some(excluded) = worker_excluded {
+        record["workerExcludedAccountKeys"] = json!(excluded);
+    }
+    if let Some(excluded) = reviewer_excluded {
+        record["reviewerExcludedAccountKeys"] = json!(excluded);
+    }
     save_agent(transaction, &record, &validate)
 }
 
@@ -820,12 +826,13 @@ mod tests {
             &tx,
             "lead",
             None,
-            Some(&["lead-account".into()]),
+            Some(&["lead-account".to_owned().try_into().unwrap()]),
+            None,
             false,
             |_, _| true,
         )
         .unwrap();
-        assert_eq!(result["excludedAccountKeys"], json!(["lead-account"]));
+        assert_eq!(result["workerExcludedAccountKeys"], json!(["lead-account"]));
     }
 
     #[test]

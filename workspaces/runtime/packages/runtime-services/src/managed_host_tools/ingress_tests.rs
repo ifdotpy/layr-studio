@@ -2517,6 +2517,33 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             "codex",
         ),
         (
+            "worker-ignores-reviewer-exclusions",
+            json!({"role":"implementer","workspace":"shared","model":"gpt-6.1-sol","account_key":"default"}),
+            configured.clone(),
+            "gpt-6.1-sol",
+            Some("high"),
+            false,
+            "codex",
+        ),
+        (
+            "reviewer-ignores-worker-exclusions",
+            json!({}),
+            json!({"model":"gpt-6-astra","effort":"high"}),
+            "gpt-6-astra",
+            Some("high"),
+            true,
+            "codex",
+        ),
+        (
+            "reviewer-respects-reviewer-exclusions",
+            json!({}),
+            json!({"model":"gpt-6-astra","effort":"high"}),
+            "gpt-6-astra",
+            Some("high"),
+            true,
+            "codex",
+        ),
+        (
             "nested-configured",
             json!({}),
             configured.clone(),
@@ -2598,11 +2625,19 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
                 } else {
                     "codex"
                 });
-                parent["excludedAccountKeys"] = json!(if label == "caller-account" {
+                parent["reviewerExcludedAccountKeys"] = json!(if label == "caller-account" {
                     vec!["default"]
                 } else {
                     vec![]
                 });
+                if label == "worker-ignores-reviewer-exclusions"
+                    || label == "reviewer-respects-reviewer-exclusions"
+                {
+                    parent["reviewerExcludedAccountKeys"] = json!(["default"]);
+                }
+                if label == "reviewer-ignores-worker-exclusions" {
+                    parent["workerExcludedAccountKeys"] = json!(["default"]);
+                }
                 parent["workerDefaults"]["fastMode"] = json!(true);
                 if defaults.is_null() {
                     parent.as_object_mut().unwrap().remove("reviewDefaults");
@@ -2702,7 +2737,10 @@ async fn managed_reviewer_defaults_reach_public_spawn_tool() {
             assert_eq!(child["provider"], expected_provider, "{label}/{tool}");
             let expected_account = match label {
                 "claude-review-default" => "test-claude",
-                "caller-account" | "explicit-review-account" | "implementer" => "alternate",
+                "caller-account"
+                | "explicit-review-account"
+                | "implementer"
+                | "reviewer-respects-reviewer-exclusions" => "alternate",
                 _ => "default",
             };
             assert_eq!(child["accountKey"], expected_account, "{label}/{tool}");
@@ -3098,7 +3136,7 @@ async fn review_selects_an_account_that_offers_the_model() {
     .await;
     assert!(incapable.is_err());
     let mut excluded = value.clone();
-    excluded["excludedAccountKeys"] = json!(["chosen"]);
+    excluded["workerExcludedAccountKeys"] = json!(["chosen"]);
     store
         .transaction(move |tx| AgentRepository::put(tx, &AgentRecord::from_value(excluded)?))
         .await
@@ -3637,7 +3675,7 @@ async fn managed_child_creation_preserves_spawn_and_review_contracts() {
         "removed workspace mode must be refused"
     );
 
-    actor_value["excludedAccountKeys"] = json!(["default"]);
+    actor_value["reviewerExcludedAccountKeys"] = json!(["default"]);
     let updated_actor = actor_value.clone();
     store
         .transaction_with::<_, StoreError>(move |tx| {
@@ -4744,7 +4782,7 @@ async fn reviewer_account_selection_uses_eligible_resolver() {
     let (_dir, store, _) = fixture().await;
     let load = std::collections::HashMap::new();
     let spec = studio_runtime_schema::creation_intent::CreationIntent::default();
-    let root: AgentRecord = studio_json::from_str(r#"{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","excludedAccountKeys":["default"],"workerDefaults":{},"reviewDefaults":{"model":"gpt-6-luna"}}"#).unwrap();
+    let root: AgentRecord = studio_json::from_str(r#"{"id":"root","rootId":"root","epoch":0,"status":"idle","compactions":0,"accountKey":"default","model":"gpt-6-astra","reviewerExcludedAccountKeys":["default"],"workerDefaults":{},"reviewDefaults":{"model":"gpt-6-luna"}}"#).unwrap();
     let settings = crate::managed_child_create::resolve_worker_settings(
         &store,
         &CreationEnvironment,

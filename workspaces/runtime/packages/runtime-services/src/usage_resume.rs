@@ -493,8 +493,23 @@ fn excluded(s: &Snapshot, key: &str) -> bool {
         .ancestors_view()
         .iter()
         .find(|a| a.id.as_str() == agent.root_id.as_str());
-    root.and_then(|root| root.excluded_account_keys.as_ref())
-        .is_some_and(|keys| keys.as_slice().iter().any(|id| id.as_str() == key))
+    root.is_some_and(|root| {
+        studio_runtime_schema::creation_intent::excluded_for(
+            agent
+                .role
+                .unwrap_or(studio_runtime_schema::creation_intent::AgentRole::Implementer),
+            root.worker_excluded_account_keys
+                .as_ref()
+                .map(|keys| keys.as_slice())
+                .unwrap_or_default(),
+            root.reviewer_excluded_account_keys
+                .as_ref()
+                .map(|keys| keys.as_slice())
+                .unwrap_or_default(),
+        )
+        .iter()
+        .any(|id| id.as_str() == key)
+    })
 }
 /// Called after an account observation; current identity and task ownership are checked anew.
 pub fn tick(s: &Snapshot, limits: &LimitsObservation, now: f64) -> Result<Decision> {

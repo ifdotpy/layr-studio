@@ -196,12 +196,13 @@ pub(crate) struct WorkerSettingsRequest<'a> {
 async fn account_scope(
     store: &RuntimeStore,
     root: &AgentRecord,
+    role: studio_runtime_schema::creation_intent::AgentRole,
 ) -> Result<(Vec<String>, Option<Vec<String>>, Option<Vec<String>>), StoreError> {
     let excluded = root
-        .excluded_account_keys
-        .value()
-        .cloned()
-        .unwrap_or_default();
+        .exclusions_for(role)
+        .iter()
+        .map(|key| key.as_str().to_owned())
+        .collect();
     let project = match root
         .project_id
         .as_deref()
@@ -246,7 +247,12 @@ async fn select_review_account(
     account_load: &std::collections::HashMap<String, i64>,
 ) -> Result<(String, crate::host_worker_create::AccountIdentity), WorkerSettingsError> {
     let selected = explicit;
-    let (excluded, keys, groups) = account_scope(store, root).await?;
+    let (excluded, keys, groups) = account_scope(
+        store,
+        root,
+        studio_runtime_schema::creation_intent::AgentRole::Reviewer,
+    )
+    .await?;
     let caller_eligible = !excluded.contains(&parent.account_key)
         && keys
             .as_ref()
@@ -343,7 +349,12 @@ pub(crate) async fn resolve_worker_settings(
         )
         .await?
     } else {
-        let (excluded, keys, groups) = account_scope(store, root).await?;
+        let (excluded, keys, groups) = account_scope(
+            store,
+            root,
+            studio_runtime_schema::creation_intent::AgentRole::Implementer,
+        )
+        .await?;
         environment.select_worker_account(crate::provider_callbacks::WorkerAccountRequest {
             parent_account_key: &parent.account_key,
             requested_account_key,

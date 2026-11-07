@@ -31,9 +31,15 @@ impl Admission for MessageNativeAdmission {
             .unwrap_or("default");
         if actor.id != root.id
             && root
-                .excluded_account_keys
-                .value()
-                .is_some_and(|keys| keys.iter().any(|key| key == account))
+                .exclusions_for(
+                    actor
+                        .role
+                        .value()
+                        .copied()
+                        .unwrap_or(studio_runtime_schema::creation_intent::AgentRole::Implementer),
+                )
+                .iter()
+                .any(|key| key.as_str() == account)
         {
             return Err(NativeError::Invalid("account-excluded"));
         }
@@ -232,7 +238,7 @@ mod admission_tests {
         store
             .transaction_with(|tx| {
                 let agent = json!({"id":"lead","rootId":"lead","epoch":1,"status":"idle",
-                "compactions":0,"accountKey":"blocked","provider":"codex","excludedAccountKeys":["blocked"]});
+                "compactions":0,"accountKey":"blocked","provider":"codex","workerExcludedAccountKeys":["blocked"]});
                 AgentRepository::put(tx, &AgentRecord::from_value(agent.clone()).unwrap())?;
                 let worker = json!({"id":"worker","rootId":"lead","epoch":1,"status":"idle",
                 "compactions":0,"accountKey":"blocked","provider":"codex"});

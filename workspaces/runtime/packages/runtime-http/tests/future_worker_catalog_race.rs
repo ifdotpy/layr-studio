@@ -424,7 +424,7 @@ async fn new_chat_prepares_catalog_for_allowed_worker_account() {
             "/api/leads",
             Some(json!({
                 "cwd":cwd, "reuse_empty":false, "account_key":TARGET,
-                "model":MODEL, "excluded_account_keys":[TARGET],
+                "model":MODEL, "worker_excluded_account_keys":[TARGET],
                 "worker_defaults":{"model":MODEL,"effort":"medium","fast_mode":false}
             })),
         )
@@ -438,6 +438,6 @@ async fn new_chat_prepares_catalog_for_allowed_worker_account() {
     );
     let (status, body) = pending.await.expect("create request");
     assert_eq!(status, 200, "{body}");
-    assert_eq!(body["excludedAccountKeys"], json!([TARGET]));
+    assert_eq!(body["workerExcludedAccountKeys"], json!([TARGET]));
     fixture.catalog.shutdown().await.expect("catalog shutdown");
 }

@@ -115,6 +115,14 @@ fn shared_values_ts() -> String {
         &mut text,
         &[
             (
+                "ACCOUNT_KEY_MIN_CHARS",
+                crate::account_key::ACCOUNT_KEY_MIN_CHARS.to_string(),
+            ),
+            (
+                "ACCOUNT_KEY_MAX_CHARS",
+                crate::account_key::ACCOUNT_KEY_MAX_CHARS.to_string(),
+            ),
+            (
                 "CLAUDE_MCP_AUTO_BACKGROUND_MS",
                 values::CLAUDE_MCP_AUTO_BACKGROUND_MS.to_string(),
             ),
@@ -581,6 +589,73 @@ fn check_account_group_parity(openapi: &Value) -> Result<(), String> {
 
 /// Hold the committed OpenAPI document and persisted-state schemas to the Rust owners.
 pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<(), String> {
+    let snapshot: Value = studio_json::from_str(include_str!(
+        "schemas/persisted-continuation-snapshot.schema.json"
+    ))
+    .map_err(|e| e.to_string())?;
+    let agent: Value =
+        studio_json::from_str(include_str!("schemas/persisted-agent-record.schema.json"))
+            .map_err(|e| e.to_string())?;
+    for (bound, value) in [
+        ("minLength", crate::account_key::ACCOUNT_KEY_MIN_CHARS),
+        ("maxLength", crate::account_key::ACCOUNT_KEY_MAX_CHARS),
+    ] {
+        expect_number(
+            openapi,
+            &format!("/components/schemas/ChatAccountExclusions/items/{bound}"),
+            value as i64,
+        )?;
+        for field in ["workerExcludedAccountKeys", "reviewerExcludedAccountKeys"] {
+            let expected = format!(
+                "https://codex-studio.invalid/openapi.json#/components/schemas/AgentEntityDto/properties/{field}"
+            );
+            if agent
+                .pointer(&format!("/properties/{field}/$ref"))
+                .and_then(Value::as_str)
+                != Some(expected.as_str())
+            {
+                return Err(format!(
+                    "persisted agent {field} must use the generated API field contract"
+                ));
+            }
+            for schema in [
+                "AgentDetailEntityDto",
+                "AgentEntityDto",
+                "AgentResponse",
+                "BranchResponse",
+            ] {
+                expect_number(
+                    openapi,
+                    &format!(
+                        "/components/schemas/{schema}/properties/{field}/anyOf/0/items/{bound}"
+                    ),
+                    value as i64,
+                )?;
+            }
+            expect_number(
+                openapi,
+                &format!(
+                    "/components/schemas/AgentRecordResponse/properties/{field}/items/{bound}"
+                ),
+                value as i64,
+            )?;
+            expect_number(
+                &snapshot,
+                &format!("/$defs/ContinuationAgent/properties/{field}/items/{bound}"),
+                value as i64,
+            )?;
+        }
+    }
+    use crate::creation_intent::AgentRole;
+    if snapshot.pointer("/$defs/ContinuationAgent/properties/role/anyOf/0/enum")
+        != Some(&studio_json::json!([
+            AgentRole::Orchestrator.as_str(),
+            AgentRole::Implementer.as_str(),
+            AgentRole::Reviewer.as_str()
+        ]))
+    {
+        return Err("continuation role schema must match AgentRole".into());
+    }
     crate::event_metadata::check_schema_parity()?;
     crate::rule_record::check_schema_parity()?;
     crate::monitor_record::check_schema_parity()?;

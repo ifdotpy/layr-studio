@@ -98,7 +98,7 @@
   {
     "name": "excluded-account",
     "agent": {
-      "excludedAccountKeys": ["default"]
+      "workerExcludedAccountKeys": ["default"]
     },
     "steps": [{}],
     "rustResults": [

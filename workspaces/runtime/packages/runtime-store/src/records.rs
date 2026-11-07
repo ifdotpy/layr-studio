@@ -514,7 +514,16 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub excluded_account_keys: studio_runtime_schema::queue_command::Field<Vec<String>>,
+    pub worker_excluded_account_keys: studio_runtime_schema::queue_command::Field<
+        Vec<studio_runtime_schema::account_key::AccountKey>,
+    >,
+    #[serde(
+        default,
+        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
+    )]
+    pub reviewer_excluded_account_keys: studio_runtime_schema::queue_command::Field<
+        Vec<studio_runtime_schema::account_key::AccountKey>,
+    >,
     #[serde(
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
@@ -956,6 +965,24 @@ impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaul
 }
 
 impl AgentRecord {
+    /// Account exclusions for the role being scheduled; the lead is unrestricted.
+    pub fn exclusions_for(
+        &self,
+        role: studio_runtime_schema::creation_intent::AgentRole,
+    ) -> &[studio_runtime_schema::account_key::AccountKey] {
+        studio_runtime_schema::creation_intent::excluded_for(
+            role,
+            self.worker_excluded_account_keys
+                .value()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+            self.reviewer_excluded_account_keys
+                .value()
+                .map(Vec::as_slice)
+                .unwrap_or_default(),
+        )
+    }
+
     pub fn moved_from_active(&self) -> bool {
         crate::schema::raw_truthy(self.moved_from.value().map(|raw| &raw.0))
     }
@@ -1368,7 +1395,8 @@ impl AgentRecord {
             checkpoint_history_head: Default::default(),
             workspace_reservation_id: Default::default(),
             workspace_operation: Default::default(),
-            excluded_account_keys: Default::default(),
+            worker_excluded_account_keys: Default::default(),
+            reviewer_excluded_account_keys: Default::default(),
             role: Default::default(),
             provider: Default::default(),
             created: Default::default(),
@@ -3788,7 +3816,7 @@ mod tests {
 
     #[test]
     fn agent_excluded_accounts_are_strings() {
-        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"excludedAccountKeys":["blocked",42]}"#;
+        let raw = r#"{"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default","compactions":0,"workerExcludedAccountKeys":["blocked",42]}"#;
         assert!(studio_json::from_str::<AgentRecord>(raw).is_err());
         let valid = raw.replace(",42", "");
         assert!(studio_json::from_str::<AgentRecord>(&valid).is_ok());

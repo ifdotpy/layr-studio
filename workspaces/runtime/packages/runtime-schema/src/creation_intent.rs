@@ -103,6 +103,15 @@ impl AgentRole {
     }
 }
 
+/// Select the chat exclusion list for the affected agent's role.
+pub fn excluded_for<'a, T>(role: AgentRole, workers: &'a [T], reviewers: &'a [T]) -> &'a [T] {
+    match role {
+        AgentRole::Implementer => workers,
+        AgentRole::Reviewer => reviewers,
+        AgentRole::Orchestrator => &[],
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreationIntent {
@@ -125,7 +134,9 @@ pub struct CreationIntent {
     )]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub excluded_account_keys: Option<Vec<String>>,
+    pub worker_excluded_account_keys: Option<Vec<crate::account_key::AccountKey>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_excluded_account_keys: Option<Vec<crate::account_key::AccountKey>>,
     #[serde(
         rename = "layrStoreRoot",
         default,

@@ -3654,8 +3654,6 @@ export interface components {
       environment?: ("host" | "linux") | null | undefined;
       /** Error */
       error?: components["schemas"]["AgentError"] | null | undefined;
-      /** Excludedaccountkeys */
-      excludedAccountKeys?: string[] | null | undefined;
       /** Executionmode */
       executionMode?: ("vm" | "native") | null | undefined;
       /** Fastmode */
@@ -3748,6 +3746,8 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /** reviewerExcludedAccountKeys */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       startAttempt?:
         | components["schemas"]["AgentStartAttempt"]
         | null
@@ -3775,6 +3775,8 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /** workerExcludedAccountKeys */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -3949,8 +3951,6 @@ export interface components {
       epoch?: number | null | undefined;
       /** Error */
       error?: components["schemas"]["AgentError"] | null | undefined;
-      /** Excludedaccountkeys */
-      excludedAccountKeys?: string[] | null | undefined;
       /** Executionmode */
       executionMode?: ("vm" | "native") | null | undefined;
       /** Fastmode */
@@ -4106,6 +4106,8 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /** reviewerExcludedAccountKeys */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       role?: components["schemas"]["AgentRole"] | null | undefined;
       /** Rootid */
       rootId?: null | string | undefined;
@@ -4152,6 +4154,8 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /** workerExcludedAccountKeys */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -4732,11 +4736,6 @@ export interface components {
        */
       events?: number | undefined;
       /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | undefined;
-      /**
        * Executionarchives
        * @default null
        */
@@ -5285,6 +5284,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsRecordResponse"]
         | undefined;
       /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | undefined;
+      /**
        * Role
        * @default null
        * @enum {string}
@@ -5428,6 +5432,11 @@ export interface components {
       workerDefaults?:
         | components["schemas"]["WorkerDefaultsRecordResponse"]
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | undefined;
       /**
        * Workspaceingit
        * @default null
@@ -5644,11 +5653,6 @@ export interface components {
         | null
         | string
         | undefined;
-      /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | null | undefined;
       /**
        * Executionmode
        * @default null
@@ -5945,6 +5949,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       /** @default null */
       role?:
         | components["schemas"]["studio_api__sync__models__AgentRole"]
@@ -6034,6 +6043,11 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       workspaceCleanupIntent?:
         | components["schemas"]["WorkspaceCleanupSummaryDto"]
         | null
@@ -8699,11 +8713,6 @@ export interface components {
         | string
         | undefined;
       /**
-       * Excludedaccountkeys
-       * @default null
-       */
-      excludedAccountKeys?: string[] | null | undefined;
-      /**
        * Executionmode
        * @default null
        */
@@ -8987,6 +8996,11 @@ export interface components {
         | components["schemas"]["ReviewDefaultsDto"]
         | null
         | undefined;
+      /**
+       * reviewerExcludedAccountKeys
+       * @default null
+       */
+      reviewerExcludedAccountKeys?: string[] | null | undefined;
       /** @default null */
       role?:
         | components["schemas"]["studio_api__sync__models__AgentRole"]
@@ -9073,6 +9087,11 @@ export interface components {
         | components["schemas"]["WorkerDefaultsDto"]
         | null
         | undefined;
+      /**
+       * workerExcludedAccountKeys
+       * @default null
+       */
+      workerExcludedAccountKeys?: string[] | null | undefined;
       /** Workspacemode */
       workspaceMode?: components["schemas"]["WorkspaceMode"] | null | undefined;
       /**
@@ -11902,9 +11921,6 @@ export interface components {
        * @default null
        */
       effort?: string | null | undefined;
-      excluded_account_keys?:
-        | components["schemas"]["ChatAccountExclusions"]
-        | undefined;
       /**
        * Expected Account Key
        * @default default
@@ -11942,6 +11958,9 @@ export interface components {
         | components["schemas"]["ReviewDefaults"]
         | null
         | undefined;
+      reviewer_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /**
        * Subagent Concurrency
        * @default 32
@@ -11951,6 +11970,9 @@ export interface components {
       worker_defaults?:
         | components["schemas"]["WorkerDefaults"]
         | null
+        | undefined;
+      worker_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
         | undefined;
       /**
        * Yolo Mode
@@ -12185,9 +12207,6 @@ export interface components {
        * @default null
        */
       effort?: string | null | undefined;
-      excluded_account_keys?:
-        | components["schemas"]["ChatAccountExclusions"]
-        | undefined;
       /**
        * Fast Mode
        * @default null
@@ -12234,10 +12253,16 @@ export interface components {
         | components["schemas"]["ReviewDefaults"]
         | null
         | undefined;
+      reviewer_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
+        | undefined;
       /** @default null */
       worker_defaults?:
         | components["schemas"]["WorkerDefaults"]
         | null
+        | undefined;
+      worker_excluded_account_keys?:
+        | components["schemas"]["ChatAccountExclusions"]
         | undefined;
       /**
        * Workspacemode
