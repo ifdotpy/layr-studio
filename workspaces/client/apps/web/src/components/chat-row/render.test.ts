@@ -212,10 +212,11 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
     document.querySelector<HTMLButtonElement>(".row-actions")?.click(),
   );
   await act(async () => vi.advanceTimersByTimeAsync(0));
+  await act(async () => vi.advanceTimersByTimeAsync(200));
   const unread = document.querySelector<HTMLButtonElement>(
     '[role="menuitem"][aria-label="Mark unread"]',
   );
-  expect(unread).not.toBeNull();
+  expect(unread, document.body.innerHTML).not.toBeNull();
   expect(unread?.disabled).toBe(false);
   await act(async () => unread?.click());
   expect(nextUnread).toHaveBeenCalledTimes(1);

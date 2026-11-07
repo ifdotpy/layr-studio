@@ -8,7 +8,7 @@ export function displayedIndicator(
   row: IndicatorRow,
   pendingRead?: SidebarChatRow["markRead"],
 ) {
-  const target = row.markRead;
+  const target = pendingRead ? row.markRead : null;
   if (
     pendingRead &&
     target &&

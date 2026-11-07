@@ -14,7 +14,7 @@ export const ChatIndicator = observer(function ChatIndicator({
   pendingRead?: SidebarChatRow["markRead"] | undefined;
 }) {
   const status = displayedIndicator(row, pendingRead);
-  // Pass a primitive snapshot across the third-party component boundary.
+  // Read tracked fields before passing the display snapshot.
   const kind = status.kind;
   switch (kind) {
     case ChatOperationalKind.none:
