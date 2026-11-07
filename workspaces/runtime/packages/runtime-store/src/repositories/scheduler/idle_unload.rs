@@ -42,7 +42,11 @@ fn agent_in_use() -> String {
         (
             "runtime_tool_requests",
             unsettled_tool_request_predicate(),
-            "json_extract(record,'$.agent')",
+            // schema::receipt_owner_columns defines agent with
+            // "WHEN 'managed_tool' THEN record->>'$.agent'". The predicate
+            // restricts kind to managed_tool, so this equals json_extract(record,'$.agent')
+            // while allowing the status/agent index to exclude unrelated callbacks.
+            "agent",
         ),
     ] {
         checks.push(format!(
@@ -283,6 +287,58 @@ mod tests {
     }
 
     #[test]
+    fn idle_unload_snapshot_skips_unrelated_running_callbacks() {
+        let connection = crate::test_canvas();
+        let mut threads = std::collections::BTreeSet::new();
+        for n in 0..18 {
+            let thread = format!("thread-{n}");
+            agent(
+                &connection,
+                &format!("idle-{n}"),
+                json!({"threadId":thread,"isLead":true}),
+            );
+            threads.insert(thread);
+        }
+        for n in 0..700 {
+            connection
+                .execute(
+                    "INSERT INTO runtime_tool_requests(id,record) VALUES(?1,?2)",
+                    [
+                        format!("callback-{n}"),
+                        json!({"kind":"provider_callback","status":"running",
+                    "payload":{"identity":{"context":{"agent":"unrelated"}}}})
+                        .to_string(),
+                    ],
+                )
+                .unwrap();
+        }
+        connection.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_PROFILE,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Profile(statement, _) = event {
+                    SNAPSHOT_STEPS.with(|count| {
+                        count.set(
+                            count.get() + statement.get_status(rusqlite::StatementStatus::VmStep),
+                        );
+                    });
+                }
+            }),
+        );
+        SNAPSHOT_STEPS.with(|count| count.set(0));
+        let (busy, immediate, account_busy) =
+            SchedulerRepository::idle_unload_usage_snapshot(&connection, "acct", &threads).unwrap();
+        let steps = SNAPSHOT_STEPS.with(std::cell::Cell::get);
+        eprintln!("18 idle agents/threads, 700 unrelated running callbacks: {steps} VM steps");
+        assert!(busy.is_empty());
+        assert!(immediate.is_empty());
+        assert!(!account_busy);
+        assert!(
+            steps < 10_000,
+            "idle checks must seek requests by status and agent: {steps} VM steps"
+        );
+    }
+
+    #[test]
     fn idle_unload_snapshot_work_is_linear_in_loaded_threads() {
         let small = snapshot_steps(50);
         let large = snapshot_steps(100);
@@ -376,6 +432,15 @@ mod tests {
         connection
             .execute_batch(&crate::domain::tables_sql())
             .expect("domain tables create");
+        let (_, _, definition) = crate::schema::receipt_owner_columns()
+            .into_iter()
+            .find(|(table, name, _)| *table == "runtime_tool_requests" && *name == "agent")
+            .expect("tool request agent owner");
+        connection
+            .execute_batch(&format!(
+                "ALTER TABLE runtime_tool_requests ADD COLUMN agent {definition}"
+            ))
+            .unwrap();
         {
             let tx = connection.transaction().expect("migration transaction");
             crate::migrations::m2026_11_06_idle_unload::apply(&tx).expect("idle indexes");

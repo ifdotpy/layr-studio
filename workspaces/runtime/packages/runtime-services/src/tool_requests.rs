@@ -754,6 +754,58 @@ mod admission_lookup_tests {
     use super::*;
 
     #[test]
+    fn managed_tool_writer_preserves_idle_agent_lookup() {
+        use studio_runtime_store::SchedulerRepository;
+
+        let mut db = studio_runtime_store::test_canvas();
+        let tx = db.transaction().unwrap();
+        for id in ["owner", "other"] {
+            let record = json!({"id":id,"provider":"codex","rootId":id,"accountKey":"acct",
+                "threadId":id,"epoch":1,"status":"completed","compactions":0});
+            let record = studio_runtime_store::AgentRecord::from_value(record).unwrap();
+            studio_runtime_store::AgentRepository::put(&tx, &record).unwrap();
+            assert!(!SchedulerRepository::idle_unload_thread_in_use(&tx, "acct", id).unwrap());
+        }
+        let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+        admission::reserve(
+            &tx,
+            json!({"id":id,"agent":"owner","accountKey":"acct",
+            "threadId":"owner","epoch":1,"signature":"idle-lookup","stage":"queued",
+            "outcome":"pending","cancelRequested":false}),
+            "call",
+            "",
+            None,
+        )
+        .unwrap();
+        let same_agent: bool = tx.query_row(
+            "SELECT agent IS json_extract(record,'$.agent') FROM runtime_tool_requests WHERE id=?1 AND kind='managed_tool'",
+            [id.as_str()], |row| row.get(0),
+        ).unwrap();
+        assert!(same_agent);
+        for stage in ["queued", "running", "completed", "failed"] {
+            tx.execute(
+                "UPDATE runtime_tool_requests SET record=json_set(record,'$.stage',?1) WHERE id=?2",
+                params![stage, id.as_str()],
+            )
+            .unwrap();
+            for agent in ["owner", "other"] {
+                let old: bool = tx.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM runtime_tool_requests WHERE kind='managed_tool' AND status IN ('queued','running') AND json_extract(record,'$.agent')=?1)",
+                    [agent], |row| row.get(0),
+                ).unwrap();
+                assert_eq!(
+                    old,
+                    agent == "owner" && matches!(stage, "queued" | "running")
+                );
+                assert_eq!(
+                    SchedulerRepository::idle_unload_thread_in_use(&tx, "acct", agent).unwrap(),
+                    old
+                );
+            }
+        }
+    }
+
+    #[test]
     fn unknown_finished_receipt_reads_externalized_result() {
         let db = studio_runtime_store::Connection::open_in_memory().unwrap();
         db.execute_batch("CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE request_results(id TEXT PRIMARY KEY, signature TEXT NOT NULL, result TEXT NOT NULL, created INTEGER NOT NULL);").unwrap();
