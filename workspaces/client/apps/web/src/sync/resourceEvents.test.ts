@@ -544,6 +544,48 @@ describe("shared resource event transport", () => {
     stopState();
   });
 
+  it("batches delayed observable slot acquisitions through the existing subscription owner", async () => {
+    const { autorun } = await import("mobx");
+    const { createSubscriptions } = await import("./subscriptions/module.ts");
+    const { createObservableResourceRuntime } =
+      await import("../store/runtime.ts");
+    const { subscriptionKey } = await import("./subscriptions/contracts.ts");
+    syncDatabase.mockResolvedValue({ workspaceId });
+    const transport = await loadTransport();
+    const stopState = transport.watchResourceChanges(
+      { kind: "state" },
+      vi.fn(),
+    );
+    await vi.advanceTimersByTimeAsync(20);
+    const subscriptions = createSubscriptions(transport);
+    const runtime = createObservableResourceRuntime(subscriptions);
+    const a = runtime.slot({
+      key: subscriptionKey({ kind: "sidebar" }),
+      ref: { kind: "sidebar" },
+      create: () => ({}),
+      apply: () => {},
+    });
+    const b = runtime.slot({
+      key: subscriptionKey({ kind: "desktop" }),
+      ref: { kind: "desktop" },
+      create: () => ({}),
+      apply: () => {},
+    });
+    const stop = autorun(() => [a.current, b.current]);
+    await vi.advanceTimersByTimeAsync(99);
+    expect(subscriptionPosts).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(31);
+    expect(subscriptionPosts).toHaveLength(1);
+    expect(subscriptionPosts[0]?.add).toEqual([
+      { resource: { kind: "sidebar" }, since: undefined },
+      { resource: { kind: "desktop" }, since: undefined },
+    ]);
+    stop();
+    runtime.dispose();
+    subscriptions.dispose();
+    stopState();
+  });
+
   it("waits for an initial frame and redelivers an unchanged reopen baseline to opted-in readers", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
 
