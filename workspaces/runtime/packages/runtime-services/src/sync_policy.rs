@@ -574,30 +574,7 @@ pub fn publish_entity_changes(
             validate,
         )?;
     }
-    let mut owned_work = Vec::new();
-    {
-        // The runtime_work_owner_status index serves this owner lookup.
-        let mut statement = transaction.prepare_cached(
-            "SELECT id,record FROM runtime_work WHERE json_extract(record,'$.owner')=?1 ORDER BY rowid",
-        )?;
-        for owner in &agent_ids {
-            for row in statement.query_map([owner], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })? {
-                let (id, raw) = row?;
-                if let Some(record) = checked_owned_work(&id, &raw)? {
-                    owned_work.push(record);
-                }
-            }
-        }
-    }
-    publish_agents(
-        transaction,
-        &agents,
-        &owned_work,
-        project_server_id,
-        validate,
-    )?;
+    publish_agents(transaction, &agents, &[], project_server_id, validate)?;
     let published = agents
         .iter()
         .map(|(id, _)| (*id).to_owned())
@@ -807,7 +784,6 @@ fn rows_by_id(
     Ok(rows)
 }
 
-/// Publish agent views; `work` must hold every work item the agents own.
 /// Mark the views of the team leads in `roots` whose team counts changed since their
 /// last publication. A lead in `skip` is published by the caller already.
 fn publish_team_roots(
@@ -835,8 +811,19 @@ fn publish_agents(
     _project_server_id: Option<&str>,
     _validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
+    if agents.is_empty() {
+        return Ok(());
+    }
+    let mut limits = crate::account_session_runtime::limits::publication_views(transaction)?;
     for &(id, record) in agents {
-        publish_agent_projection(transaction, id, truthy(record.get("deletedAt")))?;
+        let deleted = truthy(record.get("deletedAt"));
+        crate::account_session_runtime::limits::publish_agent_change_with_views(
+            transaction,
+            id,
+            deleted,
+            &mut limits,
+        )?;
+        mark_agent_projection(transaction, id, deleted)?;
     }
     Ok(())
 }
@@ -850,6 +837,14 @@ pub(crate) fn publish_agent_projection(
     deleted: bool,
 ) -> StoreResult<()> {
     crate::account_session_runtime::limits::publish_agent_change(transaction, id, deleted)?;
+    mark_agent_projection(transaction, id, deleted)
+}
+
+fn mark_agent_projection(
+    transaction: &Transaction<'_>,
+    id: &str,
+    deleted: bool,
+) -> StoreResult<()> {
     studio_runtime_store::durable_seq::mark(
         transaction,
         studio_runtime_store::durable_seq::AGENT_VIEW_MARK,

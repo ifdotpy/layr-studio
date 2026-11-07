@@ -809,7 +809,119 @@ async fn reserved_user_input_has_same_status_in_queue_and_receipt() {
 }
 
 #[tokio::test]
-async fn owned_work_is_decoded_once_per_agent_publication() {
+async fn agent_projections_decode_accounts_once_with_identical_output() {
+    use crate::account_session_runtime::limits::ACCOUNT_VIEW_DECODES;
+    use crate::sync_policy::{EntityChanges, publish_agent_projection, publish_entity_changes};
+    let (_dir, store) = store().await;
+    for n in 0..8 {
+        let id = format!("batch-{n}");
+        seed_chat(&store, chat(json!({"id":id,"rootId":id}))).await;
+    }
+    store.transaction_with(|tx| {
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs_f64();
+        for account in ["default", "other"] {
+            let credits = (0..128).map(|n| json!({"id":format!("credit-{n}"),"resetType":"usage","status":"available"})).collect::<Vec<_>>();
+            let observation = json!({"accountKey":account,"at":now,"data":{"rateLimitResetCredits":{"credits":credits}}});
+            let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(&observation.to_string(), account, now)?;
+            crate::account_session_runtime::limits::populate_agents(tx, &mut view, now)?;
+            view.projection.status = studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { reset_at: now + 3600.0 };
+            studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", account, view, false)?;
+        }
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.accountKey','other') WHERE id='batch-1'", [])?;
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.error',json(?1)) WHERE id LIKE 'batch-%'", [r#"{"codexErrorInfo":"rateLimitExceeded"}"#])?;
+        let output = || -> Result<Vec<(String, i64, String)>, StoreError> {
+            Ok(tx.prepare("SELECT collection||':'||id,seq,payload FROM sync_entities WHERE collection='rateLimit' UNION ALL SELECT tbl||':'||id,seq,CAST(deleted AS TEXT) FROM durable_rows WHERE tbl='agent_views' ORDER BY 1")?.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?.collect::<Result<Vec<_>, _>>()?)
+        };
+        tx.execute_batch("SAVEPOINT publication_reference")?;
+        ACCOUNT_VIEW_DECODES.set(0);
+        for n in 0..8 {
+            publish_agent_projection(tx, &format!("batch-{n}"), false)?;
+        }
+        let expected = output()?;
+        assert_eq!(ACCOUNT_VIEW_DECODES.replace(0), 16);
+        tx.execute_batch("ROLLBACK TO publication_reference; RELEASE publication_reference")?;
+        let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+        publish_entity_changes(tx, &EntityChanges {
+            agents: (0..8).map(|n| format!("batch-{n}")).collect(),
+            ..Default::default()
+        }, None, &|_, _, _, _| true)?;
+        assert_eq!(output()?, expected, "payloads and publication sequences must match individual publication");
+        assert_eq!(ACCOUNT_VIEW_DECODES.replace(0), 2, "decode each account once per publication batch");
+        assert_eq!(studio_runtime_store::agent_volatile::publication_work::take_full_decodes(), 0, "limits publication needs no full AgentRecord decodes");
+        Ok::<_, StoreError>(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    seed_chat(&store, chat(json!({"id":"second","rootId":"second"}))).await;
+    store.transaction_with(|tx| {
+        tx.execute_batch("CREATE TEMP TABLE repairs(id TEXT); CREATE TEMP TRIGGER count_repairs AFTER DELETE ON main.sync_entities WHEN OLD.collection='rateLimit' BEGIN INSERT INTO repairs VALUES(OLD.id); END;")?;
+        let sequences = || -> Result<Vec<(String, i64)>, StoreError> {
+            Ok(tx.prepare("SELECT collection||':'||id,seq FROM sync_entities WHERE collection='rateLimit' UNION ALL SELECT tbl||':'||id,seq FROM durable_rows WHERE tbl='agent_views' ORDER BY 1")?.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?.collect::<Result<Vec<_>, _>>()?)
+        };
+        for null_payload in [false, true] {
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", json!({}), false)?;
+        if null_payload {
+            tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='default'", [])?;
+        }
+        tx.execute_batch("SAVEPOINT repair_reference")?;
+        for id in [CHAT, "second"] {
+            crate::sync_policy::publish_agent_projection(tx, id, false)?;
+        }
+        let expected = sequences()?;
+        tx.execute_batch("ROLLBACK TO repair_reference; RELEASE repair_reference")?;
+        crate::sync_policy::publish_entity_changes(tx, &crate::sync_policy::EntityChanges {
+            agents: [CHAT.to_owned(), "second".to_owned()].into(),
+            ..Default::default()
+        }, None, &|_, _, _, _| true)?;
+        assert_eq!(tx.query_row("SELECT count(*) FROM repairs", [], |row| row.get::<_, i64>(0))?, 1);
+        let payload: String = tx.query_row("SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='default'", [], |row| row.get(0))?;
+        let (value, unreadable) = studio_runtime_store::account_state::normalized_limits_view("default", payload.as_bytes(), 0.0);
+        assert!(!unreadable);
+        assert_eq!(value.projection.agents.len(), 2);
+        assert_eq!(sequences()?, expected, "repair keeps individual publication sequence numbers, SQL NULL: {null_payload}");
+        tx.execute("DELETE FROM repairs", [])?;
+        }
+        tx.execute_batch("DROP TRIGGER count_repairs; DROP TABLE repairs")?;
+        Ok::<_, StoreError>(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn agent_projections_validate_borrowed_limit_fields() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store.transaction_with(|tx| {
+        let view = studio_runtime_schema::usage_limits::RateLimitView::read(r#"{"accountKey":"default","at":1}"#, "default", 1.0)?;
+        studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", view, false)?;
+        let raw: String = tx.query_row("SELECT record FROM runtime_agents WHERE id=?1", [CHAT], |row| row.get(0))?;
+        // The error owner preserves scalar evidence; workspaceMode is not consumed.
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode',42,'$.error',42) WHERE id=?1", [CHAT])?;
+        crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, false)?;
+        for (path, value) in [
+            ("$.id", json!("wrong")),
+            ("$.epoch", json!(-1)),
+            ("$.epoch", json!(studio_runtime_schema::shared_values::MAX_SAFE_INTEGER + 1)),
+            ("$.accountKey", json!(null)),
+            ("$.model", json!(42)),
+            ("$.provider", json!(42)),
+            ("$.threadId", json!(42)),
+            ("$.lastCompletedTurn", json!(42)),
+            ("$.deletedAt", json!("invalid")),
+        ] {
+            tx.execute("UPDATE runtime_agents SET record=json_set(?1,?2,json(?3)) WHERE id=?4", rusqlite::params![raw, path, value.to_string(), CHAT])?;
+            assert!(matches!(crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, false), Err(StoreError::InvalidSyncObject { .. })), "invalid consumed field {path}");
+        }
+        tx.execute("UPDATE runtime_agents SET record=?1 WHERE id=?2", [&raw, CHAT])?;
+        Ok::<_, StoreError>(())
+    }).await.unwrap();
+}
+
+#[tokio::test]
+async fn agent_projections_do_not_decode_unused_owned_work() {
     use crate::sync_policy::work_publication_probe;
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
@@ -829,8 +941,8 @@ async fn owned_work_is_decoded_once_per_agent_publication() {
     for id in ["owned-first", "owned-second"] {
         assert_eq!(
             work_publication_probe::take(id).owned_decodes,
-            1,
-            "owned work must be decoded once per agent publication"
+            0,
+            "agent publication does not consume work documents"
         );
     }
 }

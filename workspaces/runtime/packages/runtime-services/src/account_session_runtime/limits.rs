@@ -2,6 +2,7 @@
 use super::*;
 use rusqlite::OptionalExtension;
 use studio_runtime_schema::json_object::JsonObject;
+use studio_runtime_schema::usage_limits::RateLimitView;
 use studio_runtime_schema::usage_limits::{UsageLimitsData, UsageLimitsResponse};
 use studio_runtime_store::account_state;
 use studio_runtime_store::{StoreError, SyncDocumentsRepository};
@@ -284,17 +285,7 @@ pub(crate) fn populate_agents(
     while let Some(row) = rows.next()? {
         let id: String = row.get(0)?;
         let raw: String = row.get(1)?;
-        let invalid = || StoreError::InvalidSyncObject {
-            scope: "runtime_agents".into(),
-            id: id.clone(),
-        };
-        let agent: crate::usage_resume::LimitAgent =
-            studio_json::from_str(&raw).map_err(|_| invalid())?;
-        if agent.id != id
-            || !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&agent.epoch)
-        {
-            return Err(invalid());
-        }
+        let agent = decode_limit_agent(&id, &raw)?;
         let account = if agent.account_key.is_empty() {
             "default"
         } else {
@@ -308,6 +299,25 @@ pub(crate) fn populate_agents(
         }
     }
     Ok(())
+}
+
+/// Validate only the stored fields consumed by account-limit projection.
+fn decode_limit_agent<'a>(
+    id: &str,
+    raw: &'a str,
+) -> Result<crate::usage_resume::LimitAgent<'a>, StoreError> {
+    let invalid = || StoreError::InvalidSyncObject {
+        scope: "runtime_agents".into(),
+        id: id.to_owned(),
+    };
+    let agent: crate::usage_resume::LimitAgent<'_> =
+        studio_json::from_str(raw).map_err(|_| invalid())?;
+    if agent.id != id
+        || !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&agent.epoch)
+    {
+        return Err(invalid());
+    }
+    Ok(agent)
 }
 
 pub(super) async fn recovery_deadline(
@@ -345,17 +355,13 @@ fn mark_checking(view: &mut studio_runtime_schema::usage_limits::RateLimitView, 
     }
 }
 
+/// One account's normalized view and whether its persisted document needs repair.
+pub(crate) type AccountView = (String, RateLimitView, bool);
+
 fn decoded_account_views(
     tx: &studio_runtime_store::Transaction<'_>,
     now: f64,
-) -> Result<
-    Vec<(
-        String,
-        studio_runtime_schema::usage_limits::RateLimitView,
-        bool,
-    )>,
-    StoreError,
-> {
+) -> Result<Vec<AccountView>, StoreError> {
     let mut query = tx.prepare(
         "SELECT id,substr(CAST(payload AS BLOB),1,?1) FROM sync_entities WHERE collection='rateLimit' AND deleted=0",
     )?;
@@ -365,6 +371,8 @@ fn decoded_account_views(
     )?;
     rows.map(|row| {
         let (account, payload) = row?;
+        #[cfg(test)]
+        ACCOUNT_VIEW_DECODES.with(|count| count.set(count.get() + 1));
         let (view, unreadable) = account_state::normalized_limits_view(
             &account,
             payload.as_deref().unwrap_or_default(),
@@ -375,30 +383,61 @@ fn decoded_account_views(
     .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static ACCOUNT_VIEW_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Recompute affected agent projections in the transaction that publishes them.
 pub(crate) fn publish_agent_change(
     tx: &studio_runtime_store::Transaction<'_>,
     agent_id: &str,
     deleted: bool,
 ) -> Result<(), StoreError> {
+    let mut views = publication_views(tx)?;
+    publish_agent_change_with_views(tx, agent_id, deleted, &mut views)
+}
+
+pub(crate) fn publication_views(
+    tx: &studio_runtime_store::Transaction<'_>,
+) -> Result<Vec<AccountView>, StoreError> {
     let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
-    let views = decoded_account_views(tx, now)?;
+    decoded_account_views(tx, now)
+}
+
+/// Reuse only within a publication batch; each write updates the borrowed views
+/// so the next agent sees exactly the preceding publication.
+pub(crate) fn publish_agent_change_with_views(
+    tx: &studio_runtime_store::Transaction<'_>,
+    agent_id: &str,
+    deleted: bool,
+    views: &mut [AccountView],
+) -> Result<(), StoreError> {
     if views.is_empty() {
         return Ok(());
     }
-    let agent = if deleted {
+    let now = timestamp().map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
+    let raw = if deleted {
         None
     } else {
-        studio_runtime_store::AgentRepository::get(tx, &agent_id.into())?
+        tx.prepare_cached("SELECT record FROM runtime_agents WHERE id=?1")?
+            .query_row([agent_id], |row| row.get::<_, String>(0))
+            .optional()?
     };
-    for (account, mut value, unreadable) in views {
-        if unreadable {
+    // LimitAgent consumes no volatile columns, so the stored record is sufficient.
+    let agent = raw
+        .as_deref()
+        .map(|raw| decode_limit_agent(agent_id, raw))
+        .transpose()?;
+    for (account, value, unreadable) in views {
+        if *unreadable {
             tx.execute(
                 "DELETE FROM sync_entities WHERE collection='rateLimit' AND id=?1",
-                [&account],
+                [&*account],
             )?;
-            populate_agents(tx, &mut value, now)?;
-            SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+            populate_agents(tx, value, now)?;
+            SyncDocumentsRepository::put_entity(tx, "rateLimit", account, &*value, false)?;
+            *unreadable = false;
             continue;
         }
         let matches = agent.as_ref().is_some_and(|agent| {
@@ -407,7 +446,7 @@ pub(crate) fn publish_agent_change(
             } else {
                 &agent.account_key
             };
-            key == account
+            key == account.as_str()
         });
         if matches {
             let limits =
@@ -415,7 +454,7 @@ pub(crate) fn publish_agent_change(
             if let Some(agent) = &agent {
                 value.projection.agents.insert(
                     agent_id.to_owned(),
-                    crate::usage_resume::agent_limit_projection(&limits, agent, now),
+                    crate::usage_resume::agent_limit_projection_view(&limits, agent, now),
                 );
             }
         } else if value.projection.agents.remove(agent_id).is_none() {
@@ -424,9 +463,9 @@ pub(crate) fn publish_agent_change(
         if let studio_runtime_schema::usage_limits::AccountLimitsStatus::Checking { reset_at } =
             value.projection.status
         {
-            mark_checking(&mut value, reset_at);
+            mark_checking(value, reset_at);
         }
-        SyncDocumentsRepository::put_entity(tx, "rateLimit", &account, value, false)?;
+        SyncDocumentsRepository::put_entity(tx, "rateLimit", account, &*value, false)?;
     }
     Ok(())
 }

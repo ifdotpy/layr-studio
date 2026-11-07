@@ -807,13 +807,17 @@ pub mod publication_work {
     struct State {
         active: bool,
         calls: BTreeMap<String, Calls>,
+        full_decodes: usize,
     }
     thread_local! {
         static STATE: RefCell<State> = RefCell::new(State::default());
     }
     pub struct Scope;
     pub fn scope() -> Scope {
-        STATE.with_borrow_mut(|state| state.active = true);
+        STATE.with_borrow_mut(|state| {
+            state.active = true;
+            state.full_decodes = 0;
+        });
         Scope
     }
     impl Drop for Scope {
@@ -823,6 +827,16 @@ pub mod publication_work {
     }
     pub fn take() -> BTreeMap<String, Calls> {
         STATE.with_borrow_mut(|state| std::mem::take(&mut state.calls))
+    }
+    pub fn full_decode() {
+        STATE.with_borrow_mut(|state| {
+            if state.active {
+                state.full_decodes += 1;
+            }
+        });
+    }
+    pub fn take_full_decodes() -> usize {
+        STATE.with_borrow_mut(|state| std::mem::take(&mut state.full_decodes))
     }
     pub fn record(id: &str, operation: Operation) {
         STATE.with_borrow_mut(|state| {

@@ -3246,6 +3246,8 @@ pub fn decode_agent_record(
 
 pub(crate) fn parse_agent_record(row_id: &str, encoded: &str) -> StoreResult<AgentRecord> {
     #[cfg(any(test, feature = "test-support"))]
+    crate::agent_volatile::publication_work::full_decode();
+    #[cfg(any(test, feature = "test-support"))]
     crate::agent_volatile::publication_work::record(
         row_id,
         crate::agent_volatile::publication_work::Operation::Decode,
