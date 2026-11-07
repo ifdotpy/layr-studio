@@ -1,5 +1,6 @@
 //! Pure metadata and TypeScript generation for the observable sidebar pilot.
 mod emit;
+mod metadata;
 mod shape;
 
 use schemars::JsonSchema;
@@ -10,7 +11,7 @@ pub use emit::render;
 /// A model's Rust schema owner and field-level observation metadata.
 #[derive(Clone, Debug)]
 pub struct ObservableModel {
-    pub schema: String,
+    pub(crate) schema: String,
     pub identity: Option<String>,
     pub opaque: Vec<String>,
     pub ordered_by: Option<String>,
@@ -50,7 +51,7 @@ pub struct ObservableArg {
 pub struct ObservableResource {
     pub kind: String,
     pub facade: String,
-    pub data: String,
+    pub(crate) data: String,
     pub args: Vec<ObservableArg>,
 }
 impl ObservableResource {
@@ -108,6 +109,19 @@ fn identifier(value: &str, path: &str) -> Result<(), GenerationError> {
         || matches!(
             value,
             "constructor"
+                | "__proto__"
+                | "prototype"
+                | "interface"
+                | "type"
+                | "private"
+                | "public"
+                | "protected"
+                | "static"
+                | "yield"
+                | "await"
+                | "implements"
+                | "instanceof"
+                | "undefined"
                 | "apply"
                 | "default"
                 | "class"

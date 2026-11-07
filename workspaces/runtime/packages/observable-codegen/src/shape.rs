@@ -211,7 +211,7 @@ impl<'a> Parser<'a> {
                 for (field, value) in props {
                     let field_path = format!("{path}/properties/{field}");
                     identifier(field, &field_path)?;
-                    let ty = format!("({dto})[{}]", quote(field));
+                    let ty = format!("{name}Dto[{}]", quote(field));
                     let opaque = meta.is_some_and(|m| m.opaque.contains(field));
                     let shape = if opaque {
                         Shape::Leaf
@@ -236,29 +236,27 @@ impl<'a> Parser<'a> {
                     field.optional = !required
                         .is_some_and(|names| names.iter().any(|v| v.as_str() == Some(&field.name)));
                 }
-                if let Some(order) = meta.and_then(|m| m.ordered_by.as_ref()) {
-                    if props[order]["type"] != "string"
+                if let Some(order) = meta.and_then(|m| m.ordered_by.as_ref())
+                    && (props[order]["type"] != "string"
                         || !value["required"]
                             .as_array()
                             .is_some_and(|r| r.iter().any(|v| v.as_str() == Some(order)))
-                        || meta.and_then(|m| m.identity.as_ref()).is_none()
-                    {
-                        return Err(fail(
-                            &format!("{path}/properties/{order}"),
-                            UnsupportedShape::Identity,
-                        ));
-                    }
+                        || meta.and_then(|m| m.identity.as_ref()).is_none())
+                {
+                    return Err(fail(
+                        &format!("{path}/properties/{order}"),
+                        UnsupportedShape::Identity,
+                    ));
                 }
                 let identity = meta.and_then(|m| m.identity.clone());
-                if let Some(id) = &identity {
-                    if props[id]["type"] != "string"
-                        || fields.iter().any(|f| f.name == *id && f.optional)
-                    {
-                        return Err(fail(
-                            &format!("{path}/properties/{id}"),
-                            UnsupportedShape::Identity,
-                        ));
-                    }
+                if let Some(id) = &identity
+                    && (props[id]["type"] != "string"
+                        || fields.iter().any(|f| f.name == *id && f.optional))
+                {
+                    return Err(fail(
+                        &format!("{path}/properties/{id}"),
+                        UnsupportedShape::Identity,
+                    ));
                 }
                 self.visiting.remove(name);
                 self.models.insert(

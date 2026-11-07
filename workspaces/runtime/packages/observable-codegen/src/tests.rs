@@ -18,8 +18,8 @@ fn fixture() -> Value {
             "rows":{"type":"array","items":{"$ref":"#/components/schemas/Row"}},
             "plain":{"type":"array","items":{"type":"number"}}
         }},
-        "ResourceRef":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","agentId"],"properties":{"kind":{"type":"string","enum":["fixture"]},"agentId":{"type":"string"}}}]},
-        "SubscriptionDataMap":{"type":"object","properties":{"fixture":{"$ref":"#/components/schemas/List"}}}
+        "ResourceRef":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind","agentId","teamId"],"properties":{"kind":{"type":"string","enum":["fixture"]},"agentId":{"type":"string"},"teamId":{"type":"string"}}}]},
+        "SubscriptionDataMap":{"type":"object","required":["fixture"],"properties":{"fixture":{"$ref":"#/components/schemas/List"}}}
     }}})
 }
 fn models() -> Vec<ObservableModel> {
@@ -35,10 +35,16 @@ fn resources() -> Vec<ObservableResource> {
         kind: "fixture".into(),
         facade: "fixture".into(),
         data: "List".into(),
-        args: vec![ObservableArg {
-            name: "agentId".into(),
-            brand: "AgentId".into(),
-        }],
+        args: vec![
+            ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            },
+            ObservableArg {
+                name: "teamId".into(),
+                brand: "TeamId".into(),
+            },
+        ],
     }]
 }
 

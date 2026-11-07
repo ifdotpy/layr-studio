@@ -1,10 +1,17 @@
-//! Observable resource registration. Model and resource types live in the pure
-//! studio-observable-codegen library; this module binds them to domain owners.
+//! Binds the pure observable generator to the Rust sidebar contract owners.
 pub use studio_observable_codegen::{ObservableArg, ObservableModel, ObservableResource};
 
 pub fn models() -> Vec<ObservableModel> {
-    vec![]
+    vec![
+        ObservableModel::of::<crate::sidebar::SidebarChatRow>()
+            .identity("id")
+            .ordered_by("sortKey"),
+    ]
 }
 pub fn resources() -> Vec<ObservableResource> {
-    vec![]
+    vec![ObservableResource::of::<crate::sidebar::SidebarChatList>(
+        "sidebar",
+        "sidebar",
+        vec![],
+    )]
 }

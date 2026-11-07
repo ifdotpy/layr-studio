@@ -135,7 +135,10 @@ fn shared_values_ts() -> String {
                 (crate::shell_policy::PRESSURE_IDLE_MS / 60_000).to_string(),
             ),
             ("MAX_SAFE_INTEGER", values::MAX_SAFE_INTEGER.to_string()),
-            ("COMPACT_RECENT_WINDOW_SECONDS", values::COMPACT_RECENT_WINDOW_SECONDS.to_string()),
+            (
+                "COMPACT_RECENT_WINDOW_SECONDS",
+                values::COMPACT_RECENT_WINDOW_SECONDS.to_string(),
+            ),
             (
                 "MODEL_CHOICES_PREFERENCE_KEY",
                 json_string(values::MODEL_CHOICES_PREFERENCE_KEY),
