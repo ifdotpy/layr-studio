@@ -1,0 +1,15 @@
+[package]
+name = "studio-observable-codegen"
+version.workspace = true
+edition.workspace = true
+description = "Pure schema-driven observable resource TypeScript generator"
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+schemars.workspace = true
+studio-json = { path = "../json" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

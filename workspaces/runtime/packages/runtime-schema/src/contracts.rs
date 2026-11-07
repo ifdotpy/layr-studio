@@ -1967,6 +1967,21 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 json_string(crate::provider_diagnostics::REPLY_TIMING_DIAGNOSTIC_PREFIX),
             ),
         });
+        let observable = studio_observable_codegen::render(
+            &openapi,
+            &crate::observable_resources::models(),
+            &crate::observable_resources::resources(),
+        )
+        .map_err(|error| error.to_string())?;
+        rendered.push(Rendered {
+            path: web("observableResources.ts"),
+            text: run_node(
+                root,
+                "node_modules/oxfmt/bin/oxfmt",
+                "--stdin-filepath=observableResources.ts",
+                &observable,
+            )?,
+        });
         rendered.push(Rendered {
             path: web("api.ts"),
             text: api_types(root, &openapi, "-")? + &api_types_tail(),
