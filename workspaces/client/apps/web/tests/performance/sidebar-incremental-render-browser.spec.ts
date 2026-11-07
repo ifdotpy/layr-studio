@@ -61,6 +61,10 @@ test("Sidebar incremental rows and current callbacks @performance", async ({
               },
               async (args) => {
                 let source = await readFile(args.path, "utf8");
+                source = source.replace(
+                  'reportPromptComposerRender("sidebar-row", row.id);',
+                  'window.fixtureRows++; reportPromptComposerRender("sidebar-row", row.id);',
+                );
                 // Both implementations use the same probe. The old Sidebar
                 // builds every row; the memoized view builds changed rows only.
                 source = source.replace(
@@ -249,7 +253,7 @@ test("Sidebar incremental rows and current callbacks @performance", async ({
       const value = {
         ...window.fixtureAgent,
         name: "Current chat",
-        status: "failed",
+        status: "running",
       };
       await window.write("agent", value.id, value, 200);
     });
@@ -259,8 +263,8 @@ test("Sidebar incremental rows and current callbacks @performance", async ({
       .waitFor();
     assert.equal(
       await page.evaluate(() => window.fixtureRows),
-      rowsBeforeAgent + 1,
-      "the changed agent immediately replaces exactly its row view",
+      rowsBeforeAgent,
+      "title/status leaves update without rendering the row view",
     );
     await page.evaluate(() => window.write("agent", "agent-19", {}, 201, true));
     await page.locator('[data-chat="agent-19"]').waitFor({ state: "detached" });

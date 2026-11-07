@@ -7,7 +7,8 @@ import Sidebar from "../../src/components/Sidebar.tsx";
 import SidebarRow from "../../src/components/SidebarRow.tsx";
 import { useSnapshot } from "../../src/hooks.ts";
 import { syncDatabase, persistProjection } from "../../src/sync/client.ts";
-import { chatIndicators } from "../../src/components/chat-status/chatStatusModel.ts";
+import { createSidebarMirror } from "../../src/generated/observableResources.ts";
+import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
 const noop = () => {};
 window.fixtureRows = 0;
 window.fixtureJsonReads = 0;
@@ -83,18 +84,28 @@ window.readyAgain = () =>
     seq: 2,
     payload: "ready",
   });
-// This one-off row fixture omits serverAlias and showServer, as on the base.
-const partialSidebarRowProps = {} as Pick<
-  React.ComponentProps<typeof SidebarRow>,
-  "serverAlias" | "showServer"
->;
+const mirror = createSidebarMirror();
+const keyRow = sidebarRowFixture(agents[0]!.id);
 function Harness() {
   const { data } = useSnapshot();
   window.fixtureRenders++;
-  const indicators = useMemo(
-    () => (data ? chatIndicators(data) : new Map()),
-    [data],
-  );
+  const rows = useMemo(() => {
+    // Explicit read-model fixtures; production status policy stays on the server.
+    mirror.apply({
+      rows: (data?.threads || []).map((agent) =>
+        sidebarRowFixture(agent.id, {
+          name: agent.name || "",
+          projectPath: agent.cwd || "/fixture",
+          groupKey: JSON.stringify(["items", agent.cwd || "/fixture", null]),
+          indicator:
+            agent.status === "running"
+              ? { kind: "working", label: "Working" }
+              : { kind: "none", label: "Read" },
+        }),
+      ),
+    });
+    return mirror.rows;
+  }, [data]);
   window.fixtureData = data;
   const checks =
     (
@@ -123,13 +134,14 @@ function Harness() {
         mobile={false}
         onSearch={noop}
         close={noop}
-        indicators={indicators}
-        markUnread={(a) => window.fixtureActions.push(["unread", a.id, checks])}
+        rows={rows}
+        markUnread={(id) => window.fixtureActions.push(["unread", id, checks])}
         markingRead={new Set()}
       />
       <SidebarRow
-        row={agents[0]!}
-        {...partialSidebarRowProps}
+        row={keyRow}
+        serverAlias="Fixture"
+        showServer={false}
         selected={false}
         renaming={false}
         name=""
