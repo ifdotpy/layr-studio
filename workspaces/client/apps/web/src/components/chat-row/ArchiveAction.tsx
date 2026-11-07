@@ -13,16 +13,19 @@ export const ArchiveAction = observer(function ArchiveAction({
   disabled: boolean;
   actions: ChatRowActions;
 }) {
-  const a = row.agent;
   return (
     <Menu.Item
       leftSection={
-        a.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />
+        row.agent.archived ? (
+          <ArchiveRestore size={14} />
+        ) : (
+          <Archive size={14} />
+        )
       }
       disabled={disabled || !row.canArchive}
       onClick={() => actions.archive()}
     >
-      {a.archived ? "Restore chat" : "Archive"}
+      {row.agent.archived ? "Restore chat" : "Archive"}
     </Menu.Item>
   );
 });

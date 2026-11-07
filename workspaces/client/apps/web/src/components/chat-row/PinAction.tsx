@@ -17,16 +17,15 @@ export const PinAction = observer(function PinAction({
   organizing: boolean;
   actions: ChatRowActions;
 }) {
-  const a = row.agent;
   return (
     <Menu.Item
       disabled={disabled || organizing}
       leftSection={
-        (pinned ?? a.pinned) ? <PinOff size={14} /> : <Pin size={14} />
+        (pinned ?? row.agent.pinned) ? <PinOff size={14} /> : <Pin size={14} />
       }
       onClick={() => actions.pin()}
     >
-      {(pinned ?? a.pinned) ? "Unpin" : "Pin"}
+      {(pinned ?? row.agent.pinned) ? "Unpin" : "Pin"}
     </Menu.Item>
   );
 });

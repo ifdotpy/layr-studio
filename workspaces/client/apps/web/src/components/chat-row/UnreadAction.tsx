@@ -16,7 +16,6 @@ export const UnreadAction = observer(function UnreadAction({
   markingRead: boolean;
   actions: ChatRowActions;
 }) {
-  const a = row.agent;
   const unreadHelp = markingRead
     ? "The read status is changing."
     : markUnreadHelp(row.agent.markUnread);
@@ -26,7 +25,7 @@ export const UnreadAction = observer(function UnreadAction({
       aria-label="Mark unread"
       disabled={
         disabled ||
-        a.markUnread !== MarkUnreadEligibility.allowed ||
+        row.agent.markUnread !== MarkUnreadEligibility.allowed ||
         markingRead
       }
       onClick={() => actions.unread()}
