@@ -3787,6 +3787,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn summary_publication_preserves_pending_bounded_task_retirement() {
+        let (_old_dir, old) = task_window_store().await;
+        let (_new_dir, new) = task_window_store().await;
+        for store in [&old, &new] {
+            store.transaction(|tx| {
+                for (prefix, agent, status, count, offset) in [
+                    ("00-running", "a", "running", 101, 300),
+                    ("10-finished", "a", "completed", 100, 200),
+                    ("20-older", "b", "completed", 100, 0),
+                ] {
+                    for index in 0..count {
+                        let id = format!("{prefix}-{index:03}");
+                        let task = json!({"id":id,"agent":agent,"status":status,"created":offset+index,
+                            "itemId":id,"turnId":"turn","type":"commandExecution","kind":"command","name":"commandExecution"});
+                        tx.execute("INSERT INTO runtime_tasks(id,record) VALUES(?1,?2)",
+                            rusqlite::params![id, task.to_string()])?;
+                    }
+                }
+                maintain_task_window(tx, &|_, _, _, _| true)?;
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='a'", [])?;
+                maintain_task_window(tx, &|_, _, _, _| true)?;
+                let finished: i64 = tx.query_row(
+                    "SELECT count(*) FROM task_window_state s JOIN durable_rows w ON w.tbl='task_window' AND w.id=s.id AND w.deleted=0 WHERE NOT s.running",
+                    [], |row| row.get(0))?;
+                assert_eq!(finished, 200, "bounded retirement leaves finished members behind");
+                Ok(())
+            }).await.expect("retirement boundary fixture");
+        }
+        for (store, always_maintain) in [(&old, true), (&new, false)] {
+            store.transaction(move |tx| {
+                let id = "20-older-000";
+                tx.execute("UPDATE runtime_tasks SET record=json_set(record,'$.tail','new output') WHERE id=?1", [id])?;
+                if always_maintain {
+                    let raw: String = tx.query_row("SELECT record FROM runtime_tasks WHERE id=?1", [id], |row| row.get(0))?;
+                    let task = studio_json::from_str(&raw)?;
+                    let prior = task_window_prior(tx, id)?;
+                    maintain_task_window_after_write(tx, prior.as_ref(), &task, &|_, _, _, _| true)?;
+                } else {
+                    publish_summary_changes(tx, &studio_runtime_store::PendingEntities {
+                        tasks: BTreeSet::from([id.to_owned()]), ..Default::default()
+                    })?;
+                }
+                Ok(())
+            }).await.expect("stable member output write");
+        }
+        let snapshot = |store: &RuntimeStore| {
+            store
+                .test_read_transaction(|tx| {
+                    Ok((
+                        window_rows(tx, "task"),
+                        studio_runtime_store::durable_seq::high_and_floor(tx)?,
+                    ))
+                })
+                .expect("window snapshot")
+        };
+        assert_eq!(
+            snapshot(&new),
+            snapshot(&old),
+            "pending retirement must keep eviction and its sequence"
+        );
+    }
+
+    #[tokio::test]
     async fn incremental_task_window_equals_full_rebuild_over_random_writes() {
         let (_root, store) = task_window_store().await;
         store

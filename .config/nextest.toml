@@ -83,6 +83,7 @@ default-filter = '''
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/^perf_reporting::tests::sql_(normalizes_once_across_profile_rows_and_sweeps|normalization_memo_full_preserves_reports|normalization_memo_skips_long_text)$/)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::summary_publication_preserves_pending_bounded_task_retirement)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
@@ -543,6 +544,7 @@ default-filter = '''
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/^perf_reporting::tests::sql_(normalizes_once_across_profile_rows_and_sweeps|normalization_memo_full_preserves_reports|normalization_memo_skips_long_text)$/)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::summary_publication_preserves_pending_bounded_task_retirement)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::startup_recovery::tests::deleted_agent_selection_seeks_liveness_sets_instead_of_history)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::scheduler::policy_tests::task_cancellation_without_result_id_keeps_followup_review_and_user_input_claimable)) |
     package(=studio-observable-codegen) |
