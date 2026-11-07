@@ -11,6 +11,153 @@ use studio_runtime_store::{AgentRecord, AgentRepository, StoreError};
 const CHAT: &str = "published-chat";
 
 #[tokio::test]
+#[ignore = "manual fixture timing"]
+async fn agent_read_fixture_timing() {
+    let (_dir, store) = store().await;
+    let record = chat(json!({}));
+    store
+        .transaction(move |tx| {
+            for n in 0..100 {
+                let id = format!("fixture-{n}");
+                let mut record = record.clone();
+                record["id"] = json!(id);
+                record["rootId"] = json!(id);
+                tx.execute(
+                    "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
+                    [&id, &record.to_string()],
+                )?;
+            }
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let path = std::env::var("STUDIO_BENCH_PATH").unwrap();
+    store
+        .test_read_transaction(|tx| {
+            if path == "setup" {
+                return Ok(());
+            }
+            for _ in 0..100 {
+                if path == "transcript" {
+                    crate::transcript_runtime::page_in_transaction(
+                        &store,
+                        tx,
+                        "fixture-0",
+                        &Default::default(),
+                        1.0,
+                    )
+                    .unwrap();
+                } else {
+                    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+                        r#"{"accountKey":"default","at":1}"#,
+                        "default",
+                        1.0,
+                    )
+                    .unwrap();
+                    crate::account_session_runtime::limits::populate_agents(tx, &mut view, 1.0)?;
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn transcript_page_does_not_decode_agent_record() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store
+        .test_read_transaction(|tx| {
+            let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+            crate::transcript_runtime::page_in_transaction(
+                &store,
+                tx,
+                CHAT,
+                &Default::default(),
+                1.0,
+            )
+            .unwrap();
+            let calls = studio_runtime_store::agent_volatile::publication_work::take();
+            assert_eq!(calls.values().map(|c| c.decodes).sum::<usize>(), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn account_limits_do_not_decode_agent_records() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    store
+        .test_read_transaction(|tx| {
+            let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+                r#"{"accountKey":"default","at":1}"#,
+                "default",
+                1.0,
+            )
+            .unwrap();
+            let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+            crate::account_session_runtime::limits::populate_agents(tx, &mut view, 1.0)?;
+            let calls = studio_runtime_store::agent_volatile::publication_work::take();
+            assert_eq!(calls.values().map(|c| c.decodes).sum::<usize>(), 0);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[tokio::test]
+async fn narrow_agent_reads_validate_consumed_fields() {
+    let (_dir, store) = store().await;
+    seed_chat(&store, chat(json!({}))).await;
+    let mut db = rusqlite::Connection::open(store.root().join("canvas.sqlite3")).unwrap();
+    let tx = db.transaction().unwrap();
+    let page = || {
+        crate::transcript_runtime::page_in_transaction(&store, &tx, CHAT, &Default::default(), 1.0)
+    };
+    let limits = || {
+        let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+            r#"{"accountKey":"default","at":1}"#,
+            "default",
+            1.0,
+        )
+        .unwrap();
+        crate::account_session_runtime::limits::populate_agents(&tx, &mut view, 1.0)
+    };
+    tx.execute(
+        "UPDATE runtime_agents SET record=json_set(record,'$.workspaceMode',42) WHERE id=?1",
+        [CHAT],
+    )
+    .unwrap();
+    assert!(page().is_ok());
+    assert!(limits().is_ok());
+    tx.execute(
+        "UPDATE runtime_agents SET record=json_set(record,'$.id','wrong') WHERE id=?1",
+        [CHAT],
+    )
+    .unwrap();
+    assert!(page().is_err());
+    assert!(limits().is_err());
+    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.id',?1,'$.status',42,'$.model',42) WHERE id=?1", [CHAT]).unwrap();
+    assert!(page().is_err());
+    assert!(limits().is_err());
+    tx.rollback().unwrap();
+}
+
+#[test]
+fn account_limit_projection_rejects_malformed_json() {
+    let mut db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE runtime_agents(id TEXT,record TEXT); INSERT INTO runtime_agents VALUES('a','{');").unwrap();
+    let tx = db.transaction().unwrap();
+    let mut view = studio_runtime_schema::usage_limits::RateLimitView::read(
+        r#"{"accountKey":"default","at":1}"#,
+        "default",
+        1.0,
+    )
+    .unwrap();
+    assert!(crate::account_session_runtime::limits::populate_agents(&tx, &mut view, 1.0).is_err());
+}
+
+#[tokio::test]
 async fn summary_marks_legacy_vm_records() {
     for extra in [
         json!({"workspaceMode":"layr"}),

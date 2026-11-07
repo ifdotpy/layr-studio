@@ -279,16 +279,31 @@ pub(crate) fn populate_agents(
 ) -> Result<(), StoreError> {
     let limits = crate::usage_resume::LimitsObservation::from_response(view.observation.clone());
     view.projection.agents.clear();
-    for agent in studio_runtime_store::WorkspaceViewsRepository::agents(tx)? {
+    let mut statement = tx.prepare_cached("SELECT id,record FROM runtime_agents ORDER BY rowid")?;
+    let mut rows = statement.query([])?;
+    while let Some(row) = rows.next()? {
+        let id: String = row.get(0)?;
+        let raw: String = row.get(1)?;
+        let invalid = || StoreError::InvalidSyncObject {
+            scope: "runtime_agents".into(),
+            id: id.clone(),
+        };
+        let agent: crate::usage_resume::LimitAgent =
+            studio_json::from_str(&raw).map_err(|_| invalid())?;
+        if agent.id != id
+            || !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&agent.epoch)
+        {
+            return Err(invalid());
+        }
         let account = if agent.account_key.is_empty() {
             "default"
         } else {
             &agent.account_key
         };
-        if account == limits.account_key() && !agent.is_deleted() {
+        if account == limits.account_key() && !agent.deleted_at.is_some_and(|at| at != 0.0) {
             view.projection.agents.insert(
-                agent.id.0.clone(),
-                crate::usage_resume::agent_limit_projection(&limits, &agent, now),
+                agent.id.to_string(),
+                crate::usage_resume::agent_limit_projection_view(&limits, &agent, now),
             );
         }
     }
