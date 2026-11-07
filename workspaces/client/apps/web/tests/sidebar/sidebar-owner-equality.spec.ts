@@ -1,4 +1,4 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import assert from "node:assert/strict";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
 import type { TestRuntimeView } from "../playwright.ts";
@@ -134,33 +134,24 @@ function seedFixture(local: ServerFixture) {
     chat("archived-chat", "Archived chat", { archived: true }),
   ]);
 
-  local.snapshot.runtime.sidebarRows = [
-    sidebarRowFixture("overlap", {
+  local.snapshot.runtime.agentSummaries = [
+    agentSummaryFixture("overlap", {
       name: "Saved pin",
       pinned: true,
-      compactPinned: true,
-      sortKey: "0",
     }),
-    sidebarRowFixture("nested-chat", {
+    agentSummaryFixture("nested-chat", {
       name: "Nested chat",
       projectFolder: "nested",
-      groupKey: JSON.stringify(["items", path, "nested"]),
-      sortKey: "1",
     }),
-    sidebarRowFixture("member-a", {
+    agentSummaryFixture("member-a", {
       name: "Team member A",
-      teamId: "team",
-      sortKey: "2",
     }),
-    sidebarRowFixture("member-b", {
+    agentSummaryFixture("member-b", {
       name: "Team member B",
-      teamId: "team",
-      sortKey: "3",
     }),
-    sidebarRowFixture("archived-chat", {
+    agentSummaryFixture("archived-chat", {
       name: "Archived chat",
       archived: true,
-      sortKey: "4",
     }),
   ];
   const initialProject = local.snapshot.runtime.projects[0];

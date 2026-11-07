@@ -1221,7 +1221,8 @@ export type TestRuntimeView = {
   requests: TestApproval[];
   rules: RuleEntityDto[];
   work: WorkEntityDto[];
-  sidebarRows?: import("../src/generated/api.ts").components["schemas"]["SidebarChatRow"][];
+  agentSummaries?: AgentSummaryEntityDto[];
+  agentTail?: import("../src/generated/api.ts").components["schemas"]["AgentTail"][];
   viewScopedAgents?: boolean;
   workDetails?: import("../src/generated/api.ts").components["schemas"]["WorkItem"][];
   agentDetails?: import("../src/generated/api.ts").components["schemas"]["AgentDetailEntityDto"][];
@@ -1647,8 +1648,13 @@ function entityValuesFromSnapshot(
     for (const row of rows ?? [])
       if (typeof row.id === "string") values.push(project(row));
   };
-  append(runtime.sidebarRows, (row) => ({
-    collection: "sidebarChatRow",
+  append(runtime.agentSummaries, (row) => ({
+    collection: "agentSummary",
+    id: row.id,
+    value: row,
+  }));
+  append(runtime.agentTail, (row) => ({
+    collection: "agentTail",
     id: row.id,
     value: row,
   }));
@@ -1716,18 +1722,6 @@ function entityValuesFromSnapshot(
     ]),
   }));
   append(runtime.agents, (row) => {
-    if (runtime.viewScopedAgents) {
-      return {
-        collection: "agentSummary",
-        id: row.id,
-        value: pickJsonKeys<AgentSummaryEntityDto, keyof AgentSummaryEntityDto>(
-          row,
-          fixtureEntityPropertyNames(
-            "AgentSummaryEntityDto",
-          ) as (keyof AgentSummaryEntityDto)[],
-        ),
-      };
-    }
     const entity: JsonInputOf<AgentEntityDto> & JsonObject = { ...row };
     for (const key of snapshotOnlyAgentKeys) delete entity[key];
     const agentNestedAllowLists = {

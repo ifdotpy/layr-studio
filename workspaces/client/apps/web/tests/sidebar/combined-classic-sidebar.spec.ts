@@ -1,4 +1,4 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { required } from "../teams/helpers.ts";
 import assert from "node:assert/strict";
 import type { TestRuntimeView } from "../playwright.ts";
@@ -429,16 +429,14 @@ for (const [theme, viewport] of [
         projectFolderRevision: 2,
         updated: Date.now() / 1000,
       } satisfies Partial<TestAgent>);
-      server.snapshot.runtime.sidebarRows = [
-        sidebarRowFixture("overlap", {
+      server.snapshot.runtime.agentSummaries = [
+        agentSummaryFixture("overlap", {
           name: `${server === local ? "Local" : "Remote"} chat`,
           projectPath: project.path!,
           projectId: project.id!,
           pinned: true,
-          compactPinned: true,
           projectFolderRevision: 2,
-          activityAt: Date.now() / 1000,
-          groupKey: JSON.stringify(["items", project.path, null]),
+          updated: Date.now() / 1000,
         }),
       ];
       Object.assign(server.snapshot.runtime, {
@@ -691,13 +689,12 @@ test("offline folder expansion preserves the saved source state after reconnect"
     projectFolder: "folder",
     updated: Date.now() / 1000,
   } satisfies Partial<TestAgent>);
-  remote.snapshot.runtime.sidebarRows = [
-    sidebarRowFixture("overlap", {
+  remote.snapshot.runtime.agentSummaries = [
+    agentSummaryFixture("overlap", {
       name: "Remote chat",
       projectPath: path,
       projectFolder: "folder",
-      activityAt: Date.now() / 1000,
-      groupKey: JSON.stringify(["items", path, "folder"]),
+      updated: Date.now() / 1000,
     }),
   ];
   Object.assign(remote.snapshot.runtime, {

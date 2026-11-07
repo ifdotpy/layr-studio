@@ -1,4 +1,4 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { components, AgentEntityDto } from "../../src/generated/api.ts";
 import type { PostBody, ApiPostPath } from "../../src/apiTypes.ts";
@@ -170,6 +170,14 @@ export async function fixture(
     archived: false,
     deletedAt: null,
   };
+  const summary = agentSummaryFixture("overlap", {
+    name: `${label} chat`,
+    model: "fixture-model",
+  });
+  const agentTail = {
+    id: "overlap",
+    tail: "",
+  } satisfies components["schemas"]["AgentTail"];
   const snapshot: TestStateView = {
     token: "local-only",
     stateDir: "/same/state",
@@ -178,12 +186,8 @@ export async function fixture(
     threads: [agent],
     runtime: {
       agents: [agent],
-      sidebarRows: [
-        sidebarRowFixture("overlap", {
-          name: `${label} chat`,
-          model: "fixture-model",
-        }),
-      ],
+      agentSummaries: [summary],
+      agentTail: [agentTail],
       projects: [
         {
           path: "/same/project",
@@ -813,7 +817,22 @@ export async function fixture(
         lastCompletedTurnStatus: "completed",
         tail: `${label} reply`,
       });
-      notify.forEach((send) => send([{ kind: "state" }, { kind: "sidebar" }]));
+      Object.assign(summary, {
+        threadId: "thread-overlap",
+        status: "completed",
+        lastCompletedTurn: turnId,
+        lastCompletedTurnStatus: "completed",
+        operationalStatus: { reason: "unread_result" },
+        markRead: {
+          threadId: "thread-overlap",
+          turnId,
+          read: false,
+          revision: 1,
+        },
+        markUnread: "already_unread",
+      } satisfies Partial<components["schemas"]["AgentSummaryEntityDto"]>);
+      agentTail.tail = `${label} reply`;
+      notify.forEach((send) => send([{ kind: "state" }]));
     },
     publishState(resources: ResourceRef[] = [{ kind: "state" }]) {
       notify.forEach((send) => send(resources));

@@ -1,4 +1,4 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { TestAgent } from "../playwright.ts";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
@@ -33,24 +33,21 @@ test("paired sidebar shows the chat provider and server alias", async ({
     row("old", "Old remote chat", 1),
     row("old-two", "Second old remote chat", 1),
   ]);
-  remote.snapshot.runtime.sidebarRows = [
-    sidebarRowFixture("recent", {
+  remote.snapshot.runtime.agentSummaries = [
+    agentSummaryFixture("recent", {
       name: "Claude on remote",
       provider: "claude",
-      activityAt: Date.now() / 1000,
-      sortKey: "0",
+      updated: Date.now() / 1000,
     }),
-    sidebarRowFixture("old", {
+    agentSummaryFixture("old", {
       name: "Old remote chat",
       provider: "claude",
-      activityAt: 1,
-      sortKey: "1",
+      updated: 1,
     }),
-    sidebarRowFixture("old-two", {
+    agentSummaryFixture("old-two", {
       name: "Second old remote chat",
       provider: "claude",
-      activityAt: 1,
-      sortKey: "2",
+      updated: 1,
     }),
   ];
   try {
