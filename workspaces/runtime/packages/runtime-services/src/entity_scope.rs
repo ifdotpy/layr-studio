@@ -23,7 +23,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use rusqlite::{Connection, OptionalExtension, params};
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
-use studio_runtime_schema::sidebar::COLLECTION as SIDEBAR_COLLECTION;
 use studio_runtime_store::entity_publication::WorkHistoryKind;
 use studio_runtime_store::{
     AGENT_VIEW_COLLECTIONS, DIRECT_COLLECTIONS, EntityPage, EntityRow, StoreError, StoreResult,
@@ -607,7 +606,14 @@ fn agent_units(
     agent: Option<&str>,
     fetch: i64,
 ) -> StoreResult<Vec<Unit>> {
-    let mut units = Vec::new();
+    let mut units = if agent.is_none() && wanted.contains("agentTail") {
+        tail_units(connection, after, through, deletes_after, id, fetch)?
+    } else {
+        Vec::new()
+    };
+    if wanted.iter().all(|kind| *kind == "agentTail") {
+        return Ok(units);
+    }
     if agent.is_some() || !AGENT_VIEW_COLLECTIONS.iter().any(|c| wanted.contains(c)) {
         return Ok(units);
     }
@@ -615,7 +621,7 @@ fn agent_units(
     let changed: Vec<(String, i64)> = connection
         .prepare_cached(
             "SELECT id,MAX(seq) AS last FROM durable_rows
-             WHERE tbl IN ('runtime_agents',?1,?7) AND seq>?2 AND seq<=?3
+             WHERE tbl IN ('runtime_agents',?1) AND seq>?2 AND seq<=?3
                AND (deleted=0 OR seq>?4) AND (?5 IS NULL OR id=?5)
              GROUP BY id ORDER BY last LIMIT ?6",
         )?
@@ -626,25 +632,79 @@ fn agent_units(
                 through,
                 deletes_after,
                 id,
-                fetch,
-                if wanted.contains(SIDEBAR_COLLECTION) {
-                    durable_seq::SIDEBAR_VIEW_MARK
-                } else {
-                    durable_seq::AGENT_VIEW_MARK
-                }
+                fetch
             ],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?
         .collect::<Result<_, _>>()?;
+    let contexts = if wanted.contains("agentSummary") {
+        crate::agent_operational::load(
+            connection,
+            &changed.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+        )?
+    } else {
+        BTreeMap::new()
+    };
     let snapshot = deletes_after == i64::MAX;
     for (agent_id, seq) in changed {
         // A gone agent reads as no views: deletes in a delta, nothing in a snapshot.
-        let rows =
-            agent_docs(connection, &agent_id, Some(seq), wanted, snapshot).or_else(|error| {
-                // One agent whose view cannot be built must not stop the stream.
-                eprintln!("agent {agent_id} views are not streamed: {error}");
-                Ok::<_, StoreError>(Vec::new())
-            })?;
+        let rows = agent_docs_with_context(
+            connection,
+            &agent_id,
+            Some(seq),
+            wanted,
+            snapshot,
+            contexts.get(&agent_id),
+        )
+        .or_else(|error| {
+            // One agent whose view cannot be built must not stop the stream.
+            eprintln!("agent {agent_id} views are not streamed: {error}");
+            Ok::<_, StoreError>(Vec::new())
+        })?;
+        if !rows.is_empty() {
+            units.push(Unit { seq, rows });
+        }
+    }
+    Ok(units)
+}
+
+/// Only lead tails. Four scalar columns from owner tables; no summary/domain aggregation.
+fn tail_units(
+    connection: &Connection,
+    after: i64,
+    through: i64,
+    deletes_after: i64,
+    id: Option<&str>,
+    fetch: i64,
+) -> StoreResult<Vec<Unit>> {
+    let changed=connection.prepare_cached("SELECT id,MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents','runtime_agent_volatile') AND seq>?1 AND seq<=?2 AND (deleted=0 OR seq>?3) AND (?4 IS NULL OR id=?4) GROUP BY id ORDER BY MAX(seq) LIMIT ?5")?.query_map(params![after,through,deletes_after,id,fetch],|r|Ok((r.get::<_,String>(0)?,r.get::<_,i64>(1)?)))?.collect::<Result<Vec<_>,_>>()?;
+    let snapshot = deletes_after == i64::MAX;
+    let mut units = Vec::new();
+    for (id, seq) in changed {
+        let source:Option<(bool,bool,Option<String>)>=connection.query_row("SELECT COALESCE(json_extract(a.record,'$.isLead'),0),a.deleted_at IS NOT NULL,json_extract(v.tail,'$') FROM runtime_agents a LEFT JOIN runtime_agent_volatile v ON v.id=a.id WHERE a.id=?1",[&id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+        let rows = match source {
+            Some((true, false, tail)) => {
+                let tail = tail
+                    .unwrap_or_default()
+                    .chars()
+                    .take(studio_runtime_schema::shared_values::AGENT_TAIL_MAX_CHARS)
+                    .collect::<String>();
+                vec![upsert(
+                    "agentTail",
+                    &id,
+                    seq,
+                    studio_runtime_schema::agent_tail::AgentTail {
+                        id: id.clone(),
+                        tail: tail
+                            .try_into()
+                            .map_err(|_| StoreError::RecordContract("bounded tail"))?,
+                    },
+                )?]
+            }
+            Some((false, _, _)) => Vec::new(),
+            _ if !snapshot => tombstones(&["agentTail"], &BTreeSet::from(["agentTail"]), &id, seq),
+            _ => Vec::new(),
+        };
         if !rows.is_empty() {
             units.push(Unit { seq, rows });
         }
@@ -661,14 +721,36 @@ fn agent_docs(
     wanted: &BTreeSet<&'static str>,
     snapshot: bool,
 ) -> StoreResult<Vec<EntityRow>> {
+    if wanted.iter().all(|kind| *kind == "agentTail") {
+        let high = durable_seq::high(connection)?;
+        return Ok(tail_units(connection, 0, high, i64::MAX, Some(id), 1)?
+            .into_iter()
+            .flat_map(|unit| unit.rows)
+            .collect());
+    }
+    let contexts = if wanted.contains("agentSummary") {
+        crate::agent_operational::load(connection, &[id.to_owned()])?
+    } else {
+        BTreeMap::new()
+    };
+    agent_docs_with_context(connection, id, seq, wanted, snapshot, contexts.get(id))
+}
+fn agent_docs_with_context(
+    connection: &Connection,
+    id: &str,
+    seq: Option<i64>,
+    wanted: &BTreeSet<&'static str>,
+    snapshot: bool,
+    context: Option<&crate::agent_operational::Context>,
+) -> StoreResult<Vec<EntityRow>> {
     let seq = match seq {
         Some(seq) => seq,
         None => {
             let current: Option<i64> = connection
                 .prepare_cached(
-                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1,?3) AND id=?2",
+                    "SELECT MAX(seq) FROM durable_rows WHERE tbl IN ('runtime_agents',?1) AND id=?2",
                 )?
-                .query_row(params![durable_seq::AGENT_VIEW_MARK, id, if wanted.contains(SIDEBAR_COLLECTION) { durable_seq::SIDEBAR_VIEW_MARK } else { durable_seq::AGENT_VIEW_MARK }], |row| row.get(0))?;
+                .query_row(params![durable_seq::AGENT_VIEW_MARK, id], |row| row.get(0))?;
             let Some(current) = current else {
                 return Ok(Vec::new());
             };
@@ -676,17 +758,6 @@ fn agent_docs(
         }
     };
     let server = server_id(connection)?;
-    let mut sidebar = Vec::new();
-    if wanted.contains(SIDEBAR_COLLECTION) {
-        match crate::sidebar::row(connection, id, server.as_deref())? {
-            Some(value) => sidebar.push(upsert(SIDEBAR_COLLECTION, id, seq, value)?),
-            None if !snapshot => sidebar.extend(tombstones(&[SIDEBAR_COLLECTION], wanted, id, seq)),
-            None => {}
-        }
-        if wanted.len() == 1 {
-            return Ok(sidebar);
-        }
-    }
     let Some(documents) =
         crate::sync_policy::agent_view_documents(connection, id, server.as_deref())?
     else {
@@ -696,9 +767,16 @@ fn agent_docs(
             tombstones(AGENT_VIEW_COLLECTIONS, wanted, id, seq)
         });
     };
-    let mut rows = sidebar;
+    let mut rows = Vec::new();
+    let mut summary = documents.summary;
+    if wanted.contains("agentSummary")
+        && let Some(summary) = summary.as_mut()
+    {
+        summary["projectServerId"] = studio_json::to_value(&server)?;
+        crate::agent_operational::decorate(summary, context)?;
+    }
     for (collection, value) in [
-        ("agentSummary", documents.summary),
+        ("agentSummary", summary),
         ("agentDetail", documents.detail),
         ("agent", documents.agent),
         ("retainedWorktree", documents.retained_worktree),
@@ -717,11 +795,7 @@ fn agent_docs(
 
 /// The view documents of every live agent, as a fresh pull sends them.
 pub fn agent_snapshot(connection: &Connection) -> StoreResult<Vec<EntityRow>> {
-    let wanted = AGENT_VIEW_COLLECTIONS
-        .iter()
-        .copied()
-        .filter(|name| *name != SIDEBAR_COLLECTION)
-        .collect();
+    let wanted = AGENT_VIEW_COLLECTIONS.iter().copied().collect();
     let high = durable_seq::high(connection)?;
     Ok(
         agent_units(connection, 0, high, i64::MAX, &wanted, None, None, i64::MAX)?

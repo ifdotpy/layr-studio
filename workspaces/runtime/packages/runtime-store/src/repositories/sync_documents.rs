@@ -131,7 +131,7 @@ pub const AGENT_VIEW_COLLECTIONS: &[&str] = &[
     "agentSummary",
     "agentDetail",
     "retainedWorktree",
-    studio_runtime_schema::sidebar::COLLECTION,
+    "agentTail",
 ];
 
 /// Window collections: a document per member of a window in `durable_rows`

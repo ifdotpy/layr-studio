@@ -42,10 +42,6 @@ pub struct PendingEntities {
     pub studio_errors: StudioErrorSources,
     pub queues: BTreeSet<String>,
     pub terminals: BTreeSet<String>,
-    /// Project/team/folder or saved sidebar order changed, or an attention source was deleted.
-    pub sidebar_structure_changed: bool,
-    /// Lead search tails changed in the existing flush/completion transaction.
-    pub sidebar_rows: BTreeSet<String>,
 }
 
 impl PendingEntities {
@@ -59,8 +55,6 @@ impl PendingEntities {
             && self.studio_errors.is_empty()
             && self.queues.is_empty()
             && self.terminals.is_empty()
-            && !self.sidebar_structure_changed
-            && self.sidebar_rows.is_empty()
     }
 }
 
@@ -130,8 +124,6 @@ enum Source {
     Monitor,
     /// Read only by the Studio error list (dismissals).
     Incident,
-    Project,
-    SidebarOrder,
 }
 
 impl Source {
@@ -148,8 +140,6 @@ impl Source {
             "user_terminals" => Some(Self::Terminal),
             "runtime_monitors" => Some(Self::Monitor),
             "runtime_error_incidents" => Some(Self::Incident),
-            "runtime_projects" => Some(Self::Project),
-            "runtime_sidebar_order" => Some(Self::SidebarOrder),
             _ => None,
         }
     }
@@ -176,8 +166,6 @@ impl Source {
             Self::Terminal => "user_terminals",
             Self::Monitor => "runtime_monitors",
             Self::Incident => "runtime_error_incidents",
-            Self::Project => "runtime_projects",
-            Self::SidebarOrder => "runtime_sidebar_order",
         }
     }
 }
@@ -191,90 +179,17 @@ enum Event {
     /// A partial projection write needs a full publication.
     Stale(Source, String),
     TeamRoot(String),
-    SidebarRow(String),
-}
-
-/// Mark proofs survive source-event capture until publication finishes. Their
-/// durable sequence is checked before use because savepoints can roll marks back.
-#[derive(Default)]
-struct TransactionJournal {
-    events: Option<Vec<Event>>,
-    agent_view_marks: BTreeMap<String, i64>,
-    sidebar_marks: BTreeSet<String>,
-}
-
-fn mark_survives(connection: &Connection, id: &str, seq: i64) -> StoreResult<bool> {
-    Ok(connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl=?1 AND id=?2 AND seq=?3 AND deleted=0)",
-        rusqlite::params![crate::durable_seq::AGENT_VIEW_MARK, id, seq],
-        |row| row.get(0),
-    )?)
-}
-
-pub(crate) fn agent_view_marked(connection: &Connection, id: &str) -> StoreResult<bool> {
-    let seq = JOURNAL.with(|j| {
-        j.borrow()
-            .as_ref()
-            .and_then(|j| j.agent_view_marks.get(id).copied())
-    });
-    match seq {
-        Some(seq) => mark_survives(connection, id, seq),
-        None => Ok(false),
-    }
-}
-
-pub(crate) fn note_agent_view_mark(id: &str, seq: i64) {
-    JOURNAL.with(|j| {
-        if let Some(j) = j.borrow_mut().as_mut() {
-            j.agent_view_marks.insert(id.to_owned(), seq);
-        }
-    });
-}
-
-/// Delay sidebar-only marks until broad publication has supplied its proofs.
-pub(crate) fn queue_sidebar_mark(id: &str) -> bool {
-    JOURNAL.with(|j| {
-        let mut j = j.borrow_mut();
-        let Some(j) = j.as_mut() else {
-            return false;
-        };
-        j.sidebar_marks.insert(id.to_owned());
-        true
-    })
-}
-
-/// Clear transaction-local proofs even on rollback; return only uncovered marks.
-pub(crate) fn end(connection: &Connection) -> StoreResult<BTreeSet<String>> {
-    let journal = JOURNAL.with(|j| j.borrow_mut().take());
-    let Some(journal) = journal else {
-        return Ok(BTreeSet::new());
-    };
-    let mut uncovered = BTreeSet::new();
-    for id in journal.sidebar_marks {
-        let covered = match journal.agent_view_marks.get(&id) {
-            Some(seq) => mark_survives(connection, &id, *seq)?,
-            None => false,
-        };
-        if !covered {
-            uncovered.insert(id);
-        }
-    }
-    Ok(uncovered)
 }
 
 thread_local! {
     /// The journal of the writer transaction that runs on this thread, if any.
     /// The writer connection runs all its transactions on one thread.
-    static JOURNAL: RefCell<Option<TransactionJournal>> = const { RefCell::new(None) };
+    static JOURNAL: RefCell<Option<Vec<Event>>> = const { RefCell::new(None) };
 }
 
 fn push(event: Event) {
     JOURNAL.with(|journal| {
-        if let Some(events) = journal
-            .borrow_mut()
-            .as_mut()
-            .and_then(|j| j.events.as_mut())
-        {
+        if let Some(events) = journal.borrow_mut().as_mut() {
             events.push(event);
         }
     });
@@ -303,36 +218,20 @@ pub(crate) fn mark_agent_team_roots(id: &str, old_root: Option<&str>, new_root: 
 
 /// Start the journal of a writer transaction.
 pub(crate) fn begin() {
-    JOURNAL.with(|journal| {
-        *journal.borrow_mut() = Some(TransactionJournal {
-            events: Some(Vec::new()),
-            ..Default::default()
-        })
-    });
+    JOURNAL.with(|journal| *journal.borrow_mut() = Some(Vec::new()));
 }
 
 /// The events of one writer transaction, in write order.
 pub(crate) struct Journal(Vec<Event>);
 
-/// Finish source capture, retaining mark proofs through publication.
+/// End the journal of the current writer transaction and return its events.
 pub(crate) fn finish() -> Journal {
-    Journal(JOURNAL.with(|journal| {
-        journal
-            .borrow_mut()
-            .as_mut()
-            .and_then(|j| j.events.take())
-            .unwrap_or_default()
-    }))
+    Journal(JOURNAL.with(|journal| journal.borrow_mut().take().unwrap_or_default()))
 }
 
 /// Whether the current writer transaction publishes its changed rows before commit.
 pub(crate) fn active() -> bool {
-    JOURNAL.with(|journal| {
-        journal
-            .borrow()
-            .as_ref()
-            .is_some_and(|j| j.events.is_some())
-    })
+    JOURNAL.with(|journal| journal.borrow().is_some())
 }
 
 /// Journal a row write that the writer update hook reports.
@@ -347,11 +246,6 @@ pub(crate) fn mark_published(collection: &str, id: &str) {
     if let Some(source) = Source::of_collection(collection) {
         push(Event::Published(source, id.to_owned()));
     }
-}
-
-/// Coalesce lead tail changes at the existing transaction boundary.
-pub(crate) fn mark_sidebar_row(id: &str) {
-    push(Event::SidebarRow(id.to_owned()));
 }
 
 /// Journal that `collection/id` needs a full publication before commit.
@@ -387,9 +281,7 @@ pub(crate) fn pending(
                     | Source::Work
                     | Source::Terminal
                     | Source::Monitor
-                    | Source::Incident
-                    | Source::Project
-                    | Source::SidebarOrder => {
+                    | Source::Incident => {
                         format!("SELECT id FROM {} WHERE rowid=?1", source.table())
                     }
                 })?
@@ -398,14 +290,7 @@ pub(crate) fn pending(
             ids.insert((*source, *row_id), id);
         }
     }
-    let mut pending = PendingEntities {
-        sidebar_structure_changed: ids.iter().any(|((source, _), id)| {
-            matches!(source, Source::Project | Source::SidebarOrder)
-                || (id.is_none()
-                    && matches!(source, Source::Task | Source::Monitor | Source::Request))
-        }),
-        ..Default::default()
-    };
+    let mut pending = PendingEntities::default();
     for ((source, _), id) in &ids {
         if *source == Source::Agent {
             if let Some(id) = id {
@@ -522,19 +407,9 @@ pub(crate) fn pending(
             Event::Published(source, id) => {
                 published.insert((source, id), index);
             }
-            Event::SidebarRow(id) => {
-                pending.sidebar_rows.insert(id);
-            }
             Event::TeamRoot(id) => {
                 pending.team_roots.insert(id);
             }
-        }
-    }
-    // An ordinary agent row change already carries every current sidebar fact.
-    // Completion therefore needs no additional tail mark, even after an explicit publication.
-    for (source, id) in changed.keys() {
-        if *source == Source::Agent {
-            pending.sidebar_rows.remove(id);
         }
     }
     for ((source, id), index) in changed {
@@ -554,9 +429,7 @@ pub(crate) fn pending(
             | Source::QueueAsset
             | Source::Terminal
             | Source::Monitor
-            | Source::Incident
-            | Source::Project
-            | Source::SidebarOrder => false,
+            | Source::Incident => false,
         };
     }
     Ok(pending)

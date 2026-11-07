@@ -1239,7 +1239,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     for (name, schema) in crate::sync_entity_payload::schemas()? {
         openapi["components"]["schemas"][name] = schema;
     }
-    crate::sidebar::refresh_openapi(&mut openapi)?;
     crate::chat_operational_status::refresh_summary(&mut openapi);
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_access::refresh_openapi(&mut openapi);
@@ -1365,9 +1364,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         *openapi
             .pointer_mut(&format!("/components/schemas/{name}"))
             .ok_or_else(|| format!("OpenAPI is missing Rust-owned {name}"))? = schema;
-    }
-    for (name, schema) in crate::chat_operational_status::schemas() {
-        openapi["components"]["schemas"][name] = schema;
     }
     openapi["components"]["schemas"]["RadioControls"] = crate::radio_controls::schema();
     openapi["components"]["schemas"]["RoomRadio"]["properties"]["controls"] =

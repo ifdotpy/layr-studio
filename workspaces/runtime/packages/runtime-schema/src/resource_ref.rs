@@ -136,8 +136,6 @@ pub enum ResourceRef {
     RoomResource(RoomResource),
     #[serde(rename = "session-cost")]
     SessionCostResource(AgentResource),
-    #[serde(rename = "sidebar")]
-    SidebarResource(EmptyResource),
     #[serde(rename = "state")]
     StateResource(EmptyResource),
     #[serde(rename = "task")]
@@ -212,7 +210,6 @@ impl Serialize for ResourceRef {
             }
             Self::SessionCostResource(v) => agent!(v, "session-cost"),
             Self::StateResource(_) => kind!("state"),
-            Self::SidebarResource(_) => kind!("sidebar"),
             Self::TaskResource(v) => {
                 kind!("task");
                 map.serialize_entry("taskId", &v.task_id)?;

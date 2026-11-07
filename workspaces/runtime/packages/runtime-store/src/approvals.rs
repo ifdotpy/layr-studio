@@ -433,6 +433,15 @@ pub fn open_for_agent(tx: &Connection, agent: &AgentId) -> ApprovalResult<Vec<Ap
     )
 }
 
+/// Open approvals for one request-local set of owners; uses the existing agent index.
+pub fn open_for_agents(tx: &Connection, ids_json: &str) -> ApprovalResult<Vec<Approval>> {
+    select(
+        tx,
+        "agent IN (SELECT value FROM json_each(?1)) AND state IN ('pending','answering')",
+        [ids_json],
+    )
+}
+
 /// Approvals of one kind and state, for example pending monitor starts.
 pub fn of_kind(
     tx: &Connection,

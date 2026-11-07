@@ -482,20 +482,28 @@ fn put_fields(connection: &Connection, id: &str, agent: &Map<String, Value>) -> 
                 )
                 .optional()?
                 .flatten();
-            let next = AGENT_VOLATILE_FIELDS
-                .iter()
-                .zip(&values)
-                .find(|(name, _)| **name == "tail")
-                .expect("tail is an owned volatile field")
-                .1;
-            prior.as_deref() != next.as_deref()
+            let prior = prior
+                .map(|raw| studio_json::from_str::<String>(&raw))
+                .transpose()?;
+            let bounded = |tail: &str| {
+                tail.chars()
+                    .take(studio_runtime_schema::shared_values::AGENT_TAIL_MAX_CHARS)
+                    .collect::<String>()
+            };
+            bounded(prior.as_deref().unwrap_or_default())
+                != bounded(
+                    agent
+                        .get("tail")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                )
         };
     connection.execute_cached(
         &UPSERT_SQL,
         params_from_iter(std::iter::once(Some(id.to_owned())).chain(values)),
     )?;
     if tail_changed {
-        crate::entity_publication::mark_sidebar_row(id);
+        crate::durable_seq::mark(connection, AGENT_VOLATILE_TABLE, id)?;
     }
     Ok(())
 }

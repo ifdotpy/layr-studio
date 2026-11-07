@@ -2,40 +2,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatOperationalKind {
-    Answer,
-    Error,
-    Working,
-    Unread,
-    Paused,
-    None,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct ChatOperationalStatus {
-    pub kind: ChatOperationalKind,
-    pub label: String,
-}
-
-pub(crate) fn schemas() -> Vec<(&'static str, studio_json::Value)> {
-    let mut generator = schemars::generate::SchemaSettings::openapi3()
-        .for_serialize()
-        .into_generator();
-    vec![
-        (
-            "ChatOperationalKind",
-            ChatOperationalKind::json_schema(&mut generator).to_value(),
-        ),
-        (
-            "ChatOperationalStatus",
-            ChatOperationalStatus::json_schema(&mut generator).to_value(),
-        ),
-    ]
-}
-
 #[cfg(test)]
 mod v5_tests {
     use super::*;
@@ -64,7 +30,20 @@ pub struct WaitReasonFields {
     pub commands: u32,
     pub monitors: u32,
     pub inputs: u32,
+    #[serde(deserialize_with = "required_event")]
     pub event: Option<String>,
+}
+
+fn required_event<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<String>, D::Error> {
+    Option::<String>::deserialize(d)
+}
+fn required_wait<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<AgentWaitReasons>, D::Error> {
+    Option::<AgentWaitReasons>::deserialize(d)
+}
+fn nullable_wait(g: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    Option::<AgentWaitReasons>::json_schema(g)
 }
 
 /// A live wait has at least one positive count or a nonempty event identity.
@@ -127,8 +106,14 @@ impl JsonSchema for AgentWaitReasons {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "reason", rename_all = "snake_case", deny_unknown_fields)]
 pub enum AgentOperationalStatus {
-    NeedsInput { wait: Option<AgentWaitReasons> },
-    Waiting { wait: AgentWaitReasons },
+    NeedsInput {
+        #[serde(deserialize_with = "required_wait")]
+        #[schemars(required, schema_with = "nullable_wait")]
+        wait: Option<AgentWaitReasons>,
+    },
+    Waiting {
+        wait: AgentWaitReasons,
+    },
     WaitingBackgroundCommand {},
     Working {},
     TurnEnded {},

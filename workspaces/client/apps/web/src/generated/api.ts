@@ -9856,18 +9856,6 @@ export interface components {
       /** Text */
       text: string;
     };
-    /** @enum {string} */
-    ChatOperationalKind:
-      | "answer"
-      | "error"
-      | "working"
-      | "unread"
-      | "paused"
-      | "none";
-    ChatOperationalStatus: {
-      kind: components["schemas"]["ChatOperationalKind"];
-      label: string;
-    };
     /** ChatRead */
     ChatRead: {
       /** Messages */
@@ -19692,8 +19680,7 @@ export interface components {
       | components["schemas"]["WorkResource"]
       | components["schemas"]["ComplaintResource"]
       | components["schemas"]["TerminalOutputResource"]
-      | components["schemas"]["NativeLayrSettingsResource"]
-      | components["schemas"]["SidebarResource"];
+      | components["schemas"]["NativeLayrSettingsResource"];
     /**
      * ResourceRevisionEntry
      * @description Per-resource revision; StateResource uses the entity sequence.
@@ -21610,73 +21597,6 @@ export interface components {
       /** Model */
       model: string;
     };
-    SidebarChatList: {
-      /** @description Visible managed lead chats, ordered by the opaque sort key. */
-      rows: components["schemas"]["SidebarChatRow"][];
-    };
-    SidebarChatRow: {
-      /**
-       * Format: double
-       * @description Latest activity timestamp, in seconds since Unix epoch.
-       */
-      activityAt: number;
-      /** @description Whether the chat is archived. */
-      archived: boolean;
-      /** @description Whether the chat has no in-flight turn. */
-      canArchive: boolean;
-      /** @description Whether a threadless chat without an in-flight turn can move project. */
-      canChangeProject: boolean;
-      /** @description Non-time compact visibility reasons; recent activity is checked at render. */
-      compactPinned: boolean;
-      /** @description Current epoch workspace copy progress; counts use the progress owner unit. */
-      copyProgress: components["schemas"]["CopyProgress"] | null;
-      /** @description Canonical saved sidebar ordering group key. */
-      groupKey: string;
-      /** @description Stable chat identity, without units. */
-      id: string;
-      /** @description Operational indicator, independent of the unread receipt. */
-      indicator: components["schemas"]["ChatOperationalStatus"];
-      /** @description Whether the existing agent owner has an in-flight turn. */
-      inFlight: boolean;
-      /** @description Existing completed-result read CAS proof; null means no completed result. */
-      markRead: components["schemas"]["ReadStateDto"] | null;
-      /** @description Eligibility of an explicit mark-unread action. */
-      markUnread: components["schemas"]["MarkUnreadEligibility"];
-      /** @description Provider model identifier; null means not selected. */
-      model: string | null;
-      /** @description Display name, in Unicode text. */
-      name: string;
-      /**
-       * Format: uint32
-       * @description Zero-based saved position; null is unranked and sorts last.
-       */
-      orderRank: number | null;
-      /** @description Whether the chat is pinned. */
-      pinned: boolean;
-      /** @description Project folder identity; null means the project root. */
-      projectFolder: string | null;
-      /**
-       * Format: uint32
-       * @description Project organization revision, in monotonic changes.
-       */
-      projectFolderRevision: number;
-      /** @description Existing project identity for binding across server path aliases. */
-      projectId: string | null;
-      /** @description Owning project path, in filesystem path text. */
-      projectPath: string;
-      /** @description Existing project owner server identity for binding across server path aliases. */
-      projectServerId: string | null;
-      /** @description Provider identity, owned by provider_kind. */
-      provider: components["schemas"]["ProviderKind"];
-      /** @description Lower-case searchable display text, in Unicode text. */
-      searchText: string;
-      /** @description Opaque lexicographic authoritative ordering key, computed by studio-read-models. */
-      sortKey: string;
-      /** @description Peer team identity; null means no team. */
-      teamId: string | null;
-      /** @description Whether the existing stall owner reports waiting for lead action. */
-      waitingForLead: boolean;
-    };
     /** SidebarOrderDto */
     SidebarOrderDto: {
       /** Groups */
@@ -21715,13 +21635,6 @@ export interface components {
       migration?: boolean | null | undefined;
       /** Request Id */
       request_id: string;
-    };
-    SidebarResource: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      kind: "sidebar";
     };
     /** SignedEnvelope */
     SignedEnvelope: {
@@ -22832,7 +22745,6 @@ export interface components {
         | components["schemas"]["ChatRead"]
         | components["schemas"]["MessageHistory"];
       "session-cost": components["schemas"]["SessionCostResponse"];
-      sidebar: components["schemas"]["SidebarChatList"];
       state: components["schemas"]["SyncEntityPayload"][];
       task: components["schemas"]["TaskEntityDto"];
       tasks: components["schemas"]["TaskEntityDto"][];
@@ -23462,7 +23374,6 @@ export interface components {
             | "workResult"
             | "workDecision"
             | "workRelease"
-            | "sidebarChatRow"
             | "agentTail";
           /** @constant */
           op: "delete";
@@ -23567,13 +23478,6 @@ export interface components {
         }
       | {
           /** @constant */
-          collection: "sidebarChatRow";
-          /** @constant */
-          op: "upsert";
-          value: components["schemas"]["SidebarChatRow"];
-        }
-      | {
-          /** @constant */
           collection: "agentTail";
           /** @constant */
           op: "upsert";
@@ -23616,7 +23520,6 @@ export interface components {
       | components["schemas"]["SyncWorkResultEntityPayload"]
       | components["schemas"]["SyncWorkDecisionEntityPayload"]
       | components["schemas"]["SyncWorkReleaseEntityPayload"]
-      | components["schemas"]["SyncSidebarChatRowEntityPayload"]
       | components["schemas"]["SyncAgentTailEntityPayload"];
     /** SyncEventEntityPayload */
     SyncEventEntityPayload: {
@@ -23889,15 +23792,6 @@ export interface components {
       sessionId: string;
       token?: string | undefined;
       workspaceId: string;
-    };
-    SyncSidebarChatRowEntityPayload: {
-      /**
-       * @description discriminator enum property added by openapi-typescript
-       * @enum {string}
-       */
-      collection: "sidebarChatRow";
-      id: string;
-      value: components["schemas"]["SidebarChatRow"];
     };
     /** SyncStudioErrorEntityPayload */
     SyncStudioErrorEntityPayload: {
@@ -37693,15 +37587,6 @@ export const CapacityRetryStatus = {
 export type CapacityRetryStatus = components["schemas"]["CapacityRetryStatus"];
 export const ChatKind = { chat: "chat" } as const;
 export type ChatKind = components["schemas"]["ChatKind"];
-export const ChatOperationalKind = {
-  answer: "answer",
-  error: "error",
-  working: "working",
-  unread: "unread",
-  paused: "paused",
-  none: "none",
-} as const;
-export type ChatOperationalKind = components["schemas"]["ChatOperationalKind"];
 export const ChatWorkspaceMode = {
   "layr-native": "layr-native",
   worktree: "worktree",

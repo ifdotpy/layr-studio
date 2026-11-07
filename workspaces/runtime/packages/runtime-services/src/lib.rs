@@ -168,6 +168,7 @@ pub use radio_runtime::{
     Interrupt, InterruptOutcome, InterruptReceipt, InterruptTransport, NativeAcceptanceReceipt,
     RadioCreation, handoff_interrupt,
 };
+mod agent_operational;
 pub mod recovery;
 pub mod recovery_absence;
 pub mod recovery_history;
@@ -190,7 +191,6 @@ pub(crate) mod server_outbox;
 pub mod shell_command;
 pub mod shell_policy;
 pub mod shell_pressure;
-mod sidebar;
 pub mod sign_in;
 pub mod simple_move;
 pub mod storage_retention;

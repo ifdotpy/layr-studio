@@ -1,10 +1,9 @@
-//! Server-owned operational chat indicator, excluding device-local unread state.
+//! Domain operational precedence, shared by summaries and system read proofs.
 use studio_runtime_schema::agent_entity_nested::AgentStatus;
-pub use studio_runtime_schema::chat_operational_status::{
-    ChatOperationalKind, ChatOperationalStatus,
+use studio_runtime_schema::chat_operational_status::{
+    AgentOperationalStatus as O, AgentWaitReasons,
 };
-
-#[allow(clippy::struct_excessive_bools)] // Independent runtime facts feed status precedence.
+#[allow(clippy::struct_excessive_bools)]
 pub struct ChatStatusFacts<'a> {
     pub status: Option<&'a AgentStatus>,
     pub auto_wake: Option<bool>,
@@ -16,164 +15,61 @@ pub struct ChatStatusFacts<'a> {
     pub active: bool,
     pub disk_full: bool,
     pub unread: bool,
-    /// A live wait's already derived description, or none when the wait is not live.
-    pub wait_label: Option<&'a str>,
+    pub wait: Option<&'a AgentWaitReasons>,
 }
-
-pub fn derive_chat_status(facts: &ChatStatusFacts<'_>) -> ChatOperationalStatus {
+pub fn derive_chat_status(f: &ChatStatusFacts<'_>) -> O {
     use AgentStatus as S;
-    use ChatOperationalKind as K;
-    let waiting = matches!(
-        facts.status,
-        Some(S::Waiting | S::Parked | S::WaitingOnMonitor)
-    );
-    let (kind, label) = if facts.answer {
-        (
-            K::Answer,
-            if waiting {
-                facts.wait_label.unwrap_or("Needs your answer")
-            } else {
-                "Needs your answer"
-            },
-        )
-    } else if waiting && facts.background_work {
-        (K::Working, "Waiting for background command")
-    } else if waiting {
-        match facts.wait_label {
-            Some(label) => (K::Working, label),
-            None => (K::None, "Turn ended. Send a message to continue."),
-        }
-    } else if facts.active {
-        (
-            K::Working,
-            if !facts.in_flight {
-                facts.wait_label.unwrap_or("Working")
-            } else {
-                "Working"
-            },
-        )
-    } else if matches!(facts.status, Some(S::Failed)) {
-        if facts.disk_full {
-            (K::Paused, "Waiting for disk space")
+    let waiting = matches!(f.status, Some(S::Waiting | S::Parked | S::WaitingOnMonitor));
+    if f.answer {
+        return O::NeedsInput {
+            wait: if waiting { f.wait.cloned() } else { None },
+        };
+    }
+    if waiting && f.background_work {
+        return O::WaitingBackgroundCommand {};
+    }
+    if waiting {
+        return f
+            .wait
+            .cloned()
+            .map_or(O::TurnEnded {}, |wait| O::Waiting { wait });
+    }
+    if f.active {
+        return if !f.in_flight {
+            f.wait
+                .cloned()
+                .map_or(O::Working {}, |wait| O::Waiting { wait })
         } else {
-            (K::Error, "Failed")
-        }
-    } else if matches!(facts.status, Some(S::Paused | S::Interrupted))
-        || (facts.auto_wake == Some(false) && !facts.empty)
+            O::Working {}
+        };
+    }
+    if matches!(f.status, Some(S::Failed)) {
+        return if f.disk_full {
+            O::DiskSpace {}
+        } else {
+            O::Failed {}
+        };
+    }
+    if matches!(f.status, Some(S::Paused | S::Interrupted))
+        || (f.auto_wake == Some(false) && !f.empty)
     {
-        (
-            K::Paused,
-            if matches!(facts.status, Some(S::Interrupted)) {
-                "Interrupted"
-            } else {
-                "Stopped"
-            },
-        )
-    } else if facts.deferred && matches!(facts.status, Some(S::Approval)) {
-        (K::Paused, "Question deferred")
-    } else if matches!(facts.status, Some(S::Completed)) && facts.unread {
-        (K::Unread, "Unread result")
-    } else if matches!(facts.status, Some(S::Completed)) {
-        (K::None, "Read")
-    } else {
-        (K::None, "Ready")
-    };
-    ChatOperationalStatus {
-        kind,
-        label: label.into(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn operational_status_preserves_precedence_and_live_waits() {
-        let mut facts = ChatStatusFacts {
-            status: Some(&AgentStatus::Waiting),
-            auto_wake: Some(true),
-            empty: false,
-            in_flight: false,
-            answer: true,
-            deferred: false,
-            background_work: true,
-            active: true,
-            disk_full: false,
-            unread: false,
-            wait_label: Some("Waiting for 1 agent"),
+        return if matches!(f.status, Some(S::Interrupted)) {
+            O::Interrupted {}
+        } else {
+            O::Stopped {}
         };
-        assert_eq!(
-            derive_chat_status(&facts),
-            ChatOperationalStatus {
-                kind: ChatOperationalKind::Answer,
-                label: "Waiting for 1 agent".into()
-            }
-        );
-        facts.answer = false;
-        assert_eq!(
-            derive_chat_status(&facts).label,
-            "Waiting for background command"
-        );
-        facts.background_work = false;
-        assert_eq!(
-            derive_chat_status(&facts).kind,
-            ChatOperationalKind::Working
-        );
-        facts.wait_label = None;
-        assert_eq!(
-            derive_chat_status(&facts),
-            ChatOperationalStatus {
-                kind: ChatOperationalKind::None,
-                label: "Turn ended. Send a message to continue.".into()
-            }
-        );
-        facts.status = Some(&AgentStatus::Failed);
-        facts.active = false;
-        facts.disk_full = true;
-        assert_eq!(
-            derive_chat_status(&facts),
-            ChatOperationalStatus {
-                kind: ChatOperationalKind::Paused,
-                label: "Waiting for disk space".into()
-            }
-        );
-        facts.disk_full = false;
-        assert_eq!(derive_chat_status(&facts).kind, ChatOperationalKind::Error);
-        facts.status = Some(&AgentStatus::Completed);
-        assert_eq!(derive_chat_status(&facts).label, "Read");
     }
-
-    #[test]
-    fn operational_status_covers_deferral_stops_and_active_work() {
-        let mut facts = ChatStatusFacts {
-            status: Some(&AgentStatus::Approval),
-            auto_wake: Some(true),
-            empty: false,
-            in_flight: false,
-            answer: false,
-            deferred: true,
-            background_work: false,
-            active: false,
-            disk_full: false,
-            unread: false,
-            wait_label: None,
+    if f.deferred && matches!(f.status, Some(S::Approval)) {
+        return O::QuestionDeferred {};
+    }
+    if matches!(f.status, Some(S::Completed)) {
+        return if f.unread {
+            O::UnreadResult {}
+        } else {
+            O::ReadResult {}
         };
-        assert_eq!(derive_chat_status(&facts).label, "Question deferred");
-        facts.status = Some(&AgentStatus::Interrupted);
-        assert_eq!(derive_chat_status(&facts).label, "Interrupted");
-        facts.status = Some(&AgentStatus::Idle);
-        facts.auto_wake = Some(false);
-        assert_eq!(derive_chat_status(&facts).label, "Stopped");
-        facts.empty = true;
-        assert_eq!(derive_chat_status(&facts).label, "Ready");
-        facts.status = Some(&AgentStatus::Failed);
-        facts.active = true;
-        facts.wait_label = Some("Waiting for 1 monitor");
-        assert_eq!(derive_chat_status(&facts).label, "Waiting for 1 monitor");
-        facts.in_flight = true;
-        assert_eq!(derive_chat_status(&facts).label, "Working");
     }
+    O::Ready {}
 }
 
 /// Completed-result receipt projection shared by sidebar rows and the system summary.
@@ -202,4 +98,147 @@ pub fn mark_read_target(
             ),
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use studio_runtime_schema::chat_operational_status::WaitReasonFields;
+    #[test]
+    fn v5_active_wait_and_input_precedence_use_the_same_checked_reasons() {
+        let wait = AgentWaitReasons::new(WaitReasonFields {
+            agents: 1,
+            commands: 0,
+            monitors: 0,
+            inputs: 0,
+            event: None,
+        })
+        .expect("live wait");
+        let mut f = ChatStatusFacts {
+            status: Some(&AgentStatus::Running),
+            auto_wake: Some(true),
+            empty: false,
+            in_flight: false,
+            answer: false,
+            deferred: false,
+            background_work: false,
+            active: true,
+            disk_full: false,
+            unread: false,
+            wait: Some(&wait),
+        };
+        assert_eq!(derive_chat_status(&f), O::Waiting { wait: wait.clone() });
+        f.in_flight = true;
+        assert_eq!(derive_chat_status(&f), O::Working {});
+        f.status = Some(&AgentStatus::Waiting);
+        f.answer = true;
+        assert_eq!(
+            derive_chat_status(&f),
+            O::NeedsInput {
+                wait: Some(wait.clone())
+            }
+        );
+        f.answer = false;
+        f.background_work = true;
+        assert_eq!(derive_chat_status(&f), O::WaitingBackgroundCommand {});
+    }
+    #[test]
+    fn v5_persisted_unread_does_not_override_a_stopped_or_failed_turn() {
+        let mut f = ChatStatusFacts {
+            status: Some(&AgentStatus::Completed),
+            auto_wake: Some(false),
+            empty: false,
+            in_flight: false,
+            answer: false,
+            deferred: false,
+            background_work: false,
+            active: false,
+            disk_full: false,
+            unread: true,
+            wait: None,
+        };
+        assert_eq!(derive_chat_status(&f), O::Stopped {});
+        f.auto_wake = Some(true);
+        assert_eq!(derive_chat_status(&f), O::UnreadResult {});
+        f.status = Some(&AgentStatus::Failed);
+        f.disk_full = true;
+        assert_eq!(derive_chat_status(&f), O::DiskSpace {});
+        f.disk_full = false;
+        assert_eq!(derive_chat_status(&f), O::Failed {});
+    }
+}
+
+#[cfg(test)]
+mod receipt_and_deferral_tests {
+    use super::*;
+    #[test]
+    fn v5_deferral_and_empty_stop_rules_do_not_mask_current_attention() {
+        let mut f = ChatStatusFacts {
+            status: Some(&AgentStatus::Approval),
+            auto_wake: Some(true),
+            empty: false,
+            in_flight: false,
+            answer: false,
+            deferred: true,
+            background_work: false,
+            active: false,
+            disk_full: false,
+            unread: false,
+            wait: None,
+        };
+        assert_eq!(derive_chat_status(&f), O::QuestionDeferred {});
+        f.answer = true;
+        assert_eq!(derive_chat_status(&f), O::NeedsInput { wait: None });
+        f.answer = false;
+        f.status = Some(&AgentStatus::Interrupted);
+        assert_eq!(derive_chat_status(&f), O::Interrupted {});
+        f.status = Some(&AgentStatus::Idle);
+        f.auto_wake = Some(false);
+        assert_eq!(derive_chat_status(&f), O::Stopped {});
+        f.empty = true;
+        assert_eq!(derive_chat_status(&f), O::Ready {});
+    }
+    #[test]
+    fn v5_read_target_reuses_saved_revision_but_requires_matching_completed_result() {
+        use studio_runtime_schema::{AgentCounter, agent_entity_nested_extra::ReadStateDto};
+        let receipt = ReadStateDto {
+            thread_id: "old-thread".into(),
+            turn_id: "old-turn".into(),
+            read: true,
+            revision: AgentCounter::from_i64(7).expect("revision"),
+        };
+        let target = mark_read_target(
+            Some("current"),
+            Some("turn"),
+            Some("completed"),
+            Some(&receipt),
+        )
+        .expect("target");
+        assert!(!target.read);
+        assert_eq!(target.revision.as_i64(), 7);
+        assert!(
+            mark_read_target(
+                Some("current"),
+                Some("turn"),
+                Some("failed"),
+                Some(&receipt)
+            )
+            .is_none()
+        );
+        let read = ReadStateDto {
+            thread_id: "current".into(),
+            turn_id: "turn".into(),
+            ..receipt
+        };
+        assert!(
+            mark_read_target(
+                Some("current"),
+                Some("turn"),
+                Some("completed"),
+                Some(&read)
+            )
+            .expect("target")
+            .read
+        );
+    }
 }

@@ -30,12 +30,6 @@ export const SUBSCRIPTION_ENTITY_SCOPES = {
     agentField: null,
     includeTeamMembers: true,
   },
-  sidebar: {
-    collections: ["sidebarChatRow"],
-    idField: null,
-    agentField: null,
-    includeTeamMembers: true,
-  },
   state: {
     collections: [
       "accounts",

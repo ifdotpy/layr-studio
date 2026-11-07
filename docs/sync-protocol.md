@@ -229,15 +229,14 @@ agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A w
 changes a view without a change of the agent row (team counts, attention, command
 progress, account state) writes a mark: a `durable_rows` entry with table `agent_views`
 and no payload. A view takes the higher number of the agent row and its mark.
-The sidebar row also consumes the logical `sidebar_views` namespace in the same
-`durable_rows` table. Tail, child status, and sidebar structure changes use this
-namespace so unchanged broad state documents keep their sequence and identity.
-The existing writer journal coalesces view marks per lead per transaction:
-a successful `agent_views` mark covers a queued `sidebar_views` mark, and sidebar
-marks flush after publication. A proof records the durable mark sequence and
-checks that it still exists, so a savepoint rollback cannot suppress later
-invalidation. Both namespaces share the existing atomic commit
-and cursor; no persisted projection or second stream is introduced. Team
+The separate read-time `agentTail` collection contains only lead identities and
+bounded committed tails. Its changes use entries for the existing
+`runtime_agent_volatile` source table in the same durable cursor. Tail-only flushes
+never mark agent views or recompute operational facts. Worker tails are excluded.
+Operational reasons in `agentSummary` use four indexed owner reads and a single
+bottom-up request-local pass; projects, peer teams and saved order remain their
+own entities. There is no sidebar resource, stored projection, extra logical mark
+namespace or transaction mark-proof cache. Team
 visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
 triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the
 copies and the view log. An approval that is not open (or not a question) is a delete in a delta and

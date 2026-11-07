@@ -44,10 +44,10 @@ pub(crate) fn refresh_openapi(openapi: &mut studio_json::Value) {
         }
     }
     for name in ["StateResource", "GlobalStateResource"] {
-        if let Some(c) = s[name]["x-studio-entity-scope"]["collections"].as_array_mut() {
-            if !c.contains(&json!(COLLECTION)) {
-                c.push(json!(COLLECTION));
-            }
+        if let Some(c) = s[name]["x-studio-entity-scope"]["collections"].as_array_mut()
+            && !c.contains(&json!(COLLECTION))
+        {
+            c.push(json!(COLLECTION));
         }
     }
 }

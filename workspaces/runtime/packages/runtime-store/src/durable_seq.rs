@@ -238,9 +238,6 @@ pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
 /// runtime-services).
 pub const AGENT_VIEW_MARK: &str = "agent_views";
 
-/// Sidebar-only dependencies; broad agent/state readers do not consume these marks.
-pub const SIDEBAR_VIEW_MARK: &str = "sidebar_views";
-
 /// The `durable_rows` table name of the chat views: a chat document reads its group,
 /// its member edges and its messages, so their writers mark the chat.
 pub const CHAT_VIEW_MARK: &str = "chat_views";
@@ -297,25 +294,13 @@ pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bo
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.
 pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
-    if (tbl == AGENT_VIEW_MARK && crate::entity_publication::agent_view_marked(connection, id)?)
-        || (tbl == SIDEBAR_VIEW_MARK && crate::entity_publication::queue_sidebar_mark(id))
-    {
-        return Ok(());
-    }
-    let sql = format!(
-        "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
-         ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
-    );
-    if tbl == AGENT_VIEW_MARK {
-        let seq = connection.query_row(
-            &format!("{sql} RETURNING seq"),
-            rusqlite::params![tbl, id],
-            |row| row.get(0),
-        )?;
-        crate::entity_publication::note_agent_view_mark(id, seq);
-    } else {
-        connection.execute(&sql, rusqlite::params![tbl, id])?;
-    }
+    connection.execute(
+        &format!(
+            "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
+             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
+        ),
+        rusqlite::params![tbl, id],
+    )?;
     Ok(())
 }
 

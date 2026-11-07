@@ -16,12 +16,18 @@ struct DefaultPublisher;
 
 impl EntityPublisher for DefaultPublisher {
     fn publish(&self, transaction: &Transaction<'_>, pending: &PendingEntities) -> StoreResult<()> {
-        let changes = crate::sync_policy::EntityChanges {
+        let mut changes = crate::sync_policy::EntityChanges {
             agents: pending.agents.clone(),
             team_roots: pending.team_roots.clone(),
             work: pending.work.clone(),
             ..Default::default()
         };
+        changes
+            .agents
+            .extend(crate::agent_operational::affected_owners(
+                transaction,
+                pending,
+            )?);
         let server_id = RuntimeStore::transaction_local_server_id(transaction)?;
         for id in &pending.terminals {
             crate::terminal_driver::publish_terminal(transaction, id)?;
@@ -36,7 +42,6 @@ impl EntityPublisher for DefaultPublisher {
             &|_, _, _, _| true,
         )?;
         crate::sync_policy::publish_summary_changes(transaction, pending)?;
-        crate::sidebar::publish_changes(transaction, pending)?;
         if !pending.studio_errors.is_empty() {
             crate::studio_errors::publish_changes(transaction, &pending.studio_errors)?;
         }

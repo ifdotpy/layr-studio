@@ -299,12 +299,12 @@ The matching compiler witnesses require these directives to fail as unused when
 the vendor repairs its declarations. This exception does not authorize casts or
 parallel vendor types elsewhere.
 
-`src/sidebar.rs` owns `SidebarChatRow`, `SidebarChatList`, and the closed
-mark-unread eligibility contract. Every row field is required; nullable fields
-remain explicit null. `ReadStateDto` supplies the existing read CAS proof, and
-`CopyProgress` supplies copy counts. The `sidebar` resource delivers full rows
-through the existing entity cursor path in collection `sidebarChatRow`, outside
-`state`. Pure projection and opaque ordering keys live in `studio-read-models`;
-services gather current domain facts. The Rust-owned
-`COMPACT_RECENT_WINDOW_SECONDS` is generated for the renderer; elapsed recency
-is evaluated on its next render.
+`src/chat_operational_status.rs` owns the operational reason union and checked
+nonempty wait reasons added to the existing read-time `AgentSummaryEntityDto`.
+Read actions reuse `ReadStateDto` and the closed mark-unread eligibility enum.
+The client owns labels, ordering, grouping, search and compact visibility.
+`src/agent_tail.rs` owns the separate lead-only `agentTail` collection; its tail
+has at most `shared_values::AGENT_TAIL_MAX_CHARS` Unicode scalar values (300).
+Worker tails are excluded. Tail reads perform no operational aggregation.
+The Rust-owned `COMPACT_RECENT_WINDOW_SECONDS` is generated for the renderer;
+elapsed recency is evaluated on its next render.

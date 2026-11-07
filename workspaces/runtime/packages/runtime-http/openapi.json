@@ -20317,33 +20317,6 @@
         "title": "ChatMessage",
         "type": "object"
       },
-      "ChatOperationalKind": {
-        "enum": [
-          "answer",
-          "error",
-          "working",
-          "unread",
-          "paused",
-          "none"
-        ],
-        "type": "string"
-      },
-      "ChatOperationalStatus": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "$ref": "#/components/schemas/ChatOperationalKind"
-          },
-          "label": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind",
-          "label"
-        ],
-        "type": "object"
-      },
       "ChatRead": {
         "additionalProperties": false,
         "properties": {
@@ -44236,7 +44209,6 @@
             "rename-progress": "#/components/schemas/RenameProgressResource",
             "room": "#/components/schemas/RoomResource",
             "session-cost": "#/components/schemas/SessionCostResource",
-            "sidebar": "#/components/schemas/SidebarResource",
             "state": "#/components/schemas/StateResource",
             "task": "#/components/schemas/TaskResource",
             "tasks": "#/components/schemas/TasksResource",
@@ -44338,9 +44310,6 @@
           },
           {
             "$ref": "#/components/schemas/NativeLayrSettingsResource"
-          },
-          {
-            "$ref": "#/components/schemas/SidebarResource"
           }
         ],
         "title": "ResourceRef"
@@ -49332,197 +49301,6 @@
         "title": "SharedParticipantRequest",
         "type": "object"
       },
-      "SidebarChatList": {
-        "additionalProperties": false,
-        "properties": {
-          "rows": {
-            "description": "Visible managed lead chats, ordered by the opaque sort key.",
-            "items": {
-              "$ref": "#/components/schemas/SidebarChatRow"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "rows"
-        ],
-        "type": "object"
-      },
-      "SidebarChatRow": {
-        "additionalProperties": false,
-        "properties": {
-          "activityAt": {
-            "description": "Latest activity timestamp, in seconds since Unix epoch.",
-            "format": "double",
-            "type": "number"
-          },
-          "archived": {
-            "description": "Whether the chat is archived.",
-            "type": "boolean"
-          },
-          "canArchive": {
-            "description": "Whether the chat has no in-flight turn.",
-            "type": "boolean"
-          },
-          "canChangeProject": {
-            "description": "Whether a threadless chat without an in-flight turn can move project.",
-            "type": "boolean"
-          },
-          "compactPinned": {
-            "description": "Non-time compact visibility reasons; recent activity is checked at render.",
-            "type": "boolean"
-          },
-          "copyProgress": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CopyProgress"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Current epoch workspace copy progress; counts use the progress owner unit."
-          },
-          "groupKey": {
-            "description": "Canonical saved sidebar ordering group key.",
-            "type": "string"
-          },
-          "id": {
-            "description": "Stable chat identity, without units.",
-            "type": "string"
-          },
-          "inFlight": {
-            "description": "Whether the existing agent owner has an in-flight turn.",
-            "type": "boolean"
-          },
-          "indicator": {
-            "$ref": "#/components/schemas/ChatOperationalStatus",
-            "description": "Operational indicator, independent of the unread receipt."
-          },
-          "markRead": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ReadStateDto"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Existing completed-result read CAS proof; null means no completed result."
-          },
-          "markUnread": {
-            "$ref": "#/components/schemas/MarkUnreadEligibility",
-            "description": "Eligibility of an explicit mark-unread action."
-          },
-          "model": {
-            "description": "Provider model identifier; null means not selected.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "name": {
-            "description": "Display name, in Unicode text.",
-            "type": "string"
-          },
-          "orderRank": {
-            "description": "Zero-based saved position; null is unranked and sorts last.",
-            "format": "uint32",
-            "minimum": 0,
-            "type": [
-              "integer",
-              "null"
-            ]
-          },
-          "pinned": {
-            "description": "Whether the chat is pinned.",
-            "type": "boolean"
-          },
-          "projectFolder": {
-            "description": "Project folder identity; null means the project root.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "projectFolderRevision": {
-            "description": "Project organization revision, in monotonic changes.",
-            "format": "uint32",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "projectId": {
-            "description": "Existing project identity for binding across server path aliases.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "projectPath": {
-            "description": "Owning project path, in filesystem path text.",
-            "type": "string"
-          },
-          "projectServerId": {
-            "description": "Existing project owner server identity for binding across server path aliases.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "provider": {
-            "$ref": "#/components/schemas/ProviderKind",
-            "description": "Provider identity, owned by provider_kind."
-          },
-          "searchText": {
-            "description": "Lower-case searchable display text, in Unicode text.",
-            "type": "string"
-          },
-          "sortKey": {
-            "description": "Opaque lexicographic authoritative ordering key, computed by studio-read-models.",
-            "type": "string"
-          },
-          "teamId": {
-            "description": "Peer team identity; null means no team.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "waitingForLead": {
-            "description": "Whether the existing stall owner reports waiting for lead action.",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "projectPath",
-          "projectId",
-          "projectServerId",
-          "projectFolder",
-          "projectFolderRevision",
-          "teamId",
-          "groupKey",
-          "orderRank",
-          "sortKey",
-          "activityAt",
-          "pinned",
-          "archived",
-          "inFlight",
-          "provider",
-          "model",
-          "indicator",
-          "markRead",
-          "markUnread",
-          "canChangeProject",
-          "canArchive",
-          "compactPinned",
-          "searchText",
-          "copyProgress",
-          "waitingForLead"
-        ],
-        "type": "object"
-      },
       "SidebarOrderDto": {
         "additionalProperties": false,
         "properties": {
@@ -49642,24 +49420,6 @@
         ],
         "title": "SidebarReorderRequest",
         "type": "object"
-      },
-      "SidebarResource": {
-        "additionalProperties": false,
-        "properties": {
-          "kind": {
-            "const": "sidebar",
-            "type": "string"
-          }
-        },
-        "required": [
-          "kind"
-        ],
-        "type": "object",
-        "x-studio-entity-scope": {
-          "collections": [
-            "sidebarChatRow"
-          ]
-        }
       },
       "SignedEnvelope": {
         "additionalProperties": false,
@@ -52451,9 +52211,6 @@
           "session-cost": {
             "$ref": "#/components/schemas/SessionCostResponse"
           },
-          "sidebar": {
-            "$ref": "#/components/schemas/SidebarChatList"
-          },
           "state": {
             "items": {
               "$ref": "#/components/schemas/SyncEntityPayload"
@@ -52532,8 +52289,7 @@
           "work",
           "complaint",
           "terminal-output",
-          "native-layr-settings",
-          "sidebar"
+          "native-layr-settings"
         ],
         "type": "object"
       },
@@ -53545,6 +53301,7 @@
             "properties": {
               "collection": {
                 "const": "agent",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53566,6 +53323,7 @@
             "properties": {
               "collection": {
                 "const": "chat",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53587,6 +53345,7 @@
             "properties": {
               "collection": {
                 "const": "complaint",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53608,6 +53367,7 @@
             "properties": {
               "collection": {
                 "const": "edge",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53629,6 +53389,7 @@
             "properties": {
               "collection": {
                 "const": "event",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53650,6 +53411,7 @@
             "properties": {
               "collection": {
                 "const": "model",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53671,6 +53433,7 @@
             "properties": {
               "collection": {
                 "const": "monitor",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53692,6 +53455,7 @@
             "properties": {
               "collection": {
                 "const": "peerTeam",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53713,6 +53477,7 @@
             "properties": {
               "collection": {
                 "const": "project",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53734,6 +53499,7 @@
             "properties": {
               "collection": {
                 "const": "request",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53755,6 +53521,7 @@
             "properties": {
               "collection": {
                 "const": "room",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53776,6 +53543,7 @@
             "properties": {
               "collection": {
                 "const": "rule",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53797,6 +53565,7 @@
             "properties": {
               "collection": {
                 "const": "task",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53818,6 +53587,7 @@
             "properties": {
               "collection": {
                 "const": "uiPreferences",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53839,6 +53609,7 @@
             "properties": {
               "collection": {
                 "const": "work",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53860,6 +53631,7 @@
             "properties": {
               "collection": {
                 "const": "workspace",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53881,6 +53653,7 @@
             "properties": {
               "collection": {
                 "const": "rateLimit",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53902,6 +53675,7 @@
             "properties": {
               "collection": {
                 "const": "messageReceipt",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53923,6 +53697,7 @@
             "properties": {
               "collection": {
                 "const": "plan",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53944,6 +53719,7 @@
             "properties": {
               "collection": {
                 "const": "annotation",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -53965,6 +53741,7 @@
             "properties": {
               "collection": {
                 "const": "studioError",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54026,7 +53803,6 @@
                   "workResult",
                   "workDecision",
                   "workRelease",
-                  "sidebarChatRow",
                   "agentTail"
                 ],
                 "type": "string"
@@ -54046,6 +53822,7 @@
             "properties": {
               "collection": {
                 "const": "queue",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54067,6 +53844,7 @@
             "properties": {
               "collection": {
                 "const": "accounts",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54088,6 +53866,7 @@
             "properties": {
               "collection": {
                 "const": "accountCost",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54109,6 +53888,7 @@
             "properties": {
               "collection": {
                 "const": "sessionCost",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54130,6 +53910,7 @@
             "properties": {
               "collection": {
                 "const": "desktop",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54151,6 +53932,7 @@
             "properties": {
               "collection": {
                 "const": "terminal",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54172,6 +53954,7 @@
             "properties": {
               "collection": {
                 "const": "retainedWorktree",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54193,6 +53976,7 @@
             "properties": {
               "collection": {
                 "const": "questionHistory",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54214,6 +53998,7 @@
             "properties": {
               "collection": {
                 "const": "agentSummary",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54235,6 +54020,7 @@
             "properties": {
               "collection": {
                 "const": "agentDetail",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54256,6 +54042,7 @@
             "properties": {
               "collection": {
                 "const": "workDetail",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54277,6 +54064,7 @@
             "properties": {
               "collection": {
                 "const": "workResult",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54298,6 +54086,7 @@
             "properties": {
               "collection": {
                 "const": "workDecision",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54319,6 +54108,7 @@
             "properties": {
               "collection": {
                 "const": "workRelease",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54339,28 +54129,8 @@
           {
             "properties": {
               "collection": {
-                "const": "sidebarChatRow",
-                "type": "string"
-              },
-              "op": {
-                "const": "upsert",
-                "type": "string"
-              },
-              "value": {
-                "$ref": "#/components/schemas/SidebarChatRow"
-              }
-            },
-            "required": [
-              "op",
-              "collection",
-              "value"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "collection": {
                 "const": "agentTail",
+                "enum": null,
                 "type": "string"
               },
               "op": {
@@ -54439,7 +54209,6 @@
             "room": "#/components/schemas/SyncRoomEntityPayload",
             "rule": "#/components/schemas/SyncRuleEntityPayload",
             "sessionCost": "#/components/schemas/SyncSessionCostEntityPayload",
-            "sidebarChatRow": "#/components/schemas/SyncSidebarChatRowEntityPayload",
             "studioError": "#/components/schemas/SyncStudioErrorEntityPayload",
             "task": "#/components/schemas/SyncTaskEntityPayload",
             "terminal": "#/components/schemas/SyncTerminalEntityPayload",
@@ -54558,9 +54327,6 @@
           },
           {
             "$ref": "#/components/schemas/SyncWorkReleaseEntityPayload"
-          },
-          {
-            "$ref": "#/components/schemas/SyncSidebarChatRowEntityPayload"
           },
           {
             "$ref": "#/components/schemas/SyncAgentTailEntityPayload"
@@ -55246,27 +55012,6 @@
           "cachePolicies"
         ],
         "title": "SyncSessionEvent",
-        "type": "object"
-      },
-      "SyncSidebarChatRowEntityPayload": {
-        "additionalProperties": false,
-        "properties": {
-          "collection": {
-            "const": "sidebarChatRow",
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "value": {
-            "$ref": "#/components/schemas/SidebarChatRow"
-          }
-        },
-        "required": [
-          "collection",
-          "id",
-          "value"
-        ],
         "type": "object"
       },
       "SyncStudioErrorEntityPayload": {

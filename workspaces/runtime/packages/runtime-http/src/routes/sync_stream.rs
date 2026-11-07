@@ -102,7 +102,6 @@ impl ResourceIdentity for SubscribedResource {
     fn notification_kind(&self) -> Result<ResourceKind, ResourceNotifyError> {
         Ok(match &self.resource {
             ResourceRef::StateResource(_) => ResourceKind::State,
-            ResourceRef::SidebarResource(_) => ResourceKind::Sidebar,
             ResourceRef::AgentDetailResource(_) => ResourceKind::AgentDetail,
             ResourceRef::CostsResource(_) => ResourceKind::Costs,
             ResourceRef::DesktopResource(_) => ResourceKind::Desktop,
@@ -178,7 +177,6 @@ fn authorize_resource(
         | ResourceRef::RoomResource(_)
         | ResourceRef::SessionCostResource(_)
         | ResourceRef::StateResource(_)
-        | ResourceRef::SidebarResource(_)
         | ResourceRef::TaskResource(_)
         | ResourceRef::TasksResource(_)
         | ResourceRef::TerminalResource(_)
@@ -589,7 +587,6 @@ async fn sync_stream(
             | ResourceRef::RoomResource(_)
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
-            | ResourceRef::SidebarResource(_)
             | ResourceRef::TaskResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
@@ -787,7 +784,6 @@ pub(super) async fn append_progress_frames(
             | ResourceRef::RoomResource(_)
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
-            | ResourceRef::SidebarResource(_)
             | ResourceRef::TaskResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
@@ -1615,7 +1611,6 @@ async fn attach_transient_snapshots(
             | ResourceRef::RoomResource(_)
             | ResourceRef::SessionCostResource(_)
             | ResourceRef::StateResource(_)
-            | ResourceRef::SidebarResource(_)
             | ResourceRef::TaskResource(_)
             | ResourceRef::TasksResource(_)
             | ResourceRef::TerminalResource(_)
