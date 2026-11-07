@@ -1284,7 +1284,7 @@ impl<R: ProviderAuthReader> AccountDriver<R> {
             receipt["expectedAccountId"] = row["accountId"].clone();
             receipt["email"] = row.get("email").cloned().unwrap_or(Value::Null);
         } else {
-            value["accounts"][&key] = studio_json::json!({"id":key,"provider":studio_runtime_schema::ProviderKind::Codex.key(),"home":home,"label":request.label.as_deref().unwrap_or("New account"),"source":"Codex Agents","accountId":null,"email":null,"plan":null,"status":"pending"});
+            value["accounts"][&key] = studio_json::json!({"id":key,"provider":studio_runtime_schema::ProviderKind::Codex.key(),"home":home,"label":request.label.as_deref().unwrap_or("New account"),"source":STUDIO_ACCOUNT_SOURCE,"accountId":null,"email":null,"plan":null,"status":"pending"});
             order.accounts.push(key);
             receipt["emailHint"] = studio_json::json!(request.email);
             receipt["requestedLabel"] = studio_json::json!(request.label);
@@ -2648,6 +2648,10 @@ fn register_metadata(
     Ok((true, account))
 }
 
+/// The `source` of an account whose provider home Studio created and owns. Any
+/// other source is a folder that a provider CLI or another program also uses.
+const STUDIO_ACCOUNT_SOURCE: &str = "Codex Agents";
+
 fn reconcile_local_login(
     value: &mut Value,
     order: &RegistryOrder,
@@ -2737,12 +2741,22 @@ fn reconcile_local_login(
         })
         .cloned();
     if let Some(primary) = duplicate.as_deref() {
+        let studio_home = registry_account(value, account)?.get("home").cloned();
         if let Some(row) = value
             .get_mut("accounts")
             .and_then(|accounts| accounts.get_mut(primary))
             .and_then(Value::as_object_mut)
         {
             row.remove("deleted");
+            // A Studio sign-in of an account that Studio used from a provider CLI
+            // folder moves that account into the Studio folder: the CLI and Studio
+            // then stop sharing credentials. Its key, and so its chats, stay.
+            if row.get("source").and_then(Value::as_str) != Some(STUDIO_ACCOUNT_SOURCE)
+                && let Some(home) = studio_home
+            {
+                row.insert("home".into(), home);
+                row.insert("source".into(), Value::String(STUDIO_ACCOUNT_SOURCE.into()));
+            }
         }
         let row = registry_account_mut(value, account)?
             .as_object_mut()
@@ -4769,6 +4783,40 @@ exit 0
                 .0
         );
         assert!(value["accounts"]["existing"].get("deleted").is_none());
+    }
+
+    #[test]
+    fn a_studio_sign_in_moves_an_account_out_of_a_provider_cli_folder() {
+        let mut value = studio_json::json!({
+            "version": studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION,
+            "defaultAccountKey": "default",
+            "accounts": {
+                "default": {
+                    "id": "default", "provider": studio_runtime_schema::ProviderKind::Codex.key(),
+                    "home": "/cli/.codex", "label": "Codex", "source": "Codex CLI",
+                    "status": "ready", "accountId": "same-account", "email": "a@example.test"
+                },
+                "login-x": {
+                    "id": "login-x", "provider": studio_runtime_schema::ProviderKind::Codex.key(),
+                    "home": "/studio/accounts/login-x", "label": "New account", "source": "Codex Agents",
+                    "status": "ready", "accountId": "same-account", "email": "a@example.test"
+                }
+            },
+            "logins": {"x": {"requestId": "x", "accountKey": "login-x", "status": "pending"}}
+        });
+        let order = RegistryOrder {
+            accounts: vec!["default".into(), "login-x".into()],
+            logins: vec!["x".into()],
+        };
+        reconcile_local_login(&mut value, &order, "x", "login-x").expect("reconcile");
+        // The account and its chats keep the key `default`; only its folder moves.
+        assert_eq!(
+            value["accounts"]["default"]["home"],
+            "/studio/accounts/login-x"
+        );
+        assert_eq!(value["accounts"]["default"]["source"], "Codex Agents");
+        assert_eq!(value["accounts"]["login-x"]["duplicateOf"], "default");
+        assert_eq!(value["logins"]["x"]["resolvedAccountKey"], "default");
     }
 
     #[test]
