@@ -131,6 +131,7 @@ pub const DIRECT_COLLECTIONS: &[&str] = &[
     "desktop",
     "model",
     "terminal",
+    "queue",
 ];
 
 /// The views of one agent, built at read time from `runtime_agents` and the rows its

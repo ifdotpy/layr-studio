@@ -113,7 +113,7 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
     if table_exists("runtime_events")? {
         if table_exists("runtime_agents")? {
             complete &= !connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sync_entities q WHERE q.collection='queue' AND q.id=a.id AND q.deleted=0))", [], |row| row.get::<_, bool>(0),
+                "SELECT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM durable_rows q WHERE q.tbl='queue_window' AND q.id=a.id AND q.deleted=0))", [], |row| row.get::<_, bool>(0),
             )?;
         }
         let event_window = connection
@@ -2108,40 +2108,23 @@ fn maintain_peer_team_entities(
     }
     // The documents are built at read time (`peer_team_document`); the window holds the
     // visible teams and gives a changed team a new number.
-    // A team takes a new number only when its view changed: the hash of the view it was
-    // last numbered with is kept in `sync_entity_meta`.
     let current = peer_team_views(transaction, agent_records, project_records)?;
     for (id, view) in &current {
-        let key = format!("{PEER_TEAM_HASH_PREFIX}{id}");
         let hash = studio_runtime_store::sha256_hex(&studio_json::to_vec(view)?);
-        let stored: Option<String> = transaction
-            .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key=?1",
-                [&key],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let visible =
-            studio_runtime_store::durable_seq::in_window(transaction, PEER_TEAM_WINDOW, id)?;
-        if stored.as_deref() != Some(hash.as_str()) {
-            // A team already in the window without a hash (moved there by a migration)
-            // keeps its number.
-            if !visible || stored.is_some() {
-                studio_runtime_store::durable_seq::mark(transaction, PEER_TEAM_WINDOW, id)?;
-            }
-            transaction.execute(
-                "INSERT INTO sync_entity_meta(key,value) VALUES(?1,?2)
-                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                rusqlite::params![key, hash],
-            )?;
-        }
+        studio_runtime_store::durable_seq::set_window_view(
+            transaction,
+            PEER_TEAM_WINDOW,
+            id,
+            Some(&hash),
+        )?;
     }
     for id in studio_runtime_store::durable_seq::window_members(transaction, PEER_TEAM_WINDOW)? {
         if !current.contains_key(&id) {
-            studio_runtime_store::durable_seq::leave_window(transaction, PEER_TEAM_WINDOW, &id)?;
-            transaction.execute(
-                "DELETE FROM sync_entity_meta WHERE key=?1",
-                [format!("{PEER_TEAM_HASH_PREFIX}{id}")],
+            studio_runtime_store::durable_seq::set_window_view(
+                transaction,
+                PEER_TEAM_WINDOW,
+                &id,
+                None,
             )?;
         }
     }
@@ -2150,8 +2133,6 @@ fn maintain_peer_team_entities(
 
 /// The `durable_rows` window of the visible peer teams.
 pub(crate) const PEER_TEAM_WINDOW: &str = studio_runtime_store::durable_seq::PEER_TEAM_WINDOW;
-/// `sync_entity_meta` key prefix of the view hash a visible team was last numbered with.
-const PEER_TEAM_HASH_PREFIX: &str = "peer_team_view_hash:";
 
 /// The view of every visible peer team, by id: a team of a live project with at least
 /// two live lead members in the project folder. Owner of the peer team view rule.

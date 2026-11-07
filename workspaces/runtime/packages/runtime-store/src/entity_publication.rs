@@ -335,11 +335,11 @@ pub(crate) fn pending(
             } else {
                 // Deleted source rows no longer carry their owner. Recheck only
                 // existing queue views; this path never scans event history.
-                let mut statement = transaction.prepare_cached(
-                    "SELECT id FROM sync_entities WHERE collection='queue' AND deleted=0",
-                )?;
-                for id in statement.query_map([], |row| row.get::<_, String>(0))? {
-                    pending.queues.insert(id?);
+                for id in crate::durable_seq::window_members(
+                    transaction,
+                    crate::durable_seq::QUEUE_WINDOW,
+                )? {
+                    pending.queues.insert(id);
                 }
             }
         }

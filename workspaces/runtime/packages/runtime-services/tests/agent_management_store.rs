@@ -838,14 +838,20 @@ async fn synthetic_store(root: &Path, leads: usize, tasks: usize) -> std::sync::
 /// Current entity hashes and tombstone flags, keyed by collection and id.
 fn entities(store: &RuntimeStore) -> std::collections::BTreeMap<(String, String), (String, i64)> {
     let db = store.test_reader().expect("reader");
-    let mut statement = db
-        .prepare("SELECT collection,id,hash,deleted FROM sync_entities")
-        .expect("entity read");
-    statement
-        .query_map([], |r| Ok(((r.get(0)?, r.get(1)?), (r.get(2)?, r.get(3)?))))
-        .expect("entity rows")
-        .collect::<Result<_, _>>()
-        .expect("entity values")
+    super::agent_view_fixtures::snapshot_rows(&db)
+        .into_iter()
+        .map(|row| {
+            (
+                (row.collection, row.id),
+                (
+                    studio_runtime_store::sha256_hex(
+                        row.payload.as_deref().unwrap_or("").as_bytes(),
+                    ),
+                    i64::from(row.deleted),
+                ),
+            )
+        })
+        .collect()
 }
 
 /// Lifecycle actions publish only the changed rows and their dependent views,

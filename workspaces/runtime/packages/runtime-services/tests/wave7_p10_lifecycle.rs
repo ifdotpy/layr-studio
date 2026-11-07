@@ -766,23 +766,21 @@ fn state(store: &RuntimeStore) -> Value {
     let records = agent_management::read(&db).expect("records");
     super::agent_view_fixtures::assert_agent_view_projections(&db);
     let mut statement = db.prepare("SELECT collection,id,seq,hash,payload,deleted FROM sync_entities ORDER BY collection,id").expect("sync read");
-    let sync = statement
-        .query_map([], |r| {
+    let mut sync = statement
+        .query_map([], |row| {
             Ok(json!([
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, i64>(5)?
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, i64>(5)?
             ]))
         })
         .expect("rows")
         .collect::<Result<Vec<_>, _>>()
         .expect("sync rows");
-    // Work documents and agent views have no copy in sync_entities; a reader builds
-    // them at read time.
-    let mut sync = sync;
+    // Include the queue's durable view in rollback and restart comparisons.
     let collections = studio_json::to_string(
         &studio_runtime_store::WORK_COLLECTIONS
             .iter()
@@ -792,28 +790,21 @@ fn state(store: &RuntimeStore) -> Value {
                 "agentDetail",
                 "event",
                 "messageReceipt",
+                "queue",
             ])
             .collect::<Vec<_>>(),
     )
     .expect("collections");
-    let page = studio_runtime_services::entity_scope::resume(
-        &db,
-        None,
-        Some(&collections),
-        None,
-        None,
-        true,
-        512,
-    )
-    .expect("work documents");
-    for row in page.rows {
+    for row in studio_runtime_services::entity_scope::live_documents(&db, &collections)
+        .expect("read-time documents")
+    {
         sync.push(json!([
             row.collection,
             row.id,
             row.sequence,
             "",
             row.payload,
-            0
+            i64::from(row.deleted)
         ]));
     }
     sync.sort_by(|a, b| (a[0].as_str(), a[1].as_str()).cmp(&(b[0].as_str(), b[1].as_str())));
@@ -1388,18 +1379,18 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
         .await
         .expect("seed database checkpoint");
     drop(store);
-    for (table, operation) in [
-        ("runtime_agents", "UPDATE"),
-        ("approvals", "INSERT"),
-        ("runtime_events", "UPDATE"),
-        // Seeded projections exist, so the action updates entity rows.
-        ("sync_entities", "UPDATE"),
+    for (table, operation, condition) in [
+        ("runtime_agents", "UPDATE", ""),
+        ("approvals", "INSERT", ""),
+        ("runtime_events", "UPDATE", ""),
+        // A queue change updates its durable mark in the same transaction.
+        ("durable_rows", "UPDATE", "WHEN NEW.tbl='queue_window'"),
     ] {
         for boundary in ["BEFORE", "AFTER"] {
             let root = tempfile::tempdir().expect("case");
             let store = Arc::new(clone_store(base.path(), root.path()).await);
             let before = state(&store);
-            store.transaction(move |tx| { tx.execute_batch(&format!("CREATE TRIGGER failpoint {boundary} {operation} ON {table} BEGIN SELECT RAISE(ABORT, 'stop failure'); END"))?; Ok(()) }).await.expect("failpoint");
+            store.transaction(move |tx| { tx.execute_batch(&format!("CREATE TRIGGER failpoint {boundary} {operation} ON {table} {condition} BEGIN SELECT RAISE(ABORT, 'stop failure'); END"))?; Ok(()) }).await.expect("failpoint");
             let action: Action = studio_json::from_value(case["action"].clone()).expect("action");
             assert!(
                 agent_lifecycle_runtime::execute(
@@ -1534,8 +1525,8 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             store
             .transaction(move |tx| {
                 tx.execute_batch(&format!(
-                    "CREATE TRIGGER interrupt_projection_fail {boundary} INSERT ON sync_entities BEGIN SELECT RAISE(ABORT,'projection failure'); END; \
-                     CREATE TRIGGER interrupt_projection_update_fail {boundary} UPDATE ON sync_entities BEGIN SELECT RAISE(ABORT,'projection failure'); END"
+                    "CREATE TRIGGER interrupt_projection_fail {boundary} INSERT ON durable_rows WHEN NEW.tbl='queue_window' BEGIN SELECT RAISE(ABORT,'projection failure'); END; \
+                     CREATE TRIGGER interrupt_projection_update_fail {boundary} UPDATE ON durable_rows WHEN NEW.tbl='queue_window' BEGIN SELECT RAISE(ABORT,'projection failure'); END"
                 ))?;
                 Ok(())
             }).await

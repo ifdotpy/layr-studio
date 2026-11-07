@@ -418,6 +418,7 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             studio_runtime_store::migrations::migrate_chat_fields_to_chats(db)?;
             studio_runtime_store::migrations::migrate_status_to_chats(db)?;
             studio_runtime_store::migrations::migrate_peer_teams_to_window(db)?;
+            studio_runtime_store::migrations::migrate_queues_to_window(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;

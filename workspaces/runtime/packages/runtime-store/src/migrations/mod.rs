@@ -104,6 +104,7 @@ mod m2026_11_06_one_draft_per_chat;
 mod m2026_11_06_peer_team_read_time;
 mod m2026_11_06_process_exit_check;
 mod m2026_11_06_project_read_time;
+mod m2026_11_06_queue_read_time;
 pub(crate) mod m2026_11_06_start_attempt_on_turns;
 mod m2026_11_06_status_on_chats;
 mod m2026_11_06_terminal_read_time;
@@ -134,6 +135,7 @@ pub use m2026_10_31_project_record_kind::apply as migrate_project_record_kind;
 pub use m2026_10_31_room_record::apply as migrate_room_record;
 pub use m2026_11_06_chat_fields_on_chats::apply as migrate_chat_fields_to_chats;
 pub use m2026_11_06_peer_team_read_time::apply as migrate_peer_teams_to_window;
+pub use m2026_11_06_queue_read_time::apply as migrate_queues_to_window;
 pub use m2026_11_06_start_attempt_on_turns::apply as migrate_start_attempts_to_turns;
 pub use m2026_11_06_status_on_chats::apply as migrate_status_to_chats;
 
@@ -1718,6 +1720,16 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_06_terminal_read_time::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-06-queue-read-time",
+            introduced: NOVEMBER_6,
+            target: MigrationTarget::Canvas,
+            supported_source: "Queue copies in sync_entities",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_06_queue_read_time::apply(c.transaction),
     },
 ];
 

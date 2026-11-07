@@ -140,6 +140,24 @@ pub(crate) fn is_agent_view_collection(collection: &Value) -> bool {
     collection == "agentSummary" || collection == "agentDetail"
 }
 
+/// All documents a new client receives, including every page of the durable views.
+#[allow(dead_code)]
+pub(crate) fn snapshot_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_store::EntityRow> {
+    use studio_runtime_services::entity_scope;
+    let limit = studio_runtime_schema::shared_values::SYNC_ENTITY_STREAM_MAX_DOCUMENTS;
+    let mut page =
+        entity_scope::resume(db, None, None, None, None, true, limit).expect("entity snapshot");
+    let mut rows = Vec::new();
+    loop {
+        rows.append(&mut page.rows);
+        if page.checkpoint >= page.max_sequence {
+            return rows;
+        }
+        page = entity_scope::continue_page(db, &page, None, None, None, true, limit)
+            .expect("entity snapshot page");
+    }
+}
+
 /// The documents that readers build at read time and the frozen corpora kept as
 /// `sync_entities` copies: the legacy `agent` view, the task and monitor windows, the
 /// event window and the message receipts.
@@ -152,7 +170,7 @@ pub(crate) fn read_time_rows(db: &rusqlite::Connection) -> Vec<studio_runtime_st
         .chain(
             studio_runtime_services::entity_scope::live_documents(
                 db,
-                r#"["task","monitor","event","messageReceipt","project","peerTeam","rateLimit","accounts","accountCost","sessionCost","desktop","model"]"#,
+                r#"["task","monitor","event","messageReceipt","project","peerTeam","rateLimit","accounts","accountCost","sessionCost","desktop","model","terminal","queue"]"#,
             )
             .expect("window documents"),
         )

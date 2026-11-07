@@ -463,41 +463,56 @@ pub fn is_live(agent: &AgentRecord) -> bool {
     !agent.is_deleted()
 }
 
-/// Queue collection owner. Every relevant source write calls this before commit.
+/// The queue document fields of a live agent: its snapshot and the fixed capabilities.
+fn queue_view(
+    connection: &Connection,
+    id: &str,
+    agent: &AgentRecord,
+) -> studio_runtime_store::StoreResult<QueueSnapshot> {
+    queue_snapshot(connection, agent).map_err(|error| match error {
+        QueueWriteError::Store(error) => error,
+        QueueWriteError::RequestResult(error) => StoreError::SchemaMismatch(error.to_string()),
+        QueueWriteError::Json(error) => StoreError::Json(error),
+        QueueWriteError::InvalidRequest(_)
+        | QueueWriteError::Conflict(_)
+        | QueueWriteError::InvalidStoredObject { .. }
+        | QueueWriteError::RemoteEventsUnavailable => StoreError::InvalidSyncObject {
+            scope: "queue".into(),
+            id: id.into(),
+        },
+    })
+}
+
+/// Queue collection owner. Every relevant source write calls this before commit. The
+/// document is built at read time ([`queue_document`]); the window gives the agent a new
+/// number when its revision, a hash of the queue content, changes.
 pub fn publish_queue(
     transaction: &Transaction<'_>,
     id: &str,
 ) -> studio_runtime_store::StoreResult<()> {
-    let agent = AgentRepository::get(transaction, &AgentId::from(id))?;
-    let (value, deleted) = match agent.filter(is_live) {
-        Some(agent) => {
-            let snapshot = queue_snapshot(transaction, &agent).map_err(|error| match error {
-                QueueWriteError::Store(error) => error,
-                QueueWriteError::RequestResult(error) => {
-                    StoreError::SchemaMismatch(error.to_string())
-                }
-                QueueWriteError::Json(error) => StoreError::Json(error),
-                QueueWriteError::InvalidRequest(_)
-                | QueueWriteError::Conflict(_)
-                | QueueWriteError::InvalidStoredObject { .. }
-                | QueueWriteError::RemoteEventsUnavailable => StoreError::InvalidSyncObject {
-                    scope: "queue".into(),
-                    id: id.into(),
-                },
-            })?;
-            (
-                json!({"items":snapshot.items,"revision":snapshot.revision,"capabilities":{"reorder":QUEUE_REORDER_ENABLED,"receipts":QUEUE_RECEIPTS_ENABLED}}),
-                false,
-            )
-        }
-        None => (json!({}), true),
+    let revision = match AgentRepository::get(transaction, &AgentId::from(id))?.filter(is_live) {
+        Some(agent) => Some(queue_view(transaction, id, &agent)?.revision),
+        None => None,
     };
-    studio_runtime_store::SyncDocumentsRepository::put_entity(
+    studio_runtime_store::durable_seq::set_window_view(
         transaction,
-        "queue",
+        studio_runtime_store::durable_seq::QUEUE_WINDOW,
         id,
-        value,
-        deleted,
+        revision.as_deref(),
     )?;
     Ok(())
+}
+
+/// The `queue` document of agent `id`. None when the agent is gone or deleted.
+pub(crate) fn queue_document(
+    connection: &Connection,
+    id: &str,
+) -> studio_runtime_store::StoreResult<Option<Value>> {
+    let Some(agent) = AgentRepository::get(connection, &AgentId::from(id))?.filter(is_live) else {
+        return Ok(None);
+    };
+    let snapshot = queue_view(connection, id, &agent)?;
+    Ok(Some(
+        json!({"items":snapshot.items,"revision":snapshot.revision,"capabilities":{"reorder":QUEUE_REORDER_ENABLED,"receipts":QUEUE_RECEIPTS_ENABLED}}),
+    ))
 }

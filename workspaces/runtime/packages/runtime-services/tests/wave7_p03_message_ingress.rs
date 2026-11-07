@@ -492,7 +492,7 @@ fn logical_state(store: &RuntimeStore) -> BTreeMap<String, Value> {
         ),
         (
             "sync_entities",
-            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt','project','peerTeam','rateLimit','accounts','accountCost','sessionCost','desktop','model') ORDER BY rowid",
+            "SELECT json_object('collection',collection,'id',id,'seq',seq,'hash',CASE WHEN payload IS NULL THEN hash ELSE 'verified payload hash' END,'payload',json(CASE WHEN collection='event' AND payload IS NOT NULL THEN json_set(payload,'$.value.created','generated timestamp') ELSE payload END),'deleted',deleted) FROM sync_entities WHERE collection NOT IN ('agent','agentSummary','agentDetail','retainedWorktree','task','monitor','event','messageReceipt','project','peerTeam','rateLimit','accounts','accountCost','sessionCost','desktop','model','terminal','queue') ORDER BY rowid",
         ),
         (
             "sync_documents",

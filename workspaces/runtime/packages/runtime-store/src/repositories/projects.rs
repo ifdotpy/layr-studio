@@ -393,10 +393,11 @@ impl ProjectsRepository {
             // Its teams leave the visible window; their documents are built at read time.
             for team in existing["peerTeams"].as_array().into_iter().flatten() {
                 if let Some(team_id) = team["id"].as_str() {
-                    crate::durable_seq::leave_window(
+                    crate::durable_seq::set_window_view(
                         transaction,
                         crate::durable_seq::PEER_TEAM_WINDOW,
                         team_id,
+                        None,
                     )?;
                 }
             }

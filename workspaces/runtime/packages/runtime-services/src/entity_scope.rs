@@ -444,7 +444,7 @@ struct DirectSource {
 }
 
 /// Owner of the table of [`DIRECT_COLLECTIONS`]; each table is in `DURABLE_TABLES`.
-const DIRECT_SOURCES: [DirectSource; 17] = [
+const DIRECT_SOURCES: [DirectSource; 18] = [
     DirectSource {
         table: "runtime_plans",
         collections: &["plan"],
@@ -517,6 +517,11 @@ const DIRECT_SOURCES: [DirectSource; 17] = [
         table: "user_terminals",
         collections: &["terminal"],
     },
+    // The agents with a queue; `publish_queue` keeps the window.
+    DirectSource {
+        table: durable_seq::QUEUE_WINDOW,
+        collections: &["queue"],
+    },
 ];
 
 /// Observation tables: a row's `record` is `{"collection","id","value"}`; the document is
@@ -531,7 +536,11 @@ const OBSERVATION_SOURCES: [&str; 6] = [
 ];
 
 /// Direct sources that are `durable_rows` names of derived documents, not tables.
-const MARK_SOURCES: [&str; 2] = [durable_seq::CHAT_VIEW_MARK, durable_seq::PEER_TEAM_WINDOW];
+const MARK_SOURCES: [&str; 3] = [
+    durable_seq::CHAT_VIEW_MARK,
+    durable_seq::PEER_TEAM_WINDOW,
+    durable_seq::QUEUE_WINDOW,
+];
 
 /// The table of mirrored peer projects; their ids start with [`PEER_PROJECT_PREFIX`].
 const PEER_PROJECTS: &str = "peer_projects";
@@ -618,6 +627,15 @@ fn direct_docs(
             } else if !snapshot {
                 rows.extend(tombstones(&[collection], wanted, id, seq));
             }
+        }
+        return Ok(rows);
+    }
+    if table == durable_seq::QUEUE_WINDOW {
+        match crate::queue_write::queue_document(connection, id)? {
+            Some(value) if wanted.contains("queue") => rows.push(upsert("queue", id, seq, value)?),
+            Some(_) => {}
+            None if !snapshot => rows.extend(tombstones(&["queue"], wanted, id, seq)),
+            None => {}
         }
         return Ok(rows);
     }

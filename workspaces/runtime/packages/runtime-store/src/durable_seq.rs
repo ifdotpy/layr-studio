@@ -302,6 +302,10 @@ pub const MONITOR_WINDOW: &str = "monitor_window";
 /// out when it is no longer visible. Its documents are built at read time.
 pub const PEER_TEAM_WINDOW: &str = "peer_team_window";
 
+/// The `durable_rows` window of the agents with a queue: `publish_queue` (runtime-services)
+/// numbers an agent when its queue revision changes. Its documents are built at read time.
+pub const QUEUE_WINDOW: &str = "queue_window";
+
 /// Put `id` in window `tbl`. An id already in it keeps its number.
 pub fn join_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
     let changed = connection.execute(
@@ -326,6 +330,41 @@ pub fn leave_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult
         rusqlite::params![tbl, id],
     )?;
     Ok(changed > 0)
+}
+
+/// `sync_entity_meta` key of the view hash that `id` in window `tbl` was last numbered with.
+pub fn window_hash_key(tbl: &str, id: &str) -> String {
+    format!("window_view:{tbl}:{id}")
+}
+
+/// Keep `id` in window `tbl` with the current hash of its read-time view, or take it out
+/// when it has no view. A member takes a new number only when its view changed, so a
+/// writer may call this on every source write. Returns whether readers must read it again.
+pub fn set_window_view(
+    connection: &Connection,
+    tbl: &str,
+    id: &str,
+    view_hash: Option<&str>,
+) -> StoreResult<bool> {
+    let key = window_hash_key(tbl, id);
+    let Some(hash) = view_hash else {
+        connection.execute("DELETE FROM sync_entity_meta WHERE key=?1", [&key])?;
+        return leave_window(connection, tbl, id);
+    };
+    let stored: Option<String> = connection
+        .prepare_cached("SELECT value FROM sync_entity_meta WHERE key=?1")?
+        .query_row([&key], |row| row.get(0))
+        .optional()?;
+    if stored.as_deref() == Some(hash) && in_window(connection, tbl, id)? {
+        return Ok(false);
+    }
+    mark(connection, tbl, id)?;
+    connection.execute(
+        "INSERT INTO sync_entity_meta(key,value) VALUES(?1,?2)
+         ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        rusqlite::params![key, hash],
+    )?;
+    Ok(true)
 }
 
 /// The ids in window `tbl`.

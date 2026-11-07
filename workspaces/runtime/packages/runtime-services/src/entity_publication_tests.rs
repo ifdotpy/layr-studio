@@ -1073,6 +1073,57 @@ async fn agent_projections_fresh_seed_and_upgrade_marker_are_complete() {
 }
 
 #[tokio::test]
+async fn queue_migration_preserves_deletes_for_a_disconnected_client() {
+    assert_migrated_delete("queue").await;
+}
+
+#[tokio::test]
+async fn peer_team_migration_preserves_deletes_for_a_disconnected_client() {
+    assert_migrated_delete("peerTeam").await;
+}
+
+async fn assert_migrated_delete(collection: &'static str) {
+    let (_dir, store) = store().await;
+    let cursor = store
+        .transaction(move |tx| {
+            let cursor = studio_runtime_store::durable_seq::high_and_floor(tx)?.0 + 1;
+            tx.execute(
+                "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
+                 VALUES(?1,'deleted-before-upgrade',?2,'',NULL,1)",
+                rusqlite::params![collection, cursor + 1],
+            )?;
+            match collection {
+                "queue" => studio_runtime_store::migrations::migrate_queues_to_window(tx)?,
+                "peerTeam" => studio_runtime_store::migrations::migrate_peer_teams_to_window(tx)?,
+                _ => unreachable!("migration fixture"),
+            }
+            Ok(cursor)
+        })
+        .await
+        .expect("legacy delete and migration");
+    let collections = json!([collection]).to_string();
+    let page = store
+        .test_read_transaction(|tx| {
+            crate::entity_scope::resume(tx, Some(cursor), Some(&collections), None, None, true, 512)
+        })
+        .expect("reconnect after migration");
+    assert!(
+        page.reset
+            || page
+                .rows
+                .iter()
+                .any(|row| row.id == "deleted-before-upgrade" && row.deleted),
+        "{collection}: the client must receive the delete or a replacement snapshot"
+    );
+    assert!(
+        !page
+            .rows
+            .iter()
+            .any(|row| row.id == "deleted-before-upgrade" && !row.deleted)
+    );
+}
+
+#[tokio::test]
 async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
@@ -1081,8 +1132,17 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
         "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES(?1,?2,'user','Input','pending',1,1)",
         vec!["upgrade-receipt".into(), CHAT.into()],
     ).await;
-    store.transaction(|tx| {
-        tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.items[0].status','pending') WHERE collection='queue' AND id=?1", [CHAT])?;
+    let (_, mut legacy_queue) = client_entity(&store, "queue", CHAT).expect("queue");
+    legacy_queue["items"][0]["status"] = json!("pending");
+    store.transaction(move |tx| {
+        let high = studio_runtime_store::durable_seq::high_and_floor(tx)?.0;
+        let payload = json!({"collection":"queue","id":CHAT,"value":legacy_queue});
+        tx.execute(
+            "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('queue',?1,?2,'legacy',?3,0)",
+            rusqlite::params![CHAT, high + 1, payload.to_string()],
+        )?;
+        // Before the read-time migration, only the copy existed.
+        tx.execute("DELETE FROM durable_rows WHERE tbl='queue_window' AND id=?1", [CHAT])?;
         Ok(())
     }).await.expect("install legacy projection");
     let before = store
@@ -1120,21 +1180,22 @@ async fn message_send_projection_upgrade_rebuilds_receipts_and_queues() {
             .test_read_transaction(|tx| crate::sync_policy::has_complete_entity_seed(tx))
             .expect("seed complete")
     );
-    // Receipts are built at read time; only the queue keeps a copy.
+    // Both receipts and queues are built at read time after the upgrade.
     {
         let (collection, id) = ("queue", CHAT);
-        let (sequence, payload) = store
+        let sequence = store
             .test_read_transaction(|tx| {
                 tx.query_row(
-                    "SELECT seq,payload FROM sync_entities WHERE collection=?1 AND id=?2",
-                    [collection, id],
-                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                    "SELECT seq FROM durable_rows WHERE tbl='queue_window' AND id=?1 AND deleted=0",
+                    [id],
+                    |row| row.get::<_, i64>(0),
                 )
                 .map_err(Into::into)
             })
             .expect("rebuilt entity");
         assert!(sequence > before);
-        assert!(!payload.contains("\"pending\""));
+        let (_, view) = client_entity(&store, collection, id).expect("rebuilt queue");
+        assert_eq!(view["items"][0]["status"], "queued");
     }
     assert_eq!(
         client_entity(&store, "messageReceipt", "upgrade-receipt")
