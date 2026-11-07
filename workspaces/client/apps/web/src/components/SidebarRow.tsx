@@ -1,52 +1,17 @@
-import {
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  type FormEvent,
-  type HTMLAttributes,
-} from "react";
-import {
-  ActionIcon,
-  Button,
-  Menu,
-  TextInput,
-  UnstyledButton,
-} from "@mantine/core";
-import {
-  Archive,
-  ArchiveRestore,
-  Folder,
-  FolderOpen,
-  Mail,
-  MoreHorizontal,
-  Pencil,
-  Pin,
-  PinOff,
-  Trash2,
-  WifiOff,
-} from "lucide-react";
+import { useLayoutEffect, useMemo, useRef, type HTMLAttributes } from "react";
 import { observer } from "mobx-react-lite";
 import type { SidebarChatRow } from "../generated/observableResources.ts";
-import { ChatOperationalKind, MarkUnreadEligibility } from "../generated/api.ts";
-import ChatStatus from "./agents/ChatStatus";
-import { offlineServerDescription } from "../servers/ProjectChatRows";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
-import LayrCopyProgress from "./sidebar/LayrCopyProgress";
+import {
+  ChatTitle,
+  ChatIndicator,
+  ChatCopyProgress,
+} from "./chat-row/index.ts";
+import { ChatRowActionMenu } from "./chat-row/ChatRowActions.tsx";
+import type { ChatRowActions as Actions } from "./chat-row/actions.ts";
+import { ChatRowShell, ChatRowButton } from "./chat-row/ChatRowShell.tsx";
+import { ChatRowMeta } from "./chat-row/ChatRowMeta.tsx";
 
-type Actions = {
-  prepare: () => void;
-  open: () => void;
-  pin: () => void;
-  rename: (event: FormEvent) => void;
-  name: (value: string) => void;
-  cancelRename: () => void;
-  beginRename: () => void;
-  unread: () => void;
-  move: () => void;
-  changeProject: () => void;
-  archive: () => void;
-  remove: () => void;
-};
 type Bindings = HTMLAttributes<HTMLElement> & {
   "data-folder-drop"?: string | undefined;
   "data-sidebar-group"?: string | undefined;
@@ -161,203 +126,43 @@ const SidebarRowView = observer(function SidebarRowView({
   actions,
 }: Omit<Props, "bindings"> & { bindingValues: Bindings; events: Bindings }) {
   reportPromptComposerRender("sidebar-row", row.id);
-  const a = row;
-  const target = row.markRead;
-  const reading = pendingRead && target &&
-    pendingRead.threadId === target.threadId && pendingRead.turnId === target.turnId && pendingRead.revision === target.revision;
-  const indicator = reading && row.indicator.kind === ChatOperationalKind.unread
-    ? { kind: ChatOperationalKind.none, label: "Read" }
-    : row.indicator;
-  const unreadHelp = markingRead ? "The read status is changing." : markUnreadHelp(row.markUnread);
-  const offlineDescription = serverOffline
-    ? offlineServerDescription(serverAlias)
-    : undefined;
-  const chatRow = (
-    <UnstyledButton
-      {...bindingValues}
-      {...events}
-      title={row.name ?? undefined}
-      aria-description={[
-        "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",
-        offlineDescription,
-        indicator?.label,
-      ]
-        .filter(Boolean)
-        .join(" ")}
-      className="chat-row"
-      data-chat={row.id}
-      onPointerEnter={() => actions.prepare()}
-      onFocus={() => actions.prepare()}
-      onPointerDown={() => actions.prepare()}
-      onClick={() => actions.open()}
-      aria-current={selected}
-    >
-      <span className="row-copy">
-        <span className="fleet-chat-heading">
-          <ChatStatus
-            status={indicator}
-            provider={a.provider ?? undefined}
-            model={a.model ?? undefined}
-          />
-          <strong>
-            {(pinned ?? a.pinned) && <Pin size={11} className="chat-pin" />}
-            {row.name ?? ""}
-          </strong>
-        </span>
-        {row.copyProgress && <LayrCopyProgress progress={row.copyProgress} />}
-        {(showServer || serverOffline || row.waitingForLead) && (
-          <span className="fleet-chat-meta">
-            {(showServer || serverOffline) && (
-              <span
-                className="fleet-server-badge"
-                data-offline={serverOffline || undefined}
-                title={offlineDescription || serverAlias}
-                aria-label={
-                  serverOffline ? offlineDescription : `Server ${serverAlias}`
-                }
-              >
-                {serverOffline && <WifiOff size="1em" aria-hidden="true" />}
-                {showServer ? serverAlias : "Offline"}
-              </span>
-            )}
-            {row.waitingForLead && (
-              <span className="agent-stall" role="status">
-                Waiting for lead
-              </span>
-            )}
-          </span>
-        )}
-      </span>
-    </UnstyledButton>
-  );
   return (
-    <div
-      className={`sidebar-row fleet-strip lead-row ${selected ? "selected" : ""}`}
-      data-sidebar-item={row.id}
-      data-studio-state={indicator?.kind || "none"}
-    >
-      {chatRow}
-      {renaming ? (
-        <form className="inline-rename" onSubmit={(e) => actions.rename(e)}>
-          <TextInput
-            aria-label="Chat name"
-            value={name}
-            onChange={(e) => actions.name(e.target.value)}
-            autoFocus
-            maxLength={80}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") actions.cancelRename();
-            }}
+    <ChatRowShell row={row} selected={selected} pendingRead={pendingRead}>
+      <ChatRowButton
+        row={row}
+        selected={selected}
+        pendingRead={pendingRead}
+        serverOffline={serverOffline}
+        serverAlias={serverAlias}
+        bindings={bindingValues}
+        events={events}
+        actions={actions}
+      >
+        <span className="row-copy">
+          <span className="fleet-chat-heading">
+            <ChatIndicator row={row} pendingRead={pendingRead} />
+            <ChatTitle row={row} pinned={pinned} />
+          </span>
+          <ChatCopyProgress row={row} />
+          <ChatRowMeta
+            row={row}
+            showServer={showServer}
+            serverOffline={serverOffline}
+            serverAlias={serverAlias}
           />
-          <Button type="submit" aria-label="Save name" disabled={disabled}>
-            Save
-          </Button>
-          <Button onClick={() => actions.cancelRename()}>Cancel</Button>
-        </form>
-      ) : (
-        <Menu position="bottom-end" withinPortal shadow="lg" width={220}>
-          <Menu.Target>
-            <ActionIcon
-              className="row-actions"
-              aria-label={`Actions for ${row.name}`}
-            >
-              <MoreHorizontal size={16} />
-            </ActionIcon>
-          </Menu.Target>
-          <Menu.Dropdown className="fleet-menu">
-            <Menu.Item
-              disabled={disabled}
-              leftSection={<Pencil size={14} />}
-              onClick={actions.beginRename}
-            >
-              Rename
-            </Menu.Item>
-            <Menu.Divider />
-            <Menu.Item
-              leftSection={<Mail size={14} />}
-              aria-label="Mark unread"
-              disabled={
-                disabled ||
-                a.markUnread !== MarkUnreadEligibility.allowed ||
-                markingRead
-              }
-              onClick={() => actions.unread()}
-            >
-              Mark unread
-              {unreadHelp && (
-                <small className="menu-action-help">
-                  {unreadHelp}
-                </small>
-              )}
-            </Menu.Item>
-            {a && (
-              <>
-                <Menu.Item
-                  disabled={disabled || organizing}
-                  leftSection={
-                    (pinned ?? a.pinned) ? <PinOff size={14} /> : <Pin size={14} />
-                  }
-                  onClick={() => actions.pin()}
-                >
-                  {(pinned ?? a.pinned) ? "Unpin" : "Pin"}
-                </Menu.Item>
-                <Menu.Divider />
-                {a.projectPath && (
-                  <Menu.Item
-                    disabled={disabled}
-                    leftSection={<Folder size={14} />}
-                    onClick={actions.move}
-                  >
-                    Move to folder
-                  </Menu.Item>
-                )}
-                {!compact && (
-                  <Menu.Item
-                    leftSection={<FolderOpen size={14} />}
-                    disabled={disabled || !a.canChangeProject}
-                    onClick={() => actions.changeProject()}
-                  >
-                    Change project directory
-                  </Menu.Item>
-                )}
-                <Menu.Divider />
-                <Menu.Item
-                  leftSection={
-                    a.archived ? (
-                      <ArchiveRestore size={14} />
-                    ) : (
-                      <Archive size={14} />
-                    )
-                  }
-                  disabled={disabled || !a.canArchive}
-                  onClick={() => actions.archive()}
-                >
-                  {a.archived ? "Restore chat" : "Archive"}
-                </Menu.Item>
-                <Menu.Divider />
-              </>
-            )}
-            <Menu.Item
-              disabled={disabled}
-              color="red"
-              leftSection={<Trash2 size={14} />}
-              onClick={() => actions.remove()}
-            >
-              Delete
-            </Menu.Item>
-          </Menu.Dropdown>
-        </Menu>
-      )}
-    </div>
+        </span>
+      </ChatRowButton>
+      <ChatRowActionMenu
+        row={row}
+        pinned={pinned}
+        renaming={renaming}
+        name={name}
+        disabled={disabled}
+        organizing={organizing}
+        compact={compact}
+        markingRead={markingRead}
+        actions={actions}
+      />
+    </ChatRowShell>
   );
 });
-
-function markUnreadHelp(eligibility: SidebarChatRow["markUnread"]): string | null {
-  switch (eligibility) {
-    case MarkUnreadEligibility.allowed: return null;
-    case MarkUnreadEligibility.unsupported: return "Read status is unavailable for this chat.";
-    case MarkUnreadEligibility.no_completed_result: return "Available after an answer.";
-    case MarkUnreadEligibility.already_unread: return "This answer is already unread.";
-  }
-  return eligibility satisfies never;
-}

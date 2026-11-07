@@ -4,7 +4,11 @@ import type { SidebarChatRow } from "../../generated/observableResources.ts";
 import ChatStatus from "../agents/ChatStatus.tsx";
 import { displayedIndicator, type IndicatorRow } from "./indicator.ts";
 
-export const ChatIndicator = observer(function ChatIndicator({row, model, pendingRead}: {
+export const ChatIndicator = observer(function ChatIndicator({
+  row,
+  model,
+  pendingRead,
+}: {
   row: IndicatorRow;
   model?: string | undefined;
   pendingRead?: SidebarChatRow["markRead"] | undefined;
@@ -20,7 +24,13 @@ export const ChatIndicator = observer(function ChatIndicator({row, model, pendin
     case ChatOperationalKind.unread:
     case ChatOperationalKind.answer:
     case ChatOperationalKind.error:
-      return <ChatStatus status={{kind, label: status.label}} provider={row.provider} model={model ?? row.model ?? undefined} />;
+      return (
+        <ChatStatus
+          status={{ kind, label: status.label }}
+          provider={row.provider}
+          model={model ?? row.model ?? undefined}
+        />
+      );
   }
   return kind satisfies never;
 });

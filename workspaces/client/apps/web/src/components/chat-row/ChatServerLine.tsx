@@ -56,4 +56,3 @@ export const ChatServerLine = observer(function ChatServerLine({
 export function offlineServerDescription(alias: string) {
   return `${alias} is unreachable. Showing the last known state.`;
 }
-
