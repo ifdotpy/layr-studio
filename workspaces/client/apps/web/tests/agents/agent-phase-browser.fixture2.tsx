@@ -4,10 +4,9 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
 import ChatStatus from "../../src/components/agents/ChatStatus.tsx";
-import {
-  chatWaitState,
-  chatIndicators,
-} from "../../src/components/chat-status/chatStatusModel.ts";
+import { chatWaitState } from "../../src/components/chat-status/chatStatusModel.ts";
+import { formatOperationalStatus } from "../../src/status/operationalStatus.ts";
+import type { components } from "../../src/generated/api.ts";
 import type {
   Agent,
   BackgroundTask,
@@ -68,9 +67,14 @@ window.monitor = (i) => ({
   epoch: 2,
 });
 export type PhaseSnapshot = Pick<Snapshot, "threads"> & {
+  operationalStatus: components["schemas"]["AgentOperationalStatus"];
   runtime: Pick<Snapshot["runtime"], "requests" | "tasks" | "monitors">;
 };
 const initial: PhaseSnapshot = {
+  operationalStatus: {
+    reason: "waiting",
+    wait: { agents: 2, commands: 0, monitors: 0, inputs: 0, event: null },
+  },
   threads: [lead, window.worker(1), window.worker(2)],
   runtime: { requests: [], tasks: [], monitors: [] },
 };
@@ -84,7 +88,7 @@ function Fixture() {
   const agent = data.threads[0]!;
   const full = phaseSnapshot(data);
   const wait = chatWaitState(full, agent);
-  const indicator = chatIndicators(full).get(agent.id);
+  const indicator = formatOperationalStatus(data.operationalStatus);
   return (
     <main style={{ width: "100%", padding: 16, marginTop: 260 }}>
       <div id="indicator">

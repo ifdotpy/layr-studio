@@ -162,9 +162,15 @@ test("agent phase browser", async ({ page: runnerPage }) => {
     await summary.click();
     await phase.getByText("Agent: Worker 1", { exact: true }).waitFor();
     await summary.click();
-    const change = async (kind: string, count = 1) => {
+    const change = async (
+      kind: string,
+      count = 1,
+      operationalStatus: PhaseSnapshot["operationalStatus"] = {
+        reason: "turn_ended",
+      },
+    ) => {
       await page.evaluate(
-        ({ kind, count }) => {
+        ({ kind, count, operationalStatus }) => {
           const runtime: PhaseSnapshot["runtime"] = {
             tasks: [],
             monitors: [],
@@ -206,18 +212,48 @@ test("agent phase browser", async ({ page: runnerPage }) => {
             lead.status = "completed";
             runtime.monitors = [window.monitor(1)];
           }
-          window.setData({ threads, runtime });
+          window.setData({ threads, runtime, operationalStatus });
         },
-        { kind, count },
+        { kind, count, operationalStatus },
       );
     };
-    for (const kind of ["agent", "command", "monitor", "input"]) {
-      await change(kind);
+    for (const [kind, one, two] of [
+      [
+        "agent",
+        { agents: 1, commands: 0, monitors: 0, inputs: 0, event: null },
+        { agents: 2, commands: 0, monitors: 0, inputs: 0, event: null },
+      ],
+      [
+        "command",
+        { agents: 0, commands: 1, monitors: 0, inputs: 0, event: null },
+        { agents: 0, commands: 2, monitors: 0, inputs: 0, event: null },
+      ],
+      [
+        "monitor",
+        { agents: 0, commands: 0, monitors: 1, inputs: 0, event: null },
+        { agents: 0, commands: 0, monitors: 2, inputs: 0, event: null },
+      ],
+      [
+        "input",
+        { agents: 0, commands: 0, monitors: 0, inputs: 1, event: null },
+        { agents: 0, commands: 0, monitors: 0, inputs: 2, event: null },
+      ],
+    ] as const) {
+      await change(kind, 1, { reason: "waiting", wait: one });
       assert.equal(await summary.textContent(), `Waiting for 1 ${kind}`);
-      await change(kind, 2);
+      await change(kind, 2, { reason: "waiting", wait: two });
       assert.equal(await summary.textContent(), `Waiting for 2 ${kind}s`);
     }
-    await change("event");
+    await change("event", 1, {
+      reason: "waiting",
+      wait: {
+        agents: 0,
+        commands: 0,
+        monitors: 0,
+        inputs: 0,
+        event: "build-ready",
+      },
+    });
     assert.equal(await summary.textContent(), "Waiting for event build-ready");
     assert.equal(
       await page
@@ -225,14 +261,29 @@ test("agent phase browser", async ({ page: runnerPage }) => {
         .getAttribute("data-chat-status"),
       "working",
     );
-    await change("completed-monitor");
+    await change("completed-monitor", 1, {
+      reason: "waiting",
+      wait: { agents: 0, commands: 0, monitors: 1, inputs: 0, event: null },
+    });
     assert.equal(await summary.textContent(), "Waiting for 1 monitor");
     for (const width of [1280, 390, 320]) {
       await page.setViewportSize({ width, height: 900 });
-      await change("agent", 2);
+      await change("agent", 2, {
+        reason: "waiting",
+        wait: { agents: 2, commands: 0, monitors: 0, inputs: 0, event: null },
+      });
       const box = await phase.boundingBox();
       const anchor = await page.locator("#anchor").boundingBox();
-      await change("mixed");
+      await change("mixed", 1, {
+        reason: "needs_input",
+        wait: {
+          agents: 2,
+          commands: 1,
+          monitors: 1,
+          inputs: 1,
+          event: "very-long-event-name-".repeat(10),
+        },
+      });
       assert.equal((await phase.boundingBox())!.height, box!.height);
       assert.equal((await page.locator("#anchor").boundingBox())!.y, anchor!.y);
       assert(
@@ -259,7 +310,10 @@ test("agent phase browser", async ({ page: runnerPage }) => {
       );
       await page.screenshot({ path: join(evidence, `waiting-${width}.png`) });
       await summary.click();
-      await change("agent", 99);
+      await change("agent", 99, {
+        reason: "waiting",
+        wait: { agents: 99, commands: 0, monitors: 0, inputs: 0, event: null },
+      });
       assert.equal((await phase.boundingBox())!.height, box!.height);
       assert.equal((await page.locator("#anchor").boundingBox())!.y, anchor!.y);
     }
