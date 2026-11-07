@@ -61,6 +61,41 @@ pub fn models() -> Vec<ObservableModel> {
             .identity("id"),
         ObservableModel::named("RetainedWorktreeEntityDto").identity("id"),
         ObservableModel::named("MonitorEntityDto").identity("id"),
+        ObservableModel::named("RoomEntityDto")
+            .declared_fields()
+            .identity("id")
+            .track_nested(&["radio", "lastMessage"]),
+        ObservableModel::named("RoomDetailDto")
+            .declared_fields()
+            .identity("id")
+            .track_nested(&["radio"]),
+        ObservableModel::named("RoomRadio")
+            .declared_fields()
+            .track_nested(&["active", "controls"]),
+        ObservableModel::named("RoomRadioActive").opaque("identity"),
+        ObservableModel::named("RadioControls")
+            .declared_fields()
+            .omit("busyNotice"),
+        ObservableModel::named("ComplaintEntityDto").identity("id"),
+        ObservableModel::named("ComplaintDetailResponse").identity("id"),
+        ObservableModel::named("ComplaintResponseDto").identity("id"),
+        ObservableModel::named("MessageReceiptEntityDto").identity("id"),
+        ObservableModel::named("QueueEntityDto"),
+        ObservableModel::named("QueueItem").identity("id"),
+        ObservableModel::named("ChatRead").declared_fields(),
+        ObservableModel::named("ChatMessage")
+            .identity("id")
+            .opaque("deliveries"),
+        ObservableModel::named("MessageRecord")
+            .identity("id")
+            .opaque("deliveries"),
+        ObservableModel::named("AnalyticsTurnRecord")
+            .declared_fields()
+            .track_nested(&[]),
+        ObservableModel::named("TranscriptItemResponse")
+            .declared_fields()
+            .identity("id")
+            .track_nested(&["inputs"]),
         ObservableModel::named("TranscriptData"),
         ObservableModel::named("TranscriptMessageRecord")
             .declared_fields()
@@ -70,6 +105,7 @@ pub fn models() -> Vec<ObservableModel> {
             .opaque("nativeError")
             .opaque("previousError"),
         ObservableModel::named("TranscriptInput")
+            .identity_or_index("id")
             .declared_fields()
             .track_nested(&[]),
         ObservableModel::named("PeerTeamEntityDto").identity("id"),
@@ -89,6 +125,14 @@ pub fn resources() -> Vec<ObservableResource> {
                 ObservableCollection::named("project", "projects", "ProjectEntityDto"),
                 ObservableCollection::named("peerTeam", "peerTeams", "PeerTeamEntityDto"),
                 ObservableCollection::named("workspace", "workspaces", "WorkspaceEntityDto"),
+                ObservableCollection::named("room", "rooms", "RoomEntityDto"),
+                ObservableCollection::named("complaint", "complaints", "ComplaintEntityDto"),
+                ObservableCollection::named(
+                    "messageReceipt",
+                    "messageReceipts",
+                    "MessageReceiptEntityDto",
+                ),
+                ObservableCollection::named("queue", "queues", "QueueEntityDto"),
                 ObservableCollection::of::<crate::agent_tail::AgentTail>("agentTail", "agentTail"),
             ],
         ),
@@ -190,6 +234,29 @@ pub fn resources() -> Vec<ObservableResource> {
             }],
         ),
         ObservableResource::mapped(
+            "room",
+            "room",
+            vec![
+                ObservableArg {
+                    name: "roomId".into(),
+                    brand: "RoomId".into(),
+                },
+                ObservableArg {
+                    name: "legacy".into(),
+                    brand: "RoomLegacy".into(),
+                },
+            ],
+        ),
+        ObservableResource::named(
+            "complaint",
+            "complaint",
+            "ComplaintDetailResponse",
+            vec![ObservableArg {
+                name: "complaintId".into(),
+                brand: "ComplaintId".into(),
+            }],
+        ),
+        ObservableResource::mapped(
             "transcript",
             "transcript",
             vec![
@@ -203,6 +270,10 @@ pub fn resources() -> Vec<ObservableResource> {
                 },
             ],
         ),
+        ObservableResource::mirror("TextBlobResponse", "textBlob"),
+        ObservableResource::mirror("ResourceLiveDeltaEvent", "liveDelta"),
+        ObservableResource::mirror("TranscriptItemResponse", "transcriptItem"),
+        ObservableResource::mirror("AnalyticsTurnRecord", "turnError"),
     ]
 }
 
@@ -229,7 +300,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 14);
+        assert_eq!(resources.len(), 20);
         assert_eq!(resources[0].kind, "state");
         assert_eq!(
             resources[0]
@@ -242,6 +313,10 @@ mod tests {
                 "project",
                 "peerTeam",
                 "workspace",
+                "room",
+                "complaint",
+                "messageReceipt",
+                "queue",
                 "agentTail"
             ]
         );

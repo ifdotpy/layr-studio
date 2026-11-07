@@ -16,6 +16,8 @@ pub use inventory::render_entity_collections;
 pub struct ObservableModel {
     pub(crate) schema: String,
     pub identity: Option<String>,
+    pub optional_identity: bool,
+    pub omitted: Vec<String>,
     pub keyed_by: Vec<String>,
     pub opaque: Vec<String>,
     /// When selected, nested fields outside this list remain frozen plain refs.
@@ -33,6 +35,8 @@ impl ObservableModel {
         Self {
             schema: schema.into(),
             identity: None,
+            optional_identity: false,
+            omitted: vec![],
             keyed_by: vec![],
             opaque: vec![],
             tracked_nested: None,
@@ -42,6 +46,17 @@ impl ObservableModel {
     }
     pub fn identity(mut self, field: &str) -> Self {
         self.identity = Some(field.into());
+        self
+    }
+    /// Use supplied ids; legacy entries without an id retain their array position identity.
+    pub fn identity_or_index(mut self, field: &str) -> Self {
+        self.identity = Some(field.into());
+        self.optional_identity = true;
+        self
+    }
+    /// Exclude an existing presentation field from the declared domain projection.
+    pub fn omit(mut self, field: &str) -> Self {
+        self.omitted.push(field.into());
         self
     }
     /// Required string paths that jointly identify a tagged union entry.
@@ -84,6 +99,7 @@ pub struct ObservableResource {
     pub collections: Vec<ObservableCollection>,
     pub(crate) mapped: bool,
     pub(crate) opaque: bool,
+    pub(crate) mirror_only: bool,
 }
 
 /// Select one existing tagged payload variant as a keyed readonly collection.
@@ -106,6 +122,12 @@ impl ObservableCollection {
     }
 }
 impl ObservableResource {
+    /// Project an existing one-shot response without inventing a subscription resource.
+    pub fn mirror(schema: &str, facade: &str) -> Self {
+        let mut resource = Self::named(facade, facade, schema, vec![]);
+        resource.mirror_only = true;
+        resource
+    }
     /// Read the response shape from SubscriptionDataMap, including array and union roots.
     pub fn mapped(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
         let mut chars = facade.chars();
@@ -122,6 +144,7 @@ impl ObservableResource {
             collections: vec![],
             mapped: true,
             opaque: false,
+            mirror_only: false,
         }
     }
     /// Explicit boundary for an existing open or untagged JSON transport value.
@@ -138,6 +161,7 @@ impl ObservableResource {
             collections: vec![],
             mapped: false,
             opaque: false,
+            mirror_only: false,
         }
     }
     pub fn of<T: JsonSchema>(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
@@ -149,6 +173,7 @@ impl ObservableResource {
             collections: vec![],
             mapped: false,
             opaque: false,
+            mirror_only: false,
         }
     }
     /// Adapt an existing singleton array resource; unselected variants remain outside this store.
@@ -166,6 +191,7 @@ impl ObservableResource {
             collections,
             mapped: false,
             opaque: false,
+            mirror_only: false,
         }
     }
 }

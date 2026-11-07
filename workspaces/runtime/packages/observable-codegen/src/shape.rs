@@ -9,6 +9,11 @@ pub(crate) enum Shape {
     Object(String),
     Array(Box<Shape>),
     Nullable(Box<Shape>),
+    ArrayOrObject {
+        array: Box<Shape>,
+        object: Box<Shape>,
+        dto: String,
+    },
     Union {
         name: String,
         dto: String,
@@ -29,6 +34,7 @@ pub(crate) struct Model {
     pub dto: String,
     pub fields: Vec<Field>,
     pub identity: Option<String>,
+    pub optional_identity: bool,
     pub ordered_by: Option<String>,
 }
 pub(crate) struct Parser<'a> {
@@ -83,7 +89,7 @@ impl<'a> Parser<'a> {
                 &if local {
                     dto.into()
                 } else {
-                    format!("DeepReadonly<components['schemas'][{}]>", quote(target))
+                    crate::emit::readonly_dto(target, self.metadata)
                 },
                 reference,
             );
@@ -164,6 +170,42 @@ impl<'a> Parser<'a> {
                     }
                 }
                 return Ok(Shape::Leaf);
+            }
+            if variants.len() == 2 {
+                let left = crate::metadata::resolve_variant(
+                    self.document,
+                    &variants[0],
+                    path,
+                    UnsupportedShape::Union,
+                )?;
+                let right = crate::metadata::resolve_variant(
+                    self.document,
+                    &variants[1],
+                    path,
+                    UnsupportedShape::Union,
+                )?;
+                let pair = match (left["type"].as_str(), right["type"].as_str()) {
+                    (Some("array"), Some("object")) => Some((0, 1)),
+                    (Some("object"), Some("array")) => Some((1, 0)),
+                    _ => None,
+                };
+                if let Some((a, o)) = pair {
+                    return Ok(Shape::ArrayOrObject {
+                        dto: dto.into(),
+                        array: Box::new(self.parse(
+                            &variants[a],
+                            &format!("{name}Array"),
+                            &format!("Extract<{dto}, readonly unknown[]>"),
+                            path,
+                        )?),
+                        object: Box::new(self.parse(
+                            &variants[o],
+                            &format!("{name}Object"),
+                            &format!("Exclude<{dto}, readonly unknown[]>"),
+                            path,
+                        )?),
+                    });
+                }
             }
             let properties = variants
                 .first()
@@ -310,6 +352,7 @@ impl<'a> Parser<'a> {
                         .identity
                         .iter()
                         .chain(meta.opaque.iter())
+                        .chain(meta.omitted.iter())
                         .chain(meta.tracked_nested.iter().flatten())
                         .chain(meta.ordered_by.iter())
                     {
@@ -321,9 +364,15 @@ impl<'a> Parser<'a> {
                         }
                     }
                 }
+                if meta.is_some_and(|m| !m.omitted.is_empty() && !m.declared_fields) {
+                    return Err(fail(path, UnsupportedShape::Shape));
+                }
                 self.visiting.insert(name.into());
                 let mut fields = vec![];
                 for (field, value) in props {
+                    if meta.is_some_and(|m| m.omitted.contains(field)) {
+                        continue;
+                    }
                     let field_path = format!("{path}/properties/{field}");
                     identifier(&format!("field_{field}"), &field_path)?;
                     if ["constructor", "__proto__", "prototype", "apply"].contains(&field.as_str())
@@ -373,8 +422,19 @@ impl<'a> Parser<'a> {
                 }
                 let identity = meta.and_then(|m| m.identity.clone());
                 if let Some(id) = &identity
+                    && !meta.is_some_and(|m| m.optional_identity)
                     && (props[id]["type"] != "string"
                         || fields.iter().any(|f| f.name == *id && f.optional))
+                {
+                    return Err(fail(
+                        &format!("{path}/properties/{id}"),
+                        UnsupportedShape::Identity,
+                    ));
+                }
+                if let Some(id) = &identity
+                    && meta.is_some_and(|m| m.optional_identity)
+                    && nullable_base(&props[id]).unwrap_or_else(|| props[id].clone())["type"]
+                        != "string"
                 {
                     return Err(fail(
                         &format!("{path}/properties/{id}"),
@@ -389,6 +449,7 @@ impl<'a> Parser<'a> {
                         dto: dto.into(),
                         fields,
                         identity,
+                        optional_identity: meta.is_some_and(|m| m.optional_identity),
                         ordered_by: meta.and_then(|m| m.ordered_by.clone()),
                     },
                 );

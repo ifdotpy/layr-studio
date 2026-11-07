@@ -57,10 +57,7 @@ pub(crate) fn parse(
         let shape = parser.parse(
             schema(document, &collection.schema)?,
             &collection.schema,
-            &format!(
-                "DeepReadonly<components['schemas'][{}]>",
-                quote(&collection.schema)
-            ),
+            &super::emit::readonly_dto(&collection.schema, parser.metadata),
             &format!("#/components/schemas/{}", collection.schema),
         )?;
         if !matches!(shape, Shape::Object(_)) {
@@ -77,7 +74,11 @@ pub(crate) fn name(resource: &ObservableResource) -> String {
         chars.as_str()
     )
 }
-pub(crate) fn emit(out: &mut String, resource: &ObservableResource) {
+pub(crate) fn emit(
+    out: &mut String,
+    resource: &ObservableResource,
+    metadata: &[crate::ObservableModel],
+) {
     let facade = &resource.facade;
     let mut chars = facade.chars();
     let name = format!(
@@ -86,13 +87,36 @@ pub(crate) fn emit(out: &mut String, resource: &ObservableResource) {
         chars.as_str()
     );
     let entity = format!("{}Entity", name.trim_end_matches("Collections"));
-    let tags = resource
-        .collections
-        .iter()
-        .map(|collection| quote(&collection.collection))
-        .collect::<Vec<_>>()
-        .join(" | ");
-    writeln!(out, "export type {entity} = DeepReadonly<Extract<components['schemas'][{}], {{ collection: {tags} }}>>;", quote(&resource.data)).expect("string");
+    let projected = resource.collections.iter().any(|collection| {
+        metadata
+            .iter()
+            .any(|m| m.schema == collection.schema && m.declared_fields)
+    });
+    if projected {
+        writeln!(
+            out,
+            "export type {entity} = {};",
+            resource
+                .collections
+                .iter()
+                .map(|collection| format!(
+                    "{{ readonly collection: {}; readonly id: string; readonly value: {} }}",
+                    quote(&collection.collection),
+                    super::emit::readonly_dto(&collection.schema, metadata)
+                ))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        )
+        .expect("string");
+    } else {
+        let tags = resource
+            .collections
+            .iter()
+            .map(|collection| quote(&collection.collection))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        writeln!(out, "export type {entity} = DeepReadonly<Extract<components['schemas'][{}], {{ collection: {tags} }}>>;", quote(&resource.data)).expect("string");
+    }
     writeln!(
         out,
         "export function serialize{name}(collections: {name}): readonly {entity}[] {{ const entities: {entity}[] = [];"
@@ -106,18 +130,24 @@ pub(crate) fn emit(out: &mut String, resource: &ObservableResource) {
     for collection in &resource.collections {
         writeln!(
             out,
-            "readonly {}: ReadonlyMap<string, DeepReadonly<components['schemas'][{}]>>;",
+            "readonly {}: ReadonlyMap<string, {}>;",
             collection.facade,
-            quote(&collection.schema)
+            super::emit::readonly_dto(&collection.schema, metadata)
         )
         .expect("string");
     }
-    writeln!(
-        out,
-        "}}\ntype {name}Dto = DeepReadonly<components['schemas'][{}][]>;\nclass {name}Model {{",
-        quote(&resource.data)
-    )
-    .expect("string");
+    let dto = if projected {
+        format!(
+            "readonly (DeepReadonly<components['schemas'][{}]> | {entity})[]",
+            quote(&resource.data)
+        )
+    } else {
+        format!(
+            "DeepReadonly<components['schemas'][{}][]>",
+            quote(&resource.data)
+        )
+    };
+    writeln!(out, "}}\ntype {name}Dto = {dto};\nclass {name}Model {{").expect("string");
     for collection in &resource.collections {
         writeln!(
             out,

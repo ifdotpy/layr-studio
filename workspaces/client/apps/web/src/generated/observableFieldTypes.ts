@@ -112,6 +112,405 @@ export type TerminalRecordFields = {
     | null
     | undefined;
 };
+export type RoomEntityDtoFields = {
+  id: components["schemas"]["RoomEntityDto"]["id"];
+  kind?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["kind"]>
+    | null
+    | undefined;
+  lastMessage?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["lastMessage"]>
+    | null
+    | undefined;
+  leadIds?: components["schemas"]["RoomEntityDto"]["leadIds"] | undefined;
+  localMembers?:
+    | components["schemas"]["RoomEntityDto"]["localMembers"]
+    | undefined;
+  members?: components["schemas"]["RoomEntityDto"]["members"] | undefined;
+  name?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["name"]>
+    | null
+    | undefined;
+  peerLabel?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["peerLabel"]>
+    | null
+    | undefined;
+  peerTeamId?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["peerTeamId"]>
+    | null
+    | undefined;
+  peerTeamName?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["peerTeamName"]>
+    | null
+    | undefined;
+  projectPath?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["projectPath"]>
+    | null
+    | undefined;
+  radio?: RoomRadioFields | null | undefined;
+  rootId?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["rootId"]>
+    | null
+    | undefined;
+  updated?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["updated"]>
+    | null
+    | undefined;
+  userHidden?:
+    | NonNullable<components["schemas"]["RoomEntityDto"]["userHidden"]>
+    | null
+    | undefined;
+};
+export type RoomDetailDtoFields = {
+  customName?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["customName"]>
+    | null
+    | undefined;
+  federated?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["federated"]>
+    | null
+    | undefined;
+  id: components["schemas"]["RoomDetailDto"]["id"];
+  kind?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["kind"]>
+    | null
+    | undefined;
+  lastMessage?:
+    | components["schemas"]["RoomDetailDto"]["lastMessage"]
+    | undefined;
+  leadIds?: components["schemas"]["RoomDetailDto"]["leadIds"] | undefined;
+  localMembers?:
+    | components["schemas"]["RoomDetailDto"]["localMembers"]
+    | undefined;
+  localParticipants?:
+    | components["schemas"]["RoomDetailDto"]["localParticipants"]
+    | undefined;
+  members?: components["schemas"]["RoomDetailDto"]["members"] | undefined;
+  name?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["name"]>
+    | null
+    | undefined;
+  peerId?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["peerId"]>
+    | null
+    | undefined;
+  peerLabel?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["peerLabel"]>
+    | null
+    | undefined;
+  peerTeamId?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["peerTeamId"]>
+    | null
+    | undefined;
+  peerTeamName?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["peerTeamName"]>
+    | null
+    | undefined;
+  projectPath?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["projectPath"]>
+    | null
+    | undefined;
+  radio?: RoomRadioFields | null | undefined;
+  remoteMembers?:
+    | components["schemas"]["RoomDetailDto"]["remoteMembers"]
+    | undefined;
+  rootId?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["rootId"]>
+    | null
+    | undefined;
+  updated?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["updated"]>
+    | null
+    | undefined;
+  userHidden?:
+    | NonNullable<components["schemas"]["RoomDetailDto"]["userHidden"]>
+    | null
+    | undefined;
+};
+export type RoomRadioFields = {
+  active: NonNullable<components["schemas"]["RoomRadio"]["active"]> | null;
+  controls: RadioControlsFields;
+  direct?:
+    | NonNullable<components["schemas"]["RoomRadio"]["direct"]>
+    | null
+    | undefined;
+  error: NonNullable<components["schemas"]["RoomRadio"]["error"]> | null;
+  next: components["schemas"]["RoomRadio"]["next"];
+  revision: components["schemas"]["RoomRadio"]["revision"];
+  seen?: components["schemas"]["RoomRadio"]["seen"] | undefined;
+  speaker: NonNullable<components["schemas"]["RoomRadio"]["speaker"]> | null;
+  status: components["schemas"]["RoomRadio"]["status"];
+  teamId: components["schemas"]["RoomRadio"]["teamId"];
+};
+export type RadioControlsFields = {
+  busy: components["schemas"]["RadioControls"]["busy"];
+  canPass: components["schemas"]["RadioControls"]["canPass"];
+  inputBlocked: components["schemas"]["RadioControls"]["inputBlocked"];
+  speaking: components["schemas"]["RadioControls"]["speaking"];
+  stopping: components["schemas"]["RadioControls"]["stopping"];
+};
+export type ChatReadFields = {
+  messages: NonNullable<
+    components["schemas"]["ChatRead"]["messages"]
+  >[number][];
+  nextAfter?:
+    | NonNullable<components["schemas"]["ChatRead"]["nextAfter"]>
+    | null
+    | undefined;
+  nextBefore?:
+    | NonNullable<components["schemas"]["ChatRead"]["nextBefore"]>
+    | null
+    | undefined;
+  room: RoomDetailDtoFields;
+};
+export type AnalyticsTurnRecordFields = {
+  accountHistory?:
+    | components["schemas"]["AnalyticsTurnRecord"]["accountHistory"]
+    | undefined;
+  accountKey?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["accountKey"]>
+    | null
+    | undefined;
+  agentId: components["schemas"]["AnalyticsTurnRecord"]["agentId"];
+  agentName?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["agentName"]>
+    | null
+    | undefined;
+  at?: components["schemas"]["AnalyticsTurnRecord"]["at"] | undefined;
+  cyberAccessProgram?:
+    | NonNullable<
+        components["schemas"]["AnalyticsTurnRecord"]["cyberAccessProgram"]
+      >
+    | null
+    | undefined;
+  daybreakEnabled?:
+    | NonNullable<
+        components["schemas"]["AnalyticsTurnRecord"]["daybreakEnabled"]
+      >
+    | null
+    | undefined;
+  durationMs?:
+    | components["schemas"]["AnalyticsTurnRecord"]["durationMs"]
+    | undefined;
+  effort?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["effort"]>
+    | null
+    | undefined;
+  error?: components["schemas"]["AnalyticsTurnRecord"]["error"] | undefined;
+  fastMode?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["fastMode"]>
+    | null
+    | undefined;
+  finishedAt?:
+    | components["schemas"]["AnalyticsTurnRecord"]["finishedAt"]
+    | undefined;
+  firstOutputAt?:
+    | components["schemas"]["AnalyticsTurnRecord"]["firstOutputAt"]
+    | undefined;
+  firstOutputDelayMs?:
+    | components["schemas"]["AnalyticsTurnRecord"]["firstOutputDelayMs"]
+    | undefined;
+  id?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["id"]>
+    | null
+    | undefined;
+  model?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["model"]>
+    | null
+    | undefined;
+  nativeDurationMs?:
+    | components["schemas"]["AnalyticsTurnRecord"]["nativeDurationMs"]
+    | undefined;
+  nativeTimeToFirstTokenMs?:
+    | components["schemas"]["AnalyticsTurnRecord"]["nativeTimeToFirstTokenMs"]
+    | undefined;
+  provider?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["provider"]>
+    | null
+    | undefined;
+  rootId?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["rootId"]>
+    | null
+    | undefined;
+  source?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["source"]>
+    | null
+    | undefined;
+  startedAt?:
+    | components["schemas"]["AnalyticsTurnRecord"]["startedAt"]
+    | undefined;
+  status: components["schemas"]["AnalyticsTurnRecord"]["status"];
+  terminalSource?:
+    | NonNullable<
+        components["schemas"]["AnalyticsTurnRecord"]["terminalSource"]
+      >
+    | null
+    | undefined;
+  threadId?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["threadId"]>
+    | null
+    | undefined;
+  turnId?:
+    | NonNullable<components["schemas"]["AnalyticsTurnRecord"]["turnId"]>
+    | null
+    | undefined;
+};
+export type TranscriptItemResponseFields = {
+  accountWide?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["accountWide"]
+      >
+    | null
+    | undefined;
+  agent?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["agent"]>
+    | null
+    | undefined;
+  assets?:
+    | components["schemas"]["TranscriptItemResponse"]["assets"]
+    | undefined;
+  at?: components["schemas"]["TranscriptItemResponse"]["at"] | undefined;
+  clientMessageId?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["clientMessageId"]
+      >
+    | null
+    | undefined;
+  cyberAccessProgram?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["cyberAccessProgram"]
+      >
+    | null
+    | undefined;
+  deliveryError?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["deliveryError"]
+      >
+    | null
+    | undefined;
+  deliveryStatus?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["deliveryStatus"]
+      >
+    | null
+    | undefined;
+  details?:
+    | components["schemas"]["TranscriptItemResponse"]["details"]
+    | undefined;
+  id: components["schemas"]["TranscriptItemResponse"]["id"];
+  inputs?: TranscriptInputFields[] | null | undefined;
+  kind?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["kind"]>
+    | null
+    | undefined;
+  materialized?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["materialized"]
+      >
+    | null
+    | undefined;
+  nativeError?:
+    | components["schemas"]["TranscriptItemResponse"]["nativeError"]
+    | undefined;
+  nativeHook?:
+    | components["schemas"]["TranscriptItemResponse"]["nativeHook"]
+    | undefined;
+  nativeHookQuiet?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["nativeHookQuiet"]
+      >
+    | null
+    | undefined;
+  nativeNotice?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["nativeNotice"]
+      >
+    | null
+    | undefined;
+  nativeReview?:
+    | components["schemas"]["TranscriptItemResponse"]["nativeReview"]
+    | undefined;
+  observedWait?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["observedWait"]
+      >
+    | null
+    | undefined;
+  pending?:
+    | components["schemas"]["TranscriptItemResponse"]["pending"]
+    | undefined;
+  phase?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["phase"]>
+    | null
+    | undefined;
+  previousError?:
+    | components["schemas"]["TranscriptItemResponse"]["previousError"]
+    | undefined;
+  reasoningMs?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["reasoningMs"]
+      >
+    | null
+    | undefined;
+  reasoningObservedAt?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["reasoningObservedAt"]
+      >
+    | null
+    | undefined;
+  reasoningSince?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["reasoningSince"]
+      >
+    | null
+    | undefined;
+  requestedDelivery?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["requestedDelivery"]
+      >
+    | null
+    | undefined;
+  role: components["schemas"]["TranscriptItemResponse"]["role"];
+  sourceId?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["sourceId"]>
+    | null
+    | undefined;
+  streaming?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["streaming"]>
+    | null
+    | undefined;
+  text: components["schemas"]["TranscriptItemResponse"]["text"];
+  threadId?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["threadId"]>
+    | null
+    | undefined;
+  title?: components["schemas"]["TranscriptItemResponse"]["title"] | undefined;
+  toolStatus?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["toolStatus"]>
+    | null
+    | undefined;
+  truncated?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["truncated"]>
+    | null
+    | undefined;
+  turnError?:
+    | components["schemas"]["TranscriptItemResponse"]["turnError"]
+    | undefined;
+  turnErrorResolved?:
+    | NonNullable<
+        components["schemas"]["TranscriptItemResponse"]["turnErrorResolved"]
+      >
+    | null
+    | undefined;
+  turnId?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["turnId"]>
+    | null
+    | undefined;
+  turnStatus?:
+    | NonNullable<components["schemas"]["TranscriptItemResponse"]["turnStatus"]>
+    | null
+    | undefined;
+};
 export type TranscriptMessageRecordFields = {
   accountWide?:
     | NonNullable<

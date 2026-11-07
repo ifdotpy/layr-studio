@@ -23,6 +23,9 @@ pub(crate) fn validate(
     document: &Value,
     resource: &ObservableResource,
 ) -> Result<(), GenerationError> {
+    if resource.mirror_only {
+        return Ok(());
+    }
     let path = format!("#/resources/{}", resource.kind);
     let data = schema(document, "SubscriptionDataMap")?;
     let data = &data["properties"][&resource.kind];

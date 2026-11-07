@@ -35,6 +35,8 @@ fn models() -> Vec<ObservableModel> {
     vec![ObservableModel {
         schema: "Row".into(),
         identity: Some("id".into()),
+        optional_identity: false,
+        omitted: vec![],
         keyed_by: vec![],
         ordered_by: Some("sortKey".into()),
         opaque: vec!["opaque".into()],
@@ -158,6 +160,7 @@ fn resources() -> Vec<ObservableResource> {
         ],
         collections: vec![],
         mapped: false,
+        mirror_only: false,
         opaque: false,
     }]
 }
@@ -578,4 +581,132 @@ fn mapped_arrays_use_declared_element_fields_without_changing_closed_lists() {
     metadata[0].declared_fields = true;
     let generated = render(&document, &metadata, &list).expect("declared-field list");
     assert!(generated.contains("export type FixtureData = ReadonlyArray<DeepReadonly<import('./observableFieldTypes.ts').RowFields>>;"));
+}
+
+fn conversation_fixture() -> Value {
+    json!({"components":{"schemas":{
+        "Input":{"type":"object","additionalProperties":false,"required":["text"],"properties":{
+            "id":{"anyOf":[{"type":"string"},{"type":"null"}]},"text":{"type":"string"},"notice":{"type":"string"}
+        }},
+        "Page":{"type":"object","additionalProperties":false,"required":["items"],"properties":{
+            "items":{"type":"array","items":{"$ref":"#/components/schemas/Input"}}
+        }},
+        "Legacy":{"type":"array","items":{"$ref":"#/components/schemas/Input"}},
+        "ResourceRef":{"oneOf":[{"type":"object","additionalProperties":false,"required":["kind"],"properties":{"kind":{"const":"room"}}}]},
+        "SubscriptionDataMap":{"type":"object","required":["room"],"properties":{"room":{"anyOf":[
+            {"$ref":"#/components/schemas/Page"},{"$ref":"#/components/schemas/Legacy"}
+        ]}}}
+    }}})
+}
+fn conversation_models() -> Vec<ObservableModel> {
+    vec![
+        ObservableModel::named("Input")
+            .declared_fields()
+            .identity_or_index("id")
+            .omit("notice"),
+    ]
+}
+
+#[test]
+fn array_object_union_mirror_observes_replaced_roots() {
+    let document = conversation_fixture();
+    let source = render(
+        &document,
+        &conversation_models(),
+        &[ObservableResource::mapped("room", "room", vec![])],
+    )
+    .expect("existing object/legacy array union");
+    assert!(source.contains("Array.isArray(dto)"));
+    assert!(
+        source.contains("observable.box<"),
+        "replaceable mirror roots must notify observers"
+    );
+    assert!(
+        source.contains("deep: false"),
+        "nested models retain identity"
+    );
+    let mut bad = document;
+    bad["components"]["schemas"]["Legacy"] = json!({"type":"object","additionalProperties":false,"properties":{"other":{"type":"string"}}});
+    assert_eq!(
+        render(
+            &bad,
+            &conversation_models(),
+            &[ObservableResource::mapped("room", "room", vec![])]
+        )
+        .expect_err("ambiguous object/object union")
+        .kind,
+        UnsupportedShape::Union
+    );
+}
+
+#[test]
+fn optional_input_identity_retains_legacy_positions_and_validates_before_mutation() {
+    let source = render(
+        &conversation_fixture(),
+        &conversation_models(),
+        &[ObservableResource::mirror("Page", "page")],
+    )
+    .expect("optional input ids");
+    assert!(source.contains("item.id == null"));
+    assert!(source.contains("JSON.stringify(['index', index])"));
+    assert!(source.contains("existing.apply(item)"));
+    assert!(
+        source.find("if (ids.has(id))").expect("duplicate guard")
+            < source.find("const next = dto.map").expect("mutation")
+    );
+    let mut bad = conversation_fixture();
+    bad["components"]["schemas"]["Input"]["properties"]["id"] = json!({"type":"number"});
+    assert_eq!(
+        render(
+            &bad,
+            &conversation_models(),
+            &[ObservableResource::mirror("Page", "page")]
+        )
+        .expect_err("numeric optional id")
+        .kind,
+        UnsupportedShape::Identity
+    );
+}
+
+#[test]
+fn omitted_presentation_fields_are_absent_from_models_and_public_field_contracts() {
+    let document = conversation_fixture();
+    let resources = [ObservableResource::mirror("Page", "page")];
+    let source = render(&document, &conversation_models(), &resources).expect("projection");
+    let fields =
+        render_fields(&document, &conversation_models(), &resources).expect("field contract");
+    assert!(!source.contains("this.notice"));
+    assert!(!fields.contains("notice:"));
+    assert!(fields.contains("text:"));
+    let bad = [ObservableModel::named("Input")
+        .declared_fields()
+        .omit("missing")];
+    assert_eq!(
+        render(&document, &bad, &resources)
+            .expect_err("unknown omitted field")
+            .kind,
+        UnsupportedShape::UnknownField
+    );
+}
+
+#[test]
+fn mirror_only_reads_require_no_subscription_contract_or_acquiring_facade() {
+    let mut document = conversation_fixture();
+    document["components"]["schemas"]
+        .as_object_mut()
+        .expect("schemas")
+        .remove("ResourceRef");
+    document["components"]["schemas"]
+        .as_object_mut()
+        .expect("schemas")
+        .remove("SubscriptionDataMap");
+    let source = render(
+        &document,
+        &conversation_models(),
+        &[ObservableResource::mirror("Page", "oneShot")],
+    )
+    .expect("one-shot existing schema");
+    assert!(source.contains("createOneShotMirror"));
+    assert!(!source.contains("oneShotSlot"));
+    assert!(!source.contains("oneShot(): ResourceSlot"));
 }

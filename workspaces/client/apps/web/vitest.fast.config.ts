@@ -55,6 +55,8 @@ export default {
       "src/store/contracts.test.ts",
       "src/store/collections.test.ts",
       "src/store/batchResources.test.ts",
+      "src/store/conversationContracts.test.ts",
+      "src/store/transcriptContracts.test.ts",
       "src/store/render.test.ts",
       "src/components/sidebar/viewModel.test.ts",
       "src/components/useChatReadState.render.test.ts",
