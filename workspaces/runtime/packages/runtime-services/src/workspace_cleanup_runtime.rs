@@ -1565,9 +1565,9 @@ impl CleanupPorts for ProductionPorts {
                     reason: "legacy image workspace",
                 }))
             }
-            // Old cleanup receipts remain readable, but no VM command can be sent.
+            // Old cleanup receipts remain readable; the virtual machine is gone.
             CleanupEffect::SaveVmTurn { .. } | CleanupEffect::ReleaseVmLine { .. } => {
-                Err(EffectFailure::NotSent)
+                Err(EffectFailure::Unavailable)
             }
             CleanupEffect::SaveWorktreeRef { identity } => {
                 save_worktree_archive_ref(identity)?;
@@ -1858,7 +1858,7 @@ mod tests {
         ] {
             assert_eq!(
                 ports.perform(&AgentRecord::from_value(json!({"id":"old","rootId":"old","epoch":1,"status":"idle","accountKey":"default"})).unwrap(), &effect, "request"),
-                Err(EffectFailure::NotSent)
+                Err(EffectFailure::Unavailable)
             );
         }
     }
