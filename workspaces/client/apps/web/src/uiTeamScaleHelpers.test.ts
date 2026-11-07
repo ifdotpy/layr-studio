@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "./servers/agentSummaryFixture.ts";
 import { AgentStatus } from "./generated/api";
 import { required } from "./components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
@@ -497,12 +498,20 @@ it("merges current summary/detail streams for owned agents and observes input ev
   state(
     "resources",
     resourceFrame([
-      upsert("agentSummary", "foreign", { rootId: "other" }),
-      upsert("agentSummary", "lead", {
-        rootId: "lead",
-        model: "gpt-6-luna",
-        status: "running",
-      }),
+      upsert(
+        "agentSummary",
+        "foreign",
+        agentSummaryFixture("foreign", { rootId: "other" }),
+      ),
+      upsert(
+        "agentSummary",
+        "lead",
+        agentSummaryFixture("lead", {
+          rootId: "lead",
+          model: "gpt-6-luna",
+          status: "running",
+        }),
+      ),
       upsert("event", "input", { agent: "lead", status: "pending" }),
     ]),
   );
@@ -536,7 +545,11 @@ it("merges current summary/detail streams for owned agents and observes input ev
   state!(
     "resources",
     resourceFrame([
-      upsert("agentSummary", "worker", { rootId: "lead", status: "running" }),
+      upsert(
+        "agentSummary",
+        "worker",
+        agentSummaryFixture("worker", { rootId: "lead", status: "running" }),
+      ),
     ]),
   );
   await pull();
@@ -573,7 +586,13 @@ it("merges current summary/detail streams for owned agents and observes input ev
 it("assembles the server's multipart entity-transfer envelope before applying documents", () => {
   const accept = vi.fn();
   const receive = createEntityFrameReader(accept);
-  const documents = [upsert("agentSummary", "lead", { model: "gpt-6-luna" })];
+  const documents = [
+    upsert(
+      "agentSummary",
+      "lead",
+      agentSummaryFixture("lead", { model: "gpt-6-luna" }),
+    ),
+  ];
   const data = JSON.stringify({ after: 1, through: 3, documents });
   const frame: Omit<
     Schemas["ResourceEntityTransferEvent"],
@@ -722,7 +741,13 @@ it("stages several transfer pages until the final complete marker and rejects mi
     data: JSON.stringify({
       after,
       through,
-      documents: [upsert("agentSummary", `worker-${index}`, {})],
+      documents: [
+        upsert(
+          "agentSummary",
+          `worker-${index}`,
+          agentSummaryFixture(`worker-${index}`, {}),
+        ),
+      ],
     }),
   });
   receive!("entity-transfer", page(0, 0, 1, false));

@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   SUBSCRIPTION_CACHE_INDEX_KEY,
@@ -135,13 +136,13 @@ it("does not save auxiliary team summaries under a tasks cursor", async () => {
       entity: {
         collection: "agentSummary",
         id: "child",
-        value: {
+        value: agentSummaryFixture("child", {
           id: "child",
           rootId: "lead",
           epoch: 1,
           name: "Child",
           status: AgentStatus.idle,
-        },
+        }),
       },
     },
   ]);
@@ -168,13 +169,13 @@ it("drops a foreign entity instead of resurrecting it under another cursor", asy
           entity: {
             collection: "agentSummary",
             id: "child",
-            value: {
+            value: agentSummaryFixture("child", {
               id: "child",
               rootId: "lead",
               epoch: 1,
               name: "Child",
               status: AgentStatus.idle,
-            },
+            }),
           },
         },
       ],
@@ -355,13 +356,13 @@ it("stores current rows and omits deleted and evicted rows", async () => {
   const entity = {
     collection: "agentSummary",
     id: "lead",
-    value: {
+    value: agentSummaryFixture("lead", {
       id: "lead",
       rootId: "lead",
       epoch: 1,
       name: "Lead",
       status: AgentStatus.idle,
-    },
+    }),
   } as const;
   cache.save(selected, cursor, [
     { id: "entity:agentSummary:lead", seq: 4, payload: "", entity },

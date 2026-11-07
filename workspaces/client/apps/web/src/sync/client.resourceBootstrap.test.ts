@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
 import { backgroundDisplay } from "../components/componentTestFixtures";
 import {
@@ -242,13 +243,13 @@ async function setup() {
               collection: "agentSummary",
               id: "lead",
               seq,
-              value: {
+              value: agentSummaryFixture("lead", {
                 id: "lead",
                 rootId: "lead",
                 epoch: 1,
                 name,
                 status: AgentStatus.idle,
-              },
+              }),
             },
           ],
         },
@@ -441,13 +442,13 @@ it("keeps the newer row when command replies arrive out of order", async () => {
     collection: "agentSummary",
     id: "lead",
     seq,
-    value: {
+    value: agentSummaryFixture("lead", {
       id: "lead",
       rootId: "lead",
       epoch: 1,
       name,
       status: AgentStatus.idle,
-    },
+    }),
   });
   await f.client.applyCommandRows([row(9, "newer")]);
   await f.client.applyCommandRows([row(4, "older")]);
@@ -619,13 +620,13 @@ it("continues an initial pull when a sequence boundary exceeds the page limit", 
                 collection: "agentSummary",
                 id: chatId,
                 seq: chatSeq,
-                value: {
+                value: agentSummaryFixture(chatId, {
                   id: chatId,
                   rootId: chatId,
                   name: "Studio and layr",
                   projectPath: "/project",
                   status: AgentStatus.completed,
-                },
+                }),
               },
               ...Array.from({ length: 500 }, (_, i) => ({
                 op: "delete",

@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 // Captured from the Rust entity transfer writer; see just regenerate-entity-server-frames.
 import coldFrames from "./entityServerFrames.fixture.json";
 import { EventHistory } from "./eventHistory.testHelper";
@@ -288,11 +289,11 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
     entity: {
       collection: "agentSummary",
       id: "stale",
-      value: {
+      value: agentSummaryFixture("stale", {
         id: "stale",
         source: AgentSource.managed,
         status: AgentStatus.idle,
-      },
+      }),
     },
   });
   const assembler = new EntityTransferAssembler(new FixtureTransferStorage());

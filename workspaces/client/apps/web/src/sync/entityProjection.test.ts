@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { LimitColor, RunwayColor } from "../generated/api";
 import { StudioErrorLevel } from "../generated/api";
 import {
@@ -39,7 +40,7 @@ it("revives a locally evicted source version without reviving authoritative tomb
     entity: {
       collection: "agentSummary",
       id: "moved",
-      value: { id: "moved", status: "idle" },
+      value: agentSummaryFixture("moved", { id: "moved", status: "idle" }),
     },
   };
   applyEntityChanges(state, [row], true);
@@ -78,8 +79,23 @@ it("retains other agents when one streamed summary or detail changes", () => {
   const first = applyEntityChanges(
     state,
     [
-      entityRow("agentSummary", "a", { id: "a", status: "idle" }, 1),
-      entityRow("agentSummary", "b", { id: "b", status: "running" }, 2),
+      entityRow(
+        "agentSummary",
+        "a",
+        agentSummaryFixture("a", { id: "a", status: "idle" }),
+        1,
+      ),
+      entityRow(
+        "agentSummary",
+        "b",
+        agentSummaryFixture("b", {
+          id: "b",
+          status: "running",
+          operationalStatus: { reason: "working" },
+          inFlight: true,
+        }),
+        2,
+      ),
     ],
     true,
   );
@@ -87,7 +103,19 @@ it("retains other agents when one streamed summary or detail changes", () => {
   const untouched = first.runtime.agents[1];
   const updated = applyEntityChanges(
     state,
-    [entityRow("agentSummary", "a", { id: "a", status: "running" }, 3)],
+    [
+      entityRow(
+        "agentSummary",
+        "a",
+        agentSummaryFixture("a", {
+          id: "a",
+          status: "running",
+          operationalStatus: { reason: "working" },
+          inFlight: true,
+        }),
+        3,
+      ),
+    ],
     true,
   );
 
@@ -152,7 +180,10 @@ it("retains other agents when one streamed summary or detail changes", () => {
 
 it("renders the list from summaries and adds detail without losing unread state", () => {
   const state = emptyEntityProjection();
-  const summary = {
+  const summary = agentSummaryFixture("a", {
+    operationalStatus: { reason: "unread_result" },
+    markRead: { threadId: "thread", turnId: "turn", read: false, revision: 1 },
+    markUnread: "already_unread",
     id: "a",
     name: "Current",
     kind: "agent",
@@ -162,7 +193,7 @@ it("renders the list from summaries and adds detail without losing unread state"
     lastCompletedTurn: "turn",
     lastCompletedTurnStatus: "completed",
     readState: { threadId: "thread", turnId: "turn", read: false, revision: 1 },
-  } satisfies Agent;
+  });
 
   const first = applyEntityRows(
     state,
@@ -773,7 +804,14 @@ it("shows the pending and answering request cards the server publishes", () => {
   );
   const unrelated = applyEntityChanges(
     state,
-    [entityRow("agentSummary", "lead", { id: "lead", status: "idle" }, 6)],
+    [
+      entityRow(
+        "agentSummary",
+        "lead",
+        agentSummaryFixture("lead", { id: "lead", status: "idle" }),
+        6,
+      ),
+    ],
     true,
   );
   assert.equal(unrelated.runtime.requests, answering.runtime.requests);
