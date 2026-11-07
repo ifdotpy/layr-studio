@@ -75,6 +75,15 @@ impl<'a> Parser<'a> {
         dto: &str,
         path: &str,
     ) -> Result<Shape, GenerationError> {
+        // Normalize the outer wrapper on every reference, including cache hits.
+        if let Some(base) = nullable_base(value) {
+            return Ok(Shape::Nullable(Box::new(self.parse(
+                &base,
+                name,
+                &format!("NonNullable<{dto}>"),
+                path,
+            )?)));
+        }
         if let Some(union) = self.unions.get(name) {
             return Ok(union.clone());
         }
@@ -84,35 +93,10 @@ impl<'a> Parser<'a> {
         if self.visiting.contains(name) {
             return Err(fail(path, UnsupportedShape::Recursive));
         }
-        // OpenAPI nullable and schemars anyOf null both preserve explicit null.
-        if value["nullable"] == true {
-            let mut base = value.clone();
-            base.as_object_mut()
-                .expect("schema object")
-                .remove("nullable");
-            return Ok(Shape::Nullable(Box::new(self.parse(
-                &base,
-                name,
-                &format!("NonNullable<{dto}>"),
-                path,
-            )?)));
-        }
         if let Some(variants) = value["anyOf"]
             .as_array()
             .or_else(|| value["oneOf"].as_array())
         {
-            if variants.len() == 2 && variants.iter().any(|v| v["type"] == "null") {
-                let base = variants
-                    .iter()
-                    .find(|v| v["type"] != "null")
-                    .expect("non-null member");
-                return Ok(Shape::Nullable(Box::new(self.parse(
-                    base,
-                    name,
-                    &format!("NonNullable<{dto}>"),
-                    path,
-                )?)));
-            }
             let properties = variants
                 .first()
                 .and_then(|v| v["properties"].as_object())
@@ -163,17 +147,7 @@ impl<'a> Parser<'a> {
             self.unions.insert(name.into(), union.clone());
             return Ok(union);
         }
-        if let Some(types) = value["type"].as_array() {
-            if types.len() == 2 && types.iter().any(|v| v == "null") {
-                let mut base = value.clone();
-                base["type"] = types.iter().find(|v| **v != "null").expect("type").clone();
-                return Ok(Shape::Nullable(Box::new(self.parse(
-                    &base,
-                    name,
-                    &format!("NonNullable<{dto}>"),
-                    path,
-                )?)));
-            }
+        if value["type"].is_array() {
             return Err(fail(path, UnsupportedShape::MixedTypes));
         }
         if ["allOf", "not", "if", "then", "else"]
@@ -305,4 +279,32 @@ fn literal(value: &Value) -> Option<String> {
                 .and_then(Value::as_str)
         })
         .map(str::to_owned)
+}
+
+fn nullable_base(value: &Value) -> Option<Value> {
+    if value["nullable"] == true {
+        let mut base = value.clone();
+        base.as_object_mut()?.remove("nullable");
+        return Some(base);
+    }
+    if let Some(variants) = value["anyOf"]
+        .as_array()
+        .or_else(|| value["oneOf"].as_array())
+        && variants.len() == 2
+        && variants.iter().any(|variant| variant["type"] == "null")
+    {
+        return variants
+            .iter()
+            .find(|variant| variant["type"] != "null")
+            .cloned();
+    }
+    if let Some(types) = value["type"].as_array()
+        && types.len() == 2
+        && types.iter().any(|ty| ty == "null")
+    {
+        let mut base = value.clone();
+        base["type"] = types.iter().find(|ty| **ty != "null")?.clone();
+        return Some(base);
+    }
+    None
 }

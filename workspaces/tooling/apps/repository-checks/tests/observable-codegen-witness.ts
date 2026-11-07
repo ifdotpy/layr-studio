@@ -123,7 +123,7 @@ void readonlyWitness;
 type Row = components['schemas']['Row'];
 type Dto = DeepReadonly<components['schemas']['List']>;
 const opaque = { payload: 'transport' };
-const row = (id: string, sortKey: string): Row => ({ id, sortKey, title: null, nested: {count: 1}, tags: ['one'], choice: { kind: 'count', count: 1 }, opaque, maybe: null, nil: null, optional: 'present' });
+const row = (id: string, sortKey: string): Row => ({ id, sortKey, title: null, nested: {count: 1}, tags: ['one'], choice: { kind: 'count', count: 1 }, opaque, maybe: null, nil: null, a:null,b:null,c:null,d:null,e:null,f:null, optional: 'present' });
 let latest: Dto = { rows: [row('b', '2'), row('a', '1')], plain: [1, 2] };
 let publish: () => void = () => { throw new Error('slot missing'); };
 let opens = 0;
@@ -172,6 +172,11 @@ let mirrorRuns=0; const stopMirror=autorun(()=>{mirror.current.rows.map(row=>[ro
 mirror.apply({rows:[row('a','1'),row('b','2')],plain:[]});assert.equal(mirrorRuns,1);
 mirror.apply({rows:[{...row('a','1'),title:'updated'},row('b','2')],plain:[]});
 assert.equal(mirror.current.rows[0],mirrorFirst);assert.equal(mirror.current.rows[1],mirrorSecond);assert.equal(mirrorFirst.title,'updated');assert.equal(mirrorRuns,2);stopMirror();
+mirror.apply({rows:[{...row('a','1'),a:{value:'a'},b:{value:'b'},c:{value:'c'},d:{value:'d'},e:{value:'e'},f:{value:'f'}}],plain:[]});
+const nullableRow=mirror.current.rows[0];assert.ok(nullableRow);
+assert.equal(nullableRow.b?.value,'b');assert.equal(nullableRow.d?.value,'d');assert.equal(nullableRow.f?.value,'f');
+mirror.apply({rows:[row('a','1')],plain:[]});
+for(const value of [nullableRow.a,nullableRow.b,nullableRow.c,nullableRow.d,nullableRow.e,nullableRow.f])assert.equal(value,null);
 // @ts-expect-error A mirror's exposed snapshot remains readonly.
 if (false) mirror.current.rows = [];
 console.log('observable generator type and behavior witnesses passed');

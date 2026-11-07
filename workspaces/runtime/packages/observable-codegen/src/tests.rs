@@ -3,12 +3,15 @@ use studio_json::json;
 
 fn fixture() -> Value {
     json!({"components":{"schemas":{
-        "Row":{"type":"object","additionalProperties":false,"required":["id","sortKey","title","nested","tags","choice","opaque","maybe","nil"],"properties":{
+        "Row":{"type":"object","additionalProperties":false,"required":["id","sortKey","title","nested","tags","choice","opaque","maybe","nil","a","b","c","d","e","f"],"properties":{
             "id":{"type":"string"},"sortKey":{"type":"string"},"title":{"type":["string","null"]},
             "nested":{"type":"object","additionalProperties":false,"required":["count"],"properties":{"count":{"type":"number"}}},
             "tags":{"type":"array","items":{"type":"string"}},
             "optional":{"type":"string"},
             "nil":{"type":"null"},
+            "a":{"$ref":"#/components/schemas/Maybe"},"b":{"$ref":"#/components/schemas/Maybe"},
+            "c":{"$ref":"#/components/schemas/FlagMaybe"},"d":{"$ref":"#/components/schemas/FlagMaybe"},
+            "e":{"$ref":"#/components/schemas/TypeMaybe"},"f":{"$ref":"#/components/schemas/TypeMaybe"},
             "maybe":{"anyOf":[{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}},{"type":"null"}]},
             "opaque":{"anyOf":[{"type":"object","additionalProperties":true},{"type":"null"}]},
             "choice":{"oneOf":[
@@ -16,6 +19,9 @@ fn fixture() -> Value {
                 {"type":"object","additionalProperties":false,"required":["kind","text"],"properties":{"kind":{"type":"string","enum":["text"]},"text":{"type":"string"}}}
             ]}
         }},
+        "Maybe":{"anyOf":[{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}},{"type":"null"}]},
+        "FlagMaybe":{"type":"object","nullable":true,"additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}},
+        "TypeMaybe":{"type":["object","null"],"additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}},
         "List":{"type":"object","additionalProperties":false,"required":["rows","plain"],"properties":{
             "rows":{"type":"array","items":{"$ref":"#/components/schemas/Row"}},
             "plain":{"type":"array","items":{"type":"number"}}
@@ -197,4 +203,54 @@ fn singleton_returns_cached_slot_before_computing_the_canonical_key() {
         .find("const key = subscriptionKey(ref)")
         .expect("canonical key");
     assert!(cached < key);
+}
+
+#[test]
+fn repeated_named_nullable_references_preserve_the_outer_shape() {
+    for name in ["Maybe", "FlagMaybe", "TypeMaybe"] {
+        let document = fixture();
+        let mut parser = crate::shape::Parser::new(&document, &[]);
+        let reference = json!({"$ref":format!("#/components/schemas/{name}")});
+        for _ in 0..2 {
+            let parsed = parser
+                .parse(&reference, name, "Dto", "#/test")
+                .expect("nullable component");
+            assert!(
+                matches!(parsed, crate::shape::Shape::Nullable(_)),
+                "{name} lost outer nullability"
+            );
+        }
+    }
+}
+
+#[test]
+fn resource_arguments_reject_generated_binding_collisions() {
+    for name in [
+        "key",
+        "ref",
+        "runtime",
+        "cached",
+        "slot",
+        "cache0",
+        "fixtureSlots",
+        "subscriptionKey",
+        "Map",
+        "ListModel",
+    ] {
+        let mut document = fixture();
+        document["components"]["schemas"]["ResourceRef"]["oneOf"][0] = json!({
+            "type":"object","additionalProperties":false,
+            "properties":{"kind":{"type":"string","const":"fixture"},name:{"type":"string"}},
+            "required":["kind",name]
+        });
+        let mut resources = resources();
+        resources[0].args = vec![ObservableArg {
+            name: name.into(),
+            brand: "AgentId".into(),
+        }];
+        let error =
+            render(&document, &models(), &resources).expect_err("generated binding collision");
+        assert_eq!(error.kind, UnsupportedShape::Identifier);
+        assert_eq!(error.path, format!("#/resources/fixture/args/{name}"));
+    }
 }

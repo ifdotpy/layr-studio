@@ -52,7 +52,24 @@ pub fn render(
     let mut brands = BTreeSet::new();
     for resource in resources {
         for arg in &resource.args {
-            identifier(&arg.name, &resource.kind)?;
+            let path = format!("#/resources/{}/args/{}", resource.kind, arg.name);
+            identifier(&arg.name, &path)?;
+            if [
+                "key",
+                "ref",
+                "cached",
+                "slot",
+                "runtime",
+                "subscriptionKey",
+                "Map",
+            ]
+            .contains(&arg.name.as_str())
+                || arg.name == format!("{}Slots", resource.facade)
+                || arg.name == format!("{}Model", resource.data)
+                || (0..resource.args.len()).any(|index| arg.name == format!("cache{index}"))
+            {
+                return Err(fail(&path, UnsupportedShape::Identifier));
+            }
             identifier(&arg.brand, &resource.kind)?;
             if brands.insert(arg.brand.clone()) {
                 let brand = &arg.brand;
