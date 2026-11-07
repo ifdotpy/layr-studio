@@ -1,8 +1,7 @@
 import { observer } from "mobx-react-lite";
 import ErrorDescription from "../ErrorDescription";
 import type { JsonValue } from "../../types";
-import { approvalParams } from "../../approvals";
-import { requestApprovalDetails, requestQuestions } from "./requestData";
+import { requestApprovalDetails } from "./requestData";
 import { requestRenderProbe, type RequestView } from "./requestActions";
 type JsonObject = Record<string, JsonValue>;
 function isJsonObject(value: unknown): value is JsonObject {
@@ -46,11 +45,9 @@ export default observer(function RequestDescription({
   const r = view.request,
     question = view.question,
     approval = !question;
-  const stdinApproval =
-    r.request.kind === "exec" && approvalParams(r).kind === "writeStdin";
   const { reason, message, command, cwd, files, permissions, url, tool } =
     requestApprovalDetails(r);
-  const questions = question ? requestQuestions(r) : [];
+  const questions = view.questions;
   requestRenderProbe("description", r.id);
   return (
     <>
@@ -76,7 +73,7 @@ export default observer(function RequestDescription({
       {!view.open && questions.length > 1 && (
         <p>{questions.length} questions</p>
       )}
-      {!stdinApproval && command !== undefined && (
+      {!view.stdinApproval && command !== undefined && (
         <pre className="request-command">{command}</pre>
       )}
       {files !== undefined && files.length > 0 && (

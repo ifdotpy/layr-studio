@@ -4,7 +4,6 @@ import { useServerStore } from "../../servers/ServerServicesContext";
 import type { Message } from "../../types";
 import {
   isPendingQuestionRequest,
-  pendingQuestionRequests,
   questionCard,
   questionHistoryIndex,
 } from "./questionCardModel";
@@ -26,16 +25,19 @@ export function useQuestionCards(agentId: string | undefined) {
                 return (owner?.rootId || entry.agent) === requests.rootId;
               })
             : [];
-        const pending = requests.familyRequests;
+        const pending = requests.familyRequests.filter(
+          isPendingQuestionRequest,
+        );
         return {
           agentId,
           history: questionHistoryIndex(entries),
-          pending: pendingQuestionRequests(pending),
-          pendingIds: new Set(
-            pending
-              .filter(isPendingQuestionRequest)
-              .map((request) => request.id),
+          pending: new Map(
+            [...questionHistoryIndex(pending)].map(([key, request]) => [
+              key,
+              request.id,
+            ]),
           ),
+          pendingIds: new Set(pending.map((request) => request.id)),
         };
       },
     });

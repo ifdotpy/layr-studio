@@ -1,12 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { MessageCircleQuestion, ShieldQuestion } from "lucide-react";
 import { useEffect } from "react";
-import {
-  approvalCreated,
-  approvalParams,
-  isAgentQuestion,
-  isDeferred,
-} from "../../approvals";
+import { approvalCreated, isAgentQuestion, isDeferred } from "../../approvals";
 import MessageDate from "../conversation/transcript/MessageDate";
 import ErrorDescription from "../ErrorDescription";
 import AnswerForm from "./AnswerForm";
@@ -36,8 +31,6 @@ const RequestStatus = observer(function RequestStatus({
     waiting = r.state.kind === "pending",
     question = view.question;
   const asynchronous = isAgentQuestion(r);
-  const stdinApproval =
-    r.request.kind === "exec" && approvalParams(r).kind === "writeStdin";
   const stateNote = {
     pending: "",
     answering: "Sending your answer",
@@ -62,7 +55,7 @@ const RequestStatus = observer(function RequestStatus({
             ? "Agent can continue"
             : question
               ? "Answer required"
-              : stdinApproval
+              : view.stdinApproval
                 ? "Terminal input approval required"
                 : "Approval required"}
     </span>

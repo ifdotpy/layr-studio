@@ -15,7 +15,7 @@ import {
 import { serverViewId } from "../../servers/environment";
 import { reportUnsentFailure, unsentStore } from "../../unsent/store";
 import { nativeThreadError } from "../../nativeErrors";
-import { approvalThreadId, isDeferred } from "../../approvals";
+import { approvalParams, approvalThreadId, isDeferred } from "../../approvals";
 import type { Json } from "../../types";
 import { createArea } from "../area";
 import { removeAnswerDraft } from "./requestDrafts";
@@ -45,22 +45,17 @@ export function RequestArea({
 }: RequestCommands & { children?: ReactNode }) {
   return <Provider value={commands}>{children}</Provider>;
 }
-export const answerKey = (scope: string, request: RequestModel) =>
+export const answerKey = (
+  scope: string,
+  request: RequestModel,
+  questions = requestQuestions(request),
+) =>
   JSON.stringify([
     scope,
     request.agent,
     request.id,
     request.request.kind,
-    requestQuestions(request).map(
-      ({ id, question, isSecret, isOther, multiSelect, options }) => ({
-        id,
-        question,
-        isSecret,
-        isOther,
-        multiSelect,
-        options,
-      }),
-    ),
+    questions,
   ]);
 export function requestRenderProbe(leaf: string, id?: string) {
   if (typeof window !== "undefined")
@@ -93,7 +88,7 @@ export function useRequestView(request: RequestModel) {
       pending: false,
       mounted: true,
       get draftKey() {
-        return answerKey(scope, request);
+        return answerKey(scope, request, this.questions);
       },
       get owner() {
         const current = store.state().current;
@@ -123,6 +118,15 @@ export function useRequestView(request: RequestModel) {
       },
       get browserOpen() {
         return browserOpenDetails(request);
+      },
+      get questions() {
+        return requestQuestions(request);
+      },
+      get stdinApproval() {
+        return (
+          request.request.kind === "exec" &&
+          approvalParams(request).kind === "writeStdin"
+        );
       },
       get question() {
         return isFieldRequest(request);

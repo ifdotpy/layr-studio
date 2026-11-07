@@ -1,10 +1,9 @@
 import type { components } from "../../generated/api";
 import { QuestionDecision } from "../../generated/api";
 import type { JsonValue } from "../../types";
-import type { RequestModel } from "./requestActions";
+import type { RequestView } from "./requestActions";
 import { answerList, type AnswerValues } from "./AnswerFields";
-import { requestQuestions, elicitationSchema } from "./requestData";
-type QuestionCardAnswer = components["schemas"]["QuestionCardAnswer"];
+import { elicitationSchema } from "./requestData";
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
@@ -27,28 +26,20 @@ function parseJson(text: string): JsonValue {
   return value;
 }
 
-export function questionAnswer(request: RequestModel, values: AnswerValues) {
-  const questions = requestQuestions(request),
-    schema = elicitationSchema(request);
+export function questionAnswer(
+  { request, questions }: RequestView,
+  values: AnswerValues,
+) {
+  const schema = elicitationSchema(request);
   const properties = schema?.properties ?? {};
   const required = new Set(schema?.required ?? []);
   const kind = request.request.kind;
-  let answer: QuestionCardAnswer;
   if (kind === "question" || kind === "agent_question") {
-    answer = {
-      method:
-        kind === "question"
-          ? "item/tool/requestUserInput"
-          : "agent/asyncQuestion",
-      data: {
-        answers: Object.fromEntries(
-          questions.map((q) => [
-            q.id,
-            { answers: answerList(q, values[q.id]) },
-          ]),
-        ),
-      },
-    };
+    return {
+      answers: Object.fromEntries(
+        questions.map((q) => [q.id, { answers: answerList(q, values[q.id]) }]),
+      ),
+    } satisfies components["schemas"]["QuestionSelections"];
   } else if (kind === "elicitation") {
     const content: components["schemas"]["QuestionElicitation"]["content"] = {};
     for (const [key, value] of Object.entries(properties)) {
@@ -70,20 +61,18 @@ export function questionAnswer(request: RequestModel, values: AnswerValues) {
                 ? parseJson(v[0] ?? "")
                 : v[0];
     }
-    answer = {
-      method: "mcpServer/elicitation/request",
-      data: { decision: QuestionDecision.accept, content },
-    };
+    return {
+      decision: QuestionDecision.accept,
+      content,
+    } satisfies components["schemas"]["QuestionElicitation"];
   } else {
     throw new Error("Unsupported question type.");
   }
-
-  return answer.data;
 }
-export function savedAnswer(request: RequestModel, values: AnswerValues) {
+export function savedAnswer(view: RequestView, values: AnswerValues) {
   return JSON.stringify(
     Object.fromEntries(
-      requestQuestions(request)
+      view.questions
         .filter((question) => !question.isSecret)
         .map((question) => [question.id, values[question.id] ?? ""]),
     ),

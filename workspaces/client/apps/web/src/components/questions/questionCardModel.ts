@@ -282,17 +282,6 @@ export const isPendingQuestionRequest = (request: RequestDto) =>
   (request.request.kind === "question" ||
     request.request.kind === "agent_question");
 
-/** Live pending question requests, keyed by agent and provider item id. */
-export function pendingQuestionRequests(requests: readonly RequestDto[]) {
-  const result = new Map<string, string>();
-  for (const request of requests) {
-    if (!isPendingQuestionRequest(request)) continue;
-    const item = approvalItemId(request);
-    if (item) result.set(questionKey(request.agent, item), request.id);
-  }
-  return result;
-}
-
 export const questionKey = (agent: string, item: string) =>
   `${agent}\u0000${item}`;
 

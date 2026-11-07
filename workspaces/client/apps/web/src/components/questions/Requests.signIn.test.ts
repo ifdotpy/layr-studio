@@ -1,7 +1,3 @@
-vi.mock("../agents/state.ts", async (original) => ({
-  ...(await original<typeof import("../agents/state.ts")>()),
-  useAgentDetail: <T>(agent: T) => agent,
-}));
 import { approval, browserOpen } from "../../approvalFixtures";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -87,7 +83,10 @@ beforeEach(() => {
   controls.write.mockClear();
   vi.stubGlobal("window", {});
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  controls.store?.dispose();
+  vi.unstubAllGlobals();
+});
 
 it("the actual request card prepares native sign-in before a slow approval and opens once", async () => {
   let elapsed = 0;

@@ -10,6 +10,7 @@ import { requestFixture } from "./requestFixtures";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import { approval, question } from "../../approvalFixtures";
 import Conversation from "../Conversation";
+import { requestTestEnvironment } from "./requestTestFixture";
 
 const h = vi.hoisted(() => ({
   items: [{ id: "lead:item", role: "assistant", text: "" }] as Message[],
@@ -19,18 +20,7 @@ const h = vi.hoisted(() => ({
   hidden: () => false,
   get: vi.fn(async () => ({})),
   post: vi.fn(async () => ({})),
-  storage: {
-    length: 0,
-    clear() {},
-    getItem() {
-      return null;
-    },
-    key() {
-      return null;
-    },
-    removeItem() {},
-    setItem() {},
-  } satisfies Storage,
+  storage: new Storage(),
 }));
 // Keep the actual Conversation, TurnHistory, request-card mapping and generated store.
 // Unrelated delivery/composer services stay inert in this question projection witness.
@@ -119,25 +109,11 @@ vi.mock("../conversation/transcript/SelectionQuote", async (original) => ({
   default: () => null,
 }));
 
-beforeEach(() => {
-  vi.useFakeTimers();
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  window.matchMedia = vi.fn(() => ({
-    matches: false,
-    media: "",
-    onchange: null,
-    addListener() {},
-    removeListener() {},
-    addEventListener() {},
-    removeEventListener() {},
-    dispatchEvent: () => true,
-  }));
-});
+requestTestEnvironment();
+beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
   delete window.__studioPromptComposerRenderProbe;
   vi.useRealTimers();
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
 });
 
 it.each(["add", "remove"] as const)(

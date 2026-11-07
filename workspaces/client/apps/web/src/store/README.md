@@ -36,7 +36,10 @@ A confirmed live subscription with no selected record yields `absent` and drops
 the retained model. Loading or an interrupted connection does not establish
 absence. Requests and question history have independent generated projections
 over the same state subscription; observing the sidebar state creates no approval
-models. Projection slot keys differ, but acquisition and eviction use the shared
+models. Request leaves observe their own model fields; request views share computed
+question descriptions and stdin classification without combining status and description.
+Answer draft identity includes the server scope, owner, request kind and complete fields.
+Projection slot keys differ, but acquisition and eviction use the shared
 resource identity, so an owner eviction resets every projection of that resource.
 
 Transcript and room facades use the same subscription data observer as handwritten

@@ -6,7 +6,7 @@ import { errorText } from "../../api";
 import { useServerStorage } from "../../servers/ServerServicesContext";
 import { useUnsentText } from "../../unsent/useUnsentText";
 import { requestDraftsForStorage } from "./requestDrafts";
-import { elicitationSchema, requestQuestions } from "./requestData";
+import { elicitationSchema } from "./requestData";
 import AnswerFields, {
   answerList,
   type AnswerValue,
@@ -25,7 +25,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
   const [values, setValues] = useState<AnswerValues>(
     () => answerDrafts.get(draftKey) || {},
   );
-  const questions = requestQuestions(request);
+  const questions = view.questions;
   useEffect(() => {
     if (!savedAnswer) return;
     try {
@@ -66,7 +66,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
     const next = { ...values, [id]: value };
     answerDrafts.set(draftKey, next);
     setValues(next);
-    saveAnswer(serializeAnswer(request, next));
+    saveAnswer(serializeAnswer(view, next));
   };
   const ready =
     !missingRequired &&
@@ -80,10 +80,7 @@ export function AnswerForm({ view }: { view: RequestView }) {
     e.preventDefault();
     if (sending || !ready) return;
     try {
-      void post(
-        questionAnswer(request, values),
-        serializeAnswer(request, values),
-      );
+      void post(questionAnswer(view, values), serializeAnswer(view, values));
     } catch (e) {
       notify(errorText(e));
     }

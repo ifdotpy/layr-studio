@@ -1,37 +1,23 @@
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
-import { createRoot } from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createSubscriptions } from "../../sync/subscriptions/module";
 import { createServerStore } from "../../store";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import { approval, question } from "../../approvalFixtures";
 import type { Approval } from "../../approvals";
-import Requests, { RequestArea } from "./Requests";
+import Requests from "./Requests";
+import { requestTestEnvironment, requestTestRoot } from "./requestTestFixture";
 import { useQuestionCards } from "./useQuestionCards";
 import { observer } from "mobx-react-lite";
 import { requestRenderProbe } from "./requestActions";
-import { useRequestsView } from "./requestView";
-import { useTranscriptRequests } from "./useTranscriptRequests";
 import TurnHistory from "../conversation/transcript/TurnHistory";
 
 const h = vi.hoisted(() => ({
   store: null as ReturnType<typeof createServerStore> | null,
   answer: vi.fn(async () => ({ kind: "answer", result: {} })),
   post: vi.fn(async () => ({})),
-  storage: {
-    length: 0,
-    clear() {},
-    getItem() {
-      return null;
-    },
-    key() {
-      return null;
-    },
-    removeItem() {},
-    setItem() {},
-  } satisfies Storage,
+  storage: new Storage(),
 }));
 vi.mock("../../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../../servers/ServerServicesContext")>()),
@@ -43,32 +29,14 @@ vi.mock("../../servers/ServerServicesContext", async (original) => ({
 vi.mock("../../unsent/useUnsentText", () => ({
   useUnsentText: () => [null, vi.fn(), vi.fn()],
 }));
+requestTestEnvironment();
 beforeEach(() => {
   vi.useFakeTimers();
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  window.matchMedia = vi.fn(() => ({
-    matches: false,
-    media: "",
-    onchange: null,
-    addListener() {},
-    removeListener() {},
-    addEventListener() {},
-    removeEventListener() {},
-    dispatchEvent() {
-      return true;
-    },
-  }));
-  Object.defineProperty(document, "fonts", {
-    configurable: true,
-    value: { addEventListener() {}, removeEventListener() {} },
-  });
   h.answer.mockClear();
   h.post.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
-  document.body.replaceChildren();
   delete window.__studioRequestRenderProbe;
 });
 const request = (id = "question") =>
@@ -91,9 +59,10 @@ async function fixture(onLoading?: () => void) {
   });
   const store = createServerStore(subscriptions);
   h.store = store;
-  const root = createRoot(
-    document.body.appendChild(document.createElement("div")),
-  );
+  const root = requestTestRoot(() => {
+    store.dispose();
+    subscriptions.dispose();
+  });
   const item = { id: "lead:item", role: "assistant", text: "Continue?" };
   const items = [item];
   const Answer = observer(function Answer({
@@ -110,16 +79,9 @@ async function fixture(onLoading?: () => void) {
   const History = observer(function QuestionHistoryHarness() {
     requestRenderProbe("question-history");
     const select = useQuestionCards("lead");
-    const view = useRequestsView({ agentId: "lead", includeTeam: true });
-    const inline = useTranscriptRequests(items, view.requests, select);
     return createElement(
       "div",
       null,
-      createElement(
-        "output",
-        { "data-inline": true },
-        [...inline.keys()].join(","),
-      ),
       createElement(Answer, { select }),
       createElement(TurnHistory, {
         items,
@@ -131,19 +93,14 @@ async function fixture(onLoading?: () => void) {
       }),
     );
   });
-  await act(async () =>
-    root.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(
-          RequestArea,
-          { scope: "test", refresh: async () => {}, notify() {} },
-          createElement(Requests, { agentId: "lead", includeTeam: true }),
-        ),
-        createElement(History),
-      ),
+  await root.render(
+    createElement(
+      "div",
+      null,
+      createElement(Requests, { agentId: "lead", includeTeam: true }),
+      createElement(History),
     ),
+    { scope: "test", refresh: async () => {}, notify() {} },
   );
   await act(async () => vi.advanceTimersByTimeAsync(100));
   const publish = async (
@@ -193,11 +150,7 @@ async function fixture(onLoading?: () => void) {
   });
   return {
     publish,
-    close: async () => {
-      await act(async () => root.unmount());
-      store.dispose();
-      subscriptions.dispose();
-    },
+    close: root.close,
   };
 }
 it("isolates an owner rename from membership, descriptions, controls and the other request", async () => {
@@ -361,27 +314,6 @@ for (const changed of ["question", "options", "owner"] as const) {
     }
   });
 }
-it("moves a deferral-only update out of the inline transcript and into Later", async () => {
-  const f = await fixture();
-  try {
-    await f.publish([request()]);
-    expect(document.querySelector("[data-inline]")?.textContent).toBe(
-      "lead:item",
-    );
-    await f.publish([
-      {
-        ...request(),
-        deferral: { active: true, at: 2, by: { kind: "owner" } },
-      },
-    ]);
-    expect(document.querySelector("[data-inline]")?.textContent).toBe("");
-    expect(
-      document.querySelector('.request-deferred [data-request="question"]'),
-    ).not.toBeNull();
-  } finally {
-    await f.close();
-  }
-});
 it("isolates another chat's existing request state and observes this chat's history in its row", async () => {
   const f = await fixture();
   const outside = { ...request("outside"), agent: "outside" };

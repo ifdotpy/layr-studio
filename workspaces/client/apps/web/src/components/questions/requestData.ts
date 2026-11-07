@@ -82,14 +82,14 @@ function elicitationFields(schema: unknown): AnswerQuestion[] {
     return {
       id,
       question: stringValue(value.title) || id,
-      options: optionValues
-        .filter((label): label is string => typeof label === "string")
-        .map((label) => ({ label })),
-      multiSelect: value.type === "array" && Array.isArray(items.enum),
       isSecret:
         value.isSecret === true ||
         value.writeOnly === true ||
         value.format === "password",
+      multiSelect: value.type === "array" && Array.isArray(items.enum),
+      options: optionValues
+        .filter((label): label is string => typeof label === "string")
+        .map((label) => ({ label })),
     };
   });
 }
@@ -103,13 +103,13 @@ export function requestQuestions(approval: Approval): AnswerQuestion[] {
       return request.questions.map((entry) => ({
         id: entry.id,
         question: entry.question || entry.id,
+        isSecret: entry.is_secret,
+        isOther: request.kind === "agent_question" || entry.is_other === true,
+        multiSelect: entry.multi_select === true,
         options: entry.options.map((option) => ({
           label: option.label,
           ...(option.description ? { description: option.description } : {}),
         })),
-        multiSelect: entry.multi_select === true,
-        isSecret: entry.is_secret,
-        isOther: request.kind === "agent_question" || entry.is_other === true,
       }));
     case "elicitation":
       return isUrlElicitation(approval)

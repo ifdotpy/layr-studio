@@ -1,7 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { Button } from "@mantine/core";
 import { QuestionDecision, type components } from "../../generated/api";
-import { approvalParams, isDeferred } from "../../approvals";
+import { isDeferred } from "../../approvals";
 import { requestRenderProbe, type RequestView } from "./requestActions";
 export default observer(function RequestControls({
   view,
@@ -12,8 +12,6 @@ export default observer(function RequestControls({
     question = view.question,
     approval = !question;
   const waiting = r.state.kind === "pending";
-  const stdinApproval =
-    r.request.kind === "exec" && approvalParams(r).kind === "writeStdin";
   const trigger = view.trigger;
   requestRenderProbe("controls", r.id);
   return (
@@ -68,7 +66,7 @@ export default observer(function RequestControls({
               } satisfies components["schemas"]["QuestionApproval"])
             }
           >
-            {stdinApproval ? "Decline input" : "Decline"}
+            {view.stdinApproval ? "Decline input" : "Decline"}
           </Button>
           <Button
             variant="filled"
@@ -79,7 +77,7 @@ export default observer(function RequestControls({
               } satisfies components["schemas"]["QuestionApproval"])
             }
           >
-            {stdinApproval ? "Allow input" : "Approve"}
+            {view.stdinApproval ? "Allow input" : "Approve"}
           </Button>
         </>
       ) : null}

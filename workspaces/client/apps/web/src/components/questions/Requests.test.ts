@@ -1,18 +1,17 @@
 import { QuestionDecision, type components } from "../../generated/api";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { approval, question } from "../../approvalFixtures";
 import type { Approval } from "../../approvals";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import { requestFixture } from "./requestFixtures";
-import Requests, { RequestArea } from "./Requests";
+import Requests from "./Requests";
+import { requestTestEnvironment, requestTestRoot } from "./requestTestFixture";
 
 const h = vi.hoisted(() => ({
   store: null as ReturnType<typeof requestFixture>["store"] | null,
-  storage: {},
+  storage: new Storage(),
   post: vi.fn(async () => ({})),
   answer: vi.fn(async () => ({
     kind: "answer",
@@ -29,33 +28,15 @@ vi.mock("../../servers/ServerServicesContext", async (original) => ({
 vi.mock("../../unsent/useUnsentText", () => ({
   useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
-let root: Root;
+let root: ReturnType<typeof requestTestRoot>;
 const refresh = vi.fn(async () => {}),
   notify = vi.fn();
+requestTestEnvironment();
 beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  window.matchMedia = vi.fn(() => ({
-    matches: false,
-    media: "",
-    onchange: null,
-    addListener() {},
-    removeListener() {},
-    addEventListener() {},
-    removeEventListener() {},
-    dispatchEvent() {
-      return true;
-    },
-  }));
-  Object.defineProperty(document, "fonts", {
-    configurable: true,
-    value: { addEventListener() {}, removeEventListener() {} },
-  });
-  root = createRoot(document.body.appendChild(document.createElement("div")));
+  root = requestTestRoot(() => h.store?.dispose());
 });
 afterEach(async () => {
-  await act(async () => root.unmount());
-  document.body.replaceChildren();
-  vi.unstubAllGlobals();
+  await root.close();
   h.post.mockClear();
   h.answer.mockClear();
   refresh.mockClear();
@@ -74,19 +55,11 @@ async function render(request: Approval, threadId?: string | null) {
           },
         ],
   ).store;
-  await act(async () =>
-    root.render(
-      createElement(
-        MantineProvider,
-        null,
-        createElement(
-          RequestArea,
-          { scope: "server", refresh, notify },
-          createElement(Requests, { all: true }),
-        ),
-      ),
-    ),
-  );
+  await root.render(createElement(Requests, { all: true }), {
+    scope: "server",
+    refresh,
+    notify,
+  });
 }
 function button(label: string) {
   const button = [...document.querySelectorAll("button")].find(
