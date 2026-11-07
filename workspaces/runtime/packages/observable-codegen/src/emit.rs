@@ -167,7 +167,7 @@ fn ty(shape: &Shape, dto: &str) -> String {
     match shape {
         Shape::Leaf => dto.into(),
         Shape::Object(name) => format!("{name}Model"),
-        Shape::Array(item) => format!("({})[]", ty(item, &format!("({dto})[number]"))),
+        Shape::Array(item) => format!("({})[]", ty(item, &format!("NonNullable<{dto}>[number]"))),
         Shape::Nullable(item) => format!("{} | null", ty(item, &format!("NonNullable<{dto}>"))),
         Shape::Union { name, .. } => format!("{name}Model"),
     }
@@ -237,7 +237,7 @@ fn emit_model(out: &mut String, model: &Model, parser: &Parser<'_>) {
             out,
             "{}: {}{};",
             f.name,
-            ty(&f.shape, &format!("NonNullable<{}>", f.ty)),
+            ty(&f.shape, &f.ty),
             if f.optional { " | undefined" } else { "" }
         )
         .expect("string");

@@ -3,12 +3,14 @@ use studio_json::json;
 
 fn fixture() -> Value {
     json!({"components":{"schemas":{
-        "Row":{"type":"object","additionalProperties":false,"required":["id","sortKey","title","nested","tags","choice","opaque"],"properties":{
+        "Row":{"type":"object","additionalProperties":false,"required":["id","sortKey","title","nested","tags","choice","opaque","maybe","nil"],"properties":{
             "id":{"type":"string"},"sortKey":{"type":"string"},"title":{"type":["string","null"]},
             "nested":{"type":"object","additionalProperties":false,"required":["count"],"properties":{"count":{"type":"number"}}},
             "tags":{"type":"array","items":{"type":"string"}},
             "optional":{"type":"string"},
-            "opaque":{"type":"object","additionalProperties":true},
+            "nil":{"type":"null"},
+            "maybe":{"anyOf":[{"type":"object","additionalProperties":false,"required":["value"],"properties":{"value":{"type":"string"}}},{"type":"null"}]},
+            "opaque":{"anyOf":[{"type":"object","additionalProperties":true},{"type":"null"}]},
             "choice":{"oneOf":[
                 {"type":"object","additionalProperties":false,"required":["kind","count"],"properties":{"kind":{"type":"string","enum":["count"]},"count":{"type":"integer"}}},
                 {"type":"object","additionalProperties":false,"required":["kind","text"],"properties":{"kind":{"type":"string","enum":["text"]},"text":{"type":"string"}}}
@@ -109,6 +111,24 @@ fn deterministic_fixture_and_typed_path_failures() {
             .kind,
         UnsupportedShape::Identity
     );
+    let mut bad_resource = resources();
+    bad_resource[0].data = "Row".into();
+    let error = render(&document, &models(), &bad_resource).expect_err("mismatched resource DTO");
+    assert_eq!(error.kind, UnsupportedShape::Resource);
+    assert_eq!(error.path, "#/resources/fixture");
+    let mut bad_argument = resources();
+    bad_argument[0].args[0].name = "missing".into();
+    assert_eq!(
+        render(&document, &models(), &bad_argument)
+            .expect_err("argument")
+            .kind,
+        UnsupportedShape::Resource
+    );
+    let mut bad_field = document.clone();
+    bad_field["components"]["schemas"]["Row"]["properties"]["apply"] = json!({"type":"string"});
+    let error = render(&bad_field, &models(), &resources()).expect_err("method collision");
+    assert_eq!(error.kind, UnsupportedShape::Identifier);
+    assert_eq!(error.path, "#/components/schemas/Row/properties/apply");
 }
 
 #[test]
