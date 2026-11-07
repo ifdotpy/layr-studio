@@ -505,6 +505,83 @@ async fn sibling_completion_does_not_refuse_non_lead() {
 }
 
 #[tokio::test]
+async fn catalog_expiry_before_commit_waits_then_sends_the_input_once() {
+    let state = State::new().await;
+    let id = state.agent.clone();
+    state
+        .bridge
+        .run(move |store| async move {
+            store
+                .transaction_with(move |tx| {
+                    let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
+                    row.native_effort = studio_runtime_schema::queue_command::Field::Missing;
+                    AgentRepository::put(tx, &row)?;
+                    Ok::<_, WorkerError>(())
+                })
+                .await
+        })
+        .await
+        .unwrap();
+    let catalog = crate::model_catalog::ModelCatalogService::new();
+    let page = json!({"data":[{"model":"fake-model","defaultReasoningEffort":"medium","supportedReasoningEfforts":[{"reasoningEffort":"medium"}]}]});
+    crate::model_catalog::tests::publish_fixture(&catalog, "default", "", page.clone());
+    let mut resources =
+        preparation::PreparationResources::bundled(String::new(), catalog.clone()).unwrap();
+    resources.claude_account_pin = json!({"provider":studio_runtime_schema::ProviderKind::Codex});
+    let mut peer = Peer::new();
+    let mut worker = peer
+        .open_worker_with_resources(state.bridge.clone(), resources)
+        .await;
+    *state.bridge.faults.pause_operation.lock().unwrap() = Some("submitted".into());
+    state.wake(&worker).await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        state.bridge.faults.paused.notified(),
+    )
+    .await
+    .expect("the prepared request waits before its commit");
+    let attempt = state.record().await["startAttempt"]["id"].clone();
+    crate::model_catalog::tests::expire_fixture(&catalog);
+    *state.bridge.faults.pause_operation.lock().unwrap() = None;
+    state.bridge.faults.release.notify_one();
+    worker_barrier(&worker).await;
+    let held = state.record().await;
+    assert_eq!(
+        held["startAttempt"]["prepareError"], "model-catalog/refresh-pending",
+        "{held}"
+    );
+    assert_eq!(held["startAttempt"]["id"], attempt);
+    assert_eq!(held["startAttempt"]["submitted"], false);
+    assert_eq!(held["autoWake"], true);
+    assert_ne!(held["status"], "failed");
+    assert_eq!(state.event_status("input").await, "reserved");
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "no request before catalog recovery"
+    );
+
+    crate::model_catalog::tests::publish_fixture(&catalog, "default", "", page);
+    let resume = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        peer.write("thread/resume"),
+    )
+    .await
+    .expect("catalog publication wakes the held request without another owner message");
+    peer.reply(&resume, json!({"thread":{"id":"fake-thread-0"}}))
+        .await;
+    let start = peer.write("turn/start").await;
+    peer.accepted(&start).await;
+    assert_eq!(state.event_status("input").await, "delivered");
+    assert!(state.record().await["error"].is_null());
+    assert!(
+        peer.writes.try_recv().is_err(),
+        "the input is submitted once"
+    );
+    worker.shutdown().await.unwrap();
+    catalog.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn cold_and_expired_catalogs_hold_the_attempt_without_failing_it() {
     for expired in [false, true] {
         let state = State::new().await;

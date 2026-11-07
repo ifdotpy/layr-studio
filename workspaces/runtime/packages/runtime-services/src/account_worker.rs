@@ -2120,8 +2120,13 @@ impl Worker {
                         if !self.closing {
                             self.preparing
                                 .insert(agent_id.clone(), Preparing::new(rewake));
-                            self.preparations
-                                .spawn(turn_preparation::commit(agent_id, effect, commit));
+                            self.preparations.spawn(turn_preparation::commit(
+                                agent_id,
+                                effect,
+                                commit,
+                                Arc::clone(&self.resources),
+                                since,
+                            ));
                             return Ok(());
                         }
                     }

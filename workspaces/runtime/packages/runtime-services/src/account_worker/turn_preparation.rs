@@ -152,9 +152,31 @@ pub(super) async fn commit(
     agent_id: String,
     effect: Option<String>,
     mut commit: submission::Commit,
+    resources: Arc<preparation::PreparationResources>,
+    since: u64,
 ) -> Box<Done> {
     commit.effect = effect.clone();
+    let intent = commit.context.intent.clone();
+    let method = commit.context.method;
+    let store = Arc::clone(&commit.bridge.store);
     let outcome = Box::pin(commit.run()).await;
+    if matches!(outcome, Err(WorkerError::PreparationPending(_))) {
+        let step = store::preparation_step(&store, &resources, &intent, async { outcome }).await;
+        return Box::new(Done {
+            agent_id,
+            effect,
+            outcome: step.map(|step| match step.into_ready() {
+                Ok(committed) => Outcome::Committed(committed),
+                Err(step) => Outcome::Prepared(Box::new(Prepared {
+                    intent,
+                    method,
+                    since,
+                    loaded: None,
+                    step,
+                })),
+            }),
+        });
+    }
     Box::new(Done {
         agent_id,
         effect: effect.filter(|_| !matches!(outcome, Ok(submission::Committed::Ready(_)))),
