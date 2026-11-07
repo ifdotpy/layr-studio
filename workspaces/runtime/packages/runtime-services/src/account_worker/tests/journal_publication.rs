@@ -680,3 +680,98 @@ async fn stream_cache_revision_handles_owner_snapshots_and_rolled_back_handoffs(
         .expect("pending-only commit invalidates cache");
     assert_eq!(current.pending_bytes(), "new pending text".len());
 }
+
+#[tokio::test]
+async fn preparation_expiry_skips_full_agent_decode_when_no_expiry_is_due() {
+    let (_directory, store) = running_store().await;
+    for pending in [false, true] {
+        store
+            .transaction(move |tx| {
+                if pending {
+                    let mut agent = AgentRepository::get(tx, &AgentId::from("agent"))?.unwrap();
+                    agent.status = studio_runtime_store::AgentStatus::Starting;
+                    let attempt = agent.start_attempt.as_mut().unwrap();
+                    attempt.created = Some(100.0);
+                    attempt.submitted = Some(false);
+                    attempt.prepare_error = Some("workspace-readiness/pending".into());
+                    AgentRepository::put(tx, &agent)?;
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let decodes = store
+            .transaction_with(|tx| {
+                let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+                assert!(!store::expire_preparation_in(
+                    tx, "agent", "default", 4, 100.0, None
+                )?);
+                Ok::<_, WorkerError>(
+                    studio_runtime_store::agent_volatile::publication_work::take_full_decodes(),
+                )
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            decodes, 0,
+            "expiry probe must not decode the full agent (pending={pending})"
+        );
+    }
+}
+
+#[tokio::test]
+async fn pending_metadata_ownership_skips_full_agent_decode() {
+    let (_directory, store) = running_store().await;
+    let decodes = store
+        .transaction_with(|tx| {
+            let _scope = studio_runtime_store::agent_volatile::publication_work::scope();
+            assert!(store::owns_pending_metadata(tx, "agent", "default", 4)?);
+            assert!(!store::owns_pending_metadata(tx, "agent", "other", 4)?);
+            assert!(!store::owns_pending_metadata(tx, "agent", "default", 5)?);
+            assert!(!store::owns_pending_metadata(tx, "missing", "default", 4)?);
+            Ok::<_, WorkerError>(
+                studio_runtime_store::agent_volatile::publication_work::take_full_decodes(),
+            )
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        decodes, 0,
+        "metadata ownership must not decode the full agent"
+    );
+}
+
+#[test]
+fn pending_metadata_view_validates_identity_and_consumed_fields() {
+    let db = rusqlite::Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
+        .unwrap();
+    let valid = json!({"id":"agent","accountKey":"escaped\"account","epoch":4,
+        "status":"running","startAttempt":null,"unrelated":{"large":"x".repeat(8192)}});
+    db.execute(
+        "INSERT INTO runtime_agents VALUES('agent',?1)",
+        [valid.to_string()],
+    )
+    .unwrap();
+    assert!(store::owns_pending_metadata(&db, "agent", "escaped\"account", 4).unwrap());
+    for (field, value) in [
+        ("id", json!("another-agent")),
+        ("epoch", json!(-1)),
+        (
+            "epoch",
+            json!(studio_runtime_schema::shared_values::MAX_SAFE_INTEGER + 1),
+        ),
+        ("accountKey", json!(false)),
+        ("status", json!([])),
+        ("startAttempt", json!({"submitted":"true"})),
+    ] {
+        let mut invalid = valid.clone();
+        invalid[field] = value;
+        db.execute("UPDATE runtime_agents SET record=?1", [invalid.to_string()])
+            .unwrap();
+        assert!(
+            store::owns_pending_metadata(&db, "agent", "escaped\"account", 4).is_err(),
+            "{field}"
+        );
+    }
+}

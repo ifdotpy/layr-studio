@@ -727,6 +727,61 @@ pub(super) fn reusable_preparation_attempt(
         )
 }
 
+// Wake probes consume only durable fields, never the volatile transcript/activity.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreparationAgent<'a> {
+    #[serde(borrow)]
+    id: std::borrow::Cow<'a, str>,
+    #[serde(borrow)]
+    account_key: std::borrow::Cow<'a, str>,
+    epoch: i64,
+    status: studio_runtime_store::AgentStatus,
+    start_attempt: Option<Box<studio_runtime_store::StartAttemptView>>,
+}
+
+impl<'a> PreparationAgent<'a> {
+    fn decode(id: &str, raw: &'a str) -> Result<Self, StoreError> {
+        let invalid = || StoreError::InvalidSyncObject {
+            scope: "runtime_agents".into(),
+            id: id.to_owned(),
+        };
+        let agent: Self = studio_json::from_str(raw).map_err(|_| invalid())?;
+        if agent.id != id
+            || !(0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&agent.epoch)
+        {
+            return Err(invalid());
+        }
+        Ok(agent)
+    }
+}
+
+fn preparation_agent_raw(
+    db: &rusqlite::Connection,
+    id: &str,
+) -> Result<Option<String>, StoreError> {
+    Ok(db
+        .query_row_cached(
+            "SELECT record FROM runtime_agents WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+pub(super) fn owns_pending_metadata(
+    db: &rusqlite::Connection,
+    id: &str,
+    account: &str,
+    epoch: i64,
+) -> Result<bool, StoreError> {
+    let Some(raw) = preparation_agent_raw(db, id)? else {
+        return Ok(false);
+    };
+    let agent = PreparationAgent::decode(id, &raw)?;
+    Ok(agent.epoch == epoch && agent.account_key == account)
+}
+
 /// Settle an expired, still-unsubmitted preparation without sending its input.
 pub(super) async fn expire_preparation(
     store: &RuntimeStore,
@@ -737,51 +792,63 @@ pub(super) async fn expire_preparation(
     expected: Option<(String, super::PreparationDeadline)>,
 ) -> Result<bool, WorkerError> {
     scheduler::lifecycle_transaction_with(store, move |tx| {
-        let Some(agent) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))? else {
-            return Ok(false);
-        };
-        let Some(attempt) = agent.start_attempt.as_ref() else {
-            return Ok(false);
-        };
-        let Some(created) = attempt.created else {
-            return Ok(false);
-        };
-        if expected.as_ref().is_some_and(|(id, deadline)| {
-            attempt.id.as_deref() != Some(id.as_str())
-                || super::PreparationDeadline::from_created(created).0 != deadline.0
-        }) {
-            return Ok(false);
-        }
-        if agent.epoch != epoch
-            || agent.account_key != account
-            || agent.status != studio_runtime_store::AgentStatus::Starting
-            || attempt.submitted != Some(false)
-            || attempt.prepare_error.is_none()
-            || super::PreparationDeadline::from_created(created).remaining(at)
-                != std::time::Duration::ZERO
-        {
-            return Ok(false);
-        }
-        let identity = studio_runtime_store::TurnAttemptIdentity {
-            agent_id: agent_id.clone(),
-            epoch,
-            attempt_id: attempt.id.clone().ok_or_else(|| invalid(&agent_id))?,
-        };
-        SchedulerRepository::settle_start_outcome(
-            tx,
-            &identity,
-            "failed",
-            Some("Start preparation timed out. Send a message to retry."),
-        )?;
-        if let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
-            && agent.status == studio_runtime_store::AgentStatus::Failed
-        {
-            agent.start_wait = None;
-            AgentRepository::put(tx, &agent)?;
-        }
-        Ok::<_, WorkerError>(true)
+        expire_preparation_in(tx, &agent_id, &account, epoch, at, expected.as_ref())
     })
     .await
+}
+
+pub(super) fn expire_preparation_in(
+    tx: &studio_runtime_store::Transaction<'_>,
+    agent_id: &str,
+    account: &str,
+    epoch: i64,
+    at: f64,
+    expected: Option<&(String, super::PreparationDeadline)>,
+) -> Result<bool, WorkerError> {
+    let Some(raw) = preparation_agent_raw(tx, agent_id)? else {
+        return Ok(false);
+    };
+    let agent = PreparationAgent::decode(agent_id, &raw)?;
+    let Some(attempt) = agent.start_attempt.as_ref() else {
+        return Ok(false);
+    };
+    let Some(created) = attempt.created else {
+        return Ok(false);
+    };
+    if expected.is_some_and(|(id, deadline)| {
+        attempt.id.as_deref() != Some(id.as_str())
+            || super::PreparationDeadline::from_created(created).0 != deadline.0
+    }) {
+        return Ok(false);
+    }
+    if agent.epoch != epoch
+        || agent.account_key != account
+        || agent.status != studio_runtime_store::AgentStatus::Starting
+        || attempt.submitted != Some(false)
+        || attempt.prepare_error.is_none()
+        || super::PreparationDeadline::from_created(created).remaining(at)
+            != std::time::Duration::ZERO
+    {
+        return Ok(false);
+    }
+    let identity = studio_runtime_store::TurnAttemptIdentity {
+        agent_id: agent_id.to_owned(),
+        epoch,
+        attempt_id: attempt.id.clone().ok_or_else(|| invalid(agent_id))?,
+    };
+    SchedulerRepository::settle_start_outcome(
+        tx,
+        &identity,
+        "failed",
+        Some("Start preparation timed out. Send a message to retry."),
+    )?;
+    if let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id))?
+        && agent.status == studio_runtime_store::AgentStatus::Failed
+    {
+        agent.start_wait = None;
+        AgentRepository::put(tx, &agent)?;
+    }
+    Ok::<_, WorkerError>(true)
 }
 
 pub(super) async fn claim(

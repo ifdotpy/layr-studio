@@ -180,10 +180,8 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
             let read_account = owner_account.clone();
             let invalid = store
                 .read_async("runtime-services/pending_metadata", move |db| {
-                    let owned = AgentRepository::get(db, &AgentId::from(read_owner.as_str()))?
-                        .is_some_and(|agent| {
-                            agent.epoch == epoch && agent.account_key.as_str() == read_account
-                        });
+                    let owned =
+                        store::owns_pending_metadata(db, &read_owner, &read_account, epoch)?;
                     if owned {
                         SchedulerRepository::invalid_pending_metadata(db, &read_owner, epoch)
                     } else {
@@ -193,9 +191,7 @@ async fn claim(wake: &Wake) -> Result<Result<TurnIntent, Unclaimed>, WorkerError
                 .await?;
             if !invalid.is_empty() {
                 scheduler::lifecycle_transaction_with(&store, move |tx| {
-                    if AgentRepository::get(tx, &AgentId::from(owner.as_str()))?.is_some_and(
-                        |agent| agent.epoch == epoch && agent.account_key.as_str() == owner_account,
-                    ) {
+                    if store::owns_pending_metadata(tx, &owner, &owner_account, epoch)? {
                         let invalid =
                             SchedulerRepository::invalid_pending_metadata(tx, &owner, epoch)?;
                         if !invalid.is_empty() {
