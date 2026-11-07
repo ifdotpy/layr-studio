@@ -234,7 +234,9 @@ The sidebar row also consumes the logical `sidebar_views` namespace in the same
 namespace so unchanged broad state documents keep their sequence and identity.
 The existing writer journal coalesces view marks per lead per transaction:
 a successful `agent_views` mark covers a queued `sidebar_views` mark, and sidebar
-marks flush after publication. Both namespaces share the existing atomic commit
+marks flush after publication. A proof records the durable mark sequence and
+checks that it still exists, so a savepoint rollback cannot suppress later
+invalidation. Both namespaces share the existing atomic commit
 and cursor; no persisted projection or second stream is introduced. Team
 visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
 triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the

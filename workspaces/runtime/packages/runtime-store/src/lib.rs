@@ -2094,9 +2094,9 @@ impl RuntimeStore {
                     .map_err(E::from),
                     (outcome, _) => outcome,
                 };
-                let sidebar_marks = entity_publication::end();
+                let sidebar_marks = entity_publication::end(&transaction);
                 let outcome = outcome.and_then(|value| {
-                    for id in sidebar_marks {
+                    for id in sidebar_marks.map_err(E::from)? {
                         durable_seq::mark(&transaction, durable_seq::SIDEBAR_VIEW_MARK, &id)
                             .map_err(E::from)?;
                     }

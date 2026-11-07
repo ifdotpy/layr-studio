@@ -194,26 +194,35 @@ enum Event {
     SidebarRow(String),
 }
 
-/// Mark proofs survive source-event capture until publication finishes.
+/// Mark proofs survive source-event capture until publication finishes. Their
+/// durable sequence is checked before use because savepoints can roll marks back.
 #[derive(Default)]
 struct TransactionJournal {
     events: Option<Vec<Event>>,
-    agent_view_marks: BTreeSet<String>,
+    agent_view_marks: BTreeMap<String, i64>,
     sidebar_marks: BTreeSet<String>,
 }
 
-pub(crate) fn agent_view_marked(id: &str) -> bool {
-    JOURNAL.with(|j| {
-        j.borrow()
-            .as_ref()
-            .is_some_and(|j| j.agent_view_marks.contains(id))
-    })
+fn mark_survives(connection: &Connection, id: &str, seq: i64) -> StoreResult<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM durable_rows WHERE tbl=?1 AND id=?2 AND seq=?3 AND deleted=0)",
+        rusqlite::params![crate::durable_seq::AGENT_VIEW_MARK, id, seq],
+        |row| row.get(0),
+    )?)
 }
 
-pub(crate) fn note_agent_view_mark(id: &str) {
+pub(crate) fn agent_view_marked(connection: &Connection, id: &str) -> StoreResult<bool> {
+    let seq = JOURNAL.with(|j| j.borrow().as_ref().and_then(|j| j.agent_view_marks.get(id).copied()));
+    match seq {
+        Some(seq) => mark_survives(connection, id, seq),
+        None => Ok(false),
+    }
+}
+
+pub(crate) fn note_agent_view_mark(id: &str, seq: i64) {
     JOURNAL.with(|j| {
         if let Some(j) = j.borrow_mut().as_mut() {
-            j.agent_view_marks.insert(id.to_owned());
+            j.agent_view_marks.insert(id.to_owned(), seq);
         }
     });
 }
@@ -231,15 +240,18 @@ pub(crate) fn queue_sidebar_mark(id: &str) -> bool {
 }
 
 /// Clear transaction-local proofs even on rollback; return only uncovered marks.
-pub(crate) fn end() -> BTreeSet<String> {
-    JOURNAL.with(|j| {
-        j.borrow_mut().take().map_or_else(BTreeSet::new, |j| {
-            j.sidebar_marks
-                .difference(&j.agent_view_marks)
-                .cloned()
-                .collect()
-        })
-    })
+pub(crate) fn end(connection: &Connection) -> StoreResult<BTreeSet<String>> {
+    let journal = JOURNAL.with(|j| j.borrow_mut().take());
+    let Some(journal) = journal else { return Ok(BTreeSet::new()); };
+    let mut uncovered = BTreeSet::new();
+    for id in journal.sidebar_marks {
+        let covered = match journal.agent_view_marks.get(&id) {
+            Some(seq) => mark_survives(connection, &id, *seq)?,
+            None => false,
+        };
+        if !covered { uncovered.insert(id); }
+    }
+    Ok(uncovered)
 }
 
 thread_local! {

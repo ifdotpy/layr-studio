@@ -297,20 +297,20 @@ pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bo
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.
 pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
-    if (tbl == AGENT_VIEW_MARK && crate::entity_publication::agent_view_marked(id))
+    if (tbl == AGENT_VIEW_MARK && crate::entity_publication::agent_view_marked(connection, id)?)
         || (tbl == SIDEBAR_VIEW_MARK && crate::entity_publication::queue_sidebar_mark(id))
     {
         return Ok(());
     }
-    connection.execute(
-        &format!(
-            "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
-             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
-        ),
-        rusqlite::params![tbl, id],
-    )?;
+    let sql = format!(
+        "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
+         ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=0,at=0"
+    );
     if tbl == AGENT_VIEW_MARK {
-        crate::entity_publication::note_agent_view_mark(id);
+        let seq = connection.query_row(&format!("{sql} RETURNING seq"), rusqlite::params![tbl, id], |row| row.get(0))?;
+        crate::entity_publication::note_agent_view_mark(id, seq);
+    } else {
+        connection.execute(&sql, rusqlite::params![tbl, id])?;
     }
     Ok(())
 }
