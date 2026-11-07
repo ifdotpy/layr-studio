@@ -1,6 +1,9 @@
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { createStateMirror } from "../generated/observableResources.ts";
-import { createSidebarViewModel } from "./sidebar/viewModel.ts";
+import {
+  createMergedSidebarSelector,
+  createSidebarSourceStore,
+} from "../servers/mergedSidebar.ts";
+import { sidebarSnapshot } from "../servers/sidebarSnapshot.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
@@ -25,12 +28,11 @@ declare global {
 }
 const rootElement = document.getElementById("root");
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import Sidebar from "../components/Sidebar.tsx";
-import ProjectGroupsSidebar from "../servers/ProjectGroupsSidebar.tsx";
-import { navigationSnapshot } from "../servers/navigation.ts";
+import CombinedServerSidebar from "../servers/CombinedServerSidebar.tsx";
 import { ProjectDeleteDialog } from "../components/ProjectDeleteDialog.tsx";
 import { useProjectDelete } from "../useProjectDelete.ts";
 import "@mantine/core/styles.css";
@@ -162,68 +164,71 @@ function Fixture() {
     },
   });
   const logical = location.search.includes("logical");
-  const mirror = createStateMirror();
-  const entities = data.threads.map((chat) => ({
-    collection: "agentSummary" as const,
-    id: chat.id,
-    value: agentSummaryFixture(chat.id, {
-      name: chat.name || "Chat",
-      projectPath: chat.projectPath || chat.cwd || "",
-    }),
-  }));
-  mirror.apply([
-    ...entities,
-    ...data.runtime.projects.map((value) => ({
-      collection: "project" as const,
-      id: value.id,
-      value,
-    })),
-  ]);
-  const collections = mirror.current;
-  const views = createSidebarViewModel(
-    () => collections,
-    () => ({ query: "", archived: false, opened: "lead", rank: () => 0 }),
+  const sources = useMemo(() => {
+    const source = createSidebarSourceStore();
+    source.update(
+      "owner",
+      sidebarSnapshot(
+        {
+          ...data,
+          runtime: {
+            ...data.runtime,
+            projects: data.runtime.projects.map((project) => ({
+              ...project,
+              ...(location.search.includes("legacy") ? { id: "" } : {}),
+            })),
+          },
+        },
+        data.threads.map((chat) => ({
+          collection: "agentSummary",
+          id: chat.id,
+          value: agentSummaryFixture(chat.id, {
+            name: chat.name || "Chat",
+            projectPath: chat.projectPath || chat.cwd || "",
+          }),
+        })),
+      ),
+    );
+    return source.sources(["owner"], new Set(["owner"]));
+  }, [data]);
+  const model = useMemo(
+    () => createMergedSidebarSelector()(sources),
+    [sources],
   );
+  const collections = sources[0]!.collections;
   return React.createElement(
     React.Fragment,
     null,
     logical
-      ? React.createElement(ProjectGroupsSidebar, {
-          collections,
-          navigation: {
-            owner: {
-              ...navigationSnapshot(
-                data,
-                "lead",
-                "",
-                views.rows,
-                [],
-                undefined,
-                new Set(),
-                entities,
-              ),
-              projects: data.runtime.projects.map((project) => ({
-                ...project,
-                ...(location.search.includes("legacy") ? { id: "" } : {}),
-              })) as React.ComponentProps<
-                typeof ProjectGroupsSidebar
-              >["navigation"][string]["projects"],
-              ready: true,
-              opened: "lead",
-              alerts: [],
-              error: "",
-            },
+      ? React.createElement(CombinedServerSidebar, {
+          model,
+          backends: new Map([["owner", backend]]),
+          online: () => true,
+          refreshOwner: async () => {
+            throw new Error("Unexpected refresh");
           },
-          servers: [],
-          statuses: {},
+          executeCommand: async () => {
+            throw new Error("Unexpected command");
+          },
+          aliases: {},
           current: "owner",
-          query: "",
-          hideOldChatsThreshold: 20,
+          navigation: {},
           send: (owner, command) => {
             window.owner = owner;
             if (command.action === "delete-project")
               deletion.open(command.projectId);
           },
+          applyNavigation: () => {},
+          mobile: true,
+          hidden: false,
+          close: () => {},
+          settings: () => {},
+          search: () => {},
+          notify: (message) => {
+            window.notice = message;
+          },
+          notice: "",
+          hideOldChatsThreshold: 20,
         })
       : React.createElement(Sidebar, {
           services,

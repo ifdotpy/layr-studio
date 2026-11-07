@@ -1879,7 +1879,6 @@
       "src/servers/DiscoveryPanel.tsx",
       "src/servers/MultiServerApp.tsx",
       "src/servers/ProjectChatRows.tsx",
-      "src/servers/ProjectGroupsSidebar.tsx",
       "src/servers/ScreenContext.tsx",
       "src/servers/ServerAccessSettings.tsx",
       "src/servers/ServerAccountLimits.tsx",

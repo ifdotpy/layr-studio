@@ -48,8 +48,8 @@ for (const width of [320, 1200]) {
         "?logical&legacy",
       ]) {
         await page.goto(url + variant);
+        await expect(page.locator("#sidebar")).toBeVisible();
         if (!variant.includes("logical")) {
-          await expect(page.locator("#sidebar")).toBeVisible();
           await expect(
             page.getByRole("button", {
               name: "Close conversations",
