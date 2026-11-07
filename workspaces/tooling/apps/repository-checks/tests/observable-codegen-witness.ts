@@ -44,7 +44,19 @@ function declarations(path: string, names: readonly string[]) {
 }
 try {
   write("package.json", '{"type":"module"}');
-  write("src/generated/observableResources.ts", input.source);
+  // Count generated splice calls even when the reconciler uses temporary plain arrays.
+  write(
+    "src/generated/observableResources.ts",
+    input.source.replaceAll(/(\w+)\.splice\(/g, "fixtureSplice($1, ") +
+      `
+let arrayOperations = 0;
+export function fixtureArrayOperations(): number { return arrayOperations; }
+function fixtureSplice<T>(data: T[], start: number, count: number, ...items: T[]): T[] {
+  arrayOperations += 1;
+  return data.splice(start, count, ...items);
+}
+`,
+  );
   const api = spawnSync(
     process.execPath,
     [
@@ -96,7 +108,7 @@ try {
 import assert from 'node:assert/strict';
 import { autorun } from 'mobx';
 import {fixtureKeyComputations} from './src/sync/subscriptions/contracts.ts';
-import { createObservableResources, createFixtureMirror, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
+import { createObservableResources, createFixtureMirror, fixtureArrayOperations, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
 import type { components } from './src/generated/api.ts';
 import type { DeepReadonly } from './src/deepReadonly.ts';
 import type { ObservableResourceRuntime } from './src/store/index.ts';
@@ -177,6 +189,53 @@ const nullableRow=mirror.current.rows[0];assert.ok(nullableRow);
 assert.equal(nullableRow.b?.value,'b');assert.equal(nullableRow.d?.value,'d');assert.equal(nullableRow.f?.value,'f');
 mirror.apply({rows:[row('a','1')],plain:[]});
 for(const value of [nullableRow.a,nullableRow.b,nullableRow.c,nullableRow.d,nullableRow.e,nullableRow.f])assert.equal(value,null);
+const large = createFixtureMirror();
+let rows = Array.from({length: 1000}, (_, index) => row(String(index), String(index).padStart(4, '0')));
+large.apply({rows, plain: []});
+const members = large.current.rows;
+const changed = members[500]; assert.ok(changed);
+let memberRuns = 0; const stopMembers = autorun(() => { large.current.rows.map(item => item.id); memberRuns += 1; });
+let titleRuns = 0; const stopTitle = autorun(() => { changed.title; titleRuns += 1; });
+let before = fixtureArrayOperations();
+rows = rows.map(item => item.id === '500' ? {...item, title: 'updated'} : item);
+large.apply({rows, plain: []});
+assert.equal(fixtureArrayOperations() - before, 0, 'one changed scalar among 1000 rows needs no array operations');
+assert.equal(large.current.rows, members); assert.equal(large.current.rows[500], changed);
+assert.equal(memberRuns, 1); assert.equal(titleRuns, 2);
+before = fixtureArrayOperations();
+large.apply({rows: rows.map(item => ({...item})).reverse(), plain: []});
+assert.equal(fixtureArrayOperations() - before, 0, 'equal replay needs no array operations');
+assert.equal(memberRuns, 1); assert.equal(titleRuns, 2);
+before = fixtureArrayOperations();
+rows = rows.map(item => item.id === '500' ? {...item, sortKey: '0000a'} : item);
+large.apply({rows, plain: []});
+assert.equal(fixtureArrayOperations() - before, 2, 'one moved row needs one removal and one insertion');
+assert.equal(large.current.rows[1], changed); assert.equal(memberRuns, 2);
+before = fixtureArrayOperations();
+rows = [...rows, row('new', '0250a')]; large.apply({rows, plain: []});
+assert.equal(fixtureArrayOperations() - before, 1, 'one inserted row needs one insertion');
+assert.equal(large.current.rows[252]?.id, 'new'); assert.equal(memberRuns, 3);
+before = fixtureArrayOperations();
+rows = rows.filter(item => item.id !== '500'); large.apply({rows, plain: []});
+assert.equal(fixtureArrayOperations() - before, 1, 'one deleted row needs one removal');
+assert.equal(large.current.rows.length, 1000); assert.equal(memberRuns, 4);
+before = fixtureArrayOperations();
+assert.throws(() => large.apply({rows: [...rows, row('new', 'last')], plain: []}), /Duplicate identity/);
+assert.equal(fixtureArrayOperations(), before); assert.equal(memberRuns, 4);
+stopMembers(); stopTitle();
+const empty = createFixtureMirror();
+const emptyMembers = empty.current.rows;
+let emptyRuns = 0; const stopEmpty = autorun(() => { empty.current.rows.length; emptyRuns += 1; });
+before = fixtureArrayOperations(); empty.apply({rows: [], plain: []});
+assert.equal(empty.current.rows, emptyMembers); assert.equal(emptyRuns, 1); assert.equal(fixtureArrayOperations(), before);
+empty.apply({rows: [row('z', 'same'), row('a', 'same'), row('m', 'same')], plain: []});
+assert.deepEqual(empty.current.rows.map(item => item.id), ['a', 'm', 'z']);
+before = fixtureArrayOperations();
+empty.apply({rows: [row('m', 'same'), row('z', 'same'), row('a', 'same')], plain: []});
+assert.equal(fixtureArrayOperations(), before); assert.equal(emptyRuns, 2);
+empty.apply({rows: [], plain: []}); assert.equal(emptyRuns, 3);
+before = fixtureArrayOperations(); empty.apply({rows: [], plain: []});
+assert.equal(emptyRuns, 3); assert.equal(fixtureArrayOperations(), before); stopEmpty();
 // @ts-expect-error A mirror's exposed snapshot remains readonly.
 if (false) mirror.current.rows = [];
 console.log('observable generator type and behavior witnesses passed');
