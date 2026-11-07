@@ -2308,6 +2308,161 @@ async fn a_write_that_cannot_change_studio_errors_does_not_rebuild_them() {
     assert_published_list(&store);
 }
 
+#[tokio::test]
+async fn studio_error_unrelated_writes_to_a_failed_agent_do_not_rebuild_studio_errors() {
+    let (_dir, store) = store().await;
+    seed_chat(
+        &store,
+        chat(json!({"status":"failed","error":"unclassified"})),
+    )
+    .await;
+    assert_published_list(&store);
+    let before = full_publications(&store).await;
+    let started = std::time::Instant::now();
+    for n in 0..10 {
+        write(
+            &store,
+            "UPDATE runtime_agents SET record=json_set(record,'$.model',?2) WHERE id=?1",
+            vec![CHAT.into(), format!("model-{n}")],
+        )
+        .await;
+    }
+    let builds = full_publications(&store).await - before;
+    eprintln!(
+        "failed agent fixture: 10 unrelated writes, {builds} builds, {:?}",
+        started.elapsed()
+    );
+    assert_eq!(builds, 0);
+    assert_published_list(&store);
+    for sql in [
+        "UPDATE runtime_agents SET record=json_set(record,'$.name','Renamed') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.error','different failure') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.epoch',2) WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.turnId','new-turn') WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id=?1",
+        "UPDATE runtime_agents SET record=json_remove(record,'$.deletedAt') WHERE id=?1",
+    ] {
+        let before = full_publications(&store).await;
+        write(&store, sql, vec![CHAT.into()]).await;
+        assert_eq!(full_publications(&store).await, before + 1, "{sql}");
+        assert_published_list(&store);
+    }
+}
+
+async fn assert_failed_agent_liveness_dependency_rebuilds(extra: Value, sql: &'static str) {
+    let (_dir, store) = store().await;
+    let mut record = chat(json!({"status":"failed","error":"unclassified"}));
+    record
+        .as_object_mut()
+        .unwrap()
+        .extend(extra.as_object().unwrap().clone());
+    seed_chat(&store, record).await;
+    store
+        .transaction(move |tx| {
+            tx.execute(sql, [CHAT])?;
+            Ok(())
+        })
+        .await
+        .expect("dependency fixture");
+    let before = full_publications(&store).await;
+    write(
+        &store,
+        "UPDATE runtime_agents SET record=json_set(record,'$.model','changed') WHERE id=?1",
+        vec![CHAT.into()],
+    )
+    .await;
+    assert_eq!(full_publications(&store).await, before + 1);
+    assert_published_list(&store);
+}
+
+#[tokio::test]
+async fn studio_error_pending_input_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(json!({}),
+        "INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('pending',?1,'user','fixture','pending',unixepoch(),1)").await;
+}
+
+#[tokio::test]
+async fn studio_error_schedule_pointers_keep_conservative_rebuilds() {
+    for extra in [
+        json!({"usageResume":{"id":"resume"}}),
+        json!({"capacityRetry":{"id":"retry"}}),
+    ] {
+        assert_failed_agent_liveness_dependency_rebuilds(
+            extra,
+            "UPDATE runtime_agents SET record=record WHERE id=?1",
+        )
+        .await;
+    }
+}
+
+#[tokio::test]
+async fn studio_error_existing_liveness_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(json!({}),
+        "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT collection,'liveness:fixture',seq,hash,json_set(payload,'$.id','liveness:fixture','$.value.id','liveness:fixture'),0 FROM sync_entities WHERE collection='studioError' AND id='agent:'||?1||':'").await;
+}
+
+#[tokio::test]
+async fn studio_error_pending_transfer_keeps_conservative_rebuilds() {
+    assert_failed_agent_liveness_dependency_rebuilds(
+        json!({}),
+        "INSERT INTO runtime_account_transfers(id,record) VALUES(?1,'{\"status\":\"pending\"}')",
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn studio_error_paused_active_turn_publishes_when_its_last_tool_stops() {
+    let (_dir, store) = store().await;
+    let now = crate::event_write::unix_time().expect("clock");
+    let mut record = AgentRecord::from_value(chat(json!({
+        "status":"running","inFlight":true,"turnId":"turn","turnEpoch":1,"threadId":"thread",
+        "error":"WorkspaceRecoveryRequired: fixture", "activity":{"at":now-1000.0},
+        "activeTools":[{"id":"tool","name":"fixture"}],
+        "startAttempt":{"id":"attempt","epoch":1,"accountKey":"default","threadId":"thread",
+            "turnId":"turn","requestTicket":"ticket","connectionGeneration":1,"submitted":true,"events":[]}
+    }))).expect("active turn");
+    studio_runtime_store::SchedulerRepository::hold_recovered_delivery(&mut record)
+        .expect("manual hold");
+    assert!(studio_runtime_store::SchedulerRepository::manual_delivery_hold_tracks(&record));
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::ExecutionHistoryRepository::record_current(tx, &mut record)?;
+            AgentRepository::put(tx, &record)
+        })
+        .await
+        .expect("persist active held turn");
+    assert!(client_entity(&store, "studioError", &format!("agent:{CHAT}:turn")).is_some());
+    let stalled = format!("liveness:turn_stalled:{CHAT}:turn");
+    assert!(client_entity(&store, "studioError", &stalled).is_none());
+    let before = full_publications(&store).await;
+    store
+        .transaction(|tx| {
+            let mut record = AgentRepository::get(tx, &CHAT.into())?.unwrap();
+            record.active_tools = Some(Vec::new());
+            // A stored metadata change invokes the same source-write publication check.
+            record.model = Some("gpt-6-mini".into());
+            AgentRepository::put(tx, &record)
+        })
+        .await
+        .expect("last tool stops");
+    let listed = store
+        .test_read_transaction(move |tx| crate::studio_errors::list(tx, now))
+        .expect("list");
+    assert!(
+        listed["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == stalled)
+    );
+    assert_eq!(full_publications(&store).await, before + 1);
+    assert!(
+        !client_entity(&store, "studioError", &stalled)
+            .expect("stall published with source")
+            .0
+    );
+}
+
 /// Targeted publication must still follow every change that can alter the
 /// list: a new error, an owner rename, deletion and restoration of the owner,
 /// a dismissal and its removal, and removal of the source row.
