@@ -3291,6 +3291,37 @@ mod startup_registry_tests {
     use studio_runtime_store::RuntimeStore;
     use studio_runtime_store::supervisor_journal::SupervisorJournal;
 
+    #[tokio::test]
+    async fn fresh_studio_account_does_not_adopt_codex_cli_credentials() {
+        let state = tempfile::tempdir().expect("state directory");
+        let codex = tempfile::tempdir().expect("external Codex home");
+        let auth = br#"{"OPENAI_API_KEY":"placeholder-not-a-credential"}"#;
+        fs::write(codex.path().join("auth.json"), auth).expect("external auth");
+        let store = RuntimeStore::open(Some(state.path())).await.expect("store");
+        let state_root = studio_runtime_store::path_identity::CanonicalPath::existing(store.root())
+            .expect("state root");
+        let external = resolve_codex_home(Some(codex.path().as_os_str()), Path::new("/"))
+            .expect("external home");
+        let registry = startup_registry(&state_root, &external).expect("registry");
+        let bytes = registry.bytes.expect("registry bytes");
+        let policy = AccountPolicyState::from_startup(Some(&bytes), []).expect("policy");
+        let accounts = policy.accounts();
+        assert_eq!(accounts.default_account_key, "default");
+        assert_eq!(accounts.accounts.len(), 1);
+        let account = &accounts.accounts[0];
+        assert_eq!(account.status.as_str(), Some("signedOut"));
+        let home = Path::new(account.home.as_str().expect("account home"));
+        assert!(
+            home.starts_with(state_root.to_path_buf()),
+            "Studio owns {home:?}"
+        );
+        assert_ne!(home, external);
+        assert_eq!(
+            fs::read(codex.path().join("auth.json")).expect("external auth"),
+            auth
+        );
+    }
+
     /// The fresh-state path of the rehearsal: the supervisor creates its
     /// journal first, then the server opens the store and the registry.
     #[tokio::test]
