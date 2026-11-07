@@ -61,6 +61,7 @@ export const SUBSCRIPTION_ENTITY_SCOPES = {
       "uiPreferences",
       "work",
       "workspace",
+      "agentTail",
     ],
     idField: null,
     agentField: null,

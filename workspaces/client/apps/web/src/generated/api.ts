@@ -4421,6 +4421,62 @@ export interface components {
       | "notLoaded"
       | "unsubscribed"
       | "notSubscribed";
+    /** @description Domain operational precedence; presentation belongs to the client formatter. */
+    AgentOperationalStatus:
+      | {
+          /** @constant */
+          reason: "needs_input";
+          wait: components["schemas"]["AgentWaitReasons"] | null;
+        }
+      | {
+          /** @constant */
+          reason: "waiting";
+          wait: components["schemas"]["AgentWaitReasons"];
+        }
+      | {
+          /** @constant */
+          reason: "waiting_background_command";
+        }
+      | {
+          /** @constant */
+          reason: "working";
+        }
+      | {
+          /** @constant */
+          reason: "turn_ended";
+        }
+      | {
+          /** @constant */
+          reason: "disk_space";
+        }
+      | {
+          /** @constant */
+          reason: "failed";
+        }
+      | {
+          /** @constant */
+          reason: "interrupted";
+        }
+      | {
+          /** @constant */
+          reason: "stopped";
+        }
+      | {
+          /** @constant */
+          reason: "question_deferred";
+        }
+      | {
+          /** @constant */
+          reason: "unread_result";
+        }
+      | {
+          /** @constant */
+          reason: "read_result";
+        }
+      | {
+          /** @constant */
+          reason: "ready";
+        };
     /** AgentOverview */
     AgentOverview: {
       /**
@@ -6150,8 +6206,7 @@ export interface components {
       hasUnread?: boolean | null | undefined;
       /** Id */
       id: string;
-      /** Inflight */
-      inFlight?: boolean | null | undefined;
+      inFlight: boolean;
       /** Islead */
       isLead?: boolean | null | undefined;
       /** Kind */
@@ -6165,6 +6220,8 @@ export interface components {
       manualConnectionCheck?:
         | components["schemas"]["ManualConnectionCheck"]
         | undefined;
+      markRead: components["schemas"]["ReadStateDto"] | null;
+      markUnread: components["schemas"]["MarkUnreadEligibility"];
       /** Model */
       model?: null | string | undefined;
       movedTo?: components["schemas"]["MovePointerDto"] | null | undefined;
@@ -6175,6 +6232,7 @@ export interface components {
       moveImportPending?: boolean | undefined;
       /** Name */
       name?: null | string | undefined;
+      operationalStatus: components["schemas"]["AgentOperationalStatus"];
       /** Parentid */
       parentId?: null | string | undefined;
       /** Parkedevent */
@@ -6191,6 +6249,7 @@ export interface components {
       projectId?: null | string | undefined;
       /** Projectpath */
       projectPath?: string | null | undefined;
+      projectServerId: string | null;
       provider?: components["schemas"]["AgentProvider"] | null | undefined;
       readState?: components["schemas"]["ReadStateDto"] | null | undefined;
       /** Readstatesupported */
@@ -6231,6 +6290,41 @@ export interface components {
       /** Updated */
       updated?: null | number | undefined;
     };
+    /** @description A lead's committed tail at the existing provider flush/completion cadence. */
+    AgentTail: {
+      /** @description Lead agent identity; workers do not produce rows in this collection. */
+      id: string;
+      /** @description Search excerpt, bounded to Unicode scalar values; empty when no tail exists. */
+      tail: string;
+    };
+    /** @description Raw domain wait counts. Units are live processes/inputs, never display strings. */
+    AgentWaitReasons:
+      | {
+          /** Format: uint32 */
+          agents: number;
+          /** Format: uint32 */
+          commands: number;
+          event: string | null;
+          /** Format: uint32 */
+          inputs: number;
+          /** Format: uint32 */
+          monitors: number;
+        }
+      | {
+          agents?: unknown | undefined;
+        }
+      | {
+          commands?: unknown | undefined;
+        }
+      | {
+          monitors?: unknown | undefined;
+        }
+      | {
+          inputs?: unknown | undefined;
+        }
+      | {
+          event?: string | undefined;
+        };
     /**
      * AgentWorkspaceModeRequest
      * @description Switch one idle WT chat to the Layr workspace mode. The chat keeps its thread and history.
@@ -13888,6 +13982,7 @@ export interface components {
        */
       wait: "queued" | "slot" | "pause" | "behind";
     };
+    GlobalStateResource: unknown;
     /** @enum {string} */
     Grant: "full" | "observe";
     /** @description History stays: a hidden row is not shown in the default list. */
@@ -14356,10 +14451,7 @@ export interface components {
       available: boolean;
       receipt: components["schemas"]["ConnectionCheckDto"] | null;
     };
-    /**
-     * @description Server-owned reasons for an unavailable mark-unread action.
-     * @enum {string}
-     */
+    /** @enum {string} */
     MarkUnreadEligibility:
       | "allowed"
       | "unsupported"
@@ -23058,6 +23150,15 @@ export interface components {
       id: string;
       value: components["schemas"]["AgentSummaryEntityDto"];
     };
+    SyncAgentTailEntityPayload: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      collection: "agentTail";
+      id: string;
+      value: components["schemas"]["AgentTail"];
+    };
     /** SyncAnnotationEntityPayload */
     SyncAnnotationEntityPayload: {
       /**
@@ -23321,7 +23422,8 @@ export interface components {
             | "workResult"
             | "workDecision"
             | "workRelease"
-            | "sidebarChatRow";
+            | "sidebarChatRow"
+            | "agentTail";
           /** @constant */
           op: "delete";
         }
@@ -23430,6 +23532,13 @@ export interface components {
           op: "upsert";
           value: components["schemas"]["SidebarChatRow"];
         }
+      | {
+          /** @constant */
+          collection: "agentTail";
+          /** @constant */
+          op: "upsert";
+          value: components["schemas"]["AgentTail"];
+        }
     );
     SyncEntityPayload:
       | components["schemas"]["SyncAgentEntityPayload"]
@@ -23467,7 +23576,8 @@ export interface components {
       | components["schemas"]["SyncWorkResultEntityPayload"]
       | components["schemas"]["SyncWorkDecisionEntityPayload"]
       | components["schemas"]["SyncWorkReleaseEntityPayload"]
-      | components["schemas"]["SyncSidebarChatRowEntityPayload"];
+      | components["schemas"]["SyncSidebarChatRowEntityPayload"]
+      | components["schemas"]["SyncAgentTailEntityPayload"];
     /** SyncEventEntityPayload */
     SyncEventEntityPayload: {
       /**

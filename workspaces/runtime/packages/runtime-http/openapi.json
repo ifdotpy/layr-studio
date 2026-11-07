@@ -7033,6 +7033,195 @@
         "title": "AgentNativeStatusValue",
         "type": "string"
       },
+      "AgentOperationalStatus": {
+        "description": "Domain operational precedence; presentation belongs to the client formatter.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "needs_input",
+                "type": "string"
+              },
+              "wait": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/AgentWaitReasons"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "reason",
+              "wait"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "waiting",
+                "type": "string"
+              },
+              "wait": {
+                "$ref": "#/components/schemas/AgentWaitReasons"
+              }
+            },
+            "required": [
+              "reason",
+              "wait"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "waiting_background_command",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "working",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "turn_ended",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "disk_space",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "failed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "interrupted",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "stopped",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "question_deferred",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "unread_result",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "read_result",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "reason": {
+                "const": "ready",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reason"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "AgentOverview": {
         "additionalProperties": false,
         "properties": {
@@ -10203,15 +10392,7 @@
             "type": "string"
           },
           "inFlight": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Inflight"
+            "type": "boolean"
           },
           "isLead": {
             "anyOf": [
@@ -10272,6 +10453,19 @@
           "manualConnectionCheck": {
             "$ref": "#/components/schemas/ManualConnectionCheck"
           },
+          "markRead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReadStateDto"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "markUnread": {
+            "$ref": "#/components/schemas/MarkUnreadEligibility"
+          },
           "model": {
             "anyOf": [
               {
@@ -10308,6 +10502,9 @@
               }
             ],
             "title": "Name"
+          },
+          "operationalStatus": {
+            "$ref": "#/components/schemas/AgentOperationalStatus"
           },
           "parentId": {
             "anyOf": [
@@ -10398,6 +10595,16 @@
               }
             ],
             "title": "Projectpath"
+          },
+          "projectServerId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "provider": {
             "anyOf": [
@@ -10594,9 +10801,117 @@
           }
         },
         "required": [
-          "id"
+          "id",
+          "operationalStatus",
+          "markRead",
+          "markUnread",
+          "inFlight",
+          "projectServerId"
         ],
         "title": "AgentSummaryEntityDto",
+        "type": "object"
+      },
+      "AgentTail": {
+        "additionalProperties": false,
+        "description": "A lead's committed tail at the existing provider flush/completion cadence.",
+        "properties": {
+          "id": {
+            "description": "Lead agent identity; workers do not produce rows in this collection.",
+            "type": "string"
+          },
+          "tail": {
+            "description": "Search excerpt, bounded to Unicode scalar values; empty when no tail exists.",
+            "maxLength": 300,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tail"
+        ],
+        "type": "object"
+      },
+      "AgentWaitReasons": {
+        "additionalProperties": false,
+        "anyOf": [
+          {
+            "properties": {
+              "agents": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "commands": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "monitors": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "inputs": {
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "properties": {
+              "event": {
+                "minLength": 1,
+                "type": "string"
+              }
+            }
+          }
+        ],
+        "description": "Raw domain wait counts. Units are live processes/inputs, never display strings.",
+        "properties": {
+          "agents": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "commands": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "inputs": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "monitors": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "agents",
+          "commands",
+          "monitors",
+          "inputs",
+          "event"
+        ],
         "type": "object"
       },
       "AgentWorkspaceModeRequest": {
@@ -29730,6 +30045,11 @@
         ],
         "type": "object"
       },
+      "GlobalStateResource": {
+        "x-studio-entity-scope": {
+          "collections": null
+        }
+      },
       "Grant": {
         "enum": [
           "full",
@@ -30901,7 +31221,6 @@
         "type": "object"
       },
       "MarkUnreadEligibility": {
-        "description": "Server-owned reasons for an unavailable mark-unread action.",
         "enum": [
           "allowed",
           "unsupported",
@@ -50983,7 +51302,8 @@
             "studioError",
             "uiPreferences",
             "work",
-            "workspace"
+            "workspace",
+            "agentTail"
           ]
         }
       },
@@ -52856,6 +53176,27 @@
         "title": "SyncAgentSummaryEntityPayload",
         "type": "object"
       },
+      "SyncAgentTailEntityPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "const": "agentTail",
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "value": {
+            "$ref": "#/components/schemas/AgentTail"
+          }
+        },
+        "required": [
+          "collection",
+          "id",
+          "value"
+        ],
+        "type": "object"
+      },
       "SyncAnnotationEntityPayload": {
         "additionalProperties": false,
         "properties": {
@@ -53503,7 +53844,8 @@
                   "workResult",
                   "workDecision",
                   "workRelease",
-                  "sidebarChatRow"
+                  "sidebarChatRow",
+                  "agentTail"
                 ],
                 "type": "string"
               },
@@ -53832,6 +54174,27 @@
               "value"
             ],
             "type": "object"
+          },
+          {
+            "properties": {
+              "collection": {
+                "const": "agentTail",
+                "type": "string"
+              },
+              "op": {
+                "const": "upsert",
+                "type": "string"
+              },
+              "value": {
+                "$ref": "#/components/schemas/AgentTail"
+              }
+            },
+            "required": [
+              "op",
+              "collection",
+              "value"
+            ],
+            "type": "object"
           }
         ],
         "properties": {
@@ -53873,6 +54236,7 @@
             "agent": "#/components/schemas/SyncAgentEntityPayload",
             "agentDetail": "#/components/schemas/SyncAgentDetailEntityPayload",
             "agentSummary": "#/components/schemas/SyncAgentSummaryEntityPayload",
+            "agentTail": "#/components/schemas/SyncAgentTailEntityPayload",
             "annotation": "#/components/schemas/SyncAnnotationEntityPayload",
             "chat": "#/components/schemas/SyncChatEntityPayload",
             "complaint": "#/components/schemas/SyncComplaintEntityPayload",
@@ -54015,6 +54379,9 @@
           },
           {
             "$ref": "#/components/schemas/SyncSidebarChatRowEntityPayload"
+          },
+          {
+            "$ref": "#/components/schemas/SyncAgentTailEntityPayload"
           }
         ]
       },

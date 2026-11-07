@@ -2,6 +2,9 @@
 //! rendered from it by `studio-contracts`
 //! (`pnpm run contracts:generate`), and `pnpm run contracts:check` rejects drift.
 
+/// Maximum lead search tail length, in Unicode scalar values.
+pub const AGENT_TAIL_MAX_CHARS: usize = 300;
+
 /// Recent sidebar activity window, in seconds. Expiration is evaluated on the next render.
 pub const COMPACT_RECENT_WINDOW_SECONDS: u32 = 86400;
 

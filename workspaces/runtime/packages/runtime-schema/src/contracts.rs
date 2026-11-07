@@ -1236,6 +1236,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         openapi["components"]["schemas"][name] = schema;
     }
     crate::sidebar::refresh_openapi(&mut openapi)?;
+    crate::chat_operational_status::refresh_summary(&mut openapi);
     crate::records::refresh_openapi(&mut openapi)?;
     crate::multi_server_access::refresh_openapi(&mut openapi);
     crate::multi_server_protocol::refresh_openapi(&mut openapi);
