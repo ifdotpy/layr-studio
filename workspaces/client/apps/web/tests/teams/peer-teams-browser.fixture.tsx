@@ -1,4 +1,7 @@
-import { sidebarRowFixture } from "../../src/servers/sidebarRowFixture.ts";
+import { observer } from "mobx-react-lite";
+import { peerTeamRowFixtures } from "./peer-teams-rows.fixture.ts";
+import { createSidebarMirror } from "../../src/generated/observableResources.ts";
+import type { components } from "../../src/generated/api.ts";
 import type { Agent, Snapshot } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 declare global {
@@ -7,6 +10,7 @@ declare global {
     // Renamed from fixture: performance/scroll-restart.fixture.tsx declares scroll fixture controls.
     peerTeamsData: Snapshot;
     failRefresh: boolean;
+    receivePeerSidebar: (dto: components["schemas"]["SidebarChatList"]) => void;
   }
 }
 
@@ -69,7 +73,17 @@ const initial: Snapshot = {
     agents: [],
   },
 };
-function Fixture() {
+const sidebar = createSidebarMirror();
+sidebar.apply({
+  rows: [
+    peerTeamRowFixtures.a,
+    peerTeamRowFixtures.b,
+    peerTeamRowFixtures.c,
+    peerTeamRowFixtures.x,
+  ],
+});
+window.receivePeerSidebar = sidebar.apply;
+const Fixture = observer(function Fixture() {
   const [data, setData] = useState(initial);
   const [opened, open] = useState("a");
   window.setFixture = setData;
@@ -98,29 +112,7 @@ function Fixture() {
           onSearch={() => {}}
           close={() => {}}
           refresh={refresh}
-          rows={[
-            sidebarRowFixture("a", {
-              name: "Alpha",
-              projectPath: "/p",
-              sortKey: "0",
-            }),
-            sidebarRowFixture("b", {
-              name: "Beta",
-              projectPath: "/p",
-              projectFolder: "f",
-              sortKey: "1",
-            }),
-            sidebarRowFixture("c", {
-              name: "Gamma",
-              projectPath: "/p",
-              sortKey: "2",
-            }),
-            sidebarRowFixture("x", {
-              name: "Other project",
-              projectPath: "/other",
-              sortKey: "3",
-            }),
-          ]}
+          rows={sidebar.current.rows}
           markUnread={() => {}}
           markingRead={new Set()}
         />
@@ -133,5 +125,5 @@ function Fixture() {
       />
     </MantineProvider>
   );
-}
+});
 createRoot(document.getElementById("root")!).render(<Fixture />);
