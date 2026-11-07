@@ -13,19 +13,24 @@ use std::{
 
 pub(super) const TOOLS: [&str; 2] = ["rg", "find"];
 
-/// `layr tool --help` succeeds only on a Layr build that serves the tools.
+/// `layr tool` without a tool prints `usage: layr tool <rg|find> ...` only on a Layr build that
+/// serves the tools. `layr tool --help` is no probe: every build prints its general help for
+/// `--help` and exits 0 (layr 0.40.1 does), and then a link named `rg` runs `layr -l ...`.
 fn serves_tools(executable: &Path) -> bool {
-    bounded_child::run_without_git_environment(Request {
+    match bounded_child::run_without_git_environment(Request {
         program: executable.as_os_str(),
         git_directory: None,
-        args: &["tool", "--help"],
+        args: &["tool"],
         environment: &[],
         input: None,
         stdout_limit: 64 * 1024,
         stderr_limit: 4096,
         timeout: Duration::from_secs(10),
-    })
-    .is_ok_and(|output| String::from_utf8_lossy(&output.stdout.bytes).contains("usage: layr"))
+    }) {
+        Ok(output) => String::from_utf8_lossy(&output.stdout.bytes).contains("usage: layr tool"),
+        Err(bounded_child::ChildError::Failed(message)) => message.contains("usage: layr tool"),
+        Err(_) => false,
+    }
 }
 
 /// Point the tool links in `bin` at `executable`, or remove them when it does not serve the
@@ -84,11 +89,17 @@ mod tests {
         let dir = tempfile::tempdir().expect("fixture");
         let bin = dir.path().join("bin");
         fs::create_dir(&bin).expect("bin");
-        let serving = script(dir.path(), "layr-new", "echo 'usage: layr <command>'");
+        let serving = script(
+            dir.path(),
+            "layr-new",
+            "echo 'usage: layr tool <rg|find> [<args>]' >&2; exit 2",
+        );
+        // layr 0.40.1: general help for `--help` with exit 0, an error for `tool` alone.
         let old = script(
             dir.path(),
             "layr-old",
-            "echo \"layr: 'tool' is not a layr command\" >&2; exit 1",
+            "if [ \"$2\" = --help ]; then echo 'usage: layr <command> [<args>]'; exit 0; fi\n\
+             echo \"layr: 'tool' is not a layr command\" >&2; exit 1",
         );
 
         ensure_links(&bin, &serving).expect("links");

@@ -55,12 +55,20 @@ function fixture() {
       callbacks.get(subscriptionKey(ref))?.({
         epoch: "epoch",
         revision: ++revision,
-        nativeLayrSettings: { configured: true, storeRoot, version: null },
+        nativeLayrSettings: {
+          configured: true,
+          storeRoot,
+          version: null,
+          virtualAgentLines: false,
+          virtualAgentLinesAvailable: false,
+        },
       });
       subscriptions.publish(ref, {
         configured: true,
         storeRoot,
         version: null,
+        virtualAgentLines: false,
+        virtualAgentLinesAvailable: false,
       });
     },
   };
@@ -402,6 +410,8 @@ describe("bounded keyed observable facades", () => {
         configured: true,
         storeRoot,
         version: null,
+        virtualAgentLines: false,
+        virtualAgentLinesAvailable: false,
       });
       await vi.advanceTimersByTimeAsync(0);
     }

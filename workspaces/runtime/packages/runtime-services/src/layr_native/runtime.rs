@@ -211,10 +211,33 @@ pub(super) fn run_in_store(
     cwd: &Path,
     args: &[&str],
 ) -> Result<String> {
+    run_in_store_with_environment(state_dir, root, cwd, args, &[])
+}
+
+/// `run` with extra environment variables for this one command.
+pub(super) fn run_with_environment(
+    state_dir: &Path,
+    cwd: &Path,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> Result<String> {
+    let root = settings::root_from_cwd(cwd)
+        .map(Ok)
+        .unwrap_or_else(|| settings::selected_store(state_dir))?;
+    run_in_store_with_environment(state_dir, &root, cwd, args, environment)
+}
+
+fn run_in_store_with_environment(
+    state_dir: &Path,
+    root: &Path,
+    cwd: &Path,
+    args: &[&str],
+    environment: &[(&str, &str)],
+) -> Result<String> {
     let binary = super::capability::resolve_binary().map_err(|capability| {
         NativeLayrError::Refused(capability.message().unwrap_or("Layr is unavailable").into())
     })?;
-    run_with_binary(state_dir, root, cwd, args, &binary)
+    run_with_binary_progress(state_dir, root, cwd, args, environment, &binary, None)
 }
 
 pub(super) fn run_with_binary(
@@ -224,7 +247,7 @@ pub(super) fn run_with_binary(
     args: &[&str],
     binary: &Path,
 ) -> Result<String> {
-    run_with_binary_progress(state_dir, root, cwd, args, binary, None)
+    run_with_binary_progress(state_dir, root, cwd, args, &[], binary, None)
 }
 
 fn run_with_binary_progress(
@@ -232,6 +255,7 @@ fn run_with_binary_progress(
     root: &Path,
     cwd: &Path,
     args: &[&str],
+    environment: &[(&str, &str)],
     binary: &Path,
     progress: Option<ProgressSink>,
 ) -> Result<String> {
@@ -252,7 +276,11 @@ fn run_with_binary_progress(
             .into_iter()
             .map(|(name, value)| format!("{name}={}", value.as_str().unwrap_or_default()))
             .collect();
-    argv.extend(variables.iter().map(String::as_str));
+    let extra: Vec<String> = environment
+        .iter()
+        .map(|(name, value)| format!("{name}={value}"))
+        .collect();
+    argv.extend(variables.iter().chain(&extra).map(String::as_str));
     argv.extend(["GIT_NO_LAZY_FETCH=1", "GIT_OPTIONAL_LOCKS=0"]);
     argv.extend([
         binary
@@ -635,6 +663,7 @@ fn create_worker_line(
     cwd: &Path,
     record: &Value,
     default_start: &str,
+    virtual_line: bool,
     progress: Option<&ProgressSink>,
 ) -> Result<Value> {
     let requested = record["layrBaseState"].as_str();
@@ -665,6 +694,16 @@ fn create_worker_line(
         },
         || {
             report(progress, CopyPhase::CreatingLine, 0, None, CopyUnit::Files);
+            // A refused virtual line (for example with the file system extension off) costs
+            // only its speed: the agent gets a folder line.
+            if virtual_line {
+                match super::virtual_lines::create(state_dir, main, line, start) {
+                    Ok(()) => return Ok(json!({"path":cwd,"line":line,"view":"virtual"})),
+                    Err(error) => eprintln!(
+                        "Native Layr warning: the virtual line {line} was refused; it is a folder line: {error}"
+                    ),
+                }
+            }
             run(state_dir, main, &["line", "new", line, start])?;
             Ok(json!({"path":cwd,"line":line}))
         },
@@ -804,6 +843,7 @@ pub(super) fn prepare_files_reporting(
                         "--from",
                         staging.to_str().unwrap_or_default(),
                     ],
+                    &[],
                     &binary,
                     progress.cloned(),
                 )
@@ -873,10 +913,30 @@ pub(super) fn prepare_files_reporting(
     };
     let cwd = line_path_in_store(&root, &project, &line);
     if !lead && (!reviewer || assigned) {
+        // Assigned reviewers keep folder lines: they read through `layr try` and Git, which a
+        // virtual line refuses.
+        let virtual_line = !reviewer
+            && settings::virtual_agent_lines(state_dir)
+            && super::capability::resolve_binary()
+                .is_ok_and(|binary| super::virtual_lines::supported(&binary, &root));
         create_worker_line(
-            state_dir, &root, &main, &project, &line, &cwd, record, &start, progress,
+            state_dir,
+            &root,
+            &main,
+            &project,
+            &line,
+            &cwd,
+            record,
+            &start,
+            virtual_line,
+            progress,
         )?;
+        // A restart ends every mount; the view record stays. A mounted line is left as it is.
+        if super::virtual_lines::is_virtual(&root, &project, &line) {
+            super::virtual_lines::mount(state_dir, &main, &line)?;
+        }
     }
+    // A virtual line has no `.git` folder, so it gets no hook (Git cannot write there anyway).
     super::git_guard::install_hook(state_dir, &cwd)?;
     super::tool_index::warm(state_dir, &cwd);
     let state = run(state_dir, &cwd, &["rev-parse", "head"])?;
@@ -1066,7 +1126,7 @@ pub(super) fn associated_cwd(state_dir: &Path, record: &Value) -> Result<PathBuf
     Ok(actual)
 }
 
-fn working_state(state_dir: &Path, cwd: &Path) -> Result<String> {
+pub(super) fn working_state(state_dir: &Path, cwd: &Path) -> Result<String> {
     match run(state_dir, cwd, &["rev-parse", "head@{0}"]) {
         Ok(state) => Ok(state),
         Err(NativeLayrError::Refused(detail)) if detail.contains("has only 0 automatic states") => {
@@ -1125,6 +1185,19 @@ mod repair_tests {
     }
 }
 
+/// Whether the line of a ready agent record is a virtual line.
+fn virtual_record(state_dir: &Path, record: &Value) -> Result<bool> {
+    let line = text(record, "layrLine")?;
+    if line == "main" || record["role"] == "reviewer" {
+        return Ok(false);
+    }
+    Ok(super::virtual_lines::is_virtual(
+        &settings::record_store(state_dir, record)?,
+        &project_id(record)?,
+        line,
+    ))
+}
+
 pub fn save(state_dir: &Path, record: &Value, request_id: &str) -> Result<Value> {
     let cwd = associated_cwd(state_dir, record)?;
     operation_in_store(
@@ -1134,8 +1207,12 @@ pub fn save(state_dir: &Path, record: &Value, request_id: &str) -> Result<Value>
         &json!({"agent":record["id"],"cwd":cwd,"kind":"save"}),
         || {
             if record["role"] != "reviewer" {
-                repair_caches(state_dir, &cwd)?;
-                run(state_dir, &cwd, &["save"])?;
+                if virtual_record(state_dir, record)? {
+                    super::virtual_lines::save_all(state_dir, &cwd)?;
+                } else {
+                    repair_caches(state_dir, &cwd)?;
+                    run(state_dir, &cwd, &["save"])?;
+                }
             }
             let state = if record["role"] == "reviewer" {
                 run(state_dir, &cwd, &["rev-parse", "head"])?
@@ -1165,7 +1242,11 @@ pub fn remove(state_dir: &Path, record: &Value, request_id: &str) -> Result<Valu
                 if line == "main" {
                     return Err(NativeLayrError::Refused("Cannot delete main".into()));
                 }
-                let state = working_state(state_dir, &cwd)?;
+                let state = if virtual_record(state_dir, record)? {
+                    super::virtual_lines::save_all(state_dir, &cwd)?
+                } else {
+                    working_state(state_dir, &cwd)?
+                };
                 let archive_ref = format!(
                     "pins/studio/archive/{}",
                     studio_runtime_store::sha256_hex(text(record, "id")?.as_bytes())
@@ -2043,6 +2124,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &record,
             "main",
+            false,
             Some(&progress),
         );
         assert_eq!(
@@ -2075,6 +2157,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &record,
             "main",
+            false,
             None,
         )
         .unwrap();
@@ -2090,6 +2173,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 &main,
                 &changed,
                 "main",
+                false,
                 None
             )
             .is_err()
@@ -2111,6 +2195,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
                 &main,
                 &default,
                 "cached-main",
+                false,
                 None
             )
             .unwrap(),
@@ -2126,6 +2211,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &default,
             "cached-main",
+            false,
             None,
         )
         .unwrap();
@@ -2139,6 +2225,7 @@ if [ "$3 $4" = 'rev-parse missing' ]; then echo 'unknown revision' >&2; exit 1; 
             &main,
             &missing,
             "main",
+            false,
             None,
         )
         .unwrap_err();

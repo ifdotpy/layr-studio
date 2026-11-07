@@ -15767,6 +15767,11 @@ export interface components {
     NativeLayrSettingsRequest: {
       /** Store Root */
       storeRoot?: string | null | undefined;
+      /**
+       * Virtual Agent Lines
+       * @description Make new worker lines virtual Layr lines (experimental). A request with this field and without storeRoot changes only this setting.
+       */
+      virtualAgentLines?: boolean | undefined;
     };
     /** NativeLayrSettingsResource */
     NativeLayrSettingsResource: {
@@ -15787,6 +15792,10 @@ export interface components {
         build: string;
         version: string;
       } | null;
+      /** @description New worker lines are virtual Layr lines. */
+      virtualAgentLines: boolean;
+      /** @description This server and its Layr build can make virtual lines. */
+      virtualAgentLinesAvailable: boolean;
     };
     /** NativeNameFailureRecordResponse */
     NativeNameFailureRecordResponse: {

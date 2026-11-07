@@ -34446,6 +34446,11 @@
               }
             ],
             "title": "Store Root"
+          },
+          "virtualAgentLines": {
+            "description": "Make new worker lines virtual Layr lines (experimental). A request with this field and without storeRoot changes only this setting.",
+            "title": "Virtual Agent Lines",
+            "type": "boolean"
           }
         },
         "title": "NativeLayrSettingsRequest",
@@ -34511,12 +34516,22 @@
                 "type": "null"
               }
             ]
+          },
+          "virtualAgentLines": {
+            "description": "New worker lines are virtual Layr lines.",
+            "type": "boolean"
+          },
+          "virtualAgentLinesAvailable": {
+            "description": "This server and its Layr build can make virtual lines.",
+            "type": "boolean"
           }
         },
         "required": [
           "version",
           "storeRoot",
-          "configured"
+          "configured",
+          "virtualAgentLines",
+          "virtualAgentLinesAvailable"
         ],
         "title": "NativeLayrSettingsResponse",
         "type": "object"

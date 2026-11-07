@@ -1,5 +1,6 @@
+import { Switch } from "@mantine/core";
 import { useEffect, useState } from "react";
-import { type GetResult } from "../api";
+import { errorText, type GetResult } from "../api";
 import {
   useServerApi,
   useServerResources,
@@ -15,6 +16,7 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
   const [configuration, setConfiguration] = useState<Configuration | null>(
     null,
   );
+  const [virtualLinesError, setVirtualLinesError] = useState("");
   useEffect(() => {
     if (!active) return;
     return resources.watchResourceChanges(
@@ -49,6 +51,27 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
                 await post("/api/native-layr/settings", { storeRoot });
               }}
             />
+            {(configuration.virtualAgentLinesAvailable ||
+              configuration.virtualAgentLines) && (
+              <SettingsRow
+                label="Virtual agent lines (experimental)"
+                help="New worker agents get a virtual Layr line: Layr stores only the files that the agent changes, so a new line is ready at once. Leads and reviewers keep folder lines. A virtual line has no Git folder and no build caches."
+              >
+                <Switch
+                  aria-label="Virtual agent lines"
+                  checked={configuration.virtualAgentLines}
+                  error={virtualLinesError || undefined}
+                  onChange={(event) => {
+                    setVirtualLinesError("");
+                    post("/api/native-layr/settings", {
+                      virtualAgentLines: event.currentTarget.checked,
+                    }).catch((failure: unknown) =>
+                      setVirtualLinesError(errorText(failure)),
+                    );
+                  }}
+                />
+              </SettingsRow>
+            )}
             {configuration.readiness?.status === "notReady" && (
               <p role="status" className="layr-settings-detail">
                 {configuration.readiness.reason}

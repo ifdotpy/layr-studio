@@ -178,9 +178,11 @@ pub mod mapping;
 pub mod settings;
 mod tool_index;
 pub mod versions;
+mod virtual_lines;
 #[cfg(test)]
 mod warm_store_tests;
 pub use capability::{NativeLayrCapability, capability, resolve_binary};
+pub use virtual_lines::supported as virtual_lines_supported;
 #[cfg(test)]
 fn test_binary() -> Option<std::ffi::OsString> {
     std::env::var_os("STUDIO_LAYR_NATIVE_TEST_BINARY")

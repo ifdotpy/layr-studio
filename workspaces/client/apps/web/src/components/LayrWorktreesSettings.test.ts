@@ -87,3 +87,29 @@ it("renders the server readiness reason", () => {
     }),
   ).toContain("The store service is not running");
 });
+
+it("offers virtual agent lines only where the server supports them", () => {
+  const base = { version: null, storeRoot: "/store" };
+  expect(
+    render({
+      ...base,
+      virtualAgentLines: false,
+      virtualAgentLinesAvailable: false,
+    }),
+  ).not.toContain("Virtual agent lines");
+  const offered = render({
+    ...base,
+    virtualAgentLines: false,
+    virtualAgentLinesAvailable: true,
+  });
+  expect(offered).toContain("Virtual agent lines (experimental)");
+  expect(offered).not.toContain('checked=""');
+  // A setting that is on stays visible, so that it can be turned off.
+  expect(
+    render({
+      ...base,
+      virtualAgentLines: true,
+      virtualAgentLinesAvailable: false,
+    }),
+  ).toContain('checked=""');
+});

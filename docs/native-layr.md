@@ -350,7 +350,7 @@ These helpers can write files or run other commands.
 
 ## Search tools in native lines
 
-When the installed Layr serves tree tools (`layr tool --help` succeeds), the
+When the installed Layr serves tree tools (`layr tool` without a tool prints its usage), the
 managed bin folder also holds links named `rg` and `find` to the Layr binary. Agents' `rg` and
 `find` calls in a native line are then answered from Layr's in-memory index of the line, with
 the real tools' output; anything Layr cannot answer the same way runs the real tool (Layr
@@ -361,6 +361,63 @@ Set `LAYR_FS_OFF=1` in the server's environment to remove the links and always u
 tools. `layr fs status` lists the indexed lines and the memory they use.
 
 The `tool_index` module owns this behavior.
+
+## Virtual agent lines (experimental)
+
+A virtual line is a LayrFS mount of the line's changes over the tree of its start state (Layr
+`docs/views.md`). A new virtual line costs one mount, not a clone of the whole tree. Layr offers
+it behind `LAYR_EXPERIMENTAL_VIEWS=1`, on macOS with the LayrFS file system extension.
+
+The setting "Virtual agent lines (experimental)" in the Layr settings is off by default. Studio
+offers it only when the server can make virtual lines: macOS, an existing store, and a Layr
+build in which `layr line show` without a line prints a usage that names `--virtual`. The
+setting is `virtualAgentLines` in `layr-native/settings.json` and in
+`/api/native-layr/settings`; a request with `virtualAgentLines` and without `storeRoot` changes
+only this setting.
+
+When the setting is on, preparation makes each new worker line with
+`layr line new <line> <start> --view virtual`. Studio sets `LAYR_EXPERIMENTAL_VIEWS=1` only for
+the commands that need it (`line new --view virtual` and `line show`). Leads and main stay
+folders. Assigned reviewers keep folder lines, because they read through `layr try` and Git,
+which a virtual line refuses. A line keeps its view when the setting changes later. If Layr
+refuses the virtual line (for example, the extension is off), the server log gets a warning and
+the agent gets a folder line.
+
+Layr refuses most commands inside a virtual line. Studio uses only the commands that Layr
+supports there, and the `virtual_lines` module owns these choices:
+
+- **Is the line virtual?** Layr's local view record
+  `projects/<project>/meta/vlines/*/view.json` names the line. It stays after a restart.
+- **Preparation.** `line new --view virtual`, then `line show <line> --virtual` from main: it
+  mounts the line again after a restart and does nothing for a mounted line. Then `fs warm`, as
+  for a folder line. No Git hook: the line has no `.git` folder.
+- **Turn save.** `rev-parse head` only, without a receipt. A folder line repairs its cache
+  overlays and runs `save`, but a virtual line refuses `layr overlay` and `layr save` without
+  `-m`. Its changes stay in its upper folder, which survives a restart.
+- **Evidence.** `rev-parse`, as for a folder line.
+- **Merge into main.** `merge <line> --expect <state>` from main, as for a folder line. The line
+  has no caches, so Layr merges none.
+- **Removal.** `status --json`; with changes, `save -m "Studio: unsaved work of the removed
+  agent"`; archive `head` (a folder line archives `head@{0}`); then `line delete -D` from main.
+  The commands in the line run with `LAYR_TRASH_BUDGET_MS=0`, so Layr starts no trash process
+  whose working folder is the mount.
+
+Agents in a virtual line work as in a folder line, with these limits from Layr:
+
+- `layr status`, `layr diff` and `layr save -m` work. `layr add` is refused, and not necessary:
+  a save takes every change.
+- `layr git push`, `restore`, `reset`, `undo`, `overlay` and the other commands are refused. The
+  lead merges the agent's saved state into main as before.
+- There is no `.git` folder, so Git reads fail. Use `layr log`, `layr show` and `layr diff`.
+- Build caches (`target/`, `node_modules`) are written into the upper folder and are not shared
+  with other lines.
+- `rg` and `find` go through the tool links (previous section): Layr answers them from the
+  lower tree and the upper folder directly, not through the mount (ifdotpy/layr#432). Other bulk reads
+  through the mount are slow.
+- `line delete` must unmount the line. A process whose working folder is in the line (an agent
+  shell, a server, or the trash process of a `layr save -m` that the agent ran) makes the
+  removal fail with "Resource busy", and the cleanup of the agent is held. Stop that process,
+  then delete the line with `layr line delete -D <line>` in main.
 
 ## Reviewers
 

@@ -8,19 +8,52 @@ type Result<T> = std::result::Result<T, NativeLayrError>;
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Settings {
     pub store_root: Option<PathBuf>,
+    /// New worker lines are virtual Layr lines (`virtual_lines`). Off by default; the key is
+    /// written only when on, so a Studio without the setting still reads the file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub virtual_agent_lines: bool,
 }
 
 fn path(state: &Path) -> PathBuf {
     state.join(NATIVE_LAYR_DIRECTORY).join("settings.json")
 }
 
-pub fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
-    let settings = match fs::read(path(state)) {
+fn read(state: &Path) -> Result<Settings> {
+    match fs::read(path(state)) {
         Ok(bytes) => studio_json::from_slice::<Settings>(&bytes)
-            .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}")))?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Settings::default(),
-        Err(e) => return Err(e.into()),
-    };
+            .map_err(|e| NativeLayrError::Refused(format!("Invalid native Layr settings: {e}"))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Settings::default()),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn write(state: &Path, settings: &Settings) -> Result<()> {
+    fs::create_dir_all(state.join(NATIVE_LAYR_DIRECTORY))?;
+    crate::atomic_file::replace(
+        &path(state),
+        studio_json::to_string(settings)
+            .map_err(|e| NativeLayrError::Refused(e.to_string()))?
+            .as_bytes(),
+        Some(0o600),
+        true,
+    )?;
+    Ok(())
+}
+
+/// Whether new worker lines should be virtual. Invalid settings select folder lines.
+pub fn virtual_agent_lines(state: &Path) -> bool {
+    read(state).is_ok_and(|settings| settings.virtual_agent_lines)
+}
+
+/// Turn virtual agent lines on or off. The store root stays. Existing lines keep their view.
+pub fn configure_virtual_agent_lines(state: &Path, enabled: bool) -> Result<()> {
+    let mut settings = read(state)?;
+    settings.virtual_agent_lines = enabled;
+    write(state, &settings)
+}
+
+pub fn configured_store(state: &Path) -> Result<Option<PathBuf>> {
+    let settings = read(state)?;
     if settings
         .store_root
         .as_ref()
@@ -152,19 +185,22 @@ pub fn configure(state: &Path, root: Option<&Path>) -> Result<Value> {
 
 /// Persist the same canonical root that passed validation and overlap checks.
 pub fn configure_resolved(state: &Path, root: &CanonicalPath, use_default: bool) -> Result<Value> {
-    let settings = Settings {
-        store_root: (!use_default).then(|| root.as_path().to_owned()),
-    };
-    let folder = state.join(NATIVE_LAYR_DIRECTORY);
-    fs::create_dir_all(&folder)?;
-    crate::atomic_file::replace(
-        &path(state),
-        studio_json::to_string(&settings)
-            .map_err(|e| NativeLayrError::Refused(e.to_string()))?
-            .as_bytes(),
-        Some(0o600),
-        true,
-    )?;
+    configure_resolved_with_views(state, root, use_default, None)
+}
+
+/// Persist one validated settings request in one atomic replacement.
+pub fn configure_resolved_with_views(
+    state: &Path,
+    root: &CanonicalPath,
+    use_default: bool,
+    virtual_agent_lines: Option<bool>,
+) -> Result<Value> {
+    let mut settings = read(state)?;
+    settings.store_root = (!use_default).then(|| root.as_path().to_owned());
+    if let Some(enabled) = virtual_agent_lines {
+        settings.virtual_agent_lines = enabled;
+    }
+    write(state, &settings)?;
     Ok(json!({"storeRoot":root}))
 }
 
@@ -175,6 +211,7 @@ pub(crate) fn fixture_select(state: &Path, root: &Path) {
         path(state),
         studio_json::to_string(&Settings {
             store_root: Some(root.to_owned()),
+            virtual_agent_lines: false,
         })
         .unwrap(),
     )
@@ -337,6 +374,7 @@ mod tests {
             path(state.path()),
             studio_json::to_string(&Settings {
                 store_root: Some(default.path().to_owned()),
+                virtual_agent_lines: false,
             })
             .unwrap(),
         )
@@ -389,6 +427,33 @@ mod tests {
             metadata(state.path(), &old),
             metadata(state.path(), other.path())
         );
+    }
+
+    #[test]
+    fn virtual_agent_lines_are_off_by_default_and_survive_a_store_change() {
+        let state = tempfile::tempdir().unwrap();
+        assert!(!virtual_agent_lines(state.path()));
+        configure_virtual_agent_lines(state.path(), true).unwrap();
+        assert!(virtual_agent_lines(state.path()));
+        let selected = tempfile::tempdir().unwrap();
+        let root = CanonicalPath::existing(selected.path()).unwrap();
+        configure_resolved(state.path(), &root, false).unwrap();
+        assert!(virtual_agent_lines(state.path()));
+        assert_eq!(
+            configured_store(state.path()).unwrap().unwrap(),
+            root.as_path()
+        );
+        // Off removes the key, so a Studio without the setting reads the file again.
+        configure_virtual_agent_lines(state.path(), false).unwrap();
+        let text = fs::read_to_string(path(state.path())).unwrap();
+        assert!(!text.contains("virtualAgentLines"), "{text}");
+        assert_eq!(
+            configured_store(state.path()).unwrap().unwrap(),
+            root.as_path()
+        );
+        fs::write(path(state.path()), r#"{"virtualAgentLines":"yes"}"#).unwrap();
+        assert!(!virtual_agent_lines(state.path()));
+        assert!(configure_virtual_agent_lines(state.path(), true).is_err());
     }
 
     #[test]
