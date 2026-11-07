@@ -294,11 +294,13 @@ test.describe("sidebar visible parity", () => {
                 ? page.frameLocator('iframe[title="Studio on Local"]')
                 : page;
             await expect(sidebar).toBeVisible();
-            await expect(sidebar.locator("[data-chat]")).toHaveCount(7);
+            // The baseline also renders Approval in the Needs you lane.
+            await expect(sidebar.locator("[data-chat]")).toHaveCount(8);
             const rows = await sidebar
               .locator(".row-copy strong")
               .allTextContents();
             expect(rows).toEqual([
+              "Local Approval",
               "Local Saved shared chat",
               "Local Saved pin",
               "Local Root B",

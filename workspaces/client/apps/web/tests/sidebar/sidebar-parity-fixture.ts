@@ -14,6 +14,7 @@ import type { BrowserContext, Page } from "playwright";
 import type { components } from "../../src/generated/api.ts";
 import type { TestAgent } from "../playwright.ts";
 import type { PreferenceFields } from "../../src/sync/uiPreferenceMerge.ts";
+import { storageFields } from "../../src/sync/uiPreferenceMerge.ts";
 import type { MultiServerFixtureOptions } from "../servers/multi-server-fixture.ts";
 import { fixturePostBody } from "../servers/browser-fixture.ts";
 import type { ServerFixture } from "../servers/browser-fixture.ts";
@@ -863,6 +864,21 @@ export async function sidebarParityFixture(
   });
   Object.assign(servers, { local, remote });
   const prefs = { local: seed(local, "local"), remote: seed(remote, "remote") };
+  // Server preferences are streamed into scoped preference memory. Local storage
+  // does not supply these keys (including on the pre-pilot baseline).
+  for (const owner of ["local", "remote"] as const)
+    for (const [kind, value] of [
+      ["compact", prefs[owner].compact],
+      ["tree", prefs[owner].collapsed],
+    ] as const)
+      for (const [field, entry] of Object.entries(
+        storageFields(`codex-project-${kind}:${scope}`, JSON.stringify(value)),
+      ))
+        preferences[owner].server[field] = {
+          value: entry,
+          timestamp: 1,
+          writer: "sidebar-parity-fixture",
+        };
   if (remoteEmpty) {
     remote.setChats([]);
     remote.snapshot.runtime.sidebarRows = [];
