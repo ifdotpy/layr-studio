@@ -242,3 +242,203 @@ test("new chat controls are inline, save settings and keep the compact composer 
     fixture.kill("SIGTERM");
   }
 });
+
+test("confirmed new chat remains visible once while its entity projection is delayed", async ({
+  page,
+}) => {
+  const evidence = await mkdtemp(join(tmpdir(), "studio-confirmed-creation-"));
+  const fixture = spawnFixture(process.execPath, [rustUiFixture, evidence], {
+    stdio: ["ignore", "pipe", "pipe"],
+    env: { FIXTURE_WORKER_COUNT: "1" },
+  });
+  let log = "";
+  fixture.stderr!.on("data", (chunk) => {
+    log += chunk;
+  });
+  const port = await waitForFixturePort(fixture, { diagnostics: () => log });
+  let hold = false;
+  const held: import("@playwright/test").Route[] = [];
+  const firstHeld = Promise.withResolvers<void>();
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.exposeFunction("creationIngressHeld", () => firstHeld.resolve());
+  await page.addInitScript(() => {
+    const add = EventTarget.prototype.addEventListener;
+    const remove = EventTarget.prototype.removeEventListener;
+    const listeners = new WeakMap<
+      EventTarget,
+      Map<string, Map<EventListenerOrEventListenerObject, EventListener>>
+    >();
+    const queued: (() => void)[] = [];
+    let id: string | null = null;
+    let reported = false;
+    add.call(window, "fixture-creation-ingress", (event) => {
+      id = (event as CustomEvent<string | null>).detail;
+      if (id) reported = false;
+      else queued.splice(0).forEach((deliver) => deliver());
+    });
+    EventTarget.prototype.addEventListener = function (
+      type,
+      listener,
+      options,
+    ) {
+      if (!listener || (type !== "resources" && type !== "entity-transfer"))
+        return add.call(this, type, listener, options);
+      let target = listeners.get(this);
+      if (!target) listeners.set(this, (target = new Map()));
+      const key = `${type}:${typeof options === "boolean" ? options : !!options?.capture}`;
+      let callbacks = target.get(key);
+      if (!callbacks) target.set(key, (callbacks = new Map()));
+      let wrapped = callbacks.get(listener);
+      if (!wrapped) {
+        const deliver = (event: Event) => {
+          if ((this as EventSource).readyState === EventSource.CLOSED) return;
+          if (typeof listener === "function") listener.call(this, event);
+          else listener.handleEvent(event);
+        };
+        const defer = (event: Event) => {
+          queued.push(() => deliver(event));
+          if (!reported) {
+            reported = true;
+            void (
+              window as typeof window & { creationIngressHeld(): Promise<void> }
+            ).creationIngressHeld();
+          }
+        };
+        wrapped = (event) => {
+          if (!id) return deliver(event);
+          // Transfer fragments may split the entity id; keep every fragment in order.
+          if (type === "entity-transfer") return defer(event);
+          const message = event as MessageEvent<string>;
+          const frame: import("../../src/generated/api.ts").components["schemas"]["ResourceChangeEvent"] =
+            JSON.parse(message.data);
+          const entries = frame.resourceVersions.length
+            ? frame.resourceVersions.map((version, index) => ({
+                resource: version.resource ?? frame.resources[index]!,
+                version,
+              }))
+            : frame.resources.map((resource) => ({
+                resource,
+                version: undefined,
+              }));
+          const held = entries.filter(
+            ({ resource, version }) =>
+              resource.kind === "state" ||
+              version?.entityChanges?.documents.some(
+                (row) => row.collection === "agentSummary" && row.id === id,
+              ),
+          );
+          if (!held.length) return deliver(event);
+          const subset = (entries: typeof held) =>
+            new MessageEvent(type, {
+              data: JSON.stringify({
+                ...frame,
+                resources: entries.map((entry) => entry.resource),
+                resourceVersions: entries.flatMap((entry) =>
+                  entry.version ? [entry.version] : [],
+                ),
+              }),
+              lastEventId: message.lastEventId,
+              origin: message.origin,
+            });
+          defer(subset(held));
+          // Detail/transcript baselines still arrive so the pre-projection composer works.
+          const remaining = entries.filter((entry) => !held.includes(entry));
+          if (remaining.length) deliver(subset(remaining));
+        };
+        callbacks.set(listener, wrapped);
+      }
+      return add.call(this, type, wrapped, options);
+    };
+    EventTarget.prototype.removeEventListener = function (
+      type,
+      listener,
+      options,
+    ) {
+      const key = `${type}:${typeof options === "boolean" ? options : !!options?.capture}`;
+      const wrapped = listener && listeners.get(this)?.get(key)?.get(listener);
+      return remove.call(this, type, wrapped || listener, options);
+    };
+  });
+  await page.route("**/api/sync/pull?*", (route) => {
+    if (hold) {
+      held.push(route);
+      firstHeld.resolve();
+      return;
+    }
+    return route.continue();
+  });
+  await page.route("**/api/leads", async (route) => {
+    hold = true;
+    const id = fixturePostBody("/api/leads", route.request().postDataJSON()).id;
+    if (!id) throw new Error("The create request must carry its durable id.");
+    await page.evaluate(
+      (id) =>
+        window.dispatchEvent(
+          new CustomEvent("fixture-creation-ingress", { detail: id }),
+        ),
+      id,
+    );
+    const response = await route.fetch();
+    await route.fulfill({ response });
+  });
+  await page.goto(`http://127.0.0.1:${port}`);
+  await page
+    .locator("[data-chat]")
+    .filter({ hasText: "Release lead" })
+    .first()
+    .click();
+  await page
+    .locator("#sidebar .projects-heading")
+    .getByRole("button", { name: "New chat", exact: true })
+    .click();
+  const response = page.waitForResponse(
+    (response) =>
+      response.request().method() === "POST" &&
+      response.url().endsWith("/api/leads"),
+  );
+  await page
+    .getByRole("dialog", { name: "New chat", exact: true })
+    .getByRole("button", { name: "Start chat", exact: true })
+    .click();
+  const receipt = await fixturePostResult("/api/leads", await response);
+  await firstHeld.promise;
+  await page.waitForFunction(
+    (id) =>
+      JSON.parse(
+        localStorage.getItem("codex-confirmed-chats") || "null",
+      )?.value?.agents.some((agent: { id: string }) => agent.id === id),
+    receipt.id,
+  );
+  const row = page.locator(`[data-chat="${receipt.id}"]`);
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await expect(page.locator("#conversation-title")).toHaveText("New chat");
+  await expect(page.locator("#message")).toBeEnabled();
+  await page.screenshot({
+    path: join(evidence, "confirmed-before-projection.png"),
+    animations: "disabled",
+  });
+  hold = false;
+  await page.evaluate(() =>
+    window.dispatchEvent(
+      new CustomEvent("fixture-creation-ingress", { detail: null }),
+    ),
+  );
+  await Promise.all(held.splice(0).map((route) => route.continue()));
+  await page.waitForFunction((id) => {
+    const value = JSON.parse(
+      localStorage.getItem("codex-confirmed-chats") || "null",
+    )?.value;
+    return (
+      value && !value.agents.some((agent: { id: string }) => agent.id === id)
+    );
+  }, receipt.id);
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute("aria-current", "true");
+  await page.screenshot({
+    path: join(evidence, "confirmed-after-projection.png"),
+    animations: "disabled",
+  });
+  expect(errors).toEqual([]);
+});

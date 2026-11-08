@@ -1,3 +1,4 @@
+import "../team-navigation.css";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
 import { resourceData } from "../../store/runtime.ts";
 import { agentId as observableAgentId } from "../../generated/observableResources.ts";
@@ -157,7 +158,6 @@ const LeadReport = observer(function LeadReport({
     store.agentDetail(observableAgentId(agent.id)).current,
   );
   const { open, previewResult } = useTeam();
-  const lead = agent;
   return (
     <>
       {detail && (detail.overview?.result || detail.overview?.resultFile) && (
@@ -171,7 +171,7 @@ const LeadReport = observer(function LeadReport({
             <Button
               variant="subtle"
               size="compact-xs"
-              onClick={() => open(lead.id)}
+              onClick={() => open(agent.id)}
             >
               Continue in main chat
             </Button>
@@ -185,7 +185,7 @@ const LeadReport = observer(function LeadReport({
               onClick={(event) => {
                 event.preventDefault();
                 previewResult({
-                  agent: lead.id,
+                  agent: agent.id,
                   path: detail.overview?.resultFile ?? undefined,
                 });
               }}

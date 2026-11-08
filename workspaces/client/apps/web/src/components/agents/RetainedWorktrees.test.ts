@@ -48,9 +48,7 @@ test("retained worktrees show reason and path without a delete action", () => {
 vi.mock("./WorkerModelPicker", () => ({
   useWorkerModels: () => ({ models: [] }),
 }));
-vi.mock("../Accounts.tsx", () => ({
-  useAccounts: () => ({ data: { accounts: [] } }),
-}));
+vi.mock("../Accounts.tsx", () => ({}));
 import { fixture } from "../chat-row/testFixture";
 import { ServerStoreProvider } from "../../servers/ServerServicesContext";
 import { required } from "../componentTestFixtures";

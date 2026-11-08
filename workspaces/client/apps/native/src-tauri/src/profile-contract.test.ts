@@ -152,18 +152,17 @@ test("native archive views track the browser profile contract and callers", () =
   }
   for (const [path, calls] of [
     [
-      "workspaces/client/apps/web/src/native/frame.ts",
+      "workspaces/client/apps/native/src-tauri/src/lib.rs",
       ["profile.snapshot", "profile.chunk"],
     ],
   ] as const) {
-    const source = parse(path);
-    const methods = new Set<string>();
-    const visit = (node: ts.Node) => {
-      if (ts.isStringLiteral(node)) methods.add(node.text);
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
-    for (const method of calls)
-      assert.ok(methods.has(method), `${path}: ${method}`);
+    const source = read(path);
+    for (const method of calls) {
+      assert.ok(source.includes(`"${method}"`), `${path}: ${method}`);
+      assert.ok(
+        source.includes(`profile::${method.slice("profile.".length)}(`),
+        `${path}: ${method} dispatch`,
+      );
+    }
   }
 });

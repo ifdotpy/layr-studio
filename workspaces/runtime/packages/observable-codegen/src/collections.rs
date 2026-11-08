@@ -54,6 +54,9 @@ pub(crate) fn parse(
         if !matched {
             return Err(fail(&path, UnsupportedShape::Resource));
         }
+        if collection.opaque {
+            continue;
+        }
         let shape = parser.parse(
             schema(document, &collection.schema)?,
             &collection.schema,
@@ -149,10 +152,15 @@ pub(crate) fn emit(
     };
     writeln!(out, "}}\ntype {name}Dto = {dto};\nclass {name}Model {{").expect("string");
     for collection in &resource.collections {
+        let model = if collection.opaque {
+            super::emit::readonly_dto(&collection.schema, metadata)
+        } else {
+            format!("{}Model", collection.schema)
+        };
         writeln!(
             out,
-            "readonly {} = new Map<string, {}Model>();",
-            collection.facade, collection.schema
+            "readonly {} = new Map<string, {}>();",
+            collection.facade, model
         )
         .expect("string");
     }
@@ -192,6 +200,10 @@ pub(crate) fn emit(
     }
     out.push_str("for (const entity of dto) { switch (entity.collection) {\n");
     for collection in &resource.collections {
+        if collection.opaque {
+            writeln!(out, "case {}: {{ const previous = this.{}.get(entity.id); if (!compareStructural(previous, entity.value)) this.{}.set(entity.id, freezePlain(structuredClone(entity.value))); break; }}", quote(&collection.collection), collection.facade, collection.facade).expect("string");
+            continue;
+        }
         writeln!(out, "case {}: {{ const previous = this.{}.get(entity.id); if (previous === undefined) this.{}.set(entity.id, new {}Model(entity.value)); else previous.apply(entity.value); break; }}", quote(&collection.collection), collection.facade, collection.facade, collection.schema).expect("string");
     }
     out.push_str("} }\n}\n}\n");

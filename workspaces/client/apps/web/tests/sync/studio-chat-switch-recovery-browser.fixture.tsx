@@ -4,7 +4,7 @@ import { fixtureElement } from "./browser-helpers.ts";
 import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { useConversationHistory } from "../../src/conversation/historySession.ts";
+import { useConversationHistory } from "../../src/conversation/historyFixture.ts";
 import { createServerServices } from "../../src/servers/serverServices.ts";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
 const services = createServerServices({
@@ -134,7 +134,7 @@ declare global {
       id: string;
       selected: boolean;
       connection: ReturnType<
-        typeof import("../../src/conversation/historySession.ts").useConversationHistory
+        typeof import("../../src/conversation/historyFixture.ts").useConversationHistory
       >["connection"];
       at: number;
     }[];

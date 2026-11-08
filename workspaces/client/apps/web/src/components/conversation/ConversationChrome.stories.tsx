@@ -24,7 +24,8 @@ import {
 import ConversationTitle from "../shell/ConversationTitle";
 import ConversationStart from "./ConversationStart";
 import { ExecutionSettingsFixture as ExecutionSettings } from "../observableFixture.tsx";
-import Usage, { type UsageAccount } from "../Usage";
+import type { UsageAccount } from "../../app/settings/UsageFixture.tsx";
+import { UsageFixture as Usage } from "../../app/settings/UsageFixture.tsx";
 import { createServerServices } from "../../servers/serverServices";
 import { ServerServicesProvider } from "../../servers/ServerServicesContext";
 import type { Agent } from "../../types";
@@ -219,7 +220,10 @@ function TitleFixture() {
   return (
     <titleFixture.Provider>
       <ConversationProvider value={conversationActionsFixture(fn())}>
-        <ConversationTitle agentId={lead.id} serverAlias="MAC" />
+        <ConversationTitle
+          agent={titleFixture.mirror.current.agents.get(lead.id)}
+          serverAlias="MAC"
+        />
       </ConversationProvider>
     </titleFixture.Provider>
   );

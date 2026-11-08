@@ -30,8 +30,10 @@ export function jsonObject(
 export function accountLimits(
   value: AccountLimitsData | null | undefined,
   accountKey: string,
-  _accountId?: string | null,
+  accountId?: string | null,
 ): AccountLimitsData | null {
   if (!value || value.accountKey !== accountKey) return null;
+  if (accountId && value.data?.accountId && value.data.accountId !== accountId)
+    return null;
   return value;
 }

@@ -1,3 +1,7 @@
+import type { StateCollections } from "../generated/observableResources.ts";
+import { observeGeneratedState } from "./generatedState.testHelper.ts";
+import { autorun } from "mobx";
+import { resourceData } from "../store/runtime.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 // Captured from the Rust entity transfer writer; see just regenerate-entity-server-frames.
 import coldFrames from "./entityServerFrames.fixture.json";
@@ -19,7 +23,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import type { Snapshot } from "../types";
+
 import type { components } from "../generated/api";
 import { SYNC_PROTOCOL_VERSION } from "../generated/api";
 import { SYNC_ENTITY_STREAM_MAX_DOCUMENTS } from "../generated/sharedValues";
@@ -404,13 +408,12 @@ it("completes a recovery pull only after server pages with no documents", async 
     databaseSuffix: "empty-recovery",
   });
   ({ db } = await client.syncDatabase());
-  const stop = client.subscribeStateProjection(
-    (value) => {
-      if (value?.entitiesComplete) completed.resolve();
+  const { stop } = observeGeneratedState(
+    client,
+    () => {
+      if (client.projectionMetadata.complete) completed.resolve();
     },
-    (error) => {
-      if (error) completed.reject(error);
-    },
+    (error) => completed.reject(error),
   );
   try {
     const notify = await registered.promise;
@@ -944,17 +947,28 @@ it("applies source commits beyond a full entity page through real SSE and the pr
   );
   const client = await import("./client");
   const { ResourceEntityDelivery } = await import("./resourceEntityDelivery");
-  const snapshots = new EventHistory<Snapshot>(1);
+  const snapshots = new EventHistory<StateCollections>(1);
   const failed = vi.fn();
-  let latest: Snapshot | undefined;
-  const stop = client.subscribeStateProjection((value) => {
-    if (value) {
-      latest = value;
-      snapshots.next(value);
-    }
-  }, failed);
-  stopProjection = stop;
-  const waitSnapshot = (accept: (snapshot: Snapshot) => boolean) =>
+  let latest: StateCollections | undefined;
+  const { stop, store } = observeGeneratedState(
+    client,
+    (value) => {
+      if (value) {
+        latest = value;
+        snapshots.next(value);
+      }
+    },
+    failed,
+  );
+  const stopTasks = autorun(() => {
+    const tasks = resourceData(store.tasks().current);
+    if (tasks && latest) snapshots.next(latest);
+  });
+  stopProjection = () => {
+    stopTasks();
+    stop();
+  };
+  const waitSnapshot = (accept: (snapshot: StateCollections) => boolean) =>
     snapshots.wait(accept);
   const { db, workspaceId } = await client.syncDatabase();
   const queryProjection = vi.spyOn(db.projections, "find");
@@ -1006,16 +1020,19 @@ it("applies source commits beyond a full entity page through real SSE and the pr
   try {
     await dispatched.wait();
     const baseline = await waitSnapshot(
-      (value) => value.entitiesComplete === true,
+      () => client.projectionMetadata.complete === true,
     ).catch((error) => {
       throw new Error(
-        `Initial projection did not settle: ${JSON.stringify({ reads: mocks.syncGet.mock.calls, failures: failed.mock.calls.map(([value]) => String(value)), rows: latest?.threads.length, complete: latest?.entitiesComplete })}`,
+        `Initial projection did not settle: ${JSON.stringify({ reads: mocks.syncGet.mock.calls, failures: failed.mock.calls.map(([value]) => String(value)), rows: latest?.agents.size, complete: client.projectionMetadata.complete })}`,
         { cause: error },
       );
     });
-    expect(baseline.threads.length).toBeGreaterThan(
+    expect(baseline.agents.size).toBeGreaterThan(
       SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
     );
+    const baselineMembers = Array.from(baseline.agents.values())
+      .filter((agent) => agent.rootId === "lead")
+      .map((agent) => agent.id);
     queryProjection.mockClear();
     expect(
       mocks.syncGet.mock.calls.filter(([path]) => path === "/api/sync/pull"),
@@ -1043,23 +1060,23 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     );
     expect(createdFrame.reason).toBe("change");
     const shown = await waitSnapshot((value) =>
-      value.threads.some((agent) => agent.id === "worker"),
+      Array.from(value.agents.values()).some((agent) => agent.id === "worker"),
     );
     expect(
-      shown.threads
+      Array.from(shown.agents.values())
         .filter((agent) => agent.rootId === "lead")
         .map((agent) => agent.id)
         .sort(),
-    ).toEqual(
-      [
-        ...baseline.threads
-          .filter((agent) => agent.rootId === "lead")
-          .map((agent) => agent.id),
-        "worker",
-      ].sort(),
+    ).toEqual([...baselineMembers, "worker"].sort());
+    expect(
+      Array.from(shown.agents.values()).find((agent) => agent.id === "older-0"),
+    ).toBe(
+      Array.from(baseline.agents.values()).find(
+        (agent) => agent.id === "older-0",
+      ),
     );
-    expect(shown.threads.find((agent) => agent.id === "older-0")).toBe(
-      baseline.threads.find((agent) => agent.id === "older-0"),
+    await dispatched.wait((event) =>
+      event.resourceVersions.some((entry) => entry.revision >= created.seq),
     );
     expect(await client.readSubscriptionCursor({ kind: "state" })).toEqual({
       workspaceId,
@@ -1081,20 +1098,22 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     });
     const running = await waitSnapshot(
       (value) =>
-        value.threads.some(
+        Array.from(value.agents.values()).some(
           (agent) =>
             agent.id === "worker" &&
             agent.status === AgentStatus.running &&
             agent.model === "model-after",
         ) &&
-        value.runtime.tasks.some(
+        (resourceData(store.tasks().current) ?? []).some(
           (task) => task.id === "command" && task.status === TaskStatus.running,
         ),
     );
-    expect(running.threads).toHaveLength(shown.threads.length);
-    const runningLead = running.threads.find((agent) => agent.id === "lead");
-    expect(runningLead).not.toBe(
-      shown.threads.find((agent) => agent.id === "lead"),
+    expect(running.agents.size).toBe(shown.agents.size);
+    const runningLead = Array.from(running.agents.values()).find(
+      (agent) => agent.id === "lead",
+    );
+    expect(runningLead).toBe(
+      Array.from(shown.agents.values()).find((agent) => agent.id === "lead"),
     );
     expect(runningLead).toMatchObject({
       operationalStatus: {
@@ -1107,20 +1126,27 @@ it("applies source commits beyond a full entity page through real SSE and the pr
       ["interrupted", false],
       ["completed", true],
     ] as const) {
+      const previousValues = JSON.parse(JSON.stringify(previousLead));
       await request("/fixture/entity", {
         agent: { ...worker, status, model: "model-after" },
       });
       const next = await waitSnapshot((value) =>
-        value.threads.some(
+        Array.from(value.agents.values()).some(
           (agent) => agent.id === "worker" && agent.status === status,
         ),
       );
-      const nextLead = next.threads.find((agent) => agent.id === "lead");
+      const nextLead = Array.from(next.agents.values()).find(
+        (agent) => agent.id === "lead",
+      );
       expect(nextLead).toMatchObject({
         operationalStatus: { reason: "working" },
       });
-      if (sameLead) expect(nextLead).toBe(previousLead);
-      else expect(nextLead).not.toBe(previousLead);
+      expect(nextLead).toBe(previousLead);
+      if (sameLead) expect(nextLead).toEqual(previousValues);
+      else
+        expect(nextLead?.operationalStatus).not.toEqual(
+          previousValues.operationalStatus,
+        );
       previousLead = nextLead;
     }
     const leadChanged = await request("/fixture/entity", {
@@ -1136,11 +1162,11 @@ it("applies source commits beyond a full entity page through real SSE and the pr
       },
     });
     await waitSnapshot((value) =>
-      value.threads.some(
+      Array.from(value.agents.values()).some(
         (agent) => agent.id === "lead" && agent.status === AgentStatus.running,
       ),
     );
-    const beforeProject = latest!.threads;
+    const beforeProject = latest!.agents;
     const project = {
       id: "new-project",
       path: directory,
@@ -1149,11 +1175,16 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     };
     const projectAdded = await request("/fixture/entity", { project });
     const withProject = await waitSnapshot((value) =>
-      value.runtime.projects.some(
+      Array.from(value.projects.values()).some(
         (row) => row.id === project.id && row.name === project.name,
       ),
     );
-    expect(withProject.threads).toBe(beforeProject);
+    expect(withProject.agents).toBe(beforeProject);
+    await dispatched.wait((event) =>
+      event.resourceVersions.some(
+        (entry) => entry.revision >= projectAdded.seq,
+      ),
+    );
     const cursor = await client.readSubscriptionCursor({ kind: "state" });
     expect(cursor?.seq).toBe(projectAdded.seq);
     expect(cursor!.seq).toBeGreaterThan(leadChanged.seq);
@@ -1227,7 +1258,7 @@ it("applies source commits beyond a full entity page through real SSE and the pr
         break;
       }
       await waitSnapshot((value) =>
-        value.threads.some(
+        Array.from(value.agents.values()).some(
           (agent) => agent.id === "worker" && agent.name === "Automatic title",
         ),
       );
@@ -1248,6 +1279,7 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     ).toEqual([]);
     expect(failed.mock.calls.filter(([error]) => error !== null)).toEqual([]);
   } finally {
+    stopTasks();
     stop();
     stopProjection = undefined;
     controller.abort();

@@ -140,7 +140,17 @@ fn render_all(
                     quote(&model.schema),
                     quote(&field.name)
                 );
-                let view = projected_field(&field.shape, &dto, &parser, false);
+                let view = if model.local_fields {
+                    local_field_type(
+                        &schema(document, &model.schema)?["properties"][&field.name],
+                        &format!(
+                            "#/components/schemas/{}/properties/{}",
+                            model.schema, field.name
+                        ),
+                    )?
+                } else {
+                    projected_field(&field.shape, &dto, &parser, false)
+                };
                 let view = if field.optional {
                     format!("{view} | undefined")
                 } else {
@@ -787,5 +797,19 @@ pub(crate) fn readonly_dto(name: &str, metadata: &[ObservableModel]) -> String {
         format!("DeepReadonly<import('./observableFieldTypes.ts').{name}Fields>")
     } else {
         format!("DeepReadonly<components['schemas'][{}]>", quote(name))
+    }
+}
+
+/// Local transport models expose schema-owned scalar and dictionary fields only.
+fn local_field_type(value: &Value, path: &str) -> Result<String, GenerationError> {
+    match value["type"].as_str() {
+        Some("boolean") => Ok("boolean".into()),
+        Some("integer" | "number") => Ok("number".into()),
+        Some("string") => Ok("string".into()),
+        Some("object") if value["additionalProperties"].is_object() => Ok(format!(
+            "Record<string, {}>",
+            local_field_type(&value["additionalProperties"], path)?
+        )),
+        _ => Err(fail(path, UnsupportedShape::MissingSchema)),
     }
 }

@@ -106,13 +106,15 @@ export default function BackgroundTasks(props: BackgroundTaskProps) {
           <div className="tasks-title">
             <Activity size={19} />
             <strong>Current activity</strong>
-            <Observer>
-              {() => (
-                <Badge variant="light" color="gray" size="sm">
-                  {actions.activities.length} active
-                </Badge>
-              )}
-            </Observer>
+            {props.opened && (
+              <Observer>
+                {() => (
+                  <Badge variant="light" color="gray" size="sm">
+                    {actions.activities.length} active
+                  </Badge>
+                )}
+              </Observer>
+            )}
           </div>
         }
         classNames={{

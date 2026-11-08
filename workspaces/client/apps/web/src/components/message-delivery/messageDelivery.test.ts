@@ -631,7 +631,7 @@ function localCards(
   observed = new Set<string>(),
   history: Message[] = [],
 ) {
-  const shown = mergeOutgoing(outbox, local, observed).filter(
+  const shown = mergeOutgoing(outbox, Object.values(local), observed).filter(
     (entry) => entry.body.room === "lead",
   );
   return outgoingTranscript(history, shown)
@@ -772,7 +772,7 @@ it("lets the durable outbox state replace an in-flight send copy", () => {
 });
 
 it("keeps a stored request visible when a cached projection marks it observed", () => {
-  assert.equal(mergeOutgoing([receipt], {}, new Set([receipt.id])).length, 1);
+  assert.equal(mergeOutgoing([receipt], [], new Set([receipt.id])).length, 1);
 });
 
 it("keeps a stored request actionable beside a cached delivered transcript row", () => {

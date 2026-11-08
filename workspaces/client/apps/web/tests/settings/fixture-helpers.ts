@@ -11,11 +11,13 @@ export function fixtureUrl(server: Server | ViteDevServer, path = "") {
 
 export function fixtureAccount(
   value: Pick<
-    import("../../src/components/Accounts.tsx").Account,
+    import("../../src/generated/api.ts").components["schemas"]["Account"],
     "id" | "label"
   > &
-    Partial<import("../../src/components/Accounts.tsx").Account>,
-): import("../../src/components/Accounts.tsx").Account {
+    Partial<
+      import("../../src/generated/api.ts").components["schemas"]["Account"]
+    >,
+): import("../../src/generated/api.ts").components["schemas"]["Account"] {
   return Object.assign(
     {
       home: "",

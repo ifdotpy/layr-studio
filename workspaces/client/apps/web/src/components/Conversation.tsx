@@ -1,15 +1,13 @@
 import { resourceData } from "../store/runtime.ts";
-import { useServerStore } from "../servers/ServerServicesContext.tsx";
-import { agentId as resourceAgentId } from "../generated/observableResources.ts";
+import { useLimitRefresh } from "../usage/useLimitRefresh.ts";
 import {
-  ConversationProvider,
+  TranscriptProvider,
   useConversationActions,
 } from "./conversation/navigation.ts";
-import { useAgentCatalog } from "./agents/state.ts";
 import { observer } from "mobx-react-lite";
 import { serverStatus } from "../messageSendStatus";
-import { MessageSendStatus } from "../generated/api.ts";
 import {
+  MessageSendStatus,
   AgentSource as GeneratedApiAgentSource,
   AgentStatus as GeneratedApiAgentStatus,
   RoomKind as GeneratedApiRoomKind,
@@ -19,11 +17,7 @@ import { codePointsExceed, sendsTextFile } from "../commands";
 import { ProviderKind, providerSupports } from "../generated/providerKind.ts";
 import type { ReactNode } from "react";
 import { IdleCompactionNotice } from "./IdleCompactionNotice";
-import {
-  isCompactTools,
-  resolveLayoutLength,
-} from "../layout/deriveWorkspaceLayout";
-import { layoutQueries } from "../layout/layout-contract.generated";
+import { resolveLayoutLength } from "../layout/deriveWorkspaceLayout";
 import { usePrimaryTouch } from "../hooks/touchCapability";
 import {
   MAX_TURN_ATTACHMENTS,
@@ -34,18 +28,22 @@ import { useSendingMessageRemoval } from "./useSendingMessageRemoval";
 import {
   useServerApi,
   useServerOutbox,
+  useServerUploads,
 } from "../servers/ServerServicesContext";
 import { useServerActivity } from "../servers/activity";
-import { computed, compareShallow } from "mobx";
-import { useConversationHistory } from "../conversation/historySession";
+import {
+  computed,
+  compareShallow,
+  makeAutoObservable,
+  observableRef,
+  runInAction,
+} from "mobx";
 import AgentAvatar from "./agents/AgentAvatar";
 import MessageQueue, {
   type LocalQueueItem,
   type QueueItem,
 } from "./MessageQueue";
 import { useMessageQueue } from "./useMessageQueue";
-import { useMessageReceipts } from "./useMessageReceipts";
-import { receiptTranscript } from "../sync/messageReceipts";
 import { useVisibleChatResult } from "./useChatReadState";
 import {
   NativeError,
@@ -53,7 +51,6 @@ import {
   isNonBlockingWarning,
 } from "./NativeNotice";
 import { ActionIcon, Button, Loader, Modal, Textarea } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
 import { usePendingCommands } from "../usePendingCommands";
 import { createPortal } from "react-dom";
 import {
@@ -79,48 +76,29 @@ import FullOutput from "./conversation/transcript/FullOutput";
 import SafetyBuffering from "./conversation/transcript/SafetyBuffering";
 import { currentCapacityRetry } from "../capacityRetry";
 import { isCyberPolicyRefusal, nativeThreadError } from "../nativeErrors";
-import {
-  transcriptMessages,
-  useRetainedArray,
-  useCommittedCallback,
-} from "../hooks";
+import { transcriptMessages } from "../conversation/messageView";
 import DraftVersions from "./DraftVersions";
-import type { DraftVersion } from "../sync/drafts";
-import { type OutgoingMessage } from "../sync/send";
 import { useDisplayPhase } from "./useDisplayPhase";
 import {
-  outgoingTranscript,
   deliveryLabel,
   messageRenderKey,
   explicitQueue,
   dispatchedMessage,
   mergeQueueOrder,
 } from "./message-delivery/messageDelivery";
-import { useRemovedMessages } from "./removedMessages";
-import { isSendingMessage } from "./removeSendingMessages";
 
 import { useConversationScroll } from "./useConversationScroll";
 import { useAttachmentDrafts } from "./useAttachmentDrafts";
 import { useUploadRecovery } from "./useUploadRecovery";
-import { useServerUploads } from "../servers/ServerServicesContext";
-import {
-  type Agent,
-  type Json,
-  type KnownApiFields,
-  type Message,
-  type Room,
-} from "../types";
+import { type KnownApiFields, type Message } from "../types";
 import Usage from "./Usage";
-import type { UsageAccount } from "./Usage";
-import type { AccountLimitsData } from "../usage/accountUsage";
 import PromptNavigator from "./PromptNavigator";
 import { usePromptRecall } from "./usePromptRecall";
 import PromptComposer from "./prompt-composer/PromptComposer";
 import PromptInput from "./prompt-composer/PromptInput";
+import { SelectedTitle } from "../app/conversation/SelectedTitle.tsx";
 import { reportPromptComposerRender } from "./prompt-composer/renderProbe";
 import Requests, { RequestArea, RequestCard } from "./questions/Requests";
-import { createRequestsView } from "./questions/requestView";
-import { createQuestionCards } from "./questions/useQuestionCards";
 import MessageDate from "./conversation/transcript/MessageDate";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 import TurnHistory from "./conversation/transcript/TurnHistory";
@@ -155,10 +133,6 @@ import { transcriptRequests } from "./questions/questionCardModel";
 const modelCommandPattern = /^\/model(?:\s|$)/i;
 const exactModelCommandPattern = /^\/model$/i;
 
-function isJsonObject(value: unknown): value is Json {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 const MessageRow = observer(function MessageRow({
   render,
   item,
@@ -174,26 +148,18 @@ type PageStatus = {
   direction: "older" | "newer";
   failed: boolean;
 } | null;
-type PageStatusStore = { value: PageStatus; listeners: Set<() => void> };
-function PageIndicator({
+const PageIndicator = observer(function PageIndicator({
   store,
   id,
   direction,
   retry,
 }: {
-  store: PageStatusStore;
+  store: { value: PageStatus };
   id: string | null | undefined;
   direction: "older" | "newer";
   retry: () => void;
 }) {
-  const status = useSyncExternalStore(
-    (listener) => {
-      store.listeners.add(listener);
-      return () => store.listeners.delete(listener);
-    },
-    () => store.value,
-    () => store.value,
-  );
+  const status = store.value;
   if (!status || status.id !== id || status.direction !== direction)
     return null;
   return status.failed ? (
@@ -205,7 +171,7 @@ function PageIndicator({
       Loading messages…
     </p>
   );
-}
+});
 
 function FollowLatest(p: {
   subscribe: (listener: () => void) => () => void;
@@ -234,124 +200,45 @@ function FollowLatest(p: {
   );
 }
 
-// The root style also carries values that change every frame, such as the
-// sidebar width while it is dragged. Only the typography inputs change the main
-// font size, and the inline style reads them without a style recalculation, so
-// the computed size is read again only when they change.
-let mainFontKey: string | undefined;
-let mainFontPx = Number.NaN;
-function mainFontSize() {
-  const root = document.documentElement;
-  const key = `${root.dataset.studioTypography}|${root.style.getPropertyValue("--studio-main-font-size")}`;
-  if (key !== mainFontKey) {
-    mainFontKey = key;
-    mainFontPx = Number.parseFloat(
-      getComputedStyle(root).getPropertyValue("--studio-main-font-size"),
-    );
-  }
-  return mainFontPx;
-}
-
-function useCompactHeaderTools() {
-  const isCompact = (workspaceWidth?: number) =>
-    window.matchMedia(layoutQueries.navigationCompact).matches ||
-    isCompactTools(
-      workspaceWidth ??
-        document
-          .querySelector<HTMLElement>(".workspace")
-          ?.getBoundingClientRect().width ??
-        window.innerWidth,
-      mainFontSize(),
-    );
-  const [compact, setCompact] = useState(() =>
-    typeof window === "undefined" ? false : isCompact(),
-  );
-  useEffect(() => {
-    const viewport = window.matchMedia(layoutQueries.navigationCompact);
-    const workspace = document.querySelector<HTMLElement>(".workspace");
-    let width: number | undefined;
-    const update = () => setCompact(isCompact(width));
-    // A root style change matters only when it changes the typography inputs.
-    const preferences = new MutationObserver(() => {
-      if (mainFontKey === undefined) return update();
-      const before = mainFontKey;
-      mainFontSize();
-      if (mainFontKey !== before) update();
-    });
-    // The observer reports the new width; reading it again would force layout.
-    const workspaceObserver = workspace
-      ? new ResizeObserver((entries) => {
-          width = entries.at(-1)?.borderBoxSize[0]?.inlineSize ?? width;
-          update();
-        })
-      : undefined;
-    if (workspace) workspaceObserver?.observe(workspace);
-    viewport.addEventListener("change", update);
-    preferences.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["style", "data-studio-typography"],
-    });
-    update();
-    return () => {
-      viewport.removeEventListener("change", update);
-      workspaceObserver?.disconnect();
-      preferences.disconnect();
-    };
-  }, []);
-  return compact;
-}
-
 const emptyAttachments: Attachment[] = [];
+type BranchDraft = { message: Message; before: boolean; text: string };
 
-export function ConversationView(p: {
-  id: string | null;
-  visible?: boolean;
-  headerToolsInMenu?: boolean | undefined;
-  onRailToolsChange?: ((tools: ReactNode) => void) | undefined;
-  transcriptHeading?: ReactNode;
-  syncWorkspaceId?: string | undefined;
-  agent?: Agent | undefined;
-  detail?:
-    | import("../generated/observableResources.ts").AgentDetailEntityDto
-    | undefined;
-  lead?: Agent | undefined;
-  room?: Room | undefined;
-  legacy?: Json | undefined;
-  draftConflicts?: DraftVersion[];
-  outgoing?: OutgoingMessage[];
-  offlineSendPending?: boolean;
-  offlineSendDetails?: string;
-  sending: boolean;
-  schemaMismatch?: boolean;
-  limits: AccountLimitsData | null;
-  limitsAccounts?: UsageAccount[];
-  limitsLoading?: boolean;
-  jumpTarget?: { messageId: string; requestId: string } | undefined;
-  limitsAccountLabel?: string | undefined;
-}) {
+export function ConversationView() {
   const actions = useConversationActions();
-  const store = useServerStore();
-  const stateDir =
-    resourceData(store.state().current)?.workspaces.values().next().value
-      ?.stateDir || "";
-  const agents = useAgentCatalog().agents;
+  const { selected, navigation, delivery, startup, layout, read, scope } =
+    actions;
+  const {
+    selectedId: opened,
+    selectedAgent: agent,
+    selectedRoom: room,
+    selectedLead: lead,
+    selectedLegacyChat: legacy,
+    selectedJumpTarget: jumpTarget,
+  } = navigation;
+  const { detail } = selected;
+  const { services } = scope,
+    drafts = services.drafts;
+  const { notices, creation, sidebar } = actions;
+  const stateDir = startup.creationScope || "",
+    agents = selected.team;
   const { removeSendingMessage } = useSendingMessageRemoval();
   const { queueUploads } = useServerUploads();
-  const { get, post, command } = useServerApi();
+  const api = useServerApi();
+  const { get } = api;
   const { changeOutbox } = useServerOutbox();
 
+  const sending = delivery.isSending;
   reportPromptComposerRender("conversation");
-  const limitsData = isJsonObject(p.limits?.data) ? p.limits.data : undefined;
-  const rateLimits = isJsonObject(limitsData?.rateLimits)
-    ? limitsData.rateLimits
-    : undefined;
-  const planType =
-    typeof rateLimits?.planType === "string" ? rateLimits.planType : undefined;
-  const mobileClient = useMediaQuery(layoutQueries.navigationCompact);
+  const [limitsOpen, setLimitsOpen] = useState(false);
+  const [limitsOpenRequest, setLimitsOpenRequest] = useState(0);
+  const limitRefresh = useLimitRefresh(get);
+  const accountKey = agent?.accountKey || "default";
+  const planType = selected.planType;
+  const mobileClient = layout.isMobile;
   // A touch keyboard's Enter adds a new line at every width; the button sends.
   const touchInput = usePrimaryTouch();
-  const kind = p.room ? "room" : p.legacy ? "legacy" : "agent";
-  const compactHeaderTools = useCompactHeaderTools();
+  const kind = room ? "room" : legacy ? "legacy" : "agent";
+  const compactHeaderTools = layout.usesCompactConversationTools;
   const [headerTools, setHeaderTools] = useState<HTMLElement | null>(null);
   const [toolsExpanded, setToolsExpanded] = useState(false);
   const [toolsMenuPosition, setToolsMenuPosition] = useState<{
@@ -361,11 +248,11 @@ export function ConversationView(p: {
   } | null>(null);
   useLayoutEffect(() => {
     setHeaderTools(
-      p.headerToolsInMenu
+      layout.usesMenuHeaderTools
         ? null
         : document.getElementById("conversation-header-tools"),
     );
-  }, [p.headerToolsInMenu]);
+  }, [layout.usesMenuHeaderTools]);
   useEffect(() => {
     if (!compactHeaderTools) setToolsExpanded(false);
   }, [compactHeaderTools]);
@@ -443,16 +330,8 @@ export function ConversationView(p: {
       window.visualViewport?.removeEventListener("resize", updatePosition);
     };
   }, [compactHeaderTools, headerTools, toolsExpanded]);
-  const historySession = useConversationHistory(
-    p.id,
-    kind,
-    p.agent?.source === GeneratedApiAgentSource.managed,
-    stateDir,
-    p.syncWorkspaceId,
-    p.visible ?? true,
-  );
+  const historySession = selected.history;
   const {
-    items: history,
     historyVersion,
     notice,
     before,
@@ -467,133 +346,27 @@ export function ConversationView(p: {
     connection,
     loaded,
   } = historySession;
-  const outgoing = (p.outgoing || []).filter(
-    (entry) => entry.body.room === p.id,
-  );
-  const removed = useRemovedMessages(stateDir, kind, p.id);
-  const receiptIds = [
-    ...new Set([
-      ...outgoing
-        .filter(
-          (entry) =>
-            (entry.status.source === "device" ||
-              serverStatus(entry.status) === MessageSendStatus.queued ||
-              serverStatus(entry.status) === MessageSendStatus.sending ||
-              serverStatus(entry.status) === MessageSendStatus.uncertain) &&
-            (entry.receipt?.status !== MessageSendStatus.delivered ||
-              entry.receipt.materialized !== true),
-        )
-        .map((entry) => entry.id),
-      ...[...history, ...removed.restored]
-        .filter(
-          (item) =>
-            item.role === "user" &&
-            (item.deliveryStatus?.source === "device" ||
-              serverStatus(item.deliveryStatus) === MessageSendStatus.queued ||
-              serverStatus(item.deliveryStatus) === MessageSendStatus.sending ||
-              serverStatus(item.deliveryStatus) ===
-                MessageSendStatus.uncertain),
-        )
-        .map(
-          (item) =>
-            item.clientMessageId ||
-            (item.id.startsWith(p.id + ":")
-              ? item.id.slice(p.id!.length + 1)
-              : item.id),
-        ),
-    ]),
-  ].sort();
-  const receipts = useMessageReceipts(
-    p.agent?.source === GeneratedApiAgentSource.managed ? p.id : null,
-    `${stateDir}:${p.syncWorkspaceId}:${p.id}`,
-    p.syncWorkspaceId,
-    receiptIds,
-  );
-  const queueScope = `${stateDir}:${p.syncWorkspaceId || ""}:${p.id}`;
+  const outgoing = delivery.selectedOutgoing;
+  const removed = selected.removed;
+  const queueScope = `${stateDir}:${startup.workspaceId || ""}:${opened}`;
   const messageQueue = useMessageQueue({
-    id: p.id,
-    enabled: p.agent?.source === GeneratedApiAgentSource.managed,
+    id: opened,
+    enabled: agent?.source === GeneratedApiAgentSource.managed,
     scope: queueScope,
-    workspaceId: p.syncWorkspaceId,
-    observed: actions.observeSends,
-    edited: actions.editSend,
+    workspaceId: startup.workspaceId,
+    observed: delivery.observeSends,
+    edited: delivery.editSend,
     refresh: actions.refresh,
   });
-  const questionAgentId =
-    p.agent?.source === GeneratedApiAgentSource.managed && !p.room
-      ? p.agent.id
-      : undefined;
-  const requestArea = useMemo(() => {
-    const requests = createRequestsView(store, {
-      agentId: p.id,
-      familyId: p.room?.rootId,
-      includeTeam: !mobileClient,
-    });
-    return {
-      requests,
-      cards: createQuestionCards(store, requests, questionAgentId),
-    };
-  }, [store, p.id, p.room?.rootId, mobileClient, questionAgentId]);
-  const deliveryTranscript = useMemo(
-    () =>
-      computed(() =>
-        outgoingTranscript(
-          receiptTranscript(history, p.id || "", receipts),
-          (p.outgoing || []).filter((entry) => entry.body.room === p.id),
-        ),
-      ),
-    [history, p.outgoing, p.id, receipts],
-  ).get();
-  const visibleMessages = useMemo(
-    () =>
-      computed(() =>
-        receiptTranscript(
-          [
-            ...deliveryTranscript.items.map((message) => {
-              if (
-                !isSendingMessage(message) ||
-                message.deliveryStatus?.source === "server"
-              )
-                return message;
-              // Keep the device removal fact until the server supplies a status.
-              return (
-                removed.restored.find(
-                  (copy) =>
-                    message.id === copy.id ||
-                    (copy.clientMessageId &&
-                      copy.clientMessageId === message.clientMessageId),
-                ) || message
-              );
-            }),
-            ...removed.restored.filter(
-              (copy) =>
-                !deliveryTranscript.items.some(
-                  (message) =>
-                    message.id === copy.id ||
-                    (copy.clientMessageId &&
-                      copy.clientMessageId === message.clientMessageId),
-                ),
-            ),
-          ].filter((message) => !removed.hidden(message)),
-          p.id || "",
-          receipts,
-        ),
-      ),
-    [
-      deliveryTranscript.items,
-      removed.hidden,
-      removed.restored,
-      p.id,
-      receipts,
-    ],
-  ).get();
-  const historyAgentId = p.id;
+  const deliveryTranscript = selected.deliveryTranscript;
+  const visibleMessages = selected.visibleMessages;
+  const historyAgentId = opened;
   const promptRecall = usePromptRecall(
-    `${stateDir}:${kind}:${p.id}:${historyVersion}`,
-    p.room ? [] : visibleMessages,
-    () => actions.getDraft(p.id || "new"),
-    actions.setDraft,
-    p.agent?.source === GeneratedApiAgentSource.managed &&
+    `${stateDir}:${kind}:${opened}:${historyVersion}`,
+    room ? [] : visibleMessages,
+    () => drafts.getDraft(opened || "new"),
+    delivery.editDraft,
+    agent?.source === GeneratedApiAgentSource.managed &&
       kind === "agent" &&
       historyAgentId
       ? {
@@ -619,14 +392,14 @@ export function ConversationView(p: {
               before: page.nextCursor || null,
             };
           },
-          onError: (error) => actions.notify(errorText(error)),
+          onError: (error) => notices.notify(errorText(error)),
         }
       : undefined,
   );
   const observed = deliveryTranscript.observed.join(",");
   useEffect(() => {
-    if (observed) actions.observeSends?.(observed.split(","));
-  }, [observed, actions.observeSends]);
+    if (observed) delivery.observeSends?.(observed.split(","));
+  }, [observed, delivery.observeSends]);
   const {
     scroll,
     content,
@@ -640,25 +413,31 @@ export function ConversationView(p: {
     revealRequest,
     getAnchorId,
   } = useConversationScroll(
-    `${stateDir}:${kind}:${p.id}`,
+    `${stateDir}:${kind}:${opened}`,
     loaded,
     !after,
-    `studio-turns:${stateDir}:${p.id}`,
+    `studio-turns:${stateDir}:${opened}`,
   );
-  const pageStatus = useRef<PageStatusStore>({
-    value: null,
-    listeners: new Set(),
-  });
-  const setPageStatus = (value: PageStatus) => {
-    pageStatus.current.value = value;
-    pageStatus.current.listeners.forEach((listener) => listener());
-  };
+  const pageStatus = useRef(
+    makeAutoObservable(
+      {
+        value: null as PageStatus,
+        navigation,
+        set(value: PageStatus) {
+          this.value = value;
+        },
+      },
+      { navigation: false },
+      { autoBind: true },
+    ),
+  ).current;
+  pageStatus.navigation = navigation;
   const paging = useRef<{ id: string | null | undefined } | null>(null);
   const loadPage = (direction: "older" | "newer") => {
-    if (paging.current?.id === p.id) return;
-    const request = { id: p.id };
+    if (paging.current?.id === opened) return;
+    const request = { id: opened };
     paging.current = request;
-    setPageStatus({ id: p.id, direction, failed: false });
+    pageStatus.set({ id: opened, direction, failed: false });
     setFollow(false);
     const captureAnchor = () => {
       setFollow(false);
@@ -675,12 +454,15 @@ export function ConversationView(p: {
     };
     void (direction === "older" ? older(captureAnchor) : newer(captureAnchor))
       .then(() => {
-        if (paging.current === request) setPageStatus(null);
+        if (paging.current === request) pageStatus.set(null);
       })
       .catch((error) => {
-        if (paging.current === request && activeId.current === request.id) {
-          setPageStatus({ id: p.id, direction, failed: true });
-          actions.notify(errorText(error));
+        if (
+          paging.current === request &&
+          pageStatus.navigation?.selectedId === request.id
+        ) {
+          pageStatus.set({ id: opened, direction, failed: true });
+          notices.notify(errorText(error));
         }
       })
       .finally(() => {
@@ -693,8 +475,8 @@ export function ConversationView(p: {
     const root = scroll.current;
     if (
       !root ||
-      paging.current?.id === p.id ||
-      (pageStatus.current.value?.id === p.id && pageStatus.current.value.failed)
+      paging.current?.id === opened ||
+      (pageStatus.value?.id === opened && pageStatus.value.failed)
     )
       return;
     const near =
@@ -715,24 +497,27 @@ export function ConversationView(p: {
   const input = useRef<HTMLTextAreaElement>(null);
   const navigationAttempt = useRef(0);
   const handledJump = useRef("");
-  const [highlighted, setHighlighted] = useState<string | null>(null);
+
   const navigateToMessage = async (id: string) => {
     const root = scroll.current;
     if (!root) return;
     resetHistoryWindowAnchor(root);
-    const chat = p.id;
+    const chat = opened;
     const attempt = ++navigationAttempt.current;
     setFollow(false);
     setPageAnchor(getAnchorId());
     const available = await ensureMessage(id);
-    if (activeId.current !== chat || navigationAttempt.current !== attempt)
+    if (
+      pageStatus.navigation?.selectedId !== chat ||
+      navigationAttempt.current !== attempt
+    )
       return;
     if (!available)
       throw new Error("This message is unavailable in this conversation.");
     for (let frame = 0; frame < 20; frame++) {
       if (
         scroll.current !== root ||
-        activeId.current !== chat ||
+        pageStatus.navigation?.selectedId !== chat ||
         navigationAttempt.current !== attempt
       )
         return;
@@ -752,7 +537,7 @@ export function ConversationView(p: {
         }
         if (!target.hasAttribute("data-lazy-message")) {
           revealRequest(target, 16);
-          setHighlighted(target.dataset.message || null);
+          control.setHighlighted(target.dataset.message || null);
           return;
         }
       }
@@ -762,104 +547,583 @@ export function ConversationView(p: {
     }
     throw new Error("The message could not be displayed. Search again.");
   };
-  const jumpToPrompt = useCommittedCallback((id: string) => {
-    void navigateToMessage(id).catch((error) =>
-      actions.notify(errorText(error)),
-    );
-  });
   const returnToLatest = () => {
     if (scroll.current) resetHistoryWindowAnchor(scroll.current);
     const attempt = ++navigationAttempt.current;
-    const chat = p.id;
-    setHighlighted(null);
+    const chat = opened;
+    control.setHighlighted(null);
     void showLatest()
       .then(() => {
-        if (activeId.current === chat && navigationAttempt.current === attempt)
+        if (
+          pageStatus.navigation?.selectedId === chat &&
+          navigationAttempt.current === attempt
+        )
           setFollow(true);
       })
-      .catch((error) => actions.notify(errorText(error)));
+      .catch((error) => notices.notify(errorText(error)));
   };
   useEffect(() => {
-    if (!p.jumpTarget || handledJump.current === p.jumpTarget.requestId) return;
-    const target = p.jumpTarget;
+    if (!jumpTarget || handledJump.current === jumpTarget.requestId) return;
+    const target = jumpTarget;
     handledJump.current = target.requestId;
     void navigateToMessage(target.messageId).catch((error) =>
-      actions.notify(errorText(error)),
+      notices.notify(errorText(error)),
     );
-  }, [p.jumpTarget?.requestId, p.id]);
+  }, [jumpTarget?.requestId, opened]);
   const attachmentKey = `codex-agent-attachments:${stateDir}`;
   const [attachments, setAttachments] = useAttachmentDrafts(
     attachmentKey,
-    actions.notify,
+    notices.notify,
   );
-  const [addingFiles, setUploading] = useState(false);
   const uploadRecovery = useUploadRecovery(
     stateDir,
-    p.syncWorkspaceId || "",
+    startup.workspaceId || "",
     setAttachments,
   );
-  const pendingFiles = useRetainedArray(
-    uploadRecovery.pending.filter((row) => row.agent === p.id),
-  );
-  const uploading = addingFiles || pendingFiles.length > 0;
-  useServerActivity(addingFiles || uploadRecovery.pending.length > 0);
-  const [limitsOpen, setLimitsOpen] = useState(false);
-  const sendLock = useRef<symbol | null>(null);
-  const latestSend = useRef<Record<string, symbol>>({});
-  const branchLock = useRef(false);
-  const branchRequests = useRef<Record<string, string>>({});
-  const [branchDraft, setBranchDraft] = useState<{
-    message: Message;
-    before: boolean;
-    text: string;
-  } | null>(null);
-  const [branching, setBranching] = useState(false);
-  const [editLoading, setEditLoading] = useState<string | null>(null);
-  const editAttempt = useRef(0);
-  const [dragging, setDragging] = useState(false);
-  const [stopping, setStopping] = useState(false);
-  const stopAttempt = useRef(0);
-  // A stop stays shown until the stream holds the row that the command changed.
   const pendingCommands = usePendingCommands();
-  const stopShown =
-    stopping ||
-    pendingCommands.some(
-      (entry) => entry.kind === "stop" && entry.target === p.id,
+  const [operations] = useState(() => ({
+    latestSend: {} as Record<string, symbol>,
+    branchLock: false,
+    branchRequests: {} as Record<string, string>,
+    uploadLock: false,
+  }));
+  const control = useMemo(() => {
+    const control = {
+      pendingUploads: uploadRecovery.pending,
+      navigateToMessage: async (_id: string) => {},
+      returnToLatest: () => {},
+      attachments,
+      pendingCommands: [] as ReturnType<typeof usePendingCommands>,
+      addingFiles: false,
+      stopping: false,
+      branching: false,
+      editLoading: null as string | null,
+      highlighted: null as string | null,
+      dragging: false,
+      removingSending: false,
+      editAttempt: 0,
+      modelCommandRequest: 0,
+      branchDraft: null as BranchDraft | null,
+      get agent() {
+        return actions.navigation.selectedAgent;
+      },
+      get managed() {
+        return this.agent?.source === GeneratedApiAgentSource.managed;
+      },
+      get visibleMessages() {
+        return actions.selected.visibleMessages;
+      },
+      get assets() {
+        return this.attachments[opened || ""] || emptyAttachments;
+      },
+      get pendingFiles() {
+        return this.pendingUploads.filter((row) => row.agent === opened);
+      },
+      get uploading() {
+        return this.addingFiles || this.pendingFiles.length > 0;
+      },
+      get stopShown() {
+        return (
+          this.stopping ||
+          this.pendingCommands.some(
+            ({ kind, target }) => kind === "stop" && target === opened,
+          )
+        );
+      },
+      matchesQueue(item: Message, entry: QueueItem) {
+        return (
+          item.role === "user" &&
+          (entry.id === item.clientMessageId ||
+            entry.id === item.id ||
+            opened + ":" + entry.id === item.id)
+        );
+      },
+      get pendingQueueEntries(): QueueItem[] {
+        const { visibleMessages } = this;
+
+        return [
+          ...messageQueue.items,
+          ...visibleMessages
+            .filter(
+              (item) =>
+                item.role === "user" &&
+                explicitQueue(item) &&
+                !dispatchedMessage(item) &&
+                !messageQueue.items.some((row) => this.matchesQueue(item, row)),
+            )
+            .map((item): LocalQueueItem => ({
+              id: item.clientMessageId || item.id,
+              text: item.text,
+              ...(item.assets ? { assets: item.assets } : {}),
+              requestedDelivery: item.requestedDelivery,
+              localDelivery: true,
+              deliveryStatus: item.deliveryStatus,
+            })),
+        ].filter(
+          (entry: QueueItem) =>
+            (entry.localDelivery ||
+              entry.status === MessageSendStatus.queued) &&
+            !visibleMessages.some(
+              (item) =>
+                dispatchedMessage(item) && this.matchesQueue(item, entry),
+            ),
+        );
+      },
+      isNextTurn(entry: QueueItem) {
+        return (
+          (("delivery" in entry ? entry.delivery : undefined) ||
+            entry.requestedDelivery) === DeliveryMoment.NextTurn
+        );
+      },
+      get nextTurnQueue() {
+        return this.pendingQueueEntries.filter(this.isNextTurn);
+      },
+      get currentTurnQueue() {
+        return this.pendingQueueEntries.filter(
+          (entry) => !this.isNextTurn(entry),
+        );
+      },
+      get lastAssistantByTurn() {
+        const uncertain = new Set(
+          this.visibleMessages
+            .filter((m) => m.turnStatus === "uncertain")
+            .map((m) => m.turnId),
+        );
+        const last = new Map<string, string>();
+        for (const m of this.visibleMessages)
+          if (
+            m.role === "assistant" &&
+            m.turnId &&
+            !uncertain.has(m.turnId) &&
+            !isEmptyAssistantMessage(m)
+          )
+            last.set(m.turnId, m.id);
+        return last;
+      },
+      get renderedMessages(): Message[] {
+        const { visibleMessages, currentTurnQueue, nextTurnQueue } = this;
+
+        const removed = actions.selected.removed;
+        return [
+          ...visibleMessages.filter(
+            (item) =>
+              !nextTurnQueue.some((entry) => this.matchesQueue(item, entry)),
+          ),
+          ...currentTurnQueue
+            .filter(
+              (entry) =>
+                !visibleMessages.some((item) => this.matchesQueue(item, entry)),
+            )
+            .map((entry): Message => ({
+              id: entry.id,
+              clientMessageId: entry.id,
+              role: "user",
+              text: entry.text,
+              ...(entry.assets ? { assets: entry.assets } : {}),
+              localDelivery: true,
+              deliveryStatus: entry.localDelivery
+                ? entry.deliveryStatus
+                : { source: "server", status: entry.status },
+            })),
+        ].filter((message) => !removed.hidden(message));
+      },
+      get inlineRequests() {
+        const { requestArea } = selected;
+        return transcriptRequests(
+          this.managed && !room ? this.renderedMessages : [],
+          requestArea.requests.requests,
+          requestArea.cards,
+        );
+      },
+      setUploading(value: boolean) {
+        this.addingFiles = value;
+      },
+      setEditLoading(value: string | null) {
+        this.editLoading = value;
+      },
+      setBranching(value: boolean) {
+        this.branching = value;
+      },
+      setHighlighted(value: string | null) {
+        this.highlighted = value;
+      },
+      setDragging(value: boolean) {
+        this.dragging = value;
+      },
+      setRemovingSending(value: boolean) {
+        this.removingSending = value;
+      },
+      setBranchDraft(value: React.SetStateAction<BranchDraft | null>) {
+        this.branchDraft =
+          typeof value === "function" ? value(this.branchDraft) : value;
+      },
+      stop() {
+        if (this.stopShown || !opened) return;
+        this.stopping = true;
+        void api.command
+          .stop(opened, false)
+          .then(actions.refresh)
+          .catch((error) => actions.notices.notify(errorText(error)))
+          .finally(() =>
+            runInAction(() => {
+              this.stopping = false;
+            }),
+          );
+      },
+      jumpToPrompt(id: string) {
+        void this.navigateToMessage(id).catch((error) =>
+          notices.notify(errorText(error)),
+        );
+      },
+      async addFiles(files: globalThis.File[]) {
+        const { assets, pendingFiles } = this;
+
+        if (!opened || !this.managed)
+          throw new Error("Select a managed chat before attaching files.");
+        if (operations.uploadLock)
+          throw new Error(
+            "Wait for the selected files to be saved, then retry.",
+          );
+        if (!files.length) throw new Error("Select at least one file.");
+        if (
+          files.length + assets.length + pendingFiles.length >
+          MAX_TURN_ATTACHMENTS
+        )
+          throw new Error(`Attach at most ${MAX_TURN_ATTACHMENTS} files.`);
+        const id = opened;
+        operations.uploadLock = true;
+        this.setUploading(true);
+        try {
+          uploadRecovery.include(
+            await queueUploads(stateDir, id, files, startup.workspaceId || ""),
+          );
+          uploadRecovery.retry();
+        } finally {
+          operations.uploadLock = false;
+          this.setUploading(false);
+        }
+      },
+      async submit(
+        deliveryMoment: DeliveryMoment = DeliveryMoment.CurrentTurn,
+        asTextFile: boolean = false,
+      ) {
+        const { agent, assets } = this;
+
+        const draft = drafts.getDraft(opened || "new");
+        const draftTooLong = codePointsExceed(draft, MAX_DRAFT_TEXT_CODEPOINTS);
+        const modelCommand = modelCommandPattern.test(draft.trim());
+        const exactModelCommand = exactModelCommandPattern.test(draft.trim());
+        if (!sendsTextFile(draft, asTextFile) && modelCommand) {
+          if (!exactModelCommand) {
+            notices.notify("Use /model without arguments to choose a model.");
+          } else if (!this.managed || !agent) {
+            notices.notify("Select a managed chat to choose a model.");
+          } else {
+            promptRecall.reset();
+            input.current?.focus({ preventScroll: true });
+            delivery.editDraft("");
+            this.modelCommandRequest++;
+          }
+          return;
+        }
+        if (
+          delivery.isSending ||
+          nativeThreadError(this.agent, selected.detail) ||
+          this.uploading ||
+          draftTooLong ||
+          (!draft.trim() && !assets.length)
+        )
+          return;
+        const attempt = Symbol();
+        const id = opened || "";
+        operations.latestSend[id] = attempt;
+        // Sending expresses a new scroll intent. Streaming still respects a later
+        // manual scroll away from the bottom.
+        this.returnToLatest();
+        input.current?.focus({ preventScroll: true });
+        const sent = new Set(assets.map((asset) => asset.id));
+        try {
+          await delivery.send({
+            ...(asTextFile ? { asTextFile: true } : {}),
+            delivery: deliveryMoment,
+            assets: assets.map((asset) => asset.id),
+            attachments: assets.map(({ preview: _preview, ...asset }) => asset),
+            onPersist: async () => {
+              await setAttachments((current) => ({
+                ...current,
+                [id]: (current[id] || []).filter(
+                  (asset) => !sent.has(asset.id),
+                ),
+              }));
+            },
+          });
+          if (id && this.managed)
+            void messageQueue
+              .reload()
+              .catch((error) => notices.notify(errorText(error)));
+        } catch {
+          setAttachments((current) =>
+            operations.latestSend[id] !== attempt
+              ? current
+              : {
+                  ...current,
+                  [id]: Array.from(
+                    new Map(
+                      [...assets, ...(current[id] || [])].map((asset) => [
+                        asset.id,
+                        asset,
+                      ]),
+                    ).values(),
+                  ),
+                },
+          );
+          // The send owner restores the draft and renders its delivery error.
+        }
+      },
+      async editMessage(message: Message) {
+        const get = api.get;
+
+        const attempt = ++this.editAttempt;
+        const chat = opened;
+        this.setEditLoading(message.id);
+        try {
+          let original = message;
+          if (message.truncated) {
+            const full = await get("/api/transcript/item", {
+              query: { id: chat || "", message_id: message.id },
+              timeoutMs: 15000,
+            });
+            if (full.truncated || typeof full.text !== "string")
+              throw new Error(
+                "The full original message is unavailable. Copy the visible text into a new message instead.",
+              );
+            const fullFields: KnownApiFields<typeof full> = full;
+            original = {
+              ...message,
+              ...fullFields,
+              deliveryStatus: fullFields.deliveryStatus
+                ? { source: "server", status: fullFields.deliveryStatus }
+                : message.deliveryStatus,
+              threadId: fullFields.threadId ?? message.threadId,
+              role: fullFields.role || message.role,
+              text:
+                typeof fullFields.text === "string"
+                  ? fullFields.text
+                  : message.text,
+            };
+          }
+          if (
+            actions.navigation.selectedId === chat &&
+            attempt === this.editAttempt
+          )
+            this.setBranchDraft({
+              message: original,
+              before: true,
+              text: original.text,
+            });
+        } catch (error) {
+          if (
+            actions.navigation.selectedId === chat &&
+            attempt === this.editAttempt
+          )
+            notices.notify(errorText(error));
+        } finally {
+          if (attempt === this.editAttempt) this.setEditLoading(null);
+        }
+      },
+      async branch(
+        message: Message,
+        draft?: { before: boolean; text: string },
+      ) {
+        const { visibleMessages } = this;
+        const post = api.post;
+
+        if (
+          visibleMessages.some(
+            (item) =>
+              item.turnId === message.turnId && item.turnStatus === "uncertain",
+          )
+        ) {
+          notices.notify(
+            "The turn outcome is unconfirmed. Review the saved evidence before you continue.",
+          );
+          return;
+        }
+        if (operations.branchLock) return;
+        const agentId = opened;
+        if (!agentId) return;
+        operations.branchLock = true;
+        const sourceId = draft?.before
+          ? message.id
+          : message.sourceId || message.id;
+        const key = `${agentId}:${sourceId}:${draft?.before ? "before" : "after"}`;
+        operations.branchRequests[key] ||= randomUUID();
+        this.setBranching(true);
+        try {
+          const response = await post("/api/branch", {
+            agent: agentId,
+            message_id: sourceId,
+            id: operations.branchRequests[key],
+            ...(draft?.before ? { before: true } : {}),
+          });
+          const branchId = response.id;
+          if (!branchId)
+            throw new Error("The server did not return the new chat identity.");
+          if (draft) {
+            const reviewedText =
+              draft.before &&
+              draft.text === message.text &&
+              typeof response.draft?.text === "string"
+                ? response.draft.text
+                : draft.text;
+            const prefix =
+              draft.before && typeof response.draft?.prefixText === "string"
+                ? response.draft.prefixText
+                : "";
+            delivery.editDraft(
+              prefix ? `${prefix}\n\n${reviewedText}` : reviewedText,
+              branchId,
+            );
+            const branchAssets = response.draft?.assets;
+            if (draft.before && branchAssets?.length)
+              setAttachments((current) => ({
+                ...current,
+                [branchId]: branchAssets,
+              }));
+          }
+          await actions.refresh();
+          actions.open(branchId);
+          this.setBranchDraft(null);
+          delete operations.branchRequests[key];
+        } catch (error) {
+          notices.notify(errorText(error));
+        } finally {
+          operations.branchLock = false;
+          this.setBranching(false);
+        }
+      },
+      async copy(text: string) {
+        try {
+          await copyText(text);
+          notices.notify("Copied.");
+        } catch {
+          notices.notify("Clipboard access failed.");
+        }
+      },
+      quote(text: string) {
+        const quoted = text
+          .split(/\r?\n/)
+          .map((line) => `> ${line}`)
+          .join("\n");
+        const draft = drafts.getDraft(opened || "new");
+        const separator =
+          !draft || draft.endsWith("\n\n")
+            ? ""
+            : draft.endsWith("\n")
+              ? "\n"
+              : "\n\n";
+        delivery.editDraft(`${draft}${separator}${quoted}\n\n`);
+        input.current?.focus();
+      },
+      async removeSending(messages: Message[]) {
+        if (this.removingSending || !opened) return;
+        this.setRemovingSending(true);
+        try {
+          for (const message of messages)
+            await removeSendingMessage(
+              { stateDir: stateDir, workspaceId: startup.workspaceId, kind },
+              { chat: opened, message },
+            );
+          void messageQueue.reload().catch(() => {});
+          notices.notify(
+            `Removed ${messages.length} messages. Work already sent continues.`,
+          );
+        } catch (error) {
+          notices.notify(errorText(error));
+        } finally {
+          this.setRemovingSending(false);
+        }
+      },
+      restoreDraft(m: Message) {
+        const draft = drafts.getDraft(opened || "new");
+        const separator =
+          draft.trim() && draft.trim() !== m.text.trim() ? "\n\n" : "";
+        delivery.editDraft(separator ? draft + separator + m.text : m.text);
+        setAttachments((current) => ({
+          ...current,
+          [opened || ""]: [
+            ...new Map(
+              [...(current[opened || ""] || []), ...(m.assets || [])].map(
+                (asset: Attachment) => [asset.id, asset],
+              ),
+            ).values(),
+          ],
+        }));
+        input.current?.focus({ preventScroll: true });
+      },
+      async removeMessage(m: Message) {
+        try {
+          if (!m.clientMessageId) return;
+          await changeOutbox(m.clientMessageId, "cancel");
+          delivery.observeSends?.([m.clientMessageId]);
+          notices.notify(
+            "Message removed from this device. Delivery was not cancelled.",
+          );
+        } catch (error) {
+          notices.notify(`Could not remove this message: ${errorText(error)}`);
+        }
+      },
+    };
+    return makeAutoObservable(
+      control,
+      {
+        navigateToMessage: false,
+        returnToLatest: false,
+        pendingUploads: observableRef,
+        attachments: observableRef,
+        pendingCommands: observableRef,
+        branchDraft: observableRef,
+        lastAssistantByTurn: computed({ equals: compareShallow }),
+        inlineRequests: computed({ equals: compareShallow }),
+      },
+      { autoBind: true },
     );
-  useEffect(() => {
-    stopAttempt.current += 1;
-    setStopping(false);
-  }, [p.id]);
-  const uploadLock = useRef(false);
-  const activeId = useRef(p.id);
-  activeId.current = p.id;
-  const assets = attachments[p.id || ""] || emptyAttachments;
-  const agent = p.agent;
-  const detail = p.detail;
+  }, [actions, opened, stateDir, kind, messageQueue]);
+  useLayoutEffect(() => {
+    runInAction(() => {
+      control.attachments = attachments;
+      control.pendingUploads = uploadRecovery.pending;
+      control.pendingCommands = pendingCommands;
+      control.navigateToMessage = navigateToMessage;
+      control.returnToLatest = returnToLatest;
+    });
+  });
+
+  useServerActivity(control.addingFiles || uploadRecovery.pending.length > 0);
   const controls = {
     steer: providerSupports(agent?.provider, "steer"),
     fork: providerSupports(agent?.provider, "fork"),
   };
   useVisibleChatResult(
     scroll,
-    p.agent,
+    agent,
     visibleMessages,
     loaded,
-    actions.observeRead,
-    p.syncWorkspaceId,
+    read.observeRead,
+    startup.workspaceId,
     !historical && !after,
   );
   const threadBlock = nativeThreadError(agent, detail);
   const capacityRetry = agent ? currentCapacityRetry(agent) : null;
   const displayPhase = useDisplayPhase(
-    p.id,
+    opened,
     detail?.activity?.phase || "thinking",
   );
   const detailedActivity =
     !!threadBlock ||
     capacityRetry?.status === "scheduled" ||
     !!connection?.message ||
-    !!p.offlineSendPending ||
+    !!delivery.offlinePending ||
     !!detail?.error ||
     !!detail?.startAttempt?.prepareError ||
     !!detail?.startAttempt?.responseError ||
@@ -874,488 +1138,38 @@ export function ConversationView(p: {
     visibleMessages.at(-1)?.turnId === agent?.turnId &&
     visibleMessages.at(-1)?.role === "reasoning" &&
     typeof visibleMessages.at(-1)?.reasoningSince === "number";
-  useEffect(() => {
-    setBranchDraft(null);
-    editAttempt.current++;
-    setEditLoading(null);
-    setHighlighted(null);
-    setLimitsOpen(false);
-  }, [p.id]);
   const managed = agent?.source === GeneratedApiAgentSource.managed;
-  const [modelCommandRequest, setModelCommandRequest] = useState({
-    id: p.id,
-    serial: 0,
-  });
-  useEffect(() => {
-    setModelCommandRequest({ id: p.id, serial: 0 });
-  }, [p.id]);
-
-  // The queue holds only next-turn messages (Tab). Other input is
-  // delivered at once and stays in the chat while it is sent.
-  const pendingQueueEntries = useMemo(
-    () =>
-      computed<QueueItem[]>(() =>
-        [
-          ...messageQueue.items,
-          ...visibleMessages
-            .filter(
-              (item) =>
-                item.role === "user" &&
-                explicitQueue(item) &&
-                !dispatchedMessage(item) &&
-                !messageQueue.items.some(
-                  (row) =>
-                    row.id === item.clientMessageId ||
-                    row.id === item.id ||
-                    `${p.id}:${row.id}` === item.id,
-                ),
-            )
-            .map((item): LocalQueueItem => ({
-              id: item.clientMessageId || item.id,
-              text: item.text,
-              ...(item.assets ? { assets: item.assets } : {}),
-              requestedDelivery: item.requestedDelivery,
-              localDelivery: true,
-              deliveryStatus: item.deliveryStatus,
-            })),
-        ].filter(
-          (entry) =>
-            (("localDelivery" in entry && entry.localDelivery === true) ||
-              ("status" in entry &&
-                entry.status === MessageSendStatus.queued)) &&
-            !visibleMessages.some(
-              (item) =>
-                item.role === "user" &&
-                dispatchedMessage(item) &&
-                (item.clientMessageId === entry.id ||
-                  item.id === entry.id ||
-                  item.id === `${p.id}:${entry.id}`),
-            ),
-        ),
-      ),
-    [messageQueue.items, visibleMessages, p.id],
-  ).get();
-  const { nextTurnQueue, currentTurnQueue } = useMemo(
-    () =>
-      computed(() => {
-        const isNextTurn = (entry: QueueItem) =>
-          (("delivery" in entry ? entry.delivery : undefined) ||
-            entry.requestedDelivery) === DeliveryMoment.NextTurn;
-        return {
-          nextTurnQueue: pendingQueueEntries.filter(isNextTurn),
-          currentTurnQueue: pendingQueueEntries.filter(
-            (entry) => !isNextTurn(entry),
-          ),
-        };
-      }),
-    [pendingQueueEntries],
-  ).get();
-  const addFiles = useCommittedCallback(async (files: globalThis.File[]) => {
-    if (!p.id || !managed)
-      throw new Error("Select a managed chat before attaching files.");
-    if (uploadLock.current)
-      throw new Error("Wait for the selected files to be saved, then retry.");
-    if (!files.length) throw new Error("Select at least one file.");
-    if (
-      files.length + assets.length + pendingFiles.length >
-      MAX_TURN_ATTACHMENTS
-    )
-      throw new Error(`Attach at most ${MAX_TURN_ATTACHMENTS} files.`);
-    const id = p.id;
-    uploadLock.current = true;
-    setUploading(true);
-    try {
-      uploadRecovery.include(
-        await queueUploads(stateDir, id, files, p.syncWorkspaceId || ""),
-      );
-      uploadRecovery.retry();
-    } finally {
-      uploadLock.current = false;
-      setUploading(false);
-    }
-  });
-  const submit = useCommittedCallback(
-    async (
-      delivery: DeliveryMoment = DeliveryMoment.CurrentTurn,
-      asTextFile: boolean = false,
-    ) => {
-      const draft = actions.getDraft(p.id || "new");
-      const draftTooLong = codePointsExceed(draft, MAX_DRAFT_TEXT_CODEPOINTS);
-      const modelCommand = modelCommandPattern.test(draft.trim());
-      const exactModelCommand = exactModelCommandPattern.test(draft.trim());
-      if (!sendsTextFile(draft, asTextFile) && modelCommand) {
-        if (!exactModelCommand) {
-          actions.notify("Use /model without arguments to choose a model.");
-        } else if (!managed || !agent) {
-          actions.notify("Select a managed chat to choose a model.");
-        } else {
-          promptRecall.reset();
-          input.current?.focus({ preventScroll: true });
-          actions.setDraft("");
-          setModelCommandRequest((value) => ({
-            id: p.id,
-            serial: value.serial + 1,
-          }));
-        }
-        return;
-      }
-      if (
-        sendLock.current ||
-        p.sending ||
-        threadBlock ||
-        uploading ||
-        draftTooLong ||
-        (!draft.trim() && !assets.length)
-      )
-        return;
-      const attempt = Symbol();
-      sendLock.current = attempt;
-      const id = p.id || "";
-      latestSend.current[id] = attempt;
-      const release = () => {
-        if (sendLock.current === attempt) sendLock.current = null;
-      };
-      // Sending expresses a new scroll intent. Streaming still respects a later
-      // manual scroll away from the bottom.
-      returnToLatest();
-      input.current?.focus({ preventScroll: true });
-      const sent = new Set(assets.map((asset) => asset.id));
-      try {
-        await actions.send({
-          ...(asTextFile ? { asTextFile: true } : {}),
-          delivery,
-          assets: assets.map((asset) => asset.id),
-          attachments: assets.map(({ preview: _preview, ...asset }) => asset),
-          onPersist: async () => {
-            await setAttachments((current) => ({
-              ...current,
-              [id]: (current[id] || []).filter((asset) => !sent.has(asset.id)),
-            }));
-            release();
-          },
-        });
-        if (p.id && managed)
-          void messageQueue
-            .reload()
-            .catch((error) => actions.notify(errorText(error)));
-      } catch {
-        setAttachments((current) =>
-          latestSend.current[id] !== attempt
-            ? current
-            : {
-                ...current,
-                [id]: Array.from(
-                  new Map(
-                    [...assets, ...(current[id] || [])].map((asset) => [
-                      asset.id,
-                      asset,
-                    ]),
-                  ).values(),
-                ),
-              },
-        );
-        // The send owner restores the draft and renders its delivery error.
-      } finally {
-        release();
-      }
-    },
-  );
-  const editMessage = useCommittedCallback(async (message: Message) => {
-    const attempt = ++editAttempt.current;
-    const chat = p.id;
-    setEditLoading(message.id);
-    try {
-      let original = message;
-      if (message.truncated) {
-        const full = await get("/api/transcript/item", {
-          query: { id: chat || "", message_id: message.id },
-          timeoutMs: 15000,
-        });
-        if (full.truncated || typeof full.text !== "string")
-          throw new Error(
-            "The full original message is unavailable. Copy the visible text into a new message instead.",
-          );
-        const fullFields: KnownApiFields<typeof full> = full;
-        original = {
-          ...message,
-          ...fullFields,
-          deliveryStatus: fullFields.deliveryStatus
-            ? { source: "server", status: fullFields.deliveryStatus }
-            : message.deliveryStatus,
-          threadId: fullFields.threadId ?? message.threadId,
-          role: fullFields.role || message.role,
-          text:
-            typeof fullFields.text === "string"
-              ? fullFields.text
-              : message.text,
-        };
-      }
-      if (activeId.current === chat && attempt === editAttempt.current)
-        setBranchDraft({
-          message: original,
-          before: true,
-          text: original.text,
-        });
-    } catch (error) {
-      if (activeId.current === chat && attempt === editAttempt.current)
-        actions.notify(errorText(error));
-    } finally {
-      if (attempt === editAttempt.current) setEditLoading(null);
-    }
-  });
-  const branch = useCommittedCallback(
-    async (message: Message, draft?: { before: boolean; text: string }) => {
-      if (
-        visibleMessages.some(
-          (item) =>
-            item.turnId === message.turnId && item.turnStatus === "uncertain",
-        )
-      ) {
-        actions.notify(
-          "The turn outcome is unconfirmed. Review the saved evidence before you continue.",
-        );
-        return;
-      }
-      if (branchLock.current) return;
-      const agentId = p.id;
-      if (!agentId) return;
-      branchLock.current = true;
-      const sourceId = draft?.before
-        ? message.id
-        : message.sourceId || message.id;
-      const key = `${agentId}:${sourceId}:${draft?.before ? "before" : "after"}`;
-      branchRequests.current[key] ||= randomUUID();
-      setBranching(true);
-      try {
-        const response = await post("/api/branch", {
-          agent: agentId,
-          message_id: sourceId,
-          id: branchRequests.current[key],
-          ...(draft?.before ? { before: true } : {}),
-        });
-        const branchId = response.id;
-        if (!branchId)
-          throw new Error("The server did not return the new chat identity.");
-        if (draft) {
-          const reviewedText =
-            draft.before &&
-            draft.text === message.text &&
-            typeof response.draft?.text === "string"
-              ? response.draft.text
-              : draft.text;
-          const prefix =
-            draft.before && typeof response.draft?.prefixText === "string"
-              ? response.draft.prefixText
-              : "";
-          actions.setDraft(
-            prefix ? `${prefix}\n\n${reviewedText}` : reviewedText,
-            branchId,
-          );
-          const branchAssets = response.draft?.assets;
-          if (draft.before && branchAssets?.length)
-            setAttachments((current) => ({
-              ...current,
-              [branchId]: branchAssets,
-            }));
-        }
-        await actions.refresh();
-        (actions.branchCreated || actions.open)?.(branchId);
-        setBranchDraft(null);
-        delete branchRequests.current[key];
-      } catch (error) {
-        actions.notify(errorText(error));
-      } finally {
-        branchLock.current = false;
-        setBranching(false);
-      }
-    },
-  );
-  const copy = useCommittedCallback(async (text: string) => {
-    try {
-      await copyText(text);
-      actions.notify("Copied.");
-    } catch {
-      actions.notify("Clipboard access failed.");
-    }
-  });
-  const quote = useCommittedCallback((text: string) => {
-    const quoted = text
-      .split(/\r?\n/)
-      .map((line) => `> ${line}`)
-      .join("\n");
-    const draft = actions.getDraft(p.id || "new");
-    const separator =
-      !draft || draft.endsWith("\n\n")
-        ? ""
-        : draft.endsWith("\n")
-          ? "\n"
-          : "\n\n";
-    actions.setDraft(`${draft}${separator}${quoted}\n\n`);
-    input.current?.focus();
-  });
   const first =
-    p.room?.members?.[0] || visibleMessages.find((m) => m.sender)?.sender;
-  const canSend =
-    !p.schemaMismatch &&
-    !threadBlock &&
-    (!!detail?.canSend || !!p.legacy || !p.id);
-  const lastAssistantByTurn = useMemo(
-    () =>
-      computed(() => {
-        const uncertainTurns = new Set(
-          visibleMessages
-            .filter((message) => message.turnStatus === "uncertain")
-            .map((message) => message.turnId),
-        );
-        return new Map(
-          visibleMessages.flatMap((message) =>
-            message.role === "assistant" &&
-            message.turnId &&
-            !uncertainTurns.has(message.turnId) &&
-            !isEmptyAssistantMessage(message)
-              ? [[message.turnId, message.id] as const]
-              : [],
-          ),
-        );
-      }),
-    [visibleMessages],
-  ).get();
-  const queueEntry = (m: Message) =>
-    m.role === "user"
-      ? nextTurnQueue.find(
-          (event) =>
-            event.id === m.clientMessageId ||
-            event.id === m.id ||
-            `${p.id}:${event.id}` === m.id,
-        )
-      : undefined;
-  const sendingEntry = (m: Message) =>
-    m.role === "user"
-      ? currentTurnQueue.find(
-          (event) =>
-            event.id === m.clientMessageId ||
-            event.id === m.id ||
-            `${p.id}:${event.id}` === m.id,
-        )
-      : undefined;
-  const renderedMessages = useMemo(
-    () =>
-      computed(() =>
-        [
-          ...visibleMessages.filter((item) => !queueEntry(item)),
-          ...currentTurnQueue
-            .filter(
-              (entry) =>
-                !visibleMessages.some((item) => sendingEntry(item) === entry),
-            )
-            .map((entry): Message => ({
-              id: entry.id,
-              clientMessageId: entry.id,
-              role: "user",
-              text: entry.text,
-              ...("assets" in entry ? { assets: entry.assets } : {}),
-              localDelivery: true,
-              deliveryStatus:
-                "localDelivery" in entry && entry.localDelivery
-                  ? entry.deliveryStatus
-                  : { source: "server", status: entry.status },
-            })),
-        ].filter((message) => !removed.hidden(message)),
-      ),
-    [visibleMessages, nextTurnQueue, currentTurnQueue, p.id, removed.hidden],
-  ).get();
-  const questionCards = requestArea.cards;
-  const inlineRequests = useMemo(
-    () =>
-      computed(
-        () =>
-          transcriptRequests(
-            managed && !p.room ? renderedMessages : [],
-            requestArea.requests.requests,
-            questionCards,
-          ),
-        { equals: compareShallow },
-      ),
-    [managed, p.room, renderedMessages, requestArea, questionCards],
-  ).get();
+    room?.members?.[0] || visibleMessages.find((m) => m.sender)?.sender;
+  const canSend = selected.canSend;
+  const questionCards = useCallback(
+    (item: Message) => selected.requestArea.cards(item),
+    [selected],
+  );
   const inlineRequestIds = new Set(
-    [...inlineRequests.values()].flatMap((request) =>
+    [...control.inlineRequests.values()].flatMap((request) =>
       request ? [request.id] : [],
     ),
   );
-  const [removingSending, setRemovingSending] = useState(false);
-  const removeSending = useCommittedCallback(async (messages: Message[]) => {
-    if (removingSending || !p.id) return;
-    setRemovingSending(true);
-    try {
-      for (const message of messages)
-        await removeSendingMessage(
-          { stateDir: stateDir, workspaceId: p.syncWorkspaceId, kind },
-          { chat: p.id, message },
-        );
-      void messageQueue.reload().catch(() => {});
-      actions.notify(
-        `Removed ${messages.length} messages. Work already sent continues.`,
-      );
-    } catch (error) {
-      actions.notify(errorText(error));
-    } finally {
-      setRemovingSending(false);
-    }
-  });
-  const restoreDraft = useCommittedCallback((m: Message) => {
-    const draft = actions.getDraft(p.id || "new");
-    const separator =
-      draft.trim() && draft.trim() !== m.text.trim() ? "\n\n" : "";
-    actions.setDraft(separator ? draft + separator + m.text : m.text);
-    setAttachments((current) => ({
-      ...current,
-      [p.id || ""]: [
-        ...new Map(
-          [...(current[p.id || ""] || []), ...(m.assets || [])].map(
-            (asset: Attachment) => [asset.id, asset],
-          ),
-        ).values(),
-      ],
-    }));
-    input.current?.focus({ preventScroll: true });
-  });
-  const removeMessage = useCommittedCallback(async (m: Message) => {
-    try {
-      if (!m.clientMessageId) return;
-      await changeOutbox(m.clientMessageId, "cancel");
-      actions.observeSends?.([m.clientMessageId]);
-      actions.notify(
-        "Message removed from this device. Delivery was not cancelled.",
-      );
-    } catch (error) {
-      actions.notify(`Could not remove this message: ${errorText(error)}`);
-    }
-  });
   const renderMessage = useCallback(
     (m: Message) => {
       reportPromptComposerRender("message", m.id);
       return renderMessageArticle(m);
     },
     [
-      highlighted,
-      p.room,
-      p.id,
+      control,
+      delivery,
+      room,
+      opened,
       first,
       managed,
       agent,
       controls.fork,
-      removingSending,
-      editLoading,
-      branching,
-      lastAssistantByTurn,
-      p.outgoing,
-      p.offlineSendPending,
+      outgoing,
       stateDir,
-      p.limitsAccounts,
       agents,
-      actions.notify,
-      actions.observeSends,
+      notices.notify,
+      delivery.observeSends,
     ],
   );
   const renderMessageArticle = (m: Message) => (
@@ -1363,8 +1177,8 @@ export function ConversationView(p: {
       key={messageRenderKey(m)}
       data-message={m.id}
       data-source-message={m.sourceId}
-      data-found={highlighted === m.id || undefined}
-      className={`message ${m.role === "user" ? "user" : "assistant"} ${p.room ? "bubble " + (m.sender !== first ? "outgoing" : "incoming") : ""}`}
+      data-found={control.highlighted === m.id || undefined}
+      className={`message ${m.role === "user" ? "user" : "assistant"} ${room ? "bubble " + (m.sender !== first ? "outgoing" : "incoming") : ""}`}
     >
       {((m.deliveryStatus?.source === "device" &&
         (m.deliveryStatus.state.kind === "stored" ||
@@ -1381,8 +1195,8 @@ export function ConversationView(p: {
                 size="sm"
                 aria-label="Remove sending message"
                 title="Remove from this device and stop retries. Work already sent continues."
-                disabled={removingSending}
-                onClick={() => void removeSending([m])}
+                disabled={control.removingSending}
+                onClick={() => void control.removeSending([m])}
               >
                 <Trash2 size={14} />
               </ActionIcon>
@@ -1391,10 +1205,10 @@ export function ConversationView(p: {
         </SettledDelivery>
       )}
       {/* The main chat has two speakers; only team rooms name each sender. */}
-      {p.room && (
+      {room && (
         <span className="chat-message-author">
           <AgentAvatar
-            id={m.sender || p.agent?.id || p.id || "agent"}
+            id={m.sender || agent?.id || opened || "agent"}
             size={24}
           />
         </span>
@@ -1436,7 +1250,7 @@ export function ConversationView(p: {
                     variant="subtle"
                     aria-label="Remove message"
                     title="Remove from this device. Delivery is not cancelled."
-                    onClick={() => removeMessage(m)}
+                    onClick={() => control.removeMessage(m)}
                   >
                     <Trash2 size={14} />
                   </ActionIcon>
@@ -1451,7 +1265,7 @@ export function ConversationView(p: {
           message={m}
           streaming={!!m.streaming}
           agentId={
-            p.room
+            room
               ? agents.find((item) => item.id === m.sender)?.id
               : managed
                 ? agent?.id
@@ -1460,17 +1274,17 @@ export function ConversationView(p: {
         />
       )}
       {Array.isArray(m.assets) && (
-        <MessageAttachments assets={m.assets} notify={actions.notify} />
+        <MessageAttachments assets={m.assets} notify={notices.notify} />
       )}
       {m.localDelivery && (
         <OutboxControls
-          entry={p.outgoing?.find((entry) => entry.id === m.clientMessageId)}
-          onResolved={(id) => actions.observeSends?.([id])}
+          entry={outgoing?.find((entry) => entry.id === m.clientMessageId)}
+          onResolved={(id) => delivery.observeSends?.([id])}
         />
       )}
       {m.deliveryError &&
         !(
-          p.offlineSendPending &&
+          delivery.offlinePending &&
           m.localDelivery &&
           m.deliveryStatus?.source === "device" &&
           m.deliveryStatus.state.kind === "transport_failed"
@@ -1486,7 +1300,7 @@ export function ConversationView(p: {
               <Button
                 size="compact-xs"
                 variant="subtle"
-                onClick={() => restoreDraft(m)}
+                onClick={() => control.restoreDraft(m)}
               >
                 Restore draft
               </Button>
@@ -1495,7 +1309,7 @@ export function ConversationView(p: {
         )}
       {m.truncated && <p className="notice">This message is clipped.</p>}
       {m.fullTextBlob && <FullOutput blob={m.fullTextBlob} />}
-      {(p.room || m.role === "user") && (
+      {(room || m.role === "user") && (
         <MessageDate at={m.at ?? m.created ?? m.timestamp} />
       )}
       <MessageActions
@@ -1504,27 +1318,32 @@ export function ConversationView(p: {
           m.role === "assistant"
             ? {
                 message: m,
-                agentId: !p.room && managed ? agent?.id : undefined,
+                agentId: !room && managed ? agent?.id : undefined,
                 stateDir: stateDir,
                 rootId:
-                  !p.room && managed ? agent?.rootId || agent?.id : undefined,
-                accounts: p.limitsAccounts,
-                onCopy: (value) => void copy(value),
+                  !room && managed ? agent?.rootId || agent?.id : undefined,
+                accounts:
+                  resourceData(
+                    scope.store.state().current,
+                  )?.accountsSummary.get("current")?.accounts || [],
+                onCopy: (value) => void control.copy(value),
               }
             : undefined
         }
-        onCopy={() => void copy(m.text)}
+        onCopy={() => void control.copy(m.text)}
         onQuote={
-          !p.room && !explicitQueue(m)
+          !room && !explicitQueue(m)
             ? () => {
                 const excerpt = selectedExcerpt(scroll.current);
-                quote(excerpt?.messageId === m.id ? excerpt.text : m.text);
+                control.quote(
+                  excerpt?.messageId === m.id ? excerpt.text : m.text,
+                );
                 window.getSelection()?.removeAllRanges();
               }
             : undefined
         }
         onEdit={
-          !p.room &&
+          !room &&
           !explicitQueue(m) &&
           managed &&
           m.role === "user" &&
@@ -1532,42 +1351,46 @@ export function ConversationView(p: {
           m.turnStatus !== "uncertain" &&
           (!m.deliveryStatus ||
             serverStatus(m.deliveryStatus) === MessageSendStatus.delivered)
-            ? () => void editMessage(m)
+            ? () => void control.editMessage(m)
             : undefined
         }
-        editLoading={editLoading === m.id}
-        editDisabled={branching || !!editLoading || m.turnId === agent?.turnId}
+        editLoading={control.editLoading === m.id}
+        editDisabled={
+          control.branching ||
+          !!control.editLoading ||
+          m.turnId === agent?.turnId
+        }
         onBranch={
           controls.fork &&
-          !p.room &&
+          !room &&
           !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&
           m.turnId !== agent?.turnId &&
           m.turnStatus !== "uncertain" &&
-          lastAssistantByTurn.get(m.turnId) === m.id
-            ? () => void branch(m)
+          control.lastAssistantByTurn.get(m.turnId) === m.id
+            ? () => void control.branch(m)
             : undefined
         }
         branchDisabled={m.turnId === agent?.turnId && !!agent?.inFlight}
         onAnotherAnswer={
-          !p.room &&
+          !room &&
           !explicitQueue(m) &&
           managed &&
           m.role === "assistant" &&
           m.turnId &&
           m.turnId !== agent?.turnId &&
-          lastAssistantByTurn.get(m.turnId) === m.id
+          control.lastAssistantByTurn.get(m.turnId) === m.id
             ? () =>
-                setBranchDraft({
+                control.setBranchDraft({
                   message: m,
                   before: false,
                   text: "Give another answer to my previous request. Use the existing results. Do not run tools or commands unless I explicitly ask.",
                 })
             : undefined
         }
-        anotherAnswerDisabled={branching}
+        anotherAnswerDisabled={control.branching}
       />
     </article>
   );
@@ -1588,6 +1411,8 @@ export function ConversationView(p: {
       ),
     [planType, renderMessage],
   );
+  const inlineRequests = control.inlineRequests;
+  const onAnswerOpen = useCallback(() => setFollow(false), [setFollow]);
   const requestCards = useMemo(
     () =>
       new Map(
@@ -1598,14 +1423,14 @@ export function ConversationView(p: {
               key={request.id}
               scope={stateDir}
               refresh={actions.refresh}
-              notify={actions.notify}
-              onAnswerOpen={() => setFollow(false)}
+              notify={notices.notify}
+              onAnswerOpen={onAnswerOpen}
               onAnswerPosition={revealRequest}
             >
               <RequestCard
                 request={request}
                 messageId={messageId}
-                showDates={!!p.room}
+                showDates={!!room}
               />
             </RequestArea>
           ),
@@ -1615,535 +1440,450 @@ export function ConversationView(p: {
       inlineRequests,
       stateDir,
       actions.refresh,
-      actions.notify,
-      setFollow,
+      notices.notify,
+      onAnswerOpen,
       revealRequest,
-      p.room,
+      room,
     ],
   );
   const transcriptActions = useMemo(
     () => ({
-      ...actions,
-      transcript: {
-        renderMessage: renderTranscriptMessage,
-        questionCards,
-        requestCards,
-        jumpToMessage: jumpToPrompt,
-      },
-    }),
-    [
-      actions.open,
-      actions.nativeAction,
-      actions.openActivity,
-      renderTranscriptMessage,
+      renderMessage: renderTranscriptMessage,
       questionCards,
       requestCards,
-      jumpToPrompt,
-    ],
+      jumpToMessage: control.jumpToPrompt,
+    }),
+    [renderTranscriptMessage, questionCards, requestCards, control],
   );
   const transcript = (
-    <ConversationProvider value={transcriptActions}>
-      {managed && !p.room && agent?.provider === ProviderKind.Claude && (
+    <TranscriptProvider value={transcriptActions}>
+      {managed && !room && agent?.provider === ProviderKind.Claude && (
         <ObservedClaudeRepairNotice agent={agent} detail={detail} />
       )}
       <TurnHistory
-        key={stateDir + ":" + p.id}
+        key={stateDir + ":" + opened}
         history={historySession}
-        items={renderedMessages}
+        items={control.renderedMessages}
         scrollContainer={scroll}
         rememberScroll={remember}
         getFollow={getFollow}
         followTail={!after}
         hasRecentScrollInput={hasRecentScrollInput}
-        agent={managed && !p.room ? agent : undefined}
+        agent={managed && !room ? agent : undefined}
         currentTurn={agent?.turnId || undefined}
-        enabled={managed && !p.room}
-        storageKey={"studio-turns:" + stateDir + ":" + p.id}
+        enabled={managed && !room}
+        storageKey={"studio-turns:" + stateDir + ":" + opened}
         agentId={managed ? agent?.id : undefined}
       />
-    </ConversationProvider>
+    </TranscriptProvider>
   );
-  const promptNavigation = useMemo(
-    () =>
-      !p.room && p.id ? (
-        <PromptNavigator
-          compact
-          inMenu={p.headerToolsInMenu}
-          key={p.id}
-          messages={visibleMessages}
-          loadOlder={
-            before
-              ? () => {
-                  setFollow(false);
-                  setPageAnchor(getAnchorId());
-                  void older().catch((e) => actions.notify(errorText(e)));
-                }
-              : undefined
-          }
-          loadingOlder={pageLoading}
-          agentId={managed ? p.id || undefined : undefined}
-          container={scroll}
-          storageKey={`studio-prompt-bookmarks:${stateDir}:${p.id}`}
-          jump={jumpToPrompt}
-        />
-      ) : null,
-    [
-      p.room,
-      p.id,
-      p.headerToolsInMenu,
-      visibleMessages,
-      before,
-      pageLoading,
-      managed,
-      scroll,
-      stateDir,
-      jumpToPrompt,
-      older,
-      setFollow,
-      getAnchorId,
-      actions.notify,
-    ],
-  );
+  const promptNavigation =
+    !room && opened ? (
+      <PromptNavigator
+        compact
+        inMenu={layout.usesMenuHeaderTools}
+        key={opened}
+        messages={visibleMessages}
+        loadOlder={
+          before
+            ? () => {
+                setFollow(false);
+                setPageAnchor(getAnchorId());
+                void older().catch((e) => notices.notify(errorText(e)));
+              }
+            : undefined
+        }
+        loadingOlder={pageLoading}
+        agentId={managed ? opened || undefined : undefined}
+        container={scroll}
+        storageKey={`studio-prompt-bookmarks:${stateDir}:${opened}`}
+        jump={control.jumpToPrompt}
+      />
+    ) : null;
   useLayoutEffect(() => {
-    p.onRailToolsChange?.(p.headerToolsInMenu ? promptNavigation : null);
-  }, [p.headerToolsInMenu, p.onRailToolsChange, promptNavigation]);
+    selected.railTools.publish?.(
+      layout.usesMenuHeaderTools ? promptNavigation : null,
+    );
+  }, [
+    layout.usesMenuHeaderTools,
+    selected.railTools.publish,
+    promptNavigation,
+  ]);
   useLayoutEffect(
-    () => () => p.onRailToolsChange?.(null),
-    [p.onRailToolsChange],
+    () => () => selected.railTools.publish?.(null),
+    [selected.railTools.publish],
   );
   // The composer renders again for every keystroke. Its parts that do not
   // read the draft are built here, with the chat, so React reuses them.
 
-  const composer = useMemo(
-    () =>
-      computed(() => {
-        const canStopAgent =
-          !!agent &&
-          (agent.status === GeneratedApiAgentStatus.running ||
-            agent.status === GeneratedApiAgentStatus.starting ||
-            agent.status === GeneratedApiAgentStatus.approval);
-        const executionControls = managed && agent && (
-          <ConversationSettings
-            agent={agent}
-            lead={p.lead}
-            openRequest={
-              modelCommandRequest.id === p.id ? modelCommandRequest.serial : 0
-            }
-          />
-        );
-        const attachTool = managed && (
-          <ComposerAttachments
-            notify={actions.notify}
-            assets={assets}
-            uploading={uploading}
-            disabled={!canSend || p.sending}
-            add={addFiles}
-            remove={(id) => {
-              const agentId = p.id || "";
-              void uploadRecovery
-                .remove(id, () => {
-                  setAttachments((current) => ({
-                    ...current,
-                    [agentId]: (current[agentId] || []).filter(
-                      (asset) => asset.id !== id,
-                    ),
-                  }));
-                })
-                .catch((error) => actions.notify(errorText(error)));
-            }}
-          />
-        );
-        const voiceTool = managed &&
-          agent?.isLead &&
-          agent?.provider === ProviderKind.Codex &&
-          p.id &&
-          !threadBlock && (
-            <RealtimeVoice
-              key={`voice:${p.id}`}
-              agentId={p.id}
-              notify={actions.notify}
-            />
-          );
-        const transferChip = managed && p.agent?.isLead && (
-          <ObservedAccountTransferChip
-            transfer={p.agent.accountTransferProgress}
-          />
-        );
-        const draftVersions = (
-          <div className="composer-draft-control">
-            <DraftVersions
-              key={`drafts:${p.id || "new"}`}
-              versions={p.draftConflicts || []}
-              useVersion={(version, mode) =>
-                actions.setDraft((current) =>
-                  mode === "append" && current
-                    ? `${current}\n\n${version.text}`
-                    : version.text,
-                )
-              }
-              dismiss={(version) => actions.dismissDraft?.(version)}
-            />
-          </div>
-        );
-        const pendingUploads = managed && (
-          <>
-            {!!pendingFiles.length && (
-              <div className="attachment-list" role="status">
-                {pendingFiles.map((file) => (
-                  <div className="attachment-chip" key={file.id}>
-                    <span>
-                      {file.name}: saved on this device, waiting for upload
-                    </span>
-                    <Button
-                      size="compact-xs"
-                      onClick={() => {
-                        void uploadRecovery
-                          .remove(file.id, () => {
-                            setAttachments((current) => ({
-                              ...current,
-                              [file.agent]: (current[file.agent] || []).filter(
-                                (asset) => asset.id !== file.id,
-                              ),
-                            }));
-                          })
-                          .catch((error) => actions.notify(errorText(error)));
-                      }}
-                    >
-                      Remove pending {file.name}
-                    </Button>
-                  </div>
-                ))}
+  const composer = (() => {
+    const canStopAgent =
+      !!agent &&
+      (agent.status === GeneratedApiAgentStatus.running ||
+        agent.status === GeneratedApiAgentStatus.starting ||
+        agent.status === GeneratedApiAgentStatus.approval);
+    const executionControls = managed && agent && (
+      <ConversationSettings
+        agent={agent}
+        lead={lead}
+        openRequest={control.modelCommandRequest}
+      />
+    );
+    const attachTool = managed && (
+      <ComposerAttachments
+        notify={notices.notify}
+        assets={control.assets}
+        uploading={control.uploading}
+        disabled={!canSend || sending}
+        add={control.addFiles}
+        remove={(id) => {
+          const agentId = id || "";
+          void uploadRecovery
+            .remove(id, () => {
+              setAttachments((current) => ({
+                ...current,
+                [agentId]: (current[agentId] || []).filter(
+                  (asset) => asset.id !== id,
+                ),
+              }));
+            })
+            .catch((error) => notices.notify(errorText(error)));
+        }}
+      />
+    );
+    const voiceTool = managed &&
+      agent?.isLead &&
+      agent?.provider === ProviderKind.Codex &&
+      opened &&
+      !threadBlock && (
+        <RealtimeVoice
+          key={`voice:${opened}`}
+          agentId={opened}
+          notify={notices.notify}
+        />
+      );
+    const transferChip = managed && agent?.isLead && (
+      <ObservedAccountTransferChip transfer={agent.accountTransferProgress} />
+    );
+    const draftVersions = (
+      <div className="composer-draft-control">
+        <DraftVersions
+          key={`drafts:${opened || "new"}`}
+          versions={delivery.selectedDraftConflicts || []}
+          useVersion={(version, mode) =>
+            delivery.editDraft((current) =>
+              mode === "append" && current
+                ? `${current}\n\n${version.text}`
+                : version.text,
+            )
+          }
+          dismiss={(version) => drafts.dismissDraft?.(version)}
+        />
+      </div>
+    );
+    const pendingUploads = managed && (
+      <>
+        {!!control.pendingFiles.length && (
+          <div className="attachment-list" role="status">
+            {control.pendingFiles.map((file) => (
+              <div className="attachment-chip" key={file.id}>
+                <span>
+                  {file.name}: saved on this device, waiting for upload
+                </span>
+                <Button
+                  size="compact-xs"
+                  onClick={() => {
+                    void uploadRecovery
+                      .remove(file.id, () => {
+                        setAttachments((current) => ({
+                          ...current,
+                          [file.agent]: (current[file.agent] || []).filter(
+                            (asset) => asset.id !== file.id,
+                          ),
+                        }));
+                      })
+                      .catch((error) => notices.notify(errorText(error)));
+                  }}
+                >
+                  Remove pending {file.name}
+                </Button>
               </div>
-            )}
-            {uploadRecovery.error && (
-              <p role="status">
-                {uploadRecovery.error}{" "}
-                <button type="button" onClick={uploadRecovery.retry}>
-                  Retry file upload
-                </button>
-              </p>
-            )}
-          </>
-        );
-        const dictation = managed && p.id && (
-          <Dictation
-            key={`${stateDir}:${p.id}`}
-            chatId={`${stateDir}:${p.id}`}
-            disabled={!canSend || p.sending}
-            onInsert={(text) =>
-              actions.setDraft(
-                (current) =>
-                  current +
-                  (current && !current.endsWith("\n") ? "\n" : "") +
-                  text,
-              )
-            }
-          />
-        );
-        const stopControl = (
-          <>
-            {!canStopAgent && (
-              <span className="composer-stop-slot" aria-hidden="true" />
-            )}
-            {canStopAgent && (
-              <ActionIcon
-                type="button"
-                id="stop"
-                aria-label="Stop agent"
-                title={canStopAgent ? "Stop agent" : "No active turn to stop"}
-                disabled={stopShown || !canStopAgent}
-                aria-busy={stopShown}
-                onClick={() => {
-                  const agentId = p.id;
-                  if (stopShown || !agentId) return;
-                  const attempt = ++stopAttempt.current;
-                  setStopping(true);
-                  void command
-                    .stop(agentId, false)
-                    .then(actions.refresh)
-                    .catch((e) => actions.notify(errorText(e)))
-                    .finally(() => {
-                      if (stopAttempt.current === attempt) setStopping(false);
-                    });
-                }}
-              >
-                {stopShown ? (
-                  <Loader size={14} color="currentColor" />
-                ) : (
-                  <Square size={14} fill="currentColor" />
-                )}
-              </ActionIcon>
-            )}
-          </>
-        );
-
-        return (
-          <PromptComposer
-            session={p.id || "new"}
-            getDraft={actions.getDraft}
-            subscribeDraft={actions.subscribeDraft}
-            className={dragging ? "attachment-drop" : ""}
-            onDragOver={(event) => {
-              if (managed) {
-                event.preventDefault();
-                setDragging(true);
-              }
-            }}
-            onDragLeave={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node))
-                setDragging(false);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              setDragging(false);
-              void addFiles(Array.from(event.dataTransfer.files)).catch(
-                (error) => actions.notify(errorText(error)),
-              );
-            }}
-            onSubmit={(e) => {
-              e.preventDefault();
-              void submit();
-            }}
+            ))}
+          </div>
+        )}
+        {uploadRecovery.error && (
+          <p role="status">
+            {uploadRecovery.error}{" "}
+            <button type="button" onClick={uploadRecovery.retry}>
+              Retry file upload
+            </button>
+          </p>
+        )}
+      </>
+    );
+    const dictation = managed && opened && (
+      <Dictation
+        key={`${stateDir}:${opened}`}
+        chatId={`${stateDir}:${opened}`}
+        disabled={!canSend || sending}
+        onInsert={(text) =>
+          delivery.editDraft(
+            (current) =>
+              current + (current && !current.endsWith("\n") ? "\n" : "") + text,
+          )
+        }
+      />
+    );
+    const stopControl = (
+      <>
+        {!canStopAgent && (
+          <span className="composer-stop-slot" aria-hidden="true" />
+        )}
+        {canStopAgent && (
+          <ActionIcon
+            type="button"
+            id="stop"
+            aria-label="Stop agent"
+            title={canStopAgent ? "Stop agent" : "No active turn to stop"}
+            disabled={control.stopShown || !canStopAgent}
+            aria-busy={control.stopShown}
+            onClick={control.stop}
           >
-            {(draft) => {
-              const draftTooLong = codePointsExceed(
-                draft,
-                MAX_DRAFT_TEXT_CODEPOINTS,
-              );
-              const willAttachText = sendsTextFile(draft);
-              const modelCommand =
-                !willAttachText && modelCommandPattern.test(draft.trim());
-              const exactModelCommand = exactModelCommandPattern.test(
-                draft.trim(),
-              );
-              const queueControl = (className: string) =>
-                managed ? (
-                  <ActionIcon
-                    className={className}
-                    type="button"
-                    variant="subtle"
-                    aria-label="Queue for next turn"
-                    title="Queue for the next turn (Tab)"
-                    aria-keyshortcuts="Tab"
-                    disabled={
-                      !canSend ||
-                      p.sending ||
-                      uploading ||
-                      draftTooLong ||
-                      (!draft.trim() && !assets.length)
-                    }
-                    onClick={() => void submit(DeliveryMoment.NextTurn)}
-                  >
-                    <ListEnd size={18} />
-                  </ActionIcon>
-                ) : null;
-              return (
-                <>
-                  {transferChip}
-                  <PromptInput
-                    value={draft}
-                    session={p.id || "new"}
-                    getDraft={actions.getDraft}
-                    setDraft={actions.setDraft}
-                    input={input}
-                    mobile={mobileClient || touchInput}
-                    managed={!!managed}
-                    canSend={canSend}
-                    blocked={!!threadBlock}
-                    sending={p.sending}
-                    uploading={uploading}
-                    draftTooLong={draftTooLong}
-                    modelCommand={modelCommand}
-                    hasAttachments={!!assets.length}
-                    onChange={(value) => {
-                      promptRecall.reset();
-                      actions.setDraft(value);
-                    }}
-                    onPasteFiles={(files) =>
-                      void addFiles(files).catch((error) =>
-                        actions.notify(errorText(error)),
-                      )
-                    }
-                    onSend={() => void submit()}
-                    onQueue={() => void submit(DeliveryMoment.NextTurn)}
-                    onRecallKeyDown={promptRecall.onKeyDown}
-                    skillCatalog={{
-                      enabled:
-                        !!managed && !p.room && !!p.id && p.id === agent?.id,
-                      agentId: p.id || "",
-                      workspace: p.syncWorkspaceId || stateDir,
-                      account: p.agent?.accountKey || "default",
-                      cwd: p.agent?.cwd || "",
-                      provider: String(p.agent?.provider || ""),
-                    }}
-                  />
-                  {exactModelCommand && (
+            {control.stopShown ? (
+              <Loader size={14} color="currentColor" />
+            ) : (
+              <Square size={14} fill="currentColor" />
+            )}
+          </ActionIcon>
+        )}
+      </>
+    );
+
+    return (
+      <PromptComposer
+        session={opened || "new"}
+        getDraft={drafts.getDraft}
+        subscribeDraft={drafts.subscribeDraft}
+        className={control.dragging ? "attachment-drop" : ""}
+        onDragOver={(event) => {
+          if (managed) {
+            event.preventDefault();
+            control.setDragging(true);
+          }
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node))
+            control.setDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          control.setDragging(false);
+          void control
+            .addFiles(Array.from(event.dataTransfer.files))
+            .catch((error) => notices.notify(errorText(error)));
+        }}
+        onSubmit={(e) => {
+          e.preventDefault();
+          void control.submit();
+        }}
+      >
+        {(draft) => {
+          const draftTooLong = codePointsExceed(
+            draft,
+            MAX_DRAFT_TEXT_CODEPOINTS,
+          );
+          const willAttachText = sendsTextFile(draft);
+          const modelCommand =
+            !willAttachText && modelCommandPattern.test(draft.trim());
+          const exactModelCommand = exactModelCommandPattern.test(draft.trim());
+          const queueControl = (className: string) =>
+            managed ? (
+              <ActionIcon
+                className={className}
+                type="button"
+                variant="subtle"
+                aria-label="Queue for next turn"
+                title="Queue for the next turn (Tab)"
+                aria-keyshortcuts="Tab"
+                disabled={
+                  !canSend ||
+                  sending ||
+                  control.uploading ||
+                  draftTooLong ||
+                  (!draft.trim() && !control.assets.length)
+                }
+                onClick={() => void control.submit(DeliveryMoment.NextTurn)}
+              >
+                <ListEnd size={18} />
+              </ActionIcon>
+            ) : null;
+          return (
+            <>
+              {transferChip}
+              <PromptInput
+                value={draft}
+                session={opened || "new"}
+                getDraft={drafts.getDraft}
+                setDraft={delivery.editDraft}
+                input={input}
+                mobile={mobileClient || touchInput}
+                managed={!!managed}
+                canSend={canSend}
+                blocked={!!threadBlock}
+                sending={sending}
+                uploading={control.uploading}
+                draftTooLong={draftTooLong}
+                modelCommand={modelCommand}
+                hasAttachments={!!control.assets.length}
+                onChange={(value) => {
+                  promptRecall.reset();
+                  delivery.editDraft(value);
+                }}
+                onPasteFiles={(files) =>
+                  void control
+                    .addFiles(files)
+                    .catch((error) => notices.notify(errorText(error)))
+                }
+                onSend={() => void control.submit()}
+                onQueue={() => void control.submit(DeliveryMoment.NextTurn)}
+                onRecallKeyDown={promptRecall.onKeyDown}
+                skillCatalog={{
+                  enabled:
+                    !!managed && !room && !!opened && opened === agent?.id,
+                  agentId: opened || "",
+                  workspace: startup.workspaceId || stateDir,
+                  account: agent?.accountKey || "default",
+                  cwd: agent?.cwd || "",
+                  provider: String(agent?.provider || ""),
+                }}
+              />
+              {exactModelCommand && (
+                <Button
+                  type="button"
+                  variant="subtle"
+                  size="compact-sm"
+                  aria-label="Choose model with /model"
+                  onClick={() => void control.submit()}
+                >
+                  /model · Choose model and reasoning
+                </Button>
+              )}
+              {willAttachText && (
+                <div
+                  id="draft-length-error"
+                  className="draft-length-error"
+                  role="alert"
+                >
+                  <span>
+                    {draftTooLong
+                      ? "Draft exceeds the size limit."
+                      : "This text will be sent as a file."}
+                  </span>
+                  {managed && (
                     <Button
                       type="button"
+                      size="compact-xs"
                       variant="subtle"
-                      size="compact-sm"
-                      aria-label="Choose model with /model"
-                      onClick={() => void submit()}
+                      disabled={
+                        !canSend ||
+                        sending ||
+                        control.uploading ||
+                        draftTooLong ||
+                        control.assets.length >= MAX_TURN_ATTACHMENTS
+                      }
+                      onClick={() =>
+                        void control.submit(DeliveryMoment.CurrentTurn, true)
+                      }
                     >
-                      /model · Choose model and reasoning
+                      Attach text as a file
                     </Button>
                   )}
-                  {willAttachText && (
-                    <div
-                      id="draft-length-error"
-                      className="draft-length-error"
-                      role="alert"
-                    >
-                      <span>
-                        {draftTooLong
-                          ? "Draft exceeds the size limit."
-                          : "This text will be sent as a file."}
-                      </span>
-                      {managed && (
-                        <Button
-                          type="button"
-                          size="compact-xs"
-                          variant="subtle"
-                          disabled={
-                            !canSend ||
-                            p.sending ||
-                            uploading ||
-                            draftTooLong ||
-                            assets.length >= MAX_TURN_ATTACHMENTS
-                          }
-                          onClick={() =>
-                            void submit(DeliveryMoment.CurrentTurn, true)
-                          }
-                        >
-                          Attach text as a file
-                        </Button>
-                      )}
-                    </div>
-                  )}
-                  <div className="composer-bar">
-                    {draftVersions}
-                    <div className="composer-tools">
-                      {attachTool}
-                      <div className="composer-tools-inline">{voiceTool}</div>
-                      {managed && (
-                        <details className="composer-tools-disclosure">
-                          <summary
-                            aria-label="Composer tools"
-                            title="Voice conversation and queue"
-                          >
-                            <Ellipsis size={18} />
-                          </summary>
-                          <div className="composer-tools-popover">
-                            {voiceTool}
-                            {queueControl("composer-queue-disclosure")}
-                          </div>
-                        </details>
-                      )}
-                      {executionControls}
-
-                      {pendingUploads}
-                      {dictation}
-                    </div>
-                    <span id="send-state" role="status" aria-live="polite">
-                      {p.sending ? "Sending…" : ""}
-                    </span>
-                    <div className="composer-submit-actions">
-                      {managed && (
-                        <span className="composer-timing">
-                          <span>Send to current turn</span>
-                          <span>Queue for next turn</span>
-                        </span>
-                      )}
-                      {queueControl("composer-queue-primary")}
-                      {/* The stop slot keeps its width while idle, so Stop
-                          appearing during a turn moves no other control. */}
-                      {stopControl}
-                      <ActionIcon
-                        type="submit"
-                        variant="filled"
-                        color="gray"
-                        radius="xl"
-                        id="send"
-                        className="send"
-                        disabled={
-                          !canSend ||
-                          p.sending ||
-                          uploading ||
-                          draftTooLong ||
-                          (!draft.trim() && !assets.length)
-                        }
-                        aria-label="Send message"
-                        title={
-                          managed
-                            ? "Send after tool calls (Enter)"
-                            : "Send message"
-                        }
+                </div>
+              )}
+              <div className="composer-bar">
+                {draftVersions}
+                <div className="composer-tools">
+                  {attachTool}
+                  <div className="composer-tools-inline">{voiceTool}</div>
+                  {managed && (
+                    <details className="composer-tools-disclosure">
+                      <summary
+                        aria-label="Composer tools"
+                        title="Voice conversation and queue"
                       >
-                        {p.sending ? (
-                          <Loader size={19} color="currentColor" />
-                        ) : (
-                          <ArrowUp size={19} />
-                        )}
-                      </ActionIcon>
-                    </div>
-                  </div>
-                </>
-              );
-            }}
-          </PromptComposer>
-        );
-      }),
-    [
-      p.id,
-      p.room,
-      p.agent,
-      p.lead,
-      p.sending,
-      p.draftConflicts,
-      p.syncWorkspaceId,
-      p.agent?.accountKey,
-      p.agent?.cwd,
-      p.agent?.provider,
-      stateDir,
-      managed,
-      canSend,
-      threadBlock,
-      mobileClient,
-      touchInput,
-      dragging,
-      uploading,
-      assets,
-      pendingFiles,
-      uploadRecovery.error,
-      stopShown,
-      modelCommandRequest,
-      agents,
-      visibleMessages,
-      before,
-      historyVersion,
-      addFiles,
-      submit,
-      actions.getDraft,
-      actions.subscribeDraft,
-      actions.setDraft,
-      actions.notify,
-      actions.refresh,
-      actions.dismissDraft,
-    ],
-  ).get();
+                        <Ellipsis size={18} />
+                      </summary>
+                      <div className="composer-tools-popover">
+                        {voiceTool}
+                        {queueControl("composer-queue-disclosure")}
+                      </div>
+                    </details>
+                  )}
+                  {executionControls}
+
+                  {pendingUploads}
+                  {dictation}
+                </div>
+                <span id="send-state" role="status" aria-live="polite">
+                  {sending ? "Sending…" : ""}
+                </span>
+                <div className="composer-submit-actions">
+                  {managed && (
+                    <span className="composer-timing">
+                      <span>Send to current turn</span>
+                      <span>Queue for next turn</span>
+                    </span>
+                  )}
+                  {queueControl("composer-queue-primary")}
+                  {/* The stop slot keeps its width while idle, so Stop
+                          appearing during a turn moves no other control. */}
+                  {stopControl}
+                  <ActionIcon
+                    type="submit"
+                    variant="filled"
+                    color="gray"
+                    radius="xl"
+                    id="send"
+                    className="send"
+                    disabled={
+                      !canSend ||
+                      sending ||
+                      control.uploading ||
+                      draftTooLong ||
+                      (!draft.trim() && !control.assets.length)
+                    }
+                    aria-label="Send message"
+                    title={
+                      managed ? "Send after tool calls (Enter)" : "Send message"
+                    }
+                  >
+                    {sending ? (
+                      <Loader size={19} color="currentColor" />
+                    ) : (
+                      <ArrowUp size={19} />
+                    )}
+                  </ActionIcon>
+                </div>
+              </div>
+            </>
+          );
+        }}
+      </PromptComposer>
+    );
+  })();
 
   return (
     <section
       id="conversation"
-      className={p.room ? "agent-conversation" : "ai-conversation"}
+      className={room ? "agent-conversation" : "ai-conversation"}
     >
       <Modal
-        opened={!!branchDraft}
+        opened={!!control.branchDraft}
         onClose={() => {
-          if (!branching) setBranchDraft(null);
+          if (!control.branching) control.setBranchDraft(null);
         }}
         title={
-          branchDraft?.before
+          control.branchDraft?.before
             ? "Edit in a new chat"
             : "Another answer in a new chat"
         }
@@ -2153,36 +1893,43 @@ export function ConversationView(p: {
         </p>
         <Textarea
           label="Draft for the new chat"
-          value={branchDraft?.text || ""}
+          value={control.branchDraft?.text || ""}
           autosize
           minRows={3}
           maxRows={10}
-          disabled={branching || !!branchDraft?.message.truncated}
+          disabled={
+            control.branching || !!control.branchDraft?.message.truncated
+          }
           onChange={(event) => {
             const text = event.currentTarget.value;
-            setBranchDraft((current) =>
+            control.setBranchDraft((current) =>
               current ? { ...current, text } : current,
             );
           }}
         />
-        {branchDraft?.before && branchDraft.message.truncated && (
-          <p>
-            The preview is clipped. Create the draft to edit the full message.
-          </p>
-        )}
+        {control.branchDraft?.before &&
+          control.branchDraft.message.truncated && (
+            <p>
+              The preview is clipped. Create the draft to edit the full message.
+            </p>
+          )}
         <div className="branch-draft-actions">
           <Button
             variant="subtle"
-            disabled={branching}
-            onClick={() => setBranchDraft(null)}
+            disabled={control.branching}
+            onClick={() => control.setBranchDraft(null)}
           >
             Cancel
           </Button>
           <Button
-            loading={branching}
-            disabled={!branchDraft?.text.trim()}
+            loading={control.branching}
+            disabled={!control.branchDraft?.text.trim()}
             onClick={() => {
-              if (branchDraft) void branch(branchDraft.message, branchDraft);
+              if (control.branchDraft)
+                void control.branch(
+                  control.branchDraft.message,
+                  control.branchDraft,
+                );
             }}
           >
             Create draft in new chat
@@ -2195,24 +1942,20 @@ export function ConversationView(p: {
           detail={detail}
           refresh={actions.refresh}
           planType={planType}
-          recovery={
-            p.limitsAccounts?.find(
-              (account) => account.key === (agent.accountKey || "default"),
-            )?.agents?.[agent.id]?.recovery
-          }
+          recovery={selected.limitRecovery}
           openLimits={() => {
             setLimitsOpen(true);
-            actions.reloadLimits();
+            setLimitsOpenRequest((value) => value + 1);
           }}
-          refreshLimits={actions.reloadLimits}
-          newChat={actions.newConversation}
-          chooseChat={actions.chooseConversation}
+          refreshLimits={() => limitRefresh.reload(accountKey, true)}
+          newChat={creation.newChat}
+          chooseChat={sidebar.showAndFocusSearch}
         />
       )}
-      {!p.headerToolsInMenu &&
+      {!layout.usesMenuHeaderTools &&
         headerTools &&
-        !p.room &&
-        (p.id || managed) &&
+        !room &&
+        (opened || managed) &&
         createPortal(
           <details
             className="conversation-header-tools-menu"
@@ -2245,7 +1988,7 @@ export function ConversationView(p: {
                     : undefined
               }
             >
-              {!p.room && p.id && (
+              {!room && opened && (
                 <div className="conversation-prompt-navigation-slot">
                   {promptNavigation}
                 </div>
@@ -2294,8 +2037,10 @@ export function ConversationView(p: {
         }}
       >
         <div ref={content} className="message-content">
-          {p.transcriptHeading && (
-            <div className="transcript-heading">{p.transcriptHeading}</div>
+          {layout.railGeometry && (
+            <div className="transcript-heading">
+              <SelectedTitle />
+            </div>
           )}
           {removed.hasRemoved && (
             <Button size="compact-xs" onClick={() => removed.restore()}>
@@ -2317,8 +2062,8 @@ export function ConversationView(p: {
             </p>
           )}
           <PageIndicator
-            store={pageStatus.current}
-            id={p.id}
+            store={pageStatus}
+            id={opened}
             direction="older"
             retry={() => loadPage("older")}
           />
@@ -2326,22 +2071,22 @@ export function ConversationView(p: {
             !visibleMessages.length &&
             !notice &&
             !["running", "starting"].includes(agent?.status || "") &&
-            (p.room ? (
+            (room ? (
               <div className="empty-chat">
                 <h2>No messages yet</h2>
                 <p>Agent messages will appear here.</p>
               </div>
             ) : (
-              <LiveConversationStart agentId={p.id || ""} />
+              <LiveConversationStart agentId={opened || ""} />
             ))}
           {transcript}
           <PageIndicator
-            store={pageStatus.current}
-            id={p.id}
+            store={pageStatus}
+            id={opened}
             direction="newer"
             retry={() => loadPage("newer")}
           />
-          {!p.room && agent && (
+          {!room && agent && (
             <ObservedSafetyBuffering
               key={`safety:${agent.id}`}
               agent={agent}
@@ -2354,48 +2099,48 @@ export function ConversationView(p: {
               agent &&
               !(
                 agent.status === GeneratedApiAgentStatus.queued &&
-                nextTurnQueue.length > 0
+                control.nextTurnQueue.length > 0
               ) && (
                 <LiveAgentPhase
                   agentId={agent.id}
                   phaseOverride={displayPhase}
                   connection={connection}
-                  savedMessagePending={p.offlineSendPending}
-                  connectionDetails={p.offlineSendDetails}
+                  savedMessagePending={delivery.offlinePending}
+                  connectionDetails={delivery.offlineDetails}
                 />
               )}
           </div>
-          {!p.room && detailedActivity && (
+          {!room && detailedActivity && (
             <LiveAgentPhase
               agentId={agent?.id}
               connection={connection}
-              savedMessagePending={p.offlineSendPending}
-              connectionDetails={p.offlineSendDetails}
+              savedMessagePending={delivery.offlinePending}
+              connectionDetails={delivery.offlineDetails}
             />
           )}
           <RequestArea
             scope={stateDir}
             refresh={actions.refresh}
-            notify={actions.notify}
-            onAnswerOpen={() => setFollow(false)}
+            notify={notices.notify}
+            onAnswerOpen={onAnswerOpen}
             onAnswerPosition={revealRequest}
           >
             <Requests
-              agentId={p.id}
-              familyId={p.room?.rootId}
+              agentId={opened}
+              familyId={room?.rootId}
               includeTeam={!mobileClient}
-              showDates={!!p.room}
+              showDates={!!room}
               excludeIds={inlineRequestIds}
             />
           </RequestArea>
         </div>
       </div>
-      {!p.room && (
+      {!room && (
         <SelectionQuote
-          key={`selection:${p.id}`}
-          chatId={p.id}
+          key={`selection:${opened}`}
+          chatId={opened}
           root={scroll}
-          onQuote={quote}
+          onQuote={control.quote}
         />
       )}
       <FollowLatest
@@ -2403,12 +2148,12 @@ export function ConversationView(p: {
         getSnapshot={getFollow}
         onClick={returnToLatest}
       />
-      {p.room ? (
+      {room ? (
         <p className="room-footer">
-          {p.room.kind === GeneratedApiRoomKind.private
+          {room.kind === GeneratedApiRoomKind.private
             ? "Private agent chat."
             : "Broadcast to " +
-              (p.room.rootId === "all"
+              (room.rootId === "all"
                 ? "all teams (historical, read only)."
                 : "this team.")}
         </p>
@@ -2424,7 +2169,7 @@ export function ConversationView(p: {
                     onClick={() =>
                       void messageQueue
                         .retry()
-                        .catch((error) => actions.notify(errorText(error)))
+                        .catch((error) => notices.notify(errorText(error)))
                     }
                   >
                     Retry queue change
@@ -2433,7 +2178,7 @@ export function ConversationView(p: {
               )}
               <MessageQueue
                 loading={messageQueue.loading}
-                items={nextTurnQueue}
+                items={control.nextTurnQueue}
                 scope={queueScope}
                 onEdit={messageQueue.edit}
                 onCancel={messageQueue.cancel}
@@ -2442,14 +2187,14 @@ export function ConversationView(p: {
                   messageQueue.reorder(
                     mergeQueueOrder(
                       messageQueue.items.map((item) => item.id),
-                      nextTurnQueue.map((item) => item.id),
+                      control.nextTurnQueue.map((item) => item.id),
                       ids,
                     ),
                   )
                 }
                 canReorder={
                   messageQueue.canReorder &&
-                  !nextTurnQueue.some((item) => item.localDelivery)
+                  !control.nextTurnQueue.some((item) => item.localDelivery)
                 }
                 refreshing={messageQueue.busy}
                 error={messageQueue.error}
@@ -2469,17 +2214,10 @@ export function ConversationView(p: {
           <div className="conversation-composer-footer">
             {agent?.source === GeneratedApiAgentSource.managed && (
               <Usage
-                key={p.agent?.accountKey || "default"}
-                visible={p.visible ?? true}
                 agent={agent}
-                stateDir={stateDir}
-                limits={p.limits}
-                accounts={p.limitsAccounts}
-                limitsLoading={p.limitsLoading}
-                accountLabel={p.limitsAccountLabel}
-                reload={actions.reloadLimits}
                 opened={limitsOpen}
                 onChange={setLimitsOpen}
+                openRequest={limitsOpenRequest}
               />
             )}
           </div>
@@ -2493,25 +2231,5 @@ const ObservedClaudeRepairNotice = observer(ClaudeRepairNotice);
 const ObservedSafetyBuffering = observer(SafetyBuffering);
 export const ObservedNativeError = observer(NativeError);
 const ObservedConversation = observer(ConversationView);
-export const LiveConversation = observer(function LiveConversation({
-  ...props
-}: Parameters<typeof ConversationView>[0] & {}) {
-  const store = useServerStore();
-  const state = resourceData(store.state().current);
-  // A confirmed create can precede the authoritative collection. Keep that
-  // narrow fallback until the stream supplies its canonical model.
-  const agent = state?.agents.get(props.id ?? "") ?? props.agent;
-  const lead = state?.agents.get(props.lead?.id ?? "") ?? props.lead;
-  const detail = agent
-    ? resourceData(store.agentDetail(resourceAgentId(agent.id)).current)
-    : undefined;
-  return state ? (
-    <ObservedConversation
-      {...props}
-      agent={agent}
-      lead={lead}
-      detail={detail}
-    />
-  ) : null;
-});
+export const LiveConversation = ObservedConversation;
 export default ObservedConversation;

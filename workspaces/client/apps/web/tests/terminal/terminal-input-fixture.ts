@@ -1,3 +1,6 @@
+import { observer } from "mobx-react-lite";
+import { useServerStore } from "../../src/servers/ServerServicesContext.tsx";
+import { resourceData } from "../../src/store/runtime.ts";
 import { cacheFixture } from "../cacheFixture.ts";
 import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
 import React from "react";
@@ -5,6 +8,15 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import TerminalDock from "../../src/components/TerminalDock.tsx";
 import { setToken } from "../../src/api.ts";
+const Terminal = observer(function Terminal() {
+  const agent = resourceData(useServerStore().state().current)?.agents.get(
+    "agent",
+  );
+  return React.createElement(TerminalDock, {
+    agent,
+    notify: (value) => window.notices.push(value),
+  });
+});
 export function mount(shell: string) {
   window.reactRoot?.unmount();
   localStorage.setItem("codex.terminal.open", cacheFixture(true));
@@ -21,10 +33,7 @@ export function mount(shell: string) {
       React.createElement(
         ServerViewStoreProvider,
         null,
-        React.createElement(TerminalDock, {
-          agentId: "agent",
-          notify: (value) => window.notices.push(value),
-        }),
+        React.createElement(Terminal),
       ),
     ),
   );

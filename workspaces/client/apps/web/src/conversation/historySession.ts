@@ -1,22 +1,17 @@
-import { useRoomHistory } from "./roomHistory";
-import { useEffect, useMemo } from "react";
 import {
   autorun,
+  computed,
+  type IComputedValue,
   makeAutoObservable,
   observableRef,
   reaction,
   runInAction,
 } from "mobx";
-import {
-  agentId,
-  transcriptTail,
-  createTranscriptMirror,
-} from "../generated/observableResources";
+import { createTranscriptMirror } from "../generated/observableResources";
 import { resourceData, type ResourceSlot } from "../store/runtime";
-import {
+import type {
   useServerApi,
   useServerResources,
-  useServerStore,
 } from "../servers/ServerServicesContext";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues";
 import {
@@ -24,7 +19,6 @@ import {
   boundTranscriptPage,
   mergeTranscript,
   updateLiveTranscriptPage,
-  trimTranscriptPageCache,
   MAX_TRANSCRIPT_PAGE_BYTES,
 } from "../transcriptPageBounds";
 import {
@@ -68,6 +62,7 @@ export class TranscriptHistory {
   private attempt = 0;
   private active = false;
   private readonly views;
+  private readonly byteSizes = new WeakMap<Message, IComputedValue<number>>();
   readonly id: string | null;
   private readonly slot: ResourceSlot<Transcript> | undefined;
   private readonly api: Api;
@@ -86,7 +81,10 @@ export class TranscriptHistory {
     this.resources = resources;
     this.managed = managed;
     this.views = createMessageViews(id);
-    makeAutoObservable<this, "latest" | "slot" | "api" | "resources" | "views">(
+    makeAutoObservable<
+      this,
+      "latest" | "slot" | "api" | "resources" | "views" | "byteSizes"
+    >(
       this,
       {
         items: observableRef,
@@ -96,6 +94,7 @@ export class TranscriptHistory {
         api: false,
         resources: false,
         views: false,
+        byteSizes: false,
         live: false,
       },
       { autoBind: true },
@@ -107,8 +106,14 @@ export class TranscriptHistory {
   get historyVersion() {
     return this.version;
   }
+  // Observe all serialized fields so mutable text and nested metadata invalidate.
   private sizeOf(item: Message) {
-    return JSON.stringify(item).length * 2;
+    let size = this.byteSizes.get(item);
+    if (!size) {
+      size = computed(() => JSON.stringify(item).length * 2);
+      this.byteSizes.set(item, size);
+    }
+    return size.get();
   }
   private publish(items: Message[]) {
     if (
@@ -217,8 +222,6 @@ export class TranscriptHistory {
           if (event.agentId === this.id) this.live.add(event);
         })
       : () => {};
-    // Mutable models invalidate identity-only byte caches. Recalculate when a
-    // retained field changes; trimming publishes only if a bound is exceeded.
     const stopDurable = reaction(
       () => this.items.map((item) => [item.id, item.text] as const),
       (next, previous) => {
@@ -228,7 +231,7 @@ export class TranscriptHistory {
       },
     );
     const stopBounds = reaction(
-      () => this.items.reduce((bytes, item) => bytes + this.sizeOf(item), 0),
+      () => this.size,
       (bytes) => {
         if (bytes <= MAX_TRANSCRIPT_PAGE_BYTES) return;
         const bounded = boundTranscriptItems(
@@ -383,80 +386,4 @@ export class TranscriptHistory {
     this.items = [];
     if (this.latest) this.accept(this.latest);
   }
-}
-
-export function useTranscriptHistory(
-  id: string | null,
-  managed = true,
-  workspace = "",
-  syncWorkspaceId = "",
-  enabled = true,
-) {
-  const store = useServerStore();
-  const api = useServerApi();
-  const resources = useServerResources();
-  // This is the previous paging cache, scoped to the same authenticated owner.
-  const pages = useMemo(
-    () => new Map<string, TranscriptHistory>(),
-    [store, api, resources, managed, workspace, syncWorkspaceId],
-  );
-  const scope = id || "";
-  const session = useMemo(() => {
-    let page = pages.get(scope);
-    if (!page)
-      page = new TranscriptHistory(
-        id,
-        id
-          ? store.transcript(
-              agentId(id),
-              transcriptTail(SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS),
-            )
-          : undefined,
-        api,
-        resources,
-        managed,
-      );
-    pages.delete(scope);
-    pages.set(scope, page);
-    trimTranscriptPageCache(pages, scope);
-    return page;
-  }, [pages, scope, id, store, api, resources, managed]);
-  useEffect(() => {
-    if (!enabled) return;
-    const stop = session.start();
-    const boundCache = reaction(
-      () => session.size,
-      () => trimTranscriptPageCache(pages, scope),
-    );
-    return () => {
-      boundCache();
-      stop();
-    };
-  }, [session, enabled, pages, scope]);
-  return session;
-}
-
-/** Root selection only; each resource keeps its own small navigation owner. */
-export function useConversationHistory(
-  id: string | null,
-  kind: "agent" | "room" | "legacy",
-  managed = false,
-  workspace = "",
-  syncWorkspaceId = "",
-  enabled = true,
-) {
-  const agent = useTranscriptHistory(
-    kind === "agent" ? id : null,
-    managed,
-    workspace,
-    syncWorkspaceId,
-    enabled && kind === "agent",
-  );
-  const room = useRoomHistory(
-    kind !== "agent" ? id : null,
-    workspace,
-    enabled && kind !== "agent",
-    kind === "legacy",
-  );
-  return kind === "agent" ? agent : room;
 }

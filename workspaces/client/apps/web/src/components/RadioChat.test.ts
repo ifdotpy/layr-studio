@@ -1,3 +1,5 @@
+import { resourceData } from "../store/runtime.ts";
+import { required } from "./componentTestFixtures.ts";
 // @vitest-environment happy-dom
 import { RadioStatus, RoomKind } from "../generated/api";
 import { act, createElement } from "react";
@@ -83,7 +85,11 @@ it("renders controls from the room projection when raw radio status disagrees", 
           createElement(
             ConversationProvider,
             { value: conversationActionsFixture() },
-            createElement(RadioChat, { roomId: room.id }),
+            createElement(RadioChat, {
+              room: required(
+                resourceData(f.store.state().current)?.rooms.get(room.id),
+              ),
+            }),
           ),
         ),
       ),
@@ -108,8 +114,8 @@ it("typing a radio draft does not render the screen or reacquire history", async
   let draft = "";
   const listeners = new Set<() => void>();
   const actions = conversationActionsFixture();
-  actions.getDraft = () => draft;
-  actions.subscribeDraft = (_id, listener) => {
+  actions.scope.services.drafts.getDraft = () => draft;
+  actions.scope.services.drafts.subscribeDraft = (_id, listener) => {
     listeners.add(listener);
     return () => {
       listeners.delete(listener);
@@ -127,7 +133,11 @@ it("typing a radio draft does not render the screen or reacquire history", async
             createElement(
               ConversationProvider,
               { value: actions },
-              createElement(RadioChat, { roomId: room.id }),
+              createElement(RadioChat, {
+                room: required(
+                  resourceData(f.store.state().current)?.rooms.get(room.id),
+                ),
+              }),
             ),
           ),
         ),
@@ -172,7 +182,7 @@ it.each([408, 409])(
     };
     const f = fixture(value),
       actions = conversationActionsFixture();
-    actions.getDraft = () => "instruction";
+    actions.scope.services.drafts.getDraft = () => "instruction";
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
@@ -189,7 +199,11 @@ it.each([408, 409])(
               createElement(
                 ConversationProvider,
                 { value: actions },
-                createElement(RadioChat, { roomId: room.id }),
+                createElement(RadioChat, {
+                  room: required(
+                    resourceData(f.store.state().current)?.rooms.get(room.id),
+                  ),
+                }),
               ),
             ),
           ),

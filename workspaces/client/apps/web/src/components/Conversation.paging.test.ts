@@ -1,9 +1,19 @@
+// @vitest-environment happy-dom
+import { TranscriptHistory } from "../conversation/historySession.ts";
 import { useConversationActions } from "./conversation/navigation.ts";
 import { conversationActionsFixture } from "./observableFixture.tsx";
-vi.mock("./conversation/navigation.ts", async (original) => ({
-  ...(await original<typeof import("./conversation/navigation.ts")>()),
-  useConversationActions: vi.fn(),
-}));
+vi.mock("./conversation/navigation.ts", async () => {
+  const { createArea } = await import("./area.ts");
+  const [TranscriptProvider, useTranscriptActions] =
+    createArea<
+      import("./conversation/navigation.ts").ConversationTranscriptActions
+    >("Transcript");
+  return {
+    useConversationActions: vi.fn(),
+    TranscriptProvider,
+    useTranscriptActions,
+  };
+});
 vi.mock("./questions/requestView", () => ({
   createRequestsView: () => ({ requests: [] }),
 }));
@@ -12,12 +22,7 @@ vi.mock("./agents/state.ts", async (original) => ({
   useAgentCatalog: () => ({ agents: [] }),
 }));
 import { afterEach, expect, it, vi } from "vitest";
-import {
-  isValidElement,
-  type ComponentProps,
-  type ReactElement,
-  type ReactNode,
-} from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 
 const h = vi.hoisted(() => ({
   effects: [] as Array<() => unknown>,
@@ -96,26 +101,8 @@ vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
 }));
-vi.mock("../conversation/historySession", () => ({
-  useConversationHistory: () => ({
-    items: [],
-    loaded: true,
-    before: "older",
-    after: "newer",
-    older: h.older,
-    newer: h.newer,
-    setPageAnchor: h.anchor,
-    showLatest: h.showLatest,
-  }),
-}));
-vi.mock("./useMessageReceipts", () => ({
-  useMessageReceipts: () => new Map(),
-}));
 vi.mock("./questions/useQuestionCards", () => ({
   createQuestionCards: () => () => undefined,
-}));
-vi.mock("./removedMessages", () => ({
-  useRemovedMessages: () => ({ restored: [], hidden: () => false }),
 }));
 vi.mock("./usePromptRecall", () => ({ usePromptRecall: () => ({}) }));
 vi.mock("./useConversationScroll", () => ({
@@ -148,8 +135,8 @@ vi.mock("./useSendingMessageRemoval", () => ({
 vi.mock("../wasm/client", () => ({}));
 import { ConversationView as Conversation } from "./Conversation";
 
-type Props = ComponentProps<typeof Conversation>;
-const propsFixture: Partial<Props> = {
+type Props = { id: string };
+const propsFixture: Props = {
   id: "lead",
 };
 function elements(node: ReactNode): ReactElement<{
@@ -170,12 +157,25 @@ function elements(node: ReactNode): ReactElement<{
 }
 function renderConversation(props: Props) {
   h.refIndex = 0;
-  vi.mocked(useConversationActions).mockReturnValue(
-    conversationActionsFixture(),
+  vi.spyOn(TranscriptHistory.prototype, "older").mockImplementation(h.older);
+  vi.spyOn(TranscriptHistory.prototype, "newer").mockImplementation(h.newer);
+  vi.spyOn(TranscriptHistory.prototype, "setPageAnchor").mockImplementation(
+    h.anchor,
   );
-  return Conversation(props);
+  vi.spyOn(TranscriptHistory.prototype, "showLatest").mockImplementation(
+    h.showLatest,
+  );
+  const actions = conversationActionsFixture();
+  actions.navigation.selectedId = props.id;
+  Object.assign(actions.selected.history, {
+    before: "older",
+    after: "newer",
+  });
+  vi.mocked(useConversationActions).mockReturnValue(actions);
+  return Conversation();
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.clearAllMocks();
   h.consume.mockReset();
   h.root.clientHeight = 100;
@@ -192,7 +192,7 @@ it.each([
   async (top, direction) => {
     h.root.scrollTop = top;
     h.consume.mockReturnValueOnce(true).mockReturnValue(false);
-    const tree = renderConversation(propsFixture as Props);
+    const tree = renderConversation(propsFixture);
     const nodes = elements(tree);
     expect(
       nodes.some(
@@ -220,7 +220,7 @@ it("uses outward input at an unmoving bottom edge and chooses newer in overlappi
   h.root.clientHeight = 600;
   h.root.scrollTop = 400;
   h.consume.mockReturnValue(true);
-  const tree = renderConversation(propsFixture as Props);
+  const tree = renderConversation(propsFixture);
   const scroll = elements(tree).find((node) => node.props.id === "messages")!;
   const props = scroll.props as typeof scroll.props & {
     onWheel: (event: { deltaY: number }) => void;
@@ -235,7 +235,7 @@ it.each(["touch", "keyboard"] as const)(
   (input) => {
     h.root.scrollTop = 0;
     h.consume.mockReturnValue(true);
-    const tree = renderConversation(propsFixture as Props);
+    const tree = renderConversation(propsFixture);
     const scrollProps = elements(tree).find(
       (node) => node.props.id === "messages",
     )!.props;
@@ -266,7 +266,7 @@ it("does not block another chat while the previous page is pending", async () =>
   h.older.mockImplementationOnce(() => pending.promise);
   h.consume.mockReturnValue(true);
   h.root.scrollTop = 0;
-  const first = elements(renderConversation(propsFixture as Props)).find(
+  const first = elements(renderConversation(propsFixture)).find(
     (node) => node.props.id === "messages",
   )!;
   (
@@ -275,7 +275,7 @@ it("does not block another chat while the previous page is pending", async () =>
     }
   ).onWheel({ deltaY: -1 });
   const second = elements(
-    renderConversation({ ...propsFixture, id: "other" } as Props),
+    renderConversation({ ...propsFixture, id: "other" }),
   ).find((node) => node.props.id === "messages")!;
   (
     second.props as typeof second.props & {
@@ -289,12 +289,12 @@ it("does not block another chat while the previous page is pending", async () =>
 it("does not follow after a latest request completes for a different chat", async () => {
   const pending = Promise.withResolvers<void>();
   h.showLatest.mockImplementationOnce(() => pending.promise);
-  const first = elements(renderConversation(propsFixture as Props)).find(
+  const first = elements(renderConversation(propsFixture)).find(
     (node) =>
       typeof node.type === "function" && node.type.name === "FollowLatest",
   )!;
   (first.props as typeof first.props & { onClick: () => void }).onClick();
-  renderConversation({ ...propsFixture, id: "other" } as Props);
+  renderConversation({ ...propsFixture, id: "other" });
   pending.resolve();
   await pending.promise;
   await Promise.resolve();

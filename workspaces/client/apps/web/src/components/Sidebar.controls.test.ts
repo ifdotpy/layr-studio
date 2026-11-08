@@ -5,8 +5,8 @@ import { createElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, expect, it, vi } from "vitest";
-import { snapshotFixture } from "../snapshotFixture";
-import Sidebar from "./Sidebar";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
+import Sidebar from "./Sidebar.fixture";
 import { AgentSource } from "../generated/api";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { createStateMirror } from "../generated/observableResources.ts";
@@ -22,7 +22,8 @@ const rowFixture = (
 
 // Static markup has no layout, so the measured frame would start as a closed
 // drawer. The frame's geometry has its own tests; render its content inline here.
-vi.mock("./sidebar/SidebarFrame", () => ({
+vi.mock("./sidebar/SidebarFrame", async (original) => ({
+  ...(await original<typeof import("./sidebar/SidebarFrame")>()),
   SidebarFrame: (p: { children: ReactNode }) =>
     createElement("aside", { id: "sidebar" }, p.children),
   restoreSidebarFocus: () => {},
@@ -58,7 +59,10 @@ it("leaves the desktop close action to the workspace header", () => {
             },
           },
           createElement(Sidebar, {
-            data: snapshotFixture(),
+            data: Object.assign(snapshotFixture(), {
+              token: "",
+              stateDir: "/fixture",
+            }),
             opened: "",
             rows: [],
             markingRead: new Set<string>(),
@@ -80,24 +84,27 @@ it("shows an upgraded chat at the project root without changing its old line fol
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false }) });
   const line = "/store/projects/id/lines/main";
   const folders = [{ id: "old-folder", name: "Old folder" }];
-  const data = snapshotFixture(
-    [
-      {
-        id: "lead",
-        name: "Upgraded chat",
-        source: AgentSource.managed,
-        isLead: true,
-        cwd: line,
-        projectPath: "/source",
-        projectFolder: "old-folder",
-      },
-    ],
-    {
-      projects: [
-        { id: "/source", path: "/source", name: "Source", folders: [] },
-        { id: line, path: line, name: "main", folders },
+  const data = Object.assign(
+    snapshotFixture(
+      [
+        {
+          id: "lead",
+          name: "Upgraded chat",
+          source: AgentSource.managed,
+          isLead: true,
+          cwd: line,
+          projectPath: "/source",
+          projectFolder: "old-folder",
+        },
       ],
-    },
+      {
+        projects: [
+          { id: "/source", path: "/source", name: "Source", folders: [] },
+          { id: line, path: line, name: "main", folders },
+        ],
+      },
+    ),
+    { token: "", stateDir: "/fixture" },
   );
   const before = JSON.stringify(data.runtime.projects);
   const markup = renderToStaticMarkup(

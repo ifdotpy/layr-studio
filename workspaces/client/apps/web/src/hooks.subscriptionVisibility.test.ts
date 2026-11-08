@@ -7,7 +7,7 @@ import { createSubscriptions } from "./sync/subscriptions/module";
 import { createServerStore } from "./store/index";
 import { ServerStoreProvider } from "./servers/ServerServicesContext";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "./generated/sharedValues";
-import { useTranscriptHistory } from "./conversation/historySession";
+import { useTranscriptHistory } from "./conversation/historyFixture.ts";
 import { DEFAULT_SUBSCRIPTION_GRACE_MS } from "./sync/subscriptions/contracts";
 import type { ResourceVersion } from "./sync/resourceEvents";
 import type {

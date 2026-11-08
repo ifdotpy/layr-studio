@@ -1,1258 +1,408 @@
-import { resourceData } from "./store/runtime.ts";
-import { useServerStore } from "./servers/ServerServicesContext.tsx";
-import { agentId as resourceAgentId } from "./generated/observableResources.ts";
-import { NativeModelActions } from "./components/conversation/NativeModelActions.tsx";
-import { observer, Observer } from "mobx-react-lite";
-import { useAgentCatalog } from "./components/agents/state.ts";
-import { SidebarCommandsProvider } from "./components/sidebar/commands.ts";
-import { MarkChatUnreadItem } from "./components/ChatReadActions.tsx";
+import { lazy, Suspense, useMemo } from "react";
+import { Tabs } from "@mantine/core";
+import Accounts, { frameAccounts } from "./components/Accounts.tsx";
+import AccountSignInNotice from "./components/AccountSignInNotice.tsx";
+import ServerAccountsPanel from "./servers/ServerAccountsPanel.tsx";
+import ServerAccessSettings from "./servers/ServerAccessSettings.tsx";
+import { useServerManagementPanel } from "./servers/ServerSettingsContext.tsx";
+import { ChatSettingsDialog } from "./components/agents/ChatSettingsDialog.tsx";
+import { StudioSettingsLayout } from "./components/StudioSettingsTabs.tsx";
+import { createAgentCatalog } from "./components/agents/state.ts";
+import { modalSizes } from "./theme.ts";
 import {
-  ConversationProvider,
-  type ConversationActions,
-  type ConversationSendOptions,
-} from "./components/conversation/navigation.ts";
-import { MessageSendStatus, StopOutcome } from "./generated/api.ts";
+  AppearanceSettings,
+  HotkeySettings,
+} from "./app/settings/PreferenceViews.tsx";
+import { useAppPreferences } from "./app/settings/useAppPreferences.ts";
+import { SidebarListOwner } from "./app/shell/SidebarOwner.ts";
+import { startAppFrame } from "./servers/frameBridge.ts";
+import type { ServerCommand } from "./servers/navigation.ts";
+import { makeAutoObservable, observableRef, reaction, runInAction } from "mobx";
+import { useEffect, useState, type ReactNode } from "react";
+import { Button, Drawer, Modal } from "@mantine/core";
+import type { ServerAreas, AgentModel } from "./app/contracts.ts";
+import { randomUUID } from "./uuid.ts";
+import { errorText } from "./api.ts";
+import { StopOutcome, AgentStatus } from "./generated/api.ts";
 import {
-  AgentStatus as GeneratedApiAgentStatus,
-  AgentSource as GeneratedApiAgentSource,
-  AgentRole as GeneratedApiAgentRole,
-  WorkspaceMode as GeneratedApiWorkspaceMode,
-} from "./generated/api.ts";
-import { ProviderKind } from "./generated/providerKind.ts";
-import { submitRename, watchRenameResult } from "./renameRequest";
-import { randomUUID } from "./uuid";
-import {
-  createConversationMenuTools,
-  ConversationMenuTools,
-} from "./components/conversation/ConversationMenuTools";
-import { EdgeRail } from "./components/edge-rail/EdgeRail";
-import { useEdgeRail } from "./components/edge-rail/useEdgeRail";
-import { useWorkspacePanelWidth } from "./components/shell/workspacePanelWidth";
-import { useWorkspaceLayout } from "./layout/useWorkspaceLayout";
-import { layoutQueries } from "./layout/layout-contract.generated";
-import { restoreSidebarFocus } from "./components/sidebar/SidebarFrame";
-import {
-  codePointsExceed,
-  sendsTextFile,
-  type SendMessageBody,
-} from "./commands";
-import {
-  StudioErrorsScope,
-  useStudioErrorsState,
-} from "./components/StudioErrors";
-import SidebarWarnings from "./components/SidebarWarnings";
-import { ModelWhitelistSettings } from "./components/models/ModelWhitelistSettings";
-import Disclosure from "./components/ui/Disclosure";
-import { ChatSettingsDialog } from "./components/agents/ChatSettingsDialog";
-
-import { DeliveryMoment } from "./generated/deliveryMoment";
-import { useScreenEnvironment } from "./servers/ScreenContext";
-import {
-  useServerApi,
-  useServerSync,
-  useServerStorage,
-  useServerStorageEventKey,
-  useServerChatCreations,
-  useServerResources,
-  useServerOutbox,
-  useServerActivityScope,
-  useServerSidebarServices,
-} from "./servers/ServerServicesContext";
-import { useServerFileDialogs } from "./servers/ServerServicesContext";
-import { receiveSidebarRead } from "./servers/receiveSidebarRead.ts";
-import { onDesktopNavigate } from "./native/notifications";
-import { writePreferenceEdit } from "./sync/uiPreferenceStore";
-import { createUiPreferenceBridge } from "./sync/uiPreferenceBridge";
-import type { UiPreferenceProjection } from "./sync/entityProjection";
-import {
-  StudioSettingsLayout,
-  isStudioSettingsTab,
-  type StudioSettingsTab,
-} from "./components/StudioSettingsTabs";
-import { useServerSettings } from "./servers/ServerSettingsContext";
-import "./servers/activity";
-import ServerAccessSettings from "./servers/ServerAccessSettings";
-import { useServerFrame } from "./servers/frameBridge";
-import { serverParentOrigin } from "./servers/environment";
-import type { ServerCommand } from "./servers/navigation";
-import ServerAccountsPanel from "./servers/ServerAccountsPanel";
-import { localServer, viewServer, readServerAliases } from "./servers/registry";
-import {
-  useServerAliases,
-  DEFAULT_LOCAL_SERVER_ALIAS,
-} from "./servers/serverAliases";
-import { serverLocalStorage as localStorage } from "./servers/storage";
-import { MAX_DRAFT_TEXT_CODEPOINTS } from "./generated/sharedValues";
-import SearchOverlay from "./components/shell/SearchOverlay";
-import { SettingsRow } from "./components/ui/primitives";
-import { modalSizes } from "./theme";
-import { renameCommand, studioCommand } from "./nativeCommands";
-import { useDesktopNotifications } from "./hooks/desktopNotifications";
-import { useNativeAction } from "./useNativeAction";
-import { prepareChat } from "./hooks/chatPrefetch";
-import { useProjectDelete } from "./useProjectDelete";
-import { ProjectDeleteDialog } from "./components/ProjectDeleteDialog";
-import { deleteConversation, definiteDeleteRejection } from "./chatDeleteScope";
-import { useTeamTokenRateStream } from "./hooks/useTeamTokenRateStream";
-import { accountLimits, limitsReadSucceeded } from "./usage/accountUsage";
-import {
-  useMobileViewport,
-  focusSelectedComposer,
-} from "./hooks/mobileViewport";
-import { roomLeadIds, messageAttentionCount } from "./chatScope";
-
-import {
-  ActionIcon,
-  Button,
-  Drawer,
-  Modal,
-  Menu,
-  NativeSelect,
-  Slider,
-  Switch,
-  Tabs,
-  useMantineColorScheme,
-  TextInput,
-} from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
-import {
-  Activity,
-  ArrowLeft,
-  Layers,
-  Terminal,
-  BookOpen,
-  Clock3,
-  FileDiff,
-  MoreHorizontal,
-  Settings,
-  Square,
-  MessageSquare,
-  PanelLeft,
-  Search,
-  Settings2,
-  Users,
-} from "lucide-react";
-import {
-  useCallback,
-  useMemo,
-  useEffect,
-  lazy,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  memo,
-  Suspense,
-  type ReactNode,
-} from "react";
-import { ApiError, errorText, type PostBody, untilAnswered } from "./api";
-import {
-  useSnapshot,
-  useChatSnapshot,
-  useRetainedUsageAccounts,
-  useCommittedCallback,
-  useRetainedArray,
-} from "./hooks";
-import { useSendingMessageRemoval } from "./components/useSendingMessageRemoval";
-import {
-  defaultStudioPreferences,
-  MAX_HIDE_OLD_CHATS_THRESHOLD,
-  MIN_HIDE_OLD_CHATS_THRESHOLD,
-  fontFamilies,
-  formatSidebarShortcut,
-  parseSidebarShortcut,
-  parseStudioPreferences,
-  studioPreferencesStorageKey,
-  applyStudioPreferences,
-  type StudioPreferences,
-} from "./studioPreferences";
-import { type OutgoingMessage } from "./sync/send";
-import { mergeOutgoing } from "./components/message-delivery/messageDelivery";
-import { useServerDrafts as useSyncedDrafts } from "./servers/ServerServicesContext";
-
-import { reportPromptComposerRender } from "./components/prompt-composer/renderProbe";
-import { busy, type Agent, type Json } from "./types";
-
-type LeadCreateRequest = Omit<
-  PostBody<"/api/leads">,
-  "id" | "previous" | "reuse_empty" | "cwd" | "project_folder" | "account_key"
-> & {
-  id: string;
-  previous: string | null;
-  reuse_empty: boolean;
-  cwd?: string;
-  project_folder?: string;
-  account_key?: string | undefined;
-};
-function isLeadCreateRequest(value: Json): value is LeadCreateRequest {
-  return (
-    typeof value.id === "string" &&
-    !!value.id &&
-    (value.previous === null || typeof value.previous === "string") &&
-    typeof value.reuse_empty === "boolean" &&
-    (value.cwd === undefined || typeof value.cwd === "string") &&
-    (value.project_folder === undefined ||
-      typeof value.project_folder === "string") &&
-    (value.account_key === undefined || typeof value.account_key === "string")
-  );
-}
-import Sidebar from "./components/Sidebar";
-import { mostRecentActivity } from "./components/sidebar/catalog";
-import { useChatReadState } from "./components/useChatReadState";
-import UIErrorBoundary from "./components/UIErrorBoundary";
-import ProjectAccount from "./components/ProjectAccount";
-import ProjectFolderDialog from "./components/ProjectFolderDialog";
-import { LiveSessionActivity } from "./components/agents/SessionActivity";
-import { useWorkerModels } from "./components/agents/WorkerModelPicker";
-import { FederationSettings } from "./components/FederationSettings";
-import { LayrWorktreesSettings } from "./components/LayrWorktreesSettings";
-import { SignInPushSettings } from "./components/SignInPushSettings";
-import { OrchestrationSettings } from "./components/OrchestrationSettings";
-import ProviderUpdateSettings from "./components/ProviderUpdateSettings";
-import SupervisorRecoveryNotice from "./components/SupervisorRecoveryNotice";
-import Accounts, { useAccounts } from "./components/Accounts";
-import ClaudeSignIn from "./components/ClaudeSignIn";
-import AccountSignInNotice from "./components/AccountSignInNotice";
-import CodexSignIn from "./components/CodexSignIn";
-import ConversationTitle from "./components/shell/ConversationTitle";
-import {
-  useOfflineSendFeedback,
-  connectionFailureText,
-} from "./components/message-delivery/useOfflineSendFeedback";
-import { LiveConversation as Conversation } from "./components/Conversation";
-const SelectedConversation = memo(Conversation);
-import type { UsageAccount } from "./components/Usage";
-import RadioChat from "./components/RadioChat";
-import SharedChatCreate, {
-  sharedCreationKey,
-} from "./components/SharedChatCreate";
-import ProjectDirectoryPicker from "./components/ProjectDirectoryPicker";
-import ProjectServerCards from "./components/ProjectServerCards";
-import type { NewChatSettings } from "./components/newChatSettings";
-import ProjectFoldersDialog from "./components/ProjectFoldersDialog";
+  deleteConversation,
+  definiteDeleteRejection,
+} from "./chatDeleteScope.ts";
+import { useProjectDelete } from "./useProjectDelete.ts";
+import { ProjectDeleteDialog } from "./components/ProjectDeleteDialog.tsx";
+import ProjectDirectoryPicker from "./components/ProjectDirectoryPicker.tsx";
+import ProjectFoldersDialog, {
+  isLocatedProject,
+} from "./components/ProjectFoldersDialog.tsx";
+import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
+import ProjectAccount from "./components/ProjectAccount.tsx";
+import ProjectServerCards from "./components/ProjectServerCards.tsx";
 import {
   readProjectServers,
   registerProject,
-  type ProjectServerChoice,
-} from "./servers/projectLocations";
-import "./desktop";
-import "./components/team-navigation.css";
-import "./hooks/viewport-surface.css";
-import { TeamPanelView as TeamPanel } from "./components/agents/TeamPanel";
+} from "./servers/projectLocations.ts";
+import type { ProjectBinding } from "./app/projects/CreationOwner.ts";
+import SharedChatCreate from "./components/SharedChatCreate.tsx";
+import TeamPanel from "./components/agents/TeamPanel.tsx";
 import {
   TeamProvider,
-  useTeamArea,
   TeamPresence,
-  TeamCount,
+  useTeamArea,
 } from "./components/agents/TeamPanelContext.tsx";
-import FilePreview, { type PreviewTarget } from "./components/FilePreview";
-const TerminalDock = lazy(() => import("./components/TerminalDock"));
-import Workspace from "./components/shell/DeferredWorkspace";
+import Workspace from "./components/shell/Workspace.tsx";
+import BackgroundTasks from "./components/shell/BackgroundTasks.tsx";
+import TerminalDock from "./components/TerminalDock.tsx";
+import FilePreview, { type PreviewTarget } from "./components/FilePreview.tsx";
+import { needsAnswer } from "./approvals.ts";
+import { resourceData } from "./store/runtime.ts";
+import { isRemoteServerView } from "./servers/environment.ts";
+import Sidebar from "./components/Sidebar.tsx";
+import { ChatActionsMenu } from "./app/conversation/ChatActionsMenu.tsx";
+import { observer } from "mobx-react-lite";
+import { useServerAreas } from "./app/ServerAreasProvider.tsx";
+import { reportPromptComposerRender } from "./components/prompt-composer/renderProbe.ts";
+import {
+  StartupStatus,
+  SchemaUpdateDialog,
+  ServerUpdateStatus,
+} from "./app/startup/StartupViews.tsx";
+import { LayoutHost, WorkspaceSlot } from "./app/shell/LayoutHost.tsx";
+import { RailRoot } from "./app/shell/NavigationButtons.tsx";
+import { ConversationHeader } from "./app/conversation/ConversationHeader.tsx";
+import { ManagedConversationRoot } from "./app/conversation/ManagedConversationRoot.tsx";
+import SearchOverlay from "./components/shell/SearchOverlay.tsx";
+import SidebarWarnings from "./components/SidebarWarnings.tsx";
+import SupervisorRecoveryNotice from "./components/SupervisorRecoveryNotice.tsx";
 
-const BackgroundTasks = lazy(
-  () => import("./components/shell/BackgroundTasks"),
-);
-
-export default observer(function App({ active = true }: { active?: boolean }) {
-  const store = useServerStore();
-  const activeScreen = useRef(active);
-  activeScreen.current = active;
-  const {
-    screen,
-    postToShell,
-    hasShell,
-    serverViewId,
-    isServerView,
-    isClassicServerView,
-    isRemoteServerView,
-  } = useScreenEnvironment();
-  const { removeAllSendingMessages } = useSendingMessageRemoval();
-  const {
-    pendingChatCreations,
-    saveChatCreation,
-    confirmChatCreationResponse,
-    settleFailedChatCreation,
-    dismissChatCreation,
-  } = useServerChatCreations();
-  const { canRevealPath, revealPath } = useServerFileDialogs();
-  const { refreshProjection: recoverRenameProjection } = useServerSync();
-  const renameEvents = useServerResources();
-  const { watchResourceConnection } = renameEvents;
-  const sidebarServices = useServerSidebarServices();
-  const serverAliases = useServerAliases(readServerAliases);
-  const { useServerActivity, serverActivityActive, subscribeServerActivity } =
-    useServerActivityScope();
-  const { editOutboxDisplay, durableSend, useOutbox } = useServerOutbox();
-  const projectApi = useServerApi();
-  const {
-    get,
-    post,
-    command: serverCommand,
-    save,
-    saved,
-    isApiSchemaMismatch,
-    onApiSchemaMismatch,
-    schemaUpdateFailedAfterReload,
-    updateRendererAndReload,
-    automaticallyUpdateRenderer,
-  } = projectApi;
-
-  const serverStorageEventKey = useServerStorageEventKey();
-  const projectStorage = useServerStorage();
-  const projectServices = { ...projectApi, storage: projectStorage };
-  reportPromptComposerRender("app");
-  const [schemaMismatch, setSchemaMismatch] = useState(false);
-  const [schemaMismatchNeedsRebuild, setSchemaMismatchNeedsRebuild] =
-    useState(false);
-  const [schemaUpdateError, setSchemaUpdateError] = useState("");
-  useEffect(() => {
-    let shown = false;
-    const showMismatch = () => {
-      if (shown) return;
-      shown = true;
-      setSchemaMismatchNeedsRebuild(schemaUpdateFailedAfterReload());
-      setSchemaMismatch(true);
-    };
-    return onApiSchemaMismatch(showMismatch);
-  }, []);
-  const outbox = useOutbox();
-  const [removingAllSending, setRemovingAllSending] = useState(false);
-  const [outgoing, setOutgoing] = useState<Record<string, OutgoingMessage>>({});
-  const observedSends = useRef(new Set<string>());
-  const observeSends = useCallback((ids: string[]) => {
-    ids.forEach((id) => observedSends.current.add(id));
-    setOutgoing((old) =>
-      Object.fromEntries(
-        Object.entries(old).filter(([id]) => !observedSends.current.has(id)),
-      ),
-    );
-  }, []);
-  const editSend = useCallback((id: string, text: string) => {
-    setOutgoing((old) =>
-      old[id] ? { ...old, [id]: { ...old[id], displayText: text } } : old,
-    );
-    void editOutboxDisplay(id, text).catch(() => {});
-  }, []);
-  const outgoingMessages = useMemo(
-    () => mergeOutgoing(outbox.entries, outgoing, observedSends.current),
-    [outbox.entries, outgoing],
+export default observer(function App() {
+  const a = useServerAreas(),
+    { scope, startup, layout } = a;
+  const c = a.settings;
+  const p = useAppPreferences(a, a.preferenceBridge, (preferences) =>
+    a.frame.publish({ kind: "studio-server-preferences", preferences }),
   );
-  const mobileClient = useMediaQuery(
-    layoutQueries.navigationCompact,
-    undefined,
-    {
-      getInitialValueInEffect: false,
-    },
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [localStudioSettingsOpen, setLocalStudioSettingsOpen] = useState(false);
-  const [localStudioSettingsTab, setLocalStudioSettingsTab] =
-    useState<StudioSettingsTab>("accounts");
-  const serverSettings = useServerSettings();
-  const studioSettingsOpen =
-    serverSettings?.settingsOpen ?? localStudioSettingsOpen;
-  const studioSettingsTab =
-    serverSettings?.settingsTab ?? localStudioSettingsTab;
-  const setStudioSettingsOpen =
-    serverSettings?.setSettingsOpen ?? setLocalStudioSettingsOpen;
-  const setStudioSettingsTab =
-    serverSettings?.setSettingsTab ?? setLocalStudioSettingsTab;
-  useEffect(() => {
-    if (!studioSettingsOpen) return;
-    if (
-      serverViewId &&
-      hasShell &&
-      (studioSettingsTab === "accounts" || studioSettingsTab === "servers") &&
-      !externalFrameAccountDialog.current
-    ) {
-      setStudioSettingsOpen(false);
-      postToShell(
-        {
-          kind: "studio-server-open-settings",
-          serverId: serverViewId,
-          tab: studioSettingsTab,
-        },
-        serverParentOrigin,
-      );
-    }
-  }, [studioSettingsOpen, studioSettingsTab]);
-  const activateSettingsTab = (value: string | null) => {
-    if (!isStudioSettingsTab(value)) return;
-    setStudioSettingsTab(value);
-  };
-  const chatActionsButton = useRef<HTMLButtonElement>(null);
-  const [accountModalOpen, setAccountModalOpen] = useState(false);
-  const accountModalOpenRef = useRef(false);
-  const externalFrameAccountDialog = useRef(false);
-  const updateAccountModalOpen = useCallback((opened: boolean) => {
-    const changed = accountModalOpenRef.current !== opened;
-    accountModalOpenRef.current = opened;
-    setAccountModalOpen(opened);
-    if (changed && serverViewId && hasShell)
-      postToShell(
-        {
-          kind: "studio-server-account-dialog",
-          serverId: serverViewId,
-          opened,
-        },
-        serverParentOrigin,
-      );
-    if (!opened && changed && externalFrameAccountDialog.current) {
-      externalFrameAccountDialog.current = false;
-      setStudioSettingsOpen(false);
-    }
-  }, []);
-  const [claudeLoginKey, setClaudeLoginKey] = useState("");
-  const [codexLoginKey, setCodexLoginKey] = useState("");
-  const [serverAccountCommand, setServerAccountCommand] = useState<Extract<
-    ServerCommand,
-    { action: "account-sign-in" | "account-action" }
-  > | null>(null);
-  const [filePreview, setFilePreview] = useState<PreviewTarget | null>(null);
-  const { colorScheme, setColorScheme } = useMantineColorScheme();
-  const preferenceLoad = useMemo(() => {
-    try {
-      const stored = localStorage.getItem(studioPreferencesStorageKey);
-      if (!stored)
-        return {
-          value: { ...defaultStudioPreferences, theme: colorScheme },
-          error: "",
-        };
-      try {
-        return { value: parseStudioPreferences(stored), error: "" };
-      } catch {
-        return {
-          value: { ...defaultStudioPreferences, theme: colorScheme },
-          error:
-            "Saved Studio preferences were invalid; safe defaults are active.",
-        };
-      }
-    } catch {
-      return {
-        value: { ...defaultStudioPreferences, theme: colorScheme },
-        error:
-          "Studio preferences could not be read. Changes may not persist in this browser.",
-      };
-    }
-  }, []);
-  const preferenceBridge = useMemo(
-    () => createUiPreferenceBridge(projectStorage, projectApi.syncPost),
-    [projectStorage, projectApi.syncPost],
-  );
-  const receiveUiPreferences = useCallback(
-    (preferences: UiPreferenceProjection) =>
-      preferenceBridge.receiveProjection(preferences),
-    [preferenceBridge],
-  );
-  useEffect(() => {
-    const stopBridge = preferenceBridge.start();
-    let wasLive = false;
-    const stopConnection = watchResourceConnection((status) => {
-      const reconnected = status === "live" && !wasLive;
-      wasLive = status === "live";
-      if (reconnected) preferenceBridge.retryPendingWrites();
-    });
-    return () => {
-      stopConnection();
-      stopBridge();
-    };
-  }, [preferenceBridge, watchResourceConnection]);
-  const [studioPreferences, setStudioPreferences] = useState<StudioPreferences>(
-    preferenceLoad.value,
-  );
-  const [hideOldChatsThresholdDraft, setHideOldChatsThresholdDraft] = useState(
-    () => String(preferenceLoad.value.hideOldChatsThreshold),
-  );
-  useEffect(() => {
-    setHideOldChatsThresholdDraft(
-      String(studioPreferences.hideOldChatsThreshold),
-    );
-  }, [studioPreferences.hideOldChatsThreshold]);
-  const [studioPreferencesError, setStudioPreferencesError] = useState(
-    preferenceLoad.error,
-  );
-  const [sidebarShortcutError, setSidebarShortcutError] = useState("");
-  const updateStudioPreferences = useCallback(
-    (next: StudioPreferences) => {
-      try {
-        const value = writePreferenceEdit(
-          studioPreferencesStorageKey,
-          { ...studioPreferences },
-          { ...next },
-        );
-        setStudioPreferences(value);
-        if (value.theme !== colorScheme) setColorScheme(value.theme);
-        window.dispatchEvent(new Event("studio-preferences-change"));
-        if (isServerView)
-          postToShell(
-            { kind: "studio-server-preferences", preferences: value },
-            serverParentOrigin,
-          );
-        setStudioPreferencesError("");
-      } catch {
-        setStudioPreferencesError(
-          "Studio preferences could not be saved in this browser.",
-        );
-      }
-    },
-    [colorScheme, setColorScheme, studioPreferences],
-  );
-  const [sidebarCompact, setSidebarCompact] = useState(mobileClient);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
-    saved("codex-sidebar-collapsed", false),
-  );
-  useEffect(() => {
-    if (active && studioPreferences.theme !== colorScheme)
-      setColorScheme(studioPreferences.theme);
-  }, [studioPreferences.theme, colorScheme, setColorScheme, active]);
-  useEffect(() => {
-    if (active)
-      applyStudioPreferences(studioPreferences, document.documentElement);
-  }, [studioPreferences, active]);
-  useEffect(() => {
-    const preferences = (event: Event) => {
-      if (
-        event instanceof StorageEvent &&
-        (event.key !== studioPreferencesStorageKey || !event.newValue)
-      )
-        return;
-      try {
-        const next = parseStudioPreferences(
-          event instanceof StorageEvent
-            ? event.newValue!
-            : JSON.stringify((event as CustomEvent).detail),
-        );
-        setStudioPreferences(next);
-        setColorScheme(next.theme);
-      } catch {}
-    };
-    window.addEventListener("storage", preferences);
-    window.addEventListener("studio-shell-preferences", preferences);
-    return () => {
-      window.removeEventListener("storage", preferences);
-      window.removeEventListener("studio-shell-preferences", preferences);
-    };
-  }, []);
-  const toggleSidebar = useCallback(() => {
-    if (isServerView && !isClassicServerView) {
-      postToShell(
-        {
-          kind: "studio-server-toggle-sidebar",
-          ...(sidebarCompact ? { opened: true } : {}),
-        },
-        serverParentOrigin,
-      );
-      return;
-    }
-    restoreSidebarFocus();
-    if (sidebarCompact) {
-      setSidebar((visible) => !visible);
-      return;
-    }
-    setSidebarCollapsed((collapsed) => {
-      save("codex-sidebar-collapsed", !collapsed);
-      return !collapsed;
-    });
-  }, [sidebarCompact]);
-  useEffect(() => {
-    const shortcut = parseSidebarShortcut(studioPreferences.sidebarShortcut);
-    if (!shortcut) return;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (!activeScreen.current || screen) return;
-      const target = event.target;
-      if (
-        target instanceof HTMLElement &&
-        (target.isContentEditable ||
-          target.closest("input, textarea, select, [role='textbox']"))
-      )
-        return;
-      if (
-        event.key.toLowerCase() !== shortcut.key ||
-        event.metaKey !== shortcut.meta ||
-        event.ctrlKey !== shortcut.ctrl ||
-        event.altKey !== shortcut.alt ||
-        event.shiftKey !== shortcut.shift
-      )
-        return;
-      event.preventDefault();
-      toggleSidebar();
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [studioPreferences.sidebarShortcut, toggleSidebar]);
-  const [wideTeamOpen, setWideTeamOpen] = useState(() =>
-    saved("codex-team-open", false),
-  );
-  const [jumpTarget, setJumpTarget] = useState<{
-    chatId: string;
-    messageId: string;
-    requestId: string;
-  }>();
-  const [workspaceFocus, setWorkspaceFocus] = useState<{
-    id: string;
-    requestId: string;
-    roomId?: string;
-  }>();
-  const [taskFocus, setTaskFocus] = useState<{
-    id: string;
-    leadId: string;
-    requestId: string;
-  }>();
-  const [limitsLoading, setLimitsLoading] = useState<Record<string, boolean>>(
-    {},
-  );
-  const selectionScope = useRef("");
-  const navigationIntent = useRef(0);
-  const createdSelection = useRef<string | null>(null);
-  useMobileViewport(active, mobileClient);
-  const [workspacePanelSlot, setWorkspacePanelSlot] =
-    useState<HTMLDivElement | null>(null);
-  // CSS owns these sums: --studio-form-max + --studio-team-size, with
-  // --studio-sidebar-width when the desktop fleet occupies space. The Team
-  // layout parity test keeps the media queries aligned with those owners.
-  const teamFitsWithoutSidebar = useMediaQuery("(min-width: 60rem)");
-  const teamFitsWithSidebar = useMediaQuery("(min-width: 79.8rem)");
-  const teamHasSidebar =
-    (!isServerView || isClassicServerView) &&
-    !mobileClient &&
-    !sidebarCollapsed;
-
-  const {
-      data,
-      error,
-      transportError,
-      refresh,
-      workspaceId,
-      rememberCreated,
-      forgetCreated,
-      creationScope,
-    } = useSnapshot(receiveUiPreferences),
-    [opened, setOpened] = useState<string | null>(null),
-    [roomContext, setRoomContext] = useState<string | null>(null),
-    [sidebar, setSidebar] = useState(false),
-    [teamOpen, setTeamOpen] = useState(false),
-    [tasksOpen, setTasksOpen] = useState(false),
-    [searchOpen, setSearchOpen] = useState(false),
-    [workspaceOpen, setWorkspaceOpen] = useState(false),
-    [tasksRendered, setTasksRendered] = useState(false),
-    [workspaceRendered, setWorkspaceRendered] = useState(false),
-    [workspaceSection, setWorkspaceSection] = useState("messages"),
-    [workerQuery, setWorkerQuery] = useState(""),
-    [workerFilter, setWorkerFilter] = useState("all"),
-    [completedOpen, setCompletedOpen] = useState(false),
-    [sharedCreate, setSharedCreate] = useState<{
-      path?: string | undefined;
-    } | null>(null),
-    [creating, setCreating] = useState(false),
-    [sending, setSending] = useState(false),
-    [toast, setToast] = useState(""),
-    [modal, setModal] = useState<{ title: string; body: ReactNode } | null>(
-      null,
-    );
-  const {
-    preferredWidthRem: preferredPanelWidthRem,
-    setPreferredWidthRem: setPreferredPanelWidthRem,
-  } = useWorkspacePanelWidth(workspaceId || data?.stateDir || "pending");
-  const rowLayout = useWorkspaceLayout({
-    workspaceOpen,
-    teamPreferred: wideTeamOpen,
-    ...(preferredPanelWidthRem !== undefined ? { preferredPanelWidthRem } : {}),
-  });
-  const narrowTeam =
-    !(teamHasSidebar ? teamFitsWithSidebar : teamFitsWithoutSidebar) ||
-    !rowLayout.teamCanInline;
-  const [pendingConversationDelete, setPendingConversationDelete] = useState<
-    ReadonlySet<string>
-  >(new Set());
-  const pendingConversationDeletesRef = useRef(
-    new Map<string, AbortController>(),
-  );
-  const [projectDeleteScope, setProjectDeleteScope] = useState<
-    ReadonlySet<string>
-  >(new Set());
-  useEffect(() => {
-    if (!data) return;
-    const pending = pendingConversationDeletesRef.current;
-    let changed = false;
-    for (const [id, controller] of pending) {
-      if (!data.threads.some((thread) => thread.id === id)) {
-        pending.delete(id);
-        controller.abort();
-        changed = true;
-      }
-    }
-    if (changed) setPendingConversationDelete(new Set(pending.keys()));
-  }, [data]);
-  const openedRef = useRef(opened);
-  openedRef.current = opened;
-  useEffect(() => {
-    if (data?.stateDir && saved(sharedCreationKey(data.stateDir), null))
-      setSharedCreate({});
-  }, [data?.stateDir]);
-  useEffect(() => {
-    if (tasksOpen) setTasksRendered(true);
-    if (workspaceOpen) setWorkspaceRendered(true);
-  }, [tasksOpen, workspaceOpen]);
-  const visibleOutgoing = outgoingMessages;
-  const conversationOutgoing = useRetainedArray(
-    visibleOutgoing.filter((entry) => entry.body.room === opened),
-  );
-  const {
-    setDrafts,
-    getDraft,
-    subscribeDraft,
-    conflicts: draftConflicts,
-    dismissDraft,
-    error: draftError,
-    localPersistenceFailed,
-  } = useSyncedDrafts();
-  const conversationDraftConflicts = useRetainedArray(
-    draftConflicts.filter((version) => version.session === (opened || "new")),
-  );
-  const offlineSendFeedback = useOfflineSendFeedback(visibleOutgoing, opened, [
-    error,
-    draftError,
-    outbox.error,
-    toast,
-  ]);
-  useEffect(() => {
-    if (offlineSendFeedback.pending && connectionFailureText(toast))
-      setToast("");
-  }, [offlineSendFeedback.pending, toast]);
-  useServerActivity(localPersistenceFailed || sending);
-  const rendererBusy = useSyncExternalStore(
-    subscribeServerActivity,
-    serverActivityActive,
-  );
-  const canUpdateRenderer =
-    !localPersistenceFailed &&
-    !sending &&
-    !creating &&
-    !modal &&
-    !sharedCreate &&
-    !studioSettingsOpen;
-  const rendererUpdateSafe = useRef(canUpdateRenderer);
-  rendererUpdateSafe.current = canUpdateRenderer;
-  useEffect(() => {
-    if (!active || !schemaMismatch || rendererBusy || !canUpdateRenderer)
-      return;
-    const controller = new AbortController();
-    void automaticallyUpdateRenderer(
-      () =>
-        rendererUpdateSafe.current &&
-        !serverActivityActive() &&
-        !Array.from(document.querySelectorAll('[role="dialog"]')).some(
-          (dialog) =>
-            !dialog.closest(
-              '[role="alertdialog"][aria-label="Studio update required"]',
-            ),
-        ),
-      controller.signal,
-    ).catch((error: unknown) => {
-      if (!controller.signal.aborted) setSchemaUpdateError(errorText(error));
-    });
-    return () => controller.abort();
-  }, [schemaMismatch, rendererBusy, canUpdateRenderer, active]);
-  const [pendingCreations, setPendingCreations] = useState<Json[]>([]);
-  const creationKey = `codex-pending-creation:${data?.stateDir || ""}`;
-  const creation = useRef<LeadCreateRequest | null>(null),
-    sends = useRef<Record<string, SendMessageBody>>({}),
-    sendingLock = useRef<symbol | null>(null),
-    latestSend = useRef<Record<string, symbol>>({}),
-    creationLock = useRef(false),
-    renameRequests = useRef<Record<string, { text: string; id: string }>>({}),
-    toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [renameVersion, setRenameVersion] = useState(0);
-  const persistRenames = () => {
-    save(pendingRenameKey, renameRequests.current);
-    setRenameVersion((version) => version + 1);
-  };
-  const pendingRenameKey = `studio-pending-renames:${data?.stateDir || ""}`;
-  useEffect(() => {
-    if (data?.stateDir) renameRequests.current = saved(pendingRenameKey, {});
-  }, [pendingRenameKey, data?.stateDir]);
-  useEffect(() => {
-    if (!data?.stateDir) return;
-    const stops = Object.entries(renameRequests.current).map(
-      ([agentId, request]) =>
-        watchRenameResult(renameEvents, agentId, request.id, (receipt) => {
-          if (renameRequests.current[agentId]?.id !== request.id) return;
-          delete renameRequests.current[agentId];
-          persistRenames();
-          if (receipt.status === "failed")
-            notify(receipt.error || "The title could not be generated.");
-        }),
-    );
-    return () => stops.forEach((stop) => stop());
-  }, [pendingRenameKey, renameVersion, renameEvents]);
-  useEffect(() => {
-    if (!data?.stateDir) return;
-    const load = () => {
-      try {
-        setPendingCreations(pendingChatCreations(creationKey));
-      } catch (error) {
-        setToast("Cannot read the saved chat requests: " + errorText(error));
-      }
-    };
-    load();
-    const stored = (event: StorageEvent) => {
-      if (
-        serverStorageEventKey(event) === null ||
-        serverStorageEventKey(event) === creationKey ||
-        serverStorageEventKey(event)?.startsWith(`${creationKey}:request:`)
-      ) {
-        load();
-      }
-    };
-    window.addEventListener("storage", stored);
-    return () => window.removeEventListener("storage", stored);
-  }, [creationKey, data?.stateDir]);
-  const notify = useCallback((s: string) => {
-    setToast(s);
-    if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(""), 5000);
-  }, []);
-  const nativeActions = useNativeAction(data?.stateDir, workspaceId, notify);
-  useDesktopNotifications(data, opened, !isServerView);
-  const submitNativeAction = async (
-    target: Agent,
-    action: "compact" | "review",
-  ) => {
-    const response = await nativeActions.submit(target, action);
-    setDrafts((old) => {
-      if (old[target.id]?.trim() !== `/${action}`) return old;
-      const next = { ...old };
-      delete next[target.id];
-      return next;
-    });
-    return response;
-  };
-  const catalog = useAgentCatalog();
-  const agents = catalog.agents;
-  const leads = catalog.leads;
-  const agent = catalog.get(opened || "");
-  const room = data?.runtime?.rooms?.find((r) => r.id === opened);
-  const railGeometry = useEdgeRail(undefined, active && !!data && !room?.radio);
-  const [railTools] = useState(createConversationMenuTools);
-  const legacy = data?.chats.find((c) => c.id === opened);
-  const roomRoots = room ? roomLeadIds(room) : [];
-  const lead = room?.radio
-    ? undefined
-    : catalog.get(
-        agent?.rootId ||
-          (agent?.isLead ? agent.id : undefined) ||
-          (roomContext && roomRoots.includes(roomContext)
-            ? roomContext
-            : roomRoots[0]) ||
-          "",
-      );
-  const readState = useChatReadState(
-    data,
-    opened,
-    notify,
-    refresh,
-    workspaceId,
-  );
-  const teamArea = useTeamArea(
-    lead?.id,
-    workerQuery,
-    workerFilter,
-    readState.pendingReadTargets,
-    // Interim discovery until the global retained projection migrates.
-    !!data?.runtime.retainedWorktrees?.some((row) => row.rootId === lead?.id),
-  );
-  const team = teamArea.view.members;
-  const workers = teamArea.view.workers;
-  // Deleted workers whose worktree cleanup kept the folder.
-  useTeamTokenRateStream(
-    lead?.id,
-    Boolean(
-      workers.length &&
-      !team.some((member) => pendingConversationDelete.has(member.id)) &&
-      !team.some((member) => projectDeleteScope.has(member.id)) &&
-      (narrowTeam ? teamOpen : wideTeamOpen),
-    ),
-  );
-  useEffect(() => {
-    setWorkerQuery("");
-    setWorkerFilter("all");
-    setCompletedOpen(false);
-  }, [lead?.id]);
-  useEffect(() => {
-    if (
-      agent &&
-      !agent.isLead &&
-      agent.status === GeneratedApiAgentStatus.completed
-    )
-      setCompletedOpen(true);
-  }, [agent?.id, agent?.status]);
-  const accounts = useAccounts(data?.stateDir);
-  const publicAccounts = useMemo(
-    () =>
-      accounts.data.accounts.map((account) => ({
-        accountKey: account.id,
+  const signIn = (key: string) => {
+    const account = [
+      ...a.accounts.data.accounts,
+      ...a.accounts.data.archivedAccounts,
+    ].find((row) => row.id === key);
+    if (account) {
+      c.closeChatSettings();
+      c.setCommand({
+        action: "account-sign-in",
+        accountKey: key,
         provider: account.provider,
         email: account.email || null,
-        plan: account.plan || null,
-        status: account.status,
         label: account.label,
-        isDefault: account.id === accounts.data.defaultAccountKey,
-      })),
-    [accounts.data.accounts],
-  );
-  const cachedAccountServer = useMemo(
-    () => (serverViewId ? viewServer(serverViewId) : localServer()),
-    [],
-  );
-  const accountServer = serverSettings?.server || cachedAccountServer;
-  const accountKey =
-    agent?.accountKey ||
-    lead?.accountKey ||
-    (agent ? "default" : accounts.data.defaultAccountKey);
-  const agentModels = useWorkerModels(
-    accountKey,
-    !!agent && agent.source === GeneratedApiAgentSource.managed,
-  );
-  const limitsRequests = useRef(new Map<string, Promise<boolean>>());
-  const selectedAccount =
-    accounts.data.accounts.find((a) => a.id === accountKey) ||
-    accounts.data.archivedAccounts?.find((a) => a.id === accountKey);
-  const accountId = selectedAccount?.accountId;
-  const snapshotLimits =
-    data?.runtime?.rateLimitsByAccount?.[accountKey] ||
-    (accountKey === "default" ? data?.runtime?.rateLimits : null);
-  const matchingSnapshot = accountLimits(
-    snapshotLimits?.observation,
-    accountKey,
-    accountId,
-  );
-  const visibleLimits = matchingSnapshot;
-  const readableLeadId =
-    lead?.id && !projectDeleteScope.has(lead.id) ? lead.id : undefined;
-  const chatData = useChatSnapshot(data, readableLeadId);
-  // An open managed chat shows the connection state in its activity row
-  // (useMessages), so the workspace notice does not repeat it.
-  const workspaceError =
-    error === transportError &&
-    agent?.source === GeneratedApiAgentSource.managed &&
-    !room &&
-    !(mobileClient && sidebar)
-      ? ""
-      : error;
-  const attentionCount = messageAttentionCount(chatData);
-  const setDraft = useCallback(
-    (text: string | ((current: string) => string), id = opened || "new") =>
-      setDrafts((old) => {
-        const value = typeof text === "function" ? text(old[id] || "") : text;
-        if (codePointsExceed(value, MAX_DRAFT_TEXT_CODEPOINTS)) {
-          notify(
-            `Drafts can contain at most ${MAX_DRAFT_TEXT_CODEPOINTS.toLocaleString()} characters. Previous text was kept.`,
-          );
-          return old;
-        }
-        const next = {
-          ...old,
-          [id]: value,
-        };
-        return next;
-      }),
-    [opened, setDrafts, notify],
-  );
-  const finishConversationDelete = useCallback(
-    (deleted: string[]) => {
-      forgetCreated(deleted);
-      if (openedRef.current && deleted.includes(openedRef.current)) {
-        navigationIntent.current++;
-        setOpened(null);
-      }
-      setDrafts((old) => {
-        const next = { ...old };
-        for (const key of deleted) delete next[key];
-        return next;
+        serverLabel: a.scope.services.owner.label,
       });
-    },
-    [forgetCreated, setDrafts],
-  );
-  const projectDeletion = useProjectDelete({
-    data,
-    workspaceId,
-    services: sidebarServices,
-    onSuspend: (scope) => {
-      setProjectDeleteScope(scope);
-    },
-    onResume: () => {
-      setProjectDeleteScope(new Set());
-    },
-    onFinish: finishConversationDelete,
-    notify,
-  });
-  const open = useCommittedCallback((id: string, messageId?: string) => {
-    if (projectDeleteScope.has(id)) return;
-    readState.select(id);
-    prepareChat(id);
-    navigationIntent.current++;
-    setJumpTarget(
-      messageId
-        ? { chatId: id, messageId, requestId: randomUUID() }
-        : undefined,
-    );
-    setRoomContext(lead?.id || null);
-    setOpened(id);
-    setSidebar(false);
-    setTeamOpen(false);
-  });
-  useEffect(() => {
-    if (!data) return;
-    if (
-      agent?.sharedRoomId &&
-      !projectDeleteScope.has(agent.sharedRoomId) &&
-      data.runtime?.rooms.some(
-        (room) => room.id === agent.sharedRoomId && !room.userHidden,
-      )
-    ) {
-      setOpened(agent.sharedRoomId);
-      return;
-    }
-    const scope = `${data.stateDir}:${mobileClient ? "mobile" : "desktop"}`;
-    const key = mobileClient
-      ? "codex-mobile-opened"
-      : `codex-desktop-opened:${data.stateDir}`;
-    if (selectionScope.current !== scope) {
-      selectionScope.current = scope;
-      if (mobileClient) {
-        if (!opened) setSidebar(true);
-        return;
-      }
-      const selected = saved<string | null>(key, null);
-      if (
-        selected &&
-        !projectDeleteScope.has(selected) &&
-        (data.threads.some((item) => item.id === selected) ||
-          data.runtime?.rooms.some((item) => item.id === selected) ||
-          data.chats.some((item) => item.id === selected))
-      ) {
-        setOpened(selected);
-        return;
-      }
-    }
-    // The create response can arrive before the replicated chat projection.
-    if (
-      createdSelection.current &&
-      opened === createdSelection.current &&
-      !agent
-    )
-      return;
-    if (agent?.id === createdSelection.current) createdSelection.current = null;
-    if (mobileClient) {
-      if (opened && !agent && !room && !legacy) {
-        setOpened(null);
-        setSidebar(true);
-      } else if (opened) save(key, opened);
-      return;
-    }
-    if (!opened || (!agent && !room && !legacy))
-      setOpened(
-        mostRecentActivity(
-          leads.filter((lead) => !projectDeleteScope.has(lead.id)),
-        )?.id ||
-          mostRecentActivity(
-            data.runtime?.rooms.filter(
-              (room) =>
-                room.radio?.direct &&
-                !room.userHidden &&
-                !projectDeleteScope.has(room.id),
-            ) || [],
-          )?.id ||
-          null,
-      );
-    else save(key, opened);
-  }, [data, opened, agent, room, legacy, mobileClient, projectDeleteScope]);
-  useEffect(() => {
-    const onError = (event: Event) => {
-      if (activeScreen.current) notify((event as CustomEvent<string>).detail);
-    };
-    window.addEventListener("desktop-error", onError);
-    return () => window.removeEventListener("desktop-error", onError);
-  }, [notify]);
-  const [navigationTarget, setNavigationTarget] = useState<{
-    agentId: string;
-    section: "messages";
-    itemId?: string;
-    requestId: string;
-  }>();
-  useEffect(() => {
-    const navigate = (target: {
-      agentId: string;
-      section: "messages";
-      itemId?: string;
-    }) => {
-      setNavigationTarget({ ...target, requestId: randomUUID() });
-    };
-    if (screen) return;
-    const unsubscribe = onDesktopNavigate(navigate);
-    const onNavigate = (event: Event) =>
-      navigate((event as CustomEvent<Parameters<typeof navigate>[0]>).detail);
-    window.addEventListener("studio-navigate", onNavigate);
-    return () => {
-      unsubscribe?.();
-      window.removeEventListener("studio-navigate", onNavigate);
-    };
-  }, []);
-  useEffect(() => {
-    if (!navigationTarget || !data) return;
-    if (!agents.some((item) => item.id === navigationTarget.agentId)) {
-      notify("This chat is no longer available.");
-    } else {
-      navigationIntent.current++;
-      readState.select(navigationTarget.agentId);
-      setOpened(navigationTarget.agentId);
-      setSidebar(false);
-      setWorkspaceSection("messages");
-      setWorkspaceFocus(
-        navigationTarget.itemId
-          ? {
-              id: navigationTarget.itemId,
-              requestId: navigationTarget.requestId,
-            }
-          : undefined,
-      );
-      setWorkspaceOpen(!!navigationTarget.itemId);
-    }
-    setNavigationTarget(undefined);
-  }, [navigationTarget, data, agents, notify]);
-  const reloadLimitsFor = useCallback(
-    (key: string, force = false) => {
-      const pending = force ? undefined : limitsRequests.current.get(key);
-      if (pending) return pending;
-      setLimitsLoading((old) => ({ ...old, [key]: true }));
-      const request = get("/api/limits", {
-        query: {
-          ...(key === "default" ? {} : { account_key: key }),
-          ...(force ? {} : { cached: "1" as const }),
-        },
-        timeoutMs: 25000,
-      })
-        .then(limitsReadSucceeded)
-        .catch(() => false)
-        .finally(() => {
-          if (!force) limitsRequests.current.delete(key);
-          setLimitsLoading((old) => ({ ...old, [key]: false }));
-        });
-      if (!force) limitsRequests.current.set(key, request);
-      return request;
-    },
-    [get],
-  );
-  const forceReloadLimits = useCallback(async () => {
-    await reloadLimitsFor(accountKey, true);
-  }, [accountKey, reloadLimitsFor]);
-  const reloadLimitsForRef = useRef(reloadLimitsFor);
-  reloadLimitsForRef.current = reloadLimitsFor;
-  const nextUsageAccounts = useMemo<UsageAccount[]>(
-    () =>
-      accounts.data.accounts.map((account) => {
-        const key = account.id;
-        const snapshot = data?.runtime?.rateLimitsByAccount?.[key];
-        return {
-          key,
-          label: account.label || key,
-          email: account.email,
-          provider: account.provider ?? undefined,
-          plan: account.plan,
-          accountId: account.accountId,
-          runway: snapshot?.projection.runway,
-          reset: snapshot?.projection.reset,
-          buckets: snapshot?.projection.buckets,
-          agents: snapshot?.projection.agents,
-          status: snapshot?.projection.status,
-          limits: snapshot?.observation ?? null,
-          loading: !!limitsLoading[key],
-          reload: async (force) => {
-            await reloadLimitsForRef.current(key, force);
-          },
-        };
-      }),
-    [accounts.data.accounts, data?.runtime?.rateLimitsByAccount, limitsLoading],
-  );
-  const usageAccounts = useRetainedUsageAccounts(nextUsageAccounts);
-  useEffect(() => {
-    const key = (e: KeyboardEvent) => {
-      if (!activeScreen.current) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "k") {
-        e.preventDefault();
-        if (isServerView) {
-          postToShell({ kind: "studio-server-search" }, serverParentOrigin);
-          return;
-        }
-        setSidebar(false);
-        setSearchOpen(true);
-      }
-      if (e.key === "Escape") {
-        setModal(null);
-        setSidebar(false);
-        setTeamOpen(false);
-      }
-    };
-    window.addEventListener("keydown", key);
-    return () => window.removeEventListener("keydown", key);
-  }, []);
-  const run = async (fn: () => Promise<unknown>) => {
-    try {
-      await fn();
-      void refresh().catch((error) => notify(errorText(error)));
-    } catch (e) {
-      notify(errorText(e));
     }
   };
-  const newChat = async (
-    cwd?: string,
-    projectFolder?: string,
-    retryId?: string,
-    projectBinding?: { projectId: string; homeServerId: string },
-    settings?: NewChatSettings,
-  ) => {
-    if (creationLock.current) return null;
-    setSidebar(false);
-    if (!retryId && !cwd) {
-      cwd =
-        lead?.projectPath ||
-        (mobileClient
-          ? (data?.runtime?.projects?.[0]?.path ?? undefined) ||
-            leads.map((item) => item.projectPath).find(Boolean) ||
-            undefined
-          : undefined);
-      projectFolder = lead?.projectFolder || undefined;
+  useEffect(() => startAppFrame(a), [a]);
+  reportPromptComposerRender("app");
+  if (!scope.screen.active) return null;
+  if (scope.screen.channel && startup.isSchemaGateVisible)
+    return <ServerUpdateStatus />;
+  if (!startup.isReady || !a.state)
+    return startup.isSchemaGateVisible ? (
+      <SchemaUpdateDialog />
+    ) : (
+      <StartupStatus />
+    );
+  return (
+    <AppTeam>
+      <div ref={layout.attachHost} style={{ display: "contents" }}>
+        <AppSidebar />
+        <SidebarWarnings />
+        <RailRoot menu={<ChatActionsMenu />} />
+        <LayoutHost>
+          <AppWorkspace signIn={signIn} />
+          <WorkspaceSlot />
+          <AppPanels />
+        </LayoutHost>
+        <AppSearch />
+        <AppSettings p={p} signIn={signIn} />
+        <AppDialogs />
+        <SchemaUpdateDialog />
+        <ToastNotice />
+      </div>
+    </AppTeam>
+  );
+});
+const AppWorkspace = observer(function AppWorkspace({
+  signIn,
+}: {
+  signIn: (key: string) => void;
+}) {
+  const { layout, preferences } = useServerAreas();
+  return (
+    <main
+      ref={layout.attachWorkspace}
+      className="workspace"
+      data-edge-rail={layout.railGeometry ? "true" : undefined}
+      data-show-message-avatars={preferences.value.showMessageAvatars}
+    >
+      <SupervisorRecoveryNotice />
+      {!layout.railGeometry && <ConversationHeader />}
+      <AppNotices />
+      <AppAccountNotices signIn={signIn} />
+      <ManagedConversationRoot />
+    </main>
+  );
+});
+
+const AppSidebar = observer(function AppSidebar() {
+  const a = useServerAreas();
+  const [owner] = useState(() => new SidebarListOwner(a, undefined, a.ui.run));
+  useEffect(() => owner.start(), [owner]);
+  return a.sidebar.delegated ? null : <Sidebar owner={owner} />;
+});
+export class AppUi {
+  readonly areas: ServerAreas;
+  readonly requests;
+  visited = false;
+  section = "";
+  focus: { id: string; requestId: string; roomId?: string } | undefined;
+  teamOpen = false;
+  tasksOpen = false;
+  searchOpen = false;
+  taskFocus: { leadId: string; id: string; requestId: string } | undefined;
+  filePreview: PreviewTarget | null = null;
+  descriptor: { title: string; body: ReactNode } | null = null;
+  generation = 0;
+  restore = 0;
+  disposed = false;
+  trigger: HTMLElement | null = null;
+  get pending() {
+    return this.areas.selected.pendingDeletion;
+  }
+  projectScope = new Set<string>();
+  openProject: (id: string) => void = () => {};
+  constructor(areas: ServerAreas) {
+    this.areas = areas;
+    this.requests = areas.scope.store.requests();
+    this.teamPreferred = areas.scope.services.api.saved(
+      "codex-team-open",
+      false,
+    );
+    makeAutoObservable(
+      this,
+      {
+        areas: false,
+        requests: false,
+        descriptor: observableRef,
+        filePreview: observableRef,
+      },
+      { autoBind: true },
+    );
+  }
+  async run(command: ServerCommand) {
+    if (command.action === "remove-chat") {
+      const model = command.room
+        ? this.areas.state?.rooms.get(command.id)
+        : this.areas.creation.lookup(command.id);
+      if (model) this.requestDelete(model, command.room);
+    } else if (command.action === "change-project") {
+      const model = this.areas.creation.lookup(command.id);
+      if (model) this.changeProjectFolder(model);
+    } else if (command.action === "project-account")
+      this.showProjectAccount(command.path);
+    else if (command.action === "project-folders")
+      await this.showFolders(command.projectId, command.server);
+    else if (command.action === "add-project") this.openAddProject();
+    else if (command.action === "delete-project")
+      this.openProject(command.projectId);
+    else if (this.areas.settings.run(command)) return;
+    else if (command.action === "search") {
+      this.openSearch();
+    } else if (command.action === "notifications") this.navigate(command);
+    else {
+      const result = await this.areas.run(command);
+      if (result && typeof result === "object")
+        await this.chooseProject(result.cwd, result.folder, result.binding);
     }
-    if (!retryId && !settings && isServerView && hasShell) {
-      postToShell(
-        {
-          kind: "studio-open-new-chat",
-          serverId: serverViewId,
-          path: cwd,
-          projectFolder,
-          projectId: projectBinding?.projectId,
-          projectServerId: projectBinding?.homeServerId,
-        },
-        serverParentOrigin,
+  }
+  navigate(target: { agentId: string; itemId?: string; requestId?: string }) {
+    this.areas.navigation.applyNavigation({
+      ...target,
+      requestId: target.requestId || randomUUID(),
+    });
+    if (target.itemId)
+      this.showMessages(target.itemId, undefined, target.requestId);
+    else this.closeWorkspace();
+  }
+  escape() {
+    this.closeDialog();
+    this.areas.sidebar.close();
+    this.closeTeam();
+  }
+
+  setTeamPreferred(open: boolean) {
+    this.teamPreferred = open;
+    this.areas.scope.services.api.save("codex-team-open", open);
+  }
+
+  workspaceOpen = false;
+  get opened() {
+    return this.workspaceOpen && this.areas.startup.isReady;
+  }
+  teamPreferred = false;
+  get attentionCount(): number {
+    const lead = this.areas.navigation.selectedLead?.id;
+    return (
+      [
+        ...(resourceData(this.requests.current)?.requests.values() || []),
+      ].filter(
+        (r) =>
+          needsAnswer(r) &&
+          !!lead &&
+          (r.agent === lead ||
+            this.areas.state?.agents.get(r.agent)?.rootId === lead),
+      ).length +
+      [...(this.areas.state?.complaints.values() || [])].filter(
+        (c) => c.leadId === lead && c.needsUserResponse,
+      ).length
+    );
+  }
+  showSection(section: string) {
+    this.section = section;
+    this.visited = true;
+    this.workspaceOpen = true;
+  }
+  showMessages(id?: string, roomId?: string, requestId = randomUUID()) {
+    this.focus = id
+      ? { id, requestId, ...(roomId ? { roomId } : {}) }
+      : undefined;
+    this.showSection("messages");
+  }
+  closeWorkspace() {
+    this.workspaceOpen = false;
+  }
+
+  get isTeamVisible(): boolean {
+    return (
+      this.areas.scope.screen.active &&
+      (this.areas.layout.isNarrowTeam ? this.teamOpen : this.teamPreferred)
+    );
+  }
+  toggleTeam() {
+    if (this.areas.layout.isNarrowTeam) this.teamOpen = !this.teamOpen;
+    else this.setTeamPreferred(!this.teamPreferred);
+  }
+  closeTeam() {
+    this.teamOpen = false;
+    this.setTeamPreferred(false);
+  }
+  closeTeamDrawer() {
+    this.teamOpen = false;
+  }
+  openActivity(id?: string) {
+    this.trigger =
+      document.activeElement instanceof HTMLElement &&
+      this.areas.layout.host?.contains(document.activeElement)
+        ? document.activeElement
+        : null;
+    cancelAnimationFrame(this.restore);
+    const taskFocus =
+      id && this.areas.navigation.selectedLead
+        ? {
+            leadId: this.areas.navigation.selectedLead.id,
+            id,
+            requestId: randomUUID(),
+          }
+        : undefined;
+    this.taskFocus = taskFocus;
+    this.tasksOpen = true;
+  }
+  closeTasks() {
+    this.tasksOpen = false;
+  }
+  afterTaskClose() {
+    cancelAnimationFrame(this.restore);
+    this.restore = requestAnimationFrame(() => {
+      if (this.areas.scope.screen.active && !this.tasksOpen) {
+        const selector = this.taskFocus
+          ? `[data-activity-id="${CSS.escape(this.taskFocus.id)}"]`
+          : "#chat-actions";
+        const source =
+          this.trigger?.isConnected &&
+          this.areas.layout.host?.contains(this.trigger)
+            ? this.trigger
+            : this.areas.layout.host?.querySelector<HTMLElement>(selector);
+        source?.focus();
+      }
+    });
+  }
+  openSearch() {
+    this.areas.sidebar.close();
+    this.searchOpen = true;
+  }
+  closeSearch() {
+    this.searchOpen = false;
+  }
+  showPreview(target: PreviewTarget) {
+    this.filePreview = target;
+  }
+  closePreview() {
+    this.filePreview = null;
+  }
+
+  closeDialog() {
+    this.generation++;
+    this.descriptor = null;
+  }
+  openAddProject() {
+    this.closeDialog();
+    this.areas.sidebar.close();
+    const generation = this.generation,
+      scope = this.areas.startup.creationScope;
+    this.descriptor = {
+      title: "Add project",
+      body: (
+        <ProjectDirectoryPicker
+          onSelect={async (path, server) => {
+            await registerProject(path, server, randomUUID(), {
+              ...this.areas.scope.services.api,
+              storage: this.areas.scope.services.storage,
+            });
+            if (
+              !this.disposed &&
+              generation === this.generation &&
+              scope === this.areas.startup.creationScope
+            )
+              this.closeDialog();
+          }}
+        />
+      ),
+    };
+  }
+  async chooseProject(
+    path?: string,
+    folder?: string,
+    binding?: ProjectBinding,
+  ) {
+    this.closeDialog();
+    this.areas.sidebar.close();
+    const request = this.generation,
+      scope = this.areas.startup.creationScope;
+    const project = [...(this.areas.state?.projects.values() || [])].find(
+      (p) => p.path === path || p.id === path,
+    ) ?? {
+      id: path || "default",
+      path: path || "",
+      name: path?.split("/").pop() || "Current folder",
+    };
+    try {
+      const servers = await readProjectServers(
+        this.areas.scope.services.api.get,
       );
-      return null;
-    }
-    if (!retryId && !settings) {
-      const project =
-        data?.runtime?.projects?.find(
-          (row) => row.path === cwd || row.id === cwd,
-        ) ||
-        (cwd
-          ? { id: cwd, path: cwd, name: cwd.split("/").pop() || cwd }
-          : { id: "default", path: "", name: "Current folder" });
-      if (project.path || !mobileClient) {
-        let servers: ProjectServerChoice[];
-        try {
-          servers = await readProjectServers(get);
-        } catch (failure) {
-          notify(errorText(failure));
-          return null;
-        }
-        setModal({
+      if (
+        request !== this.generation ||
+        scope !== this.areas.startup.creationScope
+      )
+        return;
+      runInAction(() => {
+        this.descriptor = {
           title: "New chat",
           body: (
             <ProjectServerCards
@@ -1262,490 +412,196 @@ export default observer(function App({ active = true }: { active?: boolean }) {
                 name: project.name || "Current folder",
               }}
               servers={servers}
-              lastServer={
-                saved<string>(`project-last-server:${project.id}`, "") ||
-                [...leads]
-                  .filter(
-                    (chat) =>
-                      chat.projectId === project.id ||
-                      chat.projectPath === project.path,
-                  )
-                  .sort(
-                    (a, b) =>
-                      (b.updated || b.created || 0) -
-                      (a.updated || a.created || 0),
-                  )[0]?.serverId ||
-                "local"
-              }
-              onChoose={(location, chosenSettings) => {
-                save(`project-last-server:${project.id}`, location.serverId);
-                setModal(null);
-                const binding =
-                  projectBinding ||
-                  (project.homeServerId
-                    ? {
-                        projectId: project.id,
-                        homeServerId: project.homeServerId,
-                      }
-                    : undefined);
+              lastServer={this.areas.scope.services.api.saved(
+                `project-last-server:${project.id}`,
+                "local",
+              )}
+              onCancel={this.closeDialog}
+              onAdd={() => this.openAddProject()}
+              onChoose={(location, settings) => {
+                this.areas.scope.services.api.save(
+                  `project-last-server:${project.id}`,
+                  location.serverId,
+                );
+                this.closeDialog();
                 if (location.serverId === "local")
-                  void newChat(
+                  void this.areas.creation.newChat(
                     location.path,
-                    projectFolder,
+                    folder,
                     undefined,
                     binding,
-                    chosenSettings,
-                  );
-                else if (hasShell)
-                  postToShell(
-                    {
-                      kind: "studio-project-new-chat",
-                      settings: chosenSettings,
-                      serverId: serverViewId,
-                      target: location.serverId,
-                      path: location.path,
-                      projectId: project.id,
-                      projectServerId: project.homeServerId,
-                    },
-                    serverParentOrigin,
+                    settings,
                   );
                 else
-                  notify(
-                    "Open the paired server workspace to create this chat.",
-                  );
+                  this.areas.frame.publish({
+                    kind: "studio-create-on-server",
+                    server: location.serverId,
+                    path: location.path,
+                    projectId: project.id,
+                    settings,
+                  });
               }}
-              onAdd={(server) => openProjectFolders(project.id, server)}
-              onCancel={() => setModal(null)}
             />
           ),
-        });
-        return null;
-      }
-    }
-    try {
-      const pending = pendingChatCreations(creationKey);
-      creation.current =
-        (retryId
-          ? pending.find(
-              (request): request is LeadCreateRequest =>
-                isLeadCreateRequest(request) && request.id === retryId,
-            )
-          : pending.find(
-              (request): request is LeadCreateRequest =>
-                isLeadCreateRequest(request) &&
-                (request.cwd ||
-                  leads.find((item) => item.id === request.previous)
-                    ?.projectPath) === cwd &&
-                (request.project_folder || undefined) === projectFolder &&
-                (request.project_id || undefined) ===
-                  projectBinding?.projectId &&
-                (request.project_server_id || undefined) ===
-                  projectBinding?.homeServerId &&
-                (!settings ||
-                  Object.entries(settings).every(
-                    ([key, value]) =>
-                      JSON.stringify((request as Json)[key]) ===
-                      JSON.stringify(value),
-                  )),
-            )) || null;
-      setPendingCreations(pending);
-      if (retryId && !creation.current)
-        throw new Error("The saved chat request is no longer available.");
+        };
+      });
     } catch (error) {
-      notify("Cannot read the saved chat request: " + errorText(error));
-      return null;
+      if (
+        request === this.generation &&
+        scope === this.areas.startup.creationScope
+      )
+        this.areas.notices.notify(errorText(error));
     }
-    if (creation.current) cwd = creation.current.cwd;
-    if (mobileClient && !cwd) {
-      cwd =
-        lead?.projectPath ||
-        (data?.runtime?.projects?.[0]?.path ?? undefined) ||
-        leads.map((item) => item.projectPath).find(Boolean) ||
-        undefined;
-      if (!cwd) {
-        setSidebar(false);
-        setModal({
-          title: "Choose project folder",
-          body: (
-            <ProjectDirectoryPicker
-              onSelect={async (path, server) => {
-                const registered = await registerProject(
-                  path,
-                  server,
-                  randomUUID(),
-                  projectServices,
-                );
-                setModal(null);
-                await refresh();
-                if (server === "local") await newChat(path);
-                else if (
-                  "projectId" in registered &&
-                  typeof registered.projectId === "string"
-                ) {
-                  await openProjectFolders(registered.projectId);
-                }
-              }}
-            />
-          ),
-        });
-        return null;
-      }
-    }
-    creationLock.current = true;
-    const selectionIntent = navigationIntent.current;
-    const selectedScope = selectionScope.current;
-    setCreating(true);
-    creation.current ||= {
-      id: randomUUID(),
-      previous: lead?.id || null,
-      reuse_empty: false,
-      ...(cwd ? { cwd } : {}),
-      ...(projectBinding
-        ? {
-            project_id: projectBinding.projectId,
-            project_server_id: projectBinding.homeServerId,
-          }
-        : {}),
-      ...(projectFolder ? { project_folder: projectFolder } : {}),
-      // Without settings, the server chooses the account and model from the
-      // project's account order.
-      ...settings,
-    };
-    const creationRequest = creation.current;
-    if (!creationRequest) {
-      creationLock.current = false;
-      setCreating(false);
-      return null;
-    }
-    if (!opened && getDraft("new"))
-      setDraft(getDraft("new"), creationRequest.id);
+  }
+  async showFolders(id: string, server?: string) {
+    const scope = this.areas.startup.creationScope,
+      request = ++this.generation;
     try {
-      // Save the exact request before sending it. A lost response must retain this identity.
-      saveChatCreation(creationKey, creationRequest);
-      setPendingCreations(pendingChatCreations(creationKey));
-      // A slow server keeps this request. Only a real answer or a lost connection ends it.
-      const a = await untilAnswered(() =>
-        post("/api/leads", creationRequest, { timeoutMs: 60000 }),
-      );
-      if (!confirmChatCreationResponse(creationKey, creationRequest.id, a.id))
-        throw new Error("The server returned another chat identity.");
-      // The matching server response is the durable creation receipt. Clear this exact
-      // request before scope-sensitive UI work can fail or the workspace can change.
-      setPendingCreations(pendingChatCreations(creationKey));
-      rememberCreated(a, creationScope);
-      if (!opened && getDraft("new")) setDraft(getDraft("new"), a.id);
-      setToast("");
-      creation.current = null;
+      const response = await this.areas.scope.services.api.get("/api/projects");
       if (
-        navigationIntent.current === selectionIntent &&
-        selectionScope.current === selectedScope
-      ) {
-        createdSelection.current = a.id;
-        setOpened(a.id);
-        setSidebar(false);
-        setTeamOpen(false);
-      }
-      void refresh();
-      return a.id;
-    } catch (e) {
-      // A definitive refusal proves this request ID created nothing; a lost response
-      // keeps the saved request for an exact-ID retry.
-      if (
-        settleFailedChatCreation(
-          creationKey,
-          creationRequest.id,
-          e,
-          errorText(e),
-        )
-      ) {
-        setPendingCreations(pendingChatCreations(creationKey));
-        creation.current = null;
-      }
-      notify(errorText(e));
-      return null;
-    } finally {
-      creationLock.current = false;
-      setCreating(false);
-    }
-  };
-  const send = async (options?: ConversationSendOptions) => {
-    if (schemaMismatch || isApiSchemaMismatch()) return;
-    const draftKey = opened || "new",
-      draft = getDraft(draftKey),
-      fileSend = sendsTextFile(draft, options?.asTextFile),
-      text = fileSend ? draft : draft.trim();
-    if ((!text && !options?.assets?.length) || sendingLock.current) return;
-    const attempt = Symbol();
-    sendingLock.current = attempt;
-    latestSend.current[draftKey] = attempt;
-    setSending(true);
-    const release = () => {
-      if (sendingLock.current !== attempt) return;
-      sendingLock.current = null;
-      setSending(false);
-    };
-    let request: SendMessageBody | undefined;
-    try {
-      if (!fileSend && renameCommand(text) !== undefined && !opened)
-        throw new Error("Open a chat before using /rename.");
-      const id = opened || (await newChat());
-      if (!id) return;
-      latestSend.current[id] = attempt;
-      if (
-        !fileSend &&
-        agent?.source === GeneratedApiAgentSource.managed &&
-        studioCommand(text, agent.provider ?? undefined)
-      ) {
-        const [command] = text.split(/\s+/);
-        if (options?.assets?.length)
-          throw new Error(
-            "Commands cannot include files. Remove the attachments or send a normal message.",
-          );
-        if (command !== "/rename" && text !== command)
-          throw new Error(
-            "Use the command without additional text, or send a normal message.",
-          );
-        if (command === "/rename") {
-          const name = renameCommand(text);
-          if (name && name.length > 80)
-            throw new Error("A name must have 1 to 80 characters.");
-          if (renameRequests.current[id]?.text !== text) {
-            renameRequests.current[id] = { text, id: randomUUID() };
-            persistRenames();
-          }
-          const request_id = renameRequests.current[id].id;
-          const body = { id, name, request_id };
-          const result = await submitRename(body, post, () =>
-            recoverRenameProjection(),
-          );
-          if (result.status === "failed") {
-            delete renameRequests.current[id];
-            persistRenames();
-            notify(result.error || "The title could not be generated.");
-          } else if (result.status !== "pending") {
-            delete renameRequests.current[id];
-            persistRenames();
-          } else if (renameRequests.current[id]?.id === request_id) {
-            notify(
-              "Rename requested. Waiting for live updates. Use /rename again to check this request.",
-            );
-          }
-        } else if (command === "/stop" || command === "/stop-team")
-          await serverCommand.stop(
-            command === "/stop-team" ? (agent.rootId ?? id) : id,
-            command === "/stop-team",
-          );
-        else
-          await submitNativeAction(
-            agent,
-            command.slice(1) as "compact" | "review",
-          );
-      } else {
-        const pending = outbox.entries.some(
-          (entry) =>
-            entry.id === sends.current[id]?.id &&
-            !(
-              entry.status.source === "device" &&
-              entry.status.state.kind === "receipt_expired"
+        this.disposed ||
+        scope !== this.areas.startup.creationScope ||
+        request !== this.generation
+      )
+        return;
+      const found = response.items.find((p) => p.id === id || p.path === id);
+      const project =
+        found &&
+        (this.areas.state?.projects.get(found.id) ??
+          [...(this.areas.state?.projects.values() || [])].find(
+            (p) => p.path === found.path,
+          ));
+      if (isLocatedProject(project))
+        runInAction(() => {
+          this.areas.sidebar.close();
+          this.descriptor = {
+            title: "Project settings",
+            body: (
+              <ProjectFoldersDialog
+                project={project}
+                initialServer={server}
+                saved={this.areas.refresh}
+              />
             ),
-        );
-        if (
-          pending &&
-          sends.current[id]?.text === text &&
-          JSON.stringify(sends.current[id]?.assets || []) ===
-            JSON.stringify(options?.assets || []) &&
-          sends.current[id]?.delivery ===
-            (options?.delivery || DeliveryMoment.CurrentTurn) &&
-          !!sends.current[id]?.asTextFile === !!options?.asTextFile
-        ) {
-          notify("This message is still pending on this device.");
-          return;
-        }
-        sends.current[id] = {
-          id: randomUUID(),
-          room: id,
-          text,
-          assets: options?.assets || [],
-          ...(options?.asTextFile ? { asTextFile: true } : {}),
-          // Enter delivers after the current tool call; Tab after the turn.
-          delivery: options?.delivery || DeliveryMoment.CurrentTurn,
-        };
-        request = sends.current[id];
-        const entry: OutgoingMessage = {
-          id: request.id,
-          body: request,
-          status: { source: "device", state: { kind: "stored" } },
-          created: Date.now(),
-          attachments: options?.attachments || [],
-        };
-        setOutgoing((old) => ({ ...old, [entry.id]: entry }));
-        const result = await durableSend(
-          request,
-          entry.attachments,
-          async () => {
-            // Keep the draft until the request is saved.
-            setDrafts((old) => {
-              const next = { ...old };
-              if (next[draftKey] === draft) delete next[draftKey];
-              if (next[id] === draft) delete next[id];
-              return next;
+          };
+        });
+    } catch (error) {
+      this.areas.notices.notify(errorText(error));
+    }
+  }
+  changeProjectFolder(agent: AgentModel) {
+    this.closeDialog();
+    this.areas.sidebar.close();
+    const generation = this.generation,
+      scope = this.areas.startup.creationScope;
+    this.descriptor = {
+      title: "Choose project folder",
+      body: (
+        <ProjectDirectoryPicker
+          initialPath={agent.projectPath || undefined}
+          serverChoices={[
+            { id: "local", label: this.areas.scope.services.owner.label },
+          ]}
+          showServerSelector={false}
+          onSelect={async (cwd) => {
+            await this.areas.scope.services.api.post("/api/conversation", {
+              id: agent.id,
+              cwd,
             });
-            // The saved command owns this message. A new user submission,
-            // including identical text, gets its own identity.
-            if (sends.current[id]?.id === entry.id) {
-              delete sends.current[id];
+            if (
+              !this.disposed &&
+              generation === this.generation &&
+              scope === this.areas.startup.creationScope
+            )
+              this.closeDialog();
+            await this.areas.refresh();
+          }}
+        />
+      ),
+    };
+  }
+  showProjectAccount(path: string) {
+    this.closeDialog();
+    const projects = [...(this.areas.state?.projects.values() || [])];
+    this.areas.sidebar.close();
+    const generation = this.generation,
+      scope = this.areas.startup.creationScope;
+    this.descriptor = {
+      title: "Project settings",
+      body: (
+        <ProjectAccount
+          path={path}
+          project={projects.find((p) => p.path === path)}
+          accounts={this.areas.accounts.data}
+          defaultAccountKey={
+            projects
+              .filter(
+                (p) =>
+                  p.path &&
+                  (path === p.path ||
+                    path.startsWith(p.path.replace(/\/$/, "") + "/")),
+              )
+              .sort((x, y) => (y.path?.length || 0) - (x.path?.length || 0))[0]
+              ?.accountKey || this.areas.accounts.data.defaultAccountKey
+          }
+          saved={async () => {
+            if (
+              !this.disposed &&
+              generation === this.generation &&
+              scope === this.areas.startup.creationScope
+            )
+              this.closeDialog();
+            await this.areas.refresh();
+          }}
+        />
+      ),
+    };
+  }
+  showProjectFolder() {
+    this.closeDialog();
+    const agent = this.areas.navigation.selectedAgent;
+    if (!agent) return;
+    if (agent.isLead && !agent.threadId) this.changeProjectFolder(agent);
+    else if (agent.projectPath)
+      this.descriptor = {
+        title: "Project folder",
+        body: (
+          <ProjectFolderDialog
+            agent={agent}
+            canReveal={
+              this.areas.scope.services.fileDialogs.canRevealPath() &&
+              !isRemoteServerView
             }
-            await options?.onPersist?.();
-            release();
-          },
-        );
-        if (result.kind === "confirmed") {
-          setOutgoing((old) => {
-            const next = { ...old };
-            delete next[entry.id];
-            return next;
-          });
-        } else if (result.kind === "removed") {
-          throw new Error("This message was removed.");
-        } else if (result.kind === "server") {
-          setOutgoing((old) => ({
-            ...old,
-            [entry.id]: {
-              ...entry,
-              status: { source: "server", status: result.status },
-              receipt: result,
-            },
-          }));
-          if (
-            result.status === MessageSendStatus.cancelled ||
-            result.status === MessageSendStatus.failed
-          )
-            throw new ApiError(
-              result.error || "The message was not sent.",
-              400,
-            );
-        } else {
-          setOutgoing((old) => ({
-            ...old,
-            [entry.id]: {
-              ...entry,
-              status: { source: "device", state: result.state },
-            },
-          }));
-        }
-        if (
-          result.kind === "server" &&
-          Object.values(result.deliveries || {}).some(
-            (v) => v.status !== MessageSendStatus.queued,
-          )
-        )
-          notify("Message saved. Some deliveries are not confirmed.");
-      }
-      if (!request)
-        setDrafts((old) => {
-          const next = { ...old };
-          if (next[draftKey]?.trim() === text) delete next[draftKey];
-          if (next[id]?.trim() === text) delete next[id];
-          return next;
-        });
-      void refresh().catch((error) => notify(errorText(error)));
-    } catch (e) {
-      if (request) {
-        // Never replace text the user typed while this request was in flight.
-        const targetKey = request.room || draftKey;
-        setDrafts((old) => {
-          if (
-            latestSend.current[targetKey] !== attempt ||
-            old[targetKey]?.trim()
-          )
-            return old;
-          const next = { ...old, [targetKey]: text };
-          return next;
-        });
-        const key = request.id;
-        const rejected =
-          e instanceof ApiError &&
-          e.status < 500 &&
-          ![408, 429].includes(e.status);
-        if (rejected && sends.current[request.room]?.id === key)
-          delete sends.current[request.room];
-        if (
-          !rejected &&
-          latestSend.current[targetKey] === attempt &&
-          !sends.current[request.room]
-        )
-          sends.current[request.room] = request;
-        setOutgoing((old) =>
-          old[key]
-            ? {
-                ...old,
-                [key]: {
-                  ...old[key],
-                  status:
-                    old[key].status.source === "server"
-                      ? old[key].status
-                      : {
-                          source: "device",
-                          state: {
-                            kind: "transport_failed",
-                            error: errorText(e),
-                          },
-                        },
-                },
-              }
-            : old,
-        );
-      }
-      if (!request) notify(errorText(e));
-      throw e;
-    } finally {
-      release();
-    }
-  };
-  const sendToConversation = useCommittedCallback(send);
-  const branchCreated = useCommittedCallback((id: string) => {
-    navigationIntent.current++;
-    createdSelection.current = id;
-    setOpened(id);
-    setSidebar(false);
-    setTeamOpen(false);
-  });
-  const newConversation = useCommittedCallback(
-    () => void newChat(lead?.projectPath || agent?.projectPath || undefined),
-  );
-  const chooseConversation = useCallback(() => {
-    setSidebar(true);
-    setSidebarCollapsed(false);
-    save("codex-sidebar-collapsed", false);
-    requestAnimationFrame(() =>
-      document
-        .querySelector<HTMLInputElement>(
-          '#sidebar [aria-label="Filter projects and chats"]',
-        )
-        ?.focus(),
+            onReveal={(path) =>
+              void this.areas.scope.services.fileDialogs
+                .revealPath(path)
+                .catch((e) => this.areas.notices.notify(errorText(e)))
+            }
+          />
+        ),
+      };
+  }
+
+  setProjectScope(ids: ReadonlySet<string>) {
+    this.areas.selected.resumeReaders(
+      new Set(
+        [...this.projectScope].filter(
+          (id) => !ids.has(id) && !this.pending.has(id),
+        ),
+      ),
     );
-  }, []);
-  const rename = async (id: string, name: string) => {
-    try {
-      await post("/api/rename", { id, name, request_id: randomUUID() });
-      void refresh().catch((error) => notify(errorText(error)));
-    } catch (e) {
-      notify(errorText(e));
-      throw e;
-    }
-  };
-  const deletionStopNotice: Record<StopOutcome, string | undefined> = {
-    [StopOutcome.confirmed]: undefined,
-    [StopOutcome.unconfirmed]:
-      "The chat was deleted, but stopping its commands could not be confirmed.",
-  };
-  const remove = (id: string, isRoom: boolean, isWorker = false) => {
-    setModal({
-      title: isWorker ? "Delete?" : "Delete chat?",
+    this.projectScope = new Set(ids);
+    this.areas.selected.suspendReaders(ids);
+  }
+  requestDelete(model: { id: string }, room = false, worker = false) {
+    const id = model.id;
+    this.closeDialog();
+    this.descriptor = {
+      title: worker ? "Delete?" : "Delete chat?",
       body: (
         <>
           <p>
-            {isRoom
+            {room
               ? "Hide this chat. It returns on a new message."
               : "Stop this agent and its workers, and remove their chats. Files and history stay on disk."}
           </p>
@@ -1753,1766 +609,611 @@ export default observer(function App({ active = true }: { active?: boolean }) {
             color="red"
             variant="filled"
             data-delete-chat={id}
-            onClick={(event) => {
-              if (isRoom) {
-                void run(async () => {
-                  const r = await post("/api/room/delete", { id });
-                  const deleted =
-                    typeof r.deleted === "string"
-                      ? [r.deleted]
-                      : (r.deleted || []).filter(
-                          (value): value is string => typeof value === "string",
-                        );
-                  setModal(null);
-                  if (opened && deleted.includes(opened)) {
-                    navigationIntent.current++;
-                    setOpened(null);
-                  }
-                  setDrafts((old) => {
-                    const next = { ...old };
-                    for (const key of deleted) delete next[key];
-                    return next;
-                  });
-                });
+            onClick={() => {
+              this.closeDialog();
+              if (room) {
+                const scope = this.areas.startup.creationScope;
+                void this.areas.scope.services.api
+                  .post("/api/room/delete", { id })
+                  .then((r) => {
+                    if (
+                      !this.disposed &&
+                      scope === this.areas.startup.creationScope
+                    )
+                      this.areas.finishDeletion(
+                        typeof r.deleted === "string"
+                          ? [r.deleted]
+                          : (r.deleted || []).filter(
+                              (id): id is string => typeof id === "string",
+                            ),
+                      );
+                  })
+                  .catch((e) => this.areas.notices.notify(errorText(e)));
                 return;
               }
-              if (pendingConversationDeletesRef.current.has(id)) return;
-              event.currentTarget.disabled = true;
+              if (this.pending.has(id)) return;
               const controller = new AbortController();
-              pendingConversationDeletesRef.current.set(id, controller);
-              setPendingConversationDelete(
-                new Set(pendingConversationDeletesRef.current.keys()),
-              );
-              setModal(null);
+              this.pending.set(id, controller);
+              runInAction(() => {
+                this.areas.selected.suspendReaders(new Set([id]));
+              });
               void deleteConversation(
-                (chat, signal) => serverCommand.delete(chat, { signal }),
+                (chat, signal) =>
+                  this.areas.scope.services.api.command.delete(chat, {
+                    signal,
+                  }),
                 id,
-                finishConversationDelete,
+                this.areas.finishDeletion,
                 controller.signal,
               )
-                .then((result) => {
-                  if (result.kind === "delete") {
-                    const notice = deletionStopNotice[result.result.stopped];
-                    if (notice) notify(notice);
-                  }
-                })
-                .catch((error: unknown) => {
-                  if (controller.signal.aborted) return;
-                  notify(
-                    definiteDeleteRejection(error)
-                      ? errorText(error)
-                      : "Delete may not have completed. Check the chat list before trying again.",
-                  );
-                })
-                .finally(() => {
+                .then((r) => {
                   if (
-                    pendingConversationDeletesRef.current.get(id) !== controller
+                    !controller.signal.aborted &&
+                    r.kind === "delete" &&
+                    r.result.stopped === StopOutcome.unconfirmed
                   )
-                    return;
-                  pendingConversationDeletesRef.current.delete(id);
-                  setPendingConversationDelete(
-                    new Set(pendingConversationDeletesRef.current.keys()),
-                  );
-                });
-            }}
-          >
-            {isWorker ? "Delete" : "Delete chat"}
-          </Button>
-        </>
-      ),
-    });
-  };
-  const openAddProject = () => {
-    setSidebar(false);
-    setModal({
-      title: "Add project",
-      body: (
-        <ProjectDirectoryPicker
-          onSelect={async (path, server) => {
-            await registerProject(path, server, randomUUID(), projectServices);
-            setModal(null);
-          }}
-        />
-      ),
-    });
-  };
-  const openProjectFolders = async (projectId: string, server?: string) => {
-    let projects;
-    try {
-      projects = await get("/api/projects");
-    } catch (error) {
-      notify(errorText(error));
-      return;
-    }
-    const project = projects.items.find(
-      (row) => row.id === projectId || row.path === projectId,
-    );
-    if (!project?.path || !project.name) return;
-    setSidebar(false);
-    setModal({
-      title: "Project settings",
-      body: (
-        <ProjectFoldersDialog
-          project={{
-            ...project,
-            path: project.path || "",
-            name: project.name || "Current folder",
-          }}
-          initialServer={server}
-          saved={refresh}
-        />
-      ),
-    });
-  };
-  const folders = (target: Agent) => {
-    setSidebar(false);
-    setModal({
-      title: "Choose project folder",
-      body: (
-        <ProjectDirectoryPicker
-          initialPath={target.projectPath ?? undefined}
-          serverChoices={[{ id: "local", label: accountServer.label }]}
-          showServerSelector={false}
-          onSelect={async (cwd) => {
-            await post("/api/conversation", { id: target.id, cwd });
-            setModal(null);
-            void refresh().catch((error) => notify(errorText(error)));
-          }}
-        />
-      ),
-    });
-  };
-  const project = () => {
-    if (agent?.isLead && !agent.threadId) folders(agent);
-    else if (agent?.projectPath)
-      setModal({
-        title: "Project folder",
-        body: (
-          <ProjectFolderDialog
-            agent={agent}
-            canReveal={canRevealPath() && !isRemoteServerView}
-            onReveal={(path) =>
-              void revealPath(path).catch((error) => notify(errorText(error)))
-            }
-          />
-        ),
-      });
-  };
-  const schemaMismatchContent = (
-    <>
-      <p>
-        {schemaMismatchNeedsRebuild
-          ? "The installed renderer build does not match the server. Rebuild Studio before continuing."
-          : "Studio has been updated. Update this tab to continue syncing and sending."}
-      </p>
-      {!schemaMismatchNeedsRebuild && (
-        <>
-          <Button
-            onClick={() => {
-              setSchemaUpdateError("");
-              void updateRendererAndReload().catch((error: unknown) =>
-                setSchemaUpdateError(
-                  error instanceof Error
-                    ? error.message
-                    : "Studio update failed. Try again.",
-                ),
-              );
-            }}
-          >
-            Update
-          </Button>
-          {schemaUpdateError && <p role="alert">{schemaUpdateError}</p>}
-        </>
-      )}
-    </>
-  );
-  const schemaMismatchDialog = (
-    <Modal
-      opened={schemaMismatch}
-      onClose={() => {}}
-      title="Studio update required"
-      closeOnEscape={false}
-      closeOnClickOutside={false}
-      withCloseButton={false}
-      role="alertdialog"
-      aria-label="Studio update required"
-    >
-      {schemaMismatchContent}
-    </Modal>
-  );
-  const openSidebarProjectAccount = (path: string) => {
-    if (!data) return;
-    setSidebar(false);
-    setModal({
-      title: "Project settings",
-      body: (
-        <ProjectAccount
-          path={path}
-          project={data.runtime?.projects?.find((item) => item.path === path)}
-          accounts={accounts.data}
-          defaultAccountKey={
-            data.runtime?.projects
-              ?.filter(
-                (item) =>
-                  typeof item.path === "string" &&
-                  (path === item.path ||
-                    path.startsWith(item.path.replace(/\/$/, "") + "/")),
-              )
-              .sort((a, b) => (b.path?.length || 0) - (a.path?.length || 0))[0]
-              ?.accountKey || accounts.data.defaultAccountKey
-          }
-          saved={async () => {
-            setModal(null);
-            void refresh().catch((error) => notify(errorText(error)));
-          }}
-        />
-      ),
-    });
-  };
-  useServerFrame(
-    data,
-    opened,
-    error,
-    (command) => {
-      if (command.action === "open") {
-        open(command.id, command.messageId);
-        document.documentElement.removeAttribute("data-server-projects");
-      } else if (command.action === "new-chat")
-        void newChat(
-          command.path,
-          command.folder,
-          undefined,
-          command.projectId && command.projectServerId
-            ? {
-                projectId: command.projectId,
-                homeServerId: command.projectServerId,
-              }
-            : undefined,
-          command.settings,
-        );
-      else if (command.action === "refresh") return refresh(false);
-      else if (command.action === "prepare-chat") prepareChat(command.id);
-      else if (command.action === "mark-unread") {
-        return receiveSidebarRead(command, readState.markSidebarUnread);
-      } else if (command.action === "remove-chat")
-        remove(command.id, command.room);
-      else if (command.action === "change-project") {
-        const agent = data?.threads.find((row) => row.id === command.id);
-        if (agent) folders(agent);
-      } else if (command.action === "project-account")
-        openSidebarProjectAccount(command.path);
-      else if (command.action === "delete-project")
-        projectDeletion.open(command.projectId);
-      else if (command.action === "new-shared-chat") {
-        setSidebar(false);
-        setSharedCreate({ path: command.path });
-      } else if (command.action === "add-project") openAddProject();
-      else if (command.action === "project-folders")
-        openProjectFolders(command.projectId, command.server);
-      else if (command.action === "settings") {
-        setStudioSettingsTab(command.tab || "accounts");
-        setStudioSettingsOpen(true);
-      } else if (
-        command.action === "account-sign-in" ||
-        command.action === "account-action"
-      ) {
-        externalFrameAccountDialog.current = true;
-        setServerAccountCommand(command);
-        setStudioSettingsTab("accounts");
-        setStudioSettingsOpen(true);
-      } else if (command.action === "focus") {
-        window.focus();
-        focusSelectedComposer(document.getElementById("message"));
-        window.dispatchEvent(new Event("focus"));
-      } else if (command.action === "notifications") {
-        setNavigationTarget({
-          ...command,
-          section: "messages",
-          requestId: randomUUID(),
-        });
-      } else if (command.action === "projects") {
-        document.documentElement.dataset.serverProjects = "true";
-        setSidebarCollapsed(false);
-        setSidebar(true);
-      }
-      return undefined;
-    },
-    readState.pendingReadTargets,
-    publicAccounts,
-    creating,
-  );
-  const studioErrors = useStudioErrorsState(data?.runtime.studioErrors);
-  // The read hook publishes a new pending snapshot for every read revision.
-  const read = useMemo(() => readState, [readState.pendingReadTargets]);
-  const nativeAction: ConversationActions["nativeAction"] =
-    useCommittedCallback((agent, action) => {
-      void run(() => submitNativeAction(agent, action));
-    });
-  const openActivity: ConversationActions["openActivity"] =
-    useCommittedCallback((activity) => {
-      if (activity.kind === "agent") open(activity.agentId);
-      else if (lead) {
-        setTaskFocus({
-          id: activity.id,
-          leadId: lead.id,
-          requestId: randomUUID(),
-        });
-        setTasksOpen(true);
-      }
-    });
-  const conversationActions = useMemo(
-    () => ({
-      open,
-      getDraft,
-      subscribeDraft,
-      setDraft,
-      send: sendToConversation,
-      refresh,
-      notify,
-      dismissDraft,
-      observeSends,
-      observeRead: readState.observeRead,
-      editSend,
-      branchCreated,
-      newConversation,
-      chooseConversation,
-      accounts,
-      reloadLimits: forceReloadLimits,
-      read,
-      nativeAction,
-      openActivity,
-    }),
-    // All commands above keep their committed identity for this owner.
-    [read, setDraft, forceReloadLimits, accounts],
-  );
-  if (!active) return null;
-  // A server contract gate must not cover navigation to other server owners.
-  if (screen && schemaMismatch)
-    return (
-      <main className="startup" aria-label="Server update required">
-        <h2>{serverSettings?.server?.alias || "Server"}: update required</h2>
-        {schemaMismatchContent}
-      </main>
-    );
-  if (!data)
-    return schemaMismatch ? (
-      schemaMismatchDialog
-    ) : (
-      <main
-        className="startup"
-        aria-label="Studio startup"
-        data-connecting={!error || undefined}
-      >
-        <p
-          role={error ? "alert" : "status"}
-          className={error ? "studio-recovery-banner" : undefined}
-        >
-          {error || "Connecting to LAYR Studio…"}
-        </p>
-        {error && <a href="/">Reload Studio</a>}
-      </main>
-    );
-  const title = agent?.name || room?.name || legacy?.name || "New conversation";
-  const teamPanel = <TeamPanel />;
-  const toggleTeam = () => {
-    if (narrowTeam) setTeamOpen(!teamOpen);
-    else {
-      setWideTeamOpen(!wideTeamOpen);
-      save("codex-team-open", !wideTeamOpen);
-    }
-  };
-  const compactHeader =
-    rowLayout.shortTouchLandscape && !railGeometry && !room?.radio;
-  const menuHeaderTools = !!railGeometry || compactHeader;
-  const sessionActivity = agent ? (
-    <LiveSessionActivity
-      key={`${data.stateDir}:${agent.id}`}
-      compact={compactHeader}
-      agentId={agent.id}
-    />
-  ) : null;
-  const conversationTitle = (
-    <ConversationTitle
-      passive={menuHeaderTools}
-      showProject={!!railGeometry}
-      title={agent ? undefined : title}
-      agentId={agent?.id}
-      serverAlias={
-        agent
-          ? sidebarServices.alias?.({ kind: "chat", id: agent.id }) ||
-            serverAliases[
-              (agent as Agent & { serverId?: string }).serverId ||
-                serverViewId ||
-                "local"
-            ] ||
-            serverAliases[sidebarServices.serverForChat(agent.id)] ||
-            DEFAULT_LOCAL_SERVER_ALIAS
-          : undefined
-      }
-      serverOffline={
-        agent
-          ? !(
-              sidebarServices.available?.({
-                kind: "chat",
-                id: agent.id,
-              }) ?? true
-            )
-          : false
-      }
-    />
-  );
-  const toggleTerminal = () => {
-    if (screen)
-      void screen
-        .execute({ action: "terminal", operation: "toggle" })
-        .catch((error) => notify(String(error)));
-    else
-      window.dispatchEvent(
-        new CustomEvent("studio-terminal-command", { detail: "toggle" }),
-      );
-  };
-  const chatActionsMenu = (
-    <>
-      {menuHeaderTools && <ConversationMenuTools source={railTools} />}
-      {menuHeaderTools &&
-        lead &&
-        agent &&
-        !agent.isLead &&
-        agent.id !== lead.id && (
-          <Menu.Item
-            aria-label="Back to main agent"
-            leftSection={<ArrowLeft size={14} />}
-            onClick={() => open(lead.id)}
-          >
-            Back to main agent
-          </Menu.Item>
-        )}
-      <Menu.Label>Views</Menu.Label>
-      {(
-        [
-          ["changes", "Changes", FileDiff],
-          ["plan", "Plan", BookOpen],
-          ["rules", "Wake rules", Clock3],
-          ["search", "Search", Search],
-        ] as const
-      ).map(([section, label, Icon]) => (
-        <Menu.Item
-          key={section}
-          aria-label={section === "rules" ? "Rules" : label}
-          data-workspace-section={section}
-          leftSection={<Icon size={14} />}
-          onClick={() => {
-            if (section === "search") {
-              if (isServerView)
-                postToShell(
-                  { kind: "studio-server-search" },
-                  serverParentOrigin,
+                    this.areas.notices.notify(
+                      "The chat was deleted, but stopping its commands could not be confirmed.",
+                    );
+                })
+                .catch((e) => {
+                  if (!controller.signal.aborted)
+                    this.areas.notices.notify(
+                      definiteDeleteRejection(e)
+                        ? errorText(e)
+                        : "Delete may not have completed. Check the chat list before trying again.",
+                    );
+                })
+                .finally(() =>
+                  runInAction(() => {
+                    if (this.pending.get(id) === controller) {
+                      this.pending.delete(id);
+
+                      if (!this.projectScope.has(id))
+                        this.areas.selected.resumeReaders(new Set([id]));
+                    }
+                  }),
                 );
-              else setSearchOpen(true);
-            } else {
-              setWorkspaceSection(section);
-              setWorkspaceOpen(true);
-            }
-          }}
-        >
-          {label}
-        </Menu.Item>
-      ))}
-      <Observer>
-        {() => {
-          const taskCount = readableLeadId
-            ? (resourceData(
-                store.processes(resourceAgentId(readableLeadId)).current,
-              )?.activities.length ?? 0)
-            : 0;
-          return (
-            <Menu.Item
-              id="tasks-toggle"
-              aria-label={`Current activity${taskCount ? `, ${taskCount} active` : ""}`}
-              leftSection={<Activity size={14} />}
-              onClick={() => {
-                setTaskFocus(undefined);
-                setTasksOpen(true);
-              }}
-            >
-              Background activity {taskCount || ""}
-            </Menu.Item>
-          );
-        }}
-      </Observer>
-      {menuHeaderTools && !mobileClient && (
-        <Menu.Item
-          aria-label="Terminals"
-          leftSection={<Terminal size={14} />}
-          onClick={toggleTerminal}
-        >
-          Terminals
-        </Menu.Item>
-      )}
-      <Menu.Divider />
-      <Menu.Label>Chat</Menu.Label>
-      <Menu.Item
-        id="chat-actions-settings"
-        aria-label="Chat settings"
-        leftSection={<Settings size={14} />}
-        onClick={() => setSettingsOpen(true)}
-      >
-        Chat settings
-      </Menu.Item>
-      <TeamPresence>
-        <Menu.Item
-          id="chat-actions-team"
-          aria-label="Team"
-          leftSection={<Users size={14} />}
-          onClick={toggleTeam}
-        >
-          Team <TeamCount />
-        </Menu.Item>
-      </TeamPresence>
-      {agent?.source === GeneratedApiAgentSource.managed && (
-        <MarkChatUnreadItem agentId={agent.id} />
-      )}
-      {agent?.source === GeneratedApiAgentSource.managed && (
-        <>
-          <Observer>
-            {() =>
-              (!!agent.inFlight ||
-                team.some(
-                  (member) =>
-                    (member.status != null && busy.has(member.status)) ||
-                    member.status === GeneratedApiAgentStatus.queued ||
-                    member.inFlight,
-                )) && (
-                <Menu.Item
-                  data-action="stop-team"
-                  color="red"
-                  leftSection={<Square size={14} />}
-                  onClick={() => {
-                    void run(() =>
-                      serverCommand.stop(agent.rootId ?? agent.id, true),
-                    );
-                  }}
-                >
-                  Stop team
-                </Menu.Item>
-              )
-            }
-          </Observer>
-          <Observer>
-            {() => {
-              const agentDetail =
-                active &&
-                !projectDeleteScope.has(agent.id) &&
-                !(mobileClient && sidebar)
-                  ? resourceData(
-                      store.agentDetail(resourceAgentId(agent.id)).current,
-                    )
-                  : undefined;
-              return (
-                agentDetail?.workspaceMode ===
-                  GeneratedApiWorkspaceMode.worktree &&
-                (agent.isLead ||
-                  agent.role === GeneratedApiAgentRole.implementer) && (
-                  <Menu.Item
-                    data-action="switch-to-layr"
-                    leftSection={<Layers size={14} />}
-                    disabled={busy.has(agent.status ?? "") || !!agent.inFlight}
-                    onClick={() => {
-                      void run(() =>
-                        post(
-                          "/api/agents/workspace-mode",
-                          { id: agent.id, workspaceMode: "layr-native" },
-                          { timeoutMs: 300000 },
-                        ),
-                      );
-                    }}
-                  >
-                    Switch to Layr
-                    <small className="menu-action-help">
-                      Keeps this chat and its history. Commit and push worktree
-                      changes first.
-                    </small>
-                  </Menu.Item>
-                )
-              );
             }}
-          </Observer>
-          <Menu.Divider />
-          <Menu.Label>Model actions</Menu.Label>
-          <NativeModelActions agent={agent} />
+          >
+            {worker ? "Delete" : "Delete chat"}
+          </Button>
         </>
+      ),
+    };
+  }
+  start() {
+    this.disposed = false;
+    const stop = reaction(
+      () =>
+        [...this.pending.keys()].filter(
+          (id) => !this.areas.creation.lookup(id),
+        ),
+      (ids) => {
+        for (const id of ids) {
+          this.pending.get(id)?.abort();
+          this.pending.delete(id);
+
+          this.areas.selected.resumeReaders(new Set([id]));
+        }
+      },
+    );
+    const stopNavigation = reaction(
+      () =>
+        [
+          this.areas.navigation.navigationIntent,
+          this.areas.scope.screen.active,
+        ] as const,
+      () => {
+        this.closeTeamDrawer();
+        cancelAnimationFrame(this.restore);
+      },
+    );
+    return () => {
+      stop();
+      stopNavigation();
+      this.dispose();
+    };
+  }
+  dispose() {
+    this.disposed = true;
+    this.pending.forEach((c) => c.abort());
+    this.pending.clear();
+    this.setProjectScope(new Set());
+    cancelAnimationFrame(this.restore);
+  }
+}
+
+export const AppDialogs = observer(function AppDialogs() {
+  const a = useServerAreas(),
+    dialogs = a.ui;
+  const project = useProjectDelete({
+    state: a.state,
+    metadata: a.scope.services.sync.projectionMetadata,
+    workspaceId: a.startup.workspaceId,
+    services: a.scope.services.sidebarServices,
+    onSuspend: dialogs.setProjectScope,
+    onResume: () => dialogs.setProjectScope(new Set()),
+    onFinish: a.finishDeletion,
+    notify: a.notices.notify,
+  });
+  useEffect(() => {
+    dialogs.openProject = project.open;
+    return () => {
+      dialogs.openProject = () => {};
+    };
+  }, [dialogs, project.open]);
+  const shared = a.creation.sharedCreate;
+  return (
+    <>
+      <Modal
+        opened={!!dialogs.descriptor}
+        onClose={dialogs.closeDialog}
+        title={dialogs.descriptor?.title}
+      >
+        {dialogs.descriptor?.body}
+      </Modal>
+      <ProjectDeleteDialog {...project.dialog} />
+      {shared && (
+        <Modal
+          opened
+          onClose={a.creation.closeShared}
+          title="New shared chat"
+          size="lg"
+        >
+          <SharedChatCreate
+            source={a}
+            accounts={a.accounts.data}
+            initialPath={a.creation.sharedCreationInitialPath}
+            refresh={a.refresh}
+            created={a.creation.sharedCreated}
+          />
+        </Modal>
       )}
     </>
   );
+});
+export const AppTeam = observer(function AppTeam({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const a = useServerAreas(),
+    ui = a.ui,
+    lead = a.navigation.selectedLead;
+  const [query, setQuery] = useState(""),
+    [filter, setFilter] = useState("all"),
+    [override, setOverride] = useState<{
+      id: string | null;
+      value: boolean;
+    } | null>(null);
+  const view = useTeamArea(
+    a.scope.screen.active ? lead?.id : undefined,
+    query,
+    filter,
+    a.read.pendingReadTargets,
+    a.selected.hasRetainedTeam,
+  );
+  useEffect(
+    () =>
+      reaction(
+        () => a.navigation.selectedId,
+        () => setOverride(null),
+      ),
+    [a],
+  );
+  useEffect(() => {
+    setQuery("");
+    setFilter("all");
+  }, [lead?.id]);
+  const actions = useMemo(
+    () => ({
+      setCompletedOpen: (value: boolean) =>
+        setOverride({ id: a.navigation.selectedId, value }),
+      setTeamOpen: (open: boolean) =>
+        runInAction(() => {
+          ui.teamOpen = open;
+        }),
+      setWideTeamOpen: (open: boolean) => ui.setTeamPreferred(open),
+      open: a.open,
+      previewResult: ui.showPreview,
+      remove: (id: string) => ui.requestDelete({ id }, false, true),
+    }),
+    [a, ui],
+  );
+  useEffect(
+    () =>
+      view.view.members.length && ui.isTeamVisible
+        ? a.scope.services.tokenRates.watchTeamTokenRates(lead!.id)
+        : undefined,
+    [view.view.members.length, ui.isTeamVisible, lead?.id],
+  );
+  const value = useMemo(
+    () => ({
+      view: view.view,
+      retainedWorktrees: view.retainedWorktrees,
+      hasTeam: () => view.view.workers.length > 0 || a.selected.hasRetainedTeam,
+      get opened() {
+        return a.navigation.selectedId;
+      },
+      workerQuery: query,
+      setWorkerQuery: setQuery,
+      workerFilter: filter,
+      setWorkerFilter: setFilter,
+      get completedOpen() {
+        const selected = a.navigation.selectedAgent;
+        return override?.id === a.navigation.selectedId
+          ? override.value
+          : !!selected &&
+              !selected.isLead &&
+              selected.status === AgentStatus.completed;
+      },
+      ...actions,
+    }),
+    [a, view.view, query, filter, override, actions],
+  );
+  return <TeamProvider value={value}>{children}</TeamProvider>;
+});
+export const AppPanels = observer(function AppPanels() {
+  const a = useServerAreas(),
+    ui = a.ui,
+    l = a.layout,
+    active = a.scope.screen.active,
+    lead = a.navigation.selectedLead,
+    agent = a.navigation.selectedAgent;
   return (
-    <ConversationProvider value={conversationActions}>
-      <TeamProvider
-        value={{
-          ...teamArea,
-          open,
-          previewResult: setFilePreview,
-          remove: (id) => remove(id, false, true),
-          opened,
-          workerQuery,
-          setWorkerQuery,
-          workerFilter,
-          setWorkerFilter,
-          completedOpen,
-          setCompletedOpen,
-          setTeamOpen,
-          setWideTeamOpen,
-        }}
+    <>
+      {a.layout.isNarrowTeam ? (
+        <TeamPresence>
+          <Drawer
+            opened={ui.isTeamVisible}
+            onClose={ui.closeTeamDrawer}
+            position="right"
+            size="var(--studio-team-size)"
+            padding={0}
+            withCloseButton={false}
+            title="Team"
+            classNames={{ header: "sr-only" }}
+          >
+            <TeamPanel />
+          </Drawer>
+        </TeamPresence>
+      ) : ui.isTeamVisible ? (
+        <TeamPanel />
+      ) : null}
+      {ui.visited && a.startup.isReady && (
+        <Workspace
+          key={`workspace:${lead?.id || "none"}`}
+          opened={active && ui.opened}
+          onClose={ui.closeWorkspace}
+          initialSection={ui.section}
+          initialFocus={ui.focus}
+          inlineTarget={l.slot}
+          panelLayout={l.panelLayout}
+          onPanelWidthChange={l.setPreferredPanelWidth}
+          resizeScope={
+            a.startup.workspaceId || a.startup.creationScope || "pending"
+          }
+          agent={agent || lead}
+          onSelect={a.open}
+          refresh={a.refresh}
+          notify={a.notices.notify}
+        />
+      )}
+      <BackgroundTasks
+        key={`tasks:${lead?.id || "none"}`}
+        opened={active && ui.tasksOpen}
+        initialFocus={ui.taskFocus}
+        close={ui.closeTasks}
+        afterClose={ui.afterTaskClose}
+        leadId={active && ui.tasksOpen ? lead?.id : undefined}
+        openAgent={a.open}
+        refresh={a.refresh}
+        notify={a.notices.notify}
+      />
+      {active && !l.isMobile && a.preferences.value.showTerminals && (
+        <TerminalDock agent={agent || lead} notify={a.notices.notify} />
+      )}
+      <FilePreview
+        target={active ? ui.filePreview : null}
+        onClose={ui.closePreview}
+      />
+    </>
+  );
+});
+
+const MaintenanceSettings = observer(function MaintenanceSettings() {
+  const { delivery } = useServerAreas();
+  return (
+    <section className="settings-group" aria-label="Maintenance">
+      <h2>Maintenance</h2>
+      <Button
+        loading={delivery.removingAllSending}
+        onClick={delivery.removeAllSending}
       >
-        <StudioErrorsScope value={studioErrors}>
-          {active && (
-            <SidebarWarnings
-              visible={!(mobileClient && sidebar)}
-              data={data}
-              agent={agent}
-              opened={opened}
-              accountKey={accountKey}
-              syncWorkspaceId={workspaceId}
-              open={open}
-            />
-          )}
-          {(!isServerView || isClassicServerView) && (
-            <SidebarCommandsProvider
-              value={{
-                open: open,
-                prepareChat: prepareChat,
-                newChat: (path, folder) => void newChat(path, folder),
-                newSharedChat: (path) => {
-                  setSidebar(false);
-                  setSharedCreate({ path });
-                },
-                addProject: openAddProject,
-                changeProject: (id) => {
-                  const agent = catalog.get(id);
-                  if (agent) folders(agent);
-                },
-                projectFolders: (path) => openProjectFolders(path),
-                deleteProject: projectDeletion.open,
-                projectAccount: openSidebarProjectAccount,
-                refresh: refresh,
-                notify: notify,
-                markUnread: (id, target) =>
-                  void readState.markSidebarUnread(id, target),
-                rename: rename,
-                remove: remove,
-                onSearch: () => {
-                  if (isServerView) {
-                    postToShell(
-                      { kind: "studio-server-search" },
-                      serverParentOrigin,
-                    );
-                    return;
-                  }
-                  setSidebar(false);
-                  setSearchOpen(true);
-                },
-                settings: () => setStudioSettingsOpen(true),
-              }}
-            >
-              <Sidebar
-                services={sidebarServices}
-                data={data}
-                opened={opened}
-                remoteProjects={
-                  isServerView ? undefined : data.runtime.remoteProjects
-                }
-                creating={creating}
-                markingRead={readState.marking}
-                pendingReadTargets={readState.pendingReadTargets}
-                hideOldChatsThreshold={studioPreferences.hideOldChatsThreshold}
-                mobile={sidebar}
-                collapsed={sidebarCollapsed}
-                onCompactChange={setSidebarCompact}
-                close={() => {
-                  if (isServerView)
-                    delete document.documentElement.dataset.serverProjects;
-                  if (sidebarCompact) setSidebar(false);
-                  else {
-                    setSidebarCollapsed(true);
-                    save("codex-sidebar-collapsed", true);
-                  }
-                }}
-              />
-            </SidebarCommandsProvider>
-          )}
-          <EdgeRail
-            geometry={railGeometry}
-            sidebar={{
-              id: "sidebar-toggle",
-              label: sidebarCompact ? "Back to chats" : "Toggle conversations",
-              expanded: sidebarCompact ? sidebar : !sidebarCollapsed,
-              onClick: toggleSidebar,
-            }}
-            messages={{
-              count: attentionCount,
-              disabled: !lead,
-              onClick: () => {
-                setWorkspaceSection("messages");
-                setWorkspaceFocus(undefined);
-                setWorkspaceOpen(true);
-              },
-            }}
-            menu={chatActionsMenu}
-            menuButtonRef={chatActionsButton}
-          />
-          <div
-            className="workspace-frame workspace-layout-row"
-            ref={rowLayout.rowRef}
+        Remove all sending messages
+      </Button>
+    </section>
+  );
+});
+const ToastNotice = observer(function ToastNotice() {
+  const { notices, delivery } = useServerAreas();
+  return notices.toast && !delivery.ownsOfflineError(notices.toast) ? (
+    <div id="toast" role="status">
+      {notices.toast}
+    </div>
+  ) : null;
+});
+const AppNotices = observer(function AppNotices() {
+  const { startup, delivery, native, selected, navigation, creation } =
+    useServerAreas();
+  const agent = navigation.selectedAgent;
+  const pending = agent && native.pending(agent.id);
+  const error = !navigation.selectedId && startup.error;
+  return (
+    <>
+      {agent && pending && (
+        <div
+          role="status"
+          className="native-action-pending"
+          style={{ padding: "8px 16px" }}
+        >
+          <span>The {pending.action} request has no confirmed reply. </span>
+          <Button
+            size="compact-sm"
+            loading={native.active}
+            onClick={() => selected.nativeAction(agent, pending.action)}
           >
-            <main
-              className="workspace"
-              data-edge-rail={railGeometry ? "true" : undefined}
-              data-show-message-avatars={studioPreferences.showMessageAvatars}
-            >
-              <SupervisorRecoveryNotice />
-              {!railGeometry && (
-                <header
-                  className="workspace-header simple-workspace-header"
-                  data-compact-landscape={compactHeader || undefined}
-                >
-                  {sidebarCompact ? (
-                    <Button
-                      id="sidebar-toggle"
-                      variant="subtle"
-                      size="compact-xs"
-                      aria-label="Back to chats"
-                      aria-expanded={sidebar}
-                      onClick={toggleSidebar}
-                      leftSection={<ArrowLeft size={18} />}
-                    >
-                      Chats
-                    </Button>
-                  ) : (
-                    <ActionIcon
-                      id="sidebar-toggle"
-                      aria-label="Toggle conversations"
-                      aria-expanded={
-                        sidebarCompact ? sidebar : !sidebarCollapsed
-                      }
-                      onClick={toggleSidebar}
-                    >
-                      <PanelLeft size={18} />
-                    </ActionIcon>
-                  )}
-                  {conversationTitle}
-                  {compactHeader && sessionActivity}
-                  <div id="conversation-header-tools" />
-                  {!compactHeader && !room?.radio && (
-                    <ActionIcon
-                      id="chat-settings-toggle"
-                      aria-label="Chat settings"
-                      title="Chat settings"
-                      onClick={() => setSettingsOpen(true)}
-                    >
-                      <Settings2 size={18} />
-                    </ActionIcon>
-                  )}
-                  {!compactHeader && (
-                    <TeamPresence>
-                      <Button
-                        variant="subtle"
-                        leftSection={<Users size={16} />}
-                        id="team-toggle"
-                        aria-label="Team"
-                        aria-expanded={narrowTeam ? teamOpen : wideTeamOpen}
-                        onClick={toggleTeam}
-                      >
-                        Team
-                        <TeamCount className="team-button-count" />
-                      </Button>
-                    </TeamPresence>
-                  )}
-                  {!room?.radio && (!compactHeader || attentionCount > 0) && (
-                    <Button
-                      variant="subtle"
-                      id="messages-toggle"
-                      aria-label="Messages"
-                      title={
-                        attentionCount > 0
-                          ? `Messages, ${attentionCount} need you`
-                          : "Messages"
-                      }
-                      leftSection={<MessageSquare size={16} />}
-                      disabled={!lead}
-                      onClick={() => {
-                        setWorkspaceSection("messages");
-                        setWorkspaceFocus(undefined);
-                        setWorkspaceOpen(true);
-                      }}
-                    >
-                      <span className="messages-toggle-label">Messages</span>{" "}
-                      {attentionCount > 0 && (
-                        <span className="attention-count">
-                          {attentionCount}
-                        </span>
-                      )}
-                    </Button>
-                  )}
-                  {!railGeometry && !room?.radio && (
-                    <Menu
-                      position="bottom-end"
-                      withinPortal
-                      withInitialFocusPlaceholder={!compactHeader}
-                    >
-                      <Menu.Target>
-                        <ActionIcon
-                          ref={chatActionsButton}
-                          aria-label="Chat actions"
-                          title="Chat actions"
-                        >
-                          <MoreHorizontal size={18} />
-                        </ActionIcon>
-                      </Menu.Target>
-                      <Menu.Dropdown className="chat-actions-menu">
-                        {chatActionsMenu}
-                      </Menu.Dropdown>
-                    </Menu>
-                  )}
-                </header>
-              )}
-              {agent && nativeActions.pending(agent.id) && (
-                <div
-                  role="status"
-                  className="native-action-pending"
-                  style={{ padding: "8px 16px" }}
-                >
-                  <span>
-                    The {nativeActions.pending(agent.id)!.action} request has no
-                    confirmed reply.{" "}
-                  </span>
-                  <Button
-                    size="compact-sm"
-                    loading={nativeActions.active}
-                    onClick={() =>
-                      void run(() =>
-                        submitNativeAction(
-                          agent,
-                          nativeActions.pending(agent.id)!.action,
-                        ),
-                      )
-                    }
-                  >
-                    Check action request
-                  </Button>
-                </div>
-              )}
-              {!compactHeader && sessionActivity}
-              {claudeLoginKey &&
-                (accounts.data.accounts.some(
-                  (item) => item.id === claudeLoginKey,
-                ) ||
-                  accounts.data.archivedAccounts?.some(
-                    (item) => item.id === claudeLoginKey,
-                  )) && (
-                  <ClaudeSignIn
-                    key={claudeLoginKey}
-                    account={
-                      accounts.data.accounts.find(
-                        (item) => item.id === claudeLoginKey,
-                      ) ||
-                      accounts.data.archivedAccounts!.find(
-                        (item) => item.id === claudeLoginKey,
-                      )!
-                    }
-                    scope={data.stateDir}
-                    onClose={() => setClaudeLoginKey("")}
-                    onReady={accounts.refresh}
-                  />
-                )}
-              {codexLoginKey &&
-                accounts.data.accounts.some(
-                  (item) => item.id === codexLoginKey,
-                ) && (
-                  <CodexSignIn
-                    account={accounts.data.accounts.find(
-                      (item) => item.id === codexLoginKey,
-                    )!}
-                    state={accounts}
-                    onClose={() => setCodexLoginKey("")}
-                  />
-                )}
-              {/* Transient notices float under the header over the transcript, so
-              their arrival and dismissal never move the conversation. */}
-              <div className="workspace-notices">
-                <div className="workspace-notices-stack">
-                  {[
-                    ...accounts.data.accounts,
-                    ...(accounts.data.archivedAccounts || []),
-                  ]
-                    .filter(
-                      (account) =>
-                        account.id === accountKey ||
-                        agents.some(
-                          (item) =>
-                            item.rootId === lead?.id &&
-                            (item.accountKey || "default") === account.id &&
-                            item.status === GeneratedApiAgentStatus.failed,
-                        ),
-                    )
-                    .map((account) => (
-                      <AccountSignInNotice
-                        key={account.id}
-                        account={account}
-                        errors={catalog.errors(account.id, agent?.id, lead?.id)}
-                        onSignIn={
-                          (
-                            {
-                              [ProviderKind.Codex]: setCodexLoginKey,
-                              [ProviderKind.Claude]: setClaudeLoginKey,
-                            } satisfies Record<
-                              ProviderKind,
-                              (key: string) => void
-                            >
-                          )[account.provider]
-                        }
-                      />
-                    ))}
-                  {workspaceError &&
-                    !offlineSendFeedback.owns(workspaceError) && (
-                      <div id="error" role="alert">
-                        {workspaceError}
-                      </div>
-                    )}
-                  <div className="sync-notices">
-                    {!creating &&
-                      pendingCreations
-                        .filter(isLeadCreateRequest)
-                        .map((request) => (
-                          <div className="sync-status" key={request.id}>
-                            <p>
-                              Studio lost confirmation for this chat request in{" "}
-                              {request.cwd || "default project"}
-                              {request.project_folder
-                                ? ` (${request.project_folder})`
-                                : ""}
-                              . Retrying uses the saved request ID to check
-                              whether the chat was created. Dismissing stops
-                              checking; a chat this request created still
-                              appears in the chat list.
-                            </p>
-                            <Button
-                              onClick={() =>
-                                void newChat(
-                                  request.cwd,
-                                  request.project_folder,
-                                  request.id,
-                                )
-                              }
-                            >
-                              Retry chat request
-                            </Button>
-                            <Button
-                              onClick={() => {
-                                try {
-                                  dismissChatCreation(creationKey, request.id);
-                                  if (creation.current?.id === request.id)
-                                    creation.current = null;
-                                  setPendingCreations(
-                                    pendingChatCreations(creationKey),
-                                  );
-                                } catch (error) {
-                                  notify(
-                                    "Cannot dismiss the saved chat request: " +
-                                      errorText(error),
-                                  );
-                                }
-                              }}
-                            >
-                              Dismiss
-                            </Button>
-                          </div>
-                        ))}
-                    {draftError && !offlineSendFeedback.owns(draftError) && (
-                      <p
-                        className="sync-status"
-                        role="status"
-                        data-draft-sync-status
-                      >
-                        {draftError}
-                      </p>
-                    )}
-                    {outbox.error &&
-                      !offlineSendFeedback.owns(outbox.error) && (
-                        <p className="sync-status" role="alert">
-                          {outbox.error}
-                        </p>
-                      )}
-                  </div>
-                </div>
-              </div>
-              <UIErrorBoundary label="this conversation" resetKey={opened}>
-                {opened && projectDeleteScope.has(opened) ? (
-                  <div className="chat-empty-state" role="status">
-                    Project deletion in progress or unconfirmed.
-                  </div>
-                ) : opened && pendingConversationDelete.has(opened) ? (
-                  <div className="chat-empty-state" role="status">
-                    Deleting chat…
-                  </div>
-                ) : room?.radio ? (
-                  <RadioChat
-                    visible={!(mobileClient && sidebar)}
-                    key={room.id}
-                    roomId={room.id}
-                  />
-                ) : (
-                  <SelectedConversation
-                    headerToolsInMenu={menuHeaderTools}
-                    onRailToolsChange={railTools.publish}
-                    transcriptHeading={
-                      railGeometry ? conversationTitle : undefined
-                    }
-                    visible={!(mobileClient && sidebar)}
-                    syncWorkspaceId={workspaceId}
-                    id={opened}
-                    agent={agent}
-                    lead={lead || undefined}
-                    room={room}
-                    legacy={legacy}
-                    draftConflicts={conversationDraftConflicts}
-                    sending={sending}
-                    schemaMismatch={schemaMismatch}
-                    outgoing={conversationOutgoing}
-                    offlineSendPending={offlineSendFeedback.pending}
-                    offlineSendDetails={offlineSendFeedback.details}
-                    limits={visibleLimits}
-                    limitsAccounts={usageAccounts}
-                    limitsLoading={!!limitsLoading[accountKey]}
-                    jumpTarget={
-                      jumpTarget?.chatId === opened ? jumpTarget : undefined
-                    }
-                    limitsAccountLabel={
-                      selectedAccount?.email || selectedAccount?.label
-                    }
-                  />
-                )}
-              </UIErrorBoundary>
-            </main>
-            <div
-              id="workspace-panel-slot"
-              className="workspace-panel-slot"
-              ref={setWorkspacePanelSlot}
-            />
-            <TeamPresence>
-              {narrowTeam ? (
-                <Drawer
-                  opened={teamOpen}
-                  onClose={() => setTeamOpen(false)}
-                  position="right"
-                  size="var(--studio-team-size)"
-                  padding={0}
-                  withCloseButton={false}
-                  title="Team"
-                  classNames={{ header: "sr-only" }}
-                >
-                  {teamPanel}
-                </Drawer>
-              ) : wideTeamOpen ? (
-                teamPanel
-              ) : null}
-            </TeamPresence>
+            Check action request
+          </Button>
+        </div>
+      )}
+      {!creation.isCreating &&
+        creation.pendingCreationRequests.map((request) => (
+          <div className="sync-status" key={request.id}>
+            <p>
+              Studio lost confirmation for this chat request in{" "}
+              {request.cwd || "default project"}
+              {request.project_folder ? ` (${request.project_folder})` : ""}.
+              Retrying uses the saved request ID to check whether the chat was
+              created. Dismissing stops checking; a chat this request created
+              still appears in the chat list.
+            </p>
+            <Button onClick={() => void creation.retry(request)}>
+              Retry chat request
+            </Button>
+            <Button onClick={() => creation.dismiss(request)}>Dismiss</Button>
           </div>
-          {!mobileClient && studioPreferences.showTerminals && (
-            <Suspense fallback={null}>
-              <TerminalDock agentId={(agent || lead)?.id} notify={notify} />
-            </Suspense>
-          )}
-          <SearchOverlay
-            opened={searchOpen}
-            onClose={() => setSearchOpen(false)}
-            onSelect={open}
-            navigate={(section, id) => {
-              if (id) open(id);
-              setSearchOpen(false);
-              setWorkspaceSection(section);
-              setWorkspaceOpen(true);
-            }}
-          />
-          {(workspaceRendered || workspaceOpen) && (
-            <Suspense fallback={null}>
-              <Workspace
-                allRequests={data.runtime?.requests || []}
-                key={`workspace:${lead?.id || "none"}`}
-                initialSection={workspaceSection}
-                initialFocus={workspaceFocus}
-                inlineTarget={workspacePanelSlot}
-                panelLayout={rowLayout.panelLayout}
-                onPanelWidthChange={setPreferredPanelWidthRem}
-                resizeScope={workspaceId || data?.stateDir || "pending"}
-                opened={workspaceOpen}
-                onClose={() => setWorkspaceOpen(false)}
-                agent={agent || lead}
-                data={chatData!}
-                onSelect={open}
-                refresh={refresh}
-                notify={notify}
-              />
-            </Suspense>
-          )}
-          {(tasksRendered || tasksOpen) && (
-            <Suspense fallback={null}>
-              <BackgroundTasks
-                key={`background:${lead?.id || "none"}`}
-                opened={tasksOpen}
-                initialFocus={taskFocus}
-                close={() => setTasksOpen(false)}
-                afterClose={() =>
-                  requestAnimationFrame(() => {
-                    const source =
-                      taskFocus && taskFocus.leadId === lead?.id
-                        ? document.querySelector<HTMLButtonElement>(
-                            `[data-activity-id="${CSS.escape(taskFocus.id)}"]`,
-                          )
-                        : null;
-                    (source || chatActionsButton.current)?.focus();
-                  })
-                }
-                leadId={lead?.id}
-                openAgent={open}
-                refresh={refresh}
-                notify={notify}
-              />
-            </Suspense>
-          )}
-          <Accounts
-            managerOnly
-            dialogsOnly
-            onModalOpenChange={updateAccountModalOpen}
-            state={accounts}
-            onError={notify}
-            externalCommand={serverAccountCommand}
-            onExternalCommandHandled={() => setServerAccountCommand(null)}
-          />
-          <Modal
-            opened={studioSettingsOpen && !accountModalOpen}
-            transitionProps={{ duration: 0 }}
-            closeOnEscape={!accountModalOpen}
-            closeOnClickOutside={!accountModalOpen}
-            onClose={() => {
-              setStudioSettingsOpen(false);
-            }}
-            size={modalSizes.settings}
-            title="Studio settings"
-            classNames={{ body: "studio-settings-body" }}
-          >
-            <div
-              className="studio-settings-panel"
-              data-testid="studio-settings"
+        ))}
+      {error && !delivery.ownsOfflineError(error) && (
+        <div id="error" role="alert">
+          {error}
+        </div>
+      )}
+      <div className="sync-notices">
+        {delivery.draftSyncError && (
+          <p className="sync-status" role="status" data-draft-sync-status>
+            {delivery.draftSyncError}
+          </p>
+        )}
+        {delivery.outboxSyncError && (
+          <p className="sync-status" role="alert">
+            {delivery.outboxSyncError}
+          </p>
+        )}
+      </div>
+    </>
+  );
+});
+
+const AppSearch = observer(function AppSearch() {
+  const a = useServerAreas(),
+    panels = a.ui,
+    workspace = a.ui;
+  return (
+    <SearchOverlay
+      source={{
+        opened: panels.searchOpen,
+        close: panels.closeSearch,
+        select: (id, messageId) =>
+          a.navigation.selectExternal(id, {
+            requestId: randomUUID(),
+            ...(messageId ? { messageId } : {}),
+          }),
+        navigate: (section, agent) => {
+          if (agent) a.open(agent);
+          workspace.showSection(section);
+        },
+      }}
+    />
+  );
+});
+
+const Models = lazy(() =>
+  import("./components/models/ModelWhitelistSettings.tsx").then((m) => ({
+    default: m.ModelWhitelistSettings,
+  })),
+);
+const Orchestration = lazy(() =>
+  import("./components/OrchestrationSettings.tsx").then((m) => ({
+    default: m.OrchestrationSettings,
+  })),
+);
+const Worktrees = lazy(() =>
+  import("./components/LayrWorktreesSettings.tsx").then((m) => ({
+    default: m.LayrWorktreesSettings,
+  })),
+);
+const Alerts = lazy(() =>
+  import("./components/SignInPushSettings.tsx").then((m) => ({
+    default: m.SignInPushSettings,
+  })),
+);
+const Federation = lazy(() =>
+  import("./components/FederationSettings.tsx").then((m) => ({
+    default: m.FederationSettings,
+  })),
+);
+
+const AppSettings = observer(function AppSettings({
+  p,
+  signIn,
+}: {
+  p: ReturnType<typeof useAppPreferences>;
+  signIn: (key: string) => void;
+}) {
+  reportPromptComposerRender("settings");
+  const a = useServerAreas(),
+    management = useServerManagementPanel(),
+    c = a.settings,
+    ui = a.ui,
+    run = ui.run;
+  const catalog = useMemo(() => createAgentCatalog(a.scope.store), [a]);
+  const lead = a.navigation.selectedLead || a.navigation.selectedAgent;
+  const server = a.scope.services.owner;
+  return (
+    <>
+      <Accounts
+        managerOnly
+        dialogsOnly
+        state={a.accounts}
+        onError={a.notices.notify}
+        onModalOpenChange={c.reportAccountDialog}
+        externalCommand={c.command}
+        onExternalCommandHandled={() => c.setCommand(null)}
+      />
+      <Modal
+        opened={c.studioOpen && !c.accountModalOpen}
+        transitionProps={{ duration: 0 }}
+        closeOnEscape={!c.accountModalOpen}
+        closeOnClickOutside={!c.accountModalOpen}
+        onClose={() => c.setStudioOpen(false)}
+        size={modalSizes.settings}
+        title="Studio settings"
+        classNames={{ body: "studio-settings-body" }}
+      >
+        <div className="studio-settings-panel" data-testid="studio-settings">
+          <StudioSettingsLayout value={c.tab} onChange={c.activateTab}>
+            <Tabs.Panel value="accounts" pt="md">
+              <section className="settings-group" aria-label="Studio accounts">
+                <ServerAccountsPanel
+                  servers={[server]}
+                  accountsByServer={{
+                    [server.id]: frameAccounts(a.accounts.data),
+                  }}
+                  statuses={{ [server.id]: "live" }}
+                  servicesFor={(id) =>
+                    id === server.id ? a.scope.services : undefined
+                  }
+                  startAccount={(_id, command) => c.setCommand(command)}
+                  accountAction={(_id, command) => c.setCommand(command)}
+                  onDiscover={() => {
+                    void a.scope.services.api
+                      .post("/api/accounts/discover", {})
+                      .catch((error) => a.notices.notify(errorText(error)));
+                  }}
+                />
+              </section>
+            </Tabs.Panel>
+            <Tabs.Panel value="servers" pt="md" keepMounted={false}>
+              {management || <ServerAccessSettings active={c.studioOpen} />}
+            </Tabs.Panel>
+            <Tabs.Panel
+              value="models"
+              className="model-whitelist-panel"
+              pt="md"
+              keepMounted={false}
             >
-              <StudioSettingsLayout
-                value={studioSettingsTab}
-                onChange={activateSettingsTab}
-              >
-                <Tabs.Panel value="accounts" pt="md">
-                  <section
-                    className="settings-group"
-                    aria-label="Studio accounts"
-                  >
-                    <ServerAccountsPanel
-                      servers={[accountServer]}
-                      accountsByServer={{ [accountServer.id]: publicAccounts }}
-                      statuses={{ [accountServer.id]: "live" }}
-                      startAccount={(_id, command) =>
-                        setServerAccountCommand(command)
-                      }
-                      accountAction={(_id, command) =>
-                        setServerAccountCommand(command)
-                      }
-                      onDiscover={() => {
-                        void post("/api/accounts/discover", {})
-                          .then(accounts.setData)
-                          .catch((failure: unknown) =>
-                            notify(errorText(failure)),
-                          );
-                      }}
-                    />
-                  </section>
-                </Tabs.Panel>
-                <Tabs.Panel value="servers" pt="md" keepMounted={false}>
-                  {serverSettings?.panel || (
-                    <ServerAccessSettings active={studioSettingsOpen} />
-                  )}
-                </Tabs.Panel>
-                <Tabs.Panel
-                  value="models"
-                  className="model-whitelist-panel"
-                  pt="md"
-                  keepMounted={false}
-                >
-                  <ModelWhitelistSettings />
-                </Tabs.Panel>
-                <Tabs.Panel value="appearance" pt="md">
-                  <div className="studio-appearance-groups">
-                    <SettingsRow label="Theme">
-                      <div
-                        className="studio-appearance-segments"
-                        role="radiogroup"
-                        aria-label="Studio theme"
-                      >
-                        {(
-                          [
-                            ["auto", "System"],
-                            ["light", "Light"],
-                            ["dark", "Dark"],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <label key={value}>
-                            <input
-                              type="radio"
-                              name="studio-theme"
-                              value={value}
-                              checked={studioPreferences.theme === value}
-                              onChange={() =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  theme: value,
-                                })
-                              }
-                            />
-                            <span>{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </SettingsRow>
-                    <ProviderUpdateSettings
-                      checked={studioPreferences.checkProviderUpdates}
-                      onChange={(checked) =>
-                        updateStudioPreferences({
-                          ...studioPreferences,
-                          checkProviderUpdates: checked,
-                        })
-                      }
-                    />
-                    <SettingsRow label="Show terminals">
-                      <Switch
-                        aria-label="Show terminals"
-                        checked={studioPreferences.showTerminals}
-                        onChange={(event) =>
-                          updateStudioPreferences({
-                            ...studioPreferences,
-                            showTerminals: event.currentTarget.checked,
-                          })
-                        }
-                      />
-                    </SettingsRow>
-                    <SettingsRow label="Text size">
-                      <div
-                        className="studio-appearance-segments"
-                        role="radiogroup"
-                        aria-label="Studio text size"
-                      >
-                        {(
-                          [
-                            [12, "S"],
-                            [14, "M"],
-                            [16, "L"],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <label key={value}>
-                            <input
-                              type="radio"
-                              name="studio-text-size"
-                              value={value}
-                              checked={
-                                studioPreferences.typography === "custom" &&
-                                studioPreferences.sidebarFontSize === value &&
-                                studioPreferences.mainFontSize === value
-                              }
-                              onChange={() =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  typography: "custom",
-                                  sidebarFontSize: value,
-                                  mainFontSize: value,
-                                })
-                              }
-                            />
-                            <span>{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </SettingsRow>
-                    <SettingsRow label="Chat width">
-                      <div
-                        className="studio-appearance-segments"
-                        role="radiogroup"
-                        aria-label="Studio chat width"
-                      >
-                        {(
-                          [
-                            [60, "Narrow"],
-                            [80, "Wide"],
-                            [100, "Full"],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <label key={value}>
-                            <input
-                              type="radio"
-                              name="studio-chat-width"
-                              value={value}
-                              checked={
-                                studioPreferences.contentLayout === "custom" &&
-                                studioPreferences.contentWidth === value
-                              }
-                              onChange={() =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  contentLayout: "custom",
-                                  contentWidth: value,
-                                })
-                              }
-                            />
-                            <span>{label}</span>
-                          </label>
-                        ))}
-                      </div>
-                    </SettingsRow>
-                    <SettingsRow
-                      label="Hide old chats"
-                      help="Projects with fewer chats always show all of them."
-                    >
-                      <TextInput
-                        aria-label="Hide old chats"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={hideOldChatsThresholdDraft}
-                        onChange={(event) =>
-                          setHideOldChatsThresholdDraft(
-                            event.currentTarget.value,
-                          )
-                        }
-                        onBlur={() => {
-                          const value = Number(hideOldChatsThresholdDraft);
-                          if (
-                            /^\d+$/.test(hideOldChatsThresholdDraft) &&
-                            Number.isInteger(value) &&
-                            value >= MIN_HIDE_OLD_CHATS_THRESHOLD &&
-                            value <= MAX_HIDE_OLD_CHATS_THRESHOLD
-                          ) {
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              hideOldChatsThreshold: value,
-                            });
-                            setHideOldChatsThresholdDraft(String(value));
-                          } else {
-                            setHideOldChatsThresholdDraft(
-                              String(studioPreferences.hideOldChatsThreshold),
-                            );
-                          }
-                        }}
-                      />
-                    </SettingsRow>
-                    <Disclosure
-                      className="studio-appearance-more"
-                      summary="More"
-                    >
-                      <div className="studio-appearance-more-content">
-                        <section className="settings-group" aria-label="Fonts">
-                          <h2>Fonts</h2>
-                          <SettingsRow label="Text style">
-                            <NativeSelect
-                              aria-label="Studio text style"
-                              value={studioPreferences.typography}
-                              data={[
-                                {
-                                  value: "original",
-                                  label: "Default text",
-                                },
-                                { value: "custom", label: "Custom text" },
-                              ]}
-                              onChange={(event) =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  typography: event.currentTarget
-                                    .value as StudioPreferences["typography"],
-                                })
-                              }
-                            />
-                            <small>
-                              Select Custom text to change the font and text
-                              sizes.
-                            </small>
-                          </SettingsRow>
-                          <SettingsRow label="Font family">
-                            <NativeSelect
-                              aria-label="Studio font family"
-                              disabled={
-                                studioPreferences.typography === "original"
-                              }
-                              value={studioPreferences.fontFamily}
-                              data={Object.entries(fontFamilies).map(
-                                ([value, font]) => ({
-                                  value,
-                                  label: font.label,
-                                }),
-                              )}
-                              onChange={(event) =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  fontFamily: event.currentTarget
-                                    .value as StudioPreferences["fontFamily"],
-                                })
-                              }
-                            />
-                          </SettingsRow>
-                          <SettingsRow
-                            label={
-                              <span className="studio-range-label">
-                                Sidebar text{" "}
-                                <output>
-                                  {studioPreferences.sidebarFontSize}px
-                                </output>
-                              </span>
-                            }
-                          >
-                            <div className="studio-range-field">
-                              <Slider
-                                thumbLabel="Sidebar font size"
-                                disabled={
-                                  studioPreferences.typography === "original"
-                                }
-                                min={12}
-                                max={24}
-                                step={1}
-                                value={studioPreferences.sidebarFontSize}
-                                onChange={(value) =>
-                                  updateStudioPreferences({
-                                    ...studioPreferences,
-                                    sidebarFontSize: value,
-                                  })
-                                }
-                              />
-                            </div>
-                          </SettingsRow>
-                          <SettingsRow
-                            label={
-                              <span className="studio-range-label">
-                                Main text{" "}
-                                <output>
-                                  {studioPreferences.mainFontSize}px
-                                </output>
-                              </span>
-                            }
-                          >
-                            <div className="studio-range-field">
-                              <Slider
-                                thumbLabel="Main font size"
-                                disabled={
-                                  studioPreferences.typography === "original"
-                                }
-                                min={12}
-                                max={24}
-                                step={1}
-                                value={studioPreferences.mainFontSize}
-                                onChange={(value) =>
-                                  updateStudioPreferences({
-                                    ...studioPreferences,
-                                    mainFontSize: value,
-                                  })
-                                }
-                              />
-                            </div>
-                          </SettingsRow>
-                        </section>
-                        <section
-                          className="settings-group"
-                          aria-label="Chat layout"
-                        >
-                          <h2>Chat layout</h2>
-                          <SettingsRow label="Width">
-                            <NativeSelect
-                              aria-label="Chat width layout"
-                              value={studioPreferences.contentLayout}
-                              data={[
-                                { value: "original", label: "Default width" },
-                                { value: "custom", label: "Custom width" },
-                              ]}
-                              onChange={(event) =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  contentLayout: event.currentTarget
-                                    .value as StudioPreferences["contentLayout"],
-                                })
-                              }
-                            />
-                            <small>
-                              Select Custom width to change the chat width.
-                            </small>
-                          </SettingsRow>
-                          <SettingsRow
-                            label={
-                              <span className="studio-range-label">
-                                Custom width{" "}
-                                <output>
-                                  {studioPreferences.contentWidth}%
-                                </output>
-                              </span>
-                            }
-                          >
-                            <div className="studio-range-field">
-                              <Slider
-                                thumbLabel="Transcript width"
-                                disabled={
-                                  studioPreferences.contentLayout === "original"
-                                }
-                                min={60}
-                                max={100}
-                                step={1}
-                                value={studioPreferences.contentWidth}
-                                onChange={(value) =>
-                                  updateStudioPreferences({
-                                    ...studioPreferences,
-                                    contentWidth: value,
-                                  })
-                                }
-                              />
-                              <small>
-                                Sets the reading width of messages. The composer
-                                keeps its width. Narrow screens use the full
-                                width.
-                              </small>
-                            </div>
-                          </SettingsRow>
-                        </section>
-                        <section
-                          className="settings-group"
-                          aria-label="Messages"
-                        >
-                          <h2>Messages</h2>
-                          <label className="settings-field studio-preference-toggle">
-                            <span className="settings-label">
-                              Show message avatars
-                            </span>
-                            <input
-                              aria-label="Show message avatars"
-                              type="checkbox"
-                              checked={studioPreferences.showMessageAvatars}
-                              onChange={(event) =>
-                                updateStudioPreferences({
-                                  ...studioPreferences,
-                                  showMessageAvatars:
-                                    event.currentTarget.checked,
-                                })
-                              }
-                            />
-                          </label>
-                        </section>
-                        <section
-                          className="settings-group"
-                          aria-label="Maintenance"
-                        >
-                          <h2>Maintenance</h2>
-                          <Button
-                            loading={removingAllSending}
-                            onClick={async () => {
-                              if (removingAllSending) return;
-                              setRemovingAllSending(true);
-                              try {
-                                const count = await removeAllSendingMessages(
-                                  { stateDir: data.stateDir, workspaceId },
-                                  data,
-                                  outgoingMessages,
-                                );
-                                notify(
-                                  `Removed ${count} sending messages from this device. Work already sent continues.`,
-                                );
-                              } catch (error) {
-                                notify(errorText(error));
-                              } finally {
-                                setRemovingAllSending(false);
-                              }
-                            }}
-                          >
-                            Remove all sending messages
-                          </Button>
-                        </section>
-                      </div>
-                    </Disclosure>
-                  </div>
-                </Tabs.Panel>
-                <Tabs.Panel value="federation" pt="md">
-                  {lead?.isLead && (
-                    <FederationSettings
-                      active={studioSettingsOpen}
-                      leadId={lead.id}
-                      agents={data?.runtime?.agents || []}
-                      refresh={refresh}
-                      notify={notify}
-                    />
-                  )}
-                </Tabs.Panel>
-                <Tabs.Panel value="agents" pt="md">
-                  <OrchestrationSettings
-                    active={
-                      studioSettingsOpen && studioSettingsTab === "agents"
-                    }
+              <Suspense fallback={null}>
+                <Models />
+              </Suspense>
+            </Tabs.Panel>
+            <Tabs.Panel value="appearance" pt="md">
+              <AppearanceSettings p={p}>
+                <MaintenanceSettings />
+              </AppearanceSettings>
+            </Tabs.Panel>
+            <Suspense fallback={null}>
+              <Tabs.Panel value="federation" pt="md">
+                {lead?.isLead && (
+                  <Federation
+                    active={c.studioOpen}
+                    leadId={lead.id}
+                    agents={catalog.agents}
+                    refresh={a.refresh}
+                    notify={a.notices.notify}
                   />
-                </Tabs.Panel>
-                <Tabs.Panel value="layr-worktrees" pt="md">
-                  <LayrWorktreesSettings active={studioSettingsOpen} />
-                </Tabs.Panel>
-                <Tabs.Panel value="phone-alerts" pt="md" keepMounted={false}>
-                  <SignInPushSettings active={studioSettingsOpen} />
-                </Tabs.Panel>
-                <Tabs.Panel value="hotkeys" pt="md">
-                  <section
-                    className="settings-group"
-                    aria-label="Sidebar shortcut"
-                  >
-                    <h2>Keyboard shortcut</h2>
-                    <SettingsRow label="Toggle sidebar">
-                      <div className="studio-shortcut-control">
-                        <TextInput
-                          className="studio-shortcut-input"
-                          aria-describedby="studio-shortcut-hint"
-                          aria-label="Toggle sidebar shortcut"
-                          readOnly
-                          value={formatSidebarShortcut(
-                            studioPreferences.sidebarShortcut,
-                          )}
-                          onKeyDown={(event) => {
-                            if (event.key === "Tab" || event.key === "Escape") {
-                              setSidebarShortcutError("");
-                              return;
-                            }
-                            if (
-                              ["Control", "Meta", "Alt", "Shift"].includes(
-                                event.key,
-                              )
-                            )
-                              return;
-                            if (event.ctrlKey || event.metaKey)
-                              event.stopPropagation();
-                            event.preventDefault();
-                            const mods = [
-                              event.metaKey ? "Meta" : "",
-                              event.ctrlKey ? "Control" : "",
-                              event.altKey ? "Alt" : "",
-                              event.shiftKey ? "Shift" : "",
-                            ].filter(Boolean);
-                            const candidate = [...mods, event.key].join("+");
-                            if (!parseSidebarShortcut(candidate)) {
-                              setSidebarShortcutError(
-                                "Choose a letter or number with Ctrl or ⌘. Browser-reserved shortcuts cannot be used.",
-                              );
-                              return;
-                            }
-                            setSidebarShortcutError("");
-                            updateStudioPreferences({
-                              ...studioPreferences,
-                              sidebarShortcut: candidate,
-                            });
-                          }}
-                          onFocus={() =>
-                            setSidebarShortcutError(
-                              "Press a modifier and a letter or number to set the shortcut.",
-                            )
-                          }
-                          onBlur={() => setSidebarShortcutError("")}
-                        />
-                        <div
-                          className="studio-shortcut-tokens"
-                          aria-hidden="true"
-                        >
-                          {formatSidebarShortcut(
-                            studioPreferences.sidebarShortcut,
-                          )
-                            .split("+")
-                            .map((key, index) => (
-                              <kbd key={`${key}:${index}`}>{key}</kbd>
-                            ))}
-                        </div>
-                      </div>
-                      <small id="studio-shortcut-hint">
-                        Select the field. Press a modifier and a letter or
-                        number.
-                      </small>
-                      {sidebarShortcutError && (
-                        <small role="status">{sidebarShortcutError}</small>
-                      )}
-                    </SettingsRow>
-                  </section>
-                </Tabs.Panel>
-              </StudioSettingsLayout>
-              {studioPreferencesError && (
-                <p className="studio-preferences-error" role="alert">
-                  {studioPreferencesError}
-                </p>
-              )}
-            </div>
-          </Modal>
-          <ChatSettingsDialog
-            settingsOpen={settingsOpen}
-            accountModalOpen={accountModalOpen}
-            setSettingsOpen={setSettingsOpen}
-            agent={agent}
-            lead={lead}
-            accounts={accounts}
-            notify={notify}
-            agentModels={agentModels}
-            data={data}
-            refresh={refresh}
-            workspaceId={workspaceId}
-            creating={creating}
-            newChat={newChat}
-            project={project}
-            selectedAccount={selectedAccount}
-            setClaudeLoginKey={setClaudeLoginKey}
-          />
-          <ProjectDeleteDialog {...projectDeletion.dialog} />
-          <Modal
-            opened={!!modal}
-            {...(modal?.title === "New chat"
-              ? { padding: "var(--studio-model-dialog-padding)" }
-              : {})}
-            closeOnEscape={modal?.title !== "New chat"}
-            onClose={() => setModal(null)}
-            {...(modal ? { title: modal.title } : {})}
-            {...(modal?.title === "Project settings"
-              ? { size: modalSizes.settings }
-              : modal?.title === "New chat"
-                ? { size: "var(--studio-model-dialog-size)" }
-                : {})}
-          >
-            <div className={modal?.title === "New chat" ? undefined : "picker"}>
-              {modal?.body}
-            </div>
-          </Modal>
-          <Modal
-            opened={!!sharedCreate}
-            onClose={() => setSharedCreate(null)}
-            title="New shared chat"
-            size="md"
-          >
-            {sharedCreate && (
-              <SharedChatCreate
-                data={data}
-                accounts={accounts.data}
-                initialPath={sharedCreate.path}
-                refresh={refresh}
-                created={(id) => {
-                  setSharedCreate(null);
-                  open(id);
-                }}
-              />
-            )}
-          </Modal>
-          {schemaMismatch && schemaMismatchDialog}
-          {toast && !offlineSendFeedback.owns(toast) && (
-            <div id="toast" role="status">
-              {toast}
-            </div>
+                )}
+              </Tabs.Panel>
+              <Tabs.Panel value="agents" pt="md">
+                <Orchestration active={c.studioOpen && c.tab === "agents"} />
+              </Tabs.Panel>
+              <Tabs.Panel value="layr-worktrees" pt="md">
+                <Worktrees active={c.studioOpen} />
+              </Tabs.Panel>
+              <Tabs.Panel value="phone-alerts" pt="md" keepMounted={false}>
+                <Alerts active={c.studioOpen} />
+              </Tabs.Panel>
+            </Suspense>
+            <Tabs.Panel value="hotkeys" pt="md">
+              <HotkeySettings p={p} />
+            </Tabs.Panel>
+          </StudioSettingsLayout>
+          {p.preferenceError && (
+            <p className="studio-preferences-error" role="alert">
+              {p.preferenceError}
+            </p>
           )}
-          <FilePreview
-            target={filePreview}
-            onClose={() => setFilePreview(null)}
+        </div>
+      </Modal>
+      <ChatSettingsDialog
+        areas={a}
+        settings={c}
+        accounts={a.accounts}
+        onSignIn={signIn}
+        onNewChat={(path) => {
+          void run({ action: "new-chat", ...(path ? { path } : {}) });
+        }}
+        onChangeProject={ui.changeProjectFolder}
+      />
+    </>
+  );
+});
+const AppAccountNotices = observer(function AppAccountNotices({
+  signIn,
+}: {
+  signIn: (key: string) => void;
+}) {
+  const a = useServerAreas(),
+    catalog = useMemo(() => createAgentCatalog(a.scope.store), [a]);
+  const agent = a.navigation.selectedAgent,
+    lead = a.navigation.selectedLead || agent;
+  const key =
+    agent?.accountKey ||
+    lead?.accountKey ||
+    (agent ? "default" : a.accounts.data.defaultAccountKey) ||
+    "default";
+  return (
+    <>
+      {[...a.accounts.data.accounts, ...a.accounts.data.archivedAccounts]
+        .filter(
+          (account) =>
+            account.id === key ||
+            catalog.agents.some(
+              (member) =>
+                member.rootId === lead?.id &&
+                (member.accountKey || "default") === account.id &&
+                member.status === AgentStatus.failed,
+            ),
+        )
+        .map((account) => (
+          <AccountSignInNotice
+            key={account.id}
+            account={account}
+            errors={catalog.errors(account.id, agent?.id, lead?.id)}
+            onSignIn={signIn}
           />
-        </StudioErrorsScope>
-      </TeamProvider>
-    </ConversationProvider>
+        ))}
+    </>
   );
 });

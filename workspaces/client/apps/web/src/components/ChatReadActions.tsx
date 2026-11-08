@@ -4,16 +4,13 @@ import { useConversationActions } from "./conversation/navigation.ts";
 import { observer } from "mobx-react-lite";
 import { Menu } from "@mantine/core";
 import { Mail } from "lucide-react";
-import { useServerStore } from "../servers/ServerServicesContext.tsx";
-import { resourceData } from "../store/runtime.ts";
+import type { AgentModel } from "../app/contracts.ts";
 
 export const MarkChatUnreadItem = observer(function MarkChatUnreadItem({
-  agentId,
+  agent,
 }: {
-  agentId: string;
+  agent: AgentModel;
 }) {
-  const store = useServerStore();
-  const agent = resourceData(store.state().current)?.agents.get(agentId);
   const actions = useConversationActions().read;
   return (
     <Menu.Item
@@ -22,7 +19,7 @@ export const MarkChatUnreadItem = observer(function MarkChatUnreadItem({
       leftSection={<Mail size={14} />}
       disabled={
         agent?.markUnread !== MarkUnreadEligibility["allowed"] ||
-        !!actions.marking.has(agentId)
+        !!actions.marking.has(agent.id)
       }
       onClick={() => {
         if (agent?.markRead)

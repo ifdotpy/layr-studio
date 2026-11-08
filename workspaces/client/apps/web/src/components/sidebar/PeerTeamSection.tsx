@@ -21,7 +21,7 @@ export const PeerTeamSection = observer(function PeerTeamSection({
   const teamMembers = team.members ?? [];
   const members = group.chats.filter((a) => teamMembers.includes(a.id));
   const selected = sidebar.model.rows.find(
-    (a) => a.id === sidebar.p.opened && teamMembers.includes(a.id),
+    (a) => a.id === sidebar.selection.selectedId && teamMembers.includes(a.id),
   );
   if (selected && !members.includes(selected)) members.push(selected);
   if (!members.length && (sidebar.query || sidebar.archive)) return null;
@@ -51,11 +51,11 @@ export const PeerTeamSection = observer(function PeerTeamSection({
             sidebar.services.owner(
               sidebar.projectTarget(group.path, undefined, team.id),
             ).ownerId &&
-          source.group === sidebar.chatGroup(chat) &&
+          source.group === chat.groupKey &&
           chat.projectPath === group.path &&
           !teamMembers.includes(chat.id) &&
           !sidebar.teamMove.blocked() &&
-          sidebar.ui.organizing === null
+          sidebar.organizing === null
         );
       },
       ({ id }) => sidebar.teamMove.move(group.project, id, team.id),
@@ -83,7 +83,7 @@ export const PeerTeamSection = observer(function PeerTeamSection({
             : undefined
         }
         serverOffline={
-          sidebar.p.offlineServers?.has(
+          sidebar.offline?.has(
             sidebar.services.owner(
               sidebar.projectTarget(group.path, undefined, team.id),
             ).ownerId,
@@ -100,24 +100,26 @@ export const PeerTeamSection = observer(function PeerTeamSection({
         closed={closed}
       >
         <div className="peer-team-chats">
-          {(sidebar.runtime?.rooms || [])
+          {(sidebar.rooms || [])
             .filter(
               (r) =>
                 r.radio?.teamId === team.id &&
-                (!closed || r.id === sidebar.p.opened),
+                (!closed || r.id === sidebar.selection.selectedId),
             )
             .map((r) => (
               <UnstyledButton
                 key={r.id}
                 className="peer-team-shared-chat"
-                aria-current={r.id === sidebar.p.opened ? "page" : undefined}
+                aria-current={
+                  r.id === sidebar.selection.selectedId ? "page" : undefined
+                }
                 onClick={() => sidebar.openChat(r.id)}
               >
                 Shared chat
               </UnstyledButton>
             ))}
           {(closed
-            ? members.filter((a) => a.id === sidebar.p.opened)
+            ? members.filter((a) => a.id === sidebar.selection.selectedId)
             : members
           ).map((row) => (
             <SidebarRow key={row.id} row={row} />

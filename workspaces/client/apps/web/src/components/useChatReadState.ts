@@ -1,339 +1,16 @@
-import { MarkUnreadEligibility } from "../generated/api.ts";
+import { useServerStore } from "../servers/ServerServicesContext.tsx";
+import { useMemo, useLayoutEffect, type RefObject } from "react";
+import type { Agent, Message } from "../types.ts";
 import {
-  useServerApi,
-  useServerSync,
-  useServerStore,
-} from "../servers/ServerServicesContext";
-import {
-  useCallback,
-  useMemo,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type RefObject,
-} from "react";
-import { ApiError, errorText } from "../api";
-import "../sync/client";
-import type { Agent, Message, Snapshot } from "../types";
-
-export type ChatReadState = NonNullable<Agent["readState"]>;
-export type ChatReadProof = { id: string; threadId: string; turnId: string };
-export const completed = (
-  agent: Pick<Agent, "id" | "markRead">,
-): ChatReadProof | null =>
-  agent.markRead
-    ? {
-        id: agent.id,
-        threadId: agent.markRead.threadId,
-        turnId: agent.markRead.turnId,
-      }
-    : null;
-const sameResult = (a: ChatReadProof, b: ChatReadProof) =>
-  a.id === b.id && a.threadId === b.threadId && a.turnId === b.turnId;
-export function matchingCompletedAgent(
-  agents: Agent[],
-  proof: ChatReadProof,
-): Agent | null {
-  const agent = agents.find((value) => value.id === proof.id);
-  const result = agent && completed(agent);
-  return result && sameResult(result, proof) ? agent : null;
-}
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null && !Array.isArray(value);
-const parseReadState = (value: unknown): ChatReadState | null =>
-  isRecord(value) &&
-  typeof value.threadId === "string" &&
-  typeof value.turnId === "string" &&
-  typeof value.read === "boolean" &&
-  Number.isSafeInteger(value.revision) &&
-  typeof value.revision === "number" &&
-  value.revision >= 0
-    ? {
-        threadId: value.threadId,
-        turnId: value.turnId,
-        read: value.read,
-        revision: value.revision,
-      }
-    : null;
-
-export function useChatReadState(
-  data: Snapshot | null,
-  opened: string | null,
-  notify: (message: string) => void,
-  refresh: () => Promise<void>,
-  workspaceId?: string,
-) {
-  const { post } = useServerApi();
-  const store = useServerStore();
-  const summary = (id: string) => {
-    const current = store.state().current;
-    return current.status === "live" || current.status === "stale"
-      ? current.data.agents.get(id)
-      : undefined;
-  };
-  const { refreshProjection } = useServerSync();
-
-  const [readVersion, redraw] = useState(0);
-  const [metadataVersion, changedMetadata] = useState(0);
-  const mounted = useRef(true);
-  useEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
-  const key = JSON.stringify([data?.stateDir || "", workspaceId || ""]);
-  const scope = useRef({
-    key,
-    states: new Map<string, ChatReadState>(),
-    requests: new Map<string, Promise<void>>(),
-    pendingReadTargets: new Map<string, ChatReadState>(),
-    suppressed: new Set<string>(),
-    attempted: new Set<string>(),
-    uncertain: new Set<string>(),
-    opened,
-  });
-  if (scope.current.key !== key)
-    scope.current = {
-      key,
-      states: new Map(),
-      requests: new Map(),
-      pendingReadTargets: new Map(),
-      suppressed: new Set(),
-      attempted: new Set(),
-      uncertain: new Set(),
-      opened,
-    };
-  if (scope.current.opened !== opened) {
-    scope.current.suppressed.clear();
-    scope.current.attempted.clear();
-    scope.current.opened = opened;
-  }
-  const latest = useRef({ data, opened, notify, refresh, workspaceId });
-  latest.current = { data, opened, notify, refresh, workspaceId };
-  const selected = useRef<string | null>(null);
-  const readStateFor = useCallback(
-    (agent: Agent): ChatReadState | null => {
-      const saved = agent.readState ?? null;
-      const known = scope.current.states.get(agent.id);
-      if (saved && (!known || saved.revision > known.revision)) {
-        scope.current.states.set(agent.id, saved);
-        return saved;
-      }
-      return known || saved;
-    },
-    [key, metadataVersion],
-  );
-  const write = async (
-    proof: ChatReadProof,
-    read: boolean,
-    target?: ChatReadState,
-  ) => {
-    const current = scope.current;
-    const valid = () => mounted.current && scope.current === current;
-    const pending = current.requests.get(proof.id);
-    if (pending) {
-      if (read) return;
-      await pending;
-      if (!valid()) return;
-      return write(proof, read, target);
-    }
-    const agent = summary(proof.id);
-    const result = agent && completed(agent);
-    if (
-      !target &&
-      (!agent || !agent.markRead || !result || !sameResult(result, proof))
-    )
-      return;
-    if (
-      read &&
-      (latest.current.opened !== proof.id ||
-        current.suppressed.has(proof.id) ||
-        document.visibilityState !== "visible" ||
-        !document.hasFocus())
-    )
-      return;
-    const saved = target ?? (agent ? readStateFor(agent) : null);
-    if (
-      saved?.threadId === proof.threadId &&
-      saved.turnId === proof.turnId &&
-      saved.read === read &&
-      !current.uncertain.has(proof.id)
-    )
-      return;
-    const attempt = JSON.stringify([
-      proof.id,
-      proof.threadId,
-      proof.turnId,
-      saved?.revision || 0,
-    ]);
-    if (read && current.attempted.has(attempt)) return;
-    if (read) current.attempted.add(attempt);
-    if (read)
-      current.pendingReadTargets.set(proof.id, {
-        threadId: proof.threadId,
-        turnId: proof.turnId,
-        revision: saved?.revision || 0,
-        read: false,
-      });
-    const request = (async () => {
-      try {
-        const body = {
-          id: proof.id,
-          read_state: {
-            thread_id: proof.threadId,
-            turn_id: proof.turnId,
-            read,
-            expected_revision: saved?.revision || 0,
-          },
-        };
-        const requestWorkspace = latest.current.workspaceId;
-        let response: unknown;
-        for (let retry = 0; ; retry++) {
-          try {
-            response = await post("/api/organization", body, {
-              workspaceId: requestWorkspace,
-              timeoutMs: 15000,
-            });
-            break;
-          } catch (error) {
-            const transient =
-              error instanceof TypeError ||
-              (error instanceof ApiError &&
-                (error.status >= 500 || [408, 429].includes(error.status)));
-            if (!read || !transient || retry >= 2) throw error;
-            current.uncertain.add(proof.id);
-            await new Promise((resolve) =>
-              setTimeout(resolve, 1000 * (retry + 1)),
-            );
-            // Retry the exact compare-and-set body; a queued Unread follows it.
-            if (!valid()) return;
-            if (latest.current.opened !== proof.id) throw error;
-          }
-        }
-        if (!valid()) return;
-        const canonical = isRecord(response) ? response : null;
-        const state = parseReadState(canonical?.readState);
-        if (
-          canonical?.id !== proof.id ||
-          !state ||
-          state.threadId !== proof.threadId ||
-          state.turnId !== proof.turnId ||
-          state.read !== read ||
-          state.revision <= (saved?.revision || 0)
-        )
-          throw new Error("The server did not confirm the read status.");
-        const known = current.states.get(proof.id);
-        if (!known || state.revision >= known.revision)
-          current.states.set(proof.id, state);
-        current.uncertain.delete(proof.id);
-        changedMetadata((value) => value + 1);
-        redraw((value) => value + 1);
-        // The mutation response confirms the CAS; the agent stream carries it to other views.
-      } catch (error) {
-        if (valid()) {
-          current.attempted.delete(attempt);
-          current.uncertain.add(proof.id);
-          // Reconcile a lost success from the entity projection before a
-          // queued Unread can use local state.
-          try {
-            const snapshot = await refreshProjection({
-              afterCurrentPull: true,
-            });
-            if (!valid()) return;
-            const canonical =
-              snapshot.stateDir === latest.current.data?.stateDir
-                ? summary(proof.id) &&
-                  matchingCompletedAgent([summary(proof.id)!], proof)
-                : null;
-            if (canonical) {
-              const state = canonical.readState ?? null;
-              const known = current.states.get(proof.id);
-              if (state && (!known || state.revision >= known.revision))
-                current.states.set(proof.id, state);
-              if (state || !known) current.uncertain.delete(proof.id);
-              changedMetadata((value) => value + 1);
-            }
-          } catch {
-            // Keep uncertainty visible; a local no-op cannot confirm this write.
-          }
-          if (valid()) latest.current.notify(errorText(error));
-        }
-      }
-    })();
-    current.requests.set(proof.id, request);
-    redraw((value) => value + 1);
-    try {
-      await request;
-    } finally {
-      if (current.requests.get(proof.id) === request)
-        current.requests.delete(proof.id);
-      current.pendingReadTargets.delete(proof.id);
-      if (valid()) redraw((value) => value + 1);
-    }
-  };
-  const writeCurrent = useRef(write);
-  writeCurrent.current = write;
-  useEffect(() => {
-    if (!opened || selected.current !== opened) return;
-    selected.current = null;
-    const agent = summary(opened);
-    const proof = agent && completed(agent);
-    if (proof) void writeCurrent.current(proof, true);
-  }, [opened]);
-  const markUnread = useCallback(async (agent: Agent) => {
-    const model = summary(agent.id);
-    const proof = model && completed(model);
-    if (!proof || model?.markUnread !== MarkUnreadEligibility["allowed"])
-      return;
-    if (latest.current.opened === agent.id)
-      scope.current.suppressed.add(agent.id);
-    await writeCurrent.current(proof, false);
-  }, []);
-  const markSidebarUnread = useCallback(
-    async (id: string, target: ChatReadState) => {
-      // Generated nested models update in place; a queued CAS keeps the click's proof.
-      const captured = { ...target };
-      if (latest.current.opened === id) scope.current.suppressed.add(id);
-      await writeCurrent.current(
-        { id, threadId: captured.threadId, turnId: captured.turnId },
-        false,
-        captured,
-      );
-    },
-    [],
-  );
-  const observeRead = useCallback((proof: ChatReadProof) => {
-    if (selected.current !== proof.id) return;
-    selected.current = null;
-    void writeCurrent.current(proof, true);
-  }, []);
-  const select = useCallback((id: string) => {
-    selected.current = id;
-    if (latest.current.opened !== id) return;
-    const agent = summary(id);
-    const proof = agent && completed(agent);
-    if (proof) {
-      selected.current = null;
-      void writeCurrent.current(proof, true);
-    }
-  }, []);
-  // Callers memoize against this snapshot while the request map mutates in place.
-  const pendingReadTargets: ReadonlyMap<string, ChatReadState> = useMemo(
-    () => new Map(scope.current.pendingReadTargets),
-    [key, readVersion],
-  );
-  return {
-    readStateFor,
-    marking: new Set(scope.current.requests.keys()),
-    pendingReadTargets,
-    markSidebarUnread,
-    markUnread,
-    observeRead,
-    select,
-  };
-}
+  completed,
+  type ChatReadProof,
+} from "../app/conversation/ReadStateOwner.ts";
+export {
+  completed,
+  matchingCompletedAgent,
+  type ChatReadState,
+  type ChatReadProof,
+} from "../app/conversation/ReadStateOwner.ts";
 
 // Transcript selection alone is not a read. Observe the final result in its scroll root.
 export function useVisibleChatResult(
@@ -393,16 +70,12 @@ export function useVisibleChatResult(
         !item.streamPending &&
         !item.streaming,
     );
-  const callback = useRef(onReadResult);
-  useLayoutEffect(() => {
-    callback.current = onReadResult;
-  });
   useLayoutEffect(() => {
     if (
       !loaded ||
       !agent ||
       !model?.markRead ||
-      !callback.current ||
+      !onReadResult ||
       !proof ||
       (!finalId && !completedTurnVisible)
     )
@@ -432,7 +105,7 @@ export function useVisibleChatResult(
           Math.max(box.left, bounds.left, 0)
       ) {
         reported = true;
-        callback.current?.(proof);
+        onReadResult?.(proof);
       }
     };
     const observer = new IntersectionObserver(
@@ -534,7 +207,7 @@ export function useVisibleChatResult(
     nativeTurnItemIdsKey,
     completedTurnVisible,
     loaded,
-    !!onReadResult,
+    onReadResult,
     workspace,
   ]);
 }

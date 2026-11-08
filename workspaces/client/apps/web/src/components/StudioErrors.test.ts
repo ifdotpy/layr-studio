@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+import { StudioErrorsProvider } from "./noticesFixture.tsx";
 import { StudioErrorLevel } from "../generated/api";
 import { appendAppLog, clearAppLog } from "../appLog";
 import { StudioErrorEffectCertainty as GeneratedApiStudioErrorEffectCertainty } from "../generated/api.ts";
@@ -8,7 +10,6 @@ import { expect, test } from "vitest";
 import {
   StudioErrorList,
   actionLabel,
-  StudioErrorsProvider,
   useStudioErrors,
   type StudioErrorItem,
 } from "./StudioErrors";
@@ -59,15 +60,11 @@ function render(items: StudioErrorItem[]) {
     createElement(
       MantineProvider,
       null,
-      createElement(StudioErrorList, {
-        items,
-        busy: null,
-        onAction: () => undefined,
-        selected: new Set<string>(),
-        onSelect: () => undefined,
-        onSelectAll: () => undefined,
-        onDelete: () => undefined,
-      }),
+      createElement(
+        StudioErrorsProvider,
+        { items },
+        createElement(StudioErrorList),
+      ),
     ),
   );
 }
@@ -233,5 +230,85 @@ test("local transfer failures appear as errors", () => {
     expect(markup).toContain("Worker: Receipt missing");
   } finally {
     clearAppLog();
+  }
+});
+
+test("the real error leaf preserves actions, selection and the dismissal cap", async () => {
+  const { act } = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { vi } = await import("vitest");
+  const { conversationActionsFixture, observableFixture } =
+    await import("./observableFixture.tsx");
+  const { ConversationProvider } = await import("./conversation/navigation.ts");
+  const { STUDIO_ERRORS_DISMISS_MAX_IDS: cap } =
+    await import("../generated/sharedValues.ts");
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const open = vi.fn();
+  const models = observableFixture();
+  const areas = conversationActionsFixture(open, models.store);
+  const post = vi.fn().mockResolvedValue({ unknownIds: ["already-gone"] });
+  const get = vi.fn().mockResolvedValue({ items: [] });
+  areas.scope.services.api.post = post;
+  areas.scope.services.api.get = get;
+  models.apply(
+    [
+      disconnected,
+      ...Array.from({ length: cap }, (_, index) => ({
+        ...lost,
+        id: `error-${index}`,
+      })),
+    ].map((value) => ({ collection: "studioError", id: value.id, value })),
+  );
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const button = (text: string) => {
+    const found = [...host.querySelectorAll("button")].find(
+      (node) => node.textContent === text,
+    );
+    if (!found) throw new Error(`Missing button: ${text}`);
+    return found;
+  };
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ConversationProvider,
+            { value: areas },
+            createElement(StudioErrorList),
+          ),
+        ),
+      ),
+    );
+    await act(async () => button("Open").click());
+    expect(open).toHaveBeenCalledWith(lost.agentId);
+    await act(async () => button("Resume").click());
+    expect(post).toHaveBeenCalledWith("/api/connection-recovery", {
+      id: disconnected.agentId,
+    });
+    expect(get).toHaveBeenCalledWith("/api/studio-errors");
+    await act(async () => button("Select all").click());
+    expect(host.textContent).toContain(`${cap} selected`);
+    expect(
+      host.querySelectorAll('input[type="checkbox"]:checked'),
+    ).toHaveLength(cap);
+    expect(
+      host.querySelectorAll('input[type="checkbox"]:disabled'),
+    ).toHaveLength(1);
+    await act(async () => button("Delete selected").click());
+    const dismissal = post.mock.calls.find(
+      ([path]) => path === "/api/studio-errors/dismiss",
+    );
+    expect(dismissal?.[1].ids).toHaveLength(cap);
+    expect(host.textContent).toContain("0 selected");
+    expect(host.textContent).toContain("1 selected errors were already gone.");
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    areas.scope.services.close();
+    areas.scope.store.dispose();
+    vi.unstubAllGlobals();
   }
 });

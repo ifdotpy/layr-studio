@@ -1,3 +1,5 @@
+import { computedStruct, makeAutoObservable } from "mobx";
+import { Observer, observer } from "mobx-react-lite";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { writePreferenceEdit } from "../sync/uiPreferenceStore";
 import { useSyncedVisualState } from "../sync/useSyncedVisualState";
@@ -9,10 +11,12 @@ import type { Message } from "../types";
 import { isMessagePending } from "../messageSendStatus.ts";
 import "./prompt-navigation.css";
 
+type PromptDescriptor = Pick<Message, "id" | "text" | "role" | "excerpt">;
+
 type TranscriptSearchResult =
   GetResult<"/api/transcript/search">["results"][number];
 
-export default function PromptNavigator({
+export default observer(function PromptNavigator({
   messages,
   container,
   storageKey,
@@ -35,14 +39,39 @@ export default function PromptNavigator({
 }) {
   const { syncGet } = useServerApi();
 
-  const prompts = useMemo(
-    () =>
-      messages.filter(
-        (item) => item.role === "user" && !isMessagePending(item),
-      ),
+  const navigation = useMemo(
+    function PromptNavigation() {
+      return makeAutoObservable(
+        {
+          activeId: "",
+          get prompts(): PromptDescriptor[] {
+            return messages
+              .filter((item) => item.role === "user" && !isMessagePending(item))
+              .map(({ id, text, role }) => ({ id, text, role }));
+          },
+          get ids(): Set<string> {
+            return new Set(this.prompts.map((prompt) => prompt.id));
+          },
+          get hasMessages() {
+            return !!messages.length;
+          },
+          get current(): PromptDescriptor | undefined {
+            return (
+              this.prompts.find((prompt) => prompt.id === this.activeId) ||
+              this.prompts[0]
+            );
+          },
+          setActiveId(id: string) {
+            this.activeId = id;
+          },
+        },
+        { prompts: computedStruct },
+      );
+    },
     [messages],
   );
-  const [activeId, setActiveId] = useState("");
+  const prompts = navigation.prompts;
+  const ids = navigation.ids;
   const [opened, setOpened] = useState(false);
   const [query, setQuery] = useState("");
   const [bookmarks, setBookmarks] = useSyncedVisualState<
@@ -70,7 +99,7 @@ export default function PromptNavigator({
           if (active)
             setSearch({
               query: searchQuery,
-              results: result.results || [],
+              results: result.results,
               loading: false,
               error: "",
               truncated: result.truncated,
@@ -98,7 +127,6 @@ export default function PromptNavigator({
     const measure = () => {
       frame = 0;
       const top = root.getBoundingClientRect().top + 24;
-      const ids = new Set(prompts.map((prompt) => prompt.id));
       let current = prompts[0]?.id || "";
       for (const element of root.querySelectorAll<HTMLElement>(
         "[data-message]",
@@ -109,7 +137,7 @@ export default function PromptNavigator({
         )
           current = element.dataset.message!;
       }
-      setActiveId(current);
+      navigation.setActiveId(current);
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(measure);
@@ -123,13 +151,8 @@ export default function PromptNavigator({
       resize.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [prompts, container]);
-  const index = Math.max(
-    0,
-    prompts.findIndex((prompt) => prompt.id === activeId),
-  );
-  if (!messages.length && !inMenu) return null;
-  const current = prompts[index];
+  }, [ids, container, navigation]);
+  if (!navigation.hasMessages && !inMenu) return null;
   const searching = !!searchQuery && !onlySaved;
   const searchPending =
     searching && !!agentId && (search.query !== searchQuery || search.loading);
@@ -198,9 +221,14 @@ export default function PromptNavigator({
               leftSection={<ListTree size={14} />}
             >
               <span className="prompt-history-toggle-label">
-                {prompts.length
-                  ? `${index + 1} / ${prompts.length}`
-                  : "Search chat"}
+                <Observer>
+                  {() => {
+                    const current = navigation.current;
+                    return current
+                      ? `${prompts.indexOf(current) + 1} / ${prompts.length}`
+                      : "Search chat";
+                  }}
+                </Observer>
               </span>
             </Button>
           )}
@@ -254,27 +282,33 @@ export default function PromptNavigator({
             )}
             {visible.map((prompt) => (
               <div className="prompt-history-row" key={prompt.id}>
-                <button
-                  type="button"
-                  className="prompt-history-entry"
-                  aria-current={
-                    current?.id === prompt.id ? "location" : undefined
-                  }
-                  onClick={() => go(prompt.id)}
-                >
-                  <span>
-                    {searching
-                      ? prompt.role === "user"
-                        ? "You"
-                        : "Assistant"
-                      : prompts.indexOf(prompt) + 1}
-                  </span>
-                  <span>
-                    {(searching && "excerpt" in prompt
-                      ? prompt.excerpt || prompt.text
-                      : prompt.text) || "Attachment"}
-                  </span>
-                </button>
+                <Observer>
+                  {() => (
+                    <button
+                      type="button"
+                      className="prompt-history-entry"
+                      aria-current={
+                        navigation.current?.id === prompt.id
+                          ? "location"
+                          : undefined
+                      }
+                      onClick={() => go(prompt.id)}
+                    >
+                      <span>
+                        {searching
+                          ? prompt.role === "user"
+                            ? "You"
+                            : "Assistant"
+                          : prompts.indexOf(prompt) + 1}
+                      </span>
+                      <span>
+                        {(searching
+                          ? prompt.excerpt || prompt.text
+                          : prompt.text) || "Attachment"}
+                      </span>
+                    </button>
+                  )}
+                </Observer>
                 {!searching && (
                   <ActionIcon
                     size="sm"
@@ -318,17 +352,26 @@ export default function PromptNavigator({
           </div>
         </Popover.Dropdown>
       </Popover>
-      {current && !compact && (
-        <button
-          type="button"
-          className="current-prompt"
-          title={current.text}
-          aria-label="Return to current prompt"
-          onClick={() => go(current.id)}
-        >
-          {current.text || "Attachment"}
-        </button>
+      {!compact && (
+        <Observer>
+          {() => {
+            const current = navigation.current;
+            return (
+              current && (
+                <button
+                  type="button"
+                  className="current-prompt"
+                  title={current.text}
+                  aria-label="Return to current prompt"
+                  onClick={() => go(current.id)}
+                >
+                  {current.text || "Attachment"}
+                </button>
+              )
+            );
+          }}
+        </Observer>
       )}
     </nav>
   );
-}
+});

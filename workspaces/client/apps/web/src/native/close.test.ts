@@ -1,6 +1,6 @@
 import { required } from "../components/componentTestFixtures.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { bindNativeCloseFrames, initializeNativeClose } from "./close";
+import { initializeNativeClose } from "./close";
 import { guardNativeClose } from "./closeState";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -92,45 +92,6 @@ it("keeps the window editable and reports a failed save", async () => {
     );
   } finally {
     unguard();
-  }
-});
-
-it("requires an acknowledgement from the exact live server frame", async () => {
-  const harness = await setup();
-  const source = { postMessage: vi.fn() };
-  const frame = {
-    src: "studio-view://studio-local.localhost/",
-    isConnected: true,
-    contentWindow: source,
-  };
-  const frames = new Map([["local", frame as unknown as HTMLIFrameElement]]);
-  const unbind = bindNativeCloseFrames(frames);
-  try {
-    const closing = harness.close();
-    const { id } = required(source.postMessage.mock.calls[0])[0];
-    const event = {
-      source,
-      origin: "studio-view://studio-local.localhost",
-      data: { kind: "studio-native-close-reply", id, ready: true },
-    };
-    harness.message({ ...event, source: {} });
-    harness.message({ ...event, origin: "studio-view://other.localhost" });
-    await Promise.resolve();
-    expect(harness.invoke).toHaveBeenCalledTimes(1);
-    // Even a correctly sourced late reply cannot approve a replaced view.
-    frames.set("local", { ...frame } as unknown as HTMLIFrameElement);
-    harness.message(event);
-    await closing;
-    expect(harness.invoke).toHaveBeenLastCalledWith("close_response", {
-      id: 1,
-      ready: false,
-    });
-    expect(source.postMessage).toHaveBeenLastCalledWith(
-      { kind: "studio-native-close-resume", id },
-      event.origin,
-    );
-  } finally {
-    unbind();
   }
 });
 

@@ -8,14 +8,10 @@ import Accounts, {
   type AccountsState,
 } from "../../src/components/Accounts.tsx";
 import Workspace from "../../src/components/shell/Workspace.tsx";
-import type { Agent, Snapshot } from "../../src/types.ts";
+import type { Agent } from "../../src/types.ts";
 import type { JsonInput } from "../../src/apiTypes.ts";
 import { accountErrorFailure } from "./account-errors-data.ts";
-import {
-  fixtureAccount,
-  fixtureAccounts,
-  fixtureRuntime,
-} from "./fixture-helpers.ts";
+import { fixtureAccount, fixtureAccounts } from "./fixture-helpers.ts";
 const { negative }: { negative: boolean } = await (
   await fetch("/fixture-data")
 ).json();
@@ -70,15 +66,6 @@ function Harness() {
     refresh: async () => null,
     error: "",
   };
-  const snapshot: Snapshot = {
-    token: "fixture",
-    stateDir: "fixture",
-    threads: [agent],
-    runtime: { ...fixtureRuntime({ agents: [agent] }), studioErrors: [] },
-    nodes: [agent],
-    edges: [],
-    chats: [],
-  };
   return (
     <MantineProvider>
       <p data-shell>Saved conversation remains available</p>
@@ -92,8 +79,6 @@ function Harness() {
           opened
           initialSection={surface}
           agent={agent}
-          data={snapshot}
-          allRequests={[]}
           onClose={() => window.showSurface("signin")}
           onSelect={() => {}}
           refresh={async () => {}}
@@ -104,7 +89,7 @@ function Harness() {
   );
 }
 createRoot(document.getElementById("root")!).render(
-  <AgentModelsFixture agents={[]}>
+  <AgentModelsFixture agents={[agent]}>
     <Harness />
   </AgentModelsFixture>,
 );

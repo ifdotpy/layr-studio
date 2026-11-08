@@ -7,9 +7,12 @@ import { MantineProvider, Drawer, Modal } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "/src/style.css";
 import "/src/hooks/viewport-surface.css";
-import { useMobileViewport } from "/src/hooks/mobileViewport.ts";
+import { attachMobileViewport } from "/src/hooks/mobileViewport.ts";
 function ViewportOwner({ active }: { active: boolean }) {
-  useMobileViewport(active, false);
+  React.useEffect(
+    () => (active ? attachMobileViewport(false) : undefined),
+    [active],
+  );
   return null;
 }
 function Surface() {

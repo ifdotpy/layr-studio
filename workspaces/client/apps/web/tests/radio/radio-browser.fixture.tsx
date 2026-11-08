@@ -1,3 +1,5 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "@mantine/core/styles.css";
 declare global {
   interface Window {
     radio: () => NonNullable<Room["radio"]>;
@@ -14,8 +16,8 @@ declare global {
   }
 }
 const rootElement = document.getElementById("root")!;
-import { snapshotFixture } from "../../src/snapshotFixture.ts";
-import type { Room, Snapshot, PeerTeam } from "../../src/types.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import type { Room, PeerTeam } from "../../src/types.ts";
 import { radioRoom } from "./radio-fixture.ts";
 
 import { messageModels } from "../messages/message-models.fixture";
@@ -23,7 +25,6 @@ import { conversationActionsFixture } from "../../src/components/observableFixtu
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import "@mantine/core/styles.css";
 import RadioChat from "../../src/components/RadioChat.tsx";
 import {
   PeerTeamGroup,
@@ -64,13 +65,18 @@ const room: Room = {
   },
 };
 const initial: Snapshot = {
-  ...snapshotFixture(),
+  ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
   stateDir: "radio-test",
   threads: [
     { id: "a", name: "Astra", model: "gpt-6-astra", provider: "codex" },
     { id: "b", name: "Claude", model: "claude-opus-5-5", provider: "claude" },
   ],
-  runtime: { ...snapshotFixture().runtime, requests: [], peerTeams: [team] },
+  runtime: {
+    ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" })
+      .runtime,
+    requests: [],
+    peerTeams: [team],
+  },
 };
 window.radio = () => {
   const state = window.currentRoom.radio;
@@ -80,6 +86,10 @@ window.radio = () => {
 window.setRoom = () => {};
 window.radioOpened = null;
 const models = messageModels(initial.stateDir, initial.threads);
+models.apply([
+  { collection: "room", id: room.id, value: room },
+  { collection: "peerTeam", id: team.id, value: team },
+]);
 function Fixture() {
   const [value, setRoom] = useState(room);
   useLayoutEffect(
@@ -134,6 +144,23 @@ function Fixture() {
     setRoom(radioRoom(await response.json()));
     setRoomId("radio:t");
   };
+  const [area] = useState(() => conversationActionsFixture());
+  area.scope.services.drafts.getDraft = getDraft;
+  area.scope.services.drafts.subscribeDraft = subscribeDraft;
+  area.scope.services.drafts.setDrafts = (update) => {
+    const previous = drafts.current;
+    const next = typeof update === "function" ? update(previous) : update;
+    for (const session of new Set([
+      ...Object.keys(previous),
+      ...Object.keys(next),
+    ]))
+      if (previous[session] !== next[session])
+        setDraft(next[session] || "", session);
+  };
+  area.refresh = refresh;
+  area.notices.notify = (error) => {
+    (window.notifications ??= []).push(error);
+  };
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <div
@@ -144,6 +171,7 @@ function Fixture() {
           width: "100%",
         }}
       >
+        <style>{`.project-tree-action { inline-size: var(--studio-control-size); opacity: 1; pointer-events: auto; }`}</style>
         <PeerTeamActionsProvider
           value={{
             scope: "radio-test",
@@ -163,17 +191,8 @@ function Fixture() {
             <></>
           </PeerTeamGroup>
         </PeerTeamActionsProvider>
-        <models.Provider
-          commands={{
-            ...conversationActionsFixture(),
-            getDraft,
-            subscribeDraft,
-            setDraft,
-            refresh,
-            notify: (error) => (window.notifications ??= []).push(error),
-          }}
-        >
-          <RadioChat roomId={value.id} />
+        <models.Provider commands={area}>
+          <RadioChat room={value} />
         </models.Provider>
       </div>
     </MantineProvider>

@@ -82,8 +82,6 @@
   --layout-edge-rail-status-reserve: 168px;
   --layout-legacy_style-dimension120: 44px;
   --layout-sidebar-resize-hit-width: 0.5rem;
-  --layout-legacy_main_app-query91b57f15: 60rem;
-  --layout-legacy_main_app-query78cb11fd: 79.8rem;
   --layout-legacy_main_appearance-query0e42fa00: 760px;
   --layout-legacy_main_components_analytics-dimensiond0f63a09: 320px;
   --layout-legacy_main_components_analytics-dimensiondf2f2974: 320px;
@@ -93,7 +91,6 @@
   --layout-legacy_main_components_accounts-query452cba01: 37.5rem;
   --layout-legacy_main_components_accounts-query0bafbd4a: 47.5rem;
   --layout-legacy_main_components_accounts-querya3ae2bbc: 22rem;
-  --layout-legacy_main_components_agents_chat-settings-dialog-query7e044896: 48em;
   --layout-legacy_main_components_agents_chat_settings_dialog-querye51eafe3: 26em;
   --layout-legacy_main_components_conversation_conversation_chrome-query8bab4189: 16em;
   --layout-legacy_main_components_conversation_conversation_chrome-query6c130e71: 47.5em;
@@ -113,12 +110,10 @@
   --layout-legacy_main_components_studio_settings-query0bafbd4a: 47.5rem;
   --layout-legacy_main_components_supervisor_recovery_notice-query6c130e71: 47.5em;
   --layout-legacy_main_components_ui_primitives-query0bafbd4a: 47.5rem;
-  --layout-legacy_main_servers_multi-server-app-query3b784b5e: 760px;
   --layout-legacy_main_servers_server_settings-query0bafbd4a: 47.5rem;
   --layout-legacy_main_servers_server_settings-query3e8f17d2: 22.5rem;
   --layout-legacy_main_servers_server_settings-query6d39bd72: 30rem;
   --layout-legacy_main_servers_servers-query0e42fa00: 760px;
-  --layout-legacy_main_servers_servers-layere6065e37: 201;
   --layout-legacy_main_servers_servers-layer34ae5ec1: 200;
   --layout-legacy_main_servers_servers-dimension112ab710: 270px;
   --layout-legacy_main_studio_preferences-query0e42fa00: 760px;
@@ -155,4 +150,5 @@
   --layout-keyboard-focus-sample-window: 600ms;
   --layout-keyboard-stable-sample-duration: 300ms;
   --layout-keyboard-focus-open-grace: 2000ms;
+  --layout-settings-full-screen-max: 48em;
 }

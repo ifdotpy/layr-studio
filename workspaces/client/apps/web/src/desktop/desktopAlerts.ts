@@ -4,7 +4,17 @@ import {
   SIGN_IN_ALERT_GRACE_SECONDS,
   SIGN_IN_REMINDER_SECONDS,
 } from "../generated/sharedValues";
-import type { Snapshot } from "../types";
+import type { DeepReadonly } from "../deepReadonly.ts";
+import type { Approval } from "../approvals.ts";
+import {
+  agentId,
+  type ObservableResources,
+} from "../generated/observableResources.ts";
+import { resourceData } from "../store/runtime.ts";
+export type AlertStore = Pick<
+  ObservableResources,
+  "state" | "requests" | "agentDetail"
+>;
 
 export type DesktopAlert = {
   id: string;
@@ -27,9 +37,7 @@ export {
 type SignInTimes = { host: string; alertAt: number; reminderAt: number | null };
 
 /** The times of a pending sign-in card's alert and reminder, in seconds, or null. */
-function signInTimes(
-  request: Snapshot["runtime"]["requests"][number],
-): SignInTimes | null {
+function signInTimes(request: DeepReadonly<Approval>): SignInTimes | null {
   const card = request.request;
   if (card.kind !== "browser_open" || !needsAnswer(request)) return null;
   const created = approvalCreated(request);
@@ -51,9 +59,14 @@ function signInTimes(
  * The next moment, in seconds, at which a sign-in alert or reminder becomes due, or null.
  * The alert hooks wake at that moment, because no record changes then.
  */
-export function nextAlertChange(data: Snapshot, now: number): number | null {
+export function nextAlertChange(
+  store: Pick<AlertStore, "requests">,
+  now: number,
+): number | null {
   let next: number | null = null;
-  for (const request of data.runtime.requests) {
+  for (const request of resourceData(
+    store.requests().current,
+  )?.requests.values() ?? []) {
     const times = signInTimes(request);
     if (!times) continue;
     for (const at of [times.alertAt, times.reminderAt]) {
@@ -74,10 +87,12 @@ export function alertsSince(started: number) {
 }
 
 export function desktopAlerts(
-  data: Snapshot,
+  store: AlertStore,
   now = Date.now() / 1000,
 ): DesktopAlert[] {
-  const agents = new Map(data.threads.map((agent) => [agent.id, agent]));
+  const data = resourceData(store.state().current);
+  if (!data) return [];
+  const agents = data.agents;
   const alerts: DesktopAlert[] = [];
   const add = (
     id: string,
@@ -89,7 +104,7 @@ export function desktopAlerts(
     sound = false,
   ) => {
     const agent = typeof agentId === "string" ? agents.get(agentId) : undefined;
-    if (!agent || agent.deletedAt) return;
+    if (!agent || ("deletedAt" in agent && agent.deletedAt)) return;
     alerts.push({
       id,
       title: `${agent.name}: ${title}`.slice(0, 160),
@@ -107,8 +122,7 @@ export function desktopAlerts(
     if (
       !agent.isLead ||
       agent.inFlight ||
-      (agent as typeof agent & { remoteAnchor?: unknown; movedTo?: unknown })
-        .remoteAnchor ||
+      ("remoteAnchor" in agent && agent.remoteAnchor) ||
       agent.movedTo ||
       agent.moveImportPending
     )
@@ -123,27 +137,34 @@ export function desktopAlerts(
         `completed:${agent.id}:${turn}`,
         agent.id,
         "Reply ready",
-        agent.tail || "Open the chat to read the reply.",
+        data.agentTail.get(agent.id)?.tail ||
+          "Open the chat to read the reply.",
       );
     if (
       agent.status === AgentStatus.failed ||
       agent.status === AgentStatus.interrupted
-    )
+    ) {
+      const error = resourceData(
+        store.agentDetail(agentId(agent.id)).current,
+      )?.error;
       add(
         `failed:${agent.id}:${turn || agent.turnId || agent.status}`,
         agent.id,
         "Work stopped",
-        typeof agent.error === "string"
-          ? agent.error
-          : agent.error &&
-              typeof agent.error === "object" &&
-              "message" in agent.error &&
-              typeof agent.error.message === "string"
-            ? agent.error.message
+        typeof error === "string"
+          ? error
+          : error &&
+              typeof error === "object" &&
+              "message" in error &&
+              typeof error.message === "string"
+            ? error.message
             : "Open the chat to check the error.",
       );
+    }
   }
-  for (const request of data.runtime.requests) {
+  for (const request of resourceData(
+    store.requests().current,
+  )?.requests.values() ?? []) {
     if (request.request.kind === "browser_open") {
       const times = signInTimes(request);
       if (!times || now < times.alertAt) continue;
@@ -189,7 +210,7 @@ export function desktopAlerts(
       approvalCreated(request),
     );
   }
-  for (const complaint of data.runtime.complaints) {
+  for (const complaint of data.complaints.values()) {
     if (complaint.needsUserResponse)
       add(
         `complaint:${complaint.id}:${complaint.version || 0}`,

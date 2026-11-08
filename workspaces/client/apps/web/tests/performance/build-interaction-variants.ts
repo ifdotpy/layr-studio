@@ -53,7 +53,7 @@ const current = new Map(
     ]),
   ),
 );
-const supportPath = "src/components/shell/DeferredWorkspace.tsx";
+const supportPath = "src/components/shell/Workspace.tsx";
 const supportHash = createHash("sha256")
   .update(await readFile(join(root, supportPath)))
   .digest("hex");

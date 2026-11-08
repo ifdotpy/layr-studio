@@ -5,13 +5,15 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Menu } from "@mantine/core";
 import { EdgeRail } from "/src/components/edge-rail/EdgeRail.tsx";
-import { useEdgeRail } from "/src/components/edge-rail/useEdgeRail.ts";
+import { observeEdgeRail } from "/src/components/edge-rail/useEdgeRail.ts";
+import type { EdgeRailGeometry } from "./edgeRailPolicy.ts";
 import { theme } from "/src/theme.ts";
 import "@mantine/core/styles.css";
 import "/src/layout/layout-contract.generated.css";
 const e = React.createElement;
 function Fixture() {
-  const geometry = useEdgeRail();
+  const [geometry, setGeometry] = React.useState<EdgeRailGeometry | null>(null);
+  React.useEffect(() => observeEdgeRail(setGeometry), []);
   const [last, setLast] = React.useState("None");
   return e(
     MantineProvider,

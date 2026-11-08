@@ -1,4 +1,3 @@
-import { useSidebarCommands } from "./commands.ts";
 import { Modal } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import {
@@ -15,7 +14,6 @@ import { useSidebarState } from "./SidebarState.tsx";
 export const SidebarOrganizationDialogs = observer(
   function SidebarOrganizationDialogs() {
     const sidebar = useSidebarState();
-    const commands = useSidebarCommands();
     const { dialog, conversion } = sidebar;
     sidebarRender("SidebarOrganizationDialogs");
     const dialogProject = dialog
@@ -65,7 +63,7 @@ export const SidebarOrganizationDialogs = observer(
                   target={conversion.target}
                   scope={sidebar.stateDir}
                   saved={async () => {
-                    await commands.refresh?.();
+                    await sidebar.refresh();
                     sidebar.openChat(conversion.target.id);
                     sidebar.setConversion(null);
                   }}

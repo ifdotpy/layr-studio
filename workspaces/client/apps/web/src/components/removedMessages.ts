@@ -1,14 +1,11 @@
-import { useServerStorage } from "../servers/ServerServicesContext";
 import { serverLocalStorage } from "../servers/storage";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { observable, observableRef, makeAutoObservable, action } from "mobx";
 import type { Message } from "../types";
 
-const changed = "studio-removed-messages-changed";
 type Removed = {
   keys: Set<string>;
   copies: Message[];
   restored: Message[];
-  revision: number;
 };
 const owners = new WeakMap<Storage, Map<string, Removed>>();
 function record(storage: Storage, key: string): Removed {
@@ -18,7 +15,14 @@ function record(storage: Storage, key: string): Removed {
   if (!value)
     records.set(
       key,
-      (value = { keys: new Set(), copies: [], restored: [], revision: 0 }),
+      (value = observable(
+        {
+          keys: observable.set<string>(),
+          copies: [] as Message[],
+          restored: [] as Message[],
+        },
+        { copies: observableRef, restored: observableRef },
+      )),
     );
   return value;
 }
@@ -53,7 +57,7 @@ export function isRemovedMessage(
   );
   return messageRemovalKeys(message, chat).some((key) => value.keys.has(key));
 }
-export function saveRemovedMessage(
+export const saveRemovedMessage = action(function saveRemovedMessage(
   workspace: string,
   kind: string,
   chat: string,
@@ -71,8 +75,8 @@ export function saveRemovedMessage(
         item.clientMessageId !== message.clientMessageId),
   );
   value.copies.push(message);
-}
-export function removeMessageFromDevice(
+});
+export const removeMessageFromDevice = action(function removeMessageFromDevice(
   workspace: string,
   kind: string,
   chat: string,
@@ -83,56 +87,43 @@ export function removeMessageFromDevice(
   saveRemovedMessage(workspace, kind, chat, message, storage);
   const value = record(storage, key);
   for (const item of messageRemovalKeys(message, chat)) value.keys.add(item);
-  value.revision++;
-  window.dispatchEvent(new CustomEvent(changed, { detail: key }));
-}
-export function useRemovedMessages(
+});
+export function createRemovedMessages(
   workspace: string,
   kind: string,
   chat: string | null,
+  storage = serverLocalStorage,
 ) {
-  const storage = useServerStorage();
-  const key = removedMessagesStorageKey(workspace, kind, chat);
-  const value = record(storage, key);
-  const snapshot = useCallback(() => value.revision, [value]);
-  const subscribe = useCallback(
-    (notify: () => void) => {
-      const local = (event: Event) => {
-        if ((event as CustomEvent<string>).detail === key) notify();
-      };
-      window.addEventListener(changed, local);
-      return () => window.removeEventListener(changed, local);
+  const value = record(
+    storage,
+    removedMessagesStorageKey(workspace, kind, chat),
+  );
+  return makeAutoObservable(
+    {
+      hidden(message: Message) {
+        return messageRemovalKeys(message, chat || "").some((key) =>
+          value.keys.has(key),
+        );
+      },
+      get restored() {
+        return value.restored.map((message) => ({
+          ...message,
+          localDelivery: false,
+          materialized: true,
+        }));
+      },
+      get hasRemoved() {
+        return value.keys.size > 0;
+      },
+      restore() {
+        value.restored = value.copies;
+        value.keys.clear();
+      },
+      remove(message: Message) {
+        removeMessageFromDevice(workspace, kind, chat || "", message, storage);
+      },
     },
-    [key],
+    {},
+    { autoBind: true },
   );
-  const revision = useSyncExternalStore(subscribe, snapshot);
-  const hidden = useCallback(
-    (message: Message) =>
-      messageRemovalKeys(message, chat || "").some((item) =>
-        value.keys.has(item),
-      ),
-    [chat, value, revision],
-  );
-  const restored = useMemo(
-    () =>
-      value.restored.map((message) => ({
-        ...message,
-        localDelivery: false,
-        materialized: true,
-      })),
-    [value, revision],
-  );
-  return {
-    hidden,
-    restored,
-    hasRemoved: value.keys.size > 0,
-    restore: () => {
-      value.restored = value.copies;
-      value.keys.clear();
-      value.revision++;
-      window.dispatchEvent(new CustomEvent(changed, { detail: key }));
-    },
-    remove: (message: Message) =>
-      removeMessageFromDevice(workspace, kind, chat || "", message, storage),
-  };
 }

@@ -1,12 +1,12 @@
 import { expect, it, vi } from "vitest";
 import { bindAudioFrames } from "./audioFrames";
-function caller() {
-  const frame = {
-    contentWindow: { postMessage: vi.fn() },
-  } as unknown as HTMLIFrameElement;
-  return { frame, origin: "studio-view://fixture.localhost", live: () => true };
+async function caller(audio: ReturnType<typeof bindAudioFrames>) {
+  const client = audio.createClient();
+  const received = vi.fn();
+  await client.listen(received);
+  return { ...client, received };
 }
-it("binds speech permits, uploads, progress and cancellation to the initiating frame", async () => {
+it("binds speech permits, uploads, progress and cancellation to the initiating owner", async () => {
   let events: (value: unknown) => void = () => {};
   let finish!: (value: unknown) => void;
   const invoke = vi.fn(async (method: string) => {
@@ -22,38 +22,27 @@ it("binds speech permits, uploads, progress and cancellation to the initiating f
     events = callback;
     return vi.fn<() => void>();
   });
-  const a = caller(),
-    b = caller();
-  await audio.request("desktop.prepareTranscription", {}, "prepare", a);
+  const a = await caller(audio),
+    b = await caller(audio);
+  await a.request("desktop.prepareTranscription", {}, "prepare");
   await expect(
-    audio.request(
-      "speech.uploadBegin",
-      { permit: "permit", size: 4 },
-      "bad",
-      b,
-    ),
+    b.request("speech.uploadBegin", { permit: "permit", size: 4 }, "bad"),
   ).rejects.toThrow("another view");
-  await audio.request(
-    "speech.uploadBegin",
-    { permit: "permit", size: 4 },
-    "begin",
-    a,
-  );
+  await a.request("speech.uploadBegin", { permit: "permit", size: 4 }, "begin");
   await expect(
-    audio.request("speech.uploadChunk", { transfer: "upload" }, "bad", b),
+    b.request("speech.uploadChunk", { transfer: "upload" }, "bad"),
   ).rejects.toThrow("another view");
-  await audio.request(
+  await a.request(
     "view.subscribe",
     { topic: "transcription", subscription: "progress" },
     "sub",
-    a,
   );
   const subscription = (
     invoke.mock.calls.find(
       (call) => call[0] === "view.subscribe",
     ) as unknown as [string, { subscription: string }]
   )[1].subscription;
-  const task = audio.request(
+  const task = a.request(
     "speech.transcribe",
     {
       transfer: "upload",
@@ -63,7 +52,6 @@ it("binds speech permits, uploads, progress and cancellation to the initiating f
       recording: "private-record",
     },
     "run",
-    a,
   );
   expect(invoke).toHaveBeenLastCalledWith(
     "speech.transcribe",
@@ -71,36 +59,29 @@ it("binds speech permits, uploads, progress and cancellation to the initiating f
     "run",
   );
   events({ event: subscription, value: { id: "other", completed: 1 } });
-  expect(a.frame.contentWindow!.postMessage).not.toHaveBeenCalled();
+  expect(a.received).not.toHaveBeenCalled();
   events({ event: subscription, value: { id: "attempt", completed: 1 } });
-  expect(a.frame.contentWindow!.postMessage).toHaveBeenCalledOnce();
+  expect(a.received).toHaveBeenCalledOnce();
   await expect(
-    audio.request(
-      "desktop.cancelTranscription",
-      { value: "attempt" },
-      "bad",
-      b,
-    ),
+    b.request("desktop.cancelTranscription", { value: "attempt" }, "bad"),
   ).rejects.toThrow("another view");
-  await audio.request(
+  await a.request(
     "desktop.cancelTranscription",
     { value: "attempt" },
     "cancel",
-    a,
   );
   finish({ text: "done" });
   await task;
   await expect(
-    audio.request(
+    a.request(
       "speech.transcribe",
       { transfer: "upload", permit: "permit", id: "retry" },
       "retry",
-      a,
     ),
   ).rejects.toThrow();
   audio.dispose();
 });
-it("rewrites microphone identities and stops a detached owner without affecting other frames", async () => {
+it("rewrites microphone identities and stops a detached owner without affecting other owners", async () => {
   let events: (value: unknown) => void = () => {};
   const invoke = vi.fn(
     async (_method: string, _params: unknown, _id?: string) => true,
@@ -109,22 +90,20 @@ it("rewrites microphone identities and stops a detached owner without affecting 
     events = callback;
     return vi.fn<() => void>();
   });
-  const a = caller(),
-    b = caller();
-  await audio.request("desktop.requestMicrophone", {}, "mic", a);
+  const a = await caller(audio),
+    b = await caller(audio);
+  await a.request("desktop.requestMicrophone", {}, "mic");
   await expect(
-    audio.request(
+    b.request(
       "view.subscribe",
       { topic: "microphone", subscription: "spy", capture: "c" },
       "spy",
-      b,
     ),
   ).rejects.toThrow();
-  await audio.request(
+  await a.request(
     "view.subscribe",
     { topic: "microphone", subscription: "audio", capture: "c" },
     "sub",
-    a,
   );
   const native = (
     invoke.mock.calls.find((call) => call[0] === "view.subscribe")![1] as {
@@ -132,22 +111,18 @@ it("rewrites microphone identities and stops a detached owner without affecting 
     }
   ).subscription;
   expect(native).not.toBe("audio");
-  await audio.request("media.captureStart", { capture: "c" }, "start", a);
+  await a.request("media.captureStart", { capture: "c" }, "start");
   await expect(
-    audio.request("media.captureStop", { capture: "c" }, "stop", b),
+    b.request("media.captureStop", { capture: "c" }, "stop"),
   ).rejects.toThrow();
   events({ event: native, value: { pcm: "AIAAAP9/" } });
-  expect(a.frame.contentWindow!.postMessage).toHaveBeenCalledWith(
-    {
-      kind: "studio-native-audio-event",
-      event: "audio",
-      value: { pcm: "AIAAAP9/" },
-    },
-    a.origin,
-  );
-  expect(b.frame.contentWindow!.postMessage).not.toHaveBeenCalled();
-  a.live = () => false;
-  await audio.request("desktop.requestMicrophone", {}, "new-owner", b);
+  expect(a.received).toHaveBeenCalledWith({
+    event: "audio",
+    value: { pcm: "AIAAAP9/" },
+  });
+  expect(b.received).not.toHaveBeenCalled();
+  a.close();
+  await b.request("desktop.requestMicrophone", {}, "new-owner");
   expect(invoke).toHaveBeenCalledWith("media.captureStop", { capture: native });
   audio.dispose();
 });
@@ -161,37 +136,31 @@ it("keeps the Rust voice peer and its events private to its owning server", asyn
     events = callback;
     return () => {};
   });
-  const a = caller(),
-    b = caller();
-  await audio.request("desktop.requestMicrophone", {}, "mic", a);
-  await audio.request(
+  const a = await caller(audio),
+    b = await caller(audio);
+  await a.request("desktop.requestMicrophone", {}, "mic");
+  await a.request(
     "view.subscribe",
     { topic: "voice", subscription: "events", session: "logical" },
     "sub",
-    a,
   );
   const params = invoke.mock.calls.find(
     (call) => call[0] === "view.subscribe",
   )![1] as { session: string; subscription: string };
   expect(params.session).toBe(params.subscription);
-  await audio.request("voice.create", { session: "logical" }, "start", a);
+  await a.request("voice.create", { session: "logical" }, "start");
   await expect(
-    audio.request(
-      "voice.answer",
-      { session: "logical", sdp: "foreign" },
-      "bad",
-      b,
-    ),
+    b.request("voice.answer", { session: "logical", sdp: "foreign" }, "bad"),
   ).rejects.toThrow();
   await expect(
-    audio.request("voice.close", { session: "logical" }, "bad-close", b),
+    b.request("voice.close", { session: "logical" }, "bad-close"),
   ).rejects.toThrow();
   events({
     event: params.subscription,
     value: { type: "state", state: "connected" },
   });
-  expect(a.frame.contentWindow!.postMessage).toHaveBeenCalledOnce();
-  expect(b.frame.contentWindow!.postMessage).not.toHaveBeenCalled();
+  expect(a.received).toHaveBeenCalledOnce();
+  expect(b.received).not.toHaveBeenCalled();
   audio.dispose();
   expect(invoke).toHaveBeenCalledWith("voice.close", {
     session: params.session,

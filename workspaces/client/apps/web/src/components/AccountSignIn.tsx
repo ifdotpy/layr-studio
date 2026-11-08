@@ -8,7 +8,7 @@ import { Button } from "@mantine/core";
 import { Check, Copy, ExternalLink, Plus, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type PostResult } from "../api";
-import type { Account, useAccounts } from "./Accounts";
+import type { Account, AccountsController } from "./Accounts";
 import { copyText } from "../clipboard/clipboard";
 import { subscribeProgress } from "../sync/subscriptions/progress";
 
@@ -36,7 +36,7 @@ export default function AccountSignIn({
   label,
   onConnected,
 }: {
-  state: ReturnType<typeof useAccounts>;
+  state: AccountsController;
   targetAccount?: Account;
   emailHint?: string;
   label?: string;

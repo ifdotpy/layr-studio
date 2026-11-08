@@ -1,67 +1,69 @@
 import { required } from "./componentTestFixtures";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
+import type { DesktopResponse } from "../generated/observableResources.ts";
+import type { ResourceStatus } from "../store/runtime.ts";
 import type { DesktopNotice } from "./desktopNotices";
 const mocks = vi.hoisted(() => ({
-  effects: [] as (() => void | (() => void))[],
-  accept: new Set<(snapshot: Snapshot | null) => void>(),
-  report: new Set<(error: unknown) => void>(),
+  desktop: { status: "loading" } as ResourceStatus<DesktopResponse>,
   notices: [] as DesktopNotice[],
   get: vi.fn(),
 }));
-vi.mock("react", () => ({
-  useEffect: (effect: () => void | (() => void)) => mocks.effects.push(effect),
-  useState: () => [
-    mocks.notices,
-    (notices: DesktopNotice[]) => {
-      mocks.notices = notices;
-    },
-  ],
+vi.mock("mobx-react-lite", () => ({
+  observer: <T>(component: T) => component,
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
-  useServerSync: () => ({
-    subscribeStateProjection: (
-      accept: (snapshot: Snapshot | null) => void,
-      report: (error: unknown) => void,
-    ) => {
-      mocks.accept.add(accept);
-      mocks.report.add(report);
-      return () => {
-        mocks.accept.delete(accept);
-        mocks.report.delete(report);
-      };
-    },
-  }),
+  useServerStore: () => ({ desktop: () => ({ current: mocks.desktop }) }),
 }));
+vi.mock("./desktopNotices", async (original) => {
+  const source = await original<typeof import("./desktopNotices")>();
+  return {
+    ...source,
+    desktopNotices(data: Parameters<typeof source.desktopNotices>[0]) {
+      return (mocks.notices = source.desktopNotices(data));
+    },
+  };
+});
 import SupervisorRecoveryNotice from "./SupervisorRecoveryNotice";
-let cleanup: (() => void) | undefined;
 afterEach(() => {
-  cleanup?.();
-  cleanup = undefined;
-  mocks.effects.length = 0;
+  mocks.desktop = { status: "loading" };
   mocks.notices = [];
-  expect(mocks.accept.size).toBe(0);
-  expect(mocks.report.size).toBe(0);
 });
 it("renders desktop stream notices and retains the full-disk notice on projection failure", () => {
-  SupervisorRecoveryNotice();
-  cleanup = required(mocks.effects[0])() || undefined;
   for (const level of ["warning", "critical", "full"] as const) {
-    for (const accept of mocks.accept)
-      accept({
-        runtime: {
-          desktop: {
-            diskSpace: { level, message: `Disk ${level}.` },
-            supervisorNotice: "Supervisor stopped.",
-          },
-        },
-      } as Snapshot);
+    mocks.desktop = {
+      status: "live",
+      data: {
+        application: "test",
+        backendBuild: "test",
+        browser: null,
+        liveUpdate: null,
+        mobileProtocol: 1,
+        nativeRuntime: null,
+        pid: 1,
+        protocol: 1,
+        providerVersions: { checkedAt: null, providers: [], warnings: [] },
+        publicOrigin: null,
+        restartEnvironment: {},
+        stateDir: "/fixture",
+        supervisor: null,
+        supervisorError: null,
+        supervisorFallback: false,
+        supervisorMode: false,
+        supervisorRequired: false,
+        diskSpace: { level, message: `Disk ${level}.` },
+        supervisorNotice: "Supervisor stopped.",
+      },
+    };
+    SupervisorRecoveryNotice({});
     expect(mocks.notices).toEqual([
       { id: "disk", level, text: `Disk ${level}.` },
       { id: "supervisor", level: "warning", text: "Supervisor stopped." },
     ]);
   }
-  for (const report of mocks.report) report(new Error("unavailable"));
+  if (mocks.desktop.status !== "live")
+    throw new Error("Expected the streamed desktop");
+  mocks.desktop = { status: "stale", data: mocks.desktop.data };
+  SupervisorRecoveryNotice({});
   expect(required(mocks.notices[0])).toEqual({
     id: "disk",
     level: "full",

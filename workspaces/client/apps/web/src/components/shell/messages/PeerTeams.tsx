@@ -20,11 +20,8 @@ import {
 import { ApiError, command, errorText } from "../../../api";
 import type { CommandRequest } from "../../../commands";
 import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../generated/sharedValues.ts";
-import { useSidebarBackend, type SidebarBackend } from "../../sidebar/services";
-import {
-  usePeerTeamMutation,
-  type PeerTeamRequest,
-} from "./peerTeamMutation.ts";
+import { useSidebarBackend } from "../../sidebar/services";
+import { PeerTeamMutation, type PeerTeamRequest } from "./peerTeamMutation.ts";
 import type { DeepReadonly } from "../../../deepReadonly.ts";
 import type { components } from "../../../generated/api.ts";
 export type PeerTeam = DeepReadonly<components["schemas"]["PeerTeamEntityDto"]>;
@@ -391,7 +388,7 @@ export const PeerTeamForm = observer(function PeerTeamForm({
       {error && (
         <p role="alert">
           {error}
-          {committed.current
+          {committed
             ? " The change was saved. Retry to refresh the sidebar."
             : rejected
               ? " Reload the project before you edit again."
@@ -427,9 +424,7 @@ export const PeerTeamForm = observer(function PeerTeamForm({
         <Button
           size="compact-xs"
           variant="subtle"
-          disabled={
-            pending || (draft.frozen && !rejected && !committed.current)
-          }
+          disabled={pending || (draft.frozen && !rejected && !committed)}
           onClick={close}
         >
           Cancel
@@ -453,7 +448,9 @@ function usePeerTeamForm(
       frozen: false,
     }),
   );
-  const mutation = usePeerTeamMutation(refresh, () => close());
+  const [mutation] = useState(
+    () => new PeerTeamMutation(refresh, () => close()),
+  );
   const id = useRef(team?.id || randomUUID());
   const revision = useRef(project.peerTeamsRevision || 0);
   const submit = () => {
@@ -477,7 +474,16 @@ function usePeerTeamForm(
       backend,
     );
   };
-  return { ...mutation, draft, submit, close };
+  return {
+    draft,
+    submit,
+    close,
+    error: mutation.error,
+    pending: mutation.pending,
+    rejected: mutation.rejected,
+    committed: mutation.committed,
+    reload: mutation.reload,
+  };
 }
 type TeamDraft = ReturnType<typeof usePeerTeamForm>["draft"];
 const PeerTeamNameInput = observer(function PeerTeamNameInput({
@@ -545,67 +551,37 @@ const PeerTeamCandidate = observer(function PeerTeamCandidate({
   );
 });
 
-// Keep the exact mutation after a lost response. A new drag must not replace it.
-export function usePeerTeamMove(
-  refresh?: () => Promise<void>,
-  notify?: (text: string) => void,
-  ownerForProject?: (
-    path: string,
-    member: string,
-    teamId: string | null,
-  ) => SidebarBackend,
-) {
-  const defaultBackend = useSidebarBackend();
-  const mutation = usePeerTeamMutation(refresh, (clear, reload) => {
-    clear();
-    if (!reload) notify?.("Team membership updated.");
-  });
-  const move = (project: Project, member: string, teamId: string | null) => {
-    if (mutation.request.current) return;
-    if (typeof project.path !== "string") return;
-    void mutation.submit(
-      {
-        action: "move",
-        path: project.path,
-        member,
-        team_id: teamId,
-        expected_revision: project.peerTeamsRevision || 0,
-        request_id: randomUUID(),
-      },
-      ownerForProject?.(project.path, member, teamId) || defaultBackend,
-    );
-  };
-  return {
-    move,
-    blocked: () => !!mutation.request.current,
-    feedback:
-      mutation.pending || mutation.error ? (
-        <div className="peer-team-form">
-          {mutation.pending ? (
-            <p role="status">Updating team…</p>
-          ) : (
-            <>
-              <p role="alert">
-                {mutation.error}{" "}
-                {mutation.committed.current
-                  ? "The change was saved. Retry to refresh."
-                  : mutation.rejected
-                    ? "Reload the project before another move."
-                    : "The result is unknown. Retry the same move."}
-              </p>
-              <Button
-                size="compact-xs"
-                onClick={() =>
-                  void (mutation.rejected
-                    ? mutation.reload()
-                    : mutation.submit())
-                }
-              >
-                {mutation.rejected ? "Reload project" : "Retry move"}
-              </Button>
-            </>
-          )}
-        </div>
-      ) : null,
-  };
-}
+export const PeerTeamMoveFeedback = observer(function PeerTeamMoveFeedback({
+  owner,
+}: {
+  owner: import("./peerTeamMutation.ts").PeerTeamMoveOwner;
+}) {
+  return owner.mutation.pending || owner.mutation.error ? (
+    <div className="peer-team-form">
+      {owner.mutation.pending ? (
+        <p role="status">Updating team…</p>
+      ) : (
+        <>
+          <p role="alert">
+            {owner.mutation.error}{" "}
+            {owner.mutation.committed
+              ? "The change was saved. Retry to refresh."
+              : owner.mutation.rejected
+                ? "Reload the project before another move."
+                : "The result is unknown. Retry the same move."}
+          </p>
+          <Button
+            size="compact-xs"
+            onClick={() =>
+              void (owner.mutation.rejected
+                ? owner.mutation.reload()
+                : owner.mutation.submit())
+            }
+          >
+            {owner.mutation.rejected ? "Reload project" : "Retry move"}
+          </Button>
+        </>
+      )}
+    </div>
+  ) : null;
+});

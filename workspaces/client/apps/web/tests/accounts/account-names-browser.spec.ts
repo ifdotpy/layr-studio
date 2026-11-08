@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
+import type { Account, AccountsState } from "./fixture-helpers.ts";
 import {
   fixtureUrl,
   fixtureAccount,

@@ -1,4 +1,5 @@
-import { autorun, computed } from "mobx";
+import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import { autorun, computed, reaction, runInAction } from "mobx";
 
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { createWaitingChildren } from "../components/agents/waitDetails.ts";
@@ -6,9 +7,8 @@ import { AgentSource, AgentStatus } from "../generated/api";
 import { afterEach, describe, expect, it } from "vitest";
 import { observableFixture } from "../components/observableFixture.tsx";
 import { createAgentCatalog } from "../components/agents/state.ts";
-import { createChatSnapshotSelector } from "./snapshotSelection";
-import { snapshotProjectionStatusReducer } from "./snapshotProjectionStatus";
-import type { Agent, Snapshot } from "../types";
+import { conversationActionsFixture } from "../components/observableFixture.tsx";
+import type { Agent } from "../types";
 
 const WORKERS = 512;
 const stops: Array<() => void> = [];
@@ -77,7 +77,6 @@ function changeWorker(
 
 // Exercise the selectors used by App; identity changes are not React render counts.
 function pipeline() {
-  const chat = createChatSnapshotSelector();
   const generated = observableFixture();
   const mirror = generated.mirror;
   const catalog = createAgentCatalog(generated.store);
@@ -95,9 +94,8 @@ function pipeline() {
   const wait = computed(() => ({ agents: children.agents }));
   stops.push(autorun(() => wait.get()));
   return (data: Snapshot) => {
-    const chosen = chat(data, "lead")!;
     mirror.apply(
-      chosen.threads.map((agent) => ({
+      data.threads.map((agent) => ({
         collection: "agentSummary" as const,
         id: agent.id,
         value: {
@@ -173,28 +171,34 @@ describe("worker-only snapshot changes", () => {
   });
 
   it("keep a repeated projection report from scheduling a render", () => {
-    const initial = {
-      startupError: "",
-      projectionError: "",
-      transportError: "",
-    };
-    for (const action of [
-      { type: "data-received" },
-      { type: "projection-recovered" },
-      { type: "startup-recovered" },
-      { type: "transport-changed", error: "" },
-    ] as const)
-      expect(snapshotProjectionStatusReducer(initial, action)).toBe(initial);
-    const failed = snapshotProjectionStatusReducer(initial, {
-      type: "projection-failed",
-      error: "x",
-    });
-    expect(failed).not.toBe(initial);
-    expect(
-      snapshotProjectionStatusReducer(failed, {
-        type: "projection-failed",
-        error: "x",
-      }),
-    ).toBe(failed);
+    const models = observableFixture(),
+      areas = conversationActionsFixture(() => {}, models.store),
+      owner = areas.startup;
+    let renders = 0;
+    const stop = reaction(
+      () => owner.error,
+      () => renders++,
+    );
+    try {
+      runInAction(() => {
+        owner.startupError = "";
+        owner.projectionError = "";
+        owner.transportError = "";
+      });
+      expect(renders).toBe(0);
+      runInAction(() => {
+        owner.projectionError = "x";
+      });
+      expect(renders).toBe(1);
+      runInAction(() => {
+        owner.projectionError = "x";
+      });
+      expect(renders).toBe(1);
+    } finally {
+      stop();
+      areas.dispose();
+      areas.scope.services.close();
+      models.store.dispose();
+    }
   });
 });

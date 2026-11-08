@@ -17,7 +17,7 @@ import {
 import { ConversationProvider } from "./conversation/navigation";
 import { requestTestEnvironment } from "./questions/requestTestFixture";
 import { UserMessage } from "./shell/messages/UserMessages";
-import { useConversationHistory } from "../conversation/historySession";
+import { useConversationHistory } from "../conversation/historyFixture.ts";
 
 const h = vi.hoisted(() => ({ get: vi.fn(), connection: vi.fn() }));
 vi.mock("../unsent/useUnsentText", async () => {

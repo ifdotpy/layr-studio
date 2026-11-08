@@ -1,3 +1,5 @@
+import type { ComponentSnapshot as Snapshot } from "./componentTestFixtures.ts";
+// @vitest-environment happy-dom
 import { observable, runInAction } from "mobx";
 import { createModelsMirror } from "../generated/observableResources.ts";
 vi.mock("mobx-react-lite", async (original) => ({
@@ -9,9 +11,21 @@ vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useAgentDetail: () => undefined,
 }));
-import { MessageSendStatus, ProviderKind } from "../generated/api.ts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Agent, Snapshot } from "../types";
+import {
+  MessageSendStatus,
+  ProviderKind,
+  AgentSource,
+} from "../generated/api.ts";
+import {
+  afterAll,
+  afterEach,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
+import type { Agent } from "../types";
 
 // Execute the real effects and read callbacks without rendering unrelated UI.
 const {
@@ -32,7 +46,6 @@ const {
   post,
   syncPost,
   reconcile,
-  subscription,
 } = vi.hoisted(() => ({
   projectionListeners: new Set<(snapshot: unknown) => void>(),
   contexts: new Map<unknown, unknown>(),
@@ -44,7 +57,7 @@ const {
     value: unknown;
     dependencies: readonly unknown[] | undefined;
   }>,
-  cursor: { state: 0, ref: 0, memo: 0 },
+  cursor: { state: 0, ref: 0, memo: 0, dirty: false, usage: false },
   watchers: new Map<string, (version?: unknown) => void>(),
   watchOptions: new Map<string, { waitForBaseline?: boolean }>(),
   resourceVersions: new Map<string, unknown>(),
@@ -58,11 +71,6 @@ const {
   post: vi.fn(),
   syncPost: vi.fn(),
   reconcile: vi.fn(async (..._args: unknown[]) => {}),
-  subscription: vi.fn(() => ({
-    data: undefined,
-    status: "loading",
-    error: null,
-  })),
 }));
 
 vi.mock("react", async (importOriginal) => {
@@ -74,6 +82,7 @@ vi.mock("react", async (importOriginal) => {
   return {
     ...original,
     useCallback: (callback: unknown) => callback,
+    useLayoutEffect: scheduleEffect,
     // No provider is mounted, so a context read returns its default value.
     useContext: (context: { _currentValue: unknown }) =>
       contexts.has(context) ? contexts.get(context) : context._currentValue,
@@ -105,8 +114,9 @@ vi.mock("react", async (importOriginal) => {
       return [
         entry.value,
         (value: unknown) => {
-          entry.value =
-            typeof value === "function" ? value(entry.value) : value;
+          const next = typeof value === "function" ? value(entry.value) : value;
+          if (!Object.is(next, entry.value)) cursor.dirty = true;
+          entry.value = next;
         },
       ];
     },
@@ -149,7 +159,10 @@ vi.mock("../sync/localDraft", async (importOriginal) => ({
     return result;
   },
 }));
-vi.mock("../sync/send", () => ({ reconcileOutboxReceipts: reconcile }));
+vi.mock("../sync/send", async (original) => ({
+  ...(await original<typeof import("../sync/send")>()),
+  reconcileOutboxReceipts: reconcile,
+}));
 // Mantine hooks use the real React dispatcher, which this harness replaces.
 vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
@@ -157,9 +170,6 @@ vi.mock("@mantine/hooks", async (original) => ({
 }));
 vi.mock("../sync/resume", () => ({ onResume: () => () => {} }));
 vi.mock("../usePendingCommands", () => ({ usePendingCommands: () => [] }));
-vi.mock("../sync/subscriptions", () => ({
-  useSubscription: subscription,
-}));
 vi.mock("../sync/subscriptions/events", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../sync/subscriptions/events")>()),
   watchResourceChanges: (
@@ -215,7 +225,10 @@ const sessionState = observable.box<
   >
 >({ status: "loading" }, { deep: false });
 const reconnect = vi.fn();
-const nativeStore = {
+const nativeOwner = observableFixture();
+afterAll(() => nativeOwner.store.dispose());
+const nativeStore: typeof nativeOwner.store = {
+  ...nativeOwner.store,
   state: () => ({ current: { status: "live", data: nativeState.current } }),
   agentDetail: () => ({ current: { status: "loading" } }),
   models: () => ({ current: { status: "live", data: modelState.current } }),
@@ -270,22 +283,101 @@ function publishQueue(revision: string, text: string | null) {
   ]);
 }
 
-import { useMessageReceipts } from "./useMessageReceipts";
+import { conversationActionsFixture } from "./observableFixture.tsx";
 import { useMessageQueue } from "./useMessageQueue";
 import { ApiError } from "../api";
 import { useWorkerModels, readWorkerModels } from "./agents/WorkerModelPicker";
-import { useAccounts } from "./Accounts";
-import Usage from "./Usage";
+import { createAccountsView } from "./Accounts";
+import { observableFixture } from "./observableFixture.tsx";
+import ProductUsage from "./Usage";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
+import { serializeStateCollections } from "../generated/observableResources.ts";
+function Usage({
+  agent,
+  opened = false,
+  visible = true,
+}: {
+  agent: Agent;
+  stateDir: string;
+  limits: null;
+  reload: () => unknown;
+  opened?: boolean;
+  visible?: boolean;
+}) {
+  runInAction(() => {
+    nativeState.apply([
+      ...serializeStateCollections(nativeState.current).filter(
+        (row) => row.collection !== "agentSummary",
+      ),
+      {
+        collection: "agentSummary",
+        id: agent.id,
+        value: {
+          ...agentSummaryFixture(agent.id),
+          ...agent,
+          isLead: !!agent.isLead,
+          inFlight: !!agent.inFlight,
+          projectServerId: agent.projectServerId ?? null,
+        },
+      },
+    ]);
+  });
+  cursor.usage = true;
+  return ProductUsage({ agent, opened, visible, onChange: () => {} });
+}
+
+function selectedReceipts(workspaceId = "") {
+  vi.stubGlobal("location", { origin: "https://fixture.test" });
+  const models = observableFixture([
+    { id: "lead", source: AgentSource.managed },
+  ]);
+  const area = conversationActionsFixture(() => {}, nativeStore);
+  Object.assign(area.scope.screen, { active: false });
+  area.startup.workspaceId = workspaceId;
+  area.navigation.selectedId = "lead";
+  const state = nativeStore.state;
+  Object.assign(area.scope.store, {
+    state: () => ({
+      current: {
+        status: "live",
+        data: {
+          ...nativeState.current,
+          agents: models.mirror.current.agents,
+        },
+      },
+    }),
+  });
+  cleanups.push(() => Object.assign(area.scope.store, { state }));
+  area.delivery.entries = [
+    {
+      id: "message-one",
+      body: { id: "message-one", room: "lead", text: "pending" },
+      created: 1,
+      status: { source: "device", state: { kind: "stored" } },
+    },
+  ];
+  const selected = area.selected;
+  const stop = selected.start();
+  cleanups.push(() => {
+    stop();
+    models.store.dispose();
+    area.scope.services.close();
+  });
+  return selected.receipts;
+}
 
 function mount<T>(action: () => T): T {
-  cursor.state = 0;
-  cursor.ref = 0;
-  cursor.memo = 0;
-  const result = action();
-  for (const effect of effects.splice(0)) {
-    const cleanup = effect();
-    if (cleanup) cleanups.push(cleanup);
-  }
+  let result: T;
+  do {
+    cursor.state = cursor.ref = cursor.memo = 0;
+    cursor.dirty = false;
+    cursor.usage = false;
+    result = action();
+    for (const effect of effects.splice(0)) {
+      const cleanup = effect();
+      if (cleanup) cleanups.push(cleanup);
+    }
+  } while (cursor.usage && cursor.dirty);
   return result;
 }
 
@@ -324,7 +416,6 @@ describe("resource read callers", () => {
     post.mockReset();
     syncPost.mockReset();
     reconcile.mockClear();
-    subscription.mockClear();
     contexts.clear();
     effects.length = 0;
     states.length = 0;
@@ -366,9 +457,7 @@ describe("resource read callers", () => {
   });
 
   it("never reconciles an outbox from a cached projection", async () => {
-    mount(() =>
-      useMessageReceipts("lead", "scope", "workspace", ["message-one"]),
-    );
+    mount(() => selectedReceipts("workspace"));
     receiveReceipts([
       {
         id: "message-one",
@@ -381,9 +470,7 @@ describe("resource read callers", () => {
   });
 
   it("waits for the workspace identity before it reads message receipts", async () => {
-    mount(() =>
-      useMessageReceipts("lead", "scope", undefined, ["message-one"]),
-    );
+    mount(() => selectedReceipts());
     expect(watchers.size).toBe(0);
     await vi.advanceTimersByTimeAsync(60_000);
     expect(get).not.toHaveBeenCalled();
@@ -391,7 +478,7 @@ describe("resource read callers", () => {
   });
 
   it("applies safe account summaries without baseline or update GETs", async () => {
-    const accountView = mount(() => useAccounts("workspace"));
+    const accountView = createAccountsView(nativeStore, get, "workspace");
     const initial = {
       accounts: [{ id: "connected", email: "person@example.test" }],
       archivedAccounts: [],
@@ -423,10 +510,7 @@ describe("resource read callers", () => {
       logins: [],
     };
     get.mockResolvedValue(response);
-    let accounts!: ReturnType<typeof useAccounts>;
-    mount(() => {
-      accounts = useAccounts("workspace");
-    });
+    const accounts = createAccountsView(nativeStore, get, "workspace");
     await accounts.refresh();
     expect(get).toHaveBeenCalledExactlyOnceWith("/api/accounts");
     expect(accounts.data).toEqual(response);
@@ -556,10 +640,10 @@ describe("resource read callers", () => {
         opened: true,
       }),
     );
-    expect(subscription).not.toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "session-cost" }),
-    );
-    expect(subscription).not.toHaveBeenCalledWith({ kind: "costs" });
+    expect(
+      [...watchers.keys()].some((key) => key.includes("session-cost")),
+    ).toBe(false);
+    expect(watchers.has(JSON.stringify({ kind: "costs" }))).toBe(false);
   });
 
   it("requests account cost interest once when the limits window opens without polling", async () => {
@@ -743,6 +827,14 @@ describe("resource read callers", () => {
       accept({
         runtime: {
           accountCostsByAccount: {
+            second: {
+              accountKey: "second",
+              at: 100,
+              stale: false,
+              refreshing: false,
+              error: null,
+              data: { last30DaysUSD: 5 },
+            },
             default: {
               accountKey: "default",
               at: 100,
@@ -754,7 +846,7 @@ describe("resource read callers", () => {
         },
       });
     render("second");
-    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledTimes(2);
     for (const accept of projectionListeners)
       accept({
         runtime: {
@@ -779,55 +871,52 @@ describe("resource read callers", () => {
     post.mockClear();
   });
 
-  it("waits for a new baseline after A to B to A before B's baseline arrives", async () => {
+  it("keeps distinct refresh attempts when selection returns from B to A", async () => {
     const rejections: Array<(error: Error) => void> = [];
     post.mockImplementation(
-      () =>
-        new Promise((_resolve, reject) => {
-          rejections.push(reject);
-        }),
+      () => new Promise((_resolve, reject) => rejections.push(reject)),
     );
     const render = (accountKey: string) =>
       mount(() =>
         Usage({
-          agent: { id: "lead", rootId: "lead", accountKey } as Agent,
-          stateDir: "private-fixture",
+          agent: { id: "lead", accountKey },
+          stateDir: "fixture",
           limits: null,
-          reload: vi.fn(),
+          reload() {},
           opened: true,
         }),
       );
     render("a");
-    const old = {
+    const saved = {
       accountKey: "a",
       at: 100,
-      error: null,
       stale: false,
       refreshing: false,
+      error: null,
       data: { last30DaysUSD: 3 },
     };
     for (const accept of projectionListeners)
-      accept({ runtime: { accountCostsByAccount: { a: old } } });
-    expect(post).toHaveBeenCalledTimes(1);
-    // React tears down the previous projection effect before installing the
-    // new account's effects; the existing effect fixture retains component refs.
-    for (const cleanup of cleanups.splice(0).reverse()) cleanup();
+      accept({ runtime: { accountCostsByAccount: { a: saved } } });
     render("b");
-    for (const cleanup of cleanups.splice(0).reverse()) cleanup();
     render("a");
-    expect(post).toHaveBeenCalledTimes(1);
-    const current = { ...old, at: 200, data: { last30DaysUSD: 4 } };
-    for (const accept of projectionListeners)
-      accept({ runtime: { accountCostsByAccount: { a: current } } });
-    expect(post).toHaveBeenCalledTimes(2);
-    expect(post).toHaveBeenLastCalledWith("/api/costs/interest", {
-      account_key: "a",
-    });
-    rejections[1]!(new Error("Newest A interest failed"));
+    expect(post).toHaveBeenCalledTimes(3);
+    rejections[1]!(new Error("Old B failed"));
     await Promise.resolve();
-    const view = JSON.stringify(render("a"));
-    expect(view).toContain("Refresh failed · stale estimate");
-    expect(view).toContain("$4.00");
+    expect(JSON.stringify(render("a"))).not.toContain(
+      "Refresh failed · stale estimate",
+    );
+    rejections[2]!(new Error("Newest A response lost"));
+    await Promise.resolve();
+    expect(JSON.stringify(render("a"))).toContain(
+      "Refresh failed · stale estimate",
+    );
+    for (const accept of projectionListeners)
+      accept({
+        runtime: { accountCostsByAccount: { a: { ...saved, at: 200 } } },
+      });
+    expect(JSON.stringify(render("a"))).not.toContain(
+      "Refresh failed · stale estimate",
+    );
     post.mockClear();
   });
 
@@ -850,7 +939,7 @@ describe("resource read callers", () => {
       }),
     );
 
-    expect(subscription).not.toHaveBeenCalledWith({ kind: "costs" });
+    expect(watchers.has(JSON.stringify({ kind: "costs" }))).toBe(false);
     for (const accept of projectionListeners)
       accept({
         runtime: {

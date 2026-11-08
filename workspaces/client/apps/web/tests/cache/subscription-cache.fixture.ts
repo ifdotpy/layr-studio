@@ -1,3 +1,5 @@
+import { observeGeneratedState } from "../../src/sync/generatedState.testHelper.ts";
+import { serializeStateCollections } from "../../src/generated/observableResources.ts";
 import { syncGet } from "../../src/api";
 import { createSyncClient } from "../../src/sync/client";
 import { createResourceEvents } from "../../src/sync/resourceEvents";
@@ -62,18 +64,17 @@ transport = createResourceEvents({
 transport.watchResourceChanges(ref, (version) => {
   if (!version) return;
   document.querySelector("output")!.textContent = String(version.revision);
-  requestAnimationFrame(() =>
-    requestAnimationFrame(() => void client.cacheSubscription(ref)),
-  );
 });
 // A returning app reads the state projection, as the application does.
-if (new URLSearchParams(location.search).has("saved"))
-  client.subscribeStateProjection(
-    (payload) => {
-      document.querySelector("data")!.textContent = JSON.stringify(payload);
-    },
-    () => {},
-  );
+observeGeneratedState(
+  client,
+  (payload) => {
+    document.querySelector("data")!.textContent = JSON.stringify(
+      serializeStateCollections(payload),
+    );
+  },
+  () => {},
+);
 const key = JSON.stringify([workspaceId, subscriptionKey(ref)]);
 declare global {
   interface Window {

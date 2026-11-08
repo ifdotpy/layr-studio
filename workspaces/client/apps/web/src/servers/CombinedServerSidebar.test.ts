@@ -1,7 +1,9 @@
-import {
-  useSidebarCommands,
-  type SidebarCommands,
-} from "../components/sidebar/commands.ts";
+import { stateFromFixture } from "./sidebarSourceFixture.ts";
+import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
+import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
+import { type ApiPostPath, type PostInput, type PostResult } from "../api.ts";
+import type { SidebarBackend } from "../components/sidebar/services.tsx";
+import { type SidebarCommands } from "../components/sidebar/commands.ts";
 import { CombinedSidebarServicesProvider } from "./combinedSidebarServices.ts";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
@@ -10,8 +12,8 @@ import { observer } from "mobx-react-lite";
 import { createSidebarList } from "../components/sidebar/viewModel.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
-import type { SidebarProps } from "../components/Sidebar.tsx";
-import CombinedServerSidebar from "./CombinedServerSidebar.tsx";
+import { CombinedSidebarFixture as CombinedServerSidebar } from "./CombinedServerSidebar.fixture.tsx";
+import type { SidebarListOwner } from "../app/shell/SidebarOwner.ts";
 import type { ServerCommand } from "./navigation.ts";
 import { createMergedSidebarSelector, mergeSidebar } from "./mergedSidebar.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot.ts";
@@ -20,23 +22,46 @@ import {
   agentEntities,
   withSidebarCollections,
 } from "./sidebarSourceFixture.ts";
-import { createSidebarSourceStore } from "./mergedSidebar.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot } from "../components/componentTestFixtures.ts";
+const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
+  Object.assign(componentSnapshot(...args), {
+    token: "",
+    stateDir: "/fixture",
+  });
 import { navigationSnapshot } from "./navigation.ts";
 import { localSidebarBackend } from "../components/sidebar/services.tsx";
 import { required } from "../components/componentTestFixtures.ts";
 
 const captured = vi.hoisted(() => ({
-  props: null as SidebarProps | null,
-  commands: null as SidebarCommands | null,
+  owner: null as SidebarListOwner | null,
+  props: null as {
+    rows: SidebarListOwner["model"]["rows"];
+    sidebar: SidebarListOwner["runtime"];
+  } | null,
+  commands: null as Pick<
+    SidebarCommands,
+    "open" | "changeProject" | "markUnread"
+  > | null,
   lists: 0,
   groups: null as unknown,
   ordered: null as unknown,
 }));
 vi.mock("../components/Sidebar", () => ({
-  default: observer((props: SidebarProps) => {
+  default: observer(({ owner }: { owner: SidebarListOwner }) => {
+    captured.owner = owner;
+    const props = { rows: owner.model.rows, sidebar: owner.runtime };
     captured.props = props;
-    captured.commands = useSidebarCommands();
+    captured.commands = {
+      open: (id) => {
+        void owner.run({ action: "open", id });
+      },
+      changeProject: (id) => {
+        void owner.run({ action: "change-project", id });
+      },
+      markUnread: (id, target) => {
+        void owner.run({ action: "mark-unread", id, target });
+      },
+    };
     const list = useMemo(() => {
       captured.lists++;
       return createSidebarList(
@@ -65,7 +90,10 @@ it("routes overlapping row ids and the completed-result CAS target to their owni
       withSidebarCollections({
         id,
         online: true,
-        sidebar: sidebarSnapshot(snapshotFixture([]), agentEntities(rows)),
+        sidebar: sidebarSnapshot(
+          stateFromFixture(snapshotFixture([])),
+          agentEntities(rows),
+        ),
       }),
     ),
   );
@@ -105,6 +133,7 @@ function combinedElement(
   model: ReturnType<typeof mergeSidebar>,
   executeCommand: (owner: string, command: ServerCommand) => Promise<void>,
   send: (owner: string, command: ServerCommand) => void = vi.fn(),
+  overrides: Partial<CombinedSidebarServices> = {},
 ) {
   return createElement(
     CombinedSidebarServicesProvider,
@@ -117,7 +146,7 @@ function combinedElement(
           ]),
         ),
         online: () => true,
-        refreshOwner: async () => navigationSnapshot(null, null, ""),
+        refreshOwner: async () => navigationSnapshot(undefined, null, ""),
         executeCommand,
         aliases: {},
         send,
@@ -125,6 +154,7 @@ function combinedElement(
         settings: vi.fn(),
         search: vi.fn(),
         notify: vi.fn(),
+        ...overrides,
       },
     },
     createElement(CombinedServerSidebar, {
@@ -151,7 +181,7 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
     id: "remote",
     online: true,
     sidebar: sidebarSnapshot(
-      snapshotFixture([]),
+      stateFromFixture(snapshotFixture([])),
       agentEntities([
         agentSummaryFixture("same", {
           markRead: initial,
@@ -185,7 +215,7 @@ it("freezes a queued read CAS target while its generated row mirror advances", a
   store.update(
     "remote",
     sidebarSnapshot(
-      snapshotFixture([]),
+      stateFromFixture(snapshotFixture([])),
       agentEntities([
         agentSummaryFixture("same", {
           markRead: {
@@ -212,7 +242,7 @@ it("preserves combined list computations on a tail rerender and replaces rows on
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const store = createSidebarSourceStore();
   const snapshot = (tail = "") =>
-    sidebarSnapshot(snapshotFixture([]), [
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
       ...agentEntities([agentSummaryFixture("same")]),
       { collection: "agentTail", id: "same", value: { id: "same", tail } },
     ]);
@@ -263,4 +293,182 @@ it("preserves combined list computations on a tail rerender and replaces rows on
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }
+});
+
+it("routes project and folder actions through their wire owners and refuses offline mutations", () => {
+  const model = mergeSidebar(
+    ["local", "remote"].map((id) =>
+      withSidebarCollections({
+        id,
+        online: true,
+        sidebar: {
+          ...sidebarSnapshot(stateFromFixture(snapshotFixture([])), []),
+          stateDir: "shared",
+          rooms: [],
+          projects: [
+            {
+              id: `${id}-project`,
+              path: `/${id}`,
+              folders: [{ id: "folder", name: id }],
+            },
+          ],
+          entities: agentEntities([
+            agentSummaryFixture("same", {
+              projectPath: `/${id}`,
+              projectFolder: "folder",
+            }),
+          ]),
+        },
+      }),
+    ),
+  );
+  const send = vi.fn(),
+    notify = vi.fn(),
+    settings = vi.fn(),
+    search = vi.fn();
+  let online = true;
+  renderToStaticMarkup(
+    combinedElement(
+      model,
+      vi.fn(async () => {}),
+      send,
+      { online: () => online, notify, settings, search },
+    ),
+  );
+  const owner = required(captured.owner),
+    path = model.projectKey("remote", "/remote"),
+    folder = model.folderKey("remote", "/remote", "folder");
+  const commands: ServerCommand[] = [
+    { action: "new-chat", path, folder },
+    { action: "new-shared-chat", path },
+    { action: "project-account", path },
+    { action: "project-folders", projectId: path },
+    { action: "delete-project", projectId: path },
+    { action: "remove-chat", id: model.chatKey("remote", "same"), room: false },
+  ];
+  for (const command of commands) void owner.run(command);
+  expect(send.mock.calls).toEqual([
+    [
+      "remote",
+      {
+        action: "new-chat",
+        path: "/remote",
+        folder: "folder",
+        projectId: "remote-project",
+        projectServerId: "remote",
+      },
+    ],
+    ["remote", { action: "new-shared-chat", path: "/remote" }],
+    ["remote", { action: "project-account", path: "/remote" }],
+    ["remote", { action: "project-folders", projectId: "/remote" }],
+    ["remote", { action: "delete-project", projectId: "/remote" }],
+    ["remote", { action: "remove-chat", id: "same", room: false }],
+  ]);
+  send.mockClear();
+  online = false;
+  for (const command of commands) void owner.run(command);
+  void owner.run({ action: "new-chat" });
+  void owner.run({ action: "add-project" });
+  expect(send).not.toHaveBeenCalled();
+  expect(notify).toHaveBeenCalledTimes(commands.length + 2);
+  void owner.run({ action: "settings" });
+  void owner.run({ action: "search", query: "", requestId: "search" });
+  expect(settings).toHaveBeenCalledOnce();
+  expect(search).toHaveBeenCalledOnce();
+});
+
+it("retains the exact rename across a lost reply and retries only refresh after acknowledgement", async () => {
+  const model = mergeSidebar(
+    ["local", "remote"].map((id) =>
+      withSidebarCollections({
+        id,
+        online: true,
+        sidebar: sidebarSnapshot(
+          stateFromFixture(snapshotFixture([])),
+          agentEntities([agentSummaryFixture("same")]),
+        ),
+      }),
+    ),
+  );
+  const values = new Map<string, string>(),
+    requests: unknown[] = [];
+  let transportFailure = true,
+    refreshFailure = true;
+  const backend: SidebarBackend = {
+    ...localSidebarBackend,
+    ownerId: "remote",
+    storage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+    },
+    saved<T>(key: string, fallback: T): T {
+      const value = values.get(key);
+      return value === undefined ? fallback : JSON.parse(value);
+    },
+    async post<Path extends ApiPostPath>(
+      _path: Path,
+      body: PostInput<Path>,
+    ): Promise<PostResult<Path>> {
+      requests.push(body);
+      if (transportFailure) throw Error("Lost reply");
+      return {} as PostResult<Path>;
+    },
+  };
+  const backends = new Map([
+    ["local", { ...backend, ownerId: "local" }],
+    ["remote", backend],
+  ]);
+  renderToStaticMarkup(
+    combinedElement(
+      model,
+      vi.fn(async () => {}),
+      vi.fn(),
+      {
+        backends,
+        refreshOwner: async () => {
+          if (refreshFailure) throw Error("Refresh unavailable");
+          return navigationSnapshot(undefined, null, "");
+        },
+      },
+    ),
+  );
+  const owner = required(captured.owner),
+    id = model.chatKey("remote", "same");
+  await expect(owner.renameChat(id, "Saved name")).rejects.toThrow(
+    "Lost reply",
+  );
+  transportFailure = false;
+  await expect(owner.renameChat(id, "Saved name")).rejects.toThrow(
+    "Refresh unavailable",
+  );
+  expect(requests).toHaveLength(2);
+  expect(requests[1]).toEqual(requests[0]);
+  expect(requests[0]).toMatchObject({ id: "same", name: "Saved name" });
+  refreshFailure = false;
+  await owner.renameChat(id, "Saved name");
+  expect(requests).toHaveLength(2);
+  expect(values.has("studio-sidebar-rename:same")).toBe(false);
+  const replacementRequests: unknown[] = [];
+  backends.set("remote", {
+    ...backend,
+    async post<Path extends ApiPostPath>(
+      _path: Path,
+      body: PostInput<Path>,
+    ): Promise<PostResult<Path>> {
+      replacementRequests.push(body);
+      return {} as PostResult<Path>;
+    },
+  });
+  await owner.renameChat(id, "Replacement backend");
+  expect(requests).toHaveLength(2);
+  expect(replacementRequests).toHaveLength(1);
+  expect(replacementRequests[0]).toMatchObject({
+    id: "same",
+    name: "Replacement backend",
+  });
 });

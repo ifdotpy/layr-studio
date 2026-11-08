@@ -1,8 +1,7 @@
 import type { ComponentProps, ReactNode } from "react";
 import type { Message } from "../../../types";
-import { conversationActionsFixture } from "../../observableFixture";
 import {
-  ConversationProvider,
+  TranscriptProvider,
   type ConversationTranscriptActions,
 } from "../navigation";
 import TurnHistory from "./TurnHistory";
@@ -21,18 +20,15 @@ export default function TurnHistoryFixture({
   requestCards?: ConversationTranscriptActions["requestCards"];
 }) {
   return (
-    <ConversationProvider
+    <TranscriptProvider
       value={{
-        ...conversationActionsFixture(),
-        transcript: {
-          renderMessage,
-          jumpToMessage: onJump,
-          ...(questionCards ? { questionCards } : {}),
-          ...(requestCards ? { requestCards } : {}),
-        },
+        renderMessage,
+        jumpToMessage: onJump,
+        ...(questionCards ? { questionCards } : {}),
+        ...(requestCards ? { requestCards } : {}),
       }}
     >
       <TurnHistory {...props} />
-    </ConversationProvider>
+    </TranscriptProvider>
   );
 }

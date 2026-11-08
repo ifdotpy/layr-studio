@@ -1,5 +1,6 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
 import { peerTeamRowFixtures as row } from "./peer-teams-rows.fixture.ts";
-import type { Snapshot } from "../../src/types.ts";
+
 import type { components } from "../../src/generated/api.ts";
 type PeerRequest =
   | components["schemas"]["PeerTeamMoveRequest"]

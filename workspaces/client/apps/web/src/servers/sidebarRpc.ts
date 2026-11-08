@@ -1,9 +1,6 @@
-import { randomUUID } from "../uuid";
-import { frameMessageOrigin } from "./frameOrigin";
 import {
   ApiError,
   NetworkTimeoutError,
-  READ_DEADLINE_MS,
   errorText,
   post,
   type PostBody,
@@ -92,118 +89,6 @@ export type SidebarRpcRequest =
         { action: "prepare-chat" | "mark-unread" }
       >;
     };
-type Pending = {
-  frame: HTMLIFrameElement;
-  owner: string;
-  origin: string;
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-  timer: ReturnType<typeof setTimeout>;
-};
-
-/** The reply must come from the exact frame used for this request. */
-export function createSidebarRpcClient(
-  surface: Window,
-  frames: Map<string, HTMLIFrameElement>,
-  ready: (owner: string) => Promise<void>,
-) {
-  const pending = new Map<string, Pending>();
-  let listening = false;
-  const receive = (event: MessageEvent) => {
-    if (event.data?.kind !== "studio-sidebar-result") return;
-    const request = pending.get(event.data.correlation);
-    if (
-      !request ||
-      event.source !== request.frame.contentWindow ||
-      event.origin !== request.origin ||
-      event.data.serverId !== request.owner
-    )
-      return;
-    pending.delete(event.data.correlation);
-    clearTimeout(request.timer);
-    if (event.data.error) {
-      const { message, status, timedOut, ...responseFields } = event.data.error;
-      const diagnostics = copySidebarErrorFields(responseFields);
-      request.reject(
-        typeof status === "number"
-          ? new ApiError(
-              message,
-              status,
-              {
-                error: message,
-                ...diagnostics,
-              },
-              Array.isArray(diagnostics.location)
-                ? diagnostics.location
-                : undefined,
-            )
-          : timedOut === true
-            ? new NetworkTimeoutError()
-            : new Error(message),
-      );
-    } else request.resolve(event.data.result);
-  };
-  const start = () => {
-    if (!listening) {
-      surface.addEventListener("message", receive);
-      listening = true;
-    }
-  };
-  return {
-    start,
-    async request(owner: string, value: SidebarRpcRequest): Promise<unknown> {
-      start();
-      await ready(owner);
-      const frame = frames.get(owner);
-      if (!frame?.isConnected || !frame.contentWindow)
-        throw new Error("The sidebar server is unavailable.");
-      const origin = frameMessageOrigin(frame.src);
-      const correlation = randomUUID();
-      return new Promise((resolve, reject) => {
-        const timer = setTimeout(
-          () => {
-            pending.delete(correlation);
-            reject(
-              new Error(
-                "The sidebar request result is unknown. Retry the saved request.",
-              ),
-            );
-          },
-          value.action === "post"
-            ? (value.options?.timeoutMs ?? 15000) + 2000
-            : READ_DEADLINE_MS + 5000,
-        );
-        pending.set(correlation, {
-          frame,
-          owner,
-          origin,
-          resolve,
-          reject,
-          timer,
-        });
-        frame.contentWindow!.postMessage(
-          {
-            kind: "studio-sidebar-request",
-            serverId: owner,
-            correlation,
-            value,
-          },
-          origin,
-        );
-      });
-    },
-    dispose() {
-      surface.removeEventListener("message", receive);
-      listening = false;
-      for (const request of pending.values()) {
-        clearTimeout(request.timer);
-        request.reject(new Error("The sidebar request result is unknown."));
-      }
-      pending.clear();
-    },
-  };
-}
-
 /** Keep token, mutation identity and sync coverage inside the owning frame. */
 export async function executeSidebarRequest(
   value: unknown,

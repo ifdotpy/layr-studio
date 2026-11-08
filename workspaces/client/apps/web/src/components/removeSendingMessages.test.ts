@@ -45,7 +45,7 @@ vi.mock("../api", () => ({
 vi.mock("../sync/send", () => ({
   stopRemovedMessage: mocks.stopRemovedMessage,
 }));
-vi.mock("../hooks", () => ({
+vi.mock("../conversation/messageView.ts", () => ({
   transcriptMessages: (items: Message[]) => items,
 }));
 vi.mock("./removedMessages", () => ({

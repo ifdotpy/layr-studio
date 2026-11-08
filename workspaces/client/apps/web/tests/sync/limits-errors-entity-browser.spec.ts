@@ -1,5 +1,10 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
-import { StudioErrorLevel } from "../../src/generated/api.ts";
+import {
+  StudioErrorLevel,
+  ProviderKind,
+  AccountStatus,
+} from "../../src/generated/api.ts";
 import type { FixtureResourceChange } from "./helpers.ts";
 import type { AgentEntityDto, SyncEntity } from "../playwright.ts";
 import type { components } from "../../src/generated/api.ts";
@@ -92,6 +97,13 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
     edges: [],
     runtime: {
       agents: [agent],
+      agentSummaries: [
+        agentSummaryFixture(agent.id, {
+          name: agent.name,
+          accountKey: agent.accountKey,
+          cwd: agent.cwd,
+        }),
+      ],
       rooms: [],
       tasks: [],
       monitors: [],
@@ -104,6 +116,23 @@ test("limits and Studio errors update from entities with no idle HTTP refresh", 
       work: [],
       nativeNotices: [],
       sidebarOrder: { groups: {}, revision: 0 },
+      accountsSummary: {
+        accounts: [
+          {
+            id: "default",
+            provider: ProviderKind.codex,
+            status: AccountStatus.ready,
+            label: "Fixture",
+            home: "",
+            source: "fixture",
+          },
+        ],
+        archivedAccounts: [],
+        defaultAccountKey: "default",
+        defaultAccountGroups: [],
+        supportsDelete: false,
+        supportsDisconnect: false,
+      },
       rateLimitsByAccount: { default: limits(11, 100) },
     },
   };

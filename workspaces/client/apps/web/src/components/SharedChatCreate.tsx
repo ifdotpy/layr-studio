@@ -6,7 +6,13 @@ import { ProviderMark, setupAccountName } from "./AccountTiles";
 import { Button, NativeSelect, Popover, TextInput } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, errorText, type PostBody } from "../api";
-import type { Snapshot } from "../types";
+import type { StateCollections } from "../generated/observableResources.ts";
+export type SharedCreationSource = {
+  readonly startup: { readonly creationScope: string };
+  readonly state:
+    | Pick<StateCollections, "projects" | "agents" | "rooms">
+    | undefined;
+};
 import type { AccountsState } from "./Accounts";
 import { useWorkerModels } from "./agents/WorkerModelPicker";
 import { AgentSetupPicker, type SetupRole } from "./agents/AgentSetupPicker";
@@ -206,14 +212,14 @@ const ParticipantFields = observer(function ParticipantFields({
     </div>
   );
 });
-export default function SharedChatCreate({
-  data,
+export default observer(function SharedChatCreate({
+  source,
   accounts,
   initialPath,
   refresh,
   created,
 }: {
-  data: Snapshot;
+  source: SharedCreationSource;
   accounts: AccountsState;
   initialPath?: string | undefined;
   refresh: () => Promise<void>;
@@ -221,14 +227,15 @@ export default function SharedChatCreate({
 }) {
   const { post, save, saved } = useServerApi();
 
-  const key = sharedCreationKey(data.stateDir);
+  const rooms = [...(source.state?.rooms.values() ?? [])];
+  const key = sharedCreationKey(source.startup.creationScope);
   const [attempt, setAttempt] = useState<Creation | null>(() =>
     saved(key, null),
   );
   const [path, setPath] = useState<string>(
     attempt?.body.path ||
       initialPath ||
-      data.runtime?.projects?.[0]?.path ||
+      [...(source.state?.projects.values() ?? [])][0]?.path ||
       "",
   );
   const [name, setName] = useState<string>(attempt?.body.name || "");
@@ -266,13 +273,13 @@ export default function SharedChatCreate({
     if (
       !attempt?.roomId ||
       finished.current ||
-      !data.runtime?.rooms.some((room) => room.id === attempt.roomId)
+      !rooms.some((room) => room.id === attempt.roomId)
     )
       return;
     finished.current = true;
     save(key, null);
     created(attempt.roomId);
-  }, [attempt?.roomId, data.runtime?.rooms, created, key]);
+  }, [attempt?.roomId, rooms, created, key]);
   const submit = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -326,7 +333,7 @@ export default function SharedChatCreate({
   const projects = [
     ...new Map(
       [
-        ...(data.runtime?.projects || []).flatMap((project) => {
+        ...[...(source.state?.projects.values() ?? [])].flatMap((project) => {
           const projectPath = project.path;
           if (typeof projectPath !== "string" || !projectPath) return [];
           const label = project.name;
@@ -339,7 +346,7 @@ export default function SharedChatCreate({
             ] as const,
           ];
         }),
-        ...data.threads.flatMap((thread) =>
+        ...[...(source.state?.agents.values() ?? [])].flatMap((thread) =>
           typeof thread.projectPath === "string" && thread.projectPath
             ? [[thread.projectPath, thread.projectPath] as const]
             : [],
@@ -447,4 +454,4 @@ export default function SharedChatCreate({
       </div>
     </form>
   );
-}
+});

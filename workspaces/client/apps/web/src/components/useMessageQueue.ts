@@ -8,15 +8,19 @@ import {
   useServerLocalDrafts,
   useServerStorageEventKey,
 } from "../servers/ServerServicesContext";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  makeAutoObservable,
+  observableRef,
+  computed,
+  compareShallow,
+} from "mobx";
 import { ApiError, errorText } from "../api";
 import type { QueueItemDto, QueueView } from "../api";
 import { onResume } from "../sync/resume";
 import type { paths } from "../generated/api";
-import { queueMutationMessageId } from "./queueMutationIdentity";
 import { resourceData } from "../store/runtime";
 import type { DeepReadonly } from "../deepReadonly";
-import { usePendingCommands } from "../usePendingCommands";
 
 type QueueMutation =
   paths["/api/queue"]["post"]["requestBody"]["content"]["application/json"];
@@ -41,18 +45,17 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function readStoredQueueRequest(storage: Storage, suffix: string): unknown {
-  let stored: string | null;
   try {
-    stored = outboxRequests(storage).get("queueChange", suffix);
+    const stored = outboxRequests(storage).get("queueChange", suffix);
+    if (stored === null) return null;
+    try {
+      const request: unknown = JSON.parse(stored);
+      return request;
+    } catch {
+      return stored;
+    }
   } catch {
     return "";
-  }
-  if (stored === null) return null;
-  try {
-    const request: unknown = JSON.parse(stored);
-    return request;
-  } catch {
-    return stored;
   }
 }
 
@@ -65,20 +68,17 @@ function isQueueMutation(value: unknown): value is QueueMutation {
     typeof value.expected_revision !== "string"
   )
     return false;
-  const hasMessageId = typeof value.id === "string";
-  if (value.action === "send_now")
-    return hasMessageId && typeof value.expectedText === "string";
-  if (value.action === "edit")
-    return (
-      hasMessageId &&
+  if (value.action === "reorder") return isStringArray(value.ordered_ids);
+  if (typeof value.id !== "string") return false;
+  return (
+    value.action === "first" ||
+    ((value.action === "send_now" || value.action === "edit") &&
       typeof value.expectedText === "string" &&
-      typeof value.text === "string"
-    );
-  if (value.action === "first") return hasMessageId;
-  return value.action === "reorder" && isStringArray(value.ordered_ids);
+      (value.action !== "edit" || typeof value.text === "string"))
+  );
 }
 
-export function useMessageQueue(p: {
+type QueueOptions = {
   id: string | null;
   enabled: boolean;
   scope: string;
@@ -86,215 +86,238 @@ export function useMessageQueue(p: {
   observed?: ((ids: string[]) => void) | undefined;
   edited?: ((id: string, text: string) => void) | undefined;
   refresh: () => Promise<void>;
-}) {
+};
+
+export function useMessageQueue(p: QueueOptions) {
   const store = useServerStore();
   const resources = useServerResources();
-  const { syncPost, command } = useServerApi();
-  const pendingCommands = usePendingCommands();
+  const api = useServerApi();
+  const { syncPost } = api;
   const storage = useServerStorage();
   const { updateQueueRequest } = useServerLocalDrafts();
   const serverStorageEventKey = useServerStorageEventKey();
-  const readQueueRequest = useCallback(
-    (suffix: string) => readStoredQueueRequest(storage, suffix),
-    [storage],
-  );
-
-  const suffix = `${p.scope}:${p.id}`;
-  const key = outboxRequests(storage).key("queueChange", suffix);
-  const currentKey = useRef(key);
-  currentKey.current = key;
-  const [failure, setFailure] = useState({ key, text: "" });
-  const [pendingState, setPending] = useState<{
-    key: string;
-    request: unknown;
-  }>({
-    key,
-    request: readQueueRequest(suffix),
-  });
-  const [busyKey, setBusy] = useState<string | null>(null);
-  const locks = useRef(new Set<string>());
-  const serial = useRef(0);
-  const current = p.enabled && p.id ? store.state().current : undefined;
-  const view =
-    (current && resourceData(current)?.queues.get(p.id!)) || emptyQueue;
-  const pending =
-    pendingState.key === key ? pendingState.request : readQueueRequest(suffix);
-
-  const reload = useCallback(async () => {
-    if (!p.enabled || !p.id) return;
-    // Queue revisions are opaque; only the state stream can order queue facts.
-    // Reopen this server's existing stream instead of applying an unordered GET.
-    resources.replaceStream();
-  }, [resources, p.enabled, p.id]);
-
-  useEffect(() => {
-    serial.current++;
-    setPending({ key, request: readQueueRequest(suffix) });
-  }, [key, suffix, readQueueRequest]);
-
-  const clearRequest = async (request: QueueMutation) => {
-    const next = await updateQueueRequest<unknown>(suffix, null, (current) =>
-      isQueueMutation(current) && current.request_id === request.request_id
-        ? null
-        : current,
+  const [locks] = useState(() => new Set<string>());
+  const queue = useMemo(() => {
+    const suffix = `${p.scope}:${p.id}`,
+      key = outboxRequests(storage).key("queueChange", suffix);
+    const queue = {
+      key,
+      active: true,
+      error: "",
+      busy: false,
+      pending: readStoredQueueRequest(storage, suffix),
+      commands: api.pending.list(),
+      get current() {
+        return p.enabled && p.id ? store.state().current : undefined;
+      },
+      get view() {
+        return (
+          (this.current &&
+            p.id &&
+            resourceData(this.current)?.queues.get(p.id)) ||
+          emptyQueue
+        );
+      },
+      get items() {
+        return this.view.items.filter(
+          (item) =>
+            !this.commands.some(
+              (entry) =>
+                entry.kind === "withdraw" &&
+                entry.target === p.id &&
+                entry.message === item.id,
+            ),
+        );
+      },
+      get loading() {
+        return !["live", "stale"].includes(this.current?.status || "");
+      },
+      get canReorder() {
+        return !!this.view.capabilities?.reorder;
+      },
+      setPending(request: unknown) {
+        this.pending = request;
+      },
+      finish() {
+        locks.delete(key);
+        this.busy = false;
+      },
+      syncPending() {
+        this.setPending(readStoredQueueRequest(storage, suffix));
+      },
+      syncCommands() {
+        this.commands = api.pending.list();
+      },
+      async reload() {
+        if (!p.enabled || !p.id) return;
+        // Queue revisions are opaque; only the state stream can order queue facts.
+        resources.replaceStream();
+      },
+      async clearRequest(request: QueueMutation) {
+        const next = await updateQueueRequest<unknown>(
+          suffix,
+          null,
+          (current) =>
+            isQueueMutation(current) &&
+            current.request_id === request.request_id
+              ? null
+              : current,
+        );
+        if (this.active) this.setPending(next);
+      },
+      async run(operation: () => Promise<void>) {
+        if (locks.has(key))
+          throw new Error("Wait for the current queue change.");
+        locks.add(key);
+        this.busy = true;
+        try {
+          await operation();
+          if (this.active) {
+            await this.reload().catch(this.fail);
+            void p.refresh().catch(() => {});
+          }
+        } catch (error) {
+          if (this.active) await this.reload().catch(() => {});
+          throw error;
+        } finally {
+          this.finish();
+        }
+      },
+      async execute(request: QueueMutation) {
+        if (!p.id || request.agent !== p.id)
+          throw new Error("The queue belongs to another chat.");
+        await this.run(async () => {
+          try {
+            await syncPost("/api/queue", request, {
+              workspaceId: p.workspaceId,
+            });
+            await this.clearRequest(request);
+            if (request.action === "edit" && request.id)
+              p.edited?.(request.id, request.text);
+          } catch (error) {
+            if (
+              error instanceof ApiError &&
+              [400, 401, 403, 404].includes(error.status)
+            )
+              await this.clearRequest(request);
+            throw error;
+          }
+        });
+      },
+      fail(error: unknown) {
+        this.error = errorText(error);
+      },
+      async mutate(change: QueueChange) {
+        if (!p.id) throw new Error("The queue belongs to another chat.");
+        const existing = readStoredQueueRequest(storage, suffix);
+        this.pending = existing;
+        if (existing !== null)
+          throw new Error(
+            "Retry the previous queue change before making another change.",
+          );
+        if (!this.view.capabilities?.receipts || !this.view.revision)
+          throw new Error(
+            "The queue is still loading or the server needs an update.",
+          );
+        const request = {
+          ...change,
+          agent: p.id,
+          expected_revision: this.view.revision,
+          request_id: randomUUID(),
+        } satisfies QueueMutation;
+        // Save before HTTP so a lost response or reload reuses the same operation.
+        await updateQueueRequest<unknown>(suffix, null, (current) => {
+          if (current !== null)
+            throw new Error(
+              "Retry the previous queue change before making another change.",
+            );
+          return request;
+        });
+        this.setPending(request);
+        return this.execute(request);
+      },
+      async retry() {
+        const request = readStoredQueueRequest(storage, suffix);
+        this.pending = request;
+        if (request !== null) {
+          if (!isQueueMutation(request))
+            throw new Error("The saved queue change cannot be verified.");
+          await this.execute(request);
+        }
+      },
+      async edit(item: DeepReadonly<QueueItemDto>, text: string) {
+        const current = this.view.items.find((row) => row.id === item.id);
+        await this.mutate({
+          action: "edit",
+          id: item.id,
+          text,
+          expectedText:
+            current?.text === text.trim() ? current.text : item.text,
+        });
+      },
+      async cancel(item: DeepReadonly<QueueItemDto>) {
+        const id = p.id;
+        if (!id) throw new Error("The queue belongs to another chat.");
+        await this.run(async () => {
+          await api.command.withdraw(id, item.id, {
+            workspaceId: p.workspaceId,
+          });
+          p.observed?.([item.id]);
+        });
+      },
+      sendNow(item: DeepReadonly<QueueItemDto>) {
+        return this.mutate({
+          action: "send_now",
+          id: item.id,
+          expectedText: item.text,
+        });
+      },
+      reorder(ids: string[]) {
+        return this.mutate({ action: "reorder", ordered_ids: ids });
+      },
+    };
+    return makeAutoObservable(
+      queue,
+      {
+        active: false,
+        pending: observableRef,
+        commands: observableRef,
+        items: computed({ equals: compareShallow }),
+      },
+      { autoBind: true },
     );
-    if (currentKey.current === key) setPending({ key, request: next });
-  };
+  }, [
+    p.scope,
+    p.id,
+    p.enabled,
+    p.workspaceId,
+    store,
+    resources,
+    api,
+    storage,
+    updateQueueRequest,
+    locks,
+  ]);
   useEffect(() => {
-    const syncPending = () =>
-      setPending({ key, request: readQueueRequest(suffix) });
+    queue.active = true;
     const changed = (event: StorageEvent) => {
       if (
-        serverStorageEventKey(event) === key ||
+        serverStorageEventKey(event) === queue.key ||
         serverStorageEventKey(event) === null
       )
-        syncPending();
+        queue.syncPending();
     };
     window.addEventListener("storage", changed);
-    const stop = onResume(syncPending);
-    syncPending();
+    const stopResume = onResume(queue.syncPending);
+    const stopCommands = api.pending.subscribe(queue.syncCommands);
+    queue.syncPending();
+    queue.syncCommands();
     return () => {
+      queue.active = false;
       window.removeEventListener("storage", changed);
-      stop();
+      stopResume();
+      stopCommands();
     };
-  }, [key, suffix, readQueueRequest, serverStorageEventKey]);
-  const execute = async (request: QueueMutation) => {
-    if (locks.current.has(key))
-      throw new Error("Wait for the current queue change.");
-    if (!p.id || request.agent !== p.id)
-      throw new Error("The queue belongs to another chat.");
-    locks.current.add(key);
-    setBusy(key);
-    serial.current++;
-    try {
-      await syncPost("/api/queue", request, {
-        workspaceId: p.workspaceId,
-      });
-      await clearRequest(request);
-      const messageId = queueMutationMessageId(request);
-      if (
-        request.action === "edit" &&
-        messageId &&
-        typeof request.text === "string"
-      )
-        p.edited?.(messageId, request.text);
-      if (currentKey.current === key) {
-        await reload().catch((error) => {
-          setFailure({ key, text: errorText(error) });
-        });
-        void p.refresh().catch(() => {});
-      }
-    } catch (error) {
-      if (
-        error instanceof ApiError &&
-        [400, 401, 403, 404].includes(error.status)
-      ) {
-        await clearRequest(request);
-      }
-      if (currentKey.current === key) await reload().catch(() => {});
-      throw error;
-    } finally {
-      locks.current.delete(key);
-      setBusy((value) => (value === key ? null : value));
-    }
-  };
-  const mutate = async (change: QueueChange) => {
-    if (!p.id) throw new Error("The queue belongs to another chat.");
-    const existing = readQueueRequest(suffix);
-    setPending({ key, request: existing });
-    if (existing !== null)
-      throw new Error(
-        "Retry the previous queue change before making another change.",
-      );
-    if (!view.capabilities?.receipts || !view.revision)
-      throw new Error(
-        "The queue is still loading or the server needs an update.",
-      );
-    const request = {
-      ...change,
-      agent: p.id,
-      expected_revision: view.revision,
-      request_id: randomUUID(),
-    } satisfies QueueMutation;
-    // Save before HTTP so a lost response or reload reuses the same operation.
-    await updateQueueRequest<unknown>(suffix, null, (current) => {
-      if (current !== null)
-        throw new Error(
-          "Retry the previous queue change before making another change.",
-        );
-      return request;
-    });
-    setPending({ key, request });
-    return execute(request);
-  };
-  // A withdrawn message leaves the list at once, before the stream confirms it.
-  const withdrawn = new Set(
-    pendingCommands.flatMap((entry) =>
-      entry.kind === "withdraw" &&
-      entry.target === p.id &&
-      entry.message !== undefined
-        ? [entry.message]
-        : [],
-    ),
-  );
-  return {
-    items: withdrawn.size
-      ? view.items.filter((item) => !withdrawn.has(item.id))
-      : view.items,
-    loading:
-      !current || (current.status !== "live" && current.status !== "stale"),
-    error: failure.key === key ? failure.text : "",
-    canReorder: !!view.capabilities?.reorder,
-    busy: busyKey === key,
-    pending,
-    reload,
-    retry: async () => {
-      const request = readQueueRequest(suffix);
-      setPending({ key, request });
-      if (request !== null) {
-        if (!isQueueMutation(request))
-          throw new Error("The saved queue change cannot be verified.");
-        await execute(request);
-      }
-    },
-    edit: async (item: DeepReadonly<QueueItemDto>, text: string) => {
-      const current = view.items.find((row) => row.id === item.id);
-      await mutate({
-        action: "edit",
-        id: item.id,
-        text,
-        expectedText: current?.text === text.trim() ? current.text : item.text,
-      });
-    },
-    // Withdraw is a command: the server deletes the queued message (see runtime-schema
-    // command.rs). A second click after a lost answer makes a new command, and the server
-    // answers that the message already left the queue.
-    cancel: async (item: DeepReadonly<QueueItemDto>) => {
-      if (!p.id) throw new Error("The queue belongs to another chat.");
-      if (locks.current.has(key))
-        throw new Error("Wait for the current queue change.");
-      locks.current.add(key);
-      setBusy(key);
-      serial.current++;
-      try {
-        await command.withdraw(p.id, item.id, { workspaceId: p.workspaceId });
-        p.observed?.([item.id]);
-        if (currentKey.current === key) {
-          await reload().catch((error) => {
-            setFailure({ key, text: errorText(error) });
-          });
-          void p.refresh().catch(() => {});
-        }
-      } catch (error) {
-        if (currentKey.current === key) await reload().catch(() => {});
-        throw error;
-      } finally {
-        locks.current.delete(key);
-        setBusy((value) => (value === key ? null : value));
-      }
-    },
-    sendNow: (item: DeepReadonly<QueueItemDto>) =>
-      mutate({ action: "send_now", id: item.id, expectedText: item.text }),
-    reorder: (ids: string[]) => mutate({ action: "reorder", ordered_ids: ids }),
-  };
+  }, [queue, api, serverStorageEventKey]);
+  return queue;
 }

@@ -1,3 +1,5 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
 import { observableFixture } from "../../src/components/observableFixture.tsx";
 const injectedStore = observableFixture();
@@ -13,8 +15,8 @@ declare global {
   }
 }
 const rootElement = document.getElementById("root")!;
-import { snapshotFixture } from "../../src/snapshotFixture.ts";
-import type { Snapshot } from "../../src/types.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+
 import { radioSnapshot } from "./radio-fixture.ts";
 
 import React, { useState } from "react";
@@ -22,7 +24,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal } from "@mantine/core";
 import "@mantine/core/styles.css";
 import SharedChatCreate from "../../src/components/SharedChatCreate.tsx";
-import Sidebar from "../../src/components/Sidebar.tsx";
+import Sidebar from "../../src/components/Sidebar.fixture.tsx";
 import "../../src/style.css";
 import "../../src/appearance.css";
 import "../../src/workspace-layout.css";
@@ -34,47 +36,50 @@ type RadioAccount = Pick<
   SharedAccounts["accounts"][number],
   "id" | "label" | "email" | "provider" | "status"
 >;
-// Base accounts omit archivedAccounts, defaultAccountGroups, logins, supportsDelete,
-// supportsDisconnect, and each account's home/source.
-function partialRadioAccounts(
-  value: Pick<SharedAccounts, "defaultAccountKey"> & {
-    accounts: RadioAccount[];
-  },
-): SharedAccounts {
-  return value as SharedAccounts;
-}
-const accounts = partialRadioAccounts({
+const accounts: SharedAccounts = {
+  archivedAccounts: [],
+  defaultAccountGroups: [],
+  logins: [],
+  supportsDelete: true,
+  supportsDisconnect: true,
   defaultAccountKey: "codex",
-  accounts: [
-    {
-      id: "codex",
-      label: "Personal",
-      email: "personal@example.com",
-      provider: "codex",
-      status: "ready",
-    },
-    {
-      id: "claude",
-      label: "Work",
-      email: "work@example.com",
-      provider: "claude",
-      status: "ready",
-    },
-    ...Array.from({ length: 5 }, (_, i): RadioAccount => ({
-      id: "extra" + i,
-      label: "Account " + (i + 3),
-      email: "account" + i + "@example.com",
-      provider: i < 3 ? "codex" : "claude",
-      status: "ready",
-    })),
-  ],
-});
+  accounts: (
+    [
+      {
+        id: "codex",
+        label: "Personal",
+        email: "personal@example.com",
+        provider: "codex",
+        status: "ready",
+      },
+      {
+        id: "claude",
+        label: "Work",
+        email: "work@example.com",
+        provider: "claude",
+        status: "ready",
+      },
+      ...Array.from({ length: 5 }, (_, i): RadioAccount => ({
+        id: "extra" + i,
+        label: "Account " + (i + 3),
+        email: "account" + i + "@example.com",
+        provider: i < 3 ? "codex" : "claude",
+        status: "ready",
+      })),
+    ] satisfies RadioAccount[]
+  ).map((account) => ({
+    ...account,
+    home: "/fixture/" + account.id,
+    source: "fixture",
+  })),
+};
 const initial: Snapshot = {
-  ...snapshotFixture(),
+  ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
   stateDir: "create-test",
   threads: [],
   runtime: {
-    ...snapshotFixture().runtime,
+    ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" })
+      .runtime,
     projects: [{ id: "p", path: "/p", name: "Project" }],
     rooms: [],
     requests: [],
@@ -138,7 +143,28 @@ function Fixture() {
       >
         {show && (
           <SharedChatCreate
-            data={data}
+            source={{
+              startup: { creationScope: data.stateDir },
+              state: {
+                projects: new Map(
+                  data.runtime.projects.map((project) => [project.id, project]),
+                ),
+                agents: new Map(
+                  data.threads.map((agent) => [
+                    agent.id,
+                    {
+                      ...agentSummaryFixture(agent.id),
+                      ...agent,
+                      inFlight: agent.inFlight === true,
+                      projectServerId: agent.projectServerId ?? null,
+                    },
+                  ]),
+                ),
+                rooms: new Map(
+                  data.runtime.rooms.map((room) => [room.id, room]),
+                ),
+              },
+            }}
             accounts={accounts}
             initialPath={show.path}
             refresh={refresh}

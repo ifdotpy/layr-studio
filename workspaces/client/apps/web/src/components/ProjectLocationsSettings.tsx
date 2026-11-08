@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { randomUUID } from "../uuid";
 import {
   useServerApi,
@@ -10,7 +11,7 @@ import { errorText } from "../api";
 import {
   saveProjectLocation,
   ProjectReceiptRefused,
-  type LocationProject,
+  type LocationProjectView as LocationProject,
   type ProjectServerChoice,
 } from "../servers/projectLocations";
 import ProjectDirectoryPicker from "./ProjectDirectoryPicker";
@@ -22,7 +23,7 @@ import {
 import "./project-locations.css";
 import { SettingsRow } from "./ui/primitives";
 
-export default function ProjectLocationsSettings({
+const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
   project,
   servers,
   initialServer,
@@ -230,4 +231,5 @@ export default function ProjectLocationsSettings({
       )}
     </div>
   );
-}
+});
+export default ProjectLocationsSettings;

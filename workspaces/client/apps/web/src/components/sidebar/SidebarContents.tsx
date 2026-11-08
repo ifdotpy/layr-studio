@@ -1,4 +1,5 @@
-import { useSidebarCommands } from "./commands.ts";
+import { randomUUID } from "../../uuid.ts";
+import { PeerTeamMoveFeedback } from "../shell/messages/PeerTeams.tsx";
 import { ActionIcon, Menu, TextInput } from "@mantine/core";
 import {
   MoreHorizontal,
@@ -32,9 +33,12 @@ const renderAttentionRow: Parameters<
   <SidebarRow key={row.id} row={row} priority={priority} />
 );
 
-export const SidebarContents = observer(function SidebarContents() {
+export const SidebarContents = observer(function SidebarContents({
+  notice,
+}: {
+  notice?: string | undefined;
+}) {
   const sidebar = useSidebarState();
-  const commands = useSidebarCommands();
   sidebarRender("SidebarContents");
   const content = (
     <>
@@ -56,21 +60,25 @@ export const SidebarContents = observer(function SidebarContents() {
           aria-label="Search chats"
           title="Search chats (Ctrl+K / ⌘K)"
           aria-keyshortcuts="Control+k Meta+k"
-          onClick={commands.onSearch}
+          onClick={() =>
+            void sidebar.run({
+              action: "search",
+              query: "",
+              requestId: randomUUID(),
+            })
+          }
         >
           <Search size={18} />
         </ActionIcon>
-        {commands.settings && (
-          <ActionIcon
-            variant="subtle"
-            aria-label="Studio settings"
-            title="Settings"
-            onClick={commands.settings}
-          >
-            <Settings size={18} />
-          </ActionIcon>
-        )}
-        {sidebar.ui.compact && (
+        <ActionIcon
+          variant="subtle"
+          aria-label="Studio settings"
+          title="Settings"
+          onClick={() => void sidebar.run({ action: "settings" })}
+        >
+          <Settings size={18} />
+        </ActionIcon>
+        {sidebar.visibility.isCompact && (
           <ActionIcon
             aria-label="Close conversations"
             onClick={sidebar.closeSidebar}
@@ -79,9 +87,9 @@ export const SidebarContents = observer(function SidebarContents() {
           </ActionIcon>
         )}
       </div>
-      {sidebar.p.notice && (
+      {notice && (
         <p role="alert" className="notice">
-          {sidebar.p.notice}
+          {notice}
         </p>
       )}
       <TextInput
@@ -95,7 +103,7 @@ export const SidebarContents = observer(function SidebarContents() {
           sidebar.setQuery(e.target.value);
         }}
       />
-      {sidebar.teamMove.feedback}
+      <PeerTeamMoveFeedback owner={sidebar.teamMove} />
       <nav id="chat-list" className="chat-scroll" aria-label="Chats">
         <SidebarAttention
           rows={sidebar.model.visibleRows}
@@ -116,37 +124,39 @@ export const SidebarContents = observer(function SidebarContents() {
                 {sidebar.archive ? "Show active chats" : "Show archived chats"}
               </Menu.Item>
               {/* A narrow sidebar hides these two buttons; the menu keeps them. */}
-              {commands.newSharedChat && (
-                <Menu.Item onClick={() => commands.newSharedChat?.()}>
-                  New shared chat
-                </Menu.Item>
-              )}
-              <Menu.Item onClick={commands.addProject}>Add project</Menu.Item>
+              <Menu.Item
+                onClick={() => void sidebar.run({ action: "new-shared-chat" })}
+              >
+                New shared chat
+              </Menu.Item>
+              <Menu.Item
+                onClick={() => void sidebar.run({ action: "add-project" })}
+              >
+                Add project
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
           <ActionIcon
             className="sidebar-new-chat"
             aria-label="New chat"
             title="New chat"
-            disabled={sidebar.p.creating}
-            onClick={() => commands.newChat()}
+            disabled={sidebar.creation.isCreating}
+            onClick={() => void sidebar.run({ action: "new-chat" })}
           >
             <SquarePen size={16} />
           </ActionIcon>
-          {commands.newSharedChat && (
-            <ActionIcon
-              className="sidebar-shared-chat"
-              aria-label="New shared chat"
-              title="New shared chat"
-              onClick={() => commands.newSharedChat?.()}
-            >
-              <Users size={16} />
-            </ActionIcon>
-          )}
+          <ActionIcon
+            className="sidebar-shared-chat"
+            aria-label="New shared chat"
+            title="New shared chat"
+            onClick={() => void sidebar.run({ action: "new-shared-chat" })}
+          >
+            <Users size={16} />
+          </ActionIcon>
           <ActionIcon
             className="sidebar-add-project"
             aria-label="Add project"
-            onClick={commands.addProject}
+            onClick={() => void sidebar.run({ action: "add-project" })}
           >
             <Plus size={18} />
           </ActionIcon>
@@ -165,29 +175,7 @@ export const SidebarContents = observer(function SidebarContents() {
   );
   return (
     <>
-      <SidebarFrame
-        scope={`${sidebar.p.services.cache.ownerId}:${sidebar.stateDir}`}
-        opened={sidebar.p.mobile}
-        {...(sidebar.p.collapsed !== undefined
-          ? { collapsed: sidebar.p.collapsed }
-          : {})}
-        close={sidebar.closeSidebar}
-        onCompactChange={sidebar.reportCompact}
-        {...(commands.settings
-          ? { drawerZIndex: layoutValues.layers.navigation }
-          : {})}
-        onEntered={() => {
-          if (
-            sidebar.lastOpened.current &&
-            document.getElementById("sidebar")?.contains(document.activeElement)
-          )
-            document
-              .querySelector<HTMLElement>(
-                `#sidebar [data-chat="${CSS.escape(sidebar.lastOpened.current)}"]`,
-              )
-              ?.focus();
-        }}
-      >
+      <SidebarFrame drawerZIndex={layoutValues.layers.navigation}>
         {content}
       </SidebarFrame>
       <SidebarOrganizationDialogs />

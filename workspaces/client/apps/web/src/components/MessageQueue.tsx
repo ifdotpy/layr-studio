@@ -1,4 +1,5 @@
 import type { DeepReadonly } from "../deepReadonly";
+import { observer } from "mobx-react-lite";
 type QueueItemDto = DeepReadonly<ApiQueueItemDto>;
 import { useUnsentText } from "../unsent/useUnsentText";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
@@ -128,7 +129,7 @@ export default function MessageQueue(props: Props) {
   return <ScopedMessageQueue key={props.scope} {...props} />;
 }
 
-function ScopedMessageQueue(p: Props) {
+const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
   const [current, setCurrent] = useState<EditDraft | null>(null);
   const [savedEdit, saveEditText, clearEdit] = useUnsentText(
     "queue-edit",
@@ -509,4 +510,4 @@ function ScopedMessageQueue(p: Props) {
       </div>
     </section>
   );
-}
+});

@@ -53,8 +53,8 @@ export function perfInstrumentation(apiOnly = false): Plugin {
           source;
         return replace(
           source,
-          "<ServerViewStoreProvider>",
-          "<ServerViewStoreProvider><PerformanceReporting api={serverViewApi} />",
+          "<ServerServicesProvider services={services}>",
+          "<ServerServicesProvider services={services}><PerformanceReporting api={serverViewApi} />",
           id,
         );
       }

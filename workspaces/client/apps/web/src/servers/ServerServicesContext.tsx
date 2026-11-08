@@ -1,5 +1,13 @@
+import type { ServerSettings } from "./ServerSettingsContext.tsx";
+import type { ServerAreas } from "../app/ServerAreasProvider.tsx";
+import type { AppScope } from "../app/contracts.ts";
+import { ScreenOwner } from "../app/startup/ScreenOwner.ts";
+import { createModelReader } from "./modelReader.ts";
+import { viewServer } from "./registry.ts";
+import { serverViewId } from "./environment.ts";
+import * as defaultSequences from "../sync/entitySequence.ts";
 import * as defaultUploads from "../sync/uploads";
-import { defaultServerAudio } from "../native/serverAudio";
+import { createServerAudio, defaultServerAudio } from "../native/serverAudio";
 import * as defaultRecordings from "../dictation/storage";
 import * as defaultLocalDrafts from "../sync/localDraft";
 import { serverStorageEventKey } from "./storage";
@@ -9,7 +17,7 @@ import * as defaultFileActions from "../fileActions";
 import * as defaultFileDialogs from "../native/fileDialogs";
 import { watchResourceReads } from "../sync/subscriptions/reads";
 import * as defaultActivity from "./activity";
-import { useSyncedDrafts } from "../sync/drafts";
+import { createDrafts } from "../sync/drafts";
 import * as defaultOutbox from "../sync/send";
 import {
   createContext,
@@ -39,6 +47,61 @@ export function ServerViewStoreProvider({ children }: { children: ReactNode }) {
   const [store] = useState(() => createServerStore(defaultResources));
   useEffect(() => () => store.dispose(), [store]);
   return <ServerStoreProvider value={store}>{children}</ServerStoreProvider>;
+}
+export function createServerViewServices(
+  createAreas: (scope: AppScope) => ServerAreas,
+): ServerServices {
+  const owner = viewServer(serverViewId || "local");
+  const store = createServerStore(defaultResources);
+  const screen = new ScreenOwner();
+  const audio = createServerAudio();
+  const drafts = createDrafts({
+    api: defaultApi,
+    resources: defaultResources,
+    serverId: owner.id,
+  });
+  let areas: ServerAreas | undefined;
+  const services: ServerServices = {
+    owner,
+    store,
+    screen,
+    shellSettings: undefined as ServerSettings | undefined,
+    drafts,
+    get areas() {
+      return (areas ??= createAreas({ services, store, screen }));
+    },
+    api: defaultApi,
+    sync: defaultSync.defaultSyncClient,
+    resources: defaultResources,
+    sidebarServices: localSidebarServices,
+    modelReader: createModelReader(owner, (options) =>
+      defaultApi.get("/api/models", options),
+    ),
+    audio,
+    chatCreations: defaultChatCreations,
+    recordings: defaultRecordings,
+    localDrafts: defaultLocalDrafts,
+    uploads: defaultUploads,
+    storageEventKey: serverStorageEventKey,
+    fileDialogs: defaultFileDialogs,
+    fileActions: defaultFileActions,
+    watchResourceReads,
+    activity: defaultActivity,
+    sequences: defaultSequences,
+    transcripts: defaultTranscripts,
+    outbox: defaultOutbox,
+    tokenRates: defaultTokenRates,
+    storage: serverLocalStorage,
+    async ready() {
+      await defaultApi.refreshSession();
+    },
+    close() {
+      areas?.dispose();
+      store.dispose();
+      audio.close();
+    },
+  };
+  return services;
 }
 
 /** A chat/project subtree receives the services of its own resource owner. */
@@ -90,12 +153,6 @@ export const useServerTokenRates = () =>
 
 export const useServerOutbox = () =>
   useServerServices()?.outbox ?? defaultOutbox;
-
-export function useServerDrafts() {
-  const services = useServerServices();
-  const useDrafts = services?.useDrafts ?? useSyncedDrafts;
-  return useDrafts();
-}
 
 export const useServerActivityScope = () =>
   useServerServices()?.activity ?? defaultActivity;

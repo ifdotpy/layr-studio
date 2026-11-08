@@ -151,7 +151,7 @@ test("Sync http connection budget browser", async ({
                   id: "current",
                   value: {
                     stateDir: "/fixture",
-                    marker: "revision-" + revision,
+                    tasksHistoryLimit: revision,
                   },
                   seq: revision,
                 }
@@ -220,7 +220,7 @@ test("Sync http connection budget browser", async ({
     await Promise.all(
       pages.map((page) =>
         page.waitForFunction(
-          () => window.syncHttpConnectionBudgetBrowserFixtureSnapshot?.data,
+          () => window.syncHttpConnectionBudgetBrowserFixtureSnapshot?.state,
         ),
       ),
     );
@@ -231,12 +231,12 @@ test("Sync http connection budget browser", async ({
     const started = Date.now();
     await pages[0].evaluate(() => {
       window.refresh =
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.refresh();
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refresh();
     });
     await pages[0].waitForFunction(
       () =>
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.error ||
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.data!.token,
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.error ||
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.api.getToken(),
       undefined,
       { timeout: 20000 },
     );
@@ -281,8 +281,9 @@ test("Sync http connection budget browser", async ({
       pages.map((page) =>
         page.waitForFunction(() => {
           return (
-            window.syncHttpConnectionBudgetBrowserFixtureSnapshot.data!.runtime
-              .marker === "revision-2"
+            window.syncHttpConnectionBudgetBrowserFixtureSnapshot
+              .state!.workspaces.values()
+              .next().value?.tasksHistoryLimit === 2
           );
         }),
       ),
@@ -322,7 +323,7 @@ test("Sync http connection budget browser", async ({
     await Promise.all(
       pages.map((page, index) =>
         page.evaluate(async (index) => {
-          await window.syncHttpConnectionBudgetBrowserFixtureSnapshot.refresh();
+          await window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refresh();
           const id = "exact-request-" + index;
           const receipt = await window.durableSend({
             id,

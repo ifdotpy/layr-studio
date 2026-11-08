@@ -1,3 +1,8 @@
+import {
+  defaultStudioPreferences,
+  normalizeStudioPreferences,
+  studioPreferencesStorageKey,
+} from "../studioPreferences.ts";
 import { required } from "../components/componentTestFixtures.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { mergePreferenceFields, preferenceCacheKey } from "./uiPreferenceMerge";
@@ -211,4 +216,22 @@ it("shows the server value when it wins over a clamped edit", () => {
   expect(
     JSON.parse(preferenceMemory.getItem("codex-studio-preferences-v1")!).theme,
   ).toBe("light");
+});
+
+it("normalizes an invalid stored object before merging a control edit", () => {
+  const storage = memoryStorage();
+  const previous = defaultStudioPreferences;
+  storage.setItem(
+    studioPreferencesStorageKey,
+    JSON.stringify({ ...previous, mainFontSize: 999 }),
+  );
+  const value = writePreferenceEdit(
+    studioPreferencesStorageKey,
+    previous,
+    { ...previous, theme: "dark" },
+    storage,
+    normalizeStudioPreferences,
+  );
+  expect(value.mainFontSize).toBe(previous.mainFontSize);
+  expect(value.theme).toBe("dark");
 });

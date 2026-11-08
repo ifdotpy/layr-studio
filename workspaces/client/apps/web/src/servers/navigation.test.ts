@@ -1,4 +1,5 @@
-import { snapshotFixture } from "../snapshotFixture";
+import { stateFromFixture } from "./sidebarSourceFixture.ts";
+import { componentSnapshot as snapshotFixture } from "../components/componentTestFixtures.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { navigationFromSummaries } from "./sidebarSourceFixture.ts";
 import { expect, it } from "vitest";
@@ -102,10 +103,18 @@ it("rejects malformed account providers and operations", () => {
 });
 
 it("uses the server-visible rows instead of stale move records", () => {
-  const data = snapshotFixture([
-    { id: "moved", movedTo: { server: "target", agentId: "moved", move: "m" } },
-  ]);
-  expect(navigationSnapshot(data, null, "", []).chats).toEqual([]);
+  const data = Object.assign(
+    snapshotFixture([
+      {
+        id: "moved",
+        movedTo: { server: "target", agentId: "moved", move: "m" },
+      },
+    ]),
+    { token: "", stateDir: "/fixture" },
+  );
+  expect(
+    navigationSnapshot(stateFromFixture(data), null, "", []).chats,
+  ).toEqual([]);
   const row = agentSummaryFixture("moved", { projectPath: "/source/project" });
   data.entityWorkspaceId = "workspace-target";
   const target = navigationFromSummaries(data, [row]);

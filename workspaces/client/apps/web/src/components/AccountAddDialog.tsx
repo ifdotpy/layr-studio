@@ -8,7 +8,7 @@ import {
 import { Modal, Stack, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { layerZIndex } from "../theme";
-import type { useAccounts } from "./Accounts";
+import type { AccountsController } from "./Accounts";
 import AccountSignIn from "./AccountSignIn";
 import ClaudeAddSignIn from "./ClaudeAddSignIn";
 import { ProviderKind } from "../generated/providerKind.ts";
@@ -28,7 +28,7 @@ export default observer(function AccountAddDialog({
 }: {
   opened: boolean;
   intent: AddAccountIntent | null;
-  state: ReturnType<typeof useAccounts>;
+  state: AccountsController;
   onClose: () => void;
 }) {
   const [draft] = useState(createAccountAddDraft);

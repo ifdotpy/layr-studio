@@ -2,7 +2,6 @@ import {
   hasTouchCapability,
   touchPointerMedia,
 } from "../../hooks/touchCapability";
-import { useEffect, useState } from "react";
 import { layoutValues } from "../../layout/layout-contract.generated";
 import {
   edgeRailGeometry,
@@ -40,60 +39,49 @@ export function readEdgeRailViewport(
   };
 }
 
-/** Observe the host root. Do not derive another keyboard or safe-area model. */
-export function useEdgeRail(
+export function observeEdgeRail(
+  record: (geometry: EdgeRailGeometry | null) => void,
   metrics: EdgeRailMetrics = layoutEdgeRailMetrics,
-  enabled = true,
 ) {
-  const [geometry, setGeometry] = useState<EdgeRailGeometry | null>(null);
   const { minimumInset, statusReserve, targetSize, statusColumnCenter } =
     metrics;
-  useEffect(() => {
-    if (!enabled) {
-      setGeometry(null);
-      return;
-    }
-    const root = document.getElementById("root");
-    if (!root) return;
-    const coarse = touchPointerMedia();
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const next = edgeRailGeometry(
-        readEdgeRailViewport(
-          getComputedStyle(root),
-          hasTouchCapability(coarse.matches, navigator.maxTouchPoints),
-        ),
-        { minimumInset, statusReserve, targetSize, statusColumnCenter },
-      );
-      setGeometry((current) =>
-        JSON.stringify(current) === JSON.stringify(next) ? current : next,
-      );
-    };
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(update);
-    };
-    const resize = new ResizeObserver(schedule);
-    resize.observe(root);
-    const mutation = new MutationObserver(schedule);
-    mutation.observe(document.documentElement, { attributes: true });
-    mutation.observe(root, { attributes: true });
-    coarse.addEventListener("change", schedule);
-    window.addEventListener("resize", schedule);
-    window.addEventListener("orientationchange", schedule);
-    window.visualViewport?.addEventListener("resize", schedule);
-    window.visualViewport?.addEventListener("scroll", schedule);
-    update();
-    return () => {
-      cancelAnimationFrame(frame);
-      resize.disconnect();
-      mutation.disconnect();
-      coarse.removeEventListener("change", schedule);
-      window.removeEventListener("resize", schedule);
-      window.removeEventListener("orientationchange", schedule);
-      window.visualViewport?.removeEventListener("resize", schedule);
-      window.visualViewport?.removeEventListener("scroll", schedule);
-    };
-  }, [enabled, minimumInset, statusReserve, targetSize, statusColumnCenter]);
-  return enabled ? geometry : null;
+  const root = document.getElementById("root");
+  if (!root) return;
+  const coarse = touchPointerMedia();
+  let frame = 0;
+  const update = () => {
+    frame = 0;
+    const next = edgeRailGeometry(
+      readEdgeRailViewport(
+        getComputedStyle(root),
+        hasTouchCapability(coarse.matches, navigator.maxTouchPoints),
+      ),
+      { minimumInset, statusReserve, targetSize, statusColumnCenter },
+    );
+    record(next);
+  };
+  const schedule = () => {
+    if (!frame) frame = requestAnimationFrame(update);
+  };
+  const resize = new ResizeObserver(schedule);
+  resize.observe(root);
+  const mutation = new MutationObserver(schedule);
+  mutation.observe(document.documentElement, { attributes: true });
+  mutation.observe(root, { attributes: true });
+  coarse.addEventListener("change", schedule);
+  window.addEventListener("resize", schedule);
+  window.addEventListener("orientationchange", schedule);
+  window.visualViewport?.addEventListener("resize", schedule);
+  window.visualViewport?.addEventListener("scroll", schedule);
+  update();
+  return () => {
+    cancelAnimationFrame(frame);
+    resize.disconnect();
+    mutation.disconnect();
+    coarse.removeEventListener("change", schedule);
+    window.removeEventListener("resize", schedule);
+    window.removeEventListener("orientationchange", schedule);
+    window.visualViewport?.removeEventListener("resize", schedule);
+    window.visualViewport?.removeEventListener("scroll", schedule);
+  };
 }

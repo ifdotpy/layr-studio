@@ -1,18 +1,17 @@
-import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { agentId } from "../../generated/observableResources.ts";
 import { resourceData } from "../../store/runtime.ts";
-import { agentId as observableAgentId } from "../../generated/observableResources.ts";
+import { workerCatalog } from "./WorkerModelPicker.tsx";
 import { observer } from "mobx-react-lite";
 
 import { AgentSource } from "../../generated/api";
 import { ProviderKind } from "../../generated/providerKind.ts";
 import { lazy, Suspense } from "react";
-import { Button, Group, Modal, Stack } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
-import type { Agent, Snapshot } from "../../types";
-import type { Account, useAccounts } from "../Accounts";
+import { Modal, Stack, Group, Button } from "@mantine/core";
 import { DelegationSettings, ExecutionPermissions } from "./ExecutionSettings";
 import SubagentConcurrencyControl from "./SubagentConcurrencyControl";
-import type { useWorkerModels } from "./WorkerModelPicker";
+import type { ServerAreas } from "../../app/contracts.ts";
+import type { AccountsController } from "../Accounts.tsx";
+import type { SettingsUi } from "../../app/settings/useAppSettings.ts";
 import "./chat-settings-dialog.css";
 
 const ClaudeSettings = lazy(() =>
@@ -21,48 +20,52 @@ const ClaudeSettings = lazy(() =>
   })),
 );
 
-type Props = {
-  settingsOpen: boolean;
-  accountModalOpen: boolean;
-  setSettingsOpen: (value: boolean) => void;
-  agent?: Agent | null | undefined;
-  lead?: Agent | null | undefined;
-  accounts: ReturnType<typeof useAccounts>;
-  notify: (message: string) => unknown;
-  agentModels: ReturnType<typeof useWorkerModels>;
-  data: Snapshot;
-  refresh: () => Promise<void>;
-  workspaceId: string;
-  creating: boolean;
-  newChat: (path?: string) => unknown;
-  project: () => void;
-  selectedAccount?: Account | undefined;
-  setClaudeLoginKey: (key: string) => void;
-};
-
-export const ChatSettingsDialog = observer(function ChatSettingsDialog(
-  p: Props,
-) {
-  const store = useServerStore();
-  const mobile = useMediaQuery("(max-width: 48em)");
-  const root = p.lead || p.agent;
-  const detail = p.agent
-    ? resourceData(store.agentDetail(observableAgentId(p.agent.id)).current)
-    : undefined;
-  const rootDetail = root
-    ? resourceData(store.agentDetail(observableAgentId(root.id)).current)
-    : undefined;
+export const ChatSettingsDialog = observer(function ChatSettingsDialog({
+  areas,
+  accounts,
+  settings,
+  onSignIn,
+  onNewChat,
+  onChangeProject,
+}: {
+  areas: ServerAreas;
+  accounts: AccountsController;
+  settings: Pick<
+    SettingsUi,
+    "chatOpen" | "accountModalOpen" | "closeChatSettings"
+  >;
+  onSignIn: (key: string) => void;
+  onNewChat?: (path: string | undefined) => void;
+  onChangeProject?: (
+    agent: NonNullable<ServerAreas["navigation"]["selectedAgent"]>,
+  ) => void;
+}) {
+  const { store, services } = areas.scope;
+  const agent = areas.navigation.selectedAgent;
+  const root = areas.navigation.selectedLead || agent;
+  const detail =
+    agent && resourceData(store.agentDetail(agentId(agent.id)).current);
+  const rootDetail =
+    root && resourceData(store.agentDetail(agentId(root.id)).current);
+  const key =
+    agent?.accountKey ||
+    root?.accountKey ||
+    (agent ? "default" : accounts.data.defaultAccountKey) ||
+    "default";
+  const catalog = workerCatalog(store, services.modelReader, key);
+  const account = [
+    ...accounts.data.accounts,
+    ...accounts.data.archivedAccounts,
+  ].find((a) => a.id === key);
   return (
     <Modal
-      opened={p.settingsOpen}
-      onClose={() => {
-        if (!p.accountModalOpen) p.setSettingsOpen(false);
-      }}
-      closeOnEscape={!p.accountModalOpen}
-      closeOnClickOutside={!p.accountModalOpen}
+      opened={settings.chatOpen}
+      onClose={settings.closeChatSettings}
+      closeOnEscape={!settings.accountModalOpen}
+      closeOnClickOutside={!settings.accountModalOpen}
       title="Chat settings"
       size="var(--studio-team-dialog-size)"
-      fullScreen={mobile}
+      fullScreen={areas.layout.isSettingsFullscreen}
       className="execution-settings-modal"
     >
       <div className="chat-execution-settings">
@@ -72,41 +75,38 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog(
               <div className="execution-team-fields">
                 <SubagentConcurrencyControl
                   lead={root}
-                  stateDir={p.data.stateDir}
-                  workspaceId={p.workspaceId}
-                  refresh={p.refresh}
+                  stateDir={accounts.scope || ""}
+                  workspaceId={areas.startup.workspaceId}
+                  refresh={areas.refresh}
                 />
                 <DelegationSettings
                   settingsRow
                   input={{ kind: "agent", summary: root, detail: rootDetail }}
-                  catalog={p.agentModels}
-                  accounts={p.accounts.data.accounts}
-                  refresh={p.refresh}
+                  catalog={catalog}
+                  accounts={accounts.data.accounts}
+                  refresh={areas.refresh}
                 />
               </div>
             </section>
           )}
           <section aria-label="Permissions">
             <Stack gap="sm" id="chat-settings-permissions">
-              {p.agent?.source === AgentSource.managed &&
-                p.agent.provider === ProviderKind.Codex && (
+              {agent?.source === AgentSource.managed &&
+                agent.provider === ProviderKind.Codex && (
                   <ExecutionPermissions
                     settingsRow
-                    input={{ kind: "agent", summary: p.agent, detail }}
-                    catalog={p.agentModels}
-                    refresh={p.refresh}
+                    input={{ kind: "agent", summary: agent, detail }}
+                    catalog={catalog}
+                    refresh={areas.refresh}
                   />
                 )}
-              {p.agent?.provider === ProviderKind.Claude && (
+              {agent?.provider === ProviderKind.Claude && (
                 <Suspense fallback={null}>
                   <ClaudeSettings
-                    key={p.agent.id}
-                    agent={p.agent}
-                    account={p.selectedAccount}
-                    onSignIn={(key) => {
-                      p.setSettingsOpen(false);
-                      p.setClaudeLoginKey(key);
-                    }}
+                    key={agent.id}
+                    agent={agent}
+                    account={account}
+                    onSignIn={onSignIn}
                   />
                 </Suspense>
               )}
@@ -114,33 +114,31 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog(
           </section>
         </Stack>
       </div>
-      <Group justify="flex-end" gap="xs" className="execution-dialog-actions">
-        {root?.projectPath && (
+      {root?.projectPath && (
+        <Group justify="flex-end" gap="xs" className="execution-dialog-actions">
           <Button
             size="xs"
             variant="default"
-            disabled={p.creating}
+            disabled={areas.creation.isCreating}
             onClick={() => {
-              p.setSettingsOpen(false);
-              void p.newChat(root?.projectPath || undefined);
+              settings.closeChatSettings();
+              onNewChat?.(root.projectPath || undefined);
             }}
           >
             New chat in this project
           </Button>
-        )}
-        {root?.projectPath && (
           <Button
             size="xs"
             variant="subtle"
             onClick={() => {
-              p.setSettingsOpen(false);
-              p.project();
+              settings.closeChatSettings();
+              onChangeProject?.(root);
             }}
           >
             Choose project folder
           </Button>
-        )}
-      </Group>
+        </Group>
+      )}
     </Modal>
   );
 });

@@ -12,7 +12,7 @@ import {
   NativeError,
   NativeNotice,
 } from "../../src/components/NativeNotice.tsx";
-import Usage from "../../src/components/Usage.tsx";
+import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
 const now = Number(new URLSearchParams(location.search).get("now"));
 const error = {
   codexErrorInfo: "usageLimitExceeded",

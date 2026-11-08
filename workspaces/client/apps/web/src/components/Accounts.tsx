@@ -62,7 +62,6 @@ import {
   useEffect,
   useLayoutEffect,
   useRef,
-  useMemo,
   useState,
   type SetStateAction,
   type ReactNode,
@@ -92,23 +91,14 @@ import {
   useMenuEscapeSuppression,
 } from "./closeMenuFromTriggerOnEscape";
 
-export type AccountsState = GetResult<"/api/accounts">;
+export type AccountsState = import("../deepReadonly.ts").DeepReadonly<
+  GetResult<"/api/accounts">
+>;
 export type Account = AccountsState["accounts"][number];
-export function useAccounts(
-  stateDir?: string,
-): Pick<
+export type AccountsController = Pick<
   ReturnType<typeof createAccountsView>,
   "data" | "setData" | "error" | "refresh" | "scope"
-> {
-  const { get } = useServerApi();
-  const store = useServerStore();
-  const view = useMemo(
-    () => createAccountsView(store, get, stateDir),
-    [store, get, stateDir],
-  );
-  useEffect(() => () => view.invalidate(), [view]);
-  return view;
-}
+>;
 /** Full login readbacks remain local; replicated summaries keep their generated identity. */
 export function createAccountsView(
   store: ReturnType<typeof useServerStore>,
@@ -131,16 +121,10 @@ export function createAccountsView(
   let latestRead = 0;
   const view = {
     scope: stateDir,
-    get accountSummary(): Omit<AccountsState, "logins"> | undefined {
+    get data(): AccountsState {
       const summary = stateDir
         ? resourceData(store.state().current)?.accountsSummary.get("current")
         : undefined;
-      return summary
-        ? (structuredClone({ ...summary }) as Omit<AccountsState, "logins">)
-        : undefined;
-    },
-    get data(): AccountsState {
-      const summary = view.accountSummary;
       return summary
         ? { ...summary, logins: readback.get().logins }
         : readback.get();
@@ -160,7 +144,7 @@ export function createAccountsView(
     invalidate() {
       latestRead++;
     },
-    async refresh() {
+    async refresh(): Promise<AccountsState | null> {
       const read = ++latestRead;
       try {
         const result = await get("/api/accounts");
@@ -177,11 +161,7 @@ export function createAccountsView(
       }
     },
   };
-  return makeAutoObservable(
-    view,
-    { accountSummary: computedStruct, data: computedStruct },
-    { autoBind: true },
-  );
+  return makeAutoObservable(view, { data: computedStruct }, { autoBind: true });
 }
 
 function AccountNameEditor({
@@ -700,7 +680,7 @@ const Accounts = observer(function Accounts({
   dialogsOnly = false,
   showTransferStatus = true,
 }: {
-  state: ReturnType<typeof useAccounts>;
+  state: AccountsController;
   agent?: Agent;
   accountKey?: string;
   onModalOpenChange?: (opened: boolean) => void;
@@ -766,31 +746,12 @@ const Accounts = observer(function Accounts({
     !!deleteChoice ||
     !!claudeLogin ||
     !!codexLogin;
+  const modalReporter = useRef(onModalOpenChange);
   useLayoutEffect(() => {
-    onModalOpenChange?.(
-      managerOnly
-        ? !!addOpen ||
-            !!renameChoice ||
-            !!claudeProfileChoice ||
-            !!disconnectChoice ||
-            !!deleteChoice ||
-            !!claudeLogin ||
-            !!codexLogin
-        : childModalOpen,
-    );
-    return () => onModalOpenChange?.(false);
-  }, [
-    childModalOpen,
-    managerOnly,
-    disconnectChoice,
-    deleteChoice,
-    claudeLogin,
-    codexLogin,
-    addOpen,
-    renameChoice,
-    claudeProfileChoice,
-    onModalOpenChange,
-  ]);
+    modalReporter.current = onModalOpenChange;
+    onModalOpenChange?.(childModalOpen);
+  }, [childModalOpen, onModalOpenChange]);
+  useLayoutEffect(() => () => modalReporter.current?.(false), []);
   const accounts = state.data.accounts || [];
   const selected =
     accounts.find((a) => a.id === accountKey) ||
@@ -1681,3 +1642,16 @@ const Accounts = observer(function Accounts({
   );
 });
 export default Accounts;
+
+/** Frame payloads use the same canonical readback-before-summary source as Accounts. */
+export function frameAccounts(data: AccountsState) {
+  return data.accounts.map((account) => ({
+    accountKey: account.id,
+    provider: account.provider,
+    email: account.email || null,
+    plan: account.plan || null,
+    status: account.status,
+    label: account.label,
+    isDefault: account.id === data.defaultAccountKey,
+  }));
+}

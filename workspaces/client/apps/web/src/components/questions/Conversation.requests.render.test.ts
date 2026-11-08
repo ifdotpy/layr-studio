@@ -1,3 +1,4 @@
+import { runInAction } from "mobx";
 // @vitest-environment happy-dom
 import { act, createElement, useRef } from "react";
 import { createRoot } from "react-dom/client";
@@ -40,14 +41,6 @@ vi.mock("../agents/state.ts", async (original) => ({
   ...(await original<typeof import("../agents/state.ts")>()),
   useWorkspace: () => ({ stateDir: "questions" }),
 }));
-vi.mock("../../conversation/historySession", () => ({
-  useConversationHistory: () => ({
-    items: h.items,
-    loaded: true,
-    before: null,
-    after: null,
-  }),
-}));
 vi.mock("../../usePendingCommands", () => ({
   usePendingCommands: () => h.empty,
 }));
@@ -58,12 +51,6 @@ vi.mock("../../conversation/liveText", async (original) => ({
 vi.mock("../../servers/activity", async (original) => ({
   ...(await original<typeof import("../../servers/activity")>()),
   useServerActivity: () => {},
-}));
-vi.mock("../useMessageReceipts", () => ({
-  useMessageReceipts: () => h.receipts,
-}));
-vi.mock("../removedMessages", () => ({
-  useRemovedMessages: () => ({ restored: h.empty, hidden: h.hidden }),
 }));
 vi.mock("../usePromptRecall", () => ({ usePromptRecall: () => ({}) }));
 vi.mock("../useConversationScroll", async (original) => ({
@@ -157,7 +144,9 @@ it.each(["add", "remove"] as const)(
       ],
       [{ id: "lead", canSend: true }],
     );
-    const agent = f.state.current.agents.get("lead")!;
+    const actions = conversationActionsFixture(() => {}, f.store);
+    actions.navigation.selectedId = "lead";
+    actions.selected.history.items = h.items;
     const root = createRoot(
       document.body.appendChild(document.createElement("div")),
     );
@@ -172,14 +161,10 @@ it.each(["add", "remove"] as const)(
               { value: f.store },
               createElement(
                 ConversationProvider,
-                { value: conversationActionsFixture() },
-                createElement(Conversation, {
-                  id: "lead",
-                  agent,
-                  detail: { id: "lead", canSend: true },
-                  sending: false,
-                  limits: null,
-                }),
+                {
+                  value: actions,
+                },
+                createElement(Conversation),
               ),
             ),
           ),
@@ -246,13 +231,16 @@ it("a pending withdrawal causes no repeated partition invalidation across render
     [agentSummaryFixture("lead", { rootId: "lead", isLead: true })],
     [{ id: "lead", canSend: true }],
   );
-  const agent = f.state.current.agents.get("lead");
   const root = createRoot(
     document.body.appendChild(document.createElement("div")),
   );
-  const actions = conversationActionsFixture();
+  const actions = conversationActionsFixture(() => {}, f.store);
+  actions.navigation.selectedId = "lead";
   const render = (sending: boolean) =>
     act(async () => {
+      runInAction(() => {
+        actions.delivery.sendingLock = sending ? Symbol() : null;
+      });
       root.render(
         createElement(
           MantineProvider,
@@ -262,14 +250,10 @@ it("a pending withdrawal causes no repeated partition invalidation across render
             { value: f.store },
             createElement(
               ConversationProvider,
-              { value: actions },
-              createElement(Conversation, {
-                id: "lead",
-                agent,
-                detail: { id: "lead", canSend: true },
-                sending,
-                limits: null,
-              }),
+              {
+                value: actions,
+              },
+              createElement(Conversation),
             ),
           ),
         ),

@@ -1,3 +1,4 @@
+import { AgentModelsFixture } from "./observableFixture.tsx";
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useAgentDetail: <T>(agent: T) => agent,
@@ -7,7 +8,7 @@ import {
   Overage,
   ProviderKind as GeneratedApiProviderKind,
 } from "../generated/api.ts";
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, expect, test, vi } from "vitest";
@@ -20,27 +21,16 @@ vi.mock("@mantine/core", async (importOriginal) => {
     Popover: Object.assign(
       (props: Parameters<typeof actual.Popover>[0]) =>
         createElement(actual.Popover, { ...props, withinPortal: false }),
-      { Target: actual.Popover.Target, Dropdown: actual.Popover.Dropdown },
+      {
+        Target: actual.Popover.Target,
+        Dropdown: actual.Popover.Dropdown,
+        extend: actual.Popover.extend,
+      },
     ),
   };
 });
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerStore: () => ({
-    agentDetail: () => ({ current: { status: "loading" } }),
-    sessionCost: () => ({ current: { status: "loading" } }),
-    costs: () => ({ current: { status: "loading" } }),
-  }),
-  useServerServices: () => null,
-  useServerApi: () => ({ get: vi.fn(), post: vi.fn(), saved: () => "" }),
-  useServerSync: () => ({ subscribeStateProjection: vi.fn(() => () => {}) }),
-  useServerResources: () => ({
-    subscribe: vi.fn(() => () => {}),
-    getSnapshot: () => ({ data: undefined, status: "stale", error: null }),
-  }),
-  useServerResourceReads: () => vi.fn(),
-}));
 vi.mock("./TokenRate", () => ({ default: () => null }));
-import Usage from "./Usage";
+import { UsageFixture } from "../app/settings/UsageFixture.tsx";
 
 afterEach(() => vi.useRealTimers());
 
@@ -161,3 +151,10 @@ test("account limits omit model eligibility details and retain limits and refres
       expect(html).not.toContain(detail);
   }
 });
+
+function Usage(props: ComponentProps<typeof UsageFixture>) {
+  return createElement(AgentModelsFixture, {
+    agents: [props.agent],
+    children: createElement(UsageFixture, props),
+  });
+}

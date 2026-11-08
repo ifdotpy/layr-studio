@@ -1,9 +1,22 @@
+import { AgentSource, AgentStatus } from "../generated/api.ts";
+// @vitest-environment happy-dom
+import { TranscriptHistory } from "../conversation/historySession.ts";
+import { selectMessageConnection } from "../hooks/messageConnection.ts";
+import type { Agent } from "../types.ts";
 import { useConversationActions } from "./conversation/navigation.ts";
 import { conversationActionsFixture } from "./observableFixture.tsx";
-vi.mock("./conversation/navigation.ts", async (original) => ({
-  ...(await original<typeof import("./conversation/navigation.ts")>()),
-  useConversationActions: vi.fn(),
-}));
+vi.mock("./conversation/navigation.ts", async () => {
+  const { createArea } = await import("./area.ts");
+  const [TranscriptProvider, useTranscriptActions] =
+    createArea<
+      import("./conversation/navigation.ts").ConversationTranscriptActions
+    >("Transcript");
+  return {
+    useConversationActions: vi.fn(),
+    TranscriptProvider,
+    useTranscriptActions,
+  };
+});
 vi.mock("./questions/requestView", () => ({
   createRequestsView: () => ({ requests: [] }),
 }));
@@ -80,25 +93,8 @@ vi.mock("@mantine/hooks", async (original) => ({
   useMediaQuery: () => false,
   useNetwork: () => ({ online: h.online }),
 }));
-vi.mock("../conversation/historySession", async () => {
-  const { selectMessageConnection } =
-    await import("../hooks/messageConnection");
-  return {
-    useConversationHistory: () => ({
-      items: [],
-      loaded: true,
-      connection: selectMessageConnection(h.health, h.activity, h.detail),
-    }),
-  };
-});
-vi.mock("./useMessageReceipts", () => ({
-  useMessageReceipts: () => new Map(),
-}));
 vi.mock("./questions/useQuestionCards", () => ({
   createQuestionCards: () => () => undefined,
-}));
-vi.mock("./removedMessages", () => ({
-  useRemovedMessages: () => ({ restored: [], hidden: () => false }),
 }));
 vi.mock("./usePromptRecall", () => ({ usePromptRecall: () => ({}) }));
 vi.mock("./useConversationScroll", () => ({
@@ -132,16 +128,15 @@ import { ConversationView as Conversation } from "./Conversation";
 import { LiveAgentPhase } from "./agents/AgentPhase";
 import { observableFixture } from "./observableFixture.tsx";
 import { localTime } from "../local-time";
-import { useOfflineSendFeedback } from "./message-delivery/useOfflineSendFeedback";
+import { DeliveryOwner } from "../app/conversation/DeliveryOwner.ts";
 import type { OutgoingMessage } from "../sync/send";
 
-type Props = ComponentProps<typeof Conversation>;
 const agent = {
   id: "lead",
-  source: "managed",
-  status: "running",
+  source: AgentSource.managed,
+  status: AgentStatus.running,
   activity: { phase: "thinking" },
-} as Props["agent"];
+} satisfies Agent;
 const saved: OutgoingMessage = {
   id: "message-1",
   body: { id: "message-1", room: "lead", text: "Hello" },
@@ -152,46 +147,58 @@ const saved: OutgoingMessage = {
   created: 1,
 };
 
-// Run the real feedback hook across offline/online renders. Effects only update
-// hook state; they cannot send or acknowledge the stored message.
+let feedbackFixture: ReturnType<typeof conversationActionsFixture> | undefined;
+let feedbackOwner: DeliveryOwner | undefined;
+let feedbackEntries: OutgoingMessage[] = [],
+  feedbackErrors: string[] = [];
 function feedback(entries: OutgoingMessage[], errors: string[] = []) {
-  h.feedback = true;
-  let result: ReturnType<typeof useOfflineSendFeedback>;
-  for (let render = 0; render < 10; render++) {
-    h.cursor = 0;
-    h.dirty = false;
-    result = useOfflineSendFeedback(entries, "lead", errors);
-    h.effects.splice(0).forEach((effect) => effect());
-    if (!h.dirty) break;
-  }
-  expect(h.dirty).toBe(false);
-  h.feedback = false;
-  return result!;
+  feedbackEntries = entries;
+  feedbackErrors = errors;
+  feedbackFixture ??= conversationActionsFixture();
+  feedbackFixture.navigation.selectedId = "lead";
+  feedbackOwner ??= feedbackFixture.delivery;
+  feedbackFixture.startup.startupError = feedbackErrors[0] || "";
+  feedbackOwner.entries = feedbackEntries;
+  feedbackOwner.online = h.online;
+  feedbackOwner.retainDiagnostics();
+  return feedbackOwner;
 }
 function phaseElements(
   node: ReactNode,
 ): ReactElement<ComponentProps<typeof LiveAgentPhase>>[] {
   if (Array.isArray(node)) return node.flatMap(phaseElements);
   if (!isValidElement<{ children?: ReactNode }>(node)) return [];
-  if (node.type === LiveAgentPhase)
-    return [node as ReactElement<ComponentProps<typeof LiveAgentPhase>>];
+  if (
+    isValidElement<ComponentProps<typeof LiveAgentPhase>>(node) &&
+    node.type === LiveAgentPhase
+  )
+    return [node];
   return phaseElements(node.props.children);
 }
-function renderActivity(pending: boolean, currentAgent = agent) {
-  vi.mocked(useConversationActions).mockReturnValue({
-    ...conversationActionsFixture(),
-  });
+function renderActivity(
+  pending: boolean,
+  currentAgent: Agent | undefined = agent,
+) {
   const fixture = observableFixture(currentAgent ? [currentAgent] : []);
   h.store = fixture.store;
-  const tree = Conversation({
-    id: "lead",
-    agent: currentAgent,
-    detail: currentAgent,
-    sending: false,
-    limits: null,
-    offlineSendPending: pending,
-    offlineSendDetails: "Failed to fetch",
-  });
+  const actions = conversationActionsFixture(() => {}, fixture.store);
+  actions.navigation.selectedId = "lead";
+  actions.selected.detailSlot = currentAgent
+    ? { current: { status: "live", data: currentAgent } }
+    : undefined;
+  if (!(actions.selected.history instanceof TranscriptHistory))
+    throw new Error("Expected transcript history");
+  actions.selected.history.connection = selectMessageConnection(
+    h.health,
+    h.activity,
+    h.detail,
+  );
+  actions.delivery.entries = pending ? [saved] : [];
+  actions.delivery.online = !pending;
+  actions.delivery.retainDiagnostics();
+  actions.delivery.consumed = ["Failed to fetch"];
+  vi.mocked(useConversationActions).mockReturnValue(actions);
+  const tree = Conversation();
   const phases = phaseElements(tree);
   expect(phases).toHaveLength(1);
   expect(required(phases[0]).props.savedMessagePending).toBe(pending);
@@ -205,6 +212,9 @@ function renderActivity(pending: boolean, currentAgent = agent) {
   );
 }
 afterEach(() => {
+  feedbackFixture?.scope.services.close();
+  feedbackFixture = undefined;
+  feedbackOwner = undefined;
   h.health = "live";
   h.activity = "open";
   h.detail = {};
@@ -216,11 +226,11 @@ afterEach(() => {
 });
 
 it("renders a saved message with neutral text and icon through the conversation while transport is live", () => {
-  expect(feedback([saved]).pending).toBe(true);
+  expect(feedback([saved]).offlinePending).toBe(true);
   h.online = true;
   const retained = feedback([saved]);
-  expect(retained.pending).toBe(true);
-  const markup = renderActivity(retained.pending);
+  expect(retained.offlinePending).toBe(true);
+  const markup = renderActivity(retained.offlinePending);
   expect(markup).toContain("Your message is saved and waiting for delivery.");
   expect(markup).toContain("lucide-clock");
   expect(markup).not.toContain("Connection lost");
@@ -234,7 +244,9 @@ it("keeps actual retry activity beside the saved-message notice", () => {
   h.health = "degraded";
   h.activity = "connecting";
   h.detail = { failure: "stream-error" };
-  const markup = renderActivity(feedback([saved], ["Failed to fetch"]).pending);
+  const markup = renderActivity(
+    feedback([saved], ["Failed to fetch"]).offlinePending,
+  );
   expect(markup).toContain(
     "Connection failed. Reconnecting… Your message is saved and waiting for delivery.",
   );
@@ -323,10 +335,10 @@ it("retains normal compact activity when there is no delivery notice", () => {
   expect(markup).not.toContain("Your message is saved");
 });
 it("retains terminal transcript errors after delivery instead of duplicating the phase banner", () => {
-  const failed = {
+  const failed: Agent = {
     ...agent,
-    status: "failed",
+    status: AgentStatus.failed,
     error: "Provider failed",
-  } as Props["agent"];
+  };
   expect(renderActivity(false, failed)).toBe("");
 });

@@ -1,16 +1,7 @@
 import { MessageSendStatus } from "../generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
-const owner = vi.hoisted(() => ({}) as Storage);
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerStorage: () => owner,
-}));
-vi.mock("react", () => ({
-  useCallback: (value: unknown) => value,
-  useMemo: (value: () => unknown) => value(),
-  useSyncExternalStore: (_subscribe: unknown, snapshot: () => unknown) =>
-    snapshot(),
-}));
-import { useRemovedMessages } from "./removedMessages";
+import { serverLocalStorage } from "../servers/storage.ts";
+import { createRemovedMessages } from "./removedMessages.ts";
 import type { Message } from "../types";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -22,12 +13,27 @@ it("hides and restores a message only in the current page", () => {
     text: "text",
     deliveryStatus: { source: "server", status: MessageSendStatus.sending },
   };
-  const initial = useRemovedMessages("workspace", "agent", "chat");
+  const initial = createRemovedMessages(
+    "workspace",
+    "agent",
+    "chat",
+    serverLocalStorage,
+  );
   initial.remove(message);
-  const hidden = useRemovedMessages("workspace", "agent", "chat");
+  const hidden = createRemovedMessages(
+    "workspace",
+    "agent",
+    "chat",
+    serverLocalStorage,
+  );
   expect(hidden.hidden(message)).toBe(true);
   hidden.restore();
-  const restored = useRemovedMessages("workspace", "agent", "chat");
+  const restored = createRemovedMessages(
+    "workspace",
+    "agent",
+    "chat",
+    serverLocalStorage,
+  );
   expect(restored.hidden(message)).toBe(false);
   expect(restored.restored).toMatchObject([
     {

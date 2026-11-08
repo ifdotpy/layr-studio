@@ -1,10 +1,11 @@
+// @vitest-environment happy-dom
 import { appendAppLog, clearAppLog } from "../appLog";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
 import { expect, test } from "vitest";
-import { StudioErrorsProvider } from "./StudioErrors";
-import ConversationWarnings from "./ConversationWarnings";
+import { StudioErrorsProvider } from "./noticesFixture.tsx";
+import { ConversationWarningsFixture as ConversationWarnings } from "./noticesFixture.tsx";
 
 test("shows informational provider update notices in the warnings trigger", () => {
   const markup = renderToStaticMarkup(

@@ -174,8 +174,9 @@ test("state stream persists records across tabs without pulls and repairs missin
   const waitForAgent = (page: Page, id: string, name: string) =>
     page.waitForFunction(
       ({ id, name }) =>
-        window.snapshot?.runtime.agents.find((agent) => agent.id === id)
-          ?.name === name,
+        Array.from(window.nativeState?.agents.values() ?? []).find(
+          (agent) => agent.id === id,
+        )?.name === name,
       { id, name },
     );
   const waitForCheckpoint = (page: Page, seq: number) =>
@@ -207,7 +208,7 @@ test("state stream persists records across tabs without pulls and repairs missin
     send(frame("change", [put("removed", "", true)], 3));
     await page.waitForFunction(
       () =>
-        !window.snapshot?.runtime.agents.some(
+        !Array.from(window.nativeState?.agents.values() ?? []).some(
           (agent) => agent.id === "removed",
         ),
     );

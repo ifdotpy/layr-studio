@@ -212,6 +212,7 @@ it("keeps row attributes current and dispatches the latest caller-owned actions"
   await render(nextOpen);
   const button = document.querySelector<HTMLButtonElement>("button.chat-row");
   expect(button?.title).toBe("A chat");
+  expect(button?.getAttribute("aria-label")).toBe("A chat Server Remote");
   expect(button?.getAttribute("aria-description")).toContain("Working");
   expect(
     document

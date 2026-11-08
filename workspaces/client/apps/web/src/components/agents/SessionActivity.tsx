@@ -15,16 +15,22 @@ import type { ChatActivity as SessionActivityItem } from "../chat-status/chatAct
 const AgentSessionActivity = observer(function AgentSessionActivity({
   agent,
   compact,
+  onProcess,
 }: {
   agent: SidebarAgent;
   compact: boolean;
+  onProcess?: ((id: string) => void) | undefined;
 }) {
   const view = useActivityView(agent);
   const actions = useConversationActions();
   return (
     <SessionActivity
       activities={view.background}
-      onOpen={actions.openActivity}
+      onOpen={(activity) =>
+        activity.kind === "agent"
+          ? actions.open(activity.agentId)
+          : onProcess?.(activity.id)
+      }
       compact={compact}
     />
   );
@@ -32,14 +38,20 @@ const AgentSessionActivity = observer(function AgentSessionActivity({
 export const LiveSessionActivity = observer(function LiveSessionActivity({
   agentId,
   compact,
+  onProcess,
 }: {
   agentId: string;
   compact: boolean;
+  onProcess?: ((id: string) => void) | undefined;
 }) {
   const store = useServerStore();
   const agent = resourceData(store.state().current)?.agents.get(agentId);
   return agent ? (
-    <AgentSessionActivity agent={agent} compact={compact} />
+    <AgentSessionActivity
+      agent={agent}
+      compact={compact}
+      onProcess={onProcess}
+    />
   ) : null;
 });
 

@@ -8,12 +8,13 @@ import type {
   PostResult,
 } from "../../src/apiTypes.ts";
 import type { GetOptions } from "../../src/api.ts";
-import type { Agent, Snapshot } from "../../src/types.ts";
+import type { Agent } from "../../src/types.ts";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { Workspace } from "../../src/components/shell/Workspace.tsx";
+import Workspace from "../../src/components/shell/Workspace.tsx";
+import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 const agent: Agent = {
   id: "agent",
   name: "Claude fixture",
@@ -49,36 +50,20 @@ const services: Partial<Record<keyof ServerServices, unknown>> = {
   api: { get, post },
   watchResourceReads: () => () => {},
 };
-// This one-off snapshot omits token, nodes, edges, chats, and unused runtime collections.
-const data: Partial<Record<keyof Snapshot, unknown>> = {
-  stateDir: "/fixture",
-  threads: [agent],
-  runtime: {
-    agents: [agent],
-    requests: [],
-    complaints: [],
-    messages: [],
-    rooms: [],
-    monitors: [],
-    tasks: [],
-    work: [],
-    rules: [],
-  },
-};
 createRoot(document.getElementById("root")!).render(
   <MantineProvider>
     <ServerServicesProvider services={services as ServerServices}>
-      <Workspace
-        initialSection="tools"
-        opened={true}
-        onClose={() => {}}
-        agent={agent}
-        data={data as Snapshot}
-        allRequests={[]}
-        onSelect={() => {}}
-        refresh={async () => {}}
-        notify={() => {}}
-      />
+      <AgentModelsFixture agents={[agent]}>
+        <Workspace
+          initialSection="tools"
+          opened={true}
+          onClose={() => {}}
+          agent={agent}
+          onSelect={() => {}}
+          refresh={async () => {}}
+          notify={() => {}}
+        />
+      </AgentModelsFixture>
     </ServerServicesProvider>
   </MantineProvider>,
 );

@@ -1,10 +1,8 @@
+import type { ServerAreas } from "../app/contracts.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import { decodeSidebarRanks } from "./sidebarOrderRanks";
-import type { PeerTeam, Project, Room } from "../types";
-import {
-  createStateMirror,
-  type StateCollections,
-} from "../generated/observableResources.ts";
+import type { PeerTeam, Project } from "../types";
+import { type StateCollections } from "../generated/observableResources.ts";
 import { compareStructural, computed, observable, runInAction } from "mobx";
 import {
   createSidebarViewModel,
@@ -13,14 +11,13 @@ import {
   type SidebarChatView,
 } from "../components/sidebar/viewModel.ts";
 import { sidebarIdentity } from "../components/sidebar/services";
-import {
-  sidebarCollectionView,
-  type ServerSidebarView,
-  type ServerSidebarSnapshot,
-} from "./sidebarSnapshot";
+import { type ServerSidebarView } from "./sidebarSnapshot";
 
 export type SidebarSource = {
   id: string;
+  creation?:
+    | Pick<ServerAreas["creation"], "lookup" | "unreplicatedCreatedAgents">
+    | undefined;
   online: boolean;
   sidebar: ServerSidebarView;
   collections: StateCollections;
@@ -282,7 +279,7 @@ export function mergeSidebar(
     return chatKey(owner, value);
   };
   const peerTeams: DeepReadonly<PeerTeam>[] = [];
-  const rooms: Room[] = [];
+  const rooms: ServerSidebarView["rooms"] = [];
   for (const source of sources) {
     for (const nativeRow of source.view.rows) {
       const chat = nativeRow.agent;
@@ -593,6 +590,7 @@ export function mergeSidebar(
           () => source.collections,
           () => membershipInputs,
           identity,
+          () => source.creation?.unreplicatedCreatedAgents || [],
         );
   });
   return {
@@ -637,67 +635,13 @@ const membershipInputs = {
   opened: null,
   rank: () => 0,
 };
-export function createSidebarSourceStore() {
-  const snapshots = new Map<
-    string,
-    {
-      sidebar: ServerSidebarView;
-      mirror: ReturnType<typeof createStateMirror>;
-      view: ReturnType<typeof createSidebarViewModel>;
-    }
-  >();
-  return {
-    update(id: string, sidebar: ServerSidebarSnapshot | undefined) {
-      if (!sidebar) return;
-      const previous = snapshots.get(id);
-      const mirror = previous?.mirror || createStateMirror();
-      const view =
-        previous?.view ||
-        createSidebarViewModel(
-          () => mirror.current,
-          () => membershipInputs,
-        );
-      mirror.apply(sidebar.entities);
-      snapshots.set(id, {
-        sidebar: sidebarCollectionView(sidebar, mirror.current),
-        mirror,
-        view,
-      });
-    },
-    forget(id: string) {
-      snapshots.delete(id);
-    },
-    collections(id: string) {
-      return snapshots.get(id)?.mirror.current;
-    },
-    sources(
-      ids: readonly string[],
-      online: ReadonlySet<string>,
-    ): SidebarSource[] {
-      return ids.flatMap((id) => {
-        const value = snapshots.get(id);
-        return value
-          ? [
-              {
-                id,
-                sidebar: value.sidebar,
-                collections: value.mirror.current,
-                view: value.view,
-                online: online.has(id),
-              },
-            ]
-          : [];
-      });
-    },
-  };
-}
-
 export function createMergedSidebarSelector(combined = true) {
   const routing = observable.box<MergedSidebar | null>(null, { deep: false });
   const views = observable.map<
     string,
     {
       collections: StateCollections;
+      creation: SidebarSource["creation"];
       view: ReturnType<typeof createSidebarViewModel>;
     }
   >(undefined, { deep: false });
@@ -725,7 +669,10 @@ export function createMergedSidebarSelector(combined = true) {
         combined,
         (source) => {
           const previous = views.get(source.id);
-          if (previous?.collections === source.collections) {
+          if (
+            previous?.collections === source.collections &&
+            previous.creation === source.creation
+          ) {
             nextViews.set(source.id, previous);
             return previous.view;
           }
@@ -739,8 +686,13 @@ export function createMergedSidebarSelector(combined = true) {
             () => source.collections,
             () => membershipInputs,
             identity,
+            () => source.creation?.unreplicatedCreatedAgents || [],
           );
-          nextViews.set(source.id, { collections: source.collections, view });
+          nextViews.set(source.id, {
+            collections: source.collections,
+            creation: source.creation,
+            view,
+          });
           return view;
         },
         () => rows.get(),
@@ -783,7 +735,8 @@ export function createMergedSidebarSelector(combined = true) {
           source.id !== prior[index]?.id ||
           source.online !== prior[index]?.online ||
           source.sidebar !== prior[index]?.sidebar ||
-          source.collections !== prior[index]?.collections,
+          source.collections !== prior[index]?.collections ||
+          source.creation !== prior[index]?.creation,
       )
     )
       runInAction(() => inputs.set(sources));
@@ -791,13 +744,4 @@ export function createMergedSidebarSelector(combined = true) {
     runInAction(() => routing.set(next));
     return next;
   };
-}
-
-/** Classic mode does not construct or traverse a merged model. */
-export function selectCombinedSidebar(
-  enabled: boolean,
-  select: ReturnType<typeof createMergedSidebarSelector>,
-  sources: () => SidebarSource[],
-) {
-  return enabled ? select(sources()) : undefined;
 }

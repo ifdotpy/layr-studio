@@ -1,3 +1,5 @@
+import type { StateCollections } from "../generated/observableResources.ts";
+import { observeGeneratedState } from "./generatedState.testHelper.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
 import { backgroundDisplay } from "../components/componentTestFixtures";
@@ -12,7 +14,7 @@ import {
 } from "../generated/api";
 import assert from "node:assert/strict";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
+
 import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api";
 import type {
   ResourceChangeEvent,
@@ -184,12 +186,14 @@ async function setup() {
   });
   const client = await import("./client");
   const { db } = await client.syncDatabase();
-  const snapshots: Snapshot[] = [];
+  const snapshots: StateCollections[] = [];
   const failed = vi.fn();
   const subscribe = () => {
-    const stop = client.subscribeStateProjection((value) => {
-      if (value) snapshots.push(value);
-    }, failed);
+    const { stop } = observeGeneratedState(
+      client,
+      (value) => snapshots.push(value),
+      failed,
+    );
     stops.push(stop);
     return stop;
   };
@@ -471,10 +475,12 @@ it("waits for the applied cold SSE baseline and publishes it without a speculati
   );
   f.delivery.receive(f.frame(5));
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.threads[0]?.name).toBe("SSE baseline"),
+    expect(f.snapshots.at(-1)?.agents.values().next().value?.name).toBe(
+      "SSE baseline",
+    ),
   );
-  expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true);
-  expect(f.snapshots.at(-1)?.entityWorkspaceId).toBe(f.workspaceId);
+  expect(f.client.projectionMetadata.complete).toBe(true);
+  expect(f.client.projectionMetadata.workspaceId).toBe(f.workspaceId);
   expect(f.dispatch).toHaveBeenCalledOnce();
   expect(f.pulls()).toEqual([]);
   expect(
@@ -488,7 +494,9 @@ it("accepts applied reconnect and process-restart snapshots without recovery rea
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   f.delivery.receive(f.frame(8));
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.threads[0]?.name).toBe("SSE baseline"),
+    expect(f.snapshots.at(-1)?.agents.values().next().value?.name).toBe(
+      "SSE baseline",
+    ),
   );
   f.connection("degraded");
   f.delivery.receive({ ...f.frame(8), reason: "reconnect" });
@@ -498,7 +506,9 @@ it("accepts applied reconnect and process-restart snapshots without recovery rea
     reason: "reconnect",
   });
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.threads[0]?.name).toBe("Restarted"),
+    expect(f.snapshots.at(-1)?.agents.values().next().value?.name).toBe(
+      "Restarted",
+    ),
   );
   expect(f.pulls()).toEqual([]);
   expect(await f.client.readSubscriptionCursor({ kind: "state" })).toEqual({
@@ -535,7 +545,7 @@ it("keeps a partial scoped cache independent from canonical state readiness", as
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   f.delivery.receive(f.frame(5));
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+    expect(f.client.projectionMetadata.complete).toBe(true),
   );
   expect(f.pulls()).toEqual([]);
 });
@@ -562,7 +572,7 @@ it.each(["revision-only", "overflow", "persistence failure"] as const)(
     }
     await vi.waitFor(() => expect(f.pulls()).toHaveLength(1));
     await vi.waitFor(() =>
-      expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+      expect(f.client.projectionMetadata.complete).toBe(true),
     );
     expect(f.pulls()).toHaveLength(1);
     expect(f.failed.mock.calls.filter(([error]) => error !== null)).toEqual([]);
@@ -580,7 +590,7 @@ it.each(["degraded", "offline", "stopped"] as const)(
       state === "stopped" ? "stopped" : "open",
     );
     await vi.waitFor(() =>
-      expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+      expect(f.client.projectionMetadata.complete).toBe(true),
     );
     expect(f.pulls()).toHaveLength(1);
     // Repeated transport state is not a new recovery notification.
@@ -644,11 +654,11 @@ it("continues an initial pull when a sequence boundary exceeds the page limit", 
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   f.connection("degraded");
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+    expect(f.client.projectionMetadata.complete).toBe(true),
   );
   expect(f.pulls()).toHaveLength(2);
   expect(f.pulls()[1]?.[1].query.after).toBe(boundary);
-  expect(f.snapshots.at(-1)?.threads.map((chat) => chat.id)).toContain(chatId);
+  expect(Array.from(f.snapshots.at(-1)?.agents.keys() ?? [])).toContain(chatId);
 });
 
 it("rejects an oversized page that cannot advance the pull cursor", async () => {
@@ -681,7 +691,7 @@ it("rejects an oversized page that cannot advance the pull cursor", async () => 
     ),
   );
   expect(f.pulls()).toHaveLength(1);
-  expect(f.snapshots.at(-1)?.entitiesComplete).not.toBe(true);
+  expect(f.client.projectionMetadata.complete).not.toBe(true);
 });
 
 it("heals a truncated ready cache on reload and recovers the missing chat", async () => {
@@ -750,8 +760,12 @@ it("heals a truncated ready cache on reload and recovers the missing chat", asyn
     },
   );
   await client.readSubscriptionCursor(state);
-  const snapshot = await client.refreshProjection();
-  expect(snapshot.threads.map((chat) => chat.id)).toContain("missing");
+  await client.refreshState();
+  const { db } = await client.syncDatabase();
+  const row = await db.projections
+    .findOne("entity:agentSummary:missing")
+    .exec();
+  expect(row?.toJSON().entity?.id).toBe("missing");
   expect(f.pulls()[0]?.[1].query.after).toBe(0);
   client.disposeCache();
 });
@@ -775,7 +789,7 @@ it("continues an entity pull when the server declares it incomplete", async () =
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   f.connection("degraded");
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+    expect(f.client.projectionMetadata.complete).toBe(true),
   );
   expect(f.pulls()).toHaveLength(2);
 });
@@ -797,7 +811,7 @@ it("stops an entity pull when the server declares it complete", async () => {
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   f.connection("degraded");
   await vi.waitFor(() =>
-    expect(f.snapshots.at(-1)?.entitiesComplete).toBe(true),
+    expect(f.client.projectionMetadata.complete).toBe(true),
   );
   expect(f.pulls()).toHaveLength(1);
 });
@@ -1288,7 +1302,9 @@ it.each([
       expect(store.getSnapshot({ kind: "state" }).status).toBe("live"),
     );
     await vi.waitFor(() =>
-      expect(f.snapshots.at(-1)?.threads[0]?.name).toBe("SSE baseline"),
+      expect(f.snapshots.at(-1)?.agents.values().next().value?.name).toBe(
+        "SSE baseline",
+      ),
     );
     expect(await f.client.readSubscriptionCursor({ kind: "state" })).toEqual({
       workspaceId: f.workspaceId,
@@ -1565,4 +1581,57 @@ it("sends only applied live receipt rows to the outbox", async () => {
   expect(onFreshReceipts).toHaveBeenCalledWith(f.workspaceId, [
     { id: "one", agent: "lead", status: MessageSendStatus.uncertain },
   ]);
+});
+
+it("publishes project sequences and complete-baseline identity from durable rows", async () => {
+  const f = await setup();
+  const { db, workspaceId } = await f.client.syncDatabase();
+  const metadata = f.client.defaultSyncClient.projectionMetadata;
+  expect(metadata.workspaceId).toBe(workspaceId);
+  expect(metadata.complete).toBe(false);
+  await db.projections.hydrate([
+    {
+      id: "entity:project:p",
+      seq: 7,
+      payload: "",
+      entity: {
+        collection: "project",
+        id: "p",
+        value: { id: "p", path: "/p" },
+      },
+    },
+    { id: "state:entities:ready", seq: 1, payload: "ready" },
+    { id: "state:entities:complete", seq: 1, payload: "complete" },
+  ]);
+  expect(metadata.projectSequences.p).toBe(7);
+  expect(metadata.ready).toBe(true);
+  expect(metadata.complete).toBe(true);
+  await db.projections.hydrate([
+    { id: "state:entities:ready", seq: 2, payload: "", _deleted: true },
+  ]);
+  expect(metadata.ready).toBe(false);
+  expect(metadata.complete).toBe(false);
+  await db.projections.hydrate([
+    { id: "entity:project:p", seq: 8, payload: "", _deleted: true },
+  ]);
+  expect(metadata.projectSequences.p).toBeUndefined();
+});
+
+it("releases the generated observer's single durable state lease after cold-baseline recovery", async () => {
+  const f = await setup();
+  const stop = f.subscribe();
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  expect(f.pulls()).toEqual([]);
+  f.connection("degraded", "connecting");
+  await vi.waitFor(() =>
+    expect(f.client.projectionMetadata.complete).toBe(true),
+  );
+  expect(f.pulls()).toHaveLength(1);
+  expect(mocks.watch).toHaveBeenCalledOnce();
+  stop();
+  await vi.waitFor(() => expect(mocks.changes.size).toBe(0));
+  f.notify({ epoch: "late", revision: 100, reason: "overflow" });
+  f.connection("degraded", "connecting");
+  await Promise.resolve();
+  expect(f.pulls()).toHaveLength(1);
 });

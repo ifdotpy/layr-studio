@@ -1,33 +1,26 @@
-import { useServerSync } from "../servers/ServerServicesContext";
-import { useServerStore } from "../servers/ServerServicesContext.tsx";
-import { resourceData } from "../store/runtime.ts";
-import { agentId as observableAgentId } from "../generated/observableResources.ts";
 import { observer } from "mobx-react-lite";
 
 import { LimitColor, RunwayColor } from "../generated/api";
 import { PassiveUsage } from "../hooks/BottomInsetBand";
-import { randomUUID } from "../uuid";
 import { ProviderKind, providerLabel } from "../generated/providerKind.ts";
-import { useServerApi } from "../servers/ServerServicesContext";
 import { localDateTime, localTime } from "../local-time";
-import {
-  accountLimits,
-  jsonObject,
-  type AccountLimitsData,
-} from "../usage/accountUsage";
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { lazy, Suspense, useState, useMemo, useEffect, useRef } from "react";
 import { Button, Popover, Progress, Tabs, Tooltip } from "@mantine/core";
-import { useMediaQuery } from "@mantine/hooks";
-import { layoutQueries } from "../layout/layout-contract.generated";
 import BottomSheet from "./ui/BottomSheet";
-import { roleAccounts } from "./roleAccounts";
+import { useMediaQuery } from "@mantine/hooks";
+import { layoutQueries } from "../layout/layout-contract.generated.ts";
+import {
+  useServerApi,
+  useServerStore,
+} from "../servers/ServerServicesContext.tsx";
+import { resourceData } from "../store/runtime.ts";
+import { agentId } from "../generated/observableResources.ts";
+import { accountLimits, jsonObject } from "../usage/accountUsage.ts";
+import { useLimitRefresh } from "../usage/useLimitRefresh.ts";
+import { accountsForRoles } from "./roleAccounts.ts";
+import { errorText } from "../api.ts";
+import { randomUUID } from "../uuid.ts";
+import type { Agent } from "../types.ts";
 import {
   ChevronUp,
   ExternalLink,
@@ -35,8 +28,6 @@ import {
   RefreshCw,
   CircleDollarSign,
 } from "lucide-react";
-import type { Agent } from "../types";
-import { errorText } from "../api";
 import LimitRecoveryNotice from "./LimitRecoveryNotice";
 import "./Usage.css";
 import { remainingLimitColor } from "./accountLimitColor";
@@ -50,46 +41,20 @@ import { accountDisplayName } from "../accountName";
 const Analytics = lazy(() => import("./Analytics"));
 
 import type { Account } from "./Accounts";
-export type UsageAccount = Pick<Account, "label"> & {
-  [Field in "email" | "plan" | "accountId"]?: Account[Field] | undefined;
-} & {
-  provider?: Account["provider"] | undefined;
-  key: string;
-  runway?:
-    | import("../generated/api").components["schemas"]["WeeklyRunway"]
-    | undefined;
-  reset?:
-    | import("../generated/api").components["schemas"]["ResetProjection"]
-    | undefined;
-  buckets?:
-    | import("../generated/api").components["schemas"]["BucketProjection"]
-    | undefined;
-  status?:
-    | import("../generated/api").components["schemas"]["AccountLimitsStatus"]
-    | undefined;
-  agents?:
-    | import("../generated/api").components["schemas"]["AccountLimitsProjection"]["agents"]
-    | undefined;
-  limits: UsageLimitSnapshot | null;
-  loading: boolean;
-  reload: (force?: boolean) => void | Promise<void>;
-};
-
-const humanAccountLabel = (account?: UsageAccount) =>
+type UsageIdentity = Pick<Account, "id" | "label" | "email" | "provider">;
+const humanAccountLabel = (account?: UsageIdentity) =>
   account?.email ||
-  (account?.label && account.label !== account.key ? account.label : "") ||
+  (account?.label && account.label !== account.id ? account.label : "") ||
   "Account name unavailable";
 
-const displayAccountName = (account?: UsageAccount) =>
+const displayAccountName = (account?: UsageIdentity) =>
   humanAccountLabel(account) === "Account name unavailable"
     ? "Account name unavailable"
     : accountDisplayName({
-        label: account?.label === account?.key ? "" : account?.label || "",
+        label: account?.label === account?.id ? "" : account?.label || "",
         email: account?.email,
       });
-const accountProvider = (account?: UsageAccount) => account?.provider || "";
-
-type UsageLimitSnapshot = AccountLimitsData;
+const accountProvider = (account?: UsageIdentity) => account?.provider || "";
 
 const number = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
@@ -102,266 +67,279 @@ const dollarFormatter = new Intl.NumberFormat(undefined, {
 });
 const dollars = (value: unknown) =>
   number(value) ? dollarFormatter.format(value) : "Unavailable";
-function Usage({
-  agent,
-  stateDir,
-  limits: reportedLimits,
-  accountLabel,
-  reload,
-  opened,
-  onChange,
-  limitsLoading,
-  accounts = [],
-  visible = true,
-}: {
+export type UsageProps = {
   agent: Agent;
-  stateDir: string;
-  limits: UsageLimitSnapshot | null;
-  accountLabel?: string | undefined;
-  reload: () => void | Promise<void>;
   opened?: boolean;
   onChange?: (opened: boolean) => void;
-  limitsLoading?: boolean | undefined;
-  accounts?: UsageAccount[] | undefined;
+  openRequest?: number;
   visible?: boolean;
-}) {
-  const store = useServerStore();
-  const detail = resourceData(
-    store.agentDetail(observableAgentId(agent.id)).current,
+};
+function Usage({
+  agent,
+  opened: controlled,
+  onChange,
+  openRequest = 0,
+  visible = true,
+}: UsageProps) {
+  const store = useServerStore(),
+    api = useServerApi();
+  const [localOpen, setLocalOpen] = useState(controlled ?? false),
+    [analyticsOpen, setAnalyticsOpen] = useState(false),
+    [contextOpen, setContextOpen] = useState(false);
+  const opened = onChange ? (controlled ?? false) : localOpen;
+  const changeOpened = onChange ?? setLocalOpen;
+  const [browse, setBrowse] = useState({
+    key: null as string | null,
+    request: openRequest,
+  });
+  const [resetPending, setResetPending] = useState(false),
+    [resetApplied, setResetApplied] = useState(new Set<string>());
+  const [feedback, setFeedback] = useState({
+    key: "",
+    confirm: null as string | null,
+    error: "",
+    notice: "",
+  });
+  const [costInterestError, setCostInterestError] = useState("");
+  const lifetime = useMemo(
+    () => ({
+      active: true,
+      resetBusy: false,
+      resetAttempts: new Map<string, string>(),
+    }),
+    [api],
   );
-  const { post } = useServerApi();
-  const { subscribeStateProjection } = useServerSync();
-
-  const [localOpened, setLocalOpened] = useState(false);
-  const limitsOpened = opened ?? localOpened;
-  const changeOpened = (value: boolean) => {
-    setLocalOpened(value);
-    onChange?.(value);
-  };
-  const fallbackKey = agent.accountKey || "default";
-  const usageAccounts: UsageAccount[] = accounts.length
-    ? accounts
-    : [
-        {
-          key: fallbackKey,
-          label: accountLabel || "",
-          limits: reportedLimits,
-          loading: limitsLoading ?? !reportedLimits,
-          reload: () => reload(),
-        },
-      ];
-  const [activeAccountKey, setActiveAccountKey] = useState(fallbackKey);
-  const activeAccount =
-    usageAccounts.find((item) => item.key === activeAccountKey) ||
-    usageAccounts[0];
-  const selectedAccountKey = activeAccount?.key || fallbackKey;
-  const limits = accountLimits(
-    activeAccount?.limits,
-    selectedAccountKey,
-    activeAccount?.accountId,
-  );
-  const loadingLimits =
-    !limits?.data &&
-    (activeAccount?.loading ?? limitsLoading ?? !reportedLimits);
-  const [analyticsOpen, setAnalyticsOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
-  // Phones get bottom sheets; the layout contract owns the breakpoint.
-  const phone = useMediaQuery(layoutQueries.navigationCompact);
-  const [refreshing, setRefreshing] = useState(false);
-  const refreshLimits = async () => {
-    if (refreshing) return;
-    setRefreshing(true);
-    try {
-      await (activeAccount ? activeAccount.reload(true) : reload());
-    } finally {
-      setRefreshing(false);
-    }
-  };
-  const [confirmReset, setConfirmReset] = useState<string | null>(null);
-  const [resetPending, setResetPending] = useState(false);
-  const [resetError, setResetError] = useState("");
-  const [resetNotice, setResetNotice] = useState("");
-  const [resetApplied, setResetApplied] = useState<string[]>([]);
-  const resetAppliedKey = (creditId: string, accountKey = selectedAccountKey) =>
-    `${accountKey}:${creditId}`;
   useEffect(() => {
-    setConfirmReset(null);
-    setResetError("");
-    setResetNotice("");
-  }, [selectedAccountKey]);
-  const resetLock = useRef(false);
-  const resetAttempts = useRef(new Map<string, string>());
-  const applyReset = async (creditId: string) => {
-    if (resetLock.current || resetApplied.includes(resetAppliedKey(creditId)))
-      return;
-    resetLock.current = true;
-    setResetPending(true);
-    setResetError("");
-    setResetNotice("");
-    try {
-      const accountId = activeAccount?.reset?.accountId;
-      if (!accountId)
-        throw new Error("Refresh limits before using this reset credit.");
-      const key = `${accountId}:${creditId}`;
-      const requestId = resetAttempts.current.get(key) || randomUUID();
-      resetAttempts.current.set(key, requestId);
-      const result = await post("/api/limits/reset", {
-        credit_id: creditId,
-        account_id: accountId,
-        account_key: selectedAccountKey,
-        request_id: requestId,
-      });
-      switch (result.outcome) {
-        case "reset":
-        case "alreadyRedeemed":
-          resetAttempts.current.delete(key);
-          setResetApplied((ids) => [...ids, resetAppliedKey(creditId)]);
-          setConfirmReset(null);
-          setResetNotice(
-            result.outcome === "reset"
-              ? "Reset applied."
-              : "This reset credit was already used.",
-          );
-          break;
-        case "nothingToReset":
-          resetAttempts.current.delete(key);
-          setConfirmReset(null);
-          setResetNotice("No limits need a reset.");
-          break;
-        case "noCredit":
-          resetAttempts.current.delete(key);
-          setResetError("This reset credit is no longer available.");
-          break;
-        case "uncertain":
-          setResetError(
-            result.error ||
-              "Reset result uncertain. Refresh limits before trying again.",
-          );
-          break;
-      }
-      void (activeAccount ? activeAccount.reload(true) : reload());
-    } catch (error) {
-      setResetError(errorText(error));
-    } finally {
-      resetLock.current = false;
-      setResetPending(false);
-    }
-  };
-  const accountKey = selectedAccountKey;
-  const rootId = agent.rootId || agent.id;
-  const sessionCost = visible
-    ? (resourceData(store.sessionCost(observableAgentId(rootId)).current) ??
-      null)
+    lifetime.active = true;
+    return () => {
+      lifetime.active = false;
+    };
+  }, [lifetime]);
+  const { reload, isRefreshing } = useLimitRefresh(api.get);
+  const detail = resourceData(store.agentDetail(agentId(agent.id)).current);
+  const fallbackKey = agent.accountKey || "default";
+  const visibleUsageAccounts =
+    resourceData(store.state().current)?.accountsSummary.get("current")
+      ?.accounts ?? [];
+  const wantedKey = browse.request === openRequest ? browse.key : null;
+  const selectedAccount =
+    visibleUsageAccounts.find((a) => a.id === (wantedKey || fallbackKey)) ||
+    visibleUsageAccounts[0];
+  const selectedAccountKey = selectedAccount?.id || fallbackKey;
+  const projectionFor = (account: Account) =>
+    resourceData(store.state().current)?.rateLimitsByAccount.get(account.id);
+  const limitsFor = (account: Account) =>
+    accountLimits(
+      projectionFor(account)?.observation,
+      account.id,
+      account.accountId,
+    );
+  const activeAccountLimits = selectedAccount
+    ? limitsFor(selectedAccount)
     : null;
-  const costs =
-    visible && limitsOpened
-      ? (resourceData(store.costs().current)?.find(
-          (row) => row.accountKey === accountKey,
-        ) ?? null)
+  const context = jsonObject(detail?.contextUsage),
+    contextTokens = context?.tokens,
+    contextWindow = context?.window;
+  const contextProgress =
+    typeof contextTokens === "number" &&
+    Number.isFinite(contextTokens) &&
+    typeof contextWindow === "number" &&
+    Number.isFinite(contextWindow) &&
+    contextWindow > 0
+      ? {
+          tokens: contextTokens,
+          window: contextWindow,
+          percent: Math.round((contextTokens / contextWindow) * 100),
+        }
       : null;
-  const sessionCostUpdating = sessionCost === null || sessionCost.refreshing;
-  const costObservation = useRef<{
-    scope: string;
-    signature: string | null;
-  } | null>(null);
-  const costInterest = useRef<{
-    scope: string;
-    accountKey: string;
-    baseline: string | null;
+  const lowAccount = visibleUsageAccounts.find(
+    (a) => projectionFor(a)?.projection.buckets?.current.low,
+  );
+  const roleAccounts = accountsForRoles(
+    agent,
+    visibleUsageAccounts,
+    detail || {},
+    (a) => a.id,
+    (a) => projectionFor(a)?.projection.runway,
+  );
+  const sessionCost = visible
+    ? resourceData(store.sessionCost(agentId(agent.rootId || agent.id)).current)
+    : undefined;
+  const rows =
+    visible && opened ? resourceData(store.costs().current) : undefined;
+  const costs = rows?.find((row) => row.accountKey === selectedAccountKey);
+  const key = visible && opened ? selectedAccountKey : null,
+    ready = rows !== undefined,
+    signature = costs ? JSON.stringify(costs) : null;
+  const interest = useRef<{
+    key: string;
+    baseline: string | null | undefined;
     phase: "baseline" | "pending" | "settled";
   } | null>(null);
-  const [costInterestError, setCostInterestError] = useState("");
-  const sendCostInterest = useCallback(
-    (attempt: NonNullable<typeof costInterest.current>) => {
-      if (costInterest.current !== attempt || attempt.phase !== "baseline")
-        return;
-      attempt.phase = "pending";
-      void post("/api/costs/interest", {
-        account_key: attempt.accountKey,
-      }).catch((error) => {
-        if (costInterest.current === attempt && attempt.phase === "pending")
-          setCostInterestError(errorText(error));
-      });
-    },
-    [post],
-  );
   useEffect(() => {
-    if (!visible || !limitsOpened) {
-      costInterest.current = null;
+    if (!key) {
+      interest.current = null;
+      setCostInterestError("");
       return;
     }
-    const scope = JSON.stringify([stateDir, accountKey]);
-    if (costInterest.current?.scope === scope) return;
-    const observation =
-      costObservation.current?.scope === scope ? costObservation.current : null;
-    const attempt: NonNullable<typeof costInterest.current> = {
-      scope,
-      accountKey,
-      baseline: observation?.signature ?? null,
-      phase: "baseline",
-    };
-    costInterest.current = attempt;
-    setCostInterestError("");
-    // A local projection baseline distinguishes cached data from the result
-    // of this opening, including when switching accounts while already open.
-    if (observation) sendCostInterest(attempt);
-  }, [visible, limitsOpened, stateDir, accountKey, sendCostInterest]);
-  useEffect(() => {
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        const value = snapshot?.runtime.accountCostsByAccount?.[accountKey];
-        if (!snapshot) return;
-        const scope = JSON.stringify([stateDir, accountKey]);
-        const signature = value ? JSON.stringify(value) : null;
-        costObservation.current = { scope, signature };
-        const attempt = costInterest.current;
-        if (attempt?.scope === scope) {
-          if (attempt.phase === "baseline") {
-            attempt.baseline = signature;
-            sendCostInterest(attempt);
-          } else if (
-            attempt.phase === "pending" &&
-            signature !== attempt.baseline
-          ) {
-            attempt.phase = "settled";
-            setCostInterestError("");
-          }
-        }
-      },
-      () => {},
-    );
-    return () => {
-      costObservation.current = null;
-      stop();
-    };
-  }, [stateDir, accountKey, subscribeStateProjection, sendCostInterest]);
-  const contextUsage = jsonObject(detail?.contextUsage);
-  const contextTokens = contextUsage?.tokens;
-  const contextWindow = contextUsage?.window;
-  const known =
-    number(contextTokens) && number(contextWindow) && contextWindow > 0;
-  const percent = known
-    ? Math.round((contextTokens / contextWindow) * 100)
-    : null;
-  const lowAccount = usageAccounts.find((item) => item.buckets?.current.low);
+    if (interest.current?.key !== key) {
+      interest.current = { key, baseline: undefined, phase: "baseline" };
+      setCostInterestError("");
+    }
+    const attempt = interest.current;
+    if (attempt.phase === "pending" && ready && attempt.baseline === undefined)
+      attempt.baseline = signature;
+    if (
+      attempt.phase === "pending" &&
+      ready &&
+      signature !== attempt.baseline
+    ) {
+      attempt.phase = "settled";
+      setCostInterestError("");
+    }
+    if (attempt.phase !== "baseline") return;
+    attempt.baseline = ready ? signature : undefined;
+    attempt.phase = "pending";
+    void api
+      .post("/api/costs/interest", { account_key: key })
+      .catch((error) => {
+        if (
+          lifetime.active &&
+          interest.current === attempt &&
+          attempt.phase === "pending"
+        )
+          setCostInterestError(errorText(error));
+      });
+  }, [key, ready, signature, api, lifetime]);
+  const currentAccount = useRef(selectedAccountKey);
+  currentAccount.current = selectedAccountKey;
+  const resetAppliedKey = (credit: string, account = selectedAccountKey) =>
+    account + ":" + credit;
+  const selectAccount = (key: string | null) => {
+    if (!key || key === selectedAccountKey) return;
+    setBrowse({ key, request: openRequest });
+    setFeedback({ key, confirm: null, error: "", notice: "" });
+  };
+  const requestReset = (credit: string | null) =>
+    setFeedback({
+      key: selectedAccountKey,
+      confirm: credit,
+      error: "",
+      notice: "",
+    });
+  const applyReset = async (creditId: string) => {
+    const account = selectedAccount;
+    if (
+      lifetime.resetBusy ||
+      !account ||
+      resetApplied.has(resetAppliedKey(creditId, account.id))
+    )
+      return;
+    const accountKey = account.id;
+    const feedbackCurrent = () =>
+      lifetime.active && currentAccount.current === accountKey;
+    lifetime.resetBusy = true;
+    setResetPending(true);
+    setFeedback({ key: accountKey, confirm: creditId, error: "", notice: "" });
+    try {
+      const accountId = projectionFor(account)?.projection.reset.accountId;
+      if (!accountId)
+        throw new Error("Refresh limits before using this reset credit.");
+      const key = accountId + ":" + creditId;
+      const requestId = lifetime.resetAttempts.get(key) || randomUUID();
+      lifetime.resetAttempts.set(key, requestId);
+      const result = await api.post("/api/limits/reset", {
+        credit_id: creditId,
+        account_id: accountId,
+        account_key: accountKey,
+        request_id: requestId,
+      });
+      if (result.outcome !== "uncertain") lifetime.resetAttempts.delete(key);
+      if (
+        lifetime.active &&
+        (result.outcome === "reset" || result.outcome === "alreadyRedeemed")
+      )
+        setResetApplied((ids) =>
+          new Set(ids).add(resetAppliedKey(creditId, accountKey)),
+        );
+      if (feedbackCurrent()) {
+        const notice = {
+          reset: "Reset applied.",
+          alreadyRedeemed: "This reset credit was already used.",
+          nothingToReset: "No limits need a reset.",
+          noCredit: null,
+          uncertain: null,
+        }[result.outcome];
+        setFeedback({
+          key: accountKey,
+          confirm: notice ? null : creditId,
+          notice: notice || "",
+          error: notice
+            ? ""
+            : result.outcome === "uncertain"
+              ? result.error ||
+                "Reset result uncertain. Refresh limits before trying again."
+              : "This reset credit is no longer available.",
+        });
+      }
+      if (lifetime.active) void reload(accountKey, true);
+    } catch (error) {
+      if (feedbackCurrent())
+        setFeedback((previous) => ({ ...previous, error: errorText(error) }));
+    } finally {
+      lifetime.resetBusy = false;
+      if (lifetime.active) setResetPending(false);
+    }
+  };
+  const phone = useMediaQuery(layoutQueries.navigationCompact);
+  const percent = contextProgress?.percent ?? null;
+  const refreshing = isRefreshing(selectedAccountKey);
+  const confirmReset =
+    feedback.key === selectedAccountKey ? feedback.confirm : null;
+  const resetError = feedback.key === selectedAccountKey ? feedback.error : "";
+  const resetNotice =
+    feedback.key === selectedAccountKey ? feedback.notice : "";
+  const showAnalytics = () => {
+    setContextOpen(false);
+    setAnalyticsOpen(true);
+  };
+  const limitsButton = (
+    <Button
+      className="limits-toggle account-limits-toggle"
+      variant="subtle"
+      size="compact-xs"
+      aria-label="Account limits"
+      title={
+        lowAccount
+          ? `Low allowance: ${lowAccount.email || lowAccount.label}`
+          : sessionCost
+            ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
+            : undefined
+      }
+      onClick={() => changeOpened(!opened)}
+      leftSection={<Gauge size={13} />}
+      rightSection={<ChevronUp size={12} />}
+    >
+      <span className="account-limits-summary">
+        <span className="account-limits-label">Limits</span>
+        {lowAccount && (
+          <span className="account-limits-warning">Low allowance</span>
+        )}
+      </span>
+    </Button>
+  );
   const contextPanel = (
     <>
       <strong>Chat context</strong>
       <p>
-        {known
-          ? `${contextTokens.toLocaleString()} of ${contextWindow.toLocaleString()} tokens used (${percent}%).`
+        {contextProgress
+          ? `${contextProgress.tokens.toLocaleString()} of ${contextProgress.window.toLocaleString()} tokens used (${percent}%).`
           : "No context data yet."}
       </p>
       {detail?.compactions !== undefined && (
         <small>Compacted {detail?.compactions} times.</small>
       )}
-      <Button
-        variant="subtle"
-        onClick={() => {
-          setContextOpen(false);
-          setAnalyticsOpen(true);
-        }}
-      >
+      <Button variant="subtle" onClick={showAnalytics}>
         Advanced analytics
       </Button>
     </>
@@ -378,10 +356,8 @@ function Usage({
         <Button
           size="compact-xs"
           variant="subtle"
-          loading={!limits?.data && (refreshing || loadingLimits)}
-          onClick={() =>
-            void (activeAccount ? activeAccount.reload(true) : refreshLimits())
-          }
+          loading={!activeAccountLimits?.data && refreshing}
+          onClick={() => void reload(selectedAccountKey, true)}
           leftSection={<RefreshCw size={13} />}
         >
           Refresh
@@ -389,107 +365,112 @@ function Usage({
       </header>
       <AccountTilesLayout
         label="Accounts with limits"
-        provider={accountProvider(activeAccount)}
-        providers={[...new Set(usageAccounts.map(accountProvider))]}
+        provider={accountProvider(selectedAccount)}
+        providers={[...new Set(visibleUsageAccounts.map(accountProvider))]}
         onProvider={(provider) => {
-          const account = usageAccounts.find(
+          const account = visibleUsageAccounts.find(
             (item) => accountProvider(item) === provider,
           );
-          if (account) setActiveAccountKey(account.key);
+          if (account) selectAccount(account.id);
         }}
       >
         <div className="account-limits-tiles">
-          {[...new Set(usageAccounts.map(accountProvider))].map((provider) => (
-            <Tabs
-              key={provider}
-              value={
-                accountProvider(activeAccount) === provider
-                  ? selectedAccountKey
-                  : (usageAccounts.find(
-                      (item) => accountProvider(item) === provider,
-                    )?.key ?? null)
-              }
-              onChange={(value) => {
-                if (value) setActiveAccountKey(value);
-              }}
-              variant="pills"
-              className="account-limits-provider-panel"
-              data-active={
-                accountProvider(activeAccount) === provider || undefined
-              }
-              aria-hidden={accountProvider(activeAccount) !== provider}
-              inert={accountProvider(activeAccount) !== provider}
-            >
-              <Tabs.List aria-label="Accounts with limits">
-                {usageAccounts.map((item, index) => {
-                  if (accountProvider(item) !== provider) return null;
-                  const bucketState = item.buckets?.current;
-                  const remaining = bucketState?.remaining ?? null;
-                  return (
-                    <Tabs.Tab
-                      key={item.key}
-                      value={item.key}
-                      className="setup-account"
-                      data-account-key={item.key}
-                      data-selected={
-                        item.key === selectedAccountKey || undefined
-                      }
-                      aria-current={
-                        item.key === fallbackKey ? "true" : undefined
-                      }
-                      id={`usage-account-tab-${index}`}
-                      aria-controls="usage-account-panel"
-                      title={humanAccountLabel(item)}
-                      aria-label={`${humanAccountLabel(item)}${item.provider ? `, ${item.provider}` : ""} account limits`}
-                    >
-                      <AccountTileLabel
-                        name={displayAccountName(item)}
-                        nameClassName="account-limits-tile-name"
-                        remaining={remaining}
-                      />
-                      {remaining === null && (
-                        <small className="account-remaining">Unavailable</small>
-                      )}
-                      {item.key === fallbackKey && (
-                        <small className="account-limits-current">
-                          Current chat
-                        </small>
-                      )}
-                      <AccountRemainingBar
-                        remaining={remaining}
-                        color={bucketState?.color ?? LimitColor.paused}
-                        label={`${humanAccountLabel(item)} remaining limit`}
-                      />
-                    </Tabs.Tab>
-                  );
-                })}
-              </Tabs.List>
-            </Tabs>
-          ))}
+          {[...new Set(visibleUsageAccounts.map(accountProvider))].map(
+            (provider) => (
+              <Tabs
+                key={provider}
+                value={
+                  accountProvider(selectedAccount) === provider
+                    ? selectedAccountKey
+                    : (visibleUsageAccounts.find(
+                        (item) => accountProvider(item) === provider,
+                      )?.id ?? null)
+                }
+                onChange={(value) => {
+                  if (value) selectAccount(value);
+                }}
+                variant="pills"
+                className="account-limits-provider-panel"
+                data-active={
+                  accountProvider(selectedAccount) === provider || undefined
+                }
+                aria-hidden={accountProvider(selectedAccount) !== provider}
+                inert={accountProvider(selectedAccount) !== provider}
+              >
+                <Tabs.List aria-label="Accounts with limits">
+                  {visibleUsageAccounts.map((item, index) => {
+                    if (accountProvider(item) !== provider) return null;
+                    const bucketState =
+                      projectionFor(item)?.projection.buckets?.current;
+                    const remaining = bucketState?.remaining ?? null;
+                    return (
+                      <Tabs.Tab
+                        key={item.id}
+                        value={item.id}
+                        className="setup-account"
+                        data-account-key={item.id}
+                        data-selected={
+                          item.id === selectedAccountKey || undefined
+                        }
+                        aria-current={
+                          item.id === fallbackKey ? "true" : undefined
+                        }
+                        id={`usage-account-tab-${index}`}
+                        aria-controls="usage-account-panel"
+                        title={humanAccountLabel(item)}
+                        aria-label={`${humanAccountLabel(item)}${item.provider ? `, ${item.provider}` : ""} account limits`}
+                      >
+                        <AccountTileLabel
+                          name={displayAccountName(item)}
+                          nameClassName="account-limits-tile-name"
+                          remaining={remaining}
+                        />
+                        {remaining === null && (
+                          <small className="account-remaining">
+                            Unavailable
+                          </small>
+                        )}
+                        {item.id === fallbackKey && (
+                          <small className="account-limits-current">
+                            Current chat
+                          </small>
+                        )}
+                        <AccountRemainingBar
+                          remaining={remaining}
+                          color={bucketState?.color ?? LimitColor.paused}
+                          label={`${humanAccountLabel(item)} remaining limit`}
+                        />
+                      </Tabs.Tab>
+                    );
+                  })}
+                </Tabs.List>
+              </Tabs>
+            ),
+          )}
         </div>
       </AccountTilesLayout>
       <div className="account-limits-detail-stack">
-        {usageAccounts.map((activeAccount, panelIndex) => {
-          const isSelected = activeAccount.key === selectedAccountKey;
+        {visibleUsageAccounts.map((activeAccount, panelIndex) => {
+          const isSelected = activeAccount.id === selectedAccountKey;
           const name = displayAccountName(activeAccount);
           const selectedAccountName =
             name.toLowerCase() === accountProvider(activeAccount) &&
             activeAccount.email
               ? activeAccount.email
               : name;
-          const limits = accountLimits(
-            activeAccount.limits,
-            activeAccount.key,
-            activeAccount.accountId,
-          );
-          const loadingLimits = !limits?.data && activeAccount.loading;
-          const buckets = activeAccount.buckets?.current.buckets ?? [];
-          const recovery = activeAccount.agents?.[agent.id]?.recovery;
-          const resetCredits = activeAccount.reset;
+          const limits = limitsFor(activeAccount);
+          const loadingLimits = !limits?.data && isRefreshing(activeAccount.id);
+          const buckets =
+            projectionFor(activeAccount)?.projection.buckets?.current.buckets ??
+            [];
+          const recovery =
+            projectionFor(activeAccount)?.projection.agents?.[agent.id]
+              ?.recovery;
+          const resetCredits = projectionFor(activeAccount)?.projection.reset;
           const availableResets = resetCredits?.credits ?? [];
           return (
             <div
-              key={activeAccount.key}
+              key={activeAccount.id}
               className="account-limits-detail-panel"
               data-active={isSelected || undefined}
               aria-hidden={!isSelected}
@@ -502,22 +483,22 @@ function Usage({
                 {activeAccount.plan && (
                   <small className="account-plan">{activeAccount.plan}</small>
                 )}
-                {!activeAccount?.email &&
-                  (!activeAccount?.label ||
-                    activeAccount.label === activeAccount.key) && (
-                    <small>{activeAccount?.key || fallbackKey}</small>
+                {!selectedAccount?.email &&
+                  (!selectedAccount?.label ||
+                    activeAccount.label === activeAccount.id) && (
+                    <small>{selectedAccount?.id || fallbackKey}</small>
                   )}
               </div>
-              {(activeAccount.status?.kind === "checking" ||
-                activeAccount.status?.kind === "pending") && (
-                <p role="status">Checking account limits…</p>
-              )}
+              {(projectionFor(activeAccount)?.projection.status.kind ===
+                "checking" ||
+                projectionFor(activeAccount)?.projection.status.kind ===
+                  "pending") && <p role="status">Checking account limits…</p>}
               {recovery && (
                 <LimitRecoveryNotice
                   key={JSON.stringify(recovery)}
                   recovery={recovery}
                   tabIndex={isSelected ? undefined : -1}
-                  onRefresh={() => activeAccount.reload(true)}
+                  onRefresh={() => reload(activeAccount.id, true)}
                 />
               )}
               <div
@@ -629,7 +610,7 @@ function Usage({
                   </p>
                 )}
               </div>
-              {activeAccount?.provider === ProviderKind.Claude && (
+              {selectedAccount?.provider === ProviderKind.Claude && (
                 <section
                   className="account-reset-credits"
                   aria-label="Claude free limit resets"
@@ -660,7 +641,7 @@ function Usage({
                       size="compact-xs"
                       variant="subtle"
                       loading={!limits?.data && (refreshing || loadingLimits)}
-                      onClick={() => void refreshLimits()}
+                      onClick={() => void reload(selectedAccountKey, true)}
                     >
                       Refresh after reset
                     </Button>
@@ -714,18 +695,17 @@ function Usage({
                           variant="light"
                           disabled={
                             resetPending ||
-                            resetApplied.includes(
-                              resetAppliedKey(credit.id, activeAccount.key),
+                            resetApplied.has(
+                              resetAppliedKey(credit.id, activeAccount.id),
                             ) ||
                             !credit.enabled
                           }
                           onClick={() => {
-                            setConfirmReset(credit.id);
-                            setResetError("");
+                            requestReset(credit.id);
                           }}
                         >
-                          {resetApplied.includes(
-                            resetAppliedKey(credit.id, activeAccount.key),
+                          {resetApplied.has(
+                            resetAppliedKey(credit.id, activeAccount.id),
                           )
                             ? "Applied"
                             : "Apply reset"}
@@ -747,8 +727,7 @@ function Usage({
                               variant="default"
                               disabled={resetPending}
                               onClick={() => {
-                                setConfirmReset(null);
-                                setResetError("");
+                                requestReset(null);
                               }}
                             >
                               Cancel
@@ -837,16 +816,16 @@ function Usage({
         )}
       </section>
       <footer className="account-limits-updated" role="status">
-        {limits?.error
-          ? limits?.data
+        {activeAccountLimits?.error
+          ? activeAccountLimits?.data
             ? "Saved limits"
             : "Limits temporarily unavailable"
-          : number(limits?.at)
+          : number(activeAccountLimits?.at)
             ? "Updated"
             : ""}
-        {number(limits?.at) && (
+        {number(activeAccountLimits?.at) && (
           <span>
-            {localTime(new Date(limits!.at * 1000), {
+            {localTime(new Date(activeAccountLimits!.at * 1000), {
               hour: "2-digit",
               minute: "2-digit",
             })}
@@ -869,7 +848,7 @@ function Usage({
               ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
               : "Current team session API cost estimate"
           }
-          aria-busy={sessionCostUpdating}
+          aria-busy={sessionCost == null || sessionCost.refreshing}
           title={[
             sessionCost
               ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
@@ -973,103 +952,75 @@ function Usage({
           aria-label="Account weekly allowance"
         >
           {/* One dot per role (Lead, Workers, Review), not one per account. */}
-          {roleAccounts(agent, usageAccounts, detail || {}).map(
-            ({ role, account: item, automatic }) => {
-              const projection = item.runway?.current;
-              const current = role === "Lead";
-              const provider = providerLabel(accountProvider(item));
-              const label = humanAccountLabel(item);
-              const details = [
-                `${role}: ${automatic ? "automatic, now " : ""}${label} (${provider})${current ? ", current chat account" : ""}`,
-                ...(typeof item.limits?.error === "string" && !item.limits?.data
-                  ? [`Limits unavailable: ${item.limits.error}`]
-                  : []),
-                ...(projection?.windows ?? []).map(
-                  (window) =>
-                    `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
-                ),
-                !projection ||
-                (projection.days === null && !projection.unlimited)
-                  ? "Projected days unavailable."
-                  : projection.unlimited
-                    ? "At least 7 days left at the current rate. No weekly consumption recorded."
-                    : projection.windows.every((window) => window.resetFirst)
-                      ? "At least 7 days left at the current rate after reset."
-                      : projection.windows.length > 1
-                        ? `About ${projection.days?.toFixed(1)} days left across weekly limits.`
-                        : "",
-                "Rate uses consumption in the elapsed part of the weekly window.",
-              ]
-                .filter(Boolean)
-                .join("\n");
-              return (
-                <Tooltip
-                  key={role}
-                  label={
-                    <span className="account-limits-dot-tooltip">
-                      {details}
-                    </span>
-                  }
-                  multiline
-                  w={300}
-                  withArrow
-                  events={{ hover: true, focus: true, touch: true }}
+          {roleAccounts.map(({ role, account: item, automatic }) => {
+            const projection = projectionFor(item)?.projection.runway?.current;
+            const current = role === "Lead";
+            const provider = providerLabel(accountProvider(item));
+            const label = humanAccountLabel(item);
+            const limits = limitsFor(item);
+            const details = [
+              `${role}: ${automatic ? "automatic, now " : ""}${label} (${provider})${current ? ", current chat account" : ""}`,
+              ...(typeof limits?.error === "string" && !limits?.data
+                ? [`Limits unavailable: ${limits.error}`]
+                : []),
+              ...(projection?.windows ?? []).map(
+                (window) =>
+                  `${window.name} weekly: ${window.remaining === null ? "remaining allowance unavailable" : `${formatPercent(window.remaining)} left`}. ${window.reset === null ? "Reset time unavailable." : `Resets ${localDateTime(new Date(window.reset * 1000), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}.`}${window.days !== null && Number.isFinite(window.days) ? ` About ${window.days.toFixed(1)} days left at the current rate.` : ""}${window.resetFirst ? " Resets before this allowance runs out." : ""}`,
+              ),
+              !projection || (projection.days === null && !projection.unlimited)
+                ? "Projected days unavailable."
+                : projection.unlimited
+                  ? "At least 7 days left at the current rate. No weekly consumption recorded."
+                  : projection.windows.every((window) => window.resetFirst)
+                    ? "At least 7 days left at the current rate after reset."
+                    : projection.windows.length > 1
+                      ? `About ${projection.days?.toFixed(1)} days left across weekly limits.`
+                      : "",
+              "Rate uses consumption in the elapsed part of the weekly window.",
+            ]
+              .filter(Boolean)
+              .join("\n");
+            return (
+              <Tooltip
+                key={role}
+                label={
+                  <span className="account-limits-dot-tooltip">{details}</span>
+                }
+                multiline
+                w={300}
+                withArrow
+                events={{ hover: true, focus: true, touch: true }}
+              >
+                <button
+                  type="button"
+                  className="account-limits-dot-target"
+                  data-account-key={item.id}
+                  data-role={role}
+                  aria-label={`${role}: open ${humanAccountLabel(item)} weekly allowance (${provider}). ${details}`}
+                  aria-current={current ? "true" : undefined}
+                  aria-haspopup="dialog"
+                  aria-expanded={opened && selectedAccountKey === item.id}
+                  onClick={() => {
+                    selectAccount(item.id);
+                    changeOpened(true);
+                  }}
                 >
-                  <button
-                    type="button"
-                    className="account-limits-dot-target"
-                    data-account-key={item.key}
-                    data-role={role}
-                    aria-label={`${role}: open ${humanAccountLabel(item)} weekly allowance (${provider}). ${details}`}
-                    aria-current={current ? "true" : undefined}
-                    aria-haspopup="dialog"
-                    aria-expanded={
-                      limitsOpened && selectedAccountKey === item.key
-                    }
-                    onClick={() => {
-                      setActiveAccountKey(item.key);
-                      changeOpened(true);
-                    }}
-                  >
-                    <span
-                      className="account-limits-dot"
-                      data-color={projection?.color ?? RunwayColor.gray}
-                      data-current={current || undefined}
-                      aria-hidden="true"
-                    />
-                  </button>
-                </Tooltip>
-              );
-            },
-          )}
+                  <span
+                    className="account-limits-dot"
+                    data-color={projection?.color ?? RunwayColor.gray}
+                    data-current={current || undefined}
+                    aria-hidden="true"
+                  />
+                </button>
+              </Tooltip>
+            );
+          })}
         </div>
         {phone ? (
           <>
-            <Button
-              className="limits-toggle account-limits-toggle"
-              variant="subtle"
-              size="compact-xs"
-              aria-label="Account limits"
-              title={
-                lowAccount
-                  ? `Low allowance: ${lowAccount.email || lowAccount.label}`
-                  : sessionCost
-                    ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
-                    : undefined
-              }
-              onClick={() => changeOpened(!limitsOpened)}
-              leftSection={<Gauge size={13} />}
-              rightSection={<ChevronUp size={12} />}
-            >
-              <span className="account-limits-summary">
-                <span className="account-limits-label">Limits</span>
-                {lowAccount && (
-                  <span className="account-limits-warning">Low allowance</span>
-                )}
-              </span>
-            </Button>
+            {limitsButton}
             <BottomSheet
-              opened={limitsOpened}
+              opened={opened}
               onClose={() => changeOpened(false)}
               title="Account limits"
               className="account-limits-sheet"
@@ -1081,7 +1032,7 @@ function Usage({
           </>
         ) : (
           <Popover
-            opened={limitsOpened}
+            opened={opened}
             onChange={changeOpened}
             position="top-end"
             width="min(370px, calc(100vw - 24px))"
@@ -1090,33 +1041,7 @@ function Usage({
             trapFocus
             returnFocus
           >
-            <Popover.Target>
-              <Button
-                className="limits-toggle account-limits-toggle"
-                variant="subtle"
-                size="compact-xs"
-                aria-label="Account limits"
-                title={
-                  lowAccount
-                    ? `Low allowance: ${lowAccount.email || lowAccount.label}`
-                    : sessionCost
-                      ? `Session estimate: ${dollars(sessionCost.totalUSD)}`
-                      : undefined
-                }
-                onClick={() => changeOpened(!limitsOpened)}
-                leftSection={<Gauge size={13} />}
-                rightSection={<ChevronUp size={12} />}
-              >
-                <span className="account-limits-summary">
-                  <span className="account-limits-label">Limits</span>
-                  {lowAccount && (
-                    <span className="account-limits-warning">
-                      Low allowance
-                    </span>
-                  )}
-                </span>
-              </Button>
-            </Popover.Target>
+            <Popover.Target>{limitsButton}</Popover.Target>
             <Popover.Dropdown className="account-limits-popover">
               {limitsPanel}
             </Popover.Dropdown>

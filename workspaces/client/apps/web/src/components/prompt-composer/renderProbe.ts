@@ -1,6 +1,8 @@
 export type PromptComposerRenderProbe = (
   component:
     | "app"
+    | "conversation-header"
+    | "settings"
     | "sidebar"
     | "conversation"
     | "sidebar-row"

@@ -1,7 +1,7 @@
 import type { components } from "../../src/generated/api.ts";
 import type { CommandRequest, CommandResponse } from "../../src/commands.ts";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
-import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
+import type { Account, AccountsState } from "./fixture-helpers.ts";
 
 import type { AccountRateLimitsDto } from "../playwright.ts";
 import type { Page, Locator } from "@playwright/test";

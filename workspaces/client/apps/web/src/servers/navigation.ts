@@ -4,7 +4,10 @@ import {
   type StudioSettingsTab,
 } from "../components/StudioSettingsTabs";
 import type { DesktopAlert } from "../desktop/desktopAlerts";
-import type { Snapshot } from "../types";
+import type {
+  StateCollections,
+  ProjectionMetadata,
+} from "../generated/observableResources.ts";
 import { saved } from "../api";
 import {
   isNewChatSettings,
@@ -145,7 +148,7 @@ export type ServerCommand =
     }
   | { action: "focus" };
 export function navigationSnapshot(
-  data: Snapshot | null,
+  data: StateCollections | undefined,
   opened: string | null,
   error: string,
   rows: readonly SidebarChatView[] = [],
@@ -153,19 +156,21 @@ export function navigationSnapshot(
   readSaved: typeof saved = saved,
   unread: ReadonlySet<string> = new Set(),
   entities: readonly SidebarEntity[] = [],
+  metadata?: ProjectionMetadata,
 ): ServerNavigation {
+  const stateDir = data?.workspaces.values().next().value?.stateDir ?? "";
   const projects = new Map<string, ServerNavigation["projects"][number]>();
-  for (const project of data?.runtime?.projects || []) {
+  for (const project of data?.projects.values() ?? []) {
     if (project.path)
       projects.set(project.path, {
         id: project.id,
         compact: readSaved<Record<string, boolean>>(
-          `codex-project-compact:${data?.stateDir}`,
+          `codex-project-compact:${stateDir}`,
           {},
         )[project.path],
         homeServerId: project.homeServerId,
-        locations: project.locations,
-        projectAliases: project.projectAliases,
+        locations: project.locations?.map((location) => ({ ...location })),
+        projectAliases: project.projectAliases?.map((alias) => ({ ...alias })),
         path: project.path,
         name: project.name || project.path,
       });
@@ -189,7 +194,7 @@ export function navigationSnapshot(
       projects.set(path, { path, name: path || "Other chats" });
     chats.push({ kind: "chat", id: chat.id, path, agent: toJS(chat.agent) });
   }
-  for (const room of data?.runtime?.rooms || []) {
+  for (const room of data?.rooms.values() ?? []) {
     if (!room.radio || room.userHidden) continue;
     const path = room.projectPath || "";
     if (!projects.has(path))
@@ -204,14 +209,14 @@ export function navigationSnapshot(
     });
   }
   return {
-    ...(data?.entityWorkspaceId ? { workspaceId: data.entityWorkspaceId } : {}),
+    ...(metadata?.workspaceId ? { workspaceId: metadata.workspaceId } : {}),
     ...(data ? { sidebar: sidebarSnapshot(data, entities) } : {}),
     ready: !!data,
     busy: entities.some(
       (entity) => entity.collection === "agentSummary" && entity.value.inFlight,
     ),
     alerts,
-    alertsReady: !!data && data.entitiesComplete !== false,
+    alertsReady: !!data && metadata?.complete === true,
     projects: [...projects.values()],
     chats,
     opened,

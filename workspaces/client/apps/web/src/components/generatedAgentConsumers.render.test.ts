@@ -10,7 +10,7 @@ import { ConversationProvider } from "./conversation/navigation.ts";
 import { ExecutionSummaryTrigger } from "./agents/ExecutionSummaryTrigger.tsx";
 import { ClaudeSettings } from "./ClaudeSettings.tsx";
 import TurnHistory from "./conversation/transcript/TurnHistory.fixture.tsx";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 // @vitest-environment happy-dom
 import {
   createElement,
@@ -35,10 +35,10 @@ import {
   conversationActionsFixture,
 } from "./observableFixture.tsx";
 import { required } from "./componentTestFixtures.ts";
-import { ChatSettingsDialog } from "./agents/ChatSettingsDialog.tsx";
+import { ChatSettingsFixture as ChatSettingsDialog } from "../app/settings/ChatSettingsFixture.tsx";
 import { UnifiedAgentSettings } from "./agents/UnifiedAgentSettings.tsx";
 import { LiveAgentPhase } from "./agents/AgentPhase.tsx";
-import Usage from "./Usage.tsx";
+import { UsageFixture as Usage } from "../app/settings/UsageFixture.tsx";
 import Requests, { RequestArea } from "./questions/Requests.tsx";
 import { approval } from "../approvalFixtures.ts";
 import type { AgentSetupPickerProps } from "./agents/AgentSetupPicker.tsx";
@@ -200,7 +200,10 @@ it("reads generated team concurrency and defaults through ChatSettingsDialog", (
       accounts,
       notify: () => {},
       agentModels: catalog,
-      data: snapshotFixture([]),
+      data: Object.assign(snapshotFixture([]), {
+        token: "",
+        stateDir: "/fixture",
+      }),
       refresh: async () => {},
       workspaceId: "workspace",
       creating: false,
@@ -846,7 +849,10 @@ it("shows legacy single-agent mode from generated detail through ChatSettingsDia
       accounts,
       notify: () => {},
       agentModels: catalog,
-      data: snapshotFixture([]),
+      data: Object.assign(snapshotFixture([]), {
+        token: "",
+        stateDir: "/fixture",
+      }),
       refresh: async () => {},
       workspaceId: "workspace",
       creating: false,

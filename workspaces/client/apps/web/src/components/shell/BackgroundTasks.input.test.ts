@@ -1,3 +1,4 @@
+import { useBackgroundTaskArea } from "./backgroundTaskActions.tsx";
 import { initSync } from "../../wasm/generated/client";
 // @vitest-environment happy-dom
 import {
@@ -20,7 +21,6 @@ import { createServerStore } from "../../store";
 import { ServerStoreProvider } from "../../servers/ServerServicesContext";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import {
-  useBackgroundTaskArea,
   BackgroundTaskActionsProvider,
   type BackgroundTaskActions,
 } from "./backgroundTaskActions";

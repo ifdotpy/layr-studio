@@ -1,6 +1,6 @@
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Modal } from "@mantine/core";
-import type { Account, useAccounts } from "./Accounts";
+import type { Account, AccountsController } from "./Accounts";
 import AccountSignIn from "./AccountSignIn";
 import "../api";
 
@@ -11,7 +11,7 @@ export default function CodexSignIn({
   serverLabel,
 }: {
   account: Account;
-  state: ReturnType<typeof useAccounts>;
+  state: AccountsController;
   onClose: () => void;
   serverLabel?: string | undefined;
 }) {

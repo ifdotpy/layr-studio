@@ -1,81 +1,24 @@
-import type { DeepReadonly } from "../deepReadonly.ts";
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { errorText } from "../api";
+import { observer } from "mobx-react-lite";
+import { useEffect, useState, type ReactNode } from "react";
+import { resourceData } from "../store/runtime.ts";
+import {
+  accountLimits,
+  type AccountLimitsData,
+} from "../usage/accountUsage.ts";
 import AccountStartThrottle from "../components/AccountStartThrottle";
 import AccountGroup from "../components/AccountGroup";
-import {
-  accountLimitView,
-  useAccountLimitProjection,
-} from "../components/AccountTiles";
-import type { components } from "../generated/api";
+import { accountLimitView } from "../components/AccountTiles";
 import { AccountCapacityView, type Account } from "../components/Accounts";
-import type { AccountLimitsData } from "../usage/accountUsage";
-import { ServerServicesProvider, useServerSync } from "./ServerServicesContext";
+import {
+  useServerStore,
+  ServerServicesProvider,
+} from "./ServerServicesContext";
 import type { ServerAccount } from "./navigation";
 import type { ServerServices } from "./serverServices";
 
-type Accounts = Record<string, Account[]>;
-
-/** Full accounts (ids and stored limits) from each server's entity projection. */
-export function useServerFullAccounts(
-  serverIds: string[],
-  servicesFor: ((serverId: string) => ServerServices | undefined) | undefined,
-) {
-  const [accounts, setAccounts] = useState<Accounts>({});
-  const fallback = useServerSync();
-  const current = serverIds.map((id) => ({
-    id,
-    sync: servicesFor ? servicesFor(id)?.sync : fallback,
-  }));
-  const readers = useRef(current);
-  if (
-    readers.current.length !== current.length ||
-    readers.current.some(
-      (reader, index) =>
-        reader.id !== current[index]?.id ||
-        reader.sync !== current[index]?.sync,
-    )
-  )
-    readers.current = current;
-  const sources = readers.current;
-  const settledOwners = useRef(new Map<string, typeof fallback>());
-  useEffect(() => {
-    let stopped = false;
-    const stops = sources.flatMap(({ id, sync }) => {
-      if (!sync) return [];
-      return [
-        sync.subscribeStateProjection(
-          (snapshot) => {
-            const summary = snapshot?.runtime.accountsSummary;
-            if (!stopped && summary) {
-              settledOwners.current.set(id, sync);
-              setAccounts((old) => ({ ...old, [id]: summary.accounts }));
-            }
-          },
-          (failure) => {
-            if (!stopped && failure) console.warn(errorText(failure));
-          },
-        ),
-      ];
-    });
-    return () => {
-      stopped = true;
-      stops.forEach((stop) => stop());
-    };
-  }, [sources]);
-  const visible: Accounts = Object.fromEntries(
-    sources.flatMap(({ id, sync }) =>
-      sync && settledOwners.current.get(id) === sync && accounts[id]
-        ? [[id, accounts[id]]]
-        : [],
-    ),
-  );
-  return [visible, setAccounts] as const;
-}
-
 /** The server's own account that a panel row stands for. */
 export const matchServerAccount = (
-  accounts: Account[] | undefined,
+  accounts: readonly Account[] | undefined,
   row: Pick<ServerAccount, "provider" | "email" | "label" | "accountKey">,
 ) => {
   const matches = accounts?.filter(
@@ -103,7 +46,7 @@ function ServerScope({
       {children}
     </ServerServicesProvider>
   ) : (
-    <>{children}</>
+    children
   );
 }
 
@@ -114,12 +57,6 @@ export type AccountSource = {
   account: Account;
   services?: ServerServices | undefined;
 };
-type ReadingValue = {
-  limits: AccountLimitsData | null;
-  projection: DeepReadonly<components["schemas"]["RateLimitView"]> | null;
-};
-type Reading = AccountSource & ReadingValue;
-
 /** The reading that the account card shows. Usage limits belong to the
  * provider account, so every server reads the same limit: the card shows the
  * reading with data whose `at` (epoch seconds) is newest. Without any data it
@@ -142,6 +79,18 @@ export function newestReading<T extends { limits: AccountLimitsData | null }>(
   );
 }
 
+export function serverAccounts(
+  store: ServerServices["store"],
+  id: string,
+  servicesFor?: (id: string) => Pick<ServerServices, "store"> | undefined,
+) {
+  const selected = servicesFor ? servicesFor(id)?.store : store;
+  return selected
+    ? (resourceData(selected.state().current)?.accountsSummary.get("current")
+        ?.accounts ?? [])
+    : [];
+}
+
 /** "just now", "5 min ago", "3 h ago", "2 d ago" for an age in seconds. */
 export function readingAge(seconds: number) {
   if (seconds < 60) return "just now";
@@ -150,75 +99,51 @@ export function readingAge(seconds: number) {
   return `${Math.floor(seconds / 86400)} d ago`;
 }
 
-function SourceReading({
-  source,
-  onReading,
-}: {
-  source: AccountSource;
-  onReading: (serverId: string, reading: ReadingValue) => void;
-}) {
-  const projection = useAccountLimitProjection(source.account);
-  const limits = projection?.observation ?? null;
-  const report = useRef(onReading);
-  report.current = onReading;
-  useEffect(() => {
-    report.current(source.serverId, { limits, projection });
-  }, [source.serverId, limits, projection]);
-  return null;
-}
-
-/** How often, in milliseconds, the shown reading age is computed again. */
-const AGE_REFRESH_MS = 30_000;
-
 /** The remaining limit of one provider account, shown once for all servers
  * where it is signed in. Each server reads through its own API and cache. */
-export function AccountLimitsAcrossServers({
-  sources,
-  extraDetails,
-  facts,
-}: {
-  sources: AccountSource[];
-  extraDetails?: ReactNode;
-  facts?: ReactNode;
-}) {
-  const [limits, setLimits] = useState<Record<string, ReadingValue>>({});
-  const [now, setNow] = useState(() => Date.now() / 1000);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now() / 1000), AGE_REFRESH_MS);
-    return () => clearInterval(timer);
-  }, []);
-  const readings: Reading[] = sources.map((source) => ({
-    ...source,
-    limits: limits[source.serverId]?.limits ?? null,
-    projection: limits[source.serverId]?.projection ?? null,
-  }));
-  const shown = newestReading(readings);
-  const account = shown?.account ?? sources[0]?.account;
-  if (!account) return null;
-  const at = shown?.limits?.data ? shown.limits.at : null;
-  const note =
-    typeof at === "number"
-      ? `Updated ${readingAge(Math.max(0, now - at))}${
-          sources.length > 1 ? ` on ${shown!.serverLabel}` : ""
-        }`
-      : undefined;
-  return (
-    <>
-      {sources.map((source) => (
-        <ServerScope key={source.serverId} services={source.services}>
-          <SourceReading
-            source={source}
-            onReading={(serverId, next) =>
-              setLimits((old) =>
-                old[serverId]?.limits === next.limits &&
-                old[serverId]?.projection === next.projection
-                  ? old
-                  : { ...old, [serverId]: next },
-              )
-            }
-          />
-        </ServerScope>
-      ))}
+export const AccountLimitsAcrossServers = observer(
+  function AccountLimitsAcrossServers({
+    sources,
+    extraDetails,
+    facts,
+  }: {
+    sources: AccountSource[];
+    extraDetails?: ReactNode;
+    facts?: ReactNode;
+  }) {
+    const store = useServerStore();
+    const [now, setNow] = useState(() => Date.now() / 1000);
+    useEffect(() => {
+      const timer = setInterval(() => setNow(Date.now() / 1000), 30_000);
+      return () => clearInterval(timer);
+    }, []);
+    const shown = newestReading(
+      sources.map((source) => {
+        const projection =
+          resourceData(
+            (source.services?.store ?? store).state().current,
+          )?.rateLimitsByAccount.get(source.account.id) ?? null;
+        return {
+          source,
+          projection,
+          limits: accountLimits(
+            projection?.observation,
+            source.account.id,
+            source.account.accountId,
+          ),
+        };
+      }),
+    );
+    const account = shown?.source.account ?? sources[0]?.account;
+    if (!account) return null;
+    const at = shown?.limits?.data ? shown.limits.at : null;
+    const note =
+      typeof at === "number"
+        ? `Updated ${readingAge(Math.max(0, now - at))}${
+            sources.length > 1 ? ` on ${shown!.source.serverLabel}` : ""
+          }`
+        : undefined;
+    return (
       <AccountCapacityView
         card
         account={account}
@@ -232,9 +157,9 @@ export function AccountLimitsAcrossServers({
         extraDetails={extraDetails}
         facts={facts}
       />
-    </>
-  );
-}
+    );
+  },
+);
 
 /** Turn start limits and the account group are settings of one Studio server,
  * stored on that server's account, so the request goes to that server. */
@@ -243,7 +168,7 @@ export function ServerTurnStartLimits({
   onSaved,
 }: {
   source: AccountSource;
-  onSaved: (accounts: Account[]) => void;
+  onSaved: (accounts: readonly Account[]) => void;
 }) {
   return (
     <ServerScope services={source.services}>

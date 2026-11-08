@@ -1,7 +1,9 @@
 import type { Server } from "node:http";
 import type { ViteDevServer } from "vite";
 import type { ApiPostPath, JsonInputOf, PostBody } from "../../src/apiTypes.ts";
-import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
+export type AccountsState =
+  import("../../src/apiTypes.ts").GetResult<"/api/accounts">;
+export type Account = AccountsState["accounts"][number];
 import type { AgentEntityDto as Agent } from "../../src/generated/api.ts";
 import type {
   EntityFixtureState,

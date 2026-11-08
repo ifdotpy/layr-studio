@@ -1,5 +1,5 @@
 import type { DeepReadonly } from "../../deepReadonly.ts";
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext } from "react";
 import * as resources from "../../sync/subscriptions/events";
 import { post, saved, save } from "../../api";
 import { serverViewId } from "../../servers/environment";
@@ -121,14 +121,3 @@ export const localSidebarServices = createSidebarServices(
 const SidebarBackendContext = createContext(localSidebarBackend);
 export const SidebarBackendProvider = SidebarBackendContext.Provider;
 export const useSidebarBackend = () => useContext(SidebarBackendContext);
-
-export function useSidebarVisualState<T>(key: string, fallback: T) {
-  const backend = useSidebarBackend();
-  const [value, setValue] = useState<T>(() => backend.saved(key, fallback));
-  useEffect(() => {
-    const update = () => setValue(backend.saved(key, fallback));
-    update();
-    return backend.subscribePreference(key, update);
-  }, [backend, key]);
-  return [value, setValue] as const;
-}

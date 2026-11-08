@@ -3,6 +3,17 @@ pub use studio_observable_codegen::{
     ObservableArg, ObservableCollection, ObservableModel, ObservableResource,
 };
 
+/// Local durable projection facts; these are never transmitted as server entities.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectionMetadata {
+    pub workspace_id: String,
+    pub ready: bool,
+    pub complete: bool,
+    /// Each project's authoritative SyncEntity sequence, not the stream revision.
+    pub project_sequences: std::collections::BTreeMap<String, u64>,
+}
+
 pub fn models() -> Vec<ObservableModel> {
     vec![
         ObservableModel::named("AccountsSummaryDto").track_nested(&[]),
@@ -115,12 +126,29 @@ pub fn models() -> Vec<ObservableModel> {
             .track_nested(&[]),
         ObservableModel::named("PeerTeamEntityDto").identity("id"),
         ObservableModel::named("WorkspaceEntityDto").opaque("nativeNotices"),
+        ObservableModel::named("ChatEntityDto")
+            .identity("id")
+            .track_nested(&[]),
+        ObservableModel::named("PlanSummaryEntityDto")
+            .declared_fields()
+            .identity("id")
+            .track_nested(&[]),
+        ObservableModel::named("AnnotationEntityDto")
+            .identity("id")
+            .track_nested(&[]),
+        ObservableModel::named("UiPreferencesDto").track_nested(&[]),
+        ObservableModel::named("DesktopResponse").track_nested(&[]),
+        ObservableModel::of::<ProjectionMetadata>()
+            .local_fields()
+            .track_nested(&[]),
         ObservableModel::named("SidebarOrderDto").opaque("groups"),
         ObservableModel::of::<crate::agent_tail::AgentTail>().identity("id"),
     ]
 }
 pub fn resources() -> Vec<ObservableResource> {
     vec![
+        ObservableResource::mirror("ProjectionMetadata", "projectionMetadata"),
+        ObservableResource::named("desktop", "desktop", "DesktopResponse", vec![]),
         ObservableResource::collections(
             "state",
             "state",
@@ -141,6 +169,11 @@ pub fn resources() -> Vec<ObservableResource> {
                     "MessageReceiptEntityDto",
                 ),
                 ObservableCollection::named("queue", "queues", "QueueEntityDto"),
+                ObservableCollection::named("chat", "chats", "ChatEntityDto"),
+                ObservableCollection::named("plan", "plans", "PlanSummaryEntityDto"),
+                ObservableCollection::named("annotation", "annotations", "AnnotationEntityDto"),
+                ObservableCollection::named("studioError", "studioErrors", "StudioError").opaque(),
+                ObservableCollection::named("uiPreferences", "uiPreferences", "UiPreferencesDto"),
                 ObservableCollection::of::<crate::agent_tail::AgentTail>("agentTail", "agentTail"),
             ],
         ),
@@ -328,10 +361,13 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 23);
-        assert_eq!(resources[0].kind, "state");
+        assert_eq!(resources.len(), 25);
+        let state = resources
+            .iter()
+            .find(|resource| resource.kind == "state")
+            .unwrap();
         assert_eq!(
-            resources[0]
+            state
                 .collections
                 .iter()
                 .map(|item| item.collection.as_str())
@@ -348,6 +384,11 @@ mod tests {
                 "complaint",
                 "messageReceipt",
                 "queue",
+                "chat",
+                "plan",
+                "annotation",
+                "studioError",
+                "uiPreferences",
                 "agentTail"
             ]
         );

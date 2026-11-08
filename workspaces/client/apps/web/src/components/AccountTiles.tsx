@@ -152,22 +152,14 @@ export function accountLimitView(
   };
 }
 export type AccountLimitView = ReturnType<typeof accountLimitView>;
-/** The limits of one account on the server of the surrounding scope. */
-export function useAccountLimitProjection(account: LimitAccount) {
-  const store = useServerStore();
-  const entity = resourceData(store.state().current)?.rateLimitsByAccount.get(
-    account.id,
-  );
-  return entity &&
-    accountLimits(entity.observation, account.id, account.accountId)
-    ? entity
-    : null;
-}
 export function useAccountLimitView(
   account: LimitAccount,
   { signedInOnly = true } = {},
 ) {
-  const projection = useAccountLimitProjection(account);
+  const store = useServerStore();
+  const projection =
+    resourceData(store.state().current)?.rateLimitsByAccount.get(account.id) ??
+    null;
   const limits = projection?.observation ?? null;
   return accountLimitView(account, limits, signedInOnly, projection);
 }

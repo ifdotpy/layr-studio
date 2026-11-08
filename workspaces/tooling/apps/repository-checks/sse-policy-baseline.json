@@ -1,9 +1,5 @@
 [
   {
-    "file": "App.tsx",
-    "callee": "localStorage.getItem"
-  },
-  {
     "file": "api.test.ts",
     "callee": "syncGet"
   },
@@ -246,18 +242,6 @@
   {
     "file": "servers/serverTransport.test.ts",
     "callee": "transport.fetch"
-  },
-  {
-    "file": "servers/shellTransport.test.ts",
-    "callee": "fetch"
-  },
-  {
-    "file": "servers/shellTransport.ts",
-    "callee": "fetch"
-  },
-  {
-    "file": "servers/shellTransport.ts",
-    "callee": "serverCredentialAdapter().fetch"
   },
   {
     "file": "servers/storage.ts",

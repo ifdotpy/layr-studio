@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { AgentMode } from "../generated/api";
 import type { Agent } from "../types";
-import type { UsageAccount } from "./Usage";
-import { roleAccounts } from "./roleAccounts";
+import type { UsageAccount } from "../app/settings/UsageFixture.tsx";
+import { accountsForRoles } from "./roleAccounts";
 
 const account = (
   key: string,
@@ -99,3 +99,17 @@ describe("role accounts", () => {
     expect(summary(lead({ accountKey: "missing" }))).toEqual([]);
   });
 });
+
+function roleAccounts(
+  lead: import("../types").Agent,
+  accounts: UsageAccount[],
+  detail: Omit<import("../types").Agent, "id"> = lead,
+) {
+  return accountsForRoles(
+    lead,
+    accounts,
+    detail,
+    (a) => a.key,
+    (a) => a.runway,
+  );
+}

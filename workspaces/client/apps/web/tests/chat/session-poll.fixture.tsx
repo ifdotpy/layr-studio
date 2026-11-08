@@ -1,17 +1,17 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { useSnapshot } from "../../src/hooks.ts";
+import { useStartupFixture } from "../sync/startup-fixture.ts";
 
 declare global {
   interface Window {
-    snapshot: ReturnType<typeof useSnapshot>;
+    snapshot: ReturnType<typeof useStartupFixture>;
   }
 }
 
 const node = document.createElement("div");
 document.body.appendChild(node);
 function Harness() {
-  window.snapshot = useSnapshot();
+  window.snapshot = useStartupFixture();
   return null;
 }
 createRoot(node).render(React.createElement(Harness));

@@ -1,20 +1,9 @@
 import { required } from "./componentTestFixtures";
 import { afterEach, expect, it, vi } from "vitest";
-const h = vi.hoisted(() => ({ effects: [] as Array<() => unknown> }));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => [
-    typeof initial === "function" ? initial() : initial,
-    vi.fn(),
-  ],
-  useRef: (value: unknown) => ({ current: value }),
-  useEffect: (effect: () => unknown) => {
-    h.effects.push(effect);
-  },
-}));
-import { useSidebarOrder } from "./useSidebarOrder";
+import { SidebarOrderOwner } from "./useSidebarOrder.ts";
+const stops: (() => void)[] = [];
 afterEach(() => {
-  h.effects = [];
+  stops.splice(0).forEach((stop) => stop());
 });
 
 it.each(["empty", "empty-group", "legacy", "pending"] as const)(
@@ -63,15 +52,13 @@ it.each(["empty", "empty-group", "legacy", "pending"] as const)(
       byOwner: () => backend,
       available: () => true,
     } as never;
-    useSidebarOrder(
-      "codex-sidebar-order:order",
-      { revision: 0, groups: null },
-      undefined,
-      undefined,
+    const sorting = new SidebarOrderOwner({
+      stateDir: "order",
+      runtime: { sidebarOrder: { revision: 0, groups: null } },
       services,
-      "session",
-    );
-    for (const effect of h.effects.splice(0)) effect();
+      sessionToken: "session",
+    });
+    stops.push(sorting.start());
     await Promise.resolve();
     await Promise.resolve();
     if (scenario !== "pending") expect(post).not.toHaveBeenCalled();
@@ -99,15 +86,13 @@ it("allows an explicit reorder when the server has no previous order", async () 
     byOwner: () => backend,
     available: () => true,
   } as never;
-  const sorting = useSidebarOrder(
-    "codex-sidebar-order:scope",
-    { revision: 1, groups: null },
-    undefined,
-    undefined,
+  const sorting = new SidebarOrderOwner({
+    stateDir: "scope",
+    runtime: { sidebarOrder: { revision: 1, groups: null } },
     services,
-    "session",
-  );
-  for (const effect of h.effects.splice(0)) effect();
+    sessionToken: "session",
+  });
+  stops.push(sorting.start());
   const first = sorting.bindings("projects", "one", ["one", "two"]);
   const second = sorting.bindings("projects", "two", ["one", "two"]);
   first.onDragStart({

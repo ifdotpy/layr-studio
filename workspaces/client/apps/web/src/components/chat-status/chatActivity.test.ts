@@ -1,3 +1,4 @@
+import type { ComponentSnapshot as Snapshot } from "../componentTestFixtures.ts";
 import { autorun, computed } from "mobx";
 import { createProcessesMirror } from "../../generated/observableResources.ts";
 import { unreadResult } from "./readReceiptFixture.ts";
@@ -18,7 +19,7 @@ import {
 import { backgroundDisplay, required } from "../componentTestFixtures";
 
 import type { ProcessList } from "../../generated/observableResources.ts";
-import type { Agent, Snapshot } from "../../types";
+import type { Agent } from "../../types";
 
 import { componentSnapshot } from "../componentTestFixtures";
 import assert from "node:assert/strict";

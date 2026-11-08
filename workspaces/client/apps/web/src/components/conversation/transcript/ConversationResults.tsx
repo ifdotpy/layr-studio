@@ -1,4 +1,4 @@
-import { computed } from "mobx";
+import { compareStructural, computed } from "mobx";
 import { observer } from "mobx-react-lite";
 import { PanelHeader } from "../../ui/primitives";
 import { Button, Modal } from "@mantine/core";
@@ -31,7 +31,10 @@ export default observer(function ConversationResults({
   onJump?: (messageId: string) => void;
 }) {
   const results = useMemo(
-    () => computed(() => conversationResults(messages)),
+    () =>
+      computed(() => conversationResults(messages), {
+        equals: compareStructural,
+      }),
     [messages],
   ).get();
   const [open, setOpen] = useState(true);

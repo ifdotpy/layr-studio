@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { GetResult } from "../../src/apiTypes.ts";
 import type { FixturePullResponse } from "./helpers.ts";
 import { fixtureOrigin } from "./helpers.ts";
@@ -22,9 +23,11 @@ test("sync initial resume browser", async ({ page }) => {
     const pulls: Record<string, string>[] = [];
     const live = Array.from({ length: 499 }, (_, index) => ({
       op: "upsert" as const,
-      collection: "agent" as const,
+      collection: "agentSummary" as const,
       id: `worker-${index}`,
-      value: { id: `worker-${index}`, name: `Worker ${index}` },
+      value: agentSummaryFixture(`worker-${index}`, {
+        name: `Worker ${index}`,
+      }),
       seq: index + 2,
     }));
     await page.route("**/check", (route) =>
@@ -107,12 +110,15 @@ test("sync initial resume browser", async ({ page }) => {
         return write(...args);
       };
       window.snapshots = [];
-      window.stop = client.subscribeStateProjection(
+      const { observeGeneratedState } =
+        await import("/src/sync/generatedState.testHelper.ts");
+      window.stop = observeGeneratedState(
+        client,
         (value) => window.snapshots.push(value),
         (error) => {
           if (error) window.syncError = String(error);
         },
-      );
+      ).stop;
     });
     await page.waitForFunction(
       () => window.snapshots.length > 0 || window.syncError,
@@ -127,7 +133,7 @@ test("sync initial resume browser", async ({ page }) => {
       reset: "1",
     });
     assert.equal(
-      await page.evaluate(() => window.snapshots.at(-1)?.threads.length),
+      await page.evaluate(() => window.snapshots.at(-1)?.agents.size),
       499,
     );
     assert.ok(
@@ -158,11 +164,7 @@ test("sync initial resume browser", async ({ page }) => {
 declare global {
   interface Window {
     writeCalls: number;
-    snapshots: Parameters<
-      Parameters<
-        typeof import("../../src/sync/client.ts").subscribeStateProjection
-      >[0]
-    >[0][];
+    snapshots: import("../../src/generated/observableResources.ts").StateCollections[];
     syncError: string | undefined;
     stop: () => void;
   }

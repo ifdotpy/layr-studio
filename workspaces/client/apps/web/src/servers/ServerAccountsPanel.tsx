@@ -1,12 +1,13 @@
-import { runInAction } from "mobx";
+import { observer } from "mobx-react-lite";
+import { useState, useRef } from "react";
+import { useServerStore } from "./ServerServicesContext.tsx";
 import { AccountStatus } from "../generated/api";
 import { Accordion, Badge, Menu, Modal, Select } from "@mantine/core";
 import { Check, CloudOff, Ellipsis, LogIn, RefreshCw } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
 import {
+  useMenuEscapeSuppression,
   closeMenuFromTriggerOnEscape,
   restoreMenuTriggerFocusAfterClose,
-  useMenuEscapeSuppression,
 } from "../components/closeMenuFromTriggerOnEscape";
 import { ActionButton, SettingsSection } from "../components/ui/primitives";
 import type { ServerAccount, ServerCommand } from "./navigation";
@@ -17,18 +18,18 @@ import {
   type ServerAccountRow,
 } from "./serverAccountRows";
 import {
+  serverAccounts,
   AccountLimitsAcrossServers,
   matchServerAccount,
   ServerTurnStartLimits,
-  useServerFullAccounts,
   type AccountSource,
 } from "./ServerAccountLimits";
 import { AccountCapacityView, type Account } from "../components/Accounts";
 import { accountLimitView, ProviderMark } from "../components/AccountTiles";
 import {
+  createAccountAddDraft,
   AccountAddForm,
   AccountAddActionsContext,
-  createAccountAddDraft,
 } from "../components/AccountAddForm";
 import { PROVIDER_LABELS, ProviderKind } from "../generated/providerKind.ts";
 import type { ServerServices } from "./serverServices";
@@ -71,7 +72,7 @@ function needsSignIn(status: string) {
 export function accountSources(
   row: ServerAccountRow,
   servers: StudioServer[],
-  fullAccounts: Record<string, Account[]>,
+  fullAccounts: Record<string, readonly Account[]>,
   servicesFor?: (serverId: string) => ServerServices | undefined,
 ): AccountSource[] {
   return servers.flatMap((server) => {
@@ -93,7 +94,7 @@ export function accountSources(
   });
 }
 
-export default function ServerAccountsPanel({
+const ServerAccountsPanel = observer(function ServerAccountsPanel({
   servers,
   accountsByServer,
   statuses,
@@ -113,23 +114,29 @@ export default function ServerAccountsPanel({
   servicesFor?: (serverId: string) => ServerServices | undefined;
   initialFocusIdentity?: string | undefined;
 }) {
-  const [fullAccounts, setFullAccounts] = useServerFullAccounts(
-    servers.map((server) => server.id),
-    servicesFor,
-  );
-  const [adding, setAdding] = useState(false);
+  const store = useServerStore();
   const [draft] = useState(createAccountAddDraft);
-  const [serverId, setServerId] = useState(servers[0]?.id || "local");
-  const [openAccountMenuKey, setOpenAccountMenuKey] = useState<string | null>(
-    null,
-  );
-  const accountMenuTriggers = useRef(new Map<string, HTMLButtonElement>());
+  const [adding, setAdding] = useState(false);
+  const [serverId, setServerId] = useState<string | null>(null);
+  const [openAccountMenuKey, setMenuKey] = useState<string | null>(null);
+  const accountMenuTriggers = useRef(
+    new Map<string, HTMLButtonElement>(),
+  ).current;
   const { suppressNextEscape, clearSuppression } = useMenuEscapeSuppression(
     openAccountMenuKey !== null,
   );
-  const rows = useMemo(
-    () => serverAccountRows(servers, accountsByServer),
-    [accountsByServer, servers],
+  const setMenu = (key: string, opened: boolean) => {
+    if (opened) clearSuppression();
+    setMenuKey(
+      opened ? key : openAccountMenuKey === key ? null : openAccountMenuKey,
+    );
+  };
+  const rows = serverAccountRows(servers, accountsByServer);
+  const fullAccounts = Object.fromEntries(
+    servers.map((server) => [
+      server.id,
+      serverAccounts(store, server.id, servicesFor),
+    ]),
   );
   const selected =
     servers.find((server) => server.id === serverId) || servers[0];
@@ -151,9 +158,7 @@ export default function ServerAccountsPanel({
             <ActionButton
               actionRole="primary"
               onClick={() => {
-                runInAction(() => {
-                  draft.provider = "";
-                });
+                draft.provider = "";
                 setAdding(true);
               }}
             >
@@ -284,12 +289,7 @@ export default function ServerAccountsPanel({
                           {source && (
                             <ServerTurnStartLimits
                               source={source}
-                              onSaved={(accounts) =>
-                                setFullAccounts((old) => ({
-                                  ...old,
-                                  [server.id]: accounts,
-                                }))
-                              }
+                              onSaved={() => {}}
                             />
                           )}
                         </li>
@@ -387,16 +387,10 @@ export default function ServerAccountsPanel({
                     <Menu
                       opened={openAccountMenuKey === row.key}
                       onChange={(nextOpened) => {
-                        setOpenAccountMenuKey((current) =>
-                          nextOpened
-                            ? row.key
-                            : current === row.key
-                              ? null
-                              : current,
-                        );
+                        setMenu(row.key, nextOpened);
                         if (!nextOpened)
                           restoreMenuTriggerFocusAfterClose(
-                            accountMenuTriggers.current.get(row.key) ?? null,
+                            accountMenuTriggers.get(row.key) ?? null,
                           );
                       }}
                       position="bottom-end"
@@ -410,9 +404,8 @@ export default function ServerAccountsPanel({
                             initialFocusIdentity === row.key ? true : undefined
                           }
                           ref={(node) => {
-                            if (node)
-                              accountMenuTriggers.current.set(row.key, node);
-                            else accountMenuTriggers.current.delete(row.key);
+                            if (node) accountMenuTriggers.set(row.key, node);
+                            else accountMenuTriggers.delete(row.key);
                           }}
                           actionRole="quiet"
                           onClick={(event) =>
@@ -427,10 +420,7 @@ export default function ServerAccountsPanel({
                             closeMenuFromTriggerOnEscape(
                               event,
                               openAccountMenuKey === row.key,
-                              () =>
-                                setOpenAccountMenuKey((current) =>
-                                  current === row.key ? null : current,
-                                ),
+                              () => setMenu(row.key, false),
                               suppressNextEscape,
                               clearSuppression,
                             )
@@ -591,10 +581,8 @@ export default function ServerAccountsPanel({
                 forceAdd: true,
               });
               setAdding(false);
-              runInAction(() => {
-                draft.label = "";
-                draft.email = "";
-              });
+              draft.label = "";
+              draft.email = "";
             },
           }}
         >
@@ -606,11 +594,12 @@ export default function ServerAccountsPanel({
                 label: server.label,
               }))}
               value={selected?.id || null}
-              onChange={(value) => value && setServerId(value)}
+              onChange={(value) => setServerId(value)}
             />
           </AccountAddForm>
         </AccountAddActionsContext>
       </Modal>
     </div>
   );
-}
+});
+export default ServerAccountsPanel;

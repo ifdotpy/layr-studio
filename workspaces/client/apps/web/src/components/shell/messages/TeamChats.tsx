@@ -162,7 +162,9 @@ const TeamDetail = observer(function TeamDetail({
   detailOpen: boolean;
   onBack(): void;
 }) {
-  const { notify } = useConversationActions();
+  const {
+    notices: { notify },
+  } = useConversationActions();
   useMessageRenderProbe("team-detail", room?.id || "you");
   const showYou = selected === "you" || !room;
   const messages = useRoomHistory(!showYou && room ? room.id : null, stateDir);
@@ -633,7 +635,9 @@ const PersonalFeed = observer(function PersonalFeed({
   focusItemId: string | undefined;
   focusRequestId: string | undefined;
 }) {
-  const { refresh, notify } = useConversationActions();
+  const area = useConversationActions();
+  const { refresh } = area;
+  const { notify } = area.notices;
   const requests = useRequestsView({ all: true });
   useMessageRenderProbe("personal-feed");
   const items = personalItems(

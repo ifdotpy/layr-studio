@@ -1,9 +1,7 @@
-import { useConversationActions } from "./conversation/navigation.ts";
+// @vitest-environment happy-dom
+import type { Agent } from "../types.ts";
+import { ServerAreasContextProvider } from "../app/ServerAreasProvider.tsx";
 import { conversationActionsFixture } from "./observableFixture.tsx";
-vi.mock("./conversation/navigation.ts", async (original) => ({
-  ...(await original<typeof import("./conversation/navigation.ts")>()),
-  useConversationActions: vi.fn(),
-}));
 vi.mock("./questions/requestView", () => ({
   createRequestsView: () => ({ requests: [] }),
 }));
@@ -26,36 +24,64 @@ import {
   type ReactNode,
 } from "react";
 
-const h = vi.hoisted(() => ({ effects: [] as Array<() => unknown> }));
-vi.mock("../usePendingCommands", () => ({ usePendingCommands: () => [] }));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => [
-    typeof initial === "function" ? initial() : initial,
-    vi.fn(),
-  ],
-  useRef: (current: unknown) => ({ current }),
-  useMemo: (compute: () => unknown) => compute(),
-  useCallback: (callback: unknown) => callback,
-  useLayoutEffect: () => {},
-  useEffect: (effect: () => unknown) => {
-    h.effects.push(effect);
-  },
+const h = vi.hoisted(() => ({
+  live: false,
+  areas: undefined as
+    | import("../app/ServerAreasProvider.tsx").ServerAreas
+    | undefined,
+  store: undefined as
+    | ReturnType<
+        typeof import("./observableFixture.tsx").observableFixture
+      >["store"]
+    | undefined,
+  api: undefined as
+    | import("../servers/serverServices.ts").ServerServices["api"]
+    | undefined,
+  effects: [] as Array<() => unknown>,
+  read: vi.fn(async () => {}),
 }));
+vi.mock("../usePendingCommands", () => ({ usePendingCommands: () => [] }));
+vi.mock("react", async (original) => {
+  const actual = await original<typeof import("react")>();
+  return {
+    ...actual,
+    useContext: <T>(context: import("react").Context<T>) =>
+      h.live ? actual.useContext(context) : h.areas,
+    useState: (initial: unknown) =>
+      h.live
+        ? actual.useState(initial)
+        : [typeof initial === "function" ? initial() : initial, vi.fn()],
+    useRef: (current: unknown) =>
+      h.live ? actual.useRef(current) : { current },
+    useMemo: (compute: () => unknown, deps: unknown[]) =>
+      h.live ? actual.useMemo(compute, deps) : compute(),
+    useCallback: (callback: () => unknown, deps: unknown[]) =>
+      h.live ? actual.useCallback(callback, deps) : callback,
+    useLayoutEffect: (effect: () => void | (() => void), deps: unknown[]) => {
+      if (h.live) actual.useLayoutEffect(effect, deps);
+    },
+    useEffect: (effect: () => void | (() => void), deps: unknown[]) => {
+      if (h.live) actual.useEffect(effect, deps);
+      else h.effects.push(effect);
+    },
+  };
+});
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
-  useServerStore: () => ({
-    state: () => ({
-      current: {
-        status: "live",
-        data: {
-          agents: new Map(),
-          workspaces: new Map([["workspace", { stateDir: "fixture" }]]),
+  useServerStore: () =>
+    h.store ?? {
+      state: () => ({
+        current: {
+          status: "live",
+          data: {
+            agents: new Map(),
+            workspaces: new Map([["workspace", { stateDir: "fixture" }]]),
+          },
         },
-      },
-    }),
-  }),
-  useServerApi: () => ({ get: vi.fn(), post: vi.fn() }),
+      }),
+    },
+  useServerApi: () => h.api ?? { get: h.read, post: vi.fn() },
+  useServerSync: () => ({ subscribeStateProjection: () => () => {} }),
   useServerOutbox: () => ({}),
   useServerUploads: () => ({}),
 }));
@@ -71,18 +97,10 @@ vi.mock("@mantine/hooks", async (original) => ({
   ...(await original<typeof import("@mantine/hooks")>()),
   useMediaQuery: () => false,
 }));
-vi.mock("../conversation/historySession", () => ({
-  useConversationHistory: () => ({ items: [], loaded: true }),
-}));
-vi.mock("./useMessageReceipts", () => ({
-  useMessageReceipts: () => new Map(),
-}));
 vi.mock("./questions/useQuestionCards", () => ({
   createQuestionCards: () => () => undefined,
 }));
-vi.mock("./removedMessages", () => ({
-  useRemovedMessages: () => ({ restored: [], hidden: () => false }),
-}));
+vi.mock("./TokenRate", () => ({ default: () => null }));
 vi.mock("./usePromptRecall", () => ({ usePromptRecall: () => ({}) }));
 vi.mock("./useConversationScroll", () => ({
   useConversationScroll: () => ({
@@ -113,50 +131,35 @@ import { ObservedNativeError as NativeError } from "./Conversation";
 import PromptComposer from "./prompt-composer/PromptComposer";
 import RealtimeVoice from "./RealtimeVoice";
 
-type Props = ComponentProps<typeof Conversation>;
+type Props = { agent?: Agent; detail?: Agent };
 function render(
   agent: Props["agent"],
   reloadLimits: () => void,
   detail: Props["detail"] = agent,
 ) {
-  vi.mocked(useConversationActions).mockReturnValue({
-    ...conversationActionsFixture(),
-    reloadLimits,
+  const models = observableFixture(agent ? [agent] : []);
+  const actions = conversationActionsFixture(() => {}, models.store);
+  actions.navigation.selectedId = agent?.id || null;
+  actions.selected.detailSlot = detail
+    ? { current: { status: "live", data: detail } }
+    : undefined;
+  h.read.mockImplementation(async () => {
+    reloadLimits();
   });
-  const element = Conversation({
-    id: "lead",
-    agent,
-    detail,
-    sending: false,
-    limits: null,
-  });
-  // The compact-header observer needs only these browser boundaries.
-  vi.stubGlobal("window", {
-    matchMedia: () => ({
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      matches: false,
-    }),
-  });
-  vi.stubGlobal("document", {
-    querySelector: () => null,
-    documentElement: { dataset: {}, style: { getPropertyValue: () => "" } },
-  });
-  vi.stubGlobal("getComputedStyle", () => ({ getPropertyValue: () => "" }));
-  vi.stubGlobal(
-    "MutationObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
+  h.areas = actions;
+  const element = Conversation();
   const cleanups = h.effects.splice(0).map((effect) => effect());
   for (const cleanup of cleanups) if (typeof cleanup === "function") cleanup();
   vi.unstubAllGlobals();
+  models.store.dispose();
+  actions.scope.services.close();
   return element;
 }
 afterEach(() => {
   h.effects = [];
+  h.live = false;
+  h.store = undefined;
+  h.api = undefined;
   vi.unstubAllGlobals();
 });
 
@@ -198,13 +201,13 @@ it.each(["usageLimitExceeded", "rateLimitExceeded"])(
   (kind) => {
     const read = vi.fn();
     const reloadLimits = () => read("/api/limits");
-    render({ id: "lead", turnId: "turn" } as Props["agent"], reloadLimits);
+    render({ id: "lead", turnId: "turn" }, reloadLimits);
     render(
       {
         id: "lead",
         turnId: "turn",
         error: { codexErrorInfo: kind },
-      } as Props["agent"],
+      },
       reloadLimits,
     );
     expect(read).not.toHaveBeenCalled();
@@ -217,14 +220,14 @@ it("retains the explicit limits refresh action", () => {
     {
       id: "lead",
       error: { codexErrorInfo: "usageLimitExceeded" },
-    } as Props["agent"],
+    },
     reloadLimits,
   );
-  const error = (element.props.children as ReactElement[]).find(
-    (child) => child?.type === NativeError,
-  ) as ReactElement<{ refreshLimits: () => void }>;
+  const error = elements(element).find((child) => child.type === NativeError);
+  if (!isValidElement<ComponentProps<typeof NativeError>>(error))
+    throw new Error("Expected native error");
   reloadLimits.mockClear();
-  error.props.refreshLimits();
+  required(error.props.refreshLimits)();
   expect(reloadLimits).toHaveBeenCalledOnce();
 });
 
@@ -249,4 +252,225 @@ it("enables the composer from generated detail without copying it onto the summa
     throw new Error("Expected prompt input");
   expect(input.props.canSend).toBe(true);
   fixture.store.dispose();
+});
+
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import Usage from "./Usage.tsx";
+import MessageActions from "./conversation/transcript/MessageActions.tsx";
+import MessageInfo from "./conversation/transcript/MessageInfo.tsx";
+import { TranscriptProvider } from "./conversation/navigation.ts";
+import { projectedLimits } from "../usage/accountLimits.fixture.ts";
+import { serializeStateCollections } from "../generated/observableResources.ts";
+import {
+  AccountStatus,
+  EligibilityState,
+  Overage,
+  ProviderKind,
+} from "../generated/api.ts";
+import type { Message } from "../types.ts";
+
+it("keeps chat A metadata and recovery while the real Usage dropdown browses B", async () => {
+  h.live = true;
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  const models = observableFixture([
+    {
+      id: "lead",
+      accountKey: "account-A",
+      source: GeneratedApiAgentSource.managed,
+      provider: ProviderKind.codex,
+      isLead: true,
+      status: GeneratedApiAgentStatus.idle,
+      canSend: true,
+      error: { codexErrorInfo: "usageLimitExceeded" },
+    },
+  ]);
+  const a = projectedLimits("account-A", 100),
+    b = projectedLimits("account-B", 200);
+  a.observation.data = {
+    accountId: "native-A",
+    rateLimits: { planType: "plus" },
+  };
+  b.observation.data = {
+    accountId: "native-B",
+    rateLimits: { planType: "pro" },
+  };
+  for (const [key, view, title] of [
+    ["account-A", a, "Recovery A"],
+    ["account-B", b, "Recovery B"],
+  ] as const) {
+    view.projection.agents.lead = {
+      eligibility: {
+        accountKey: key,
+        agentId: "lead",
+        buckets: [],
+        model: "fixture",
+        overage: Overage.unavailable,
+        provider: ProviderKind.codex,
+        state: EligibilityState.blocked,
+        validUntil: null,
+      },
+      recovery: {
+        title,
+        message: title,
+        timing: { kind: "unknown" },
+        action: { kind: "none" },
+      },
+    };
+  }
+  const account = {
+    id: "account-A",
+    accountId: "native-A",
+    label: "Account A",
+    provider: ProviderKind.codex,
+    status: AccountStatus.ready,
+    home: "",
+    source: "fixture",
+  };
+  models.apply([
+    ...serializeStateCollections(models.mirror.current),
+    {
+      collection: "accounts",
+      id: "current",
+      value: {
+        accounts: [
+          account,
+          {
+            ...account,
+            id: "account-B",
+            accountId: "native-B",
+            label: "Account B",
+          },
+        ],
+        archivedAccounts: [],
+        defaultAccountKey: "account-A",
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+    },
+    { collection: "rateLimit", id: "account-A", value: a },
+    { collection: "rateLimit", id: "account-B", value: b },
+  ]);
+  const areas = conversationActionsFixture(() => {}, models.store);
+  areas.navigation.selectedId = "lead";
+  areas.selected.detailSlot = {
+    current: {
+      status: "live",
+      data: required(models.details.get("lead")).current,
+    },
+  };
+  h.store = models.store;
+  h.api = areas.scope.services.api;
+  const reads = vi.spyOn(h.api, "get");
+  const message: Message = {
+    id: "answer",
+    role: "assistant",
+    text: "Answer",
+    accountKey: "account-A",
+    model: "fixture",
+  };
+  let native: ComponentProps<typeof NativeError> | undefined;
+  let usageProps: ComponentProps<typeof Usage> | undefined;
+  function Caller() {
+    const tree = Conversation();
+    const error = elements(tree).find((node) => node.type === NativeError);
+    if (!isValidElement<ComponentProps<typeof NativeError>>(error))
+      throw new Error("Expected native error");
+    native = error.props;
+    const usage = elements(tree).find((node) => node.type === Usage);
+    if (!isValidElement<ComponentProps<typeof Usage>>(usage))
+      throw new Error("Expected Usage");
+    usageProps = usage.props;
+    const transcript = elements(tree).find(
+      (node) => node.type === TranscriptProvider,
+    );
+    if (!isValidElement<ComponentProps<typeof TranscriptProvider>>(transcript))
+      throw new Error("Expected transcript provider");
+    const row = required(transcript.props.value).renderMessage(message);
+    if (!isValidElement<{ render: (item: Message) => ReactNode }>(row))
+      throw new Error("Expected message row");
+    const article = row.props.render(message);
+    const actions = elements(article).find(
+      (node) => node.type === MessageActions,
+    );
+    if (!isValidElement<ComponentProps<typeof MessageActions>>(actions))
+      throw new Error("Expected message actions");
+    return createElement(
+      "div",
+      null,
+      usage,
+      createElement(MessageInfo, required(actions.props.info)),
+    );
+  }
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const tab = (key: string) =>
+    required(
+      document.querySelector<HTMLButtonElement>(
+        `[role="tab"][data-account-key="${key}"]`,
+      ),
+    );
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(
+            ServerAreasContextProvider,
+            { value: areas },
+            createElement(Caller),
+          ),
+        ),
+      ),
+    );
+    await act(async () => required(native?.openLimits)());
+    expect(usageProps?.opened).toBe(true);
+    const firstRequest = required(usageProps).openRequest;
+    await act(async () => tab("account-B").click());
+    expect(tab("account-B").dataset.selected).toBe("true");
+    expect(required(native).planType).toBe("plus");
+    expect(required(native).recovery?.title).toBe("Recovery A");
+    await act(async () =>
+      required(
+        host.querySelector<HTMLButtonElement>(
+          '[aria-label="Message information"]',
+        ),
+      ).click(),
+    );
+    const info = required(
+      document.querySelector(
+        '[role="dialog"][aria-label="Message information"]',
+      ),
+    );
+    expect(info.textContent).toContain("Account A");
+    expect(info.textContent).not.toContain("Account B");
+    reads.mockClear();
+    await act(async () => required(native?.refreshLimits)());
+    expect(reads).toHaveBeenCalledWith(
+      "/api/limits",
+      expect.objectContaining({ query: { account_key: "account-A" } }),
+    );
+    await act(async () => required(native?.openLimits)());
+    expect(usageProps?.openRequest).toBe((firstRequest ?? 0) + 1);
+    expect(usageProps?.opened).toBe(true);
+    expect(tab("account-A").dataset.selected).toBe("true");
+    expect(tab("account-B").dataset.selected).toBeUndefined();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    models.store.dispose();
+    areas.scope.services.close();
+  }
 });

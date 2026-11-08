@@ -1,4 +1,10 @@
 import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
+import { runInAction } from "mobx";
+import {
+  createServerServices,
+  type ServerServices,
+} from "../../src/servers/serverServices.ts";
+import * as fixtureApi from "../../src/api.ts";
 import { createServerStore } from "../../src/store";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
 import {
@@ -20,17 +26,16 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import { LiveConversation as Conversation } from "../../src/components/Conversation.tsx";
+import Conversation from "../../src/components/Conversation.tsx";
 import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
 
 import type { Agent } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
-import type { OutgoingMessage } from "../../src/sync/send.ts";
 import { fixtureSnapshot } from "./snapshot.ts";
 
 /** JSON body authored by this fixture, excluding the local persistence callback. */
 export type UxChatFixtureSendBody = { text: string } & Omit<
-  NonNullable<Parameters<ConversationActions["send"]>[0]>,
+  NonNullable<Parameters<ConversationActions["delivery"]["send"]>[0]>,
   "onPersist"
 >;
 
@@ -59,8 +64,6 @@ function Fixture() {
     messageId: string;
     requestId: string;
   }>();
-  const [sending, setSending] = useState(false);
-  const [failedOutgoing, setFailedOutgoing] = useState<OutgoingMessage[]>([]);
   const branchSelections = useRef<string[]>([]);
   const regularSelections = useRef<string[]>([]);
   const agent = {
@@ -74,24 +77,6 @@ function Fixture() {
     canSend: true,
     activity: { phase: "idle" },
   } satisfies Agent;
-  // This partial fixture omits account groups and deletion/disconnection capabilities.
-  const fixtureAccountsData: Partial<
-    NonNullable<ConversationActions["accounts"]["data"]>
-  > = {
-    accounts: [],
-    archivedAccounts: [],
-    defaultAccountKey: "default",
-    logins: [],
-  };
-  const accountsState: ConversationActions["accounts"] = {
-    data: fixtureAccountsData as NonNullable<
-      ConversationActions["accounts"]["data"]
-    >,
-    setData: () => {},
-    error: "",
-    refresh: async () => null,
-    scope: "ux-chat-fixture",
-  };
   const data = fixtureSnapshot([agent]);
   const model = useMemo(() => observableFixture([agent]), [id]);
   const [runtime] = useState(() => createServerStore(defaultSubscriptions));
@@ -132,17 +117,6 @@ function Fixture() {
     },
     [],
   );
-  const setDraft = (
-    value: string | ((text: string) => string),
-    target = id,
-  ) => {
-    const previous = currentDrafts.current[target] || "";
-    const text = typeof value === "function" ? value(previous) : value;
-    currentDrafts.current = { ...currentDrafts.current, [target]: text };
-    setDrafts(currentDrafts.current);
-    if (text !== previous)
-      draftListeners.current.get(target)?.forEach((listener) => listener());
-  };
   window.chatFixture = {
     select: setId,
     jump: (messageId: string) =>
@@ -152,64 +126,74 @@ function Fixture() {
     branchSelections: branchSelections.current,
     regularSelections: regularSelections.current,
   };
+  const [services] = useState(() => {
+    const value = createServerServices({
+      id: "local",
+      origin: window.location.origin,
+      label: "Fixture",
+    });
+    Object.defineProperty(value, "api", {
+      value: fixtureApi satisfies ServerServices["api"],
+    });
+    Object.defineProperty(value, "resources", {
+      value: defaultSubscriptions satisfies ServerServices["resources"],
+    });
+    return value;
+  });
+  useEffect(() => () => services.close(), [services]);
+  const area = useMemo(
+    () =>
+      conversationActionsFixture(
+        (target) => {
+          if (data.threads.some((thread) => thread.id === target))
+            regularSelections.current.push(target);
+          else branchSelections.current.push(target);
+          setId(target);
+        },
+        store,
+        services,
+      ),
+    [store, services],
+  );
+  area.scope.services.drafts.getDraft = getDraft;
+  area.scope.services.drafts.subscribeDraft = subscribeDraft;
+  runInAction(() => {
+    setStartupFixture(area, data);
+    area.startup.workspaceId =
+      window.__uxChatSyncIdentity?.workspaceId || "workspace";
+    area.navigation.selectedId = id;
+    area.navigation.jumpTarget = jumpTarget
+      ? { ...jumpTarget, chatId: id }
+      : undefined;
+  });
+  const selected = area.selected;
+  useEffect(() => selected.start(), [selected]);
+  useEffect(() => area.layout.start(), [area]);
+  services.drafts.setDrafts = (update) => {
+    const previous = currentDrafts.current;
+    const next = typeof update === "function" ? update(previous) : update;
+    currentDrafts.current = next;
+    setDrafts(next);
+    for (const [session, listeners] of draftListeners.current)
+      if (previous[session] !== next[session])
+        listeners.forEach((listener) => listener());
+  };
+  services.outbox.durableSend = async (body, _attachments, persist) => {
+    const failure = window.__uxChatSendFailure;
+    if (failure !== undefined) throw new TypeError(failure);
+    await fetch("/api/fixture-send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    await persist?.();
+    return { kind: "confirmed", id: body.id };
+  };
+  area.refresh = async () => {};
+  area.notices.notify = setNotice;
   return (
     <ServerStoreProvider value={store}>
-      <ConversationProvider
-        value={{
-          ...conversationActionsFixture((target) => {
-            regularSelections.current.push(target);
-            if (data.threads.some((thread) => thread.id === target))
-              setId(target);
-          }),
-          accounts: accountsState,
-          getDraft,
-          subscribeDraft,
-          setDraft,
-          notify: setNotice,
-          branchCreated: (target) => {
-            branchSelections.current.push(target);
-            setId(target);
-          },
-          send: async (options) => {
-            setSending(true);
-            try {
-              const failure = window.__uxChatSendFailure;
-              if (failure !== undefined) {
-                const messageId = "image-refusal";
-                setFailedOutgoing([
-                  {
-                    id: messageId,
-                    body: {
-                      id: messageId,
-                      room: id,
-                      text: getDraft(id),
-                      assets: [],
-                      delivery: "queue",
-                    },
-                    status: {
-                      source: "device",
-                      state: { kind: "transport_failed", error: failure },
-                    },
-                    created: Date.now(),
-                  },
-                ]);
-                throw new Error(failure);
-              }
-              await fetch("/api/fixture-send", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  text: getDraft(id),
-                  ...options,
-                } satisfies UxChatFixtureSendBody),
-              });
-              setDraft("");
-            } finally {
-              setSending(false);
-            }
-          },
-        }}
-      >
+      <ConversationProvider value={area}>
         <MantineProvider defaultColorScheme="dark">
           <main
             style={{
@@ -223,17 +207,7 @@ function Fixture() {
                 {notice}
               </div>
             )}
-            <Conversation
-              id={id}
-              syncWorkspaceId={window.__uxChatSyncIdentity?.workspaceId}
-              agent={model.mirror.current.agents.get(agent.id)}
-              sending={sending}
-              outgoing={failedOutgoing}
-
-              limits={null}
-
-              jumpTarget={jumpTarget}
-            />
+            <Conversation />
           </main>
         </MantineProvider>
       </ConversationProvider>
@@ -241,3 +215,5 @@ function Fixture() {
   );
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);
+
+import { setStartupFixture } from "../../src/components/observableFixture.tsx";

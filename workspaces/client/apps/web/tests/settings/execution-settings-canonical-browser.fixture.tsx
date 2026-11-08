@@ -77,7 +77,30 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
+import {
+  ExecutionSettings,
+  ExecutionPermissions,
+} from "../../src/components/agents/ExecutionSettings.tsx";
+import { observer } from "mobx-react-lite";
+import { useServerStore } from "../../src/servers/ServerServicesContext.tsx";
+import { resourceData } from "../../src/store/runtime.ts";
+import { agentId } from "../../src/generated/observableResources.ts";
+import type { ComponentProps } from "react";
+const CanonicalSettings = observer(function CanonicalSettings({
+  agent,
+  permissions,
+  ...props
+}: Omit<ComponentProps<typeof ExecutionSettings>, "input"> & {
+  agent: Agent;
+  permissions?: boolean;
+}) {
+  const store = useServerStore();
+  const summary = resourceData(store.state().current)?.agents.get(agent.id);
+  const detail = resourceData(store.agentDetail(agentId(agent.id)).current);
+  if (!summary) return null;
+  const Component = permissions ? ExecutionPermissions : ExecutionSettings;
+  return <Component {...props} input={{ kind: "agent", summary, detail }} />;
+});
 import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
@@ -301,7 +324,7 @@ function Fixture() {
     <MantineProvider>
       <AgentModelsFixture agents={[agent]}>
         <ModelCatalogFixture value={catalogSource}>
-          <ExecutionSettings
+          <CanonicalSettings
             key={mount}
             settingsRow={defaults}
             initialRole={defaults ? "worker" : "orchestrator"}
@@ -348,7 +371,8 @@ function Fixture() {
             }}
           />
           {!defaults && (
-            <ExecutionSettings
+            <CanonicalSettings
+              permissions
               key={"permissions:" + mount}
               agent={agent}
               catalog={{ models, loading: false, error: "", retry: () => {} }}

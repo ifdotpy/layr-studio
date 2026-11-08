@@ -1,10 +1,10 @@
 import { frameMessageOrigin } from "./frameOrigin";
 import { expect, it } from "vitest";
 import { createRequire } from "node:module";
-import { frameURL, serverFrameHost } from "./frameOrigin";
-const native = createRequire(import.meta.url)(
-  "../../../desktop/frame-owner.ts",
-);
+const native: typeof import("../../../desktop/frame-owner.ts") = createRequire(
+  import.meta.url,
+)("../../../desktop/frame-owner.ts");
+const { serverFrameHost } = native;
 it("uses distinct DNS-valid frame hosts for case-sensitive IDs, UUIDs and maximum length IDs", () => {
   const ids = [
     "local",
@@ -19,7 +19,6 @@ it("uses distinct DNS-valid frame hosts for case-sensitive IDs, UUIDs and maximu
     const host = serverFrameHost(id);
     expect(host.length).toBeLessThanOrEqual(253);
     expect(host.split(".").every((label) => label.length <= 63)).toBe(true);
-    expect(native.serverFrameHost(id)).toBe(host);
     const url = `http://${host}:4621/?${new URLSearchParams({ "studio-server": id, "studio-parent": "http://127.0.0.1:4621" })}`;
     expect(
       native.frameOwner(url, "http://127.0.0.1:4621", "http://127.0.0.1:4621"),
@@ -33,45 +32,6 @@ it("uses distinct DNS-valid frame hosts for case-sensitive IDs, UUIDs and maximu
     ).toBeUndefined();
   }
 });
-it.each(["classic", "combined"])(
-  "accepts the renderer's %s frame URL at the native boundary",
-  (navigation) => {
-    const shell = "http://127.0.0.1:4620";
-    const assets = "http://127.0.0.1:4621";
-    const url = frameURL(
-      { id: "local", label: "This computer", origin: shell },
-      `${shell}/?studio-navigation=${navigation}`,
-      assets,
-    );
-    expect(native.frameOwner(url, assets, shell)).toBe("local");
-    for (const query of [
-      "studio-navigation=invalid",
-      "studio-navigation=classic&studio-navigation=combined",
-      "unknown=classic",
-      "studio-parent=http://other.localhost:4620",
-      "studio-server=remote",
-    ]) {
-      const invalid = new URL(url);
-      const keys = new Set(new URLSearchParams(query).keys());
-      for (const key of keys) invalid.searchParams.delete(key);
-      for (const [key, value] of new URLSearchParams(query))
-        invalid.searchParams.append(key, value);
-      expect(native.frameOwner(invalid.href, assets, shell)).toBeUndefined();
-    }
-  },
-);
-it.each(["", "?studio-navigation=combined", "?studio-navigation=invalid"])(
-  "uses combined frames for the default and harmless diagnostic URLs (%s)",
-  (query) => {
-    const url = frameURL(
-      { id: "local", label: "This computer", origin: "http://127.0.0.1:4620" },
-      "http://127.0.0.1:4620/" + query,
-      "http://127.0.0.1:4621",
-    );
-    expect(new URL(url).searchParams.get("studio-navigation")).toBe("combined");
-  },
-);
-
 it("encodes server IDs as lowercase unpadded base32 in labels of at most 50 characters", () => {
   for (const [id, host] of [
     ["local", "studio-nrxwgylm.localhost"],
@@ -85,19 +45,6 @@ it("encodes server IDs as lowercase unpadded base32 in labels of at most 50 char
   ] as const) {
     expect(serverFrameHost(id), id).toBe(host);
   }
-});
-
-it("gives native server views separate bundled origins", () => {
-  const url = new URL(
-    frameURL(
-      { id: "local", label: "Local", origin: "http://localhost" },
-      "tauri://localhost/index.html",
-      "",
-    ),
-  );
-  expect(url.protocol).toBe("studio-view:");
-  expect(url.hostname).toBe("studio-nrxwgylm.localhost");
-  expect(url.searchParams.get("studio-server")).toBe("local");
 });
 
 it("uses exact WebKit origins without collapsing native hosts to null", () => {
@@ -114,3 +61,35 @@ it("uses exact WebKit origins without collapsing native hosts to null", () => {
     "http://localhost:4621",
   );
 });
+
+it.each(["classic", "combined"])(
+  "accepts %s navigation only at the native frame boundary",
+  (navigation) => {
+    const shell = "http://127.0.0.1:4620";
+    const assets = "http://127.0.0.1:4621";
+    const url = new URL(assets);
+    url.hostname = serverFrameHost("local");
+    url.search = new URLSearchParams({
+      "studio-server": "local",
+      "studio-navigation": navigation,
+      "studio-parent": shell,
+      "studio-origin": shell,
+      "studio-credential": "",
+    }).toString();
+    expect(native.frameOwner(url.href, assets, shell)).toBe("local");
+    for (const query of [
+      "studio-navigation=invalid",
+      "studio-navigation=classic&studio-navigation=combined",
+      "unknown=classic",
+      "studio-parent=http://other.localhost:4620",
+      "studio-server=remote",
+    ]) {
+      const invalid = new URL(url);
+      const keys = new Set(new URLSearchParams(query).keys());
+      for (const key of keys) invalid.searchParams.delete(key);
+      for (const [key, value] of new URLSearchParams(query))
+        invalid.searchParams.append(key, value);
+      expect(native.frameOwner(invalid.href, assets, shell)).toBeUndefined();
+    }
+  },
+);

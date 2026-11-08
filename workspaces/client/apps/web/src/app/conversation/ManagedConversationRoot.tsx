@@ -1,0 +1,32 @@
+import { observer } from "mobx-react-lite";
+import Conversation from "../../components/Conversation.tsx";
+import RadioChat from "../../components/RadioChat.tsx";
+import UIErrorBoundary from "../../components/UIErrorBoundary.tsx";
+import { useConversationActions } from "../../components/conversation/navigation.ts";
+
+/** Selection is resolved once; the widget receives a stable owner reference. */
+export const ManagedConversationRoot = observer(
+  function ManagedConversationRoot() {
+    const area = useConversationActions();
+    const { selected, navigation } = area;
+    return (
+      <UIErrorBoundary
+        label="this conversation"
+        resetKey={navigation.selectedId}
+      >
+        {selected.isSelectionSuspended ? (
+          <div className="chat-empty-state" role="status">
+            {selected.deletionMessage}
+          </div>
+        ) : navigation.selectedRoom?.radio ? (
+          <RadioChat
+            room={navigation.selectedRoom}
+            visible={selected.isConversationVisible}
+          />
+        ) : (
+          <Conversation key={navigation.selectedId || "new"} />
+        )}
+      </UIErrorBoundary>
+    );
+  },
+);

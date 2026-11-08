@@ -58,6 +58,7 @@ test("hidden server screens release chat details while keeping list membership",
     );
   try {
     await remoteNetwork(context, remote);
+    await page.clock.install();
     await page.goto(origin);
     await expect(page.locator("#message")).toBeVisible();
     await page
@@ -85,7 +86,6 @@ test("hidden server screens release chat details while keeping list membership",
     for (const kind of ["transcript", "session-cost"] as const)
       await expect.poll(() => has(local, kind, "overlap")).toBe(true);
     expect(has(local, "transcript", "prefetch")).toBe(false);
-    await page.clock.install();
     await chat("Remote chat").click();
     await page.clock.fastForward(DEFAULT_SUBSCRIPTION_GRACE_MS + 100);
     for (const kind of ["transcript", "session-cost", "limits"] as const)

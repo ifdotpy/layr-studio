@@ -4,7 +4,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { theme } from "/src/theme.ts";
-import { useMobileViewport } from "/src/hooks/mobileViewport.ts";
+import { attachMobileViewport } from "/src/hooks/mobileViewport.ts";
 import { BottomInsetBand, PassiveUsage } from "/src/hooks/BottomInsetBand.tsx";
 import "@mantine/core/styles.css";
 import "/src/style.css";
@@ -13,7 +13,7 @@ import "/src/hooks/viewport-surface.css";
 import "/src/layout/layout-contract.generated.css";
 const e = React.createElement;
 function Fixture() {
-  useMobileViewport(true);
+  React.useEffect(() => attachMobileViewport(), []);
   return e(
     MantineProvider,
     { theme },

@@ -2,8 +2,10 @@ import { fixtureElement } from "./browser-helpers.ts";
 
 import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import { useSnapshot } from "../../src/hooks.ts";
-import { useSyncedDrafts } from "../../src/sync/drafts.ts";
+import { useStartupFixture } from "./startup-fixture.ts";
+import { createDrafts } from "../../src/sync/drafts.ts";
+import * as api from "../../src/api.ts";
+import * as resources from "../../src/sync/resourceEvents.ts";
 import {
   subscribeTranscriptProjection,
   watchResourceChanges,
@@ -15,8 +17,9 @@ window.durableSend = durableSend;
 window.mount = (selected) =>
   createRoot(fixtureElement("app")).render(
     React.createElement(function Fixture() {
-      window.syncHttpConnectionBudgetBrowserFixtureSnapshot = useSnapshot();
-      useSyncedDrafts();
+      window.syncHttpConnectionBudgetBrowserFixtureSnapshot =
+        useStartupFixture();
+      useEffect(() => createDrafts({ api, resources }).start(), []);
       useEffect(
         () =>
           subscribeTranscriptProjection(
@@ -28,18 +31,22 @@ window.mount = (selected) =>
       );
       useEffect(
         () =>
-          window.syncHttpConnectionBudgetBrowserFixtureSnapshot.workspaceId
+          window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup
+            .workspaceId
             ? watchResourceChanges(
                 { kind: "transcript", agentId: selected },
                 () => {},
               )
             : undefined,
-        [window.syncHttpConnectionBudgetBrowserFixtureSnapshot.workspaceId],
+        [
+          window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup
+            .workspaceId,
+        ],
       );
       return React.createElement(
         "div",
         { id: "error" },
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.error,
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.error,
       );
     }),
   );

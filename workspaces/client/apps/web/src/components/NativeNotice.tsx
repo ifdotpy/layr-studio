@@ -46,16 +46,7 @@ function Guidance({
   );
 }
 
-export function isNonBlockingWarning(item: Message): boolean {
-  return (
-    "nativeNotice" in item &&
-    item.nativeNotice === "warning" &&
-    !("nativeError" in item && item.nativeError) &&
-    !("nativeReview" in item && item.nativeReview) &&
-    !("nativeHook" in item && item.nativeHook) &&
-    !("nativeHookQuiet" in item && item.nativeHookQuiet)
-  );
-}
+export { isNonBlockingWarning } from "../app/notices/nonBlockingWarning.ts";
 
 export function NativeError({
   agent,

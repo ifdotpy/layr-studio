@@ -1,3 +1,4 @@
+import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import { sidebarEntities } from "./sidebarSnapshot.ts";
 import {
   withSidebarCollections,
@@ -20,7 +21,6 @@ import {
 import { itemGroup } from "../components/sidebar/catalog";
 import {
   createMergedSidebarSelector,
-  createSidebarSourceStore,
   mergeSidebar,
   type SidebarSource,
 } from "./mergedSidebar";

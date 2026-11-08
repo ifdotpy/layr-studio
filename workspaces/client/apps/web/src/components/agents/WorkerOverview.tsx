@@ -30,13 +30,9 @@ export function TeamGroupLabel({
   );
 }
 export const TeamSummary = observer(function TeamSummary() {
-  const {
-    view,
-    workerFilter: selected,
-    setWorkerFilter,
-    setCompletedOpen,
-  } = useTeam();
-  const counts = view.counts;
+  const view = useTeam();
+  const { workerFilter: selected, setWorkerFilter, setCompletedOpen } = view;
+  const counts = view.view.counts;
   const onFilter = (value: string) => {
     setWorkerFilter(value);
     if (value === "completed") setCompletedOpen(true);

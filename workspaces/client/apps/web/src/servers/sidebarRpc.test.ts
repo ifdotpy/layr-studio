@@ -1,180 +1,16 @@
-import assert from "node:assert/strict";
 import { afterEach, expect, it, vi } from "vitest";
 const post = vi.hoisted(() => vi.fn());
 vi.mock("../api", async (original) => ({
   ...(await original<typeof import("../api")>()),
   post,
 }));
-import { ApiError } from "../api";
-import { errorDetails } from "../errorPresentation";
-import { createSidebarRpcClient, executeSidebarRequest } from "./sidebarRpc";
+import { executeSidebarRequest } from "./sidebarRpc";
 import { navigationSnapshot } from "./navigation";
 
 afterEach(() => {
   post.mockReset();
   vi.useRealTimers();
 });
-function surface() {
-  const events = new EventTarget();
-  const child = { postMessage: vi.fn() };
-  const frame = {
-    contentWindow: child,
-    src: "https://frame.example/?studio-server=remote",
-    isConnected: true,
-  } as unknown as HTMLIFrameElement;
-  const frames = new Map([["remote", frame]]);
-  const rpc = createSidebarRpcClient(
-    events as unknown as Window,
-    frames,
-    async () => {},
-  );
-  const reply = (
-    data: unknown,
-    source: unknown = child,
-    origin = "https://frame.example",
-  ) =>
-    events.dispatchEvent(
-      Object.assign(new Event("message"), { data, source, origin }),
-    );
-  return { rpc, child, frame, frames, reply };
-}
-
-it("accepts only the exact frame, origin, owner and correlation used for a request", async () => {
-  const { rpc, child, reply, frames } = surface();
-  const request = rpc.request("remote", { action: "refresh" });
-  await Promise.resolve();
-  assert.ok(child.postMessage.mock.calls[0] != null);
-  const sent = child.postMessage.mock.calls[0][0];
-  const data = {
-    kind: "studio-sidebar-result",
-    serverId: "remote",
-    correlation: sent.correlation,
-    result: { ready: true },
-  };
-  let resolved = false;
-  void request.then(() => {
-    resolved = true;
-  });
-  reply(data, {});
-  reply(data, child, "https://wrong.example");
-  reply({ ...data, serverId: "local" });
-  reply({ ...data, correlation: "another-request" });
-  frames.set("remote", { contentWindow: {} } as HTMLIFrameElement);
-  reply(data, frames.get("remote")!.contentWindow);
-  await Promise.resolve();
-  expect(resolved).toBe(false);
-  reply(data);
-  expect(await request).toEqual({ ready: true });
-  rpc.dispose();
-});
-
-it("reconstructs the previous error wire shape and keeps uncertain timeouts without a retry", async () => {
-  vi.useFakeTimers();
-  const { rpc, child, reply } = surface();
-  const request = rpc.request("remote", {
-    action: "post",
-    path: "/api/rename",
-    body: { id: "same", name: "Draft", request_id: "exact" },
-  });
-  const rejected = request.catch((error: unknown) => error);
-  await Promise.resolve();
-  assert.ok(child.postMessage.mock.calls[0] != null);
-  const sent = child.postMessage.mock.calls[0][0];
-  reply({
-    kind: "studio-sidebar-result",
-    serverId: "remote",
-    correlation: sent.correlation,
-    error: {
-      message: "Conflict",
-      status: 409,
-      location: ["body", "revision"],
-      outcome: "not_applied",
-      catalogPending: false,
-    },
-  });
-  expect(await rejected).toMatchObject({
-    status: 409,
-    location: ["body", "revision"],
-    outcome: "not_applied",
-    catalogPending: false,
-    response: {
-      error: "Conflict",
-      location: ["body", "revision"],
-      outcome: "not_applied",
-      catalogPending: false,
-    },
-  });
-  expect(await rejected).toBeInstanceOf(ApiError);
-  const unknown = rpc
-    .request("remote", {
-      action: "post",
-      path: "/api/rename",
-      body: { id: "same", name: "Draft", request_id: "exact" },
-    })
-    .catch((error: unknown) => error);
-  await vi.advanceTimersByTimeAsync(17000);
-  expect(await unknown).toBeInstanceOf(Error);
-  expect(((await unknown) as Error).message).toContain("unknown");
-  expect(child.postMessage).toHaveBeenCalledTimes(2);
-  rpc.dispose();
-});
-
-it("reconstructs documented API diagnostics for the same error presentation as HTTP", async () => {
-  const { rpc, child, reply } = surface();
-  const request = rpc.request("remote", { action: "refresh" });
-  const rejected = request.catch((error: unknown) => error);
-  await Promise.resolve();
-  assert.ok(child.postMessage.mock.calls[0] != null);
-  const sent = child.postMessage.mock.calls[0][0];
-  const payload = {
-    message: "Conflict",
-    status: 409,
-    code: "request_conflict",
-    metadata: { attempt: 2 },
-    outcome: "not_applied",
-    catalogPending: true,
-    protocolVersion: 3,
-    supportedVersions: [2, 3],
-    extra: "must not be reconstructed",
-  };
-  reply({
-    kind: "studio-sidebar-result",
-    serverId: "remote",
-    correlation: sent.correlation,
-    error: payload,
-  });
-  const error = await rejected;
-  expect(error).toBeInstanceOf(ApiError);
-  expect(error).toMatchObject({
-    message: "Conflict",
-    status: 409,
-    response: {
-      error: "Conflict",
-      code: "request_conflict",
-      metadata: { attempt: 2 },
-      outcome: "not_applied",
-      catalogPending: true,
-      protocolVersion: 3,
-      supportedVersions: [2, 3],
-    },
-  });
-  expect(error).not.toHaveProperty("response.extra");
-  expect(errorDetails(error)).toBe(
-    errorDetails(
-      new ApiError("Conflict", 409, {
-        error: "Conflict",
-        code: "request_conflict",
-        metadata: { attempt: 2 },
-        outcome: "not_applied",
-        catalogPending: true,
-        protocolVersion: 3,
-        supportedVersions: [2, 3],
-      }),
-    ),
-  );
-  rpc.dispose();
-});
-
 it("uses the frame API with the exact request identity and options", async () => {
   const body = {
     action: "rename",
@@ -251,7 +87,7 @@ it("denies non-sidebar API paths, credential options and unrelated commands", as
 });
 
 it("runs prefetch and unread callbacks in the owning frame and returns its fresh navigation", async () => {
-  const navigation = navigationSnapshot(null, null, "");
+  const navigation = navigationSnapshot(undefined, null, "");
   const refresh = vi.fn(async () => navigation);
   const run = vi.fn(async () => {});
   const command = {

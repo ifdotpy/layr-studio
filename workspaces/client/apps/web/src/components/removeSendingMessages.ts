@@ -5,8 +5,9 @@ import { DeliveryMoment } from "../generated/deliveryMoment";
 import { serverLocalStorage as localStorage } from "../servers/storage";
 import { get, command, ApiError } from "../api";
 import type { CommandRequest } from "../commands";
-import type { Message, Snapshot } from "../types";
-import { transcriptMessages } from "../hooks";
+import type { Message } from "../types";
+import type { StateCollections } from "../generated/observableResources.ts";
+import { transcriptMessages } from "../conversation/messageView.ts";
 import { stopRemovedMessage, type OutgoingMessage } from "../sync/send";
 import type { paths } from "../generated/api";
 import {
@@ -137,7 +138,7 @@ export function createSendingMessageRemoval(
 
   async function removeAllSendingMessages(
     scope: Scope,
-    data: Snapshot,
+    agents: StateCollections["agents"],
     outgoing: OutgoingMessage[],
   ) {
     const targets = new Map<string, Target>();
@@ -168,7 +169,7 @@ export function createSendingMessageRemoval(
         continue;
       include({
         chat: entry.body.room,
-        kind: data.threads.some(
+        kind: [...agents.values()].some(
           (agent) =>
             agent.id === entry.body.room &&
             agent.source === GeneratedApiAgentSource.managed,
@@ -186,14 +187,14 @@ export function createSendingMessageRemoval(
         },
       });
     }
-    const agents = data.threads.filter(
+    const managedAgents = [...agents.values()].filter(
       (agent) => agent.source === GeneratedApiAgentSource.managed,
     );
     let next = 0;
     await Promise.all(
-      Array.from({ length: Math.min(4, agents.length) }, async () => {
-        while (next < agents.length) {
-          const agent = agents[next++]!;
+      Array.from({ length: Math.min(4, managedAgents.length) }, async () => {
+        while (next < managedAgents.length) {
+          const agent = managedAgents[next++]!;
           const queue = await get("/api/queue", {
             query: { agent: agent.id },
             workspaceId: scope.workspaceId,

@@ -1,20 +1,20 @@
 import { fixtureElement } from "./browser-helpers.ts";
 const mount1 = async () => {
   window.snapshotMountedAt = performance.now();
-  const { useSnapshot } = await import("../../src/hooks.ts");
+  const { useStartupFixture } = await import("./startup-fixture.ts");
   const React = await import("react");
   const { createRoot } = await import("react-dom/client");
   const root = createRoot(fixtureElement("root"));
   window.unmountSnapshot = () => root.unmount();
   root.render(
     React.createElement(function SnapshotHarness() {
-      window.snapshot = useSnapshot();
+      window.snapshot = useStartupFixture();
       return React.createElement(
         "p",
         {
-          role: window.snapshot.error ? "alert" : "status",
+          role: window.snapshot.startup.error ? "alert" : "status",
         },
-        window.snapshot.error || "Connecting to LAYR Studio…",
+        window.snapshot.startup.error || "Connecting to LAYR Studio…",
       );
     }),
   );

@@ -4,14 +4,13 @@ import { ActionButton } from "../ui/primitives";
 import { ArrowLeft } from "lucide-react";
 import { AgentWorkspaceBadge } from "./WorkspaceBadge";
 import { ChatServerLine } from "../chat-row/index.ts";
-import { useAgentSummary } from "../agents/state.ts";
 import { useServerStore } from "../../servers/ServerServicesContext.tsx";
 import { useConversationActions } from "../conversation/navigation.ts";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import "../conversation/conversation-chrome.css";
 
 export type ConversationTitleProps = {
-  agentId?: string | undefined;
+  agent?: SidebarAgent | undefined;
   title?: string | undefined;
   passive?: boolean | undefined;
   showProject?: boolean | undefined;
@@ -91,14 +90,13 @@ const ServerLine = observer(function ServerLine({
 });
 
 export default observer(function ConversationTitle({
-  agentId,
+  agent,
   title,
   passive = false,
   showProject = false,
   serverAlias,
   serverOffline = false,
 }: ConversationTitleProps) {
-  const agent = useAgentSummary(agentId || "");
   return (
     <div className="conversation-heading">
       {!passive && agent && <BackToLead agent={agent} />}

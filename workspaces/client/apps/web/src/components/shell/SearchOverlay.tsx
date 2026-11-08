@@ -11,33 +11,36 @@ import { Search } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type GetResult } from "../../api";
 import { observer } from "mobx-react-lite";
-import { useAgentSummary } from "../agents/state.ts";
+import { useServerStore } from "../../servers/ServerServicesContext";
+import { resourceData } from "../../store/runtime.ts";
 import { useWorkspaceResource as useResource } from "../useWorkspaceResource";
 import "./Workspace.css";
-type SearchProps = {
-  revision: number;
-  onSelect: (id: string, messageId?: string) => void;
-  onClose: () => void;
-  navigate: (section: string, agent?: string) => void;
-};
-export default function SearchOverlay(
-  props: Omit<SearchProps, "revision"> & { opened: boolean },
-) {
+export interface SearchSource {
+  readonly opened: boolean;
+  select(id: string, messageId?: string): void;
+  close(): void;
+  navigate(section: string, agent?: string): void;
+}
+export default observer(function SearchOverlay({
+  source,
+}: {
+  source: SearchSource;
+}) {
   return (
     <Modal
-      opened={props.opened}
-      onClose={props.onClose}
+      opened={source.opened}
+      onClose={source.close}
       title="Search messages"
       size="lg"
     >
       <p className="workspace-muted">
         All messages and archived chats. Ctrl+K / ⌘K
       </p>
-      {props.opened && <SearchContent {...props} revision={0} />}
+      {source.opened && <SearchContent source={source} />}
     </Modal>
   );
-}
-export function SearchContent(c: SearchProps) {
+});
+export function SearchContent({ source: c }: { source: SearchSource }) {
   const { get } = useServerApi();
 
   const sourceRequest = useRef(0);
@@ -49,14 +52,14 @@ export function SearchContent(c: SearchProps) {
   );
   type SearchResult = GetResult<"/api/search">["results"][number];
   type SearchItem = GetResult<"/api/search/item">;
-  type SearchSource =
+  type SearchRecord =
     | (SearchResult & { loading: boolean })
     | (SearchItem & { loading: boolean });
-  const [source, setSource] = useState<SearchSource | null>(null),
+  const [source, setSource] = useState<SearchRecord | null>(null),
     [sourceError, setSourceError] = useState("");
   const [query, setQuery] = useState(""),
     [search, setSearch] = useState("");
-  const state = useResource(search ? "/api/search" : null, c.revision, {
+  const state = useResource(search ? "/api/search" : null, 0, {
     query: { q: search },
   });
   return (
@@ -173,8 +176,8 @@ export function SearchContent(c: SearchProps) {
               onClick={() => {
                 if (source.kind === "plan") c.navigate("plan", source.agent);
                 else {
-                  c.onSelect(source.room || source.agent, source.id);
-                  c.onClose();
+                  c.select(source.room || source.agent, source.id);
+                  c.close();
                 }
                 setSource(null);
               }}
@@ -193,5 +196,9 @@ const SearchAgentName = observer(function SearchAgentName({
 }: {
   id: string;
 }) {
-  return useAgentSummary(id)?.name || id || "Unassigned";
+  return (
+    resourceData(useServerStore().state().current)?.agents.get(id)?.name ||
+    id ||
+    "Unassigned"
+  );
 });

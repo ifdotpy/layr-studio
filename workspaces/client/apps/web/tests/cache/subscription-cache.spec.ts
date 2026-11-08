@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import {
   FrontendLocality,
   SubscriptionCachePolicy,
@@ -103,13 +104,11 @@ test("remote cache resumes a delta, shows saved state offline, corruption snapsh
                           collection: "agentSummary",
                           id: "lead",
                           seq,
-                          value: {
-                            id: "lead",
-                            rootId: "lead",
+                          value: agentSummaryFixture("lead", {
                             epoch: 1,
                             name: delta ? "delta" : "snapshot",
                             status: "idle",
-                          },
+                          }),
                         },
                       ],
                     },

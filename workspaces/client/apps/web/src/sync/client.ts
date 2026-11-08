@@ -1,4 +1,6 @@
+import { autorun } from "mobx";
 import type { ConnectionHealth } from "./connectionState";
+import { createProjectionMetadataMirror } from "../generated/observableResources.ts";
 import { SubscriptionReplyKind } from "../generated/api";
 import { mergeTerminalOutput } from "./subscriptions/terminalOutput";
 import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
@@ -17,14 +19,7 @@ import {
   type SubscriptionCacheStorage,
 } from "./subscriptionCache";
 
-import {
-  applyEntityRows,
-  emptyEntityProjection,
-  type UiPreferenceProjection,
-  type EntityRow,
-} from "./entityProjection";
-
-import { observeEntityProjection } from "./entityProjectionObserver";
+import type { EntityRow } from "./entityContracts.ts";
 
 import {
   syncGet,
@@ -38,7 +33,6 @@ import {
 
 import type { SyncEntityPayload } from "../generated/api";
 
-import type { Snapshot } from "../types";
 import {
   readTranscriptMeta,
   TRANSCRIPT_PROJECTION_FORMAT,
@@ -123,8 +117,6 @@ type ProjectionState = {
   listeners: Set<(error: unknown | null) => void>;
 };
 
-type StateProjectionPayload = Snapshot | null;
-
 import type { TranscriptProjectionPayload } from "../apiTypes.ts";
 export type { TranscriptProjectionPayload } from "../apiTypes.ts";
 
@@ -158,6 +150,12 @@ export type SyncClientOptions = {
   databaseSuffix: string;
 };
 export function createSyncClient(options: SyncClientOptions) {
+  const metadata = createProjectionMetadataMirror({
+    workspaceId: "",
+    ready: false,
+    complete: false,
+    projectSequences: {},
+  });
   const { syncGet, saved, save, setWorkspace } = options.api;
   const { watchResourceChanges, watchResourceConnection } = options.resources;
   const { getEntitySequenceCheckpoint, setEntitySequenceProjection } =
@@ -236,6 +234,7 @@ export function createSyncClient(options: SyncClientOptions) {
       return checking;
     };
     setWorkspace(workspaceId);
+    metadata.apply({ ...metadata.current, workspaceId });
     const db = {
       projections: new LocalCollection(
         entityProjectionDatabaseName(
@@ -253,6 +252,25 @@ export function createSyncClient(options: SyncClientOptions) {
       );
     db.projections.$.subscribe((event) => {
       const doc = event.documentData;
+      if (doc.id === "state:entities:ready") {
+        const ready = !doc._deleted && doc.payload === "ready";
+        metadata.apply({
+          ...metadata.current,
+          ready,
+          complete: ready && metadata.current.complete,
+        });
+      } else if (doc.id === "state:entities:complete")
+        metadata.apply({
+          ...metadata.current,
+          complete: !doc._deleted && doc.payload === "complete",
+        });
+      else if (doc.id.startsWith("entity:project:")) {
+        const projectSequences = { ...metadata.current.projectSequences };
+        const id = doc.id.slice("entity:project:".length);
+        if (doc._deleted || doc.evicted) delete projectSequences[id];
+        else projectSequences[id] = doc.seq;
+        metadata.apply({ ...metadata.current, projectSequences });
+      }
       if (doc.id.startsWith("transcript:") && doc.id.split(":").length === 2)
         cacheStoredTranscriptAfterWrite(
           db.projections,
@@ -335,7 +353,7 @@ export function createSyncClient(options: SyncClientOptions) {
         },
       );
     } catch (error) {
-      await refreshProjection().catch(() => {});
+      await refreshState().catch(() => {});
       throw error;
     }
   }
@@ -2266,37 +2284,6 @@ export function createSyncClient(options: SyncClientOptions) {
     }
   }
 
-  async function watchStateProjection(
-    accept: (payload: StateProjectionPayload) => void,
-    fail: (e: unknown) => void,
-    acceptUiPreferences?: (preferences: UiPreferenceProjection) => void,
-  ) {
-    const { db, state, release, workspaceId } =
-      await acquireProjection("state");
-    state.listeners.add(fail);
-    let stopEntities: (() => void) | undefined;
-    try {
-      stopEntities = await observeEntityProjection(
-        db.projections,
-        (snapshot) => accept({ ...snapshot, entityWorkspaceId: workspaceId }),
-        fail,
-        acceptUiPreferences,
-      );
-      // The subscribed resource owns bootstrap. Applied SSE receipts publish
-      // ready data; revision-only hints and transport failure request recovery.
-    } catch (error) {
-      stopEntities?.();
-      state.listeners.delete(fail);
-      await release();
-      throw error;
-    }
-    return () => {
-      stopEntities?.();
-      state.listeners.delete(fail);
-      void release();
-    };
-  }
-
   async function watchTranscriptProjection(
     scope: `transcript:${string}`,
     accept: (payload: TranscriptProjectionPayload) => void,
@@ -2333,44 +2320,13 @@ export function createSyncClient(options: SyncClientOptions) {
     };
   }
 
-  /** Pull and return the current entity projection for state reconciliation. */
-  async function refreshProjection(
-    options: {
-      afterCurrentPull?: boolean;
-      onWorkspaceId?: (workspaceId: string) => void;
-    } = {},
-  ): Promise<Snapshot> {
-    return readProjection(options, true);
-  }
-
-  async function readProjection(
-    options: {
-      afterCurrentPull?: boolean;
-      onWorkspaceId?: (workspaceId: string) => void;
-    } = {},
-    explicitRetry = false,
-  ): Promise<Snapshot> {
+  /** Wait for the requested pull and its durable application; never assemble UI data. */
+  async function refreshState(options: { afterCurrentPull?: boolean } = {}) {
     const handle = await acquireProjection("state");
     try {
-      if (explicitRetry) handle.state.resetReadRecovery();
+      handle.state.resetReadRecovery();
       if (options.afterCurrentPull) await handle.state.refreshAfterCurrent();
       else await handle.state.refresh();
-      const [ready, documents] = await Promise.all([
-        handle.db.projections.findOne("state:entities:ready").exec(),
-        handle.db.projections
-          .find({ selector: { id: { $gte: "entity:", $lt: "entity;" } } })
-          .exec(),
-      ]);
-      if (!ready || ready.payload !== "ready" || ready._deleted)
-        throw new Error("The entity projection is not ready yet.");
-      const snapshot = applyEntityRows(
-        emptyEntityProjection(),
-        documents.map((document) => document.toJSON()),
-        true,
-      );
-      if (!snapshot) throw new Error("The entity projection is unavailable.");
-      options.onWorkspaceId?.(handle.workspaceId);
-      return { ...snapshot, entityWorkspaceId: handle.workspaceId };
     } finally {
       await handle.release();
     }
@@ -2532,16 +2488,51 @@ export function createSyncClient(options: SyncClientOptions) {
     };
   }
 
-  function subscribeStateProjection(
-    accept: (payload: StateProjectionPayload) => void,
-    report: (error: unknown | null) => void,
-    acceptUiPreferences?: (preferences: UiPreferenceProjection) => void,
-  ) {
-    return subscribeProjection(
-      (next, fail) => watchStateProjection(next, fail, acceptUiPreferences),
-      accept,
+  /** Own the durable state delivery engine while its generated observer is present. */
+  function retainStateDelivery(report: (error: unknown | null) => void) {
+    return subscribeProjection<void>(
+      async (accept, fail) => {
+        const { db, state, release } = await acquireProjection("state");
+        let frame = 0;
+        const cacheAfterApply = () => {
+          if (
+            typeof requestAnimationFrame !== "function" ||
+            !metadata.current.ready
+          )
+            return;
+          cancelAnimationFrame(frame);
+          frame = requestAnimationFrame(() => {
+            frame = requestAnimationFrame(() => {
+              void cacheSubscription({ kind: "state" }).catch(() => {});
+            });
+          });
+        };
+        const cacheChanges = db.projections.$.subscribe(({ documentData }) => {
+          if (
+            documentData.id.startsWith("entity:") ||
+            documentData.id === "state:entities:complete"
+          )
+            cacheAfterApply();
+        });
+        state.listeners.add(fail);
+        const stopReady = autorun(() => {
+          if (metadata.current.ready) {
+            accept();
+            cacheAfterApply();
+          }
+        });
+        return () => {
+          stopReady();
+          cacheChanges.unsubscribe();
+          if (typeof cancelAnimationFrame === "function")
+            cancelAnimationFrame(frame);
+          state.listeners.delete(fail);
+          void release();
+        };
+      },
+      () => {},
       report,
-      () => readProjection(),
+      () => scopes.get("state")?.refresh() ?? Promise.resolve(),
     );
   }
 
@@ -2560,6 +2551,11 @@ export function createSyncClient(options: SyncClientOptions) {
     );
   }
   return {
+    get projectionMetadata() {
+      return metadata.current;
+    },
+    refreshState,
+    retainStateDelivery,
     syncDatabase,
     cacheSubscription,
     setCachePolicies(
@@ -2590,14 +2586,12 @@ export function createSyncClient(options: SyncClientOptions) {
     readSubscriptionCursor,
     watchSyncInvalidations,
     persistProjection,
-    refreshProjection,
     TRANSCRIPT_PREFETCH_LIMIT,
     prefetchTranscript,
-    subscribeStateProjection,
     subscribeTranscriptProjection,
   };
 }
-const defaultSyncClient = createSyncClient({
+export const defaultSyncClient = createSyncClient({
   api: {
     syncGet,
     syncPost,
@@ -2624,6 +2618,9 @@ const defaultSyncClient = createSyncClient({
   databaseSuffix: serverDatabaseSuffix,
 });
 export const {
+  projectionMetadata,
+  refreshState,
+  retainStateDelivery,
   setCachePolicies,
   clearCachePolicies,
   syncDatabase,
@@ -2633,9 +2630,7 @@ export const {
   readSubscriptionCursor,
   watchSyncInvalidations,
   persistProjection,
-  refreshProjection,
   TRANSCRIPT_PREFETCH_LIMIT,
   prefetchTranscript,
-  subscribeStateProjection,
   subscribeTranscriptProjection,
 } = defaultSyncClient;

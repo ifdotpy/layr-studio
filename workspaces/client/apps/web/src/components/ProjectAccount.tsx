@@ -7,14 +7,11 @@ import { ActionButton, SettingsRow } from "./ui/primitives";
 import "./project-settings.css";
 import { useRef, useState } from "react";
 import { useProjectSave } from "./useProjectSave";
-import type { Snapshot } from "../types";
+import type { ProjectModel } from "../app/contracts.ts";
 import type { AccountsState } from "./Accounts";
+import { observer } from "mobx-react-lite";
 
-type SnapshotProject = NonNullable<
-  NonNullable<Snapshot["runtime"]>["projects"]
->[number];
-
-export default function ProjectAccount({
+export default observer(function ProjectAccount({
   path,
   project,
   defaultAccountKey,
@@ -22,15 +19,15 @@ export default function ProjectAccount({
   saved,
 }: {
   path: string;
-  project?: SnapshotProject | undefined;
+  project?: ProjectModel | undefined;
   accounts: AccountsState;
   defaultAccountKey: string;
   saved: () => Promise<void>;
 }) {
   const [key, setKey] = useState(project?.accountKey || defaultAccountKey);
-  const [keys, setKeys] = useState(
-    project?.accountKeys || [project?.accountKey || defaultAccountKey],
-  );
+  const [keys, setKeys] = useState([
+    ...(project?.accountKeys || [project?.accountKey || defaultAccountKey]),
+  ]);
   const [workerBase, setWorkerBase] = useState(project?.workerBaseRef || "");
   const selectableKeys = keys.filter((accountKey) => {
     const account = accounts.accounts.find((item) => item.id === accountKey);
@@ -50,9 +47,9 @@ export default function ProjectAccount({
   const accountsChanged =
     key !== (project?.accountKey || defaultAccountKey) ||
     JSON.stringify(keys) !==
-      JSON.stringify(
-        project?.accountKeys || [project?.accountKey || defaultAccountKey],
-      );
+      JSON.stringify([
+        ...(project?.accountKeys || [project?.accountKey || defaultAccountKey]),
+      ]);
   const workerBaseChanged =
     workerBase.trim() !== (project?.workerBaseRef || "");
   const savedOrder = (project?.accountGroups || []).join(", ");
@@ -353,4 +350,4 @@ export default function ProjectAccount({
       </form>
     </div>
   );
-}
+});

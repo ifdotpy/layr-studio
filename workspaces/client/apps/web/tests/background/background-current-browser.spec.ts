@@ -127,50 +127,51 @@ test("Background Current Browser", async ({
       created: Date.now() / 1000 - 30,
       processId: "123",
     });
-    const data: import("../../src/types.ts").Snapshot = {
-      ...fixtureSnapshot(agents),
-      token: "fixture",
-      threads: agents,
-      runtime: {
-        ...fixtureSnapshot(agents).runtime,
-        requests: [
-          approval({
-            id: "approve-id",
-            request: {
-              kind: "monitor_start",
-              monitor: "approval",
-              command: "tail -f log",
+    const data: import("../../src/components/componentTestFixtures.ts").ComponentSnapshot =
+      {
+        ...fixtureSnapshot(agents),
+        token: "fixture",
+        threads: agents,
+        runtime: {
+          ...fixtureSnapshot(agents).runtime,
+          requests: [
+            approval({
+              id: "approve-id",
+              request: {
+                kind: "monitor_start",
+                monitor: "approval",
+                command: "tail -f log",
+              },
+            }),
+          ],
+          monitors: [
+            {
+              ...task("approval", "approval"),
+              kind: "monitor",
+            } as import("../../src/types.ts").Monitor,
+          ],
+          tasks: [
+            task("active", "running"),
+            {
+              ...task("tool", "running"),
+              kind: "tool",
+              name: "webSearch",
+              command: undefined,
             },
-          }),
-        ],
-        monitors: [
-          {
-            ...task("approval", "approval"),
-            kind: "monitor",
-          } as import("../../src/types.ts").Monitor,
-        ],
-        tasks: [
-          task("active", "running"),
-          {
-            ...task("tool", "running"),
-            kind: "tool",
-            name: "webSearch",
-            command: undefined,
-          },
-          task("child", "running", "worker"),
-          task("other-active", "running", "other"),
-          ...(["completed", "failed", "interrupted", "lost"] as const).map(
-            (status) => task(status, status),
-          ),
-          // @ts-expect-error cancelled is a deliberately legacy task status.
-          task("cancelled", "cancelled"),
-          task("starting", "starting"),
-          task("pending", "pending"),
-          // @ts-expect-error stopping is a deliberately legacy task status.
-          task("stopping", "stopping"),
-        ],
-      },
-    };
+            task("child", "running", "worker"),
+            task("other-active", "running", "other"),
+            ...(["completed", "failed", "interrupted", "lost"] as const).map(
+              (status) => task(status, status),
+            ),
+            // @ts-expect-error cancelled is a deliberately legacy task status.
+            task("cancelled", "cancelled"),
+            task("starting", "starting"),
+            task("pending", "pending"),
+            // @ts-expect-error stopping is a deliberately legacy task status.
+            task("stopping", "stopping"),
+          ],
+        },
+      };
     type Listing = components["schemas"]["ProcessListing"];
     type TaskProjection = components["schemas"]["TaskProjection"];
     const projected = (
@@ -233,9 +234,7 @@ test("Background Current Browser", async ({
     };
     const render = async (
       leadId = "lead",
-      focus?: React.ComponentProps<
-        typeof import("../../src/components/shell/BackgroundTasks.tsx").default
-      >["initialFocus"],
+      focus?: import("../../src/components/shell/backgroundTaskActions.tsx").BackgroundTaskProps["initialFocus"],
     ) => {
       currentListing = leadId === "other" ? otherListing : listing;
       await page.evaluate<void, unknown>(

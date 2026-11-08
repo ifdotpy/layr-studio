@@ -1,12 +1,18 @@
+import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import { stateFromFixture } from "./sidebarSourceFixture.ts";
 import { StudioErrorLevel } from "../generated/api";
 import { StudioErrorEffectCertainty } from "../generated/api";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
+
 import { preferenceMemory } from "./storage";
 import { navigationSnapshot } from "./navigation";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { agentEntities, sidebarFactsFixture } from "./sidebarSourceFixture.ts";
-import { sidebarSnapshot } from "./sidebarSnapshot";
+import { sidebarSnapshot, sidebarCollectionView } from "./sidebarSnapshot";
+import {
+  createStateMirror,
+  serializeStateCollections,
+} from "../generated/observableResources.ts";
 
 function snapshot(): Snapshot {
   return {
@@ -46,6 +52,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("server sidebar projection", () => {
+  it("carries room facts once through the generated collection boundary", () => {
+    const mirror = createStateMirror();
+    const room = { id: "room", name: "Shared", members: ["lead"] };
+    mirror.apply([{ collection: "room", id: room.id, value: room }]);
+    const envelope = sidebarSnapshot(
+      stateFromFixture(snapshot()),
+      serializeStateCollections(mirror.current),
+    );
+    expect(envelope).not.toHaveProperty("rooms");
+    const receiver = createStateMirror();
+    receiver.apply(envelope.entities);
+    const view = sidebarCollectionView(envelope, receiver.current);
+    expect(view.rooms).toEqual([room]);
+    receiver.apply([
+      { collection: "room", id: room.id, value: { ...room, name: "Renamed" } },
+    ]);
+    expect(view.rooms[0]?.name).toBe("Renamed");
+    receiver.apply([]);
+    expect(view.rooms).toEqual([]);
+  });
   it("forwards native summary facts unchanged without stage1 presentation rows", () => {
     const data = snapshot();
     data.threads = [{ id: "lead", name: "Stale Agent title", inFlight: true }];
@@ -59,7 +85,7 @@ describe("server sidebar projection", () => {
         },
       }),
     ]);
-    const projected = sidebarSnapshot(data, entities);
+    const projected = sidebarSnapshot(stateFromFixture(data), entities);
     expect(projected.entities).toBe(entities);
     expect(projected).not.toHaveProperty("rows");
     expect(projected).not.toHaveProperty("threads");
@@ -121,7 +147,7 @@ describe("server sidebar projection", () => {
         },
       }),
     );
-    const projected = sidebarSnapshot(data);
+    const projected = sidebarSnapshot(stateFromFixture(data));
     expect(projected.visualFields).toEqual({
       [own]: { value: false, timestamp: 7, writer: "frame" },
     });
@@ -149,7 +175,7 @@ describe("server sidebar projection", () => {
       `codex-sidebar-order:${data.stateDir}`,
       JSON.stringify({ projects: ["/legacy"] }),
     );
-    const projected = sidebarSnapshot(data);
+    const projected = sidebarSnapshot(stateFromFixture(data));
     expect(projected).not.toHaveProperty("sidebarOrder");
     expect(projected.savedOrder).toEqual({ projects: ["/legacy"] });
   });
@@ -158,7 +184,7 @@ describe("server sidebar projection", () => {
     const data = snapshot();
     records.set(`codex-project-compact:${data.stateDir}`, "invalid");
     records.set(`codex-project-tree:${data.stateDir}`, "null");
-    expect(sidebarSnapshot(data)).toMatchObject({
+    expect(sidebarSnapshot(stateFromFixture(data))).toMatchObject({
       compact: {},
       collapsed: {},
       savedOrder: {},
@@ -187,7 +213,15 @@ describe("server sidebar projection", () => {
       subject: "",
     };
     data.runtime.studioErrors = [item];
-    expect(sidebarSnapshot(data).studioErrors).toBe(data.runtime.studioErrors);
+    expect(sidebarSnapshot(stateFromFixture(data)).studioErrors).toEqual(
+      data.runtime.studioErrors,
+    );
+    expect(
+      sidebarSnapshot(stateFromFixture(data)).studioErrors?.map((error) => ({
+        id: error.id,
+        action: error.action,
+      })),
+    ).toEqual([{ id: item.id, action: item.action }]);
   });
 
   it("publishes navigation from raw summary facts after state is available", () => {
@@ -196,7 +230,7 @@ describe("server sidebar projection", () => {
         agentSummaryFixture("lead", { inFlight: true }),
       ]);
     const navigation = navigationSnapshot(
-      data,
+      stateFromFixture(data),
       "lead",
       "",
       source.view.rows,
@@ -206,13 +240,15 @@ describe("server sidebar projection", () => {
       source.sidebar.entities,
     );
     expect(navigation.sidebar).toEqual(
-      sidebarSnapshot(data, source.sidebar.entities),
+      sidebarSnapshot(stateFromFixture(data), source.sidebar.entities),
     );
     expect(navigation.busy).toBe(true);
     expect(navigation.chats[0]).toMatchObject({
       kind: "chat",
       agent: { id: "lead", inFlight: true },
     });
-    expect(navigationSnapshot(null, null, "")).not.toHaveProperty("sidebar");
+    expect(navigationSnapshot(undefined, null, "")).not.toHaveProperty(
+      "sidebar",
+    );
   });
 });

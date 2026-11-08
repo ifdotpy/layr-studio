@@ -1,3 +1,7 @@
+import {
+  StudioErrorLevel,
+  StudioErrorEffectCertainty,
+} from "../generated/api.ts";
 import { describe, expect, it } from "vitest";
 import {
   ENTITY_COLLECTIONS,
@@ -72,4 +76,42 @@ it("generates account summaries, model rows and rate limits on the shared state 
     expect(state[name]).toBeDefined();
     expect(state[name].size).toBe(0);
   }
+});
+
+it("keeps error action unions atomic and preserves equal native facts", () => {
+  const mirror = createStateMirror();
+  const error = {
+    id: "turn",
+    kind: "turn_disconnected",
+    level: StudioErrorLevel.error,
+    at: 1,
+    reason: "Disconnected",
+    detail: "",
+    subject: "",
+    diagnostics: {
+      context: { source: "agent", turnId: "turn", epoch: 0 },
+      certainty: StudioErrorEffectCertainty.unknown,
+      causes: [],
+    },
+    action: "resume",
+    agentId: "lead",
+    agentName: "Lead",
+  } satisfies import("../generated/api.ts").components["schemas"]["StudioError"];
+  mirror.apply([{ collection: "studioError", id: error.id, value: error }]);
+  const first = mirror.current.studioErrors.get(error.id);
+  mirror.apply([
+    { collection: "studioError", id: error.id, value: structuredClone(error) },
+  ]);
+  expect(mirror.current.studioErrors.get(error.id)).toBe(first);
+  mirror.apply([
+    {
+      collection: "studioError",
+      id: error.id,
+      value: { ...error, action: "details" },
+    },
+  ]);
+  expect(mirror.current.studioErrors.get(error.id)?.action).toBe("details");
+  expect(first?.action).toBe("resume");
+  mirror.apply([]);
+  expect(mirror.current.studioErrors.size).toBe(0);
 });

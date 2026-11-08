@@ -1,12 +1,12 @@
+import type { StateCollections } from "../generated/observableResources.ts";
 import type { ConnectionHealth } from "./connectionState";
-import type { Snapshot } from "../types";
 
 import type { ViteDevServer } from "vite";
 import type { components } from "../generated/api";
 
 declare global {
   interface Window {
-    snapshot: Snapshot | null;
+    nativeState: StateCollections | null;
     connection: ConnectionHealth | "closed";
     checkpoint: () => Promise<number | undefined>;
   }

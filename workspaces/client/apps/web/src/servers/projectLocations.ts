@@ -5,6 +5,7 @@ import { serverLocalStorage } from "./storage";
 
 import { readServers, type StudioServer } from "./registry";
 
+import type { DeepReadonly } from "../deepReadonly.ts";
 import type { components } from "../generated/api";
 export type ProjectLocation = components["schemas"]["ProjectLocation"];
 export type LocationProject = {
@@ -22,6 +23,7 @@ export type LocationProject = {
     | null
     | undefined;
 };
+export type LocationProjectView = DeepReadonly<LocationProject>;
 export type ProjectServerChoice = {
   id: string;
   label: string;
@@ -192,7 +194,7 @@ export async function registerProject(
 }
 
 export function projectLocationOn(
-  project: LocationProject,
+  project: LocationProjectView,
   server: ProjectServerChoice,
 ) {
   return (

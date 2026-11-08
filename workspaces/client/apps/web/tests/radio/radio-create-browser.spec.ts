@@ -1,8 +1,9 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
 import { required } from "../../src/components/componentTestFixtures.ts";
 import type { components } from "../../src/generated/api.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import type { PostBody } from "../../src/api.ts";
-import type { Snapshot } from "../../src/types.ts";
+
 import { fixturePostBody } from "../misc-fixture.ts";
 import { fixtureOrigin } from "../misc-fixture.ts";
 import type {} from "./radio-create-browser.fixture.tsx";

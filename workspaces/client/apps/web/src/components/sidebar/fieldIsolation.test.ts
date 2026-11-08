@@ -1,9 +1,15 @@
+import { createSidebarSourceStore } from "../../servers/sidebarSourceFixture.ts";
+import { stateFromFixture } from "../../servers/sidebarSourceFixture.ts";
+import { observable, runInAction } from "mobx";
+import NativeSidebar from "../Sidebar.tsx";
+import { SidebarListOwner } from "../../app/shell/SidebarOwner.ts";
+import { useSidebarState as awaitState } from "./SidebarState.tsx";
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
-import Sidebar from "../Sidebar.tsx";
+import Sidebar, { sidebarFixtureAreas } from "../Sidebar.fixture.tsx";
 import { SidebarCommandsProvider } from "./commands.ts";
 import { ServerStoreProvider } from "../../servers/ServerServicesContext.tsx";
 import { observableFixture } from "../observableFixture.tsx";
@@ -12,20 +18,15 @@ import {
   serializeStateCollections,
 } from "../../generated/observableResources.ts";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import { snapshotFixture } from "../../snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "../componentTestFixtures.ts";
 
 const frame = vi.hoisted(() => ({
   compact: undefined as ((value: boolean) => void) | undefined,
 }));
-vi.mock("./SidebarFrame", () => ({
-  SidebarFrame: ({
-    children,
-    onCompactChange,
-  }: {
-    children: ReactNode;
-    onCompactChange?: (value: boolean) => void;
-  }) => {
-    frame.compact = onCompactChange;
+vi.mock("./SidebarFrame", async (original) => ({
+  ...(await original<typeof import("./SidebarFrame")>()),
+  SidebarFrame: ({ children }: { children: ReactNode }) => {
+    frame.compact = awaitState().visibility.recordCompact;
     return createElement("aside", null, children);
   },
   restoreSidebarFocus() {},
@@ -103,7 +104,10 @@ it("folder field edits render only the folder branch and preserve unrelated head
                 },
               },
               createElement(Sidebar, {
-                data: snapshotFixture([]),
+                data: Object.assign(snapshotFixture([]), {
+                  token: "",
+                  stateDir: "/fixture",
+                }),
                 collections: mirror.current,
                 opened: null,
                 creating: false,
@@ -163,7 +167,7 @@ it("folder field edits render only the folder branch and preserve unrelated head
 it("resolves a newly arrived combined row against the current services before layout sync", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("location", new URL("http://studio.test/"));
-  const { createSidebarSourceStore, createMergedSidebarSelector } =
+  const { createMergedSidebarSelector } =
     await import("../../servers/mergedSidebar.ts");
   const { createMergedSidebarServices } =
     await import("../../servers/sidebarServices.ts");
@@ -175,14 +179,46 @@ it("resolves a newly arrived combined row against the current services before la
   const host = document.createElement("div"),
     root = createRoot(host);
   document.body.append(host);
-  const render = () => {
-    const model = select(source.sources(["local"], new Set(["local"])));
-    const services = createMergedSidebarServices(
+  const model = select(source.sources(["local"], new Set(["local"])));
+  const backends = new Map([["local", localSidebarBackend]]);
+  const inputs = observable.box(
+    {
       model,
-      new Map([["local", localSidebarBackend]]),
-      () => true,
-      {},
-    );
+      services: createMergedSidebarServices(model, backends, () => true, {}),
+    },
+    { deep: false },
+  );
+  const areas = sidebarFixtureAreas(fixture.store);
+  const visibility = areas.sidebar;
+  const boundary = {
+    get services() {
+      return inputs.get().services;
+    },
+    visibility,
+    commands: {
+      rename: areas.rename.rename,
+      refresh: areas.refresh,
+      notify: areas.notices.notify,
+    },
+    selection: areas.navigation,
+    preferences: areas.preferences,
+    read: areas.read,
+    creation: areas.creation,
+    run: areas.run,
+    get model() {
+      return inputs.get().model;
+    },
+  };
+  const owner = new SidebarListOwner(areas, boundary);
+  const stop = owner.start();
+  const render = () => {
+    runInAction(() => {
+      const model = select(source.sources(["local"], new Set(["local"])));
+      inputs.set({
+        model,
+        services: createMergedSidebarServices(model, backends, () => true, {}),
+      });
+    });
     root.render(
       createElement(
         ServerStoreProvider,
@@ -205,16 +241,7 @@ it("resolves a newly arrived combined row against the current services before la
                 markUnread() {},
               },
             },
-            createElement(Sidebar, {
-              sidebar: model.sidebar,
-              rows: model.rows,
-              services,
-              opened: null,
-              creating: false,
-              mobile: false,
-              close() {},
-              markingRead: new Set<string>(),
-            }),
+            createElement(NativeSidebar, { owner }),
           ),
         ),
       ),
@@ -224,18 +251,28 @@ it("resolves a newly arrived combined row against the current services before la
     await act(async () => render());
     source.update(
       "local",
-      sidebarSnapshot(snapshotFixture([]), [
-        {
-          collection: "agentSummary",
-          id: "arrived",
-          value: agentSummaryFixture("arrived", { name: "Arrived chat" }),
-        },
-      ]),
+      sidebarSnapshot(
+        stateFromFixture(
+          Object.assign(snapshotFixture([]), {
+            token: "",
+            stateDir: "/fixture",
+          }),
+        ),
+        [
+          {
+            collection: "agentSummary",
+            id: "arrived",
+            value: agentSummaryFixture("arrived", { name: "Arrived chat" }),
+          },
+        ],
+      ),
     );
     await act(async () => render());
     expect(host.textContent).toContain("Arrived chat");
   } finally {
     await act(async () => root.unmount());
+    stop();
+    areas.dispose();
     fixture.store.dispose();
     host.remove();
     vi.unstubAllGlobals();
@@ -263,10 +300,13 @@ it.each([true, false])(
     );
     const rows = model.rows;
     const group = JSON.stringify(["items", "/p", null]);
-    const data = snapshotFixture([], {
-      projects: [{ id: "p", path: "/p", name: "Project", folders: [] }],
-      sidebarOrder: { revision: 1, groups: { [group]: ["a", "b", "c"] } },
-    });
+    const data = Object.assign(
+      snapshotFixture([], {
+        projects: [{ id: "p", path: "/p", name: "Project", folders: [] }],
+        sidebarOrder: { revision: 1, groups: { [group]: ["a", "b", "c"] } },
+      }),
+      { token: "", stateDir: "/fixture" },
+    );
     data.stateDir = `drag-${checkIndicator}`;
     const submitted: unknown[] = [];
     let revision = 1;
@@ -290,6 +330,21 @@ it.each([true, false])(
     const fixture = observableFixture(),
       host = document.createElement("div"),
       root = createRoot(host);
+    fixture.apply([
+      ...data.runtime.projects.map((value) => ({
+        collection: "project" as const,
+        id: value.id,
+        value,
+      })),
+      {
+        collection: "workspace",
+        id: "fixture",
+        value: {
+          stateDir: data.stateDir,
+          sidebarOrder: data.runtime.sidebarOrder,
+        },
+      },
+    ]);
     document.body.append(host);
     try {
       await act(async () =>

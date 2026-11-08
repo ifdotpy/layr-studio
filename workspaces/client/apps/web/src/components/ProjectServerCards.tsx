@@ -2,7 +2,7 @@ import { Button, Text, SegmentedControl } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import {
   projectLocationOn,
-  type LocationProject,
+  type LocationProjectView as LocationProject,
   type ProjectServerChoice,
   type ProjectLocation,
 } from "../servers/projectLocations";

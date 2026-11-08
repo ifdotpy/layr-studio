@@ -1,0 +1,289 @@
+import type { ServerAreas } from "../ServerAreasProvider.tsx";
+import {
+  makeAutoObservable,
+  observable,
+  observableRef,
+  reaction,
+  runInAction,
+} from "mobx";
+import { MarkUnreadEligibility } from "../../generated/api.ts";
+import { ApiError, errorText, type PostResult } from "../../api.ts";
+import { resourceData } from "../../store/runtime.ts";
+import type { Agent } from "../../types.ts";
+
+export type ChatReadState = NonNullable<Agent["readState"]>;
+export type ChatReadProof = { id: string; threadId: string; turnId: string };
+export const completed = (
+  agent: Pick<Agent, "id" | "markRead">,
+): ChatReadProof | null =>
+  agent.markRead
+    ? {
+        id: agent.id,
+        threadId: agent.markRead.threadId,
+        turnId: agent.markRead.turnId,
+      }
+    : null;
+const sameResult = (a: ChatReadProof, b: ChatReadProof) =>
+  a.id === b.id && a.threadId === b.threadId && a.turnId === b.turnId;
+export function matchingCompletedAgent(
+  agent: Agent | undefined,
+  proof: ChatReadProof,
+): Agent | null {
+  const result = agent && completed(agent);
+  return result && sameResult(result, proof) ? agent : null;
+}
+export class ReadStateOwner {
+  mounted = true;
+  selected: string | null = null;
+  scope = this.createScope();
+  readonly areas;
+  constructor(areas: ServerAreas) {
+    this.areas = areas;
+    makeAutoObservable(
+      this,
+      { areas: false, scope: observableRef, mounted: false },
+      { autoBind: true },
+    );
+  }
+  createScope() {
+    return {
+      states: observable.map<string, ChatReadState>({}, { deep: false }),
+      requests: observable.map<string, Promise<void>>({}, { deep: false }),
+      pendingReadTargets: observable.map<string, ChatReadState>(
+        {},
+        { deep: false },
+      ),
+      suppressed: new Set<string>(),
+      attempted: new Set<string>(),
+      uncertain: new Set<string>(),
+    };
+  }
+  get marking() {
+    return new Set(this.scope.requests.keys());
+  }
+  get pendingReadTargets(): ReadonlyMap<string, ChatReadState> {
+    return this.scope.pendingReadTargets;
+  }
+  summary(id: string) {
+    return resourceData(this.areas.scope.store.state().current)?.agents.get(id);
+  }
+  readStateFor(agent: Agent): ChatReadState | null {
+    const saved = agent.readState ?? null,
+      known = this.scope.states.get(agent.id);
+    return saved && (!known || saved.revision > known.revision)
+      ? saved
+      : known || saved;
+  }
+  start() {
+    const { startup } = this.areas;
+    this.mounted = true;
+    const reset = reaction(
+      () => JSON.stringify([startup.creationScope, startup.workspaceId]),
+      () => {
+        this.scope = this.createScope();
+      },
+    );
+    const selection = reaction(
+      () => this.areas.navigation.selectedId,
+      (opened) => {
+        this.scope.suppressed.clear();
+        this.scope.attempted.clear();
+        if (!opened || this.selected !== opened) return;
+        this.selected = null;
+        const agent = this.summary(opened),
+          proof = agent && completed(agent);
+        if (proof) void this.write(proof, true);
+      },
+    );
+    return () => {
+      this.mounted = false;
+      reset();
+      selection();
+    };
+  }
+  async write(
+    proof: ChatReadProof,
+    read: boolean,
+    target?: ChatReadState,
+  ): Promise<void> {
+    const { navigation } = this.areas;
+    const current = this.scope;
+    const valid = () => this.mounted && this.scope === current;
+    const pending = current.requests.get(proof.id);
+    if (pending) {
+      if (read) return;
+      await pending;
+      if (!valid()) return;
+      return this.write(proof, read, target);
+    }
+    const agent = this.summary(proof.id);
+    const result = agent && completed(agent);
+    if (
+      !target &&
+      (!agent || !agent.markRead || !result || !sameResult(result, proof))
+    )
+      return;
+    if (
+      read &&
+      (navigation.selectedId !== proof.id ||
+        current.suppressed.has(proof.id) ||
+        document.visibilityState !== "visible" ||
+        !document.hasFocus())
+    )
+      return;
+    const saved = target ?? (agent ? this.readStateFor(agent) : null);
+    if (
+      saved?.threadId === proof.threadId &&
+      saved.turnId === proof.turnId &&
+      saved.read === read &&
+      !current.uncertain.has(proof.id)
+    )
+      return;
+    const attempt = JSON.stringify([
+      proof.id,
+      proof.threadId,
+      proof.turnId,
+      saved?.revision || 0,
+    ]);
+    if (read && current.attempted.has(attempt)) return;
+    if (read) current.attempted.add(attempt);
+    if (read)
+      current.pendingReadTargets.set(proof.id, {
+        threadId: proof.threadId,
+        turnId: proof.turnId,
+        revision: saved?.revision || 0,
+        read: false,
+      });
+    const request = (async () => {
+      try {
+        const body = {
+          id: proof.id,
+          read_state: {
+            thread_id: proof.threadId,
+            turn_id: proof.turnId,
+            read,
+            expected_revision: saved?.revision || 0,
+          },
+        };
+        const requestWorkspace = this.areas.startup.workspaceId;
+        let response: PostResult<"/api/organization">;
+        for (let retry = 0; ; retry++) {
+          try {
+            response = await this.areas.scope.services.api.post(
+              "/api/organization",
+              body,
+              {
+                workspaceId: requestWorkspace,
+                timeoutMs: 15000,
+              },
+            );
+            break;
+          } catch (error) {
+            const transient =
+              error instanceof TypeError ||
+              (error instanceof ApiError &&
+                (error.status >= 500 || [408, 429].includes(error.status)));
+            if (!read || !transient || retry >= 2) throw error;
+            current.uncertain.add(proof.id);
+            await new Promise((resolve) =>
+              setTimeout(resolve, 1000 * (retry + 1)),
+            );
+            // Retry the exact compare-and-set body; a queued Unread follows it.
+            if (!valid()) return;
+            if (navigation.selectedId !== proof.id) throw error;
+          }
+        }
+        if (!valid()) return;
+        const state = response.readState;
+        if (
+          response.id !== proof.id ||
+          !state ||
+          !Number.isSafeInteger(state.revision) ||
+          state.revision < 0 ||
+          state.threadId !== proof.threadId ||
+          state.turnId !== proof.turnId ||
+          state.read !== read ||
+          state.revision <= (saved?.revision || 0)
+        )
+          throw new Error("The server did not confirm the read status.");
+        const known = current.states.get(proof.id);
+        if (!known || state.revision >= known.revision)
+          runInAction(() => current.states.set(proof.id, state));
+        current.uncertain.delete(proof.id);
+        // The mutation response confirms the CAS; the agent stream carries it to other views.
+      } catch (error) {
+        if (valid()) {
+          current.attempted.delete(attempt);
+          current.uncertain.add(proof.id);
+          // Reconcile a lost success from the entity projection before a
+          // queued Unread can use local state.
+          try {
+            await this.areas.scope.services.sync.refreshState({
+              afterCurrentPull: true,
+            });
+            if (!valid()) return;
+            const canonical =
+              this.areas.scope.services.sync.projectionMetadata.workspaceId ===
+              this.areas.startup.workspaceId
+                ? matchingCompletedAgent(this.summary(proof.id), proof)
+                : null;
+            if (canonical) {
+              const state = canonical.readState ?? null;
+              const known = current.states.get(proof.id);
+              if (state && (!known || state.revision >= known.revision))
+                runInAction(() => current.states.set(proof.id, state));
+              if (state || !known) current.uncertain.delete(proof.id);
+            }
+          } catch {
+            // Keep uncertainty visible; a local no-op cannot confirm this write.
+          }
+          if (valid()) this.areas.notices.notify(errorText(error));
+        }
+      }
+    })();
+    current.requests.set(proof.id, request);
+    try {
+      await request;
+    } finally {
+      runInAction(() => {
+        if (current.requests.get(proof.id) === request)
+          current.requests.delete(proof.id);
+        current.pendingReadTargets.delete(proof.id);
+      });
+    }
+  }
+  async markUnread(agent: Agent) {
+    const model = this.summary(agent.id);
+    const proof = model && completed(model);
+    if (!proof || model?.markUnread !== MarkUnreadEligibility["allowed"])
+      return;
+    if (this.areas.navigation.selectedId === agent.id)
+      this.scope.suppressed.add(agent.id);
+    await this.write(proof, false);
+  }
+  async markSidebarUnread(id: string, target: ChatReadState) {
+    // Generated nested models update in place; a queued CAS keeps the click's proof.
+    const captured = { ...target };
+    if (this.areas.navigation.selectedId === id) this.scope.suppressed.add(id);
+    await this.write(
+      { id, threadId: captured.threadId, turnId: captured.turnId },
+      false,
+      captured,
+    );
+  }
+  observeRead(proof: ChatReadProof) {
+    if (this.selected !== proof.id) return;
+    this.selected = null;
+    void this.write(proof, true);
+  }
+  select(id: string) {
+    this.selected = id;
+    if (this.areas.navigation.selectedId !== id) return;
+    const agent = this.summary(id);
+    const proof = agent && completed(agent);
+    if (proof) {
+      this.selected = null;
+      void this.write(proof, true);
+    }
+  }
+}

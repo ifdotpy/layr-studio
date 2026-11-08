@@ -2,7 +2,9 @@ import { AgentRole as GeneratedApiAgentRole } from "../../generated/api.ts";
 import type { Agent } from "../../types";
 import { observer } from "mobx-react-lite";
 import type { SidebarAgent } from "../sidebar/viewModel.ts";
-import { useAgentDetail } from "../agents/state.ts";
+import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId } from "../../generated/observableResources.ts";
 
 export type WorkspaceBadgeInfo = {
   label: "Layr" | "Unavailable" | "WT" | "SHARED";
@@ -80,7 +82,9 @@ export const AgentWorkspaceBadge = observer(function AgentWorkspaceBadge({
   agent: SidebarAgent;
   passive: boolean;
 }) {
-  const detail = useAgentDetail(agent);
+  const detail = resourceData(
+    useServerStore().agentDetail(agentId(agent.id)).current,
+  );
   const info = workspaceBadgeInfo(agent, detail);
   return info ? (
     <span

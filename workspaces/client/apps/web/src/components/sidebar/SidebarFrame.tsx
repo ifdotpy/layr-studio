@@ -1,20 +1,37 @@
 import { Drawer, FocusTrap } from "@mantine/core";
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { observer } from "mobx-react-lite";
+import {
+  makeAutoObservable,
+  observableStruct,
+  observableRef,
+  reaction,
+  runInAction,
+} from "mobx";
+import {
+  useLayoutEffect,
+  type ReactNode,
+  type PointerEvent,
+  type KeyboardEvent,
+} from "react";
 import {
   layoutQueries,
   layoutValues,
 } from "../../layout/layout-contract.generated";
-import { resolveSidebarWidth, storedSidebarWidth } from "./sidebarWidth";
-import { useSidebarResize } from "./useSidebarResize";
+import {
+  resolveSidebarWidth,
+  storedSidebarWidth,
+  clampSidebarWidth,
+} from "./sidebarWidth";
+import { SidebarResizeSession } from "./sidebarResize";
+import { useSidebarState } from "./SidebarState.tsx";
+import type { SidebarListOwner } from "../../app/shell/SidebarOwner.ts";
 import "./sidebar-frame.css";
-
 const widthContract = {
   minimumRem: layoutValues.sidebar.min,
   preferredRem: layoutValues.sidebar.preferred,
   conversationMinRem: layoutValues.conversation.min,
   navigationInlineMinPx: layoutValues.navigation.inlineMin,
 };
-
 /** Move focus to the visible control before removing sidebar content. */
 export function restoreSidebarFocus() {
   const sidebar = document.getElementById("sidebar");
@@ -24,44 +41,197 @@ export function restoreSidebarFocus() {
     ?.focus({ preventScroll: true });
 }
 
-export type SidebarFrameProps = {
-  scope: string;
-  opened: boolean;
-  collapsed?: boolean;
-  close: () => void;
-  onCompactChange?: (compact: boolean) => void;
-  children: ReactNode;
-  drawerZIndex?: number;
-  onEntered?: () => void;
-};
-
-export function SidebarFrame(p: SidebarFrameProps) {
-  const aside = useRef<HTMLElement | null>(null);
-  const headerMinimum = useRef(0);
-  const scrollTop = useRef(0);
-  const [geometry, setGeometry] = useState(() => ({
-    hostWidth: 0,
-    rootFontSize: 0,
-    headerMinimum: 0,
-  }));
-  const [preference, setPreference] = useState(() => ({
-    scope: p.scope,
-    width: null as number | null,
-  }));
-  const preferred = preference.scope === p.scope ? preference.width : null;
-  const policy = resolveSidebarWidth({
-    ...geometry,
-    preferred,
-    contract: widthContract,
-  });
-  // The static desktop render has no viewport to measure.
-  const compact = typeof window !== "undefined" && policy.mode === "drawer";
-  // Measure once before paint when the saved desktop preference starts closed.
-  const probing = !compact && p.collapsed && headerMinimum.current === 0;
-  const live = useRef({ scope: p.scope, compact });
-  live.current = { scope: p.scope, compact };
-
-  useLayoutEffect(() => {
+/** Sole width authority; pointer drafts touch the sidebar and dock, never document styles. */
+export class SidebarFrameOwner {
+  readonly source: SidebarListOwner;
+  aside: HTMLElement | null = null;
+  headerMinimum = 0;
+  scrollTop = 0;
+  geometry = { hostWidth: 0, rootFontSize: 0, headerMinimum: 0 };
+  preference: { scope: string; width: number | null } | null = null;
+  draft: number | null = null;
+  readonly session = new SidebarResizeSession();
+  constructor(source: SidebarListOwner) {
+    this.source = source;
+    makeAutoObservable(
+      this,
+      {
+        source: false,
+        aside: observableRef,
+        session: false,
+        geometry: observableStruct,
+        preference: observableRef,
+        scrollTop: false,
+      },
+      { autoBind: true },
+    );
+  }
+  get scope() {
+    return `${this.source.services.cache.ownerId}:${this.source.stateDir}`;
+  }
+  get preferred() {
+    return this.preference?.scope === this.scope ? this.preference.width : null;
+  }
+  get policy() {
+    return resolveSidebarWidth({
+      ...this.geometry,
+      preferred: this.preferred,
+      contract: widthContract,
+    });
+  }
+  get compact() {
+    return typeof window !== "undefined" && this.policy.mode === "drawer";
+  }
+  get probing() {
+    return (
+      !this.compact &&
+      this.source.visibility.desktopCollapsed &&
+      this.headerMinimum === 0
+    );
+  }
+  get enabled() {
+    return !this.compact && !this.source.visibility.desktopCollapsed;
+  }
+  get width() {
+    return this.draft === null
+      ? this.policy.width
+      : clampSidebarWidth(this.draft, this.policy.minimum, this.policy.maximum);
+  }
+  get step() {
+    return layoutValues.resize.step * this.geometry.rootFontSize;
+  }
+  node(node: HTMLElement | null) {
+    this.aside = node;
+  }
+  save(width: number | null) {
+    if (width !== null && storedSidebarWidth(width) === null) return;
+    this.preference = { scope: this.scope, width };
+  }
+  reset() {
+    this.cancel();
+    this.save(null);
+  }
+  cancel() {
+    this.session.cancel();
+    this.draft = null;
+  }
+  get handlers() {
+    return {
+      onPointerDown: this.pointerDown,
+      onPointerMove: this.pointerMove,
+      onPointerUp: this.pointerUp,
+      onPointerCancel: this.cancel,
+      onLostPointerCapture: this.cancel,
+      onDoubleClick: this.reset,
+      onKeyDown: this.keyDown,
+    };
+  }
+  pointerDown(event: PointerEvent<HTMLElement>) {
+    if (!this.enabled || event.button !== 0 || !event.isPrimary) return;
+    event.preventDefault();
+    event.currentTarget.focus();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    this.session.start(
+      this.scope,
+      event.pointerId,
+      event.clientX,
+      this.policy.width,
+    );
+  }
+  pointerMove(event: PointerEvent<HTMLElement>) {
+    const width = this.session.move(
+      this.scope,
+      event.pointerId,
+      event.clientX,
+      this.policy,
+    );
+    if (width !== null) this.draft = width;
+  }
+  pointerUp(event: PointerEvent<HTMLElement>) {
+    const width = this.session.finish(
+      this.scope,
+      event.pointerId,
+      event.clientX,
+      this.policy,
+    );
+    if (width !== null) {
+      this.draft = null;
+      this.save(width);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId))
+      event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+  keyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key === "Escape") {
+      this.cancel();
+      return;
+    }
+    if (["Home", "Enter"].includes(event.key)) {
+      event.preventDefault();
+      this.reset();
+    } else if (["ArrowLeft", "ArrowRight", "End"].includes(event.key)) {
+      event.preventDefault();
+      this.cancel();
+      this.save(
+        event.key === "End"
+          ? this.policy.maximum
+          : clampSidebarWidth(
+              this.policy.width +
+                (event.key === "ArrowRight" ? this.step : -this.step),
+              this.policy.minimum,
+              this.policy.maximum,
+            ),
+      );
+    }
+  }
+  attach() {
+    const stopMeasurement = this.measureHost();
+    const stopSession = reaction(() => [this.scope, this.enabled], this.cancel);
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") this.cancel();
+    };
+    window.addEventListener("keydown", escape, true);
+    window.addEventListener("blur", this.cancel);
+    const root = document.getElementById("root") ?? document.documentElement;
+    const previous = root.style.getPropertyValue("--studio-sidebar-width");
+    const stopWidth = reaction(
+      () => [this.enabled, this.policy.width] as const,
+      ([enabled, width]) => {
+        if (enabled)
+          root.style.setProperty("--studio-sidebar-width", width + "px");
+        else if (previous)
+          root.style.setProperty("--studio-sidebar-width", previous);
+        else root.style.removeProperty("--studio-sidebar-width");
+      },
+      { fireImmediately: true },
+    );
+    const stopDraft = reaction(
+      () => (this.draft === null ? null : this.width),
+      (width) => {
+        const dock = document.querySelector<HTMLElement>(
+          "#root .terminal-dock",
+        );
+        if (width === null)
+          dock?.style.removeProperty("--studio-sidebar-width");
+        else dock?.style.setProperty("--studio-sidebar-width", width + "px");
+      },
+    );
+    return () => {
+      stopMeasurement?.();
+      stopSession();
+      stopWidth();
+      stopDraft();
+      this.cancel();
+      window.removeEventListener("keydown", escape, true);
+      window.removeEventListener("blur", this.cancel);
+      if (previous) root.style.setProperty("--studio-sidebar-width", previous);
+      else root.style.removeProperty("--studio-sidebar-width");
+      document
+        .querySelector<HTMLElement>("#root .terminal-dock")
+        ?.style.removeProperty("--studio-sidebar-width");
+    };
+  }
+  measureHost() {
     const host =
       document.querySelector<HTMLElement>(".multi-server-shell") ||
       document.getElementById("root");
@@ -82,81 +252,77 @@ export function SidebarFrame(p: SidebarFrameProps) {
       ].join("|");
     };
     let measuredTypography: string | undefined;
-    const measure = (headerChanged = true) => {
-      measuredTypography = typography();
-      const rootFontSize = Number.parseFloat(
-        getComputedStyle(document.documentElement).fontSize,
-      );
-      const hostStyle = getComputedStyle(host);
-      const hostWidth =
-        host.clientWidth -
-        parseFloat(hostStyle.paddingLeft) -
-        parseFloat(hostStyle.paddingRight);
-      const header =
-        aside.current?.querySelector<HTMLElement>(".sidebar-header");
-      // Drawer touch controls must not raise the desktop header minimum.
-      if (
-        headerChanged &&
-        header &&
-        aside.current &&
-        !compact &&
-        window.matchMedia(layoutQueries.navigationInline).matches
-      ) {
-        const style = getComputedStyle(header);
-        const sideStyle = getComputedStyle(aside.current);
-        const children = Array.from(header.children) as HTMLElement[];
-        const minimumWidths = children.map((child) => {
-          if (Number(getComputedStyle(child).flexGrow) === 0)
-            return child.getBoundingClientRect().width;
-          // A flexible label can wrap; its expanded width is not its minimum.
-          const previous = child.style.cssText;
-          try {
-            child.style.flex = "none";
-            child.style.inlineSize = "min-content";
-            return child.getBoundingClientRect().width;
-          } finally {
-            child.style.cssText = previous;
-          }
-        });
-        const contentMinimum =
-          style.flexWrap === "nowrap"
-            ? minimumWidths.reduce((sum, width) => sum + width, 0) +
-              Math.max(0, children.length - 1) *
-                (parseFloat(style.columnGap) || 0)
-            : Math.max(0, ...minimumWidths);
-        headerMinimum.current =
-          contentMinimum +
-          parseFloat(sideStyle.paddingLeft) +
-          parseFloat(sideStyle.paddingRight) +
-          parseFloat(sideStyle.borderLeftWidth) +
-          parseFloat(sideStyle.borderRightWidth);
-      }
-      const next = {
-        hostWidth,
-        rootFontSize,
-        headerMinimum: headerMinimum.current,
-      };
-      const nextCompact =
-        resolveSidebarWidth({
-          ...next,
-          preferred: null,
-          contract: widthContract,
-        }).mode === "drawer";
-      if (nextCompact !== live.current.compact) restoreSidebarFocus();
-      setGeometry((old) =>
-        old.hostWidth === hostWidth &&
-        old.rootFontSize === rootFontSize &&
-        old.headerMinimum === next.headerMinimum
-          ? old
-          : next,
-      );
-    };
+    const measure = (headerChanged = true) =>
+      runInAction(() => {
+        measuredTypography = typography();
+        const rootFontSize = Number.parseFloat(
+          getComputedStyle(document.documentElement).fontSize,
+        );
+        const hostStyle = getComputedStyle(host);
+        const hostWidth =
+          host.clientWidth -
+          parseFloat(hostStyle.paddingLeft) -
+          parseFloat(hostStyle.paddingRight);
+        const header =
+          this.aside?.querySelector<HTMLElement>(".sidebar-header");
+        // Drawer touch controls must not raise the desktop header minimum.
+        if (
+          headerChanged &&
+          header &&
+          this.aside &&
+          !this.compact &&
+          window.matchMedia(layoutQueries.navigationInline).matches
+        ) {
+          const style = getComputedStyle(header);
+          const sideStyle = getComputedStyle(this.aside);
+          const children = Array.from(header.children) as HTMLElement[];
+          const minimumWidths = children.map((child) => {
+            if (Number(getComputedStyle(child).flexGrow) === 0)
+              return child.getBoundingClientRect().width;
+            // A flexible label can wrap; its expanded width is not its minimum.
+            const previous = child.style.cssText;
+            try {
+              child.style.flex = "none";
+              child.style.inlineSize = "min-content";
+              return child.getBoundingClientRect().width;
+            } finally {
+              child.style.cssText = previous;
+            }
+          });
+          const contentMinimum =
+            style.flexWrap === "nowrap"
+              ? minimumWidths.reduce((sum, width) => sum + width, 0) +
+                Math.max(0, children.length - 1) *
+                  (parseFloat(style.columnGap) || 0)
+              : Math.max(0, ...minimumWidths);
+          this.headerMinimum =
+            contentMinimum +
+            parseFloat(sideStyle.paddingLeft) +
+            parseFloat(sideStyle.paddingRight) +
+            parseFloat(sideStyle.borderLeftWidth) +
+            parseFloat(sideStyle.borderRightWidth);
+        }
+        const next = {
+          hostWidth,
+          rootFontSize,
+          headerMinimum: this.headerMinimum,
+        };
+        const nextCompact =
+          resolveSidebarWidth({
+            ...next,
+            preferred: null,
+            contract: widthContract,
+          }).mode === "drawer";
+        if (nextCompact !== this.compact) restoreSidebarFocus();
+        this.geometry = next;
+        this.source.visibility.recordCompact(this.compact);
+      });
     const remeasure = () => measure();
     // The host width decides the layout mode; a resize keeps the header minimum.
     const observer = new ResizeObserver(() => measure(false));
     observer.observe(host);
     const content = new MutationObserver(remeasure);
-    const header = aside.current?.querySelector(".sidebar-header");
+    const header = this.aside?.querySelector(".sidebar-header");
     if (header)
       content.observe(header, {
         subtree: true,
@@ -187,79 +353,50 @@ export function SidebarFrame(p: SidebarFrameProps) {
       document.fonts?.removeEventListener("loadingdone", remeasure);
       window.removeEventListener("resize", remeasure);
     };
-  }, [compact, p.collapsed, p.opened]);
+  }
+}
 
+export const SidebarFrame = observer(function SidebarFrame({
+  children,
+  drawerZIndex,
+}: {
+  children: ReactNode;
+  drawerZIndex?: number;
+}) {
+  const { frame } = useSidebarState();
   useLayoutEffect(() => {
-    p.onCompactChange?.(compact);
-  }, [compact, p.onCompactChange]);
-
-  useLayoutEffect(() => {
-    const list = aside.current?.querySelector<HTMLElement>("#chat-list");
-    if (list) list.scrollTop = scrollTop.current;
+    const stop = frame.attach();
+    const list = frame.aside?.querySelector<HTMLElement>("#chat-list");
+    if (list) list.scrollTop = frame.scrollTop;
     return () => {
-      if (list) scrollTop.current = list.scrollTop;
+      if (list) frame.scrollTop = list.scrollTop;
+      stop();
       restoreSidebarFocus();
     };
-  }, [compact, p.collapsed, p.opened]);
-
-  const save = (width: number | null) => {
-    if (live.current.scope !== p.scope) return;
-    if (width !== null && storedSidebarWidth(width) === null) return;
-    setPreference({ scope: p.scope, width });
-  };
-  const resize = useSidebarResize({
-    scope: p.scope,
-    enabled: !compact && !p.collapsed,
-    width: policy.width,
-    minimum: policy.minimum,
-    maximum: policy.maximum,
-    step: layoutValues.resize.step * geometry.rootFontSize,
-    reset: () => save(null),
-    commit: save,
-  });
-  // The committed width lives on #root, which holds every reader: the sidebar
-  // and the terminal dock below it. A custom property on #root recalculates
-  // the style of the whole app, so a drag moves only the sidebar's own inline
-  // width and gives the dock the draft width on its own element.
-  const committedWidth = policy.width;
-  useLayoutEffect(() => {
-    if (compact || p.collapsed) return;
-    const root = document.getElementById("root") ?? document.documentElement;
-    const previous = root.style.getPropertyValue("--studio-sidebar-width");
-    root.style.setProperty("--studio-sidebar-width", `${committedWidth}px`);
-    return () => {
-      if (previous) root.style.setProperty("--studio-sidebar-width", previous);
-      else root.style.removeProperty("--studio-sidebar-width");
-    };
-  }, [committedWidth, compact, p.collapsed]);
-  useLayoutEffect(() => {
-    if (!resize.dragging) return;
-    const dock = document.querySelector<HTMLElement>("#root .terminal-dock");
-    dock?.style.setProperty("--studio-sidebar-width", `${resize.width}px`);
-    return () => {
-      dock?.style.removeProperty("--studio-sidebar-width");
-    };
-  }, [resize.dragging, resize.width]);
-  const close = () => {
-    restoreSidebarFocus();
-    p.close();
-  };
+  }, [
+    frame,
+    frame.compact,
+    frame.source.visibility.desktopCollapsed,
+    frame.source.visibility.mobileOpen,
+  ]);
   const content = (
     <aside
-      ref={aside}
+      ref={frame.node}
       id="sidebar"
       className="sidebar-frame"
-      data-presentation={compact ? "drawer" : "inline"}
-      data-probe={probing || undefined}
-      inert={probing || undefined}
-      aria-hidden={probing || undefined}
+      data-presentation={frame.compact ? "drawer" : "inline"}
+      data-probe={frame.probing || undefined}
+      inert={frame.probing || undefined}
+      aria-hidden={frame.probing || undefined}
       aria-label="Conversations"
       style={
-        compact ? undefined : { width: resize.width, flexBasis: resize.width }
+        frame.compact
+          ? undefined
+          : { width: frame.width, flexBasis: frame.width }
       }
     >
-      {p.children}
-      {!compact && (
+      {children}
+      {!frame.compact && (
         <div
           className="sidebar-resize-rail"
           role="separator"
@@ -267,23 +404,26 @@ export function SidebarFrame(p: SidebarFrameProps) {
           aria-label="Conversation sidebar width"
           aria-orientation="vertical"
           aria-controls="sidebar"
-          aria-valuemin={Math.ceil(policy.minimum)}
-          aria-valuemax={Math.floor(policy.maximum)}
-          aria-valuenow={Math.round(resize.width)}
-          aria-valuetext={`${Math.round(resize.width)} pixels`}
+          aria-valuemin={Math.ceil(frame.policy.minimum)}
+          aria-valuemax={Math.floor(frame.policy.maximum)}
+          aria-valuenow={Math.round(frame.width)}
+          aria-valuetext={`${Math.round(frame.width)} pixels`}
           title="Drag or use arrow keys to resize. Press Home to reset."
-          {...resize.handlers}
+          {...frame.handlers}
         />
       )}
     </aside>
   );
-  if (!compact) return p.collapsed && !probing ? null : content;
+  if (!frame.compact)
+    return frame.source.visibility.desktopCollapsed && !frame.probing
+      ? null
+      : content;
   return (
     <Drawer
-      opened={p.opened}
-      {...(p.onEntered ? { onEnterTransitionEnd: p.onEntered } : {})}
-      onClose={close}
-      {...(p.drawerZIndex !== undefined ? { zIndex: p.drawerZIndex } : {})}
+      opened={frame.source.visibility.mobileOpen}
+      onEnterTransitionEnd={frame.source.focusSelected}
+      onClose={frame.source.closeSidebar}
+      {...(drawerZIndex !== undefined ? { zIndex: drawerZIndex } : {})}
       size={`min(${layoutValues.sidebar.drawerMax}rem, 100vw)`}
       padding={0}
       withCloseButton={false}
@@ -295,4 +435,4 @@ export function SidebarFrame(p: SidebarFrameProps) {
       {content}
     </Drawer>
   );
-}
+});

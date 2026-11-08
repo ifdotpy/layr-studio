@@ -23,8 +23,8 @@ import NativeRuntimeStatus from "../../src/components/NativeRuntimeStatus.tsx";
 import Accounts from "../../src/components/Accounts.tsx";
 import "../../src/studio-theme.css";
 import "../../src/appearance.css";
-import ConversationWarnings from "../../src/components/ConversationWarnings.tsx";
-import { StudioErrorsProvider } from "../../src/components/StudioErrors.tsx";
+import { ConversationWarningsFixture as ConversationWarnings } from "../../src/components/noticesFixture.tsx";
+import { StudioErrorsProvider } from "../../src/components/noticesFixture.tsx";
 const accounts = [
   { id: "default", label: "Personal", status: "ready" as const },
   {

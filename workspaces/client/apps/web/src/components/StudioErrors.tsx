@@ -1,13 +1,9 @@
-import { useServerApi } from "../servers/ServerServicesContext";
-import {
-  createContext,
-  useContext,
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { observer } from "mobx-react-lite";
+import { ERROR_LEVELS, isInfoNotice } from "../app/notices/warnings.ts";
+import { useConversationActions } from "./conversation/navigation.ts";
+import { isNonBlockingWarning } from "../app/notices/nonBlockingWarning.ts";
+import { useState } from "react";
+import { STUDIO_ERRORS_DISMISS_MAX_IDS } from "../generated/sharedValues.ts";
 import {
   Badge,
   Button,
@@ -17,14 +13,17 @@ import {
   Stack,
   Text,
 } from "@mantine/core";
-import { errorText, type GetResult } from "../api";
-import { clearAppLog, useAppLog } from "../appLog";
+import { errorText } from "../api";
+import { appLogEntries, clearAppLog } from "../appLog";
 import type { components } from "../generated/api";
-import { STUDIO_ERRORS_DISMISS_MAX_IDS } from "../generated/sharedValues";
 
-export type StudioErrorItem = GetResult<"/api/studio-errors">["items"][number];
+export type StudioErrorItem = NonNullable<
+  ReturnType<
+    import("../generated/observableResources.ts").StateCollections["studioErrors"]["get"]
+  >
+>;
 type Level = components["schemas"]["StudioErrorLevel"];
-export const LEVELS: Level[] = ["critical", "error", "warning", "log"];
+export const LEVELS = ERROR_LEVELS;
 export const LEVEL_COLORS: Record<Level, string> = {
   critical: "violet",
   error: "red",
@@ -34,7 +33,6 @@ export const LEVEL_COLORS: Record<Level, string> = {
 /** Sentence-case level name; labels are never all caps. */
 const levelLabel = (level: Level) =>
   level.charAt(0).toUpperCase() + level.slice(1);
-const EMPTY_ERRORS: StudioErrorItem[] = [];
 
 export function actionLabel(item: StudioErrorItem) {
   switch (item.action) {
@@ -66,25 +64,27 @@ export function period(item: StudioErrorItem) {
 }
 
 /** The rows with their reason and one safe action each. */
-export function StudioErrorList({
-  items,
-  busy,
-  selected,
-  onSelect,
-  onSelectAll,
-  onDelete,
-  onAction,
+export const StudioErrorList = observer(function StudioErrorList({
+  onOpen,
 }: {
-  items: StudioErrorItem[];
-  busy: string | null;
-  selected: ReadonlySet<string>;
-  onSelect: (id: string, checked: boolean) => void;
-  onSelectAll: (ids: string[]) => void;
-  onDelete: () => void;
-  onAction: (item: StudioErrorItem) => void;
+  onOpen?: () => void;
 }) {
-  const logs = useAppLog();
-  const [filter, setFilter] = useState<Level | null>(null);
+  const { areas, items: sourceItems, logs } = useStudioErrors();
+  const [reply, setReply] = useState<{
+    source: StudioErrorItem[];
+    items: StudioErrorItem[];
+  }>();
+  const items = reply?.source === sourceItems ? reply.items : sourceItems;
+  const accept = (value: { items: StudioErrorItem[] }) => {
+    if (Array.isArray(value.items))
+      setReply({ source: sourceItems, items: value.items });
+  };
+  const [selected, setSelected] = useState(new Set<string>());
+  const [busy, setBusy] = useState<string | null>(null);
+  const [filter, setFilter] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const { get, post } = areas.scope.services.api;
   const rows = [
     ...items.map((item) => ({
       type: "server" as const,
@@ -105,15 +105,81 @@ export function StudioErrorList({
   const visibleServerIds = visible
     .filter((row) => row.type === "server")
     .map((row) => row.item.id);
+  const onSelectAll = (ids: string[]) => {
+    if (!busy)
+      setSelected(new Set(ids.slice(0, STUDIO_ERRORS_DISMISS_MAX_IDS)));
+  };
+  const onSelect = (id: string, checked: boolean) => {
+    if (busy) return;
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (!checked) next.delete(id);
+      else if (next.size < STUDIO_ERRORS_DISMISS_MAX_IDS) next.add(id);
+      return next;
+    });
+  };
+  async function onDelete() {
+    if (busy || !selected.size) return;
+    const ids = [...selected];
+    setBusy("delete");
+    setError("");
+    setNotice("");
+    try {
+      const result = await post("/api/studio-errors/dismiss", { ids });
+      accept(result);
+      setSelected(new Set());
+      if (result.unknownIds.length)
+        setNotice(
+          `${result.unknownIds.length} selected errors were already gone.`,
+        );
+    } catch (failure) {
+      let message = `Could not confirm deletion of ${ids.join(", ")}: ${errorText(failure)}`;
+      // A lost response permits readback, never another dismissal write.
+      try {
+        accept(await get("/api/studio-errors"));
+      } catch (failure) {
+        message += `. Could not refresh: ${errorText(failure)}`;
+      }
+      setError(message);
+    } finally {
+      setBusy(null);
+    }
+  }
+  async function onAction(item: StudioErrorItem) {
+    if (item.action === "check") {
+      onOpen?.();
+      areas.open(item.agentId);
+      return;
+    }
+    if (item.action !== "resume" || busy) return;
+    setBusy(item.id);
+    setError("");
+    try {
+      await post("/api/connection-recovery", { id: item.agentId });
+      await get("/api/studio-errors");
+    } catch (failure) {
+      setError(errorText(failure));
+    } finally {
+      setBusy(null);
+    }
+  }
   return (
     <Stack gap="sm">
+      {error && (
+        <Text c="red" size="sm" role="alert">
+          {error}
+        </Text>
+      )}
+      {notice && (
+        <Text size="sm" role="status">
+          {notice}
+        </Text>
+      )}
       <Group gap="xs">
         <SegmentedControl
           aria-label="Filter by level"
           value={filter ?? "all"}
-          onChange={(value) =>
-            setFilter(value === "all" ? null : (value as Level))
-          }
+          onChange={(value) => setFilter(value === "all" ? null : value)}
           data={[
             { value: "all", label: `All (${rows.length})` },
             ...LEVELS.map((level) => ({
@@ -253,136 +319,48 @@ export function StudioErrorList({
       )}
     </Stack>
   );
-}
-
-/** Reads and mutations stay on the active server, including when the trigger is portalled. */
-export function useStudioErrorsState(
-  sourceItems: StudioErrorItem[] = EMPTY_ERRORS,
-) {
-  const { get, post } = useServerApi();
-  const [items, setItems] = useState<StudioErrorItem[]>(sourceItems);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const pending = useRef(false);
-  const generation = useRef(0);
-  const refresh = useCallback(async () => {
-    const read = ++generation.current;
-    const value = await get("/api/studio-errors");
-    if (read === generation.current) setItems(value.items);
-  }, [get]);
-  useEffect(() => {
-    // Complete entity batches own membership; HTTP readback is only for explicit actions.
-    generation.current++;
-    setItems(sourceItems);
-  }, [sourceItems]);
-  const select = (id: string, checked: boolean) => {
-    if (pending.current) return;
-    setSelected((previous) => {
-      const next = new Set(previous);
-      if (checked && next.size < STUDIO_ERRORS_DISMISS_MAX_IDS) next.add(id);
-      else if (!checked) next.delete(id);
-      return next;
-    });
-  };
-  const selectAll = (ids: string[]) => {
-    if (!pending.current)
-      setSelected(new Set(ids.slice(0, STUDIO_ERRORS_DISMISS_MAX_IDS)));
-  };
-  const remove = async () => {
-    if (pending.current || !selected.size) return;
-    const ids = [...selected];
-    pending.current = true;
-    generation.current++;
-    setBusy("delete");
-    setError("");
-    setNotice("");
-    try {
-      const value = await post("/api/studio-errors/dismiss", { ids });
-      setItems(value.items);
-      setSelected(new Set());
-      if (value.unknownIds.length)
-        setNotice(
-          `${value.unknownIds.length} selected errors were already gone.`,
-        );
-    } catch (failure) {
-      setError(
-        `Could not confirm deletion of ${ids.join(", ")}: ${errorText(failure)}`,
-      );
-      // A lost response is not proof of failure. Keep selection and read back; never resend.
-      try {
-        await refresh();
-      } catch (readFailure) {
-        setError(
-          (message) =>
-            `${message}. Could not refresh: ${errorText(readFailure)}`,
-        );
-      }
-    } finally {
-      pending.current = false;
-      setBusy(null);
-    }
-  };
-  const resume = async (item: StudioErrorItem) => {
-    if (item.action !== "resume") return;
-    if (pending.current) return;
-    pending.current = true;
-    generation.current++;
-    setBusy(item.id);
-    setError("");
-    try {
-      await post("/api/connection-recovery", { id: item.agentId });
-      await refresh();
-    } catch (failure) {
-      setError(errorText(failure));
-    } finally {
-      pending.current = false;
-      setBusy(null);
-    }
-  };
-  return {
-    items,
-    selected,
-    busy,
-    error,
-    notice,
-    refresh: () => {
-      if (!pending.current)
-        void refresh().catch((failure) => setError(errorText(failure)));
-    },
-    select,
-    selectAll,
-    remove,
-    resume,
-  };
-}
-
-const StudioErrorsContext = createContext<ReturnType<
-  typeof useStudioErrorsState
-> | null>(null);
-
-export const StudioErrorsScope = StudioErrorsContext.Provider;
-
-/** One owner per server, above chat keys and sidebar portals, retains pending mutations. */
-export function StudioErrorsProvider({
-  children,
-  items = EMPTY_ERRORS,
-}: {
-  children?: ReactNode;
-  items?: StudioErrorItem[];
-}) {
-  const state = useStudioErrorsState(items);
-  return (
-    <StudioErrorsContext.Provider value={state}>
-      {children}
-    </StudioErrorsContext.Provider>
-  );
-}
+});
 
 export function useStudioErrors() {
-  const state = useContext(StudioErrorsContext);
-  if (!state)
-    throw new Error("Studio errors require their server-scoped provider.");
-  return state;
+  const areas = useConversationActions();
+  const items = [...(areas.state?.studioErrors.values() ?? [])].sort(
+    (left, right) => right.at - left.at || left.id.localeCompare(right.id),
+  );
+  const logs = appLogEntries();
+  const accountNotices =
+    areas.state?.workspaces
+      .values()
+      .next()
+      .value?.nativeNotices?.filter(
+        (notice) =>
+          notice.accountKey ===
+          (areas.navigation.selectedAgent?.accountKey || "default"),
+      ) || [];
+  const chatWarnings =
+    areas.selected.warningMessages.filter(isNonBlockingWarning);
+  const highestLevel = LEVELS.find(
+    (level) =>
+      items.some((item) => item.level === level) ||
+      logs.some((item) => item.level === level) ||
+      (level === "warning" &&
+        (accountNotices.some((notice) => !isInfoNotice(notice)) ||
+          chatWarnings.length > 0)),
+  );
+  const hasWarning = highestLevel !== undefined && highestLevel !== "log";
+  const noticeCount = accountNotices.length + chatWarnings.length;
+  return {
+    areas,
+    items,
+    logs,
+    accountNotices,
+    chatWarnings,
+    highestLevel,
+    hasWarning,
+    noticeCount,
+    warningTitle:
+      hasWarning || (noticeCount === 0 && logs.length === 0)
+        ? "Warnings"
+        : "Notices",
+    warningCount: noticeCount + items.length + logs.length,
+  };
 }

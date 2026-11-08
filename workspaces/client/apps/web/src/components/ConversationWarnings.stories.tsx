@@ -3,10 +3,11 @@ import { useState } from "react";
 import { Button } from "@mantine/core";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { expect, fn, userEvent, within, waitFor } from "storybook/test";
-import ConversationWarnings from "./ConversationWarnings";
+import { ConversationWarningsFixture as ConversationWarnings } from "./noticesFixture.tsx";
 import { ServerServicesProvider } from "../servers/ServerServicesContext";
 import type { ServerServices } from "../servers/serverServices";
-import { StudioErrorsProvider, type StudioErrorItem } from "./StudioErrors";
+import { StudioErrorsProvider } from "./noticesFixture.tsx";
+import type { StudioErrorItem } from "./StudioErrors.tsx";
 
 const errors: StudioErrorItem[] = ["one", "two", "three"].map((id) => ({
   id: `monitor:${id}`,

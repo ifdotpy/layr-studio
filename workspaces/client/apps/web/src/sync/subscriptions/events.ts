@@ -1,5 +1,5 @@
 /** Internal adapters for projection, recovery and non-React consumers. Components
- * use useSubscription; transport details stay within the subscription boundary. */
+ * use server resources; transport details stay within the subscription boundary. */
 import * as transport from "../resourceEvents";
 import { subscribeTranscriptProjection } from "../client";
 import { createSubscriptions } from "./module";

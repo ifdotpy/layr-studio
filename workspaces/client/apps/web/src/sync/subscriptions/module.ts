@@ -32,7 +32,11 @@ export function createSubscriptions<T extends SubscriptionTransport>(
       options?: SubscriptionOptions,
     ) {
       const stopObserve = store.observe(ref, accept);
-      const stopInterest = store.watchResourceChanges(ref, () => {}, options);
+      // State's durable observer acquires its own interest after attaching the lease.
+      const stopInterest =
+        ref.kind === "state" && observeData
+          ? () => {}
+          : store.watchResourceChanges(ref, () => {}, options);
       const key = subscriptionKey(ref);
       let reader = readers.get(key);
       if (!reader) {

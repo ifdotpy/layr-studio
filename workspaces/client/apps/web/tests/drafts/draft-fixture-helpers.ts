@@ -1,8 +1,9 @@
-import type { useSyncedDrafts } from "../../src/sync/drafts.ts";
+import type { createDrafts } from "../../src/sync/drafts.ts";
 import type { syncDatabase } from "../../src/sync/client.ts";
 declare global {
   interface Window {
-    draft: ReturnType<typeof useSyncedDrafts>;
+    draft: ReturnType<typeof createDrafts>;
+    outbox: { entries: OutboxEntry[]; error: string };
     db: Awaited<ReturnType<typeof syncDatabase>>["db"];
   }
 }

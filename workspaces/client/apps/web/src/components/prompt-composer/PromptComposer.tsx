@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import {
   useSyncExternalStore,
   type DragEventHandler,
@@ -28,20 +29,31 @@ export function usePromptDraft(
   );
 }
 
-/** Owns the live composer subtree so typing does not render App or the transcript. */
-export default function PromptComposer(p: {
+type DraftSource = {
   session: string;
   getDraft: DraftReader;
   subscribeDraft: DraftSubscription;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  onDragOver?: DragEventHandler<HTMLFormElement>;
-  onDragLeave?: DragEventHandler<HTMLFormElement>;
-  onDrop?: DragEventHandler<HTMLFormElement>;
-  className?: string;
-  children: (draft: string) => ReactNode;
-}) {
-  reportPromptComposerRender("prompt-composer", p.session);
+};
+
+export const PromptDraft = observer(function PromptDraft(
+  p: DraftSource & { children: (draft: string) => ReactNode },
+) {
   const draft = usePromptDraft(p.session, p.getDraft, p.subscribeDraft);
+  reportPromptComposerRender("prompt-composer", p.session);
+  return p.children(draft);
+});
+
+/** Draft changes execute the content leaf; the form and prebuilt settings stay idle. */
+export default function PromptComposer(
+  p: DraftSource & {
+    onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+    onDragOver?: DragEventHandler<HTMLFormElement>;
+    onDragLeave?: DragEventHandler<HTMLFormElement>;
+    onDrop?: DragEventHandler<HTMLFormElement>;
+    className?: string;
+    children: (draft: string) => ReactNode;
+  },
+) {
   return (
     <form
       id="composer"
@@ -51,7 +63,7 @@ export default function PromptComposer(p: {
       onDragLeave={p.onDragLeave}
       onDrop={p.onDrop}
     >
-      {p.children(draft)}
+      <PromptDraft {...p} />
     </form>
   );
 }

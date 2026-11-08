@@ -2,12 +2,12 @@ const fixtureRoot = document.getElementById("root");
 if (!fixtureRoot) throw new Error("Missing fixture root");
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { useMobileViewport } from "/src/hooks/mobileViewport.ts";
+import { attachMobileViewport } from "/src/hooks/mobileViewport.ts";
 import "/src/hooks/viewport-surface.css";
 import "/src/layout/layout-contract.generated.css";
 const e = React.createElement;
 function Fixture() {
-  useMobileViewport(true);
+  React.useEffect(() => attachMobileViewport(), []);
   return e(
     React.Fragment,
     null,

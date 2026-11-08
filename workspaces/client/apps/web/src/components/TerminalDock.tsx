@@ -13,7 +13,7 @@ import {
   Square,
   Terminal as TerminalIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, useLayoutEffect } from "react";
+import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
 import type { CSSProperties } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { errorText, type GetResult, type PostBody } from "../api";
@@ -67,10 +67,10 @@ function terminalTheme() {
 }
 
 export default observer(function TerminalDock({
-  agentId,
+  agent,
   notify,
 }: {
-  agentId?: string | undefined;
+  agent?: import("./sidebar/viewModel.ts").SidebarAgent | undefined;
   notify: (message: string) => void;
 }) {
   const {
@@ -83,12 +83,11 @@ export default observer(function TerminalDock({
   } = useScreenEnvironment();
   const shellTerminal = isServerView && !isClassicServerView && hasShell;
   const store = useServerStore();
-  const agents = resourceData(store.state().current)?.agents;
-  const agent = agentId ? agents?.get(agentId) : undefined;
   const terminalList = store.terminals().current;
   const shells = resourceData(terminalList) ?? [];
   const api = useServerApi();
   const { post, save, saved } = api;
+  const actions = useMemo(() => ({ ...api, notify }), [api, notify]);
 
   const [opened, setOpened] = useState(() =>
     saved("codex.terminal.open", false),
@@ -179,7 +178,8 @@ export default observer(function TerminalDock({
     (shell) => shell.status !== GeneratedApiTerminalState.closed,
   );
   const current = entries.find((entry) => `shell:${entry.id}` === selected);
-  const owner = (id: string) => agents?.get(id)?.name || "Agent";
+  const owner = (id: string) =>
+    resourceData(store.state().current)?.agents.get(id)?.name || "Agent";
   const filtered = entries.filter((entry) =>
     `${entry.title} ${entry.cwd || ""} ${owner(entry.agent)} ${entry.status}`
       .toLowerCase()
@@ -282,7 +282,7 @@ export default observer(function TerminalDock({
     }
   };
   return (
-    <TerminalActionsProvider value={{ ...api, notify }}>
+    <TerminalActionsProvider value={actions}>
       <section
         ref={dock}
         className={`terminal-dock ${opened ? "is-open" : ""}`}

@@ -1,3 +1,4 @@
+import type { ComponentSnapshot as Snapshot } from "./componentTestFixtures.ts";
 vi.mock("./agents/state.ts", async (original) => ({
   ...(await original<typeof import("./agents/state.ts")>()),
   useAgentDetail: <T>(agent: T) => agent,
@@ -13,11 +14,14 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createElement, isValidElement, type ComponentProps } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import type { Agent, Message, Snapshot } from "../types";
-import { snapshotFixture } from "../snapshotFixture";
+import type { Agent, Message } from "../types";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 import type { Account } from "./Accounts";
 
 const h = vi.hoisted(() => ({
+  cost: undefined as
+    | import("../generated/api.ts").components["schemas"]["SessionCostResponse"]
+    | undefined,
   cursor: 0,
   cells: [] as ComponentHookCell[],
   effects: [] as Array<() => void>,
@@ -70,6 +74,9 @@ vi.mock("react", async (original) => ({
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerStore: () => ({
     agentDetail: () => ({ current: { status: "loading" } }),
+    sessionCost: () => ({
+      current: h.cost ? { status: "live", data: h.cost } : { status: "absent" },
+    }),
   }),
   useServerApi: () => ({ get: h.get, post: h.post, saved: () => null }),
   useServerStorage: () => ({}),
@@ -296,7 +303,9 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
   let view = render(read);
   view.props.onClick();
   render(read);
-  const notify = required(required(h.subscribe.mock.calls[0])[0]);
+  const notify = (snapshot: Snapshot) => {
+    h.cost = snapshot.runtime.sessionCostsByAgent?.root;
+  };
   const cost = {
     rootId: "root",
     pricingState: "ready",
@@ -308,7 +317,12 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
     unknownModels: [],
     breakdown: { models: {}, providers: {} },
   } satisfies import("../generated/api").components["schemas"]["SessionCostResponse"];
-  notify(snapshotFixture([], { sessionCostsByAgent: { root: cost } }));
+  notify(
+    Object.assign(
+      snapshotFixture([], { sessionCostsByAgent: { root: cost } }),
+      { token: "", stateDir: "/fixture" },
+    ),
+  );
   view = render(read);
   expect(
     find(
@@ -318,9 +332,12 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
     ),
   ).toBeUndefined();
   notify(
-    snapshotFixture([], {
-      sessionCostsByAgent: { root: { ...cost, totalUSD: 1 } },
-    }),
+    Object.assign(
+      snapshotFixture([], {
+        sessionCostsByAgent: { root: { ...cost, totalUSD: 1 } },
+      }),
+      { token: "", stateDir: "/fixture" },
+    ),
   );
   view = render(read);
   expect(
@@ -330,7 +347,7 @@ it("message info uses streamed cost and leaves missing cost unavailable", async 
         node.type === "dt" && node.props.children === "Session estimate (USD)",
     ),
   ).toBeDefined();
-  notify(snapshotFixture());
+  notify(Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }));
   view = render(read);
   expect(
     find(

@@ -133,7 +133,7 @@ type SettingsProps = {
   input: ExecutionSettingsInput;
   leadInput?: AgentSettingsInput | undefined;
   catalog: Catalog;
-  accounts?: Account[];
+  accounts?: readonly Account[];
   team?: Array<Pick<Agent, "id" | "rootId" | "deletedAt" | "accountKey">>;
   refresh: () => Promise<void>;
   initialRole?: SetupRole;
@@ -455,14 +455,22 @@ const ExecutionSettingsController = observer(
               : current,
           )
         }
-        onSettingsConfirmed={(key, nextTurn) =>
+        onSettingsConfirmed={(key, nextTurn, canonical) =>
           setChangeStatus((current) =>
             current &&
             current.phase !== "failed" &&
             current.requestKey === key &&
             projected.current.agent.id === current.agentId &&
             accountOf(projected.current.agent) === current.accountKey
-              ? { ...current, phase: nextTurn ? "queued" : "saved" }
+              ? {
+                  ...current,
+                  phase: nextTurn ? "queued" : "saved",
+                  requested: {
+                    model: settingsFor(canonical, false).model,
+                    effort: settingsFor(canonical, false).effort,
+                    fastMode: settingsFor(canonical, false).fast_mode,
+                  },
+                }
               : current,
           )
         }
@@ -564,7 +572,11 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   beginSettingsSave: (role: SetupRole) => (agent: Agent) => boolean;
   onSettingsChange: (change: SettingsChange) => void;
   onSettingsFailure: (key: string, message: string, uncertain: boolean) => void;
-  onSettingsConfirmed: (key: string, nextTurn: boolean) => void;
+  onSettingsConfirmed: (
+    key: string,
+    nextTurn: boolean,
+    canonical: Agent,
+  ) => void;
   teamDefaults: boolean;
   readOnlyReason?: string | undefined;
   inheritedUnavailable: boolean;
@@ -943,7 +955,7 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         );
       confirmed = true;
       if (!teamDefaults)
-        onSettingsConfirmed(statusKey, request.next_turn === true);
+        onSettingsConfirmed(statusKey, request.next_turn === true, canonical);
       if (request.next_turn) {
         clearReceipt();
         if (mounted.current) setUnconfirmed(null);

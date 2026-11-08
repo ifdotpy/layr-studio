@@ -66,7 +66,8 @@ it("real complaint subscription isolates detail, retains confirmed reply against
   });
   const store = createServerStore(subscriptions);
   const actions = conversationActionsFixture();
-  actions.notify = vi.fn();
+  const notify = vi.fn();
+  actions.notices.notify = notify;
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -231,7 +232,7 @@ it("real complaint subscription isolates detail, retains confirmed reply against
     await submit();
     expect(card?.textContent).not.toContain("Retry response");
     expect(input.value).toBe("");
-    expect(actions.notify).toHaveBeenCalledWith("detail reload failed");
+    expect(notify).toHaveBeenCalledWith("detail reload failed");
     await act(async () => root.unmount());
     await act(async () => vi.advanceTimersByTimeAsync(30001));
     expect(

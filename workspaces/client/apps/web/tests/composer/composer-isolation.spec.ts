@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { Page, Route } from "@playwright/test";
 import type { PromptComposerRenderProbe } from "../../src/components/prompt-composer/renderProbe.ts";
 import { commandOf, sendReply } from "../messages/send-command.ts";
+import type { FixtureStep } from "../fixtures/fixture-scripts.ts";
 import type { PostBody } from "../../src/api.ts";
 import { randomUUID } from "../../src/uuid.ts";
 import {
@@ -19,6 +20,7 @@ declare global {
   interface Window {
     composerIsolation?: {
       input: HTMLTextAreaElement;
+      attachment?: HTMLElement;
       renders: Partial<
         Record<Parameters<PromptComposerRenderProbe>[0], number>
       >;
@@ -34,11 +36,17 @@ async function withComposer(
     state: Awaited<ReturnType<typeof readTestState>>;
     updateModel(): Promise<void>;
     agentId: string;
+    control(steps: FixtureStep[]): void;
   }) => Promise<void>,
+  scripts?: { prompt: string; steps: FixtureStep[] }[],
 ) {
   const directory = await mkdtemp(join(tmpdir(), "studio-composer-isolation-"));
   const fixture = spawnFixture(process.execPath, [rustUiFixture, directory], {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: ["pipe", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      ...(scripts ? { FIXTURE_SCRIPT: JSON.stringify(scripts) } : {}),
+    },
   });
   let log = "";
   fixture.stderr!.on("data", (chunk) => (log += chunk));
@@ -64,6 +72,15 @@ async function withComposer(
       page,
       state,
       agentId: agent.id,
+      control: (steps) => {
+        fixture.stdin?.write(
+          JSON.stringify({
+            method: "fixture/provider",
+            agent: agent.id,
+            steps,
+          }) + "\n",
+        );
+      },
       updateModel: async () => {
         const response = await fetch(`${origin}/api/conversation`, {
           method: "POST",
@@ -108,13 +125,32 @@ test("App composer typing leaves the application and transcript idle and preserv
   await withComposer(page, async ({ updateModel }) => {
     const input = page.locator("#message");
     await input.fill("Draft ");
+    await page
+      .locator('.composer-tools input[type="file"]')
+      .setInputFiles({
+        name: "isolation-notes.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from("Keep this attachment through model updates."),
+      });
+    await expect(
+      page.locator(".composer-tools .attachment-list"),
+    ).toContainText("isolation-notes.txt");
+    await input.focus();
     await page.evaluate(async () => {
       await new Promise<void>((resolve) =>
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       );
       const input = document.querySelector<HTMLTextAreaElement>("#message");
       if (!input) throw new Error("Missing composer");
-      const probe = { input, renders: {}, changed: performance.now() };
+      const attachment =
+        document.querySelector<HTMLElement>(".attachment-chip");
+      if (!attachment) throw new Error("Missing saved attachment");
+      const probe = {
+        input,
+        attachment,
+        renders: {},
+        changed: performance.now(),
+      };
       window.composerIsolation = probe;
       window.__studioPromptComposerRenderProbe = (component) => {
         const renders = window.composerIsolation!.renders;
@@ -165,6 +201,14 @@ test("App composer typing leaves the application and transcript idle and preserv
         ];
       }),
     ).toEqual([true, true, 3, 8]);
+    await expect(
+      page.locator(".composer-tools .attachment-list"),
+    ).toContainText("isolation-notes.txt");
+    expect(
+      await page
+        .locator(".attachment-chip")
+        .evaluate((node) => node === window.composerIsolation?.attachment),
+    ).toBe(true);
     await input.dispatchEvent("compositionend", { data: "編" });
   });
 });
@@ -212,4 +256,88 @@ test("App retries the first lost send unchanged while a newer draft survives", a
     await expect(input).toHaveValue("A newer unsent draft");
     expect(attempts).toHaveLength(2);
   });
+});
+
+test("100 separately delivered transcript updates leave the production App and header idle", async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000);
+  await withComposer(
+    page,
+    async ({ control }) => {
+      await page.locator("#message").fill("App token isolation stream");
+      await page.locator("#send").click();
+      const stream = page.locator('[data-message$=":app-isolation-stream"]');
+      await expect(stream).toContainText("start");
+      await page.evaluate(() => {
+        const input = document.querySelector<HTMLTextAreaElement>("#message");
+        if (!input) throw new Error("Missing composer");
+        window.composerIsolation = {
+          input,
+          renders: {},
+          changed: performance.now(),
+        };
+        window.__studioPromptComposerRenderProbe = (kind) => {
+          const probe = window.composerIsolation!;
+          probe.renders[kind] = (probe.renders[kind] || 0) + 1;
+          probe.changed = performance.now();
+        };
+      });
+      await page.waitForFunction(
+        () => performance.now() - window.composerIsolation!.changed > 300,
+      );
+      await page.evaluate(() => {
+        window.composerIsolation!.renders = {};
+      });
+      const delivered: string[] = [];
+      for (let index = 0; index < 100; index++) {
+        const marker = `token-${index}-end`;
+        control([
+          { item: "app-isolation-stream", delta: ` ${marker}`, append: true },
+        ]);
+        // The next delta is issued only after this intermediate state is rendered.
+        await expect(stream).toContainText(marker);
+        delivered.push(await stream.innerText());
+      }
+      expect(new Set(delivered).size).toBe(100);
+      const renders = await page.evaluate(
+        () => window.composerIsolation!.renders,
+      );
+      const report = {
+        deliveredUpdates: delivered.length,
+        renders,
+        appRenders: renders.app || 0,
+        appRendersPerUpdate: (renders.app || 0) / delivered.length,
+      };
+      await testInfo.attach("app-transcript-isolation", {
+        body: JSON.stringify(report, null, 2),
+        contentType: "application/json",
+      });
+      console.log(`App transcript isolation ${JSON.stringify(report)}`);
+      expect(
+        await page
+          .locator("#message")
+          .evaluate((input) => input === window.composerIsolation!.input),
+      ).toBe(true);
+      if (process.env.STUDIO_TRANSCRIPT_BASELINE !== "1") {
+        for (const key of [
+          "app",
+          "conversation",
+          "conversation-header",
+          "settings",
+          "sidebar",
+        ] as const)
+          expect(renders[key] || 0, key).toBe(0);
+      }
+    },
+    [
+      {
+        prompt: "App token isolation stream",
+        steps: [
+          { item: "app-isolation-stream", delta: "start " },
+          { hold: true },
+        ],
+      },
+    ],
+  );
 });

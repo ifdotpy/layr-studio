@@ -64,7 +64,7 @@ function saveDeleteRequest(
 
 export function matchingAccountsForExternalCommand<
   T extends AccountDeleteTarget,
->(accounts: T[], identity: ExternalAccountIdentity) {
+>(accounts: readonly T[], identity: ExternalAccountIdentity) {
   return accounts.filter(
     (candidate) =>
       candidate.provider === identity.provider &&
@@ -78,7 +78,7 @@ export function matchingAccountsForExternalCommand<
 }
 
 export function accountForExternalCommand<T extends AccountDeleteTarget>(
-  accounts: T[],
+  accounts: readonly T[],
   identity: ExternalAccountIdentity,
 ) {
   const matches = matchingAccountsForExternalCommand(accounts, identity);

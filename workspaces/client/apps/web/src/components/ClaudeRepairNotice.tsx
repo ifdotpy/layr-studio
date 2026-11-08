@@ -1,4 +1,4 @@
-import type { useAgentDetail } from "./agents/state.ts";
+import type { AgentDetailEntityDto } from "../generated/observableResources.ts";
 import { useEffect, useState } from "react";
 import { useServerApi } from "../servers/ServerServicesContext";
 import type { Agent } from "../types";
@@ -15,7 +15,7 @@ export default function ClaudeRepairNotice({
   detail = agent,
 }: {
   agent: Agent;
-  detail?: ReturnType<typeof useAgentDetail> | Agent;
+  detail?: AgentDetailEntityDto | Agent | undefined;
 }) {
   const { get } = useServerApi();
   const [result, setResult] = useState<{

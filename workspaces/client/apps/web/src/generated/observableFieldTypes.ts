@@ -756,3 +756,18 @@ export type TranscriptInputFields = {
   text: components["schemas"]["TranscriptInput"]["text"];
   truncated: components["schemas"]["TranscriptInput"]["truncated"];
 };
+export type PlanSummaryEntityDtoFields = {
+  id: components["schemas"]["PlanSummaryEntityDto"]["id"];
+  native?: components["schemas"]["PlanSummaryEntityDto"]["native"] | undefined;
+  rootId: components["schemas"]["PlanSummaryEntityDto"]["rootId"];
+  steps?: components["schemas"]["PlanSummaryEntityDto"]["steps"] | undefined;
+  text: components["schemas"]["PlanSummaryEntityDto"]["text"];
+  updated: components["schemas"]["PlanSummaryEntityDto"]["updated"];
+  version: components["schemas"]["PlanSummaryEntityDto"]["version"];
+};
+export type ProjectionMetadataFields = {
+  complete: boolean;
+  projectSequences: Record<string, number>;
+  ready: boolean;
+  workspaceId: string;
+};

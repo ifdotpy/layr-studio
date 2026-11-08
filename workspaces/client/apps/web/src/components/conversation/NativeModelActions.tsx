@@ -37,7 +37,7 @@ export const NativeModelActions = observer(function NativeModelActions({
             data-action={action}
             leftSection={<Icon size={14} />}
             disabled={disabled}
-            onClick={() => actions.nativeAction(agent, action)}
+            onClick={() => actions.selected.nativeAction(agent, action)}
           >
             {label}
             {disabled && (

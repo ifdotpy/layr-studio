@@ -68,7 +68,8 @@ test("malformed current-draft key does not crash hook initialization", async ({
       await mount();
     });
     await page.waitForFunction(
-      () => window.draft?.drafts.healthy === "Healthy chat remains visible",
+      () =>
+        window.draft?.getDraft("healthy") === "Healthy chat remains visible",
     );
     assert.match(
       await page.evaluate(() => window.draft.error),

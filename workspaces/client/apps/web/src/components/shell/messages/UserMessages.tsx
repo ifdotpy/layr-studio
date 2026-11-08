@@ -59,7 +59,9 @@ function MessageResponse({
   onResponse: (c: ComplaintDetailResponse) => void;
 }) {
   const { get, post } = useServerApi();
-  const { refresh, notify } = useConversationActions();
+  const area = useConversationActions();
+  const { refresh } = area;
+  const { notify } = area.notices;
   const storage = useServerStorage();
   const responseStore = complaintResponseStore(storage, scope);
 

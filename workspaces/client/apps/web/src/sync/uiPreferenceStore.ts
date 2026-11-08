@@ -231,10 +231,14 @@ export function writePreferenceEdit<T extends Record<string, unknown>>(
   previous: T,
   next: T,
   storage = serverLocalStorage,
+  normalize: (value: T) => T = (value) => value,
 ): T {
   let latest: T;
   try {
-    latest = { ...previous, ...JSON.parse(storage.getItem(key) || "{}") };
+    latest = normalize({
+      ...previous,
+      ...JSON.parse(storage.getItem(key) || "{}"),
+    });
   } catch {
     latest = { ...previous };
   }

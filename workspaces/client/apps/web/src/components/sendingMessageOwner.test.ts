@@ -8,7 +8,6 @@ vi.mock("../api", () => ({
   ApiError: class extends Error {},
 }));
 vi.mock("../sync/send", () => ({ stopRemovedMessage: vi.fn() }));
-vi.mock("../hooks", () => ({ transcriptMessages: (items: unknown) => items }));
 import { createSendingMessageRemoval } from "./removeSendingMessages";
 import { isRemovedMessage, removedMessagesStorageKey } from "./removedMessages";
 import { scopedStorage } from "../servers/storage";

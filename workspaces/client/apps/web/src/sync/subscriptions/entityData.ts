@@ -1,4 +1,8 @@
-import { syncDatabase, type createSyncClient } from "../client";
+import {
+  syncDatabase,
+  retainStateDelivery,
+  type createSyncClient,
+} from "../client";
 import type { DeepReadonly } from "../../deepReadonly.ts";
 import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api";
 import { SUBSCRIPTION_ENTITY_SCOPES } from "../../generated/subscriptionEntities";
@@ -56,6 +60,7 @@ const selectors: Required<Pick<ResourceDataSelectors<Selection>, ScopeKind>> = {
  * subscription module, and each server injects its own projection database. */
 export function createEntityDataObserver(
   database: ReturnType<typeof createSyncClient>["syncDatabase"],
+  retainState?: ReturnType<typeof createSyncClient>["retainStateDelivery"],
 ): ObserveSubscriptionData {
   return <R extends ResourceRef>(
     ref: R,
@@ -94,6 +99,19 @@ export function createEntityDataObserver(
     >();
     let previousEntities: SyncEntityPayload[] | undefined;
     const selectWork = createWorkDataSelector();
+    const stopDelivery =
+      ref.kind === "state"
+        ? retainState?.((error) => {
+            if (error !== null) failed(error);
+            else if (previousEntities)
+              accept(
+                selectResourceData(selectors, ref, {
+                  entities: previousEntities,
+                  selectWork,
+                }),
+              );
+          })
+        : undefined;
     void database()
       .then(({ db }) => {
         if (stopped) return;
@@ -170,11 +188,19 @@ export function createEntityDataObserver(
       .catch(failed);
     return () => {
       stopped = true;
+      stopDelivery?.();
       stop();
     };
   };
 }
 
-export const subscribeEntityData = createEntityDataObserver(() =>
-  syncDatabase(),
-);
+export function subscribeEntityData<R extends ResourceRef>(
+  ref: R,
+  accept: (data: ResourceData<R> | undefined) => void,
+  failed: (error: unknown) => void,
+) {
+  return createEntityDataObserver(
+    () => syncDatabase(),
+    (report) => retainStateDelivery(report),
+  )(ref, accept, failed);
+}

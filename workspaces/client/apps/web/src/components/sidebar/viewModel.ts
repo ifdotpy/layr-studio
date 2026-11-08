@@ -211,10 +211,14 @@ export function createSidebarViewModel(
   getCollections: () => StateCollections,
   getInputs: () => SidebarInputs,
   identity: SidebarIdentity = localSidebarIdentity,
+  confirmed: () => readonly SidebarAgent[] = () => [],
 ) {
   const rows = computed(() => {
     const collections = getCollections();
-    return [...collections.agents.values()]
+    return [
+      ...collections.agents.values(),
+      ...confirmed().filter((agent) => !collections.agents.has(agent.id)),
+    ]
       .filter(
         (a) =>
           a.source === AgentSource.managed &&

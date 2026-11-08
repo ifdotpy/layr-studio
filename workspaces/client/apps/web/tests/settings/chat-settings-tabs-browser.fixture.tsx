@@ -27,7 +27,7 @@ import "../../src/style.css";
 import "../../src/appearance.css";
 import "../../src/design/state.css";
 import { theme } from "../../src/theme.ts";
-import { ChatSettingsDialog } from "../../src/components/agents/ChatSettingsDialog.tsx";
+import { ChatSettingsFixture as ChatSettingsDialog } from "../../src/app/settings/ChatSettingsFixture.tsx";
 const names = [
   "gpt-6-astra",
   "gpt-6.1-sol",
@@ -209,7 +209,6 @@ function Fixture() {
           creating={false}
           newChat={() => {}}
           project={() => {}}
-          selectedAccount={accounts[0]}
           setClaudeLoginKey={() => {}}
         />
       </AgentModelsFixture>

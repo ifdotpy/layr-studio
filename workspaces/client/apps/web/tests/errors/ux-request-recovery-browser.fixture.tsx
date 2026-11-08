@@ -1,4 +1,9 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import { observer } from "mobx-react-lite";
+import * as api from "../../src/api.ts";
+import {
+  AgentModelsFixture,
+  observableFixture,
+} from "../../src/components/observableFixture.tsx";
 import type { Agent, Project } from "../../src/types.ts";
 import type { GetResult } from "../../src/apiTypes.ts";
 declare global {
@@ -21,7 +26,7 @@ import {
 } from "../../src/components/ProjectOrganization.tsx";
 import ProjectAccount from "../../src/components/ProjectAccount.tsx";
 import {
-  useAccounts,
+  createAccountsView,
   AccountTransferStatus,
 } from "../../src/components/Accounts.tsx";
 const mode = new URLSearchParams(location.search).get("case")!;
@@ -78,8 +83,10 @@ const saved = async () => {
     throw Error("Snapshot unavailable");
   }
 };
-function AccountsFixture() {
-  const state = useAccounts("/fixture");
+const accountModels = observableFixture([agent]);
+const state = createAccountsView(accountModels.store, api.get, "/fixture");
+if (mode.startsWith("accounts")) void state.refresh();
+const AccountsFixture = observer(function AccountsFixture() {
   return (
     <>
       <button onClick={() => state.refresh()}>Refresh accounts</button>
@@ -101,7 +108,7 @@ function AccountsFixture() {
       <output>{state.data.accounts.map((a) => a.label).join(",")}</output>
     </>
   );
-}
+});
 let body =
   mode === "picker" ? (
     <Picker

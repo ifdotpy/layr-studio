@@ -1,3 +1,4 @@
+import "@mantine/core/styles.css";
 import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
 import { CombinedSidebarServicesProvider } from "../../src/servers/combinedSidebarServices.ts";
@@ -6,7 +7,7 @@ const injectedStore = observableFixture();
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
-import { snapshotFixture } from "../../src/snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
 import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { AgentSummaryEntityDto } from "../../src/generated/api.ts";
 import {
@@ -21,9 +22,8 @@ declare global {
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import "@mantine/core/styles.css";
-import Sidebar from "../../src/components/Sidebar.tsx";
-import CombinedServerSidebar from "../../src/servers/CombinedServerSidebar.tsx";
+import Sidebar from "../../src/components/Sidebar.fixture.tsx";
+import { CombinedSidebarFixture as CombinedServerSidebar } from "../../src/servers/CombinedServerSidebar.fixture.tsx";
 import { mergeSidebar } from "../../src/servers/mergedSidebar.ts";
 import { localSidebarBackend } from "../../src/components/sidebar/services.tsx";
 import { theme } from "../../src/theme.ts";
@@ -40,12 +40,15 @@ const rows = Array.from({ length: 30 }, (_, index) =>
   }),
 );
 const data = {
-  ...snapshotFixture([], {
-    projects: [
-      { id: "project", name: "Project", path: "/project", folders: [] },
-    ],
-    sidebarOrder: { revision: 0, groups: {} },
-  }),
+  ...Object.assign(
+    snapshotFixture([], {
+      projects: [
+        { id: "project", name: "Project", path: "/project", folders: [] },
+      ],
+      sidebarOrder: { revision: 0, groups: {} },
+    }),
+    { token: "", stateDir: "/fixture" },
+  ),
   stateDir: "sidebar-single-activation",
   token: "fixture-token",
 };
@@ -116,6 +119,11 @@ mirror.apply([
 ]);
 const groupMirror = createStateMirror();
 groupMirror.apply([
+  ...groupData.runtime.rooms.map((value) => ({
+    collection: "room" as const,
+    id: value.id,
+    value,
+  })),
   ...groupRows.map((value) => ({
     collection: "agentSummary" as const,
     id: value.id,
@@ -137,8 +145,8 @@ for (const [target, snapshot] of [
       collection: "workspace",
       id: "fixture",
       value: {
+        ...snapshot.runtime,
         stateDir: snapshot.stateDir,
-        sidebarOrder: snapshot.runtime.sidebarOrder,
       },
     },
   ]);
@@ -207,9 +215,6 @@ function Fixture() {
               open: (id) => {
                 setOpened(id);
                 setOpens((old) => [...old, id]);
-              },
-              prepareChat: (id) => {
-                window.prepared = id;
               },
               newChat: noop,
               addProject: noop,

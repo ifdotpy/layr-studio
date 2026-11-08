@@ -2161,6 +2161,8 @@ const defaultResourceEvents = createResourceEvents({
   openEvents: openServerEvents,
 });
 export const {
+  retryNow,
+  dispose,
   acknowledgeEntitySequences,
   watchResourceChanges,
   watchResourceConnection,

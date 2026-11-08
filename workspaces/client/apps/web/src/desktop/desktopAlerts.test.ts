@@ -6,8 +6,12 @@ import {
   simpleRequest,
 } from "../approvalFixtures";
 import type { Approval } from "../approvals";
-import { snapshotFixture } from "../snapshotFixture";
-import type { Agent, Snapshot, Complaint } from "../types";
+import { observableFixture } from "../components/observableFixture.tsx";
+import {
+  createRequestsMirror,
+  serializeStateCollections,
+} from "../generated/observableResources.ts";
+import type { Agent, Complaint } from "../types";
 import assert from "node:assert/strict";
 import {
   SIGN_IN_ALERT_GRACE_SECONDS,
@@ -33,7 +37,36 @@ const snapshot = (
   threads: Agent[] = [lead],
   requests: Approval[] = [],
   complaints: Complaint[] = [],
-): Snapshot => snapshotFixture(threads, { requests, complaints });
+) => {
+  const fixture = observableFixture(
+    threads.filter((agent) => !agent.deletedAt),
+  );
+  fixture.apply([
+    ...serializeStateCollections(fixture.mirror.current),
+    ...threads
+      .filter((agent) => !!agent.tail)
+      .map((agent) => ({
+        collection: "agentTail" as const,
+        id: agent.id,
+        value: { id: agent.id, tail: agent.tail || "" },
+      })),
+    ...complaints.map((value) => ({
+      collection: "complaint" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
+  const approvals = createRequestsMirror();
+  approvals.apply(
+    requests.map((value) => ({ collection: "request", id: value.id, value })),
+  );
+  return {
+    ...fixture.store,
+    requests: () => ({
+      current: { status: "live" as const, data: approvals.current },
+    }),
+  };
+};
 
 it("builds completed reply notifications with a bounded title and body", () => {
   const alerts = desktopAlerts(

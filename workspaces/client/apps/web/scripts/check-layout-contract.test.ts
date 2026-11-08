@@ -110,13 +110,16 @@ test("rejects stale generated output without a browser", () => {
 });
 
 test("the shell row does not share a class with Workspace list rows", () => {
-  const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
+  const app = readFileSync(
+    new URL("../src/app/shell/LayoutHost.tsx", import.meta.url),
+    "utf8",
+  );
   const workspaceCss = readFileSync(
     new URL("../src/components/shell/Workspace.css", import.meta.url),
     "utf8",
   );
   const shellClass = app.match(
-    /className="([\w -]+)"\s+ref=\{rowLayout.rowRef\}/,
+    /className="([\w -]+)"\s+ref=\{layout.attachRow\}/,
   )?.[1];
   assert.ok(shellClass, "The measured shell row exists");
   assert.ok(shellClass.split(" ").includes("workspace-layout-row"));
@@ -148,10 +151,12 @@ test("preserves font-relative component thresholds in generated metadata", () =>
     unit: "em",
     purpose: "Font-relative component fit",
   };
+  relative.queries.fixtureCompact = { key: "fixture.column", operator: "<=" };
   const output = renderContract(relative);
   const css = output["src/layout/layout-contract.generated.css"];
   assert.ok(css, "The layout contract generates CSS");
   assert.match(css, /--layout-fixture-column: 47.5em;/);
+  assert.ok(output["src/layout/layout-contract.generated.ts"]?.includes("(width <= 47.5em)"));
 });
 
 test("generates keyboard motion duration with milliseconds intact", () => {

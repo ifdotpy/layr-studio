@@ -26,7 +26,6 @@ export const ChatRowButton = observer(function ChatRowButton({
   children,
 }: PropsWithChildren<ChatRowProps>) {
   const row = state.row;
-  const actions = state.actions;
   const server = state.server;
   return (
     <UnstyledButton
@@ -34,6 +33,11 @@ export const ChatRowButton = observer(function ChatRowButton({
       data-drop-edge={state.dropEdge}
       data-folder-drop={state.folderDrop}
       title={row.agent.name ?? undefined}
+      aria-label={
+        [row.agent.name, server.show ? `Server ${server.alias}` : undefined]
+          .filter(Boolean)
+          .join(" ") || undefined
+      }
       aria-description={[
         "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",
         server.offline ? offlineServerDescription(server.alias) : undefined,
@@ -43,10 +47,7 @@ export const ChatRowButton = observer(function ChatRowButton({
         .join(" ")}
       className="chat-row"
       data-chat={row.id}
-      onPointerEnter={actions.prepare}
-      onFocus={actions.prepare}
-      onPointerDown={actions.prepare}
-      onClick={actions.open}
+      onClick={state.actions.open}
       aria-current={state.selected}
     >
       {children}

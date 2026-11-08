@@ -4996,6 +4996,91 @@ class AnalyticsTurnRecordModel {
     return this;
   }
 }
+type AnnotationEntityDtoDto = DeepReadonly<
+  components["schemas"]["AnnotationEntityDto"]
+>;
+class AnnotationEntityDtoModel {
+  agent: AnnotationEntityDtoDto["agent"];
+  created: AnnotationEntityDtoDto["created"];
+  id: AnnotationEntityDtoDto["id"];
+  line: AnnotationEntityDtoDto["line"];
+  path: AnnotationEntityDtoDto["path"];
+  rootId: AnnotationEntityDtoDto["rootId"];
+  text: AnnotationEntityDtoDto["text"];
+  turnId: NonNullable<AnnotationEntityDtoDto["turnId"]> | null | undefined;
+  constructor(dto: AnnotationEntityDtoDto) {
+    this.agent = dto.agent;
+    this.created = dto.created;
+    this.id = dto.id;
+    this.line = dto.line;
+    this.path = dto.path;
+    this.rootId = dto.rootId;
+    this.text = dto.text;
+    this.turnId =
+      dto.turnId === undefined
+        ? undefined
+        : dto.turnId === null
+          ? null
+          : dto.turnId;
+    makeObservable(this, {
+      agent: observableRef,
+      created: observableRef,
+      id: observableRef,
+      line: observableRef,
+      path: observableRef,
+      rootId: observableRef,
+      text: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: AnnotationEntityDtoDto): this {
+    {
+      const next = dto.agent;
+      if (this.agent !== next) this.agent = next;
+    }
+    {
+      const next = dto.created;
+      if (this.created !== next) this.created = next;
+    }
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next = dto.line;
+      if (this.line !== next) this.line = next;
+    }
+    {
+      const next = dto.path;
+      if (this.path !== next) this.path = next;
+    }
+    {
+      const next = dto.rootId;
+      if (this.rootId !== next) this.rootId = next;
+    }
+    {
+      const next = dto.text;
+      if (this.text !== next) this.text = next;
+    }
+    {
+      const next =
+        dto.turnId === undefined
+          ? undefined
+          : this.turnId === undefined
+            ? dto.turnId === null
+              ? null
+              : dto.turnId
+            : dto.turnId === null
+              ? null
+              : this.turnId === null
+                ? dto.turnId
+                : dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    return this;
+  }
+}
 type AnswerVariant0Dto = Extract<
   DeepReadonly<components["schemas"]["Answer"]>,
   { kind: "decision" }
@@ -5711,6 +5796,150 @@ class BrowserRedirectModel {
     {
       const next = dto.port;
       if (this.port !== next) this.port = next;
+    }
+    return this;
+  }
+}
+type ChatEntityDtoDto = DeepReadonly<components["schemas"]["ChatEntityDto"]>;
+class ChatEntityDtoModel {
+  id: ChatEntityDtoDto["id"];
+  kind: NonNullable<ChatEntityDtoDto["kind"]> | null | undefined;
+  lastMessageAt:
+    | NonNullable<ChatEntityDtoDto["lastMessageAt"]>
+    | null
+    | undefined;
+  members: ChatEntityDtoDto["members"] | undefined;
+  messageCount:
+    | NonNullable<ChatEntityDtoDto["messageCount"]>
+    | null
+    | undefined;
+  name: NonNullable<ChatEntityDtoDto["name"]> | null | undefined;
+  tail: NonNullable<ChatEntityDtoDto["tail"]> | null | undefined;
+  constructor(dto: ChatEntityDtoDto) {
+    this.id = dto.id;
+    this.kind =
+      dto.kind === undefined ? undefined : dto.kind === null ? null : dto.kind;
+    this.lastMessageAt =
+      dto.lastMessageAt === undefined
+        ? undefined
+        : dto.lastMessageAt === null
+          ? null
+          : dto.lastMessageAt;
+    this.members =
+      dto.members === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.members));
+    this.messageCount =
+      dto.messageCount === undefined
+        ? undefined
+        : dto.messageCount === null
+          ? null
+          : dto.messageCount;
+    this.name =
+      dto.name === undefined ? undefined : dto.name === null ? null : dto.name;
+    this.tail =
+      dto.tail === undefined ? undefined : dto.tail === null ? null : dto.tail;
+    makeObservable(this, {
+      id: observableRef,
+      kind: observableRef,
+      lastMessageAt: observableRef,
+      members: observableRef,
+      messageCount: observableRef,
+      name: observableRef,
+      tail: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ChatEntityDtoDto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.kind === undefined
+          ? undefined
+          : this.kind === undefined
+            ? dto.kind === null
+              ? null
+              : dto.kind
+            : dto.kind === null
+              ? null
+              : this.kind === null
+                ? dto.kind
+                : dto.kind;
+      if (this.kind !== next) this.kind = next;
+    }
+    {
+      const next =
+        dto.lastMessageAt === undefined
+          ? undefined
+          : this.lastMessageAt === undefined
+            ? dto.lastMessageAt === null
+              ? null
+              : dto.lastMessageAt
+            : dto.lastMessageAt === null
+              ? null
+              : this.lastMessageAt === null
+                ? dto.lastMessageAt
+                : dto.lastMessageAt;
+      if (this.lastMessageAt !== next) this.lastMessageAt = next;
+    }
+    {
+      const next =
+        dto.members === undefined
+          ? undefined
+          : this.members === undefined
+            ? freezePlain(structuredClone(dto.members))
+            : compareStructural(this.members, dto.members)
+              ? this.members
+              : freezePlain(structuredClone(dto.members));
+      if (this.members !== next) this.members = next;
+    }
+    {
+      const next =
+        dto.messageCount === undefined
+          ? undefined
+          : this.messageCount === undefined
+            ? dto.messageCount === null
+              ? null
+              : dto.messageCount
+            : dto.messageCount === null
+              ? null
+              : this.messageCount === null
+                ? dto.messageCount
+                : dto.messageCount;
+      if (this.messageCount !== next) this.messageCount = next;
+    }
+    {
+      const next =
+        dto.name === undefined
+          ? undefined
+          : this.name === undefined
+            ? dto.name === null
+              ? null
+              : dto.name
+            : dto.name === null
+              ? null
+              : this.name === null
+                ? dto.name
+                : dto.name;
+      if (this.name !== next) this.name = next;
+    }
+    {
+      const next =
+        dto.tail === undefined
+          ? undefined
+          : this.tail === undefined
+            ? dto.tail === null
+              ? null
+              : dto.tail
+            : dto.tail === null
+              ? null
+              : this.tail === null
+                ? dto.tail
+                : dto.tail;
+      if (this.tail !== next) this.tail = next;
     }
     return this;
   }
@@ -6678,6 +6907,212 @@ class DeliveryModel {
             ? new SupervisorModel(dto.supervisor)
             : this.supervisor.apply(dto.supervisor);
       if (this.supervisor !== next) this.supervisor = next;
+    }
+    return this;
+  }
+}
+type DesktopResponseDto = DeepReadonly<
+  components["schemas"]["DesktopResponse"]
+>;
+class DesktopResponseModel {
+  application: DesktopResponseDto["application"];
+  backendBuild: DesktopResponseDto["backendBuild"];
+  backendKind: DesktopResponseDto["backendKind"] | undefined;
+  browser: DesktopResponseDto["browser"];
+  diskSpace: DesktopResponseDto["diskSpace"] | undefined;
+  liveUpdate: DesktopResponseDto["liveUpdate"];
+  mobileProtocol: DesktopResponseDto["mobileProtocol"];
+  nativeRuntime: DesktopResponseDto["nativeRuntime"];
+  pid: DesktopResponseDto["pid"];
+  protocol: DesktopResponseDto["protocol"];
+  providerVersions: DesktopResponseDto["providerVersions"];
+  publicOrigin: NonNullable<DesktopResponseDto["publicOrigin"]> | null;
+  restartEnvironment: DesktopResponseDto["restartEnvironment"];
+  stateDir: DesktopResponseDto["stateDir"];
+  supervisor: DesktopResponseDto["supervisor"];
+  supervisorError: NonNullable<DesktopResponseDto["supervisorError"]> | null;
+  supervisorFallback: DesktopResponseDto["supervisorFallback"];
+  supervisorMode: DesktopResponseDto["supervisorMode"];
+  supervisorNotice: NonNullable<DesktopResponseDto["supervisorNotice"]> | null;
+  supervisorRequired: DesktopResponseDto["supervisorRequired"];
+  constructor(dto: DesktopResponseDto) {
+    this.application = dto.application;
+    this.backendBuild = dto.backendBuild;
+    this.backendKind =
+      dto.backendKind === undefined ? undefined : dto.backendKind;
+    this.browser = freezePlain(structuredClone(dto.browser));
+    this.diskSpace =
+      dto.diskSpace === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.diskSpace));
+    this.liveUpdate = freezePlain(structuredClone(dto.liveUpdate));
+    this.mobileProtocol = dto.mobileProtocol;
+    this.nativeRuntime = freezePlain(structuredClone(dto.nativeRuntime));
+    this.pid = dto.pid;
+    this.protocol = dto.protocol;
+    this.providerVersions = freezePlain(structuredClone(dto.providerVersions));
+    this.publicOrigin = dto.publicOrigin === null ? null : dto.publicOrigin;
+    this.restartEnvironment = freezePlain(
+      structuredClone(dto.restartEnvironment),
+    );
+    this.stateDir = dto.stateDir;
+    this.supervisor = freezePlain(structuredClone(dto.supervisor));
+    this.supervisorError =
+      dto.supervisorError === null ? null : dto.supervisorError;
+    this.supervisorFallback = dto.supervisorFallback;
+    this.supervisorMode = dto.supervisorMode;
+    this.supervisorNotice =
+      dto.supervisorNotice === null ? null : dto.supervisorNotice;
+    this.supervisorRequired = dto.supervisorRequired;
+    makeObservable(this, {
+      application: observableRef,
+      backendBuild: observableRef,
+      backendKind: observableRef,
+      browser: observableRef,
+      diskSpace: observableRef,
+      liveUpdate: observableRef,
+      mobileProtocol: observableRef,
+      nativeRuntime: observableRef,
+      pid: observableRef,
+      protocol: observableRef,
+      providerVersions: observableRef,
+      publicOrigin: observableRef,
+      restartEnvironment: observableRef,
+      stateDir: observableRef,
+      supervisor: observableRef,
+      supervisorError: observableRef,
+      supervisorFallback: observableRef,
+      supervisorMode: observableRef,
+      supervisorNotice: observableRef,
+      supervisorRequired: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: DesktopResponseDto): this {
+    {
+      const next = dto.application;
+      if (this.application !== next) this.application = next;
+    }
+    {
+      const next = dto.backendBuild;
+      if (this.backendBuild !== next) this.backendBuild = next;
+    }
+    {
+      const next =
+        dto.backendKind === undefined
+          ? undefined
+          : this.backendKind === undefined
+            ? dto.backendKind
+            : dto.backendKind;
+      if (this.backendKind !== next) this.backendKind = next;
+    }
+    {
+      const next = compareStructural(this.browser, dto.browser)
+        ? this.browser
+        : freezePlain(structuredClone(dto.browser));
+      if (this.browser !== next) this.browser = next;
+    }
+    {
+      const next =
+        dto.diskSpace === undefined
+          ? undefined
+          : this.diskSpace === undefined
+            ? freezePlain(structuredClone(dto.diskSpace))
+            : compareStructural(this.diskSpace, dto.diskSpace)
+              ? this.diskSpace
+              : freezePlain(structuredClone(dto.diskSpace));
+      if (this.diskSpace !== next) this.diskSpace = next;
+    }
+    {
+      const next = compareStructural(this.liveUpdate, dto.liveUpdate)
+        ? this.liveUpdate
+        : freezePlain(structuredClone(dto.liveUpdate));
+      if (this.liveUpdate !== next) this.liveUpdate = next;
+    }
+    {
+      const next = dto.mobileProtocol;
+      if (this.mobileProtocol !== next) this.mobileProtocol = next;
+    }
+    {
+      const next = compareStructural(this.nativeRuntime, dto.nativeRuntime)
+        ? this.nativeRuntime
+        : freezePlain(structuredClone(dto.nativeRuntime));
+      if (this.nativeRuntime !== next) this.nativeRuntime = next;
+    }
+    {
+      const next = dto.pid;
+      if (this.pid !== next) this.pid = next;
+    }
+    {
+      const next = dto.protocol;
+      if (this.protocol !== next) this.protocol = next;
+    }
+    {
+      const next = compareStructural(
+        this.providerVersions,
+        dto.providerVersions,
+      )
+        ? this.providerVersions
+        : freezePlain(structuredClone(dto.providerVersions));
+      if (this.providerVersions !== next) this.providerVersions = next;
+    }
+    {
+      const next =
+        dto.publicOrigin === null
+          ? null
+          : this.publicOrigin === null
+            ? dto.publicOrigin
+            : dto.publicOrigin;
+      if (this.publicOrigin !== next) this.publicOrigin = next;
+    }
+    {
+      const next = compareStructural(
+        this.restartEnvironment,
+        dto.restartEnvironment,
+      )
+        ? this.restartEnvironment
+        : freezePlain(structuredClone(dto.restartEnvironment));
+      if (this.restartEnvironment !== next) this.restartEnvironment = next;
+    }
+    {
+      const next = dto.stateDir;
+      if (this.stateDir !== next) this.stateDir = next;
+    }
+    {
+      const next = compareStructural(this.supervisor, dto.supervisor)
+        ? this.supervisor
+        : freezePlain(structuredClone(dto.supervisor));
+      if (this.supervisor !== next) this.supervisor = next;
+    }
+    {
+      const next =
+        dto.supervisorError === null
+          ? null
+          : this.supervisorError === null
+            ? dto.supervisorError
+            : dto.supervisorError;
+      if (this.supervisorError !== next) this.supervisorError = next;
+    }
+    {
+      const next = dto.supervisorFallback;
+      if (this.supervisorFallback !== next) this.supervisorFallback = next;
+    }
+    {
+      const next = dto.supervisorMode;
+      if (this.supervisorMode !== next) this.supervisorMode = next;
+    }
+    {
+      const next =
+        dto.supervisorNotice === null
+          ? null
+          : this.supervisorNotice === null
+            ? dto.supervisorNotice
+            : dto.supervisorNotice;
+      if (this.supervisorNotice !== next) this.supervisorNotice = next;
+    }
+    {
+      const next = dto.supervisorRequired;
+      if (this.supervisorRequired !== next) this.supervisorRequired = next;
     }
     return this;
   }
@@ -8200,6 +8635,88 @@ class PeerTeamEntityDto_peerLeadsItemModel {
     {
       const next = dto.server;
       if (this.server !== next) this.server = next;
+    }
+    return this;
+  }
+}
+type PlanSummaryEntityDtoDto = DeepReadonly<
+  import("./observableFieldTypes.ts").PlanSummaryEntityDtoFields
+>;
+class PlanSummaryEntityDtoModel {
+  id: PlanSummaryEntityDtoDto["id"];
+  native: PlanSummaryEntityDtoDto["native"] | undefined;
+  rootId: PlanSummaryEntityDtoDto["rootId"];
+  steps: PlanSummaryEntityDtoDto["steps"] | undefined;
+  text: PlanSummaryEntityDtoDto["text"];
+  updated: PlanSummaryEntityDtoDto["updated"];
+  version: PlanSummaryEntityDtoDto["version"];
+  constructor(dto: PlanSummaryEntityDtoDto) {
+    this.id = dto.id;
+    this.native =
+      dto.native === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.native));
+    this.rootId = dto.rootId;
+    this.steps =
+      dto.steps === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.steps));
+    this.text = dto.text;
+    this.updated = dto.updated;
+    this.version = dto.version;
+    makeObservable(this, {
+      id: observableRef,
+      native: observableRef,
+      rootId: observableRef,
+      steps: observableRef,
+      text: observableRef,
+      updated: observableRef,
+      version: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: PlanSummaryEntityDtoDto): this {
+    {
+      const next = dto.id;
+      if (this.id !== next) this.id = next;
+    }
+    {
+      const next =
+        dto.native === undefined
+          ? undefined
+          : this.native === undefined
+            ? freezePlain(structuredClone(dto.native))
+            : compareStructural(this.native, dto.native)
+              ? this.native
+              : freezePlain(structuredClone(dto.native));
+      if (this.native !== next) this.native = next;
+    }
+    {
+      const next = dto.rootId;
+      if (this.rootId !== next) this.rootId = next;
+    }
+    {
+      const next =
+        dto.steps === undefined
+          ? undefined
+          : this.steps === undefined
+            ? freezePlain(structuredClone(dto.steps))
+            : compareStructural(this.steps, dto.steps)
+              ? this.steps
+              : freezePlain(structuredClone(dto.steps));
+      if (this.steps !== next) this.steps = next;
+    }
+    {
+      const next = dto.text;
+      if (this.text !== next) this.text = next;
+    }
+    {
+      const next = dto.updated;
+      if (this.updated !== next) this.updated = next;
+    }
+    {
+      const next = dto.version;
+      if (this.version !== next) this.version = next;
     }
     return this;
   }
@@ -9795,6 +10312,52 @@ class ProjectPeerTeamDtoModel {
     {
       const next = dto.name;
       if (this.name !== next) this.name = next;
+    }
+    return this;
+  }
+}
+type ProjectionMetadataDto = DeepReadonly<
+  import("./observableFieldTypes.ts").ProjectionMetadataFields
+>;
+class ProjectionMetadataModel {
+  complete: ProjectionMetadataDto["complete"];
+  projectSequences: ProjectionMetadataDto["projectSequences"];
+  ready: ProjectionMetadataDto["ready"];
+  workspaceId: ProjectionMetadataDto["workspaceId"];
+  constructor(dto: ProjectionMetadataDto) {
+    this.complete = dto.complete;
+    this.projectSequences = freezePlain(structuredClone(dto.projectSequences));
+    this.ready = dto.ready;
+    this.workspaceId = dto.workspaceId;
+    makeObservable(this, {
+      complete: observableRef,
+      projectSequences: observableRef,
+      ready: observableRef,
+      workspaceId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: ProjectionMetadataDto): this {
+    {
+      const next = dto.complete;
+      if (this.complete !== next) this.complete = next;
+    }
+    {
+      const next = compareStructural(
+        this.projectSequences,
+        dto.projectSequences,
+      )
+        ? this.projectSequences
+        : freezePlain(structuredClone(dto.projectSequences));
+      if (this.projectSequences !== next) this.projectSequences = next;
+    }
+    {
+      const next = dto.ready;
+      if (this.ready !== next) this.ready = next;
+    }
+    {
+      const next = dto.workspaceId;
+      if (this.workspaceId !== next) this.workspaceId = next;
     }
     return this;
   }
@@ -16585,6 +17148,36 @@ function reconcileTranscriptMessageRecord(
     ? data
     : next;
 }
+type UiPreferencesDtoDto = DeepReadonly<
+  components["schemas"]["UiPreferencesDto"]
+>;
+class UiPreferencesDtoModel {
+  fields: UiPreferencesDtoDto["fields"] | undefined;
+  constructor(dto: UiPreferencesDtoDto) {
+    this.fields =
+      dto.fields === undefined
+        ? undefined
+        : freezePlain(structuredClone(dto.fields));
+    makeObservable(this, {
+      fields: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: UiPreferencesDtoDto): this {
+    {
+      const next =
+        dto.fields === undefined
+          ? undefined
+          : this.fields === undefined
+            ? freezePlain(structuredClone(dto.fields))
+            : compareStructural(this.fields, dto.fields)
+              ? this.fields
+              : freezePlain(structuredClone(dto.fields));
+      if (this.fields !== next) this.fields = next;
+    }
+    return this;
+  }
+}
 type WorkDecisionRecordDto = NonNullable<WorkDetailDto["decisions"]>[number];
 class WorkDecisionRecordModel {
   by: WorkDecisionRecordDto["by"];
@@ -18206,10 +18799,28 @@ export type PeerTeamEntityDto = DeepReadonly<
 export type WorkspaceEntityDto = DeepReadonly<
   components["schemas"]["WorkspaceEntityDto"]
 >;
+export type ChatEntityDto = DeepReadonly<
+  components["schemas"]["ChatEntityDto"]
+>;
+export type PlanSummaryEntityDto = DeepReadonly<
+  import("./observableFieldTypes.ts").PlanSummaryEntityDtoFields
+>;
+export type AnnotationEntityDto = DeepReadonly<
+  components["schemas"]["AnnotationEntityDto"]
+>;
+export type UiPreferencesDto = DeepReadonly<
+  components["schemas"]["UiPreferencesDto"]
+>;
 export type SidebarOrderDto = DeepReadonly<
   components["schemas"]["SidebarOrderDto"]
 >;
 export type AgentTail = DeepReadonly<components["schemas"]["AgentTail"]>;
+export type ProjectionMetadata = DeepReadonly<
+  import("./observableFieldTypes.ts").ProjectionMetadataFields
+>;
+export type DesktopResponse = DeepReadonly<
+  components["schemas"]["DesktopResponse"]
+>;
 export type SessionCostData = DeepReadonly<
   ObservableInput<ResourceData<Extract<ResourceRef, { kind: "session-cost" }>>>
 >;
@@ -18273,6 +18884,38 @@ export type TranscriptItemResponse = DeepReadonly<
 export type AnalyticsTurnRecord = DeepReadonly<
   import("./observableFieldTypes.ts").AnalyticsTurnRecordFields
 >;
+export function createProjectionMetadataMirror(dto: ProjectionMetadata): {
+  readonly current: ProjectionMetadata;
+  apply(dto: ProjectionMetadata): void;
+} {
+  let model: ProjectionMetadataModel = new ProjectionMetadataModel(dto);
+  return {
+    get current(): ProjectionMetadata {
+      return model;
+    },
+    apply(dto: ProjectionMetadata): void {
+      runInAction(() => {
+        model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createDesktopMirror(dto: DesktopResponse): {
+  readonly current: DesktopResponse;
+  apply(dto: DesktopResponse): void;
+} {
+  let model: DesktopResponseModel = new DesktopResponseModel(dto);
+  return {
+    get current(): DesktopResponse {
+      return model;
+    },
+    apply(dto: DesktopResponse): void {
+      runInAction(() => {
+        model = model.apply(dto);
+      });
+    },
+  };
+}
 export type StateEntity =
   | {
       readonly collection: "accounts";
@@ -18338,6 +18981,35 @@ export type StateEntity =
       readonly value: DeepReadonly<components["schemas"]["QueueEntityDto"]>;
     }
   | {
+      readonly collection: "chat";
+      readonly id: string;
+      readonly value: DeepReadonly<components["schemas"]["ChatEntityDto"]>;
+    }
+  | {
+      readonly collection: "plan";
+      readonly id: string;
+      readonly value: DeepReadonly<
+        import("./observableFieldTypes.ts").PlanSummaryEntityDtoFields
+      >;
+    }
+  | {
+      readonly collection: "annotation";
+      readonly id: string;
+      readonly value: DeepReadonly<
+        components["schemas"]["AnnotationEntityDto"]
+      >;
+    }
+  | {
+      readonly collection: "studioError";
+      readonly id: string;
+      readonly value: DeepReadonly<components["schemas"]["StudioError"]>;
+    }
+  | {
+      readonly collection: "uiPreferences";
+      readonly id: string;
+      readonly value: DeepReadonly<components["schemas"]["UiPreferencesDto"]>;
+    }
+  | {
       readonly collection: "agentTail";
       readonly id: string;
       readonly value: DeepReadonly<components["schemas"]["AgentTail"]>;
@@ -18368,6 +19040,16 @@ export function serializeStateCollections(
     entities.push({ collection: "messageReceipt", id, value: toJS(value) });
   for (const [id, value] of collections.queues)
     entities.push({ collection: "queue", id, value: toJS(value) });
+  for (const [id, value] of collections.chats)
+    entities.push({ collection: "chat", id, value: toJS(value) });
+  for (const [id, value] of collections.plans)
+    entities.push({ collection: "plan", id, value: toJS(value) });
+  for (const [id, value] of collections.annotations)
+    entities.push({ collection: "annotation", id, value: toJS(value) });
+  for (const [id, value] of collections.studioErrors)
+    entities.push({ collection: "studioError", id, value: toJS(value) });
+  for (const [id, value] of collections.uiPreferences)
+    entities.push({ collection: "uiPreferences", id, value: toJS(value) });
   for (const [id, value] of collections.agentTail)
     entities.push({ collection: "agentTail", id, value: toJS(value) });
   return entities;
@@ -18417,6 +19099,26 @@ export interface StateCollections {
     string,
     DeepReadonly<components["schemas"]["QueueEntityDto"]>
   >;
+  readonly chats: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["ChatEntityDto"]>
+  >;
+  readonly plans: ReadonlyMap<
+    string,
+    DeepReadonly<import("./observableFieldTypes.ts").PlanSummaryEntityDtoFields>
+  >;
+  readonly annotations: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["AnnotationEntityDto"]>
+  >;
+  readonly studioErrors: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["StudioError"]>
+  >;
+  readonly uiPreferences: ReadonlyMap<
+    string,
+    DeepReadonly<components["schemas"]["UiPreferencesDto"]>
+  >;
   readonly agentTail: ReadonlyMap<
     string,
     DeepReadonly<components["schemas"]["AgentTail"]>
@@ -18438,6 +19140,14 @@ class StateCollectionsModel {
   readonly complaints = new Map<string, ComplaintEntityDtoModel>();
   readonly messageReceipts = new Map<string, MessageReceiptEntityDtoModel>();
   readonly queues = new Map<string, QueueEntityDtoModel>();
+  readonly chats = new Map<string, ChatEntityDtoModel>();
+  readonly plans = new Map<string, PlanSummaryEntityDtoModel>();
+  readonly annotations = new Map<string, AnnotationEntityDtoModel>();
+  readonly studioErrors = new Map<
+    string,
+    DeepReadonly<components["schemas"]["StudioError"]>
+  >();
+  readonly uiPreferences = new Map<string, UiPreferencesDtoModel>();
   readonly agentTail = new Map<string, AgentTailModel>();
   constructor(dto: StateCollectionsDto) {
     makeObservable(this, {
@@ -18452,6 +19162,11 @@ class StateCollectionsModel {
       complaints: observableShallow,
       messageReceipts: observableShallow,
       queues: observableShallow,
+      chats: observableShallow,
+      plans: observableShallow,
+      annotations: observableShallow,
+      studioErrors: observableShallow,
+      uiPreferences: observableShallow,
       agentTail: observableShallow,
       apply: action,
     });
@@ -18469,6 +19184,11 @@ class StateCollectionsModel {
     const complaintsIds = new Set<string>();
     const messageReceiptsIds = new Set<string>();
     const queuesIds = new Set<string>();
+    const chatsIds = new Set<string>();
+    const plansIds = new Set<string>();
+    const annotationsIds = new Set<string>();
+    const studioErrorsIds = new Set<string>();
+    const uiPreferencesIds = new Set<string>();
     const agentTailIds = new Set<string>();
     for (const entity of dto) {
       switch (entity.collection) {
@@ -18527,6 +19247,31 @@ class StateCollectionsModel {
             throw new Error("Duplicate identity in queue");
           queuesIds.add(entity.id);
           break;
+        case "chat":
+          if (chatsIds.has(entity.id))
+            throw new Error("Duplicate identity in chat");
+          chatsIds.add(entity.id);
+          break;
+        case "plan":
+          if (plansIds.has(entity.id))
+            throw new Error("Duplicate identity in plan");
+          plansIds.add(entity.id);
+          break;
+        case "annotation":
+          if (annotationsIds.has(entity.id))
+            throw new Error("Duplicate identity in annotation");
+          annotationsIds.add(entity.id);
+          break;
+        case "studioError":
+          if (studioErrorsIds.has(entity.id))
+            throw new Error("Duplicate identity in studioError");
+          studioErrorsIds.add(entity.id);
+          break;
+        case "uiPreferences":
+          if (uiPreferencesIds.has(entity.id))
+            throw new Error("Duplicate identity in uiPreferences");
+          uiPreferencesIds.add(entity.id);
+          break;
         case "agentTail":
           if (agentTailIds.has(entity.id))
             throw new Error("Duplicate identity in agentTail");
@@ -18566,6 +19311,21 @@ class StateCollectionsModel {
     }
     for (const id of this.queues.keys()) {
       if (!queuesIds.has(id)) this.queues.delete(id);
+    }
+    for (const id of this.chats.keys()) {
+      if (!chatsIds.has(id)) this.chats.delete(id);
+    }
+    for (const id of this.plans.keys()) {
+      if (!plansIds.has(id)) this.plans.delete(id);
+    }
+    for (const id of this.annotations.keys()) {
+      if (!annotationsIds.has(id)) this.annotations.delete(id);
+    }
+    for (const id of this.studioErrors.keys()) {
+      if (!studioErrorsIds.has(id)) this.studioErrors.delete(id);
+    }
+    for (const id of this.uiPreferences.keys()) {
+      if (!uiPreferencesIds.has(id)) this.uiPreferences.delete(id);
     }
     for (const id of this.agentTail.keys()) {
       if (!agentTailIds.has(id)) this.agentTail.delete(id);
@@ -18673,6 +19433,52 @@ class StateCollectionsModel {
           const previous = this.queues.get(entity.id);
           if (previous === undefined)
             this.queues.set(entity.id, new QueueEntityDtoModel(entity.value));
+          else previous.apply(entity.value);
+          break;
+        }
+        case "chat": {
+          const previous = this.chats.get(entity.id);
+          if (previous === undefined)
+            this.chats.set(entity.id, new ChatEntityDtoModel(entity.value));
+          else previous.apply(entity.value);
+          break;
+        }
+        case "plan": {
+          const previous = this.plans.get(entity.id);
+          if (previous === undefined)
+            this.plans.set(
+              entity.id,
+              new PlanSummaryEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "annotation": {
+          const previous = this.annotations.get(entity.id);
+          if (previous === undefined)
+            this.annotations.set(
+              entity.id,
+              new AnnotationEntityDtoModel(entity.value),
+            );
+          else previous.apply(entity.value);
+          break;
+        }
+        case "studioError": {
+          const previous = this.studioErrors.get(entity.id);
+          if (!compareStructural(previous, entity.value))
+            this.studioErrors.set(
+              entity.id,
+              freezePlain(structuredClone(entity.value)),
+            );
+          break;
+        }
+        case "uiPreferences": {
+          const previous = this.uiPreferences.get(entity.id);
+          if (previous === undefined)
+            this.uiPreferences.set(
+              entity.id,
+              new UiPreferencesDtoModel(entity.value),
+            );
           else previous.apply(entity.value);
           break;
         }
@@ -19463,6 +20269,7 @@ export function createTurnErrorMirror(dto: AnalyticsTurnRecord): {
   };
 }
 export interface ObservableResources {
+  desktop(): ResourceSlot<DesktopResponse>;
   state(): ResourceSlot<StateCollections>;
   requests(): ResourceSlot<RequestsCollections>;
   questionHistory(): ResourceSlot<QuestionHistoryCollections>;
@@ -19489,6 +20296,7 @@ export interface ObservableResources {
 export function createObservableResources(
   runtime: ObservableResourceRuntime,
 ): ObservableResources {
+  let desktopSlot: ResourceSlot<DesktopResponse> | undefined;
   let stateSlot: ResourceSlot<StateCollections> | undefined;
   let requestsSlot: ResourceSlot<RequestsCollections> | undefined;
   let questionHistorySlot: ResourceSlot<QuestionHistoryCollections> | undefined;
@@ -19762,6 +20570,19 @@ export function createObservableResources(
     apply: (data, dto) => data.apply(dto),
   });
   return {
+    desktop() {
+      if (desktopSlot !== undefined) return desktopSlot;
+      const ref: Extract<ResourceRef, { kind: "desktop" }> = {
+        kind: "desktop",
+      };
+      const key = subscriptionKey(ref);
+      return (desktopSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => new DesktopResponseModel(dto),
+        apply: (data, dto) => data.apply(dto),
+      }));
+    },
     state() {
       if (stateSlot !== undefined) return stateSlot;
       const ref: Extract<ResourceRef, { kind: "state" }> = { kind: "state" };

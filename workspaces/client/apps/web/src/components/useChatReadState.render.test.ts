@@ -1,17 +1,21 @@
+import { setStartupFixture } from "./observableFixture.tsx";
+import { conversationActionsFixture } from "./observableFixture.tsx";
+import { defaultSyncClient } from "../sync/client.ts";
+import type { ServerServices } from "../servers/serverServices.ts";
 import { WorkerIndicator } from "./agents/worker/Heading.tsx";
 import TeamFixture from "./agents/TeamFixture.tsx";
 import { observableFixture } from "./observableFixture.tsx";
 // @vitest-environment happy-dom
-import { act, createElement, useMemo } from "react";
+import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
-import { useChatReadState } from "./useChatReadState.ts";
+import { observer } from "mobx-react-lite";
 import {
   agentIndicators,
   formatAgentStatus,
 } from "../status/operationalStatus.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 const service = vi.hoisted(() => ({
   store: null as
     | ReturnType<
@@ -19,7 +23,7 @@ const service = vi.hoisted(() => ({
       >["store"]
     | null,
   post: vi.fn(),
-  refreshProjection: vi.fn(),
+  refreshState: vi.fn(),
   subscribeStateProjection: () => () => {},
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
@@ -27,7 +31,6 @@ vi.mock("../servers/ServerServicesContext", () => ({
   useServerApi: () => ({ post: service.post }),
   useServerSync: () => service,
 }));
-vi.mock("../sync/client", () => ({}));
 let root: Root | undefined;
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -54,7 +57,10 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
     markRead: proof,
     operationalStatus: { reason: "unread_result" },
   });
-  const data = snapshotFixture([agent]);
+  const data = Object.assign(snapshotFixture([agent]), {
+    token: "",
+    stateDir: "/fixture",
+  });
   service.store = observableFixture([agent]).store;
   let finish: (response: unknown) => void = () => {};
   service.post.mockReturnValue(
@@ -62,15 +68,22 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
       finish = resolve;
     }),
   );
-  const notify = vi.fn(),
-    refresh = async () => {};
-  function Caller() {
-    const read = useChatReadState(data, agent.id, notify, refresh, "workspace");
-    // This is App's memoized caller: facts stay unchanged while the CAS is pending.
-    const indicators = useMemo(
-      () => agentIndicators(data.threads, read.pendingReadTargets),
-      [data.threads, read.pendingReadTargets, read.readStateFor],
-    );
+  const notify = vi.fn();
+  const area = conversationActionsFixture(() => {}, service.store);
+  area.scope.services.api.post = service.post;
+  Object.defineProperty(area.scope.services, "sync", {
+    value: {
+      ...defaultSyncClient,
+      refreshState: service.refreshState,
+    } satisfies ServerServices["sync"],
+  });
+  setStartupFixture(area, data);
+  area.navigation.selectedId = "lead";
+  area.notices.notify = notify;
+  const read = area.read;
+  const stop = read.start();
+  const Caller = observer(function Caller() {
+    const indicators = agentIndicators(data.threads, read.pendingReadTargets);
     return createElement(
       TeamFixture,
       { leadId: agent.id, pendingReads: read.pendingReadTargets },
@@ -94,7 +107,7 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
         }),
       ),
     );
-  }
+  });
   const host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -128,4 +141,5 @@ it("keeps the memoized conversation and sidebar aligned during a deferred read C
     host.querySelector("[data-sidebar]")?.getAttribute("data-sidebar"),
   ).toBe("unread");
   expect(notify).not.toHaveBeenCalled();
+  stop();
 });

@@ -1,36 +1,13 @@
-import { AgentSource as GeneratedApiAgentSource } from "../generated/api.ts";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
-import type { Agent, Snapshot } from "../types";
-const read = vi.hoisted(() => vi.fn(() => ({ items: [] })));
-vi.mock("../conversation/historySession", () => ({ useConversationHistory: read }));
-import SidebarWarnings from "./SidebarWarnings";
+const renderWarnings = vi.hoisted(() => vi.fn(() => null));
+vi.mock("./ConversationWarnings", async () => ({
+  default: (await import("mobx-react-lite")).observer(renderWarnings),
+}));
+import SidebarWarnings from "./SidebarWarnings.tsx";
 
-test("imported agents read the agent transcript that preserves native warnings", () => {
-  const agent = {
-    id: "imported",
-    source: GeneratedApiAgentSource["app-server"],
-  } as Agent;
-  renderToStaticMarkup(
-    createElement(SidebarWarnings, {
-      data: {
-        stateDir: "/fixture",
-        runtime: { nativeNotices: [] },
-      } as unknown as Snapshot,
-      agent,
-      opened: agent.id,
-      accountKey: "default",
-      syncWorkspaceId: "fixture",
-      open: () => {},
-    }),
-  );
-  expect(read).toHaveBeenCalledWith(
-    "imported",
-    "agent",
-    false,
-    "/fixture",
-    "fixture",
-    true,
-  );
+test("an unattached sidebar warning target acquires no transcript interest", () => {
+  renderToStaticMarkup(createElement(SidebarWarnings));
+  expect(renderWarnings).not.toHaveBeenCalled();
 });

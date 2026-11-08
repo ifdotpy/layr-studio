@@ -1,8 +1,21 @@
+import type { ComponentSnapshot as Snapshot } from "./components/componentTestFixtures.ts";
+import { runInAction } from "mobx";
+import {
+  createStateMirror,
+  createProjectionMetadataMirror,
+  serializeStateCollections,
+} from "./generated/observableResources.ts";
+import { stateFromFixture } from "./servers/sidebarSourceFixture.ts";
+import { componentSnapshot as snapshotFixture } from "./components/componentTestFixtures.ts";
+import { writePreferenceEdit } from "./sync/uiPreferenceStore.ts";
 import { StopOutcome } from "./generated/api.ts";
 import { required } from "./components/componentTestFixtures.ts";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { SidebarServices } from "./components/sidebar/services";
-import type { Snapshot } from "./types";
+import type {
+  SidebarServices,
+  SidebarBackend,
+} from "./components/sidebar/services";
+
 import { ApiError } from "./api";
 
 // A deterministic render/effect harness, including effect replay, without a DOM dependency.
@@ -56,24 +69,25 @@ const project = {
   name: "Example",
   homeServerId: "home",
 };
-const data = {
+const data: Snapshot = {
+  ...Object.assign(
+    snapshotFixture(
+      [
+        {
+          id: "lead",
+          cwd: "/project",
+          projectId: "project",
+          projectServerId: "home",
+        },
+      ],
+      { projects: [project], projectSequences: { project: 12 }, rooms: [] },
+    ),
+    { token: "", stateDir: "/fixture" },
+  ),
   stateDir: "fixture",
   entityWorkspaceId: "workspace",
   entitiesComplete: true,
-  threads: [
-    {
-      id: "lead",
-      cwd: "/project",
-      projectId: "project",
-      projectServerId: "home",
-    },
-  ],
-  runtime: {
-    projects: [project],
-    projectSequences: { project: 12 },
-    rooms: [],
-  },
-} as unknown as Snapshot;
+};
 
 function fixture() {
   const values = new Map<string, string>();
@@ -94,22 +108,58 @@ function fixture() {
     deletedAgentIds: ["lead"],
     deletedRoomIds: [],
   }));
-  const backend = { post, storage };
+  const backend: SidebarBackend = {
+    post,
+    storage,
+    ownerId: "home",
+    saved: (key, fallback) => {
+      const raw = storage.getItem(key);
+      return raw === null ? fallback : JSON.parse(raw);
+    },
+    save: (key, value) => storage.setItem(key, JSON.stringify(value)),
+    editPreference: writePreferenceEdit,
+    subscribePreference: () => () => {},
+  };
   const owner = vi.fn(() => backend);
   const options = {
     data,
     workspaceId: "workspace",
-    services: { owner, cache: backend } as unknown as SidebarServices,
+    services: {
+      owner,
+      cache: backend,
+      byOwner: () => backend,
+      serverForChat: () => backend.ownerId,
+    } satisfies SidebarServices,
     onSuspend: vi.fn(),
     onResume: vi.fn(),
     onFinish: vi.fn(),
     notify: vi.fn(),
   };
+  const state = createStateMirror();
+  const metadata = createProjectionMetadataMirror({
+    workspaceId: "",
+    ready: false,
+    complete: false,
+    projectSequences: {},
+  });
   let result: ReturnType<typeof useProjectDelete>;
   const render = () => {
     hooks.cursor = 0;
     hooks.dirty = false;
-    result = useProjectDelete(options);
+    runInAction(() => {
+      metadata.apply({
+        workspaceId: options.data.entityWorkspaceId ?? "",
+        ready: true,
+        complete: options.data.entitiesComplete === true,
+        projectSequences: options.data.runtime.projectSequences ?? {},
+      });
+      state.apply(serializeStateCollections(stateFromFixture(options.data)));
+    });
+    result = useProjectDelete({
+      ...options,
+      state: state.current,
+      metadata: metadata.current,
+    });
     const effects = hooks.effects.splice(0);
     for (const effect of effects) effect();
     return result;

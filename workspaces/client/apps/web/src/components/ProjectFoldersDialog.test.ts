@@ -1,100 +1,144 @@
-import { type ReactElement, type ReactNode } from "react";
+// @vitest-environment happy-dom
 import { expect, it, vi } from "vitest";
-import type { ServerServices } from "../servers/serverServices";
-import { componentSnapshot, required } from "./componentTestFixtures";
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import ProjectFoldersDialog from "./ProjectFoldersDialog.tsx";
+import { createStateMirror } from "../generated/observableResources.ts";
 
-const h = vi.hoisted(() => ({
-  cursor: 0,
-  cells: [] as unknown[],
-  effects: [] as Array<() => void>,
-  accept: undefined as
-    | Parameters<ServerServices["sync"]["subscribeStateProjection"]>[0]
-    | undefined,
-}));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useState: (initial: unknown) => {
-    const index = h.cursor++;
-    if (!(index in h.cells)) h.cells[index] = initial;
-    return [
-      h.cells[index],
-      (value: unknown) => {
-        h.cells[index] =
-          typeof value === "function" ? value(h.cells[index]) : value;
-      },
-    ];
-  },
-  useEffect: (effect: () => void) => {
-    h.effects.push(effect);
+const leaf = vi.hoisted(() => ({
+  post: vi.fn(async () => ({})),
+  resources: {
+    watchResourceChanges: (
+      _ref: unknown,
+      accept: (version: {
+        nativeLayrSettings: { storeRoot: string; configured: boolean };
+      }) => void,
+    ) => {
+      accept({
+        nativeLayrSettings: { storeRoot: "/default", configured: true },
+      });
+      return () => {};
+    },
   },
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerApi: () => ({
-    get: vi.fn(async () => ({ items: [], identity: {}, servers: [] })),
+    post: leaf.post,
+    get: async () => ({ gitHead: "main" }),
+    refreshSession: async () => ({ token: "fixture" }),
   }),
-  useServerSync: () => ({
-    subscribeStateProjection: (accept: typeof h.accept) => {
-      h.accept = accept;
-      return () => {};
-    },
+  useServerStorage: () => ({
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  }),
+  useServerResources: () => leaf.resources,
+  useServerFileDialogs: () => ({
+    canPickDirectory: () => false,
+    pickDirectory: vi.fn(),
   }),
 }));
-vi.mock("./ProjectLocationsSettings", () => ({ default: "locations" }));
-vi.mock("./ProjectPeers", () => ({ ProjectPeers: "peers" }));
-vi.mock("./ProjectLayrStoreSettings", () => ({
-  ProjectLayrStoreSettings: "project-store",
-}));
-import ProjectFoldersDialog from "./ProjectFoldersDialog";
+vi.mock("./ProjectPeers", () => ({ ProjectPeers: () => null }));
 
-function find(
-  node: ReactNode,
-):
-  | ReactElement<{
-      project: {
-        layrStoreRoot?: string | null;
-        layrStoreRootRevision?: number | null;
-      };
-    }>
-  | undefined {
-  if (Array.isArray(node)) return node.map(find).find(Boolean);
-  if (!node || typeof node !== "object" || !("props" in node)) return undefined;
-  const element = node as ReactElement<{
-    project: {
-      layrStoreRoot?: string | null;
-      layrStoreRootRevision?: number | null;
-    };
-    children?: ReactNode;
-  }>;
-  return element.type === "project-store"
-    ? element
-    : find(element.props.children);
-}
-
-it("updates the store and revision from project stream events", () => {
-  const props = {
-    project: { id: "/project", path: "/project", name: "Project" },
-    saved: async () => {},
+it("project folders updates the real store and location leaves from one stable generated model", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    media: "",
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: () => true,
+  }));
+  const mirror = createStateMirror();
+  const project = { id: "/project", path: "/project", name: "Project" };
+  const old = {
+    ...project,
+    layrStoreRoot: "/old-store",
+    layrStoreRootRevision: 1,
+    locations: [
+      { projectId: project.id, serverId: "home", path: "/old-folder" },
+    ],
   };
-  const render = () => {
-    h.cursor = 0;
-    return ProjectFoldersDialog(props);
-  };
-  render();
-  for (const effect of h.effects.splice(0)) effect();
-  required(h.accept)(
-    componentSnapshot([], {
-      projects: [
+  mirror.apply([{ collection: "project", id: project.id, value: old }]);
+  const selected = mirror.current.projects.get(project.id)!;
+  if (!validProject(selected)) throw new Error("Missing project");
+  const host = document.createElement("div"),
+    root = createRoot(host);
+  document.body.append(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(ProjectFoldersDialog, {
+            project: selected,
+            saved: async () => {},
+          }),
+        ),
+      ),
+    );
+    expect(host.querySelector("input")?.value).toBe("/old-store");
+    expect(host.textContent).toContain("/old-folder");
+    await act(async () =>
+      mirror.apply([
         {
-          id: "/project",
-          path: "/project",
-          name: "Project",
-          layrStoreRoot: "/new",
-          layrStoreRootRevision: 3,
+          collection: "project",
+          id: project.id,
+          value: {
+            ...old,
+            layrStoreRoot: "/new-store",
+            layrStoreRootRevision: 3,
+          },
         },
-      ],
-    }),
-  );
-  const project = required(find(render())).props.project;
-  expect(project.layrStoreRoot).toBe("/new");
-  expect(project.layrStoreRootRevision).toBe(3);
+      ]),
+    );
+    expect(mirror.current.projects.get(project.id)).toBe(selected);
+    expect(host.querySelector("input")?.value).toBe("/new-store");
+    await act(async () =>
+      mirror.apply([
+        {
+          collection: "project",
+          id: project.id,
+          value: {
+            ...old,
+            layrStoreRoot: "/new-store",
+            layrStoreRootRevision: 3,
+            locations: [
+              { projectId: project.id, serverId: "home", path: "/new-folder" },
+            ],
+          },
+        },
+      ]),
+    );
+    expect(host.textContent).toContain("/new-folder");
+    await act(async () =>
+      [...host.querySelectorAll("button")]
+        .find((button) => button.textContent === "Reset")
+        ?.click(),
+    );
+    expect(leaf.post).toHaveBeenCalledWith("/api/projects", {
+      action: "set_layr_store_root",
+      path: project.id,
+      expected_revision: 3,
+      layr_store_root: null,
+    });
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    vi.unstubAllGlobals();
+  }
 });
+
+function validProject(
+  project: import("../app/contracts.ts").ProjectModel,
+): project is import("../app/contracts.ts").ProjectModel & {
+  path: string;
+  name: string;
+} {
+  return typeof project.path === "string" && typeof project.name === "string";
+}

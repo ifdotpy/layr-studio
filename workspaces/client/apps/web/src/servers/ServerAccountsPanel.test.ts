@@ -1,3 +1,5 @@
+import { ServerStoreProvider } from "./ServerServicesContext.tsx";
+import { observableFixture } from "../components/observableFixture.tsx";
 import { ProviderKind } from "../generated/providerKind";
 import {
   createElement,
@@ -84,20 +86,26 @@ const render = (
   overrides: Partial<ComponentProps<typeof ServerAccountsPanel>> = {},
 ) => {
   const startAccount = vi.fn();
+  const fixture = observableFixture();
   const html = renderToStaticMarkup(
     createElement(
       MantineProvider,
       null,
-      createElement(ServerAccountsPanel, {
-        servers: [local, remote],
-        accountsByServer: { local: [account] },
-        statuses: { local: "live", remote: "offline" },
-        startAccount,
-        accountAction: () => {},
-        ...overrides,
-      }),
+      createElement(
+        ServerStoreProvider,
+        { value: fixture.store },
+        createElement(ServerAccountsPanel, {
+          servers: [local, remote],
+          accountsByServer: { local: [account] },
+          statuses: { local: "live", remote: "offline" },
+          startAccount,
+          accountAction: () => {},
+          ...overrides,
+        }),
+      ),
     ),
   );
+  fixture.store.dispose();
   return { html, startAccount };
 };
 beforeEach(() => {

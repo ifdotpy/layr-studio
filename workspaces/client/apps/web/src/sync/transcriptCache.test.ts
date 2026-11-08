@@ -124,7 +124,7 @@ it("does not publish a cached transcript after it is cleared", async () => {
 
 it("keeps a retained conversation snapshot renderable while a removal awaits publication", async () => {
   const { createTranscriptCache } = await import("./transcriptCache");
-  const { transcriptMessages } = await import("../hooks");
+  const { transcriptMessages } = await import("../conversation/messageView");
   const cache = createTranscriptCache();
   const batch = {
     id: "batch",

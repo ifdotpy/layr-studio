@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import {
   reportUnsentFailure,
   sendStore,
@@ -369,70 +368,68 @@ export function createOutbox(options: {
     const value = entry && read(entry.body.room, id);
     if (value) await write({ ...value, displayText: text });
   }
-  function useOutbox() {
-    const [entries, setEntries] = useState<OutboxEntry[]>([]);
-    const [error, setError] = useState("");
-    useEffect(() => {
-      const update = () => {
-        try {
-          setEntries(list());
-          setError("");
-        } catch (failure) {
-          setError(errorText(failure));
+  function observeOutbox(
+    setEntries: (entries: OutboxEntry[]) => void,
+    setError: (error: string) => void,
+  ) {
+    const update = () => {
+      try {
+        setEntries(list());
+        setError("");
+      } catch (failure) {
+        setError(errorText(failure));
+      }
+    };
+    const retry = () => {
+      try {
+        for (const entry of list()) {
+          const value = read(entry.body.room, entry.id);
+          if (
+            value?.localState.kind === "transport_failed" &&
+            !value.receipt &&
+            !value.expired
+          )
+            void send(value).catch((failure) => setError(errorText(failure)));
         }
-      };
-      const retry = () => {
-        try {
-          for (const entry of list()) {
-            const value = read(entry.body.room, entry.id);
-            if (
-              value?.localState.kind === "transport_failed" &&
-              !value.receipt &&
-              !value.expired
-            )
-              void send(value).catch((failure) => setError(errorText(failure)));
-          }
-        } catch (failure) {
-          setError(errorText(failure));
-        }
-      };
-      listeners.add(update);
-      let wasLive = false;
-      const stopConnection = options.watchResourceConnection((status) => {
-        const reconnected = status === "live" && !wasLive;
-        wasLive = status === "live";
-        if (reconnected) retry();
-      });
-      void ready()
-        .then(() => {
-          update();
-          if (wasLive) retry();
-        })
-        .catch((failure) => setError(errorText(failure)));
-      return () => {
-        listeners.delete(update);
-        stopConnection();
-      };
-    }, []);
-    return { entries, error };
+      } catch (failure) {
+        setError(errorText(failure));
+      }
+    };
+    listeners.add(update);
+    let wasLive = false;
+    const stopConnection = options.watchResourceConnection((status) => {
+      const reconnected = status === "live" && !wasLive;
+      wasLive = status === "live";
+      if (reconnected) retry();
+    });
+    void ready()
+      .then(() => {
+        update();
+        if (wasLive) retry();
+      })
+      .catch((failure) => setError(errorText(failure)));
+    return () => {
+      listeners.delete(update);
+      stopConnection();
+    };
   }
   return {
+    observeOutbox,
     durableSend,
     reconcileOutboxReceipts,
     editOutboxDisplay,
     changeOutbox,
     stopRemovedMessage,
-    useOutbox,
   };
 }
 
 export const {
+  observeOutbox,
   durableSend,
   reconcileOutboxReceipts,
   editOutboxDisplay,
   changeOutbox,
   stopRemovedMessage,
-  useOutbox,
 } = createOutbox({
   api: { command, getStreamSession },
   watchResourceConnection,

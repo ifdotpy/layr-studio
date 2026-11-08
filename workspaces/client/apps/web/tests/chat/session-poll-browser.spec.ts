@@ -1,5 +1,4 @@
 import type { AddressInfo } from "node:net";
-import type { JsonValue } from "../../src/apiTypes.ts";
 import type {
   SyncPullResponse,
   SyncEntity,
@@ -109,7 +108,7 @@ test("Session Poll Browser", async ({
                   op: "upsert",
                   collection: "workspace",
                   id: "current",
-                  value: { marker: "replicated", stateDir: "fixture" },
+                  value: { tasksHistoryLimit: 1, stateDir: "fixture" },
                   seq: 1,
                 },
               ],
@@ -127,13 +126,10 @@ test("Session Poll Browser", async ({
 
     await page.waitForFunction(
       () =>
-        (
-          window.snapshot?.data?.runtime as
-            | Record<string, JsonValue>
-            | undefined
-        )?.marker === "replicated",
+        window.snapshot?.state?.workspaces.values().next().value
+          ?.tasksHistoryLimit === 1,
     );
-    await page.evaluate(() => window.snapshot.refresh());
+    await page.evaluate(() => window.snapshot.startup.refresh());
     assert.ok(sessions >= 2);
     assert.equal(
       snapshotReads,
@@ -142,27 +138,27 @@ test("Session Poll Browser", async ({
     );
     assert.ok(pulls > 0, "Startup and refresh use the entity pull");
     token = "rotated";
-    await page.evaluate(() => window.snapshot.refresh());
+    await page.evaluate(() => window.snapshot.startup.refresh());
     assert.equal(
-      await page.evaluate(() => window.snapshot.data!.token),
+      await page.evaluate(() => window.snapshot.api.getToken()),
       "rotated",
     );
     assert.equal(
       await page.evaluate(() => {
-        const runtime = window.snapshot.data!.runtime;
-        return "marker" in runtime ? runtime.marker : undefined;
+        return window.snapshot.state!.workspaces.values().next().value
+          ?.tasksHistoryLimit;
       }),
-      "replicated",
+      1,
     );
     for (const failure of [503, 404]) {
       status = failure;
-      await page.evaluate(() => window.snapshot.refresh());
+      await page.evaluate(() => window.snapshot.startup.refresh());
       assert.equal(
-        await page.evaluate(() => window.snapshot.error),
+        await page.evaluate(() => window.snapshot.startup.error),
         "Session unavailable",
       );
       assert.equal(
-        await page.evaluate(() => window.snapshot.data!.token),
+        await page.evaluate(() => window.snapshot.api.getToken()),
         "rotated",
       );
       assert.equal(
@@ -173,12 +169,12 @@ test("Session Poll Browser", async ({
     }
     status = 200;
     token = "recovered";
-    await page.evaluate(() => window.snapshot.refresh());
+    await page.evaluate(() => window.snapshot.startup.refresh());
     assert.equal(
-      await page.evaluate(() => window.snapshot.data!.token),
+      await page.evaluate(() => window.snapshot.api.getToken()),
       "recovered",
     );
-    assert.equal(await page.evaluate(() => window.snapshot.error), "");
+    assert.equal(await page.evaluate(() => window.snapshot.startup.error), "");
     assert.equal(snapshotReads, 0, "Never download the full state");
     assert.equal(snapshotReads, 0, "Never invoke the old snapshot fallback");
     assert.deepEqual(errors, []);

@@ -42,6 +42,7 @@ fn models() -> Vec<ObservableModel> {
         opaque: vec!["opaque".into()],
         tracked_nested: None,
         declared_fields: false,
+        local_fields: false,
     }]
 }
 
@@ -709,4 +710,27 @@ fn mirror_only_reads_require_no_subscription_contract_or_acquiring_facade() {
     assert!(source.contains("createOneShotMirror"));
     assert!(!source.contains("oneShotSlot"));
     assert!(!source.contains("oneShot(): ResourceSlot"));
+}
+
+#[test]
+fn local_models_emit_schema_fields_without_wire_components() {
+    let document = json!({"components":{"schemas":{"LocalProjection":{
+        "type":"object","additionalProperties":false,"required":["ready","versions"],
+        "properties":{"ready":{"type":"boolean"},"versions":{"type":"object","additionalProperties":{"type":"integer"}}}
+    }}}});
+    let models = vec![
+        ObservableModel::named("LocalProjection")
+            .local_fields()
+            .track_nested(&[]),
+    ];
+    let resources = vec![ObservableResource::mirror(
+        "LocalProjection",
+        "localProjection",
+    )];
+    let fields = render_fields(&document, &models, &resources).expect("local fields render");
+    assert!(fields.contains("ready: boolean"));
+    assert!(fields.contains("versions: Record<string, number>"));
+    assert!(!fields.contains("components['schemas']['LocalProjection']"));
+    let generated = render(&document, &models, &resources).expect("local mirror renders");
+    assert!(generated.contains("import('./observableFieldTypes.ts').LocalProjectionFields"));
 }

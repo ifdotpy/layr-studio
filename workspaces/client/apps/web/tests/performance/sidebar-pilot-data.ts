@@ -1,5 +1,5 @@
 import type { Agent } from "../../src/types.ts";
-import { snapshotFixture } from "../../src/snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
 
 /** Fixture sizes are shared by preparation, the browser and validation. */
 export const pilotSize = { chats: 1000, visible: 30, updates: 120 };
@@ -27,12 +27,15 @@ export function pilotAgents(now = Date.now() / 1000): PilotAgent[] {
   }));
 }
 export function pilotSnapshot(agents: Agent[]) {
-  return snapshotFixture(agents, {
-    projects: [
-      { id: "fixture", path: "/fixture", name: "Fixture", folders: [] },
-    ],
-    sidebarOrder: { revision: 0, groups: {} },
-  });
+  return Object.assign(
+    snapshotFixture(agents, {
+      projects: [
+        { id: "fixture", path: "/fixture", name: "Fixture", folders: [] },
+      ],
+      sidebarOrder: { revision: 0, groups: {} },
+    }),
+    { token: "", stateDir: "/fixture" },
+  );
 }
 export function pilotUpdate(agents: PilotAgent[], index: number): PilotAgent[] {
   const target = index % pilotSize.visible;

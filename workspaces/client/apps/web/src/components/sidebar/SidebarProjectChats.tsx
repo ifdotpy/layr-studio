@@ -76,13 +76,13 @@ export const SidebarProjectChats = observer(function SidebarProjectChats({
             Number(b.pinned) - Number(a.pinned) ||
             sidebar.sorting.rank(
               a.pinned
-                ? sidebar.chatGroup(chats.find((c) => c.id === a.id)!)
+                ? chats.find((c) => c.id === a.id)!.groupKey
                 : itemGroup(group.path, parent?.id || null),
               a.id,
             ) -
               sidebar.sorting.rank(
                 b.pinned
-                  ? sidebar.chatGroup(chats.find((c) => c.id === b.id)!)
+                  ? chats.find((c) => c.id === b.id)!.groupKey
                   : itemGroup(group.path, parent?.id || null),
                 b.id,
               ),

@@ -8,7 +8,7 @@ import type { LocalCollection, Row } from "./localCollection";
 import { subscriptionKey, type ResourceRef } from "./subscriptions/contracts";
 import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
 import { cursorDocumentId } from "./subscriptions/cursors";
-import { parseEntityPayload } from "./entityProjection";
+import { parseEntityPayload } from "./entityContracts.ts";
 import { readTranscriptMeta } from "./transcriptMetadata";
 
 /** Minimum delay between scheduled cache writes, in milliseconds. */

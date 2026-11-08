@@ -5,16 +5,6 @@ import { ApiError } from "../api";
 
 const observed = vi.hoisted(() => ({ entries: [] as unknown[] }));
 
-vi.mock("react", () => ({
-  useEffect: (effect: () => void) => effect(),
-  useState: (initial: unknown) => [
-    initial,
-    (value: unknown) => {
-      if (Array.isArray(value)) observed.entries = value;
-    },
-  ],
-}));
-
 import { createOutbox } from "./send";
 import { createCommandClient } from "../commands";
 
@@ -67,7 +57,12 @@ it("fresh uncertain receipt blocks reconnect retry until explicit retry", async 
   );
   expect([...values.values()][0]?.localState.kind).toBe("transport_failed");
   expect([...values.values()][0]).not.toHaveProperty("receipt");
-  outbox.useOutbox();
+  const stop = outbox.observeOutbox(
+    (entries) => {
+      observed.entries = entries;
+    },
+    () => {},
+  );
   onConnection?.("live");
   await new Promise((resolve) => setTimeout(resolve, 10));
   expect(post).toHaveBeenCalledTimes(1);
@@ -83,4 +78,5 @@ it("fresh uncertain receipt blocks reconnect retry until explicit retry", async 
   expect(observed.entries[0]).not.toHaveProperty("receipt");
   await outbox.changeOutbox("one", "resume");
   expect(post).toHaveBeenCalledTimes(2);
+  stop();
 });

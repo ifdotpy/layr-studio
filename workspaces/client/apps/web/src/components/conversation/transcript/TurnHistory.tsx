@@ -1,5 +1,5 @@
-import { computed } from "mobx";
-import { useConversationActions } from "../navigation";
+import { compareShallow, computed } from "mobx";
+import { useTranscriptActions } from "../navigation";
 import { HistoryLiveText } from "../../../conversation/liveText";
 import type { createLiveText } from "../../../conversation/liveText";
 import { observer } from "mobx-react-lite";
@@ -12,6 +12,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type ComponentProps,
   type RefObject,
 } from "react";
 import {
@@ -51,13 +52,6 @@ import {
   isQuestionToolItem,
   questionCard,
 } from "../../questions/questionCardModel";
-
-function useTranscriptActions() {
-  const actions = useConversationActions().transcript;
-  if (!actions)
-    throw new Error("Transcript actions must be provided by the conversation");
-  return actions;
-}
 
 // Group presentation depends on model fields, but unchanged membership/order and
 // outcome must keep the list asleep while a displayed text field changes.
@@ -471,9 +465,9 @@ const HistoryContent = observer(function HistoryContent({
   agentId,
   cwd,
   storageKey,
-  failurePending,
-  failureLookupFailed,
-  failureReason,
+  items,
+  loading,
+  failed,
   retry,
 }: {
   group: HistoryGroup;
@@ -482,9 +476,9 @@ const HistoryContent = observer(function HistoryContent({
   agentId?: string | undefined;
   cwd?: string | undefined;
   storageKey: string;
-  failurePending: boolean;
-  failureLookupFailed: boolean;
-  failureReason: string;
+  items: Message[];
+  loading: string[];
+  failed: string[];
   retry: (turn: string) => void;
 }) {
   const { requestCards } = useTranscriptActions();
@@ -507,16 +501,41 @@ const HistoryContent = observer(function HistoryContent({
       key={group.id}
       group={group}
       revealedMessage={revealedMessage}
-      failurePending={failurePending}
-      failureLookupFailed={failureLookupFailed}
+      failurePending={loading.includes(turnId)}
+      failureLookupFailed={failed.includes(turnId)}
       retryFailure={() => retry(turnId)}
-      failureReason={failureReason}
+      failureReason={
+        ["failed", "uncertain"].includes(group.outcome || "")
+          ? turnFailureReason(items.filter((item) => item.turnId === turnId))
+          : ""
+      }
       storageKey={storageKey}
 
       agentId={agentId}
       cwd={cwd}
     />
   );
+});
+
+/** Request membership can change without regrouping the transcript. */
+const RequestHistoryWindow = observer(function RequestHistoryWindow(
+  props: ComponentProps<typeof HistoryWindow>,
+) {
+  const { requestCards } = useTranscriptActions();
+  const requiredRows = useMemo(
+    () =>
+      computed(
+        () =>
+          props.rows
+            .filter((row) =>
+              row.items.some((item) => requestCards?.has(item.id)),
+            )
+            .map((row) => row.id),
+        { equals: compareShallow },
+      ),
+    [props.rows, requestCards],
+  ).get();
+  return <HistoryWindow {...props} requiredRows={requiredRows} />;
 });
 
 function TurnHistory({
@@ -548,7 +567,6 @@ function TurnHistory({
   followTail?: boolean;
   hasRecentScrollInput?: () => boolean;
 }) {
-  const { requestCards } = useTranscriptActions();
   reportPromptComposerRender("turn-history", agentId);
   const { items, loading, failed, retry } = useTurnErrors(
     sourceItems,
@@ -566,45 +584,6 @@ function TurnHistory({
       ),
     [items, currentTurn, agentId],
   ).get();
-  const failureReasonEntries = useMemo(
-    () =>
-      computed(() => {
-        const failedTurns = new Set(
-          groups
-            .flatMap((group) => group.turns || [group])
-            .filter((turn) =>
-              ["failed", "uncertain"].includes(turn.outcome || ""),
-            )
-            .flatMap((turn) => {
-              const turnId = turn.items[0].turnId;
-              return turnId && typeof turnId === "string" ? [turnId] : [];
-            }),
-        );
-        const byTurn = new Map<string, Message[]>();
-        for (const item of items) {
-          if (typeof item.turnId !== "string") continue;
-          if (!failedTurns.has(item.turnId)) continue;
-          const turn = byTurn.get(item.turnId) || [];
-          turn.push(item);
-          byTurn.set(item.turnId, turn);
-        }
-        return [...byTurn]
-          .map(
-            ([turn, messages]) =>
-              [turn, turnFailureReason(messages)] as [string, string],
-          )
-          .sort(([a], [b]) => a.localeCompare(b));
-      }),
-    [items, groups],
-  ).get();
-  // Keep the map identity stable across streamed deltas with unchanged failures.
-  const failureReasonKey = failureReasonEntries
-    .map(([turn, reason]) => `${turn.length}:${turn}${reason.length}:${reason}`)
-    .join("|");
-  const failureReasons = useMemo(
-    () => new Map(failureReasonEntries),
-    [failureReasonKey],
-  );
   const previousRows = useRef<HistoryGroup[]>([]);
   const rows = useMemo(() => {
     const partitioned = scrollContainer
@@ -615,56 +594,28 @@ function TurnHistory({
   useLayoutEffect(() => {
     previousRows.current = rows;
   }, [rows]);
-  const requiredRows = useMemo(
-    () =>
-      rows
-        .filter((row) => row.items.some((item) => requestCards?.has(item.id)))
-        .map((row) => row.id),
-    [rows, requestCards],
-  );
+  const cwd = agent?.cwd ?? undefined;
   const renderRow = useCallback(
-    (group: HistoryGroup, revealedMessage?: string) => {
-      const turnId = (group.turns?.at(-1) || group).items[0].turnId;
-      return (
-        <HistoryContent
-          group={group}
-          revealedMessage={revealedMessage}
-          enabled={enabled}
-
-          agentId={agentId}
-          cwd={agent?.cwd ?? undefined}
-          storageKey={storageKey}
-
-          failurePending={
-            typeof turnId === "string" && loading.includes(turnId)
-          }
-          failureLookupFailed={
-            typeof turnId === "string" && failed.includes(turnId)
-          }
-          failureReason={
-            typeof turnId === "string" ? failureReasons.get(turnId) || "" : ""
-          }
-          retry={retry}
-        />
-      );
-    },
-    [
-      enabled,
-      requestCards,
-      agentId,
-      agent?.cwd,
-      storageKey,
-      loading,
-      failed,
-      failureReasons,
-      retry,
-    ],
+    (group: HistoryGroup, revealedMessage?: string) => (
+      <HistoryContent
+        group={group}
+        revealedMessage={revealedMessage}
+        enabled={enabled}
+        agentId={agentId}
+        cwd={cwd}
+        storageKey={storageKey}
+        items={items}
+        loading={loading}
+        failed={failed}
+        retry={retry}
+      />
+    ),
+    [enabled, agentId, cwd, storageKey, items, loading, failed, retry],
   );
   return (
     <HistoryLiveText.Provider value={history?.live || null}>
-      <HistoryWindow
+      <RequestHistoryWindow
         rows={rows}
-        requiredRows={requiredRows}
         storageKey={storageKey}
         rememberScroll={rememberScroll}
         getFollow={getFollow}

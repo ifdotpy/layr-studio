@@ -57,12 +57,10 @@ test("execution settings canonical browser", async ({ page }) => {
             id === join(root, "src/components/agents/ExecutionSettings.tsx")
           )
             return execFileSync(
-              "git",
+              "layr",
               [
                 "show",
-                process.env.CONFIRMATION_BASELINE
-                  ? `${process.env.CONFIRMATION_BASELINE}:web/src/components/agents/ExecutionSettings.tsx`
-                  : "5217bb9:web/src/components/ExecutionSettings.tsx",
+                `${process.env.CONFIRMATION_BASELINE || "bf59170a063271b7933801a1b7b6b2f6"}:workspaces/client/apps/web/src/components/agents/ExecutionSettings.tsx`,
               ],
               { cwd: root, encoding: "utf8" },
             );
@@ -122,24 +120,14 @@ test("execution settings canonical browser", async ({ page }) => {
         ),
       );
     const value = async (expected: string, defaults = false) => {
-      await page.waitForFunction(
-        ({ expected, defaults }) => {
-          const label = defaults
+      await expect(
+        page.getByRole("radiogroup", {
+          name: defaults
             ? "Default subagent reasoning"
-            : "Main agent reasoning";
-          return (
-            [...document.querySelectorAll('[role="radiogroup"]')]
-              .find(
-                (node) =>
-                  document.getElementById(node.getAttribute("aria-labelledby")!)
-                    ?.textContent === label,
-              )
-              ?.getAttribute("data-value") === expected
-          );
-        },
-        { expected, defaults },
-        { timeout: 2500 },
-      );
+            : "Main agent reasoning",
+          exact: true,
+        }),
+      ).toHaveAttribute("data-value", expected);
     };
     const check = async (name: string, run: () => Promise<void>) => {
       if (process.env.CASE && process.env.CASE !== name) return;
@@ -174,6 +162,9 @@ test("execution settings canonical browser", async ({ page }) => {
       );
       await effort().selectOption("high");
       await value("medium");
+      await expect(
+        page.getByRole("dialog", { name: "Settings change", exact: true }),
+      ).toContainText("medium");
       await page.evaluate(() =>
         window.setAgent!({
           ...window.agent,

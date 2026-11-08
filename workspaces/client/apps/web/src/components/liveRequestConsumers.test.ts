@@ -1,3 +1,4 @@
+import type { ComponentSnapshot as Snapshot } from "./componentTestFixtures.ts";
 import { createRequestsView } from "./questions/requestView";
 import { createRetainedWorktreesMirror } from "../generated/observableResources";
 import { requestFixture } from "./questions/requestFixtures";
@@ -8,7 +9,7 @@ import { required } from "./componentTestFixtures.ts";
 import type { ComponentHookCell } from "./componentTestFixtures";
 import type { EffectCallback } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Agent, Snapshot } from "../types";
+import type { Agent } from "../types";
 
 const h = vi.hoisted(() => ({
   cursor: 0,
@@ -69,7 +70,7 @@ vi.mock("../servers/ServerServicesContext", () => ({
     },
   }),
 }));
-import { useTeamArea } from "./agents/TeamPanelContext";
+import { useTeamArea } from "./agents/TeamPanelContext.tsx";
 import { createQuestionCards } from "./questions/useQuestionCards";
 import ClaudeRepairNotice from "./ClaudeRepairNotice";
 

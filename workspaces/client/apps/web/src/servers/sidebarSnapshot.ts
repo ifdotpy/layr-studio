@@ -10,31 +10,22 @@ export type SidebarEntity = StateEntity;
 /** Preserve native facts at the frame serialization boundary. */
 export const sidebarEntities = serializeStateCollections;
 
-import type { Room, Snapshot } from "../types";
+import type { components } from "../generated/api.ts";
 import { readPreferenceFields } from "../sync/uiPreferenceStore";
 import type { PreferenceFields } from "../sync/uiPreferenceMerge";
 
 export type ServerSidebarSnapshot = {
   entities: readonly SidebarEntity[];
-  rooms: Room[];
   savedOrder: Record<string, string[]>;
   compact: Record<string, boolean>;
   collapsed: Record<string, boolean>;
   /** Edit times of the compact and collapse values, for last-writer-wins merges. */
   visualFields?: PreferenceFields;
   /** Local errors keep their server-owned ids for safe actions. */
-  studioErrors?: Snapshot["runtime"]["studioErrors"];
+  studioErrors?: readonly import("../deepReadonly.ts").DeepReadonly<
+    components["schemas"]["StudioError"]
+  >[];
 };
-
-function pick<T extends object, K extends keyof T>(
-  value: T,
-  keys: readonly K[],
-): Pick<T, K> {
-  const result = {} as Pick<T, K>;
-  for (const key of keys)
-    if (Object.hasOwn(value, key)) result[key] = value[key];
-  return result;
-}
 
 /** The saved preference fields of this server's compact and collapse records. */
 export function sidebarVisualFields(
@@ -59,43 +50,26 @@ export function sidebarVisualFields(
 
 /** Preserve sidebar fields and source identities without transcripts or session state. */
 export function sidebarSnapshot(
-  data: Snapshot,
+  data: StateCollections,
   entities: readonly SidebarEntity[] = [],
 ): ServerSidebarSnapshot {
-  const runtime = data.runtime;
+  const stateDir = data.workspaces.values().next().value?.stateDir ?? "";
   return {
     entities,
-    rooms: (runtime?.rooms || []).map((room) =>
-      pick(room, [
-        "id",
-        "kind",
-        "name",
-        "projectPath",
-        "members",
-        "localMembers",
-        "rootId",
-        "peerTeamId",
-        "peerTeamName",
-        "peerLabel",
-        "userHidden",
-        "radio",
-        "updated",
-      ]),
-    ),
-    studioErrors: runtime?.studioErrors || [],
+    studioErrors: [...data.studioErrors.values()],
     savedOrder: saved<Record<string, string[]>>(
-      `codex-sidebar-order:${data.stateDir}`,
+      `codex-sidebar-order:${stateDir}`,
       {},
     ),
     compact: saved<Record<string, boolean>>(
-      `codex-project-compact:${data.stateDir}`,
+      `codex-project-compact:${stateDir}`,
       {},
     ),
     collapsed: saved<Record<string, boolean>>(
-      `codex-project-tree:${data.stateDir}`,
+      `codex-project-tree:${stateDir}`,
       {},
     ),
-    visualFields: sidebarVisualFields(data.stateDir),
+    visualFields: sidebarVisualFields(stateDir),
   };
 }
 
@@ -106,6 +80,7 @@ export function sidebarCollectionView(
 ) {
   const projects = computed(() => [...collections.projects.values()]);
   const peerTeams = computed(() => [...collections.peerTeams.values()]);
+  const rooms = computed(() => [...collections.rooms.values()]);
   const workspace = () => collections.workspaces.values().next().value;
   return {
     ...sidebar,
@@ -114,6 +89,9 @@ export function sidebarCollectionView(
     },
     get peerTeams() {
       return peerTeams.get();
+    },
+    get rooms() {
+      return rooms.get();
     },
     get stateDir() {
       return workspace()?.stateDir || "";

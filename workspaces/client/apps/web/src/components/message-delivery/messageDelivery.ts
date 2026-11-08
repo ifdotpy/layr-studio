@@ -78,14 +78,14 @@ export function receiptMessage(item: Message, entry: OutgoingMessage) {
 /** Merge durable outbox entries with this tab's display copies of its sends. */
 export function mergeOutgoing(
   outbox: OutboxEntry[],
-  local: Record<string, OutgoingMessage>,
+  local: Iterable<OutgoingMessage>,
   observed: ReadonlySet<string>,
 ) {
   const stored = new Map(outbox.map((entry) => [entry.id, entry]));
   const visibleSends = new Map(outbox.map((entry) => [entry.id, entry]));
   // The outbox owns delivery state once it stores a message. A local copy
   // shows only before that.
-  for (const entry of Object.values(local)) {
+  for (const entry of local) {
     const owner = stored.get(entry.id);
     if (
       !owner ||

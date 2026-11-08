@@ -3,18 +3,9 @@ export function fixtureElement(id: string) {
   return document.getElementById(id)!;
 }
 
-/** These two recovery fixtures add a marker to their own snapshot documents. */
 export type FixtureSnapshot = ReturnType<
-  typeof import("../../src/hooks.ts").useSnapshot
-> & {
-  data:
-    | (NonNullable<
-        ReturnType<typeof import("../../src/hooks.ts").useSnapshot>["data"]
-      > & {
-        runtime: { marker?: string };
-      })
-    | null;
-};
+  typeof import("./startup-fixture.ts").useStartupFixture
+>;
 
 /** Probes inspect legacy payloads from the fixture's resource event document. */
 export type FixtureResourceFrame = Omit<

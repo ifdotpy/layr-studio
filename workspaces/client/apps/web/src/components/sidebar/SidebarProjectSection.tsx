@@ -63,12 +63,11 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
             .map((room) => {
               const alias =
                 sidebar.services.alias?.({ kind: "chat", id: room.id }) ||
-                sidebar.aliases[sidebar.services.serverForChat(room.id)] ||
+                sidebar.aliases.get(sidebar.services.serverForChat(room.id)) ||
                 DEFAULT_LOCAL_SERVER_ALIAS;
               const serverOffline =
-                sidebar.p.offlineServers?.has(
-                  sidebar.services.serverForChat(room.id),
-                ) ?? false;
+                sidebar.offline?.has(sidebar.services.serverForChat(room.id)) ??
+                false;
               const chatRow = (
                 <UnstyledButton
                   className="chat-row"
@@ -78,7 +77,9 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
                       : undefined
                   }
                   aria-current={
-                    sidebar.p.opened === room.id ? "page" : undefined
+                    sidebar.selection.selectedId === room.id
+                      ? "page"
+                      : undefined
                   }
                   onClick={() => sidebar.openChat(room.id)}
                 >
@@ -88,9 +89,10 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
                       sidebar.services.cache.ownerId && (
                       <ChatServerLine
                         provider={
-                          sidebar.p.data?.threads.find((agent) =>
-                            room.members?.includes(agent.id),
-                          )?.provider || undefined
+                          sidebar.model.rows
+                            .map((row) => row.agent)
+                            .find((agent) => room.members?.includes(agent.id))
+                            ?.provider || undefined
                         }
                         alias={alias}
                         offline={serverOffline}
@@ -112,7 +114,7 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
               return (
                 <div
                   key={room.id}
-                  className={`sidebar-row lead-row ${sidebar.p.opened === room.id ? "selected" : ""}`}
+                  className={`sidebar-row lead-row ${sidebar.selection.selectedId === room.id ? "selected" : ""}`}
                 >
                   {chatRow}
                 </div>
@@ -121,7 +123,7 @@ export const SidebarProjectSection = observer(function SidebarProjectSection({
           <SidebarProjectChats group={group} />
           {!sidebar.query &&
             (sidebar.viewChatCounts.get(group.path) || 0) >=
-              sidebar.hideOldChatsThreshold &&
+              sidebar.preferences.value.hideOldChatsThreshold &&
             (sidebar.isCompactProject(group.path)
               ? sidebar.model.visibleRows.filter(
                   (a) => a.projectPath === group.path,

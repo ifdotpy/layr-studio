@@ -1,7 +1,13 @@
+import { setStartupFixture } from "./observableFixture.tsx";
+// @vitest-environment happy-dom
+import { conversationActionsFixture } from "./observableFixture.tsx";
+import { defaultSyncClient } from "../sync/client.ts";
+import type { ServerServices } from "../servers/serverServices.ts";
 import { MarkUnreadEligibility } from "../generated/api.ts";
 import { observableFixture } from "./observableFixture.tsx";
 import { afterEach, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
+import type { Agent } from "../types";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 
 const h = vi.hoisted(() => ({
   store: null as
@@ -25,10 +31,8 @@ vi.mock("react", async (original) => ({
 vi.mock("../servers/ServerServicesContext", () => ({
   useServerStore: () => h.store,
   useServerApi: () => ({ post: h.post }),
-  useServerSync: () => ({ refreshProjection: h.recovery }),
+  useServerSync: () => ({ refreshState: h.recovery }),
 }));
-vi.mock("../sync/client", () => ({}));
-import { useChatReadState } from "./useChatReadState";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -42,7 +46,7 @@ it.each([false, true])(
       visibilityState: "visible",
       hasFocus: () => true,
     });
-    const agent = {
+    const agent: Agent = {
       id: "lead",
       threadId: "thread",
       lastCompletedTurn: "turn",
@@ -62,9 +66,13 @@ it.each([false, true])(
       },
     ]).store;
     const snapshot = {
+      ...Object.assign(snapshotFixture([agent]), {
+        token: "",
+        stateDir: "/fixture",
+      }),
       stateDir: "fixture",
       threads: [agent],
-    } as unknown as Snapshot;
+    };
     const refresh = vi.fn(async () => {});
     h.recovery.mockResolvedValue(snapshot);
     if (lostResponse)
@@ -79,13 +87,18 @@ it.each([false, true])(
           read: true,
         },
       });
-    const state = useChatReadState(
-      snapshot,
-      "lead",
-      vi.fn(),
-      refresh,
-      "workspace",
-    );
+    const area = conversationActionsFixture(() => {}, h.store);
+    area.scope.services.api.post = h.post;
+    Object.defineProperty(area.scope.services, "sync", {
+      value: {
+        ...defaultSyncClient,
+        refreshState: h.recovery,
+      } satisfies ServerServices["sync"],
+    });
+    setStartupFixture(area, snapshot);
+    area.navigation.selectedId = "lead";
+    area.notices.notify = vi.fn();
+    const state = area.read;
     state.observeRead({ id: "lead", threadId: "thread", turnId: "turn" });
     expect(h.post).not.toHaveBeenCalled();
     state.select("lead");

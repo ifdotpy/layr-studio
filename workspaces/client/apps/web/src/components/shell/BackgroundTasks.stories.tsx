@@ -1,3 +1,4 @@
+import { useBackgroundTaskArea } from "./backgroundTaskActions.tsx";
 import {
   BackgroundTaskIndicator,
   BackgroundTaskKind,
@@ -18,7 +19,6 @@ import {
 } from "../../generated/observableResources";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import {
-  useBackgroundTaskArea,
   BackgroundTaskActionsProvider,
 } from "./backgroundTaskActions";
 import { BackgroundTaskStrip } from "./BackgroundTaskList";

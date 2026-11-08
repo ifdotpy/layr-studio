@@ -3,27 +3,43 @@ import {
   notifyDesktop,
 } from "../native/notifications";
 import { isServerView } from "../servers/environment";
-import { useEffect, useRef } from "react";
+import { autorun } from "mobx";
 import { alertsSince, desktopAlerts } from "../desktop/desktopAlerts";
-import { useAlertClock } from "./useAlertClock";
-import type { Snapshot } from "../types";
+import { nextAlertChange } from "../desktop/desktopAlerts";
+import type { AlertStore } from "../desktop/desktopAlerts.ts";
+import type { ProjectionMetadata } from "../generated/observableResources.ts";
+import { resourceData } from "../store/runtime.ts";
 
-export function useDesktopNotifications(
-  data: Snapshot | null,
-  opened: string | null,
-  enabled = true,
-) {
-  const now = useAlertClock(enabled ? data : null);
-  const state = useRef({
-    scope: "",
-    initialized: false,
-    permissionReported: false,
-    seen: new Set<string>(),
-    started: Date.now(),
-  });
-  useEffect(() => {
+export function startDesktopNotifications(source: {
+  readonly store: AlertStore;
+  readonly metadata: ProjectionMetadata;
+  readonly opened: string | null;
+  readonly enabled: boolean;
+}) {
+  const state = {
+    current: {
+      scope: "",
+      initialized: false,
+      permissionReported: false,
+      seen: new Set<string>(),
+      started: Date.now(),
+    },
+  };
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const publish = () => {
+    if (stopped) return;
+    const { store, metadata, opened, enabled } = source;
+    const data = resourceData(store.state().current);
+    clearTimeout(timer);
+    if (enabled && data) {
+      const next = nextAlertChange(store, Date.now() / 1000);
+      if (next !== null)
+        timer = setTimeout(publish, Math.max(0, next * 1000 - Date.now()) + 50);
+    }
+
     if (!enabled || !data || isServerView) return;
-    const scope = data.stateDir;
+    const scope = data.workspaces.values().next().value?.stateDir ?? "";
     if (state.current.scope !== scope)
       state.current = {
         scope,
@@ -34,8 +50,8 @@ export function useDesktopNotifications(
       };
     const current = state.current;
     // Before the first pull ends, missing records would make old alerts look new later.
-    if (!current.initialized && data.entitiesComplete === false) return;
-    const alerts = desktopAlerts(data, now);
+    if (!current.initialized && !metadata.complete) return;
+    const alerts = desktopAlerts(store);
     const added = alerts
       .filter((alert) => !current.seen.has(alert.id))
       .filter(alertsSince(current.started));
@@ -45,9 +61,7 @@ export function useDesktopNotifications(
       current.initialized = true;
       return;
     }
-    const openedShared = data.runtime?.rooms.find(
-      (room) => room.id === opened && room.radio,
-    );
+    const openedShared = opened ? data.rooms.get(opened) : undefined;
     for (const alert of added) {
       if (
         document.visibilityState === "visible" &&
@@ -59,6 +73,7 @@ export function useDesktopNotifications(
       const { id, ...notification } = alert;
       if (hasDesktopNotifications()) {
         void notifyDesktop(notification).catch((error) => {
+          if (stopped) return;
           const message =
             error instanceof Error ? error.message : String(error);
           const denied =
@@ -89,6 +104,7 @@ export function useDesktopNotifications(
         });
         native.onclick = () => {
           native.close();
+          if (stopped) return;
           window.focus();
           window.dispatchEvent(
             new CustomEvent("studio-navigate", { detail: alert.target }),
@@ -96,5 +112,11 @@ export function useDesktopNotifications(
         };
       }
     }
-  }, [data, opened, enabled, now]);
+  };
+  const stop = autorun(publish);
+  return () => {
+    stopped = true;
+    stop();
+    clearTimeout(timer);
+  };
 }

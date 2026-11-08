@@ -11,7 +11,6 @@ import {
   mergeSidebar,
   createMergedSidebarSelector,
   type SidebarSource,
-  selectCombinedSidebar,
 } from "./mergedSidebar";
 import {
   mergedSidebarPreferences,
@@ -169,17 +168,6 @@ it.runIf(process.env.CODEX_SIDEBAR_BENCHMARK === "1").each([false, true])(
     expect(times.sort((a, b) => a - b)[1]).toBeLessThan(500);
   },
 );
-
-it("classic mode does not request sources or construct the merged model", () => {
-  const select = vi.fn(createMergedSidebarSelector());
-  const sources = vi.fn(() => [source("local")]);
-  expect(selectCombinedSidebar(false, select, sources)).toBeUndefined();
-  expect(select).not.toHaveBeenCalled();
-  expect(sources).not.toHaveBeenCalled();
-  expect(selectCombinedSidebar(true, select, sources)?.sources).toHaveLength(1);
-  expect(select).toHaveBeenCalledOnce();
-  expect(sources).toHaveBeenCalledOnce();
-});
 
 it("an explicit reorder converts legacy combined ranks without changing unknown native IDs", () => {
   const a = source("local", 2),

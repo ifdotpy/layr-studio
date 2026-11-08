@@ -1,7 +1,6 @@
 import { AgentStatus } from "./generated/api";
 import { nativeErrorView } from "./nativeErrors";
 import type { GetResult } from "./api";
-import type { Approval } from "./approvals";
 import type {
   AgentEntityDto,
   AgentSummaryEntityDto,
@@ -16,7 +15,6 @@ import type {
   RuleEntityDto,
   TaskEntityDto,
   WorkEntityDto,
-  WorkspaceEntityDto,
   components,
 } from "./generated/api";
 
@@ -55,61 +53,6 @@ export type Event = EventEntityDto;
 export type Work = WorkEntityDto;
 export type Edge = EdgeEntityDto;
 
-type SnapshotRuntime = WorkspaceEntityDto & {
-  /** Projects of paired servers, published by this server and shown read-only. */
-  remoteProjects?: Project[] | undefined;
-  modelsByAccount?:
-    | Record<string, components["schemas"]["ModelEntityDto"][]>
-    | undefined;
-  desktop?: components["schemas"]["DesktopResponse"] | undefined;
-  sessionCostsByAgent?:
-    | Record<string, components["schemas"]["SessionCostResponse"]>
-    | undefined;
-  accountCostsByAccount?:
-    | Record<string, components["schemas"]["AccountCostResponse"]>
-    | undefined;
-  accountsSummary?: components["schemas"]["AccountsSummaryDto"] | undefined;
-  rateLimitsByAccount?:
-    | Record<string, components["schemas"]["RateLimitView"]>
-    | undefined;
-  rateLimits?: components["schemas"]["RateLimitView"] | null | undefined;
-  retainedWorktrees?:
-    | components["schemas"]["RetainedWorktreeEntityDto"][]
-    | undefined;
-  questionHistory?: Approval[] | undefined;
-  plans?: components["schemas"]["PlanSummaryEntityDto"][] | undefined;
-  annotations?: components["schemas"]["AnnotationEntityDto"][] | undefined;
-  studioErrors: components["schemas"]["StudioError"][];
-  agents: Agent[];
-  rooms: Room[];
-  tasks: BackgroundTask[];
-  monitors: Monitor[];
-  complaints: Complaint[];
-  requests: Approval[];
-  rules: Rule[];
-  projects: Project[];
-  /** Project entity sequence by native ID, owned by the entity projection; stale-delete guard. */
-  projectSequences?: Record<string, number> | undefined;
-  peerTeams: PeerTeam[];
-  events: Event[];
-  work: Work[];
-};
-
-/** Fields assembled for renderer consumers from entity collections. */
-type ProjectionSnapshotFields = {
-  /** Workspace of the applied entity rows, stamped by their projection handle. */
-  entityWorkspaceId?: string | undefined;
-  token: string;
-  stateDir: string;
-  threads: Agent[];
-  chats: Chat[];
-  nodes: Array<Agent | Chat>;
-  edges: Edge[];
-  /** False while the first sync pull of this projection still runs: records can be missing. */
-  entitiesComplete?: boolean | undefined;
-};
-
-export type Snapshot = ProjectionSnapshotFields & { runtime: SnapshotRuntime };
 export type FederationPeer = components["schemas"]["FederationPeer"];
 export type FederationRoom = components["schemas"]["FederationRoom"];
 export type FederationSnapshot = components["schemas"]["FederationSnapshot"];

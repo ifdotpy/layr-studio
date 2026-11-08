@@ -1,0 +1,70 @@
+// @vitest-environment happy-dom
+import { act, createElement } from "react";
+import { createRoot } from "react-dom/client";
+import { MantineProvider } from "@mantine/core";
+import { expect, it, vi } from "vitest";
+import { SearchContent } from "./SearchOverlay.tsx";
+Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+const fixture = vi.hoisted(() => ({
+  get: vi.fn(),
+  result: { id: "message", agent: "same", text: "Excerpt", kind: "message" },
+}));
+vi.mock("../../servers/ServerServicesContext", () => ({
+  useServerApi: () => ({ get: fixture.get }),
+  useServerStore: () => ({
+    state: () => ({
+      current: {
+        status: "live",
+        data: { agents: new Map([["same", { name: "Own server" }]]) },
+      },
+    }),
+  }),
+}));
+vi.mock("../useWorkspaceResource", () => ({
+  useWorkspaceResource: () => ({
+    loading: false,
+    error: "",
+    data: { results: [fixture.result] },
+  }),
+}));
+it("renders scoped names and ignores a source reply after its detail is closed", async () => {
+  const pending = Promise.withResolvers<unknown>();
+  fixture.get.mockReturnValueOnce(pending.promise);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  const source = {
+    opened: true,
+    close: vi.fn(),
+    select: vi.fn(),
+    navigate: vi.fn(),
+  };
+  await act(async () =>
+    root.render(
+      createElement(
+        MantineProvider,
+        null,
+        createElement(SearchContent, { source }),
+      ),
+    ),
+  );
+  expect(host.textContent).toContain("Own server");
+  await act(async () =>
+    host.querySelector<HTMLButtonElement>(".workspace-row")!.click(),
+  );
+  const detail = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(detail.textContent).toContain("Search source");
+  await act(async () =>
+    detail
+      .querySelector<HTMLButtonElement>("button.mantine-Modal-close")!
+      .click(),
+  );
+  await act(async () => {
+    pending.resolve({ ...fixture.result, text: "Late full source" });
+    await pending.promise;
+  });
+  expect(document.body.textContent).not.toContain("Late full source");
+  expect(source.select).not.toHaveBeenCalled();
+  await act(async () => root.unmount());
+  host.remove();
+});

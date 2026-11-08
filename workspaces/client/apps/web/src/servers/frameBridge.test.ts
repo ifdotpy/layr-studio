@@ -1,41 +1,22 @@
-import { createStateMirror } from "../generated/observableResources.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import {
+  createStateMirror,
+  createRequestsMirror,
+  createProjectionMetadataMirror,
+  serializeStateCollections,
+} from "../generated/observableResources.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { AgentSource } from "../generated/api";
 import { required } from "../components/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { Snapshot } from "../types";
+
 import type { ServerNavigation, ServerAccount } from "./navigation";
 import { createScreenChannel, type ScreenChannel } from "./screenChannel";
 
 const hooks = vi.hoisted(() => ({
   mirror: null as ReturnType<typeof createStateMirror> | null,
-  effects: [] as (() => void | (() => void))[],
   screen: null as ScreenChannel | null,
-}));
-vi.mock("./ScreenContext", async (original) => ({
-  ...(await original<typeof import("./ScreenContext")>()),
-  useScreenChannel: () => hooks.screen,
-}));
-vi.mock("./ServerServicesContext", () => ({
-  useServerStore: () => ({
-    state: () => ({
-      current: { status: "live", data: required(hooks.mirror).current },
-    }),
-  }),
-  useServerApi: () => ({ get: vi.fn(), saved: api.saved }),
-  useServerResources: () => ({ watchResourceConnection: () => stopConnection }),
-}));
-vi.mock("react", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("react")>()),
-  useEffect: (effect: () => void | (() => void)) => hooks.effects.push(effect),
-  useRef: (current: unknown) => ({ current }),
-  useState: (initial: unknown) => [
-    typeof initial === "function" ? initial() : initial,
-    () => {},
-  ],
-  useContext: () => null,
-  useMemo: (create: () => unknown) => create(),
 }));
 vi.mock("./environment", async (importOriginal) => ({
   ...(await importOriginal<typeof import("./environment")>()),
@@ -56,7 +37,7 @@ vi.mock("../sync/subscriptions/events", () => ({
 }));
 
 import * as api from "../api";
-import { useServerFrame } from "./frameBridge";
+import { startServerFrame } from "./frameBridge";
 import * as sidebarRpc from "./sidebarRpc";
 import { ApiError } from "../api";
 import { preferenceEvent } from "../sync/uiPreferenceMerge";
@@ -90,7 +71,6 @@ beforeEach(() => {
       }),
     },
   ]);
-  hooks.effects = [];
   hooks.screen = null;
   cleanup = [];
   records = new Map();
@@ -145,11 +125,58 @@ function mount(
   accounts: ServerAccount[] = [],
 ) {
   const run = vi.fn();
-  useServerFrame(data, "lead", "", run, new Map(), accounts);
-  for (const effect of hooks.effects) {
-    const stop = effect();
-    if (stop) cleanup.push(stop);
-  }
+  if (data)
+    required(hooks.mirror).apply([
+      ...serializeStateCollections(required(hooks.mirror).current).filter(
+        (entity) => entity.collection !== "workspace",
+      ),
+      {
+        collection: "workspace",
+        id: "current",
+        value: { stateDir: data.stateDir },
+      },
+    ]);
+  const requests = createRequestsMirror();
+  const metadata = createProjectionMetadataMirror({
+    workspaceId: data?.entityWorkspaceId ?? "",
+    ready: !!data,
+    complete: !!data && data.entitiesComplete !== false,
+    projectSequences: {},
+  });
+  cleanup.push(
+    startServerFrame(
+      {
+        store: {
+          requests: () => ({
+            current: { status: "live", data: requests.current },
+          }),
+          agentDetail: () => ({ current: { status: "loading" } }),
+          state: () => ({
+            current: { status: "live", data: required(hooks.mirror).current },
+          }),
+        },
+        services: {
+          api: {
+            get: api.get,
+            saved: api.saved,
+            getToken: () => data?.token ?? "",
+          },
+          sync: { projectionMetadata: metadata.current },
+          resources: { watchResourceConnection: () => stopConnection },
+        },
+        screen: { channel: hooks.screen, active: true },
+      },
+      {
+        ready: !!data,
+        opened: "lead",
+        error: "",
+        run,
+        pendingReads: new Map(),
+        accounts,
+        creating: false,
+      },
+    ),
+  );
   return run;
 }
 
@@ -280,7 +307,7 @@ it("republishes saved order and tree changes from scoped or materialized storage
       .navigation.sidebar?.entities.find(
         (entity) => entity.collection === "workspace",
       )?.value,
-  ).toBeUndefined();
+  ).toEqual(expect.objectContaining({ stateDir: "/same/state" }));
   preferenceMemory.setItem(
     ":server:remote:codex-project-tree:/same/state",
     JSON.stringify({ "/work": true }),

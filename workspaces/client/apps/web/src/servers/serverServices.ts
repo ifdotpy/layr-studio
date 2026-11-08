@@ -1,3 +1,6 @@
+import type { ServerSettings } from "./ServerSettingsContext.tsx";
+import { ServerAreas } from "../app/ServerAreasProvider.tsx";
+import { ScreenOwner } from "../app/startup/ScreenOwner.ts";
 import { createModelReader } from "./modelReader.ts";
 import { createSidebarServices } from "../components/sidebar/services.tsx";
 import { serverSidebarBackend } from "./serverSidebarBackend.ts";
@@ -15,7 +18,7 @@ import { createChatCreationStore } from "../chatCreation";
 import { createFileActions } from "../fileActions";
 import { createFileDialogs } from "../native/fileDialogs";
 import { watchResourceReads } from "../sync/subscriptions/reads";
-import { createBrowserDrafts } from "../sync/drafts";
+import { createDrafts } from "../sync/drafts";
 import { createOutbox } from "../sync/send";
 import { createSyncClient } from "../sync/client";
 import { createServerSubscriptions } from "../sync/subscriptions/server";
@@ -124,18 +127,7 @@ export function createServerServices(server: StudioServer) {
     watchResourceConnection: (...args) =>
       synchronization().resources.watchResourceConnection(...args),
   });
-  let browserDrafts: ReturnType<typeof createBrowserDrafts> | undefined;
-  const drafts = () => {
-    return (browserDrafts ??= createBrowserDrafts({
-      serverId: transport.owner.id,
-      api,
-      resources: {
-        watchResourceChanges: (...args) =>
-          synchronization().resources.watchResourceChanges(...args),
-        replaceStream: () => synchronization().resources.replaceStream(),
-      },
-    }));
-  };
+  let draftService: ReturnType<typeof createDrafts> | undefined;
   const localDrafts = createLocalDraftStorage(
     storage,
     storageNameForServer(transport.owner.id, LOCAL_DRAFT_DATABASE_NAME),
@@ -167,8 +159,17 @@ export function createServerServices(server: StudioServer) {
     }
     await initialization;
   }
+  const screen = new ScreenOwner();
+  let areas: ServerAreas | undefined;
   let sidebarServices: ReturnType<typeof createSidebarServices> | undefined;
   return {
+    screen,
+    shellSettings: undefined as ServerSettings | undefined,
+    get areas(): ServerAreas {
+      if (!areas || areas.disposed)
+        areas = new ServerAreas({ services: this, store: this.store, screen });
+      return areas;
+    },
     get sidebarServices(): ReturnType<typeof createSidebarServices> {
       if (!sidebarServices) {
         const backend = serverSidebarBackend(this, () => true);
@@ -203,8 +204,16 @@ export function createServerServices(server: StudioServer) {
     sequences,
     transcripts,
     outbox,
-    get useDrafts() {
-      return drafts();
+    get drafts() {
+      return (draftService ??= createDrafts({
+        serverId: transport.owner.id,
+        api,
+        resources: {
+          watchResourceChanges: (...args) =>
+            synchronization().resources.watchResourceChanges(...args),
+          replaceStream: () => synchronization().resources.replaceStream(),
+        },
+      }));
     },
     tokenRates,
     get sync() {
@@ -220,6 +229,7 @@ export function createServerServices(server: StudioServer) {
     storage,
     ready,
     close(removeCache = false) {
+      areas?.dispose();
       audio.close();
       stopName();
       runtime?.store.dispose();

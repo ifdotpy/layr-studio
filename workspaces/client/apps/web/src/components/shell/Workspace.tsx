@@ -1,3 +1,6 @@
+import { resourceData } from "../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../generated/observableResources.ts";
+import type { SidebarAgent } from "../sidebar/viewModel.ts";
 import { observer } from "mobx-react-lite";
 import { ApiError } from "../../api";
 import { serverMutationResponseIsUncertain } from "../../servers/mutationIdentity";
@@ -11,6 +14,7 @@ import { isModelEnabled, useModelChoices } from "../models/modelChoices";
 import Tasks from "./Tasks";
 import { providerSupports } from "../../generated/providerKind.ts";
 import {
+  useServerStore,
   useServerApi,
   useServerSync,
 } from "../../servers/ServerServicesContext";
@@ -19,7 +23,7 @@ import { EmptyState, PanelHeader } from "../ui/primitives";
 import { localDateTime } from "../../local-time";
 import ErrorDescription from "../ErrorDescription";
 import { useWorkspaceResource as useResource } from "../useWorkspaceResource";
-import { messageAttentionCount } from "../../chatScope";
+import { needsAnswer } from "../../approvals.ts";
 import {
   Badge,
   Button,
@@ -54,7 +58,7 @@ import {
   type PostBody,
   type PostResult,
 } from "../../api";
-import type { Agent, Json, JsonInput, JsonValue, Snapshot } from "../../types";
+import type { Agent, Json, JsonInput, JsonValue } from "../../types";
 import { useFormDraft } from "../useFormDraft";
 import { ModelField } from "../models/ModelField";
 import {
@@ -82,8 +86,6 @@ type Props = WorkspacePanelPresentationProps & {
   opened: boolean;
   onClose: () => void;
   agent?: Agent | undefined;
-  data: Snapshot;
-  allRequests: NonNullable<Snapshot["runtime"]>["requests"];
   onSelect: (id: string, messageId?: string) => void;
   refresh: () => Promise<void>;
   notify: (s: string) => void;
@@ -93,13 +95,13 @@ type WorkspaceAction = <Path extends ApiPostPath>(
   body: PostBody<Path>,
 ) => Promise<PostResult<Path>>;
 type Context = Props & {
-  selected: Agent | undefined;
+  stateDir: string;
+  selected: SidebarAgent | undefined;
   run: WorkspaceAction;
   reload: () => void;
   revision: number;
   preview: (target: PreviewTarget) => void;
   navigate: (section: string, agent?: string, item?: string) => void;
-  focusId: string;
 };
 const sections = [
   ["changes", "Changes", FileDiff],
@@ -165,7 +167,22 @@ function Status({ value }: { value: string }) {
   );
 }
 
-export function Workspace(props: Props) {
+export const Workspace = observer(function Workspace(props: Props) {
+  const store = useServerStore();
+  const state = resourceData(store.state().current);
+  const rootId = props.agent?.rootId || props.agent?.id;
+  const agents = [...(state?.agents.values() ?? [])].filter(
+    (agent) => !!rootId && (agent.id === rootId || agent.rootId === rootId),
+  );
+  const members = new Set(agents.map((agent) => agent.id));
+  const attention =
+    [
+      ...(resourceData(store.requests().current)?.requests.values() ?? []),
+    ].filter((request) => members.has(request.agent) && needsAnswer(request))
+      .length +
+    [...(state?.complaints.values() ?? [])].filter(
+      (complaint) => complaint.leadId === rootId && complaint.needsUserResponse,
+    ).length;
   const { post } = useServerApi();
   const sync = useServerSync();
 
@@ -174,11 +191,7 @@ export function Workspace(props: Props) {
     [revision, setRevision] = useState(0),
     [preview, setPreview] = useState<PreviewTarget | null>(null);
   const [pending, setPending] = useState(0),
-    [focusId, setFocusId] = useState(""),
     [filePath, setFilePath] = useState("");
-  useEffect(() => {
-    if (props.opened && props.initialFocus) setFocusId(props.initialFocus.id);
-  }, [props.opened, props.initialFocus?.requestId]);
   const navRef = useRef<HTMLElement>(null);
   useEffect(() => {
     if (props.opened)
@@ -213,7 +226,6 @@ export function Workspace(props: Props) {
           previousEntry.section !== props.initialSection)
       ) {
         setSection(props.initialSection);
-        setFocusId("");
       }
     }
   }
@@ -245,21 +257,21 @@ export function Workspace(props: Props) {
     },
     [post, reload, sync],
   );
-  const selected = props.data.threads.find(
+  const selected = agents.find(
     (a) => a.id === agentId && a.source === GeneratedApiAgentSource.managed,
   );
   const context: Context = {
     ...props,
+    stateDir: state?.workspaces.values().next().value?.stateDir ?? "",
     selected,
     run,
     reload,
     revision,
     preview: setPreview,
-    focusId,
     navigate: (section, agent, item) => {
       setSection(section);
       if (agent) setAgentId(agent);
-      setFocusId(item || "");
+      void item;
     },
   };
   const needAgent = [
@@ -326,10 +338,8 @@ export function Workspace(props: Props) {
               >
                 <Icon size={17} />
                 <span>{label}</span>
-                {id === "messages" && messageAttentionCount(props.data) > 0 && (
-                  <span className="workspace-count">
-                    {messageAttentionCount(props.data)}
-                  </span>
+                {id === "messages" && attention > 0 && (
+                  <span className="workspace-count">{attention}</span>
                 )}
               </UnstyledButton>
             ))}
@@ -351,13 +361,13 @@ export function Workspace(props: Props) {
                       onChange={(e) => setAgentId(e.target.value)}
                     >
                       <option value="">Select an agent</option>
-                      {props.data.threads
+                      {agents
                         .filter(
                           (a) => a.source === GeneratedApiAgentSource.managed,
                         )
                         .map((a) => {
                           const parent = a.parentId
-                            ? props.data.threads.find(
+                            ? agents.find(
                                 (candidate) =>
                                   candidate.id === a.parentId &&
                                   candidate.source ===
@@ -440,51 +450,64 @@ export function Workspace(props: Props) {
               </Button>
             </div>
           )}
-          {needAgent && !selected ? (
-            <Empty>Select an agent to view its {title?.toLowerCase()}.</Empty>
-          ) : (
-            <div
-              className={
-                section === "messages" ? "workspace-message-body" : undefined
-              }
-              key={`${section}:${section === "messages" ? "team" : selected?.id || "all"}`}
-            >
-              {section === "changes" && <Changes {...context} />}
-              {section === "messages" && (
-                <TeamChats
-                  focusItemId={props.initialFocus?.id}
-                  focusRequestId={props.initialFocus?.requestId}
-                  focusRoomId={props.initialFocus?.roomId}
-                  leadId={
-                    props.agent?.rootId ||
-                    (props.agent?.isLead ? props.agent.id : undefined)
-                  }
-                />
-              )}
-              {section === "search" && <SearchContent {...context} />}
-              {section === "plan" && <Plan {...context} />}
-              {section === "tasks" && selected && (
-                <Tasks
-                  key={selected.id}
-                  agentId={selected.id}
-                  rootId={selected.rootId || selected.id}
-                />
-              )}
-              {section === "checkpoints" && <Checkpoints {...context} />}
-              {section === "tools" && <Tools {...context} />}
-              {section === "profiles" && <Profiles {...context} />}
-              {section === "rules" && <Rules {...context} />}
-            </div>
-          )}
+          {props.opened &&
+            (needAgent && !selected ? (
+              <Empty>Select an agent to view its {title?.toLowerCase()}.</Empty>
+            ) : (
+              <div
+                className={
+                  section === "messages" ? "workspace-message-body" : undefined
+                }
+                key={`${section}:${section === "messages" ? "team" : selected?.id || "all"}`}
+              >
+                {section === "changes" && <Changes {...context} />}
+                {section === "messages" && (
+                  <TeamChats
+                    focusItemId={props.initialFocus?.id}
+                    focusRequestId={props.initialFocus?.requestId}
+                    focusRoomId={props.initialFocus?.roomId}
+                    leadId={
+                      props.agent?.rootId ||
+                      (props.agent?.isLead ? props.agent.id : undefined)
+                    }
+                  />
+                )}
+                {section === "search" && (
+                  <SearchContent
+                    source={{
+                      opened: props.opened,
+                      close: props.onClose,
+                      select: props.onSelect,
+                      navigate: context.navigate,
+                    }}
+                  />
+                )}
+                {section === "plan" && <Plan {...context} />}
+                {section === "tasks" && selected && (
+                  <Tasks
+                    key={selected.id}
+                    agentId={selected.id}
+                    rootId={selected.rootId || selected.id}
+                  />
+                )}
+                {section === "checkpoints" && <Checkpoints {...context} />}
+                {section === "tools" && <Tools {...context} />}
+                {section === "profiles" && <Profiles {...context} />}
+                {section === "rules" && <Rules {...context} />}
+              </div>
+            ))}
         </main>
       </div>
-      <FilePreview target={preview} onClose={() => setPreview(null)} />
+      <FilePreview
+        target={props.opened ? preview : null}
+        onClose={() => setPreview(null)}
+      />
     </WorkspacePanelHost>
   );
-}
+});
 export default Workspace;
 
-function Changes(c: Context) {
+const Changes = observer(function Changes(c: Context) {
   const state = useResource("/api/changes", c.revision, {
       query: {
         ...(c.selected ? { agent: c.selected.id } : {}),
@@ -492,7 +515,13 @@ function Changes(c: Context) {
       },
     }),
     comments = {
-      data: { annotations: c.data.runtime.annotations ?? [] },
+      data: {
+        annotations: [
+          ...(resourceData(
+            useServerStore().state().current,
+          )?.annotations.values() ?? []),
+        ],
+      },
       error: "",
       loading: false,
     };
@@ -700,14 +729,16 @@ function Changes(c: Context) {
       </Modal>
     </>
   );
-}
+});
 
-function Plan(c: Context) {
+const Plan = observer(function Plan(c: Context) {
   const state = {
     data:
-      c.data.runtime.plans?.find((plan) => plan.id === c.selected?.id) ?? null,
+      resourceData(useServerStore().state().current)?.plans.get(
+        c.selected?.id ?? "",
+      ) ?? null,
     error: "",
-    loading: !c.data.entitiesComplete,
+    loading: !useServerSync().projectionMetadata.complete,
   };
   const native = state.data?.native;
   const steps = native?.plan ?? [];
@@ -740,22 +771,26 @@ function Plan(c: Context) {
       )}
     </>
   );
-}
+});
 
-function Checkpoints(c: Context) {
+const Checkpoints = observer(function Checkpoints(c: Context) {
   const state = useResource("/api/checkpoints", c.revision, {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
     [label, setLabel] = useState(""),
     [preview, setPreview] = useState<CheckpointPreview | null>(null),
     [busy, setBusy] = useState(false),
-    // A shared folder has no snapshot to restore from, so rewind is off for that chat.
-    sharedFolder =
-      c.selected?.workspaceMode === GeneratedApiWorkspaceMode.shared ||
-      (!c.selected?.worktree &&
-        c.selected?.workspaceMode !== GeneratedApiWorkspaceMode.worktree),
+    store = useServerStore(),
+    detail = c.selected
+      ? resourceData(
+          store.agentDetail(observableAgentId(c.selected.id)).current,
+        )
+      : undefined,
     canRewind =
-      providerSupports(c.selected?.provider, "rewind") && !sharedFolder;
+      providerSupports(c.selected?.provider, "rewind") &&
+      (detail?.worktree ||
+        detail?.workspaceMode === GeneratedApiWorkspaceMode.worktree) &&
+      detail?.workspaceMode !== GeneratedApiWorkspaceMode.shared;
   return (
     <>
       <ResourceState state={state} />
@@ -886,7 +921,7 @@ function Checkpoints(c: Context) {
       </Modal>
     </>
   );
-}
+});
 
 type CheckpointPreview = Omit<
   PostResult<"/api/checkpoint/preview">,
@@ -1059,15 +1094,15 @@ function inventoryName(value: unknown): string | undefined {
 const Profiles = observer(function Profiles(c: Context) {
   const state = useResource("/api/profiles", c.revision),
     [draft, setDraft, clearDraft] = useFormDraft(
-      `studio-profile-draft:${c.data.stateDir}`,
+      `studio-profile-draft:${c.stateDir}`,
     ),
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<
       GetResult<"/api/profiles">["profiles"][number] | null
     >(null),
     [launch, setLaunch] = useState<WorkerLaunch | null>(null);
-  const lead = c.data.threads.find(
-    (a) => a.id === (c.selected?.rootId || c.selected?.id) && a.isLead,
+  const lead = resourceData(useServerStore().state().current)?.agents.get(
+    c.selected?.rootId || c.selected?.id || "",
   );
   // The profile model list comes from the selected lead's subagent catalog.
   const catalog = useWorkerModels(lead?.accountKey || "default", !!draft, true);
@@ -1341,7 +1376,7 @@ function Rules(c: Context) {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
     [draftValue, setDraftValue, clearDraft] = useFormDraft(
-      `studio-rule-draft:${JSON.stringify([c.data.stateDir, c.selected?.id])}`,
+      `studio-rule-draft:${JSON.stringify([c.stateDir, c.selected?.id])}`,
     ),
     [busy, setBusy] = useState(false),
     [remove, setRemove] = useState<RuleRecord | null>(null);

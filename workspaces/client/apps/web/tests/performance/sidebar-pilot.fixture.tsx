@@ -7,7 +7,7 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
 import "../../src/appearance.css";
-import Sidebar from "../../src/components/Sidebar.tsx";
+import Sidebar from "../../src/components/Sidebar.fixture.tsx";
 import { createPilotModel } from "./sidebar-pilot-model.ts";
 import { pilotAgents, pilotSize, pilotUpdate } from "./sidebar-pilot-data.ts";
 import { required } from "./performance-fixture.ts";

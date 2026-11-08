@@ -36,15 +36,14 @@ type Attempt = {
   rejected?: boolean;
 };
 export default observer(function RadioChat({
-  roomId,
+  room,
   visible = true,
 }: {
-  roomId: string;
+  room: RadioRoom;
   visible?: boolean;
 }) {
   const store = useServerStore();
   const state = resourceData(store.state().current);
-  const room = state?.rooms.get(roomId);
   if (!state || !room?.radio) return <p role="status">Loading shared chat…</p>;
   return <RadioScreen room={room} state={state} visible={visible} />;
 });
@@ -62,8 +61,11 @@ const RadioScreen = observer(function RadioScreen({
 }) {
   useMessageRenderProbe("radio-screen", room.id);
   const { post, save, saved } = useServerApi();
-  const { getDraft, subscribeDraft, setDraft, refresh, notify } =
-    useConversationActions();
+  const area = useConversationActions();
+  const { getDraft, subscribeDraft } = area.scope.services.drafts;
+  const { editDraft: setDraft } = area.delivery;
+  const { refresh } = area,
+    { notify } = area.notices;
   const radio = room.radio!;
   const stateDir = state.workspaces.values().next().value?.stateDir || "";
   const key = `studio-radio-command:${stateDir}:${room.id}`;

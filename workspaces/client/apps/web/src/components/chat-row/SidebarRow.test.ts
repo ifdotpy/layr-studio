@@ -1,5 +1,5 @@
 import { createStateMirror } from "../../generated/observableResources.ts";
-import { useSidebarOrder, type SidebarDragTarget } from "../useSidebarOrder.ts";
+import { SidebarOrderOwner } from "../useSidebarOrder.ts";
 import { localSidebarServices } from "../sidebar/services.tsx";
 import { rowArea } from "./actions.fixture.ts";
 import { SidebarRowActionsProvider } from "./actions.ts";
@@ -8,7 +8,6 @@ import { MarkUnreadEligibility } from "../../generated/api.ts";
 // @vitest-environment happy-dom
 import {
   act,
-  useLayoutEffect,
   createElement,
   Profiler,
   StrictMode,
@@ -71,26 +70,33 @@ it.each([false, true])(
     const ui = observable({
       services: localSidebarServices,
       aliases: observable.map<string, string>(),
-      dragTarget: null as SidebarDragTarget | null,
-      dropDestination: null as string | null,
+      get sorting() {
+        return sorting;
+      },
       offline: observable.set<string>(),
-      opened: null as string | null,
-      pendingReadTargets: new Map<
-        string,
-        NonNullable<SidebarAgent["markRead"]>
-      >(),
+      selection: { selectedId: null as string | null },
+      read: {
+        pendingReadTargets: new Map<
+          string,
+          NonNullable<SidebarAgent["markRead"]>
+        >(),
+        marking: new Set<string>(),
+      },
       renaming: null as string | null,
       renameInPriority: false,
       name: "",
       organizing: null as string | null,
-      compact: false,
-      markingRead: new Set<string>(),
+      visibility: { isCompact: false },
       overrides: observable.map<
         string,
         { pinned?: boolean; archived?: boolean }
       >(),
     });
-    let sorting: ReturnType<typeof useSidebarOrder>;
+    const sorting = new SidebarOrderOwner({
+      stateDir: "/row-isolation",
+      runtime: undefined,
+      services: localSidebarServices,
+    });
     const area: SidebarRowActions = {
       ui,
       commands: () => actions,
@@ -109,16 +115,6 @@ it.each([false, true])(
     };
     const renders = new Map<string, number>();
     const Rows = observer(() => {
-      sorting = useSidebarOrder(
-        "codex-sidebar-order:/row-isolation",
-        undefined,
-      );
-      useLayoutEffect(() =>
-        runInAction(() => {
-          ui.dragTarget = sorting.target;
-          ui.dropDestination = sorting.destination;
-        }),
-      );
       return f.model.rows.flatMap((row) =>
         [false, true].map((copy) =>
           createElement(
@@ -183,7 +179,7 @@ it.each([false, true])(
     renders.clear();
     await act(async () =>
       runInAction(() => {
-        ui.markingRead.add("a");
+        ui.read.marking.add("a");
       }),
     );
     expect(renders.get("a:false")).toBeGreaterThan(0);
@@ -191,24 +187,24 @@ it.each([false, true])(
     expect(renders.get("b:true") || 0).toBe(0);
     for (const update of [
       () =>
-        ui.pendingReadTargets.set("a", {
+        ui.read.pendingReadTargets.set("a", {
           threadId: "thread",
           turnId: "turn",
           revision: 2,
           read: false,
         }),
-      () => ui.pendingReadTargets.delete("a"),
+      () => ui.read.pendingReadTargets.delete("a"),
       () => ui.offline.add("a"),
       () => ui.aliases.set("a", "Changed server"),
       () => {
-        ui.dropDestination = "convert:a";
+        sorting.setDestination("convert:a");
       },
       () => {
-        ui.dragTarget = {
+        sorting.setTarget({
           group: f.model.rows[0]!.groupKey,
           id: "a",
           after: true,
-        };
+        });
       },
     ]) {
       renders.clear();

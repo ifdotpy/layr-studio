@@ -1,3 +1,4 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
 import { messageModels } from "../messages/message-models.fixture";
 import { conversationActionsFixture } from "../../src/components/observableFixture";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
@@ -5,9 +6,12 @@ import { observableFixture } from "../../src/components/observableFixture.tsx";
 const injectedStore = observableFixture();
 import { observer } from "mobx-react-lite";
 import { peerTeamRowFixtures } from "./peer-teams-rows.fixture.ts";
-import { createStateMirror } from "../../src/generated/observableResources.ts";
+import {
+  createStateMirror,
+  serializeStateCollections,
+} from "../../src/generated/observableResources.ts";
 import type { components } from "../../src/generated/api.ts";
-import type { Agent, Snapshot } from "../../src/types.ts";
+import type { Agent } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 type PeerProject = Pick<
   components["schemas"]["ProjectEntityDto"],
@@ -46,7 +50,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Sidebar from "../../src/components/Sidebar.tsx";
+import Sidebar from "../../src/components/Sidebar.fixture.tsx";
 import TeamChats from "../../src/components/shell/messages/TeamChats.tsx";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
@@ -102,7 +106,24 @@ const initial: Snapshot = {
   },
 };
 const sidebar = createStateMirror();
-sidebar.apply([
+let currentSnapshot = initial;
+const receiveSidebar = (dto: Parameters<typeof sidebar.apply>[0]) =>
+  sidebar.apply([
+    ...dto.filter(
+      (item) => item.collection !== "workspace" && item.collection !== "room",
+    ),
+    {
+      collection: "workspace",
+      id: "fixture",
+      value: { ...currentSnapshot.runtime, stateDir: currentSnapshot.stateDir },
+    },
+    ...currentSnapshot.runtime.rooms.map((value) => ({
+      collection: "room" as const,
+      id: value.id,
+      value,
+    })),
+  ]);
+receiveSidebar([
   ...[
     peerTeamRowFixtures.a,
     peerTeamRowFixtures.b,
@@ -119,18 +140,23 @@ sidebar.apply([
     value,
   })),
 ]);
-window.receivePeerSidebar = sidebar.apply;
+window.receivePeerSidebar = receiveSidebar;
 const models = messageModels(initial.stateDir, initial.threads);
 const Fixture = observer(function Fixture() {
   const [data, setData] = useState(initial);
   const [opened, open] = useState("a");
-  window.setFixture = setData;
+  window.setFixture = (value) => {
+    const next = typeof value === "function" ? value(currentSnapshot) : value;
+    currentSnapshot = next;
+    receiveSidebar(serializeStateCollections(sidebar.current));
+    setData(next);
+  };
   window.peerTeamsData = data;
   window.failRefresh = false;
   const refresh = async () => {
     if (window.failRefresh) throw Error("Refresh failed");
     const r = await fetch("/snapshot");
-    setData(await r.json());
+    window.setFixture(await r.json());
   };
   models.apply([
     ...data.runtime.rooms.map((value) => ({
@@ -175,7 +201,7 @@ const Fixture = observer(function Fixture() {
         </injectedStore.Provider>
       </div>
       <models.Provider
-        commands={{ ...conversationActionsFixture(open), refresh }}
+        commands={Object.assign(conversationActionsFixture(open), { refresh })}
       >
         <TeamChats leadId={opened} />
       </models.Provider>

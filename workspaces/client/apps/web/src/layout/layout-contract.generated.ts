@@ -437,16 +437,6 @@ export const layoutTokens = {
     unit: "rem",
     purpose: "Pointer hit width of the navigation resize control",
   },
-  "legacy_main_App.query91b57f15": {
-    value: 60,
-    unit: "rem",
-    purpose: 'Main src/App.tsx query: useMediaQuery("(min-width: 60rem)"',
-  },
-  "legacy_main_App.query78cb11fd": {
-    value: 79.8,
-    unit: "rem",
-    purpose: 'Main src/App.tsx query: useMediaQuery("(min-width: 79.8rem)"',
-  },
   "legacy_main_appearance.query0e42fa00": {
     value: 760,
     unit: "px",
@@ -497,12 +487,6 @@ export const layoutTokens = {
     unit: "rem",
     purpose:
       "Main src/components/accounts.css query: @container account-list (max-width: 22rem) {",
-  },
-  "legacy_main_components_agents_ChatSettingsDialog.query7e044896": {
-    value: 48,
-    unit: "em",
-    purpose:
-      'Main src/components/agents/ChatSettingsDialog.tsx query: useMediaQuery("(max-width: 48em)"',
   },
   "legacy_main_components_agents_chat_settings_dialog.querye51eafe3": {
     value: 26,
@@ -618,12 +602,6 @@ export const layoutTokens = {
     purpose:
       "Main src/components/ui/primitives.css query: @media (max-width: 47.5rem) {",
   },
-  "legacy_main_servers_MultiServerApp.query3b784b5e": {
-    value: 760,
-    unit: "px",
-    purpose:
-      'Main src/servers/MultiServerApp.tsx query: matchMedia("(max-width: 760px)"',
-  },
   "legacy_main_servers_server_settings.query0bafbd4a": {
     value: 47.5,
     unit: "rem",
@@ -646,11 +624,6 @@ export const layoutTokens = {
     value: 760,
     unit: "px",
     purpose: "Main src/servers/servers.css query: @media (max-width: 760px) {",
-  },
-  "legacy_main_servers_servers.layere6065e37": {
-    value: 201,
-    unit: "layer",
-    purpose: "Main src/servers/servers.css layer: z-index: 201",
   },
   "legacy_main_servers_servers.layer34ae5ec1": {
     value: 200,
@@ -858,6 +831,11 @@ export const layoutTokens = {
     purpose:
       "Initial composer focus watch interval for a delayed silent keyboard height change",
   },
+  "settings.fullScreenMax": {
+    value: 48,
+    unit: "em",
+    purpose: "Maximum viewport width for fullscreen chat settings",
+  },
 } as const;
 export const layoutValues = {
   navigation: {
@@ -1027,10 +1005,6 @@ export const layoutValues = {
     menuGap: 8,
     buttonSize: 48,
   },
-  legacy_main_App: {
-    query91b57f15: 60,
-    query78cb11fd: 79.8,
-  },
   legacy_main_appearance: {
     query0e42fa00: 760,
     agentModeLimitWidth: 64,
@@ -1050,9 +1024,6 @@ export const layoutValues = {
     query452cba01: 37.5,
     query0bafbd4a: 47.5,
     querya3ae2bbc: 22,
-  },
-  legacy_main_components_agents_ChatSettingsDialog: {
-    query7e044896: 48,
   },
   legacy_main_components_agents_chat_settings_dialog: {
     querye51eafe3: 26,
@@ -1095,9 +1066,6 @@ export const layoutValues = {
   legacy_main_components_ui_primitives: {
     query0bafbd4a: 47.5,
   },
-  legacy_main_servers_MultiServerApp: {
-    query3b784b5e: 760,
-  },
   legacy_main_servers_server_settings: {
     query0bafbd4a: 47.5,
     query3e8f17d2: 22.5,
@@ -1105,7 +1073,6 @@ export const layoutValues = {
   },
   legacy_main_servers_servers: {
     query0e42fa00: 760,
-    layere6065e37: 201,
     layer34ae5ec1: 200,
     dimension112ab710: 270,
   },
@@ -1147,6 +1114,9 @@ export const layoutValues = {
     shortLandscapeMaxHeight: 700,
     compactHeight: 44,
   },
+  settings: {
+    fullScreenMax: 48,
+  },
 } as const;
 export const layoutQueries = {
   navigationCompact: "(width < 761px)",
@@ -1155,6 +1125,7 @@ export const layoutQueries = {
   teamInline: "(width >= 960px)",
   toolsCompact: "(width < 900px)",
   teamToggleCompact: "(width <= 660px)",
+  settingsFullScreen: "(width <= 48em)",
 } as const;
 export const layerZIndex = layoutValues.layers;
 export type LayoutLengthKey = {

@@ -1,24 +1,13 @@
-import { useEffect, useState } from "react";
-import { useServerSync } from "../servers/ServerServicesContext";
-import { desktopNotices, type DesktopNotice } from "./desktopNotices";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { useServerStore } from "../servers/ServerServicesContext";
+import { desktopNotices } from "./desktopNotices";
 import "./supervisor-recovery-notice.css";
 
 // Host notices from /api/desktop: supervisor recovery and low disk space.
-export default function SupervisorRecoveryNotice() {
-  const { subscribeStateProjection } = useServerSync();
-  const [notices, setNotices] = useState<DesktopNotice[]>([]);
-
-  useEffect(
-    () =>
-      subscribeStateProjection(
-        (snapshot) => {
-          if (snapshot?.runtime.desktop)
-            setNotices(desktopNotices(snapshot.runtime.desktop));
-        },
-        () => {},
-      ),
-    [subscribeStateProjection],
-  );
+export default observer(function SupervisorRecoveryNotice() {
+  const desktop = resourceData(useServerStore().desktop().current);
+  const notices = desktop ? desktopNotices(desktop) : [];
 
   return notices.map((notice) => (
     <div
@@ -32,4 +21,4 @@ export default function SupervisorRecoveryNotice() {
       {notice.text}
     </div>
   ));
-}
+});

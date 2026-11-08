@@ -13,7 +13,7 @@ import { createSubscriptions } from "../../sync/subscriptions/module";
 import { createServerStore } from "../../store";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture";
 import type { components } from "../../generated/api";
-import BackgroundTasks from "./BackgroundTasks";
+import BackgroundTasks from "./BackgroundTasks.tsx";
 import { backgroundDisplay } from "../componentTestFixtures";
 
 const h = vi.hoisted(() => ({
@@ -282,6 +282,7 @@ it("uses the server response target before any owner arrives and captures its pr
   try {
     await f.publish([], target);
     await act(async () => button("Stop response").click());
+    expect(button("Stop response").hasAttribute("data-loading")).toBe(false);
     expect(h.post).toHaveBeenCalledWith(
       "/api/processes/action",
       expect.objectContaining({

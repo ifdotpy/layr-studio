@@ -2,12 +2,11 @@ import { randomUUID } from "../uuid";
 import { Button, NativeSelect, TextInput } from "@mantine/core";
 import { useId, useRef, useState } from "react";
 import { useProjectSave } from "./useProjectSave";
-import type { Agent, Snapshot, DeepReadonly } from "../types";
+import type { Agent, DeepReadonly } from "../types";
+import type { components } from "../generated/api.ts";
 import { SettingsRow } from "./ui/primitives";
 
-export type Project = DeepReadonly<
-  NonNullable<Snapshot["runtime"]>["projects"][number]
->;
+export type Project = DeepReadonly<components["schemas"]["ProjectEntityDto"]>;
 export type ProjectFolder = NonNullable<Project["folders"]>[number];
 
 export function folderLabel(

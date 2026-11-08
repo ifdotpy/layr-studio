@@ -32,22 +32,34 @@ const limits = (accountKey: string, at: number, usedPercent: number) =>
     data: { accountId: null, rateLimits: { primary: { usedPercent } } },
     error: null,
   }) as unknown as AccountLimitsSnapshot;
-const render = (element: ReturnType<typeof createElement>) =>
-  renderToStaticMarkup(
+const render = (element: ReturnType<typeof createElement>) => {
+  const fixture = observableFixture();
+  const html = renderToStaticMarkup(
     createElement(
       ServerStoreProvider,
-      { value: observableFixture().store },
+      { value: fixture.store },
       createElement(
         MantineProvider,
         null,
         createElement(
           Accordion,
           { keepMounted: false },
-          createElement(Accordion.Item, { value: "account" }, element),
+          createElement(
+            Accordion.Item,
+            { value: "account" },
+            createElement(
+              ServerStoreProvider,
+              { value: fixture.store },
+              element,
+            ),
+          ),
         ),
       ),
     ),
   );
+  fixture.store.dispose();
+  return html;
+};
 const count = (text: string, part: string) => text.split(part).length - 1;
 
 test.each(["codex", "claude"] as const)(

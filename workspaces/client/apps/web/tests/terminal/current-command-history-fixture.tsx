@@ -9,7 +9,6 @@ export type HistorySnapshot = {
 };
 declare global {
   interface Window {
-    // applySnapshot takes BrowserAccessSnapshot in tests/notices/browser-access-notice-ui.fixture.tsx.
     applyHistorySnapshot: (snapshot: HistorySnapshot) => void;
   }
 }

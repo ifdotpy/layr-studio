@@ -1,5 +1,5 @@
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
-import type { Account } from "../../src/components/Accounts.tsx";
+import type { Account } from "./fixture-helpers.ts";
 import type { Project } from "../../src/types.ts";
 import type { AccountRateLimitsDto } from "../playwright.ts";
 import type { Browser } from "@playwright/test";

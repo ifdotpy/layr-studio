@@ -5,10 +5,11 @@ import { ActionIcon, Popover } from "@mantine/core";
 import { Copy, Info, X } from "lucide-react";
 import { type GetOptions, type GetResult } from "../../../api";
 import { localDateTime } from "../../../local-time";
-import { useServerSync } from "../../../servers/ServerServicesContext";
-import type { components } from "../../../generated/api";
+import { useServerStore } from "../../../servers/ServerServicesContext";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as storeAgentId } from "../../../generated/observableResources.ts";
 import type { Message } from "../../../types";
-import type { UsageAccount } from "../../Usage";
+import type { Account } from "../../Accounts.tsx";
 import "./message-info.css";
 
 type Metadata = GetResult<"/api/analytics">;
@@ -18,7 +19,9 @@ export type MessageInfoProps = {
   agentId?: string | undefined;
   stateDir: string;
   rootId?: string | undefined;
-  accounts?: UsageAccount[] | undefined;
+  accounts?:
+    | readonly Pick<Account, "id" | "label" | "email" | "provider">[]
+    | undefined;
   onCopy: (value: string) => void;
 };
 
@@ -36,12 +39,11 @@ const duration = (value: number) =>
 export default observer(function MessageInfo({
   message,
   agentId,
-  stateDir,
   rootId,
   accounts,
   onCopy,
 }: MessageInfoProps) {
-  const { subscribeStateProjection } = useServerSync();
+  const store = useServerStore();
   const { get } = useServerApi();
 
   const [open, setOpen] = useState(false);
@@ -108,40 +110,13 @@ export default observer(function MessageInfo({
       ? null
       : new Date(typeof at === "number" ? at * 1000 : at);
   const account = accounts?.find(
-    (entry) => entry.key === (metadata?.accountKey || messageAccountKey),
+    (entry) => entry.id === (metadata?.accountKey || messageAccountKey),
   );
-  const costScope = JSON.stringify([stateDir, rootId]);
-  const [costState, setCostState] = useState<{
-    scope: string;
-    source: typeof subscribeStateProjection;
-    value: components["schemas"]["SessionCostResponse"];
-  } | null>(null);
-  useEffect(() => {
-    if (!open || !rootId) return;
-    let active = true;
-    const stop = subscribeStateProjection(
-      (snapshot) => {
-        const value = snapshot?.runtime.sessionCostsByAgent?.[rootId];
-        if (!active) return;
-        setCostState(
-          value?.rootId === rootId
-            ? { scope: costScope, source: subscribeStateProjection, value }
-            : null,
-        );
-      },
-      () => {},
-    );
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [open, rootId, costScope, subscribeStateProjection]);
-  const cost =
-    open &&
-    costState?.scope === costScope &&
-    costState.source === subscribeStateProjection
-      ? costState.value
-      : null;
+  const currentCost =
+    open && rootId
+      ? resourceData(store.sessionCost(storeAgentId(rootId)).current)
+      : undefined;
+  const cost = currentCost?.rootId === rootId ? currentCost : null;
   const rows: [string, string][] = [];
   const identifiers: Array<[string, string | undefined]> = [
     ["Turn ID", message.turnId ?? undefined],

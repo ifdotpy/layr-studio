@@ -6,7 +6,7 @@ import type { Agent } from "../../src/types.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { useConversationHistory } from "../../src/conversation/historySession.ts";
+import { useConversationHistory } from "../../src/conversation/historyFixture.ts";
 import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";

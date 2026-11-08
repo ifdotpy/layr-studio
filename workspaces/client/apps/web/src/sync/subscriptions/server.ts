@@ -73,7 +73,10 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
     createDataObserver(
       sync,
       transport,
-      createEntityDataObserver(() => sync().syncDatabase()),
+      createEntityDataObserver(
+        () => sync().syncDatabase(),
+        (report) => sync().retainStateDelivery(report),
+      ),
       {
         processes: (ref) =>
           api.get("/api/processes", { query: { agent: ref.agentId } }),

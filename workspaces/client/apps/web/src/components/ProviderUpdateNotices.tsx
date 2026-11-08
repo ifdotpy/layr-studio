@@ -5,7 +5,7 @@ type ProviderUpdateWarning = components["schemas"]["ProviderVersionWarningDto"];
 export default function ProviderUpdateNotices({
   notices,
 }: {
-  notices: ProviderUpdateWarning[];
+  notices: readonly ProviderUpdateWarning[];
 }) {
   return (
     <>

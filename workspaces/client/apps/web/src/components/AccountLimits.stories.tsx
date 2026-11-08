@@ -7,7 +7,7 @@ import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useEffect, useMemo } from "react";
 import { Accordion, MantineProvider } from "@mantine/core";
-import Usage from "./Usage";
+import { UsageFixture as Usage } from "../app/settings/UsageFixture.tsx";
 import { AccountCapacityView } from "./Accounts";
 import { accountLimitView, ProviderMark } from "./AccountTiles";
 import { createServerServices } from "../servers/serverServices";

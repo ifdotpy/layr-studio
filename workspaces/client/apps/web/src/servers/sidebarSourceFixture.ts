@@ -1,6 +1,12 @@
-import type { Snapshot } from "../types.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
-import { sidebarSnapshot } from "./sidebarSnapshot.ts";
+import {
+  sidebarCollectionView,
+  type ServerSidebarSnapshot,
+  type ServerSidebarView,
+} from "./sidebarSnapshot.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import { agentSummaryFixture } from "./agentSummaryFixture.ts";
+
+import type { components } from "../generated/api.ts";
 import { navigationSnapshot } from "./navigation.ts";
 import { createStateMirror } from "../generated/observableResources.ts";
 import {
@@ -24,9 +30,10 @@ type SidebarFixtureState =
     stateDir: string;
     projects: import("../types.ts").Project[];
     peerTeams: import("../types.ts").PeerTeam[];
-    peerTeamsVersion: Snapshot["runtime"]["peerTeamsVersion"];
-    projectOrganizationVersion: Snapshot["runtime"]["projectOrganizationVersion"];
-    sidebarOrder: Snapshot["runtime"]["sidebarOrder"];
+    rooms: components["schemas"]["RoomEntityDto"][];
+    peerTeamsVersion: components["schemas"]["WorkspaceEntityDto"]["peerTeamsVersion"];
+    projectOrganizationVersion: components["schemas"]["WorkspaceEntityDto"]["projectOrganizationVersion"];
+    sidebarOrder: components["schemas"]["WorkspaceEntityDto"]["sidebarOrder"];
   };
 export function withSidebarCollections(source: {
   id: string;
@@ -39,6 +46,7 @@ export function withSidebarCollections(source: {
     stateDir: "",
     projects: [],
     peerTeams: [],
+    rooms: [],
     peerTeamsVersion: undefined,
     projectOrganizationVersion: undefined,
     sidebarOrder: undefined,
@@ -50,6 +58,11 @@ export function withSidebarCollections(source: {
         (entity) =>
           !["project", "peerTeam", "workspace"].includes(entity.collection),
       ),
+      ...(sidebar.rooms || []).map((value) => ({
+        collection: "room" as const,
+        id: value.id,
+        value,
+      })),
       ...sidebar.projects.map((value) => ({
         collection: "project" as const,
         id: value.id,
@@ -106,7 +119,13 @@ export function sidebarFactsFixture(agents: readonly SidebarAgent[]) {
   return withSidebarCollections({
     id: "local",
     online: true,
-    sidebar: sidebarSnapshot(snapshotFixture([]), agentEntities(agents)),
+    sidebar: {
+      entities: agentEntities(agents),
+      savedOrder: {},
+      compact: {},
+      collapsed: {},
+      studioErrors: [],
+    },
   });
 }
 export function navigationFromSummaries(
@@ -115,7 +134,7 @@ export function navigationFromSummaries(
 ) {
   const source = sidebarFactsFixture(agents);
   return navigationSnapshot(
-    data,
+    stateFromFixture(data),
     null,
     "",
     source.view.rows,
@@ -123,5 +142,128 @@ export function navigationFromSummaries(
     undefined,
     new Set(),
     source.sidebar.entities,
+    {
+      workspaceId: data.entityWorkspaceId ?? "",
+      ready: true,
+      complete: data.entitiesComplete !== false,
+      projectSequences: {},
+    },
   );
+}
+
+/** Legacy scenario inputs seed real generated models; production never calls this helper. */
+export function stateFromFixture(
+  data: Snapshot,
+): import("../generated/observableResources.ts").StateCollections;
+export function stateFromFixture(data: null | undefined): undefined;
+export function stateFromFixture(data: Snapshot | null | undefined) {
+  if (!data) return undefined;
+  const mirror = createStateMirror();
+  mirror.apply([
+    ...data.threads.map((agent) => ({
+      collection: "agentSummary" as const,
+      id: agent.id,
+      value: {
+        ...agentSummaryFixture(agent.id),
+        ...agent,
+        inFlight: agent.inFlight === true,
+        projectServerId: agent.projectServerId ?? null,
+        markRead: agent.markRead ?? null,
+      },
+    })),
+    ...data.chats.map((value) => ({
+      collection: "chat" as const,
+      id: value.id,
+      value,
+    })),
+    ...data.runtime.projects.map((value) => ({
+      collection: "project" as const,
+      id: value.id,
+      value,
+    })),
+    ...data.runtime.rooms.map((value) => ({
+      collection: "room" as const,
+      id: value.id,
+      value,
+    })),
+    ...data.runtime.peerTeams.map((value) => ({
+      collection: "peerTeam" as const,
+      id: value.id,
+      value,
+    })),
+    ...data.runtime.studioErrors.map((value) => ({
+      collection: "studioError" as const,
+      id: value.id,
+      value,
+    })),
+    {
+      collection: "workspace",
+      id: "current",
+      value: { ...data.runtime, stateDir: data.stateDir },
+    },
+  ]);
+  return mirror.current;
+}
+
+const membershipInputs = {
+  query: "",
+  archived: false,
+  opened: null,
+  rank: () => 0,
+};
+export function createSidebarSourceStore() {
+  const snapshots = new Map<
+    string,
+    {
+      sidebar: ServerSidebarView;
+      mirror: ReturnType<typeof createStateMirror>;
+      view: ReturnType<typeof createSidebarViewModel>;
+    }
+  >();
+  return {
+    update(id: string, sidebar: ServerSidebarSnapshot | undefined) {
+      if (!sidebar) return;
+      const previous = snapshots.get(id);
+      const mirror = previous?.mirror || createStateMirror();
+      const view =
+        previous?.view ||
+        createSidebarViewModel(
+          () => mirror.current,
+          () => membershipInputs,
+        );
+      mirror.apply(sidebar.entities);
+      snapshots.set(id, {
+        sidebar: sidebarCollectionView(sidebar, mirror.current),
+        mirror,
+        view,
+      });
+    },
+    forget(id: string) {
+      snapshots.delete(id);
+    },
+    collections(id: string) {
+      return snapshots.get(id)?.mirror.current;
+    },
+    sources(
+      ids: readonly string[],
+      online: ReadonlySet<string>,
+      creationFor?: (owner: string) => SidebarSource["creation"],
+    ): SidebarSource[] {
+      return ids.flatMap((id) => {
+        const value = snapshots.get(id);
+        return value
+          ? [
+              {
+                id,
+                creation: creationFor?.(id),
+                sidebar: value.sidebar,
+                collections: value.mirror.current,
+                view: value.view,
+                online: online.has(id),
+              },
+            ]
+          : [];
+      });
+    },
+  };
 }

@@ -463,7 +463,7 @@ type PreferenceDeclaration =
 type PreferenceProjectDeclaration =
   import("./components/accountPreference").PreferenceProject;
 type LocalSyncRow = import("./sync/client").SyncDocument;
-type ProjectionSyncRow = import("./sync/entityProjection").EntityRow;
+type ProjectionSyncRow = import("./sync/entityContracts").EntityRow;
 export type LocalContractAssertions = [
   Assert<Equal<DesktopDeclaration, WebDesktopDeclaration>>,
   Assert<
@@ -481,9 +481,11 @@ export type LocalContractAssertions = [
   Assert<
     Equal<
       PreferenceProjectDeclaration,
-      Pick<
-        components["schemas"]["ProjectEntityDto"],
-        "accountKey" | "accountKeys" | "accountGroups"
+      import("./deepReadonly.ts").DeepReadonly<
+        Pick<
+          components["schemas"]["ProjectEntityDto"],
+          "accountKey" | "accountKeys" | "accountGroups"
+        >
       >
     >
   >,

@@ -29,8 +29,8 @@ describe("read-state entity reconciliation", () => {
       },
     } satisfies Agent;
 
-    expect(matchingCompletedAgent([agent], proof)).toBe(agent);
-    expect(matchingCompletedAgent([agent], { ...proof, turnId: "stale" })).toBe(
+    expect(matchingCompletedAgent(agent, proof)).toBe(agent);
+    expect(matchingCompletedAgent(agent, { ...proof, turnId: "stale" })).toBe(
       null,
     );
   });

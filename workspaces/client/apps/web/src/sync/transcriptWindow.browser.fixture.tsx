@@ -2,7 +2,7 @@ import { ServerViewStoreProvider } from "../servers/ServerServicesContext";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { useConversationHistory } from "../conversation/historySession";
+import { useConversationHistory } from "../conversation/historyFixture";
 import {
   useConversationScroll,
   TRANSCRIPT_HISTORY_START_PX,

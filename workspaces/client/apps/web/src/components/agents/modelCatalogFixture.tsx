@@ -1,3 +1,4 @@
+import type { ComponentSnapshot as Snapshot } from "../componentTestFixtures.ts";
 import { useLayoutEffect, useState, type ReactNode } from "react";
 import { observable, runInAction } from "mobx";
 import { createModelsMirror } from "../../generated/observableResources.ts";
@@ -8,7 +9,6 @@ import {
 } from "../../servers/ServerServicesContext.tsx";
 import type { ServerServices } from "../../servers/serverServices.ts";
 import type { GetOptions, GetResult } from "../../api.ts";
-import type { Snapshot } from "../../types.ts";
 
 type Projection = Pick<Snapshot, "entitiesComplete"> & {
   runtime: Pick<Snapshot["runtime"], "modelsByAccount">;

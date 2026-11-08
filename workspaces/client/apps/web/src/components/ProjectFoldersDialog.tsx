@@ -1,64 +1,38 @@
-import { useServerApi, useServerSync } from "../servers/ServerServicesContext";
+import type { ProjectModel } from "../app/contracts.ts";
 import { Tabs } from "@mantine/core";
+import { observer } from "mobx-react-lite";
 import { useEffect, useState } from "react";
-import { errorText } from "../api";
+import { useServerApi } from "../servers/ServerServicesContext.tsx";
+import { errorText } from "../api.ts";
 import {
   readProjectServers,
-  type LocationProject,
+  type LocationProjectView,
   type ProjectServerChoice,
-} from "../servers/projectLocations";
-import ProjectLocationsSettings from "./ProjectLocationsSettings";
-import { ProjectLayrStoreSettings } from "./ProjectLayrStoreSettings";
-import { ProjectPeers } from "./ProjectPeers";
+} from "../servers/projectLocations.ts";
+import ProjectLocationsSettings from "./ProjectLocationsSettings.tsx";
+import { ProjectLayrStoreSettings } from "./ProjectLayrStoreSettings.tsx";
+import { ProjectPeers } from "./ProjectPeers.tsx";
 
-export default function ProjectFoldersDialog({
-  project: initial,
+export default observer(function ProjectFoldersDialog({
+  project,
   initialServer,
   saved,
 }: {
-  project: LocationProject;
+  project: LocationProjectView;
   initialServer?: string | undefined;
   saved: () => Promise<void>;
 }) {
   const { get } = useServerApi();
-  const { subscribeStateProjection } = useServerSync();
-
-  const [project, setProject] = useState(initial);
-  const [servers, setServers] = useState<ProjectServerChoice[]>([]);
-  const [error, setError] = useState("");
-  useEffect(
-    () =>
-      subscribeStateProjection(
-        (snapshot) => {
-          const next = snapshot?.runtime.projects.find(
-            (row) => row.id === initial.id,
-          );
-          if (next)
-            setProject((current) => ({
-              ...current,
-              ...next,
-              path: next.path ?? current.path,
-              name: next.name ?? current.name,
-            }));
-        },
-        () => {},
-      ),
-    [initial.id, subscribeStateProjection],
-  );
-  const refreshProject = async () => {
-    const result = await get("/api/projects");
-    const next = result.items.find((row) => row.id === project.id);
-    if (next) setProject(next);
-    await saved();
-  };
+  const [servers, setServers] = useState<ProjectServerChoice[]>([]),
+    [error, setError] = useState("");
   useEffect(() => {
     let active = true;
     void readProjectServers(get)
       .then((rows) => {
         if (active) setServers(rows);
       })
-      .catch((failure) => {
-        if (active) setError(errorText(failure));
+      .catch((error) => {
+        if (active) setError(errorText(error));
       });
     return () => {
       active = false;
@@ -73,17 +47,22 @@ export default function ProjectFoldersDialog({
       <Tabs.Panel value="folders" pt="md">
         {error && <p role="alert">{error}</p>}
         <ProjectLocationsSettings
-          key={project.locations?.map((row) => row.serverId).join(":")}
           project={project}
           servers={servers.length ? servers : undefined}
           initialServer={initialServer}
-          saved={refreshProject}
+          saved={saved}
         />
-        <ProjectLayrStoreSettings project={project} saved={refreshProject} />
+        <ProjectLayrStoreSettings project={project} saved={saved} />
       </Tabs.Panel>
       <Tabs.Panel value="peers" pt="md">
         <ProjectPeers projectId={project.id} notify={setError} />
       </Tabs.Panel>
     </Tabs>
   );
+});
+
+export function isLocatedProject(
+  project: ProjectModel | undefined,
+): project is ProjectModel & LocationProjectView {
+  return !!project?.path && !!project.name;
 }

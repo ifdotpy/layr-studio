@@ -1,4 +1,3 @@
-import { useSidebarCommands } from "./commands.ts";
 import { ActionIcon, Menu, UnstyledButton } from "@mantine/core";
 import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -21,7 +20,6 @@ export const FolderBranch = observer(function FolderBranch({
   parent: ProjectFolder | null;
 }) {
   const sidebar = useSidebarState();
-  const commands = useSidebarCommands();
   sidebarRender("FolderBranch");
   const folders = group.folders || [];
   const target = sidebar.projectTarget(group.path, folder.id);
@@ -70,9 +68,7 @@ export const FolderBranch = observer(function FolderBranch({
                   .ownerId && (
                 <ChatServerLine
                   alias={sidebar.services.alias(target) || ""}
-                  offline={
-                    sidebar.p.offlineServers?.has(backend.ownerId) ?? false
-                  }
+                  offline={sidebar.offline?.has(backend.ownerId) ?? false}
                 />
               )}
           </span>
@@ -81,10 +77,14 @@ export const FolderBranch = observer(function FolderBranch({
           <ActionIcon
             className="project-tree-action"
             aria-label={`New chat in folder ${folder.name}`}
-            disabled={sidebar.p.creating || !editable}
+            disabled={sidebar.creation.isCreating || !editable}
             onClick={() => {
               if (sidebar.requireProjectSupport())
-                commands.newChat(group.path, folder.id);
+                void sidebar.run({
+                  action: "new-chat",
+                  path: group.path,
+                  folder: folder.id,
+                });
             }}
           >
             <Plus size={15} />
@@ -123,9 +123,9 @@ export const FolderBranch = observer(function FolderBranch({
                     folder_id: folder.id,
                     expected_revision: group.organizationRevision || 0,
                   });
-                  await commands.refresh?.();
+                  await sidebar.refresh();
                 } catch (error) {
-                  commands.notify?.(errorText(error));
+                  sidebar.notify(errorText(error));
                 }
               }}
             >

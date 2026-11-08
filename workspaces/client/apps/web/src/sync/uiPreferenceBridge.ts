@@ -15,7 +15,7 @@ import {
   type PreferenceFields,
   type PreferenceScope,
 } from "./uiPreferenceMerge";
-import type { UiPreferenceProjection } from "./entityProjection";
+import type { UiPreferenceProjection } from "./entityContracts.ts";
 
 /** Bridges projected preference rows to memory and gated API writes. */
 export function createUiPreferenceBridge(

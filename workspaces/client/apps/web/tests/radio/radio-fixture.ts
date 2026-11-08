@@ -1,4 +1,5 @@
-import type { Room, Snapshot } from "../../src/types.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import type { Room } from "../../src/types.ts";
 
 // This fixture serves and reads its own snapshot and room documents.
 export function radioSnapshot(value: unknown): Snapshot {

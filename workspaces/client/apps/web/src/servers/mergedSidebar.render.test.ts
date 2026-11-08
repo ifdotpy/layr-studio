@@ -1,3 +1,5 @@
+import { stateFromFixture } from "./sidebarSourceFixture.ts";
+import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import { rowArea } from "../components/chat-row/actions.fixture.ts";
 import { SidebarRowActionsProvider } from "../components/chat-row/actions.ts";
 // @vitest-environment happy-dom
@@ -6,14 +8,16 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import SidebarRow from "../components/SidebarRow.tsx";
-import {
-  createMergedSidebarSelector,
-  createSidebarSourceStore,
-} from "./mergedSidebar.ts";
+import { createMergedSidebarSelector } from "./mergedSidebar.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { agentEntities } from "./sidebarSourceFixture.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot } from "../components/componentTestFixtures.ts";
+const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
+  Object.assign(componentSnapshot(...args), {
+    token: "",
+    stateDir: "/fixture",
+  });
 
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -53,7 +57,7 @@ it("a combined source update renders only its changed row with overlapping chat 
   const agents = [agentSummaryFixture("same"), agentSummaryFixture("other")];
   const store = createSidebarSourceStore();
   const snapshot = (tail = "") =>
-    sidebarSnapshot(snapshotFixture([]), [
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
       ...agentEntities(agents),
       { collection: "agentTail", id: "same", value: { id: "same", tail } },
     ]);
@@ -109,7 +113,7 @@ it("a combined source update renders only its changed row with overlapping chat 
       store.update(
         "remote",
         sidebarSnapshot(
-          snapshotFixture([]),
+          stateFromFixture(snapshotFixture([])),
           agentEntities(
             agents.map((agent) =>
               agent.id === "same"

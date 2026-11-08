@@ -43,7 +43,12 @@ export function RequestArea({
   children,
   ...commands
 }: RequestCommands & { children?: ReactNode }) {
-  return <Provider value={commands}>{children}</Provider>;
+  const { scope, refresh, notify, onAnswerOpen, onAnswerPosition } = commands;
+  const value = useMemo(
+    () => ({ scope, refresh, notify, onAnswerOpen, onAnswerPosition }),
+    [scope, refresh, notify, onAnswerOpen, onAnswerPosition],
+  );
+  return <Provider value={value}>{children}</Provider>;
 }
 export const answerKey = (
   scope: string,

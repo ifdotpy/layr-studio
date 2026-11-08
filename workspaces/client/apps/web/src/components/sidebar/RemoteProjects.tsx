@@ -1,7 +1,7 @@
 import { Folder } from "lucide-react";
-import type { Snapshot } from "../../types";
+import type { DeepReadonly, Project } from "../../types";
 
-export type RemoteProjectList = Snapshot["runtime"]["remoteProjects"];
+export type RemoteProjectList = readonly DeepReadonly<Project>[] | undefined;
 type RemoteProject = NonNullable<RemoteProjectList>[number];
 /** One paired server: its id, its name and its projects. */
 export type RemoteProjectGroup = readonly [string, string, RemoteProject[]];

@@ -1,14 +1,8 @@
 import type {} from "./draft-fixture-helpers.ts";
-import React from "react";
-import { createRoot } from "react-dom/client";
+import { createDrafts } from "../../src/sync/drafts.ts";
+import * as api from "../../src/api.ts";
+import * as resources from "../../src/sync/resourceEvents.ts";
 export async function mount() {
-  const { useSyncedDrafts } = await import("../../src/sync/drafts.ts");
-  const node = document.createElement("div");
-  document.body.appendChild(node);
-  createRoot(node).render(
-    React.createElement(function Harness() {
-      window.draft = useSyncedDrafts();
-      return null;
-    }),
-  );
+  window.draft = createDrafts({ api, resources });
+  window.addEventListener("pagehide", window.draft.start(), { once: true });
 }

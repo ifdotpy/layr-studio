@@ -1,7 +1,7 @@
 import { ProviderKind as GeneratedApiProviderKind } from "../generated/api.ts";
 import type { JsonInputOf } from "../apiTypes.ts";
 import type { components } from "../generated/api.ts";
-import type { UsageAccount } from "./Usage";
+import type { UsageAccount } from "../app/settings/UsageFixture.tsx";
 
 const now = Math.floor(Date.now() / 1000);
 const limitWindow = (remaining: number, minutes: number, reset: number) => ({

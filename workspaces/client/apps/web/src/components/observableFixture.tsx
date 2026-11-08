@@ -1,10 +1,21 @@
+import { runInAction } from "mobx";
+import "@mantine/core/styles.css";
+import { ServerAreas } from "../app/ServerAreasProvider.tsx";
+import {
+  createServerServices,
+  type ServerServices,
+} from "../servers/serverServices.ts";
 import { observer } from "mobx-react-lite";
-import { useAgentDetail } from "./agents/state.ts";
+import { resourceData } from "../store/runtime.ts";
 import { ExecutionSettings } from "./agents/ExecutionSettings.tsx";
 import type { ComponentProps } from "react";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import {
+  agentId,
   createStateMirror,
+  createProjectionMetadataMirror,
+  serializeStateCollections,
+  type StateCollections,
   createAgentDetailMirror,
   createProcessesMirror,
   type AgentId,
@@ -13,7 +24,10 @@ import {
 import type { Agent } from "../types.ts";
 import type { SidebarAgent } from "./sidebar/viewModel.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
+import {
+  ServerStoreProvider,
+  useServerStore,
+} from "../servers/ServerServicesContext.tsx";
 import { createServerStore } from "../store/index.ts";
 import { createSubscriptions } from "../sync/subscriptions/module.ts";
 
@@ -56,11 +70,17 @@ function agentEntities(agents: readonly Agent[]) {
   );
 }
 
+const fixtureMirrors = new WeakMap<
+  StateCollections,
+  ReturnType<typeof createStateMirror>
+>();
+
 /** Explicit generated models for isolated stories and renderer assertions. */
 export function observableFixture(
   agents: readonly (Agent & Pick<SidebarAgent, "hasBackgroundWork">)[] = [],
 ) {
   const mirror = createStateMirror();
+  fixtureMirrors.set(mirror.current, mirror);
   const details = new Map(
     agents.map((agent) => [agent.id, createAgentDetailMirror(agent)]),
   );
@@ -97,7 +117,16 @@ export function observableFixture(
     details,
     processes,
     apply(rows: Parameters<typeof mirror.apply>[0]) {
-      mirror.apply(rows);
+      mirror.apply(
+        rows.some((row) => row.collection === "workspace")
+          ? rows
+          : [
+              ...serializeStateCollections(mirror.current).filter(
+                (row) => row.collection === "workspace",
+              ),
+              ...rows,
+            ],
+      );
     },
     Provider({ children }: { children?: ReactNode }) {
       return (
@@ -107,48 +136,79 @@ export function observableFixture(
   };
 }
 
+/** Construct the real composition with explicit test services, without starting it. */
 export function conversationActionsFixture(
   open: (id: string) => void = () => {},
-): import("./conversation/navigation.ts").ConversationActions {
-  return {
-    open,
-    accounts: {
-      data: {
-        accounts: [],
-        archivedAccounts: [],
-        defaultAccountKey: "default",
-        defaultAccountGroups: [],
-        logins: [],
-        supportsDelete: true,
-        supportsDisconnect: true,
+  store = observableFixture().store,
+  injectedServices?: ServerServices,
+): ServerAreas {
+  const services =
+    injectedServices ||
+    createServerServices({
+      id: "local",
+      origin: "https://fixture.test",
+      label: "Fixture",
+    });
+  if (!injectedServices) {
+    const values = new Map<string, string>();
+    const storage: Storage = {
+      get length() {
+        return values.size;
       },
-      error: "",
-      setData: () => {},
-      refresh: async () => null,
-      scope: "fixture",
-    },
-    getDraft: () => "",
-    subscribeDraft: () => () => {},
-    setDraft: () => {},
-    send: async () => {},
-    refresh: async () => {},
-    notify: () => {},
-    dismissDraft: () => {},
-    observeSends: () => {},
-    observeRead: () => {},
-    editSend: () => {},
-    branchCreated: () => {},
-    newConversation: () => {},
-    chooseConversation: () => {},
-    reloadLimits: () => {},
-    nativeAction: () => {},
-    openActivity: () => {},
-    read: {
-      marking: new Set(),
-      pendingReadTargets: new Map(),
-      markSidebarUnread: async () => {},
-    },
-  };
+      key: (index) => [...values.keys()][index] ?? null,
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => {
+        values.set(key, value);
+      },
+      removeItem: (key) => {
+        values.delete(key);
+      },
+      clear: () => values.clear(),
+    };
+    services.storage = storage;
+    services.api.saved = (key, fallback) => {
+      const value = storage.getItem(key);
+      return value === null ? fallback : JSON.parse(value);
+    };
+    services.api.save = (key, value) =>
+      storage.setItem(key, JSON.stringify(value));
+    services.api.get = async () => {
+      throw new Error("Unexpected fixture GET");
+    };
+    services.api.post = async () => {
+      throw new Error("Unexpected fixture POST");
+    };
+    const resources: ServerServices["resources"] = createSubscriptions({
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: (
+        accept: Parameters<
+          ServerServices["resources"]["watchResourceConnection"]
+        >[0],
+      ) => {
+        accept("live", "open", {});
+        return () => {};
+      },
+      watchTokenRateEvents: () => () => {},
+      watchLiveDeltas: () => () => {},
+      acknowledgeEntitySequences() {},
+      replaceStream() {},
+      retryNow() {},
+      dispose() {},
+    });
+    Object.defineProperty(services, "resources", { value: resources });
+    const close = services.close;
+    services.close = (removeCache) => {
+      resources.dispose();
+      close(removeCache);
+    };
+  }
+  const areas = new ServerAreas({
+    services,
+    store,
+    screen: { active: true, channel: null },
+  });
+  areas.open = open;
+  return areas;
 }
 
 /** Standalone settings fixtures use the same explicit server input as their caller. */
@@ -161,8 +221,11 @@ export const ExecutionSettingsFixture = observer(
     agent: Agent;
     lead?: Agent | undefined;
   }) {
-    const detail = useAgentDetail(agent);
-    const leadDetail = useAgentDetail(lead);
+    const store = useServerStore();
+    const detail = resourceData(store.agentDetail(agentId(agent.id)).current);
+    const leadDetail = lead
+      ? resourceData(store.agentDetail(agentId(lead.id)).current)
+      : undefined;
     return (
       <ExecutionSettings
         {...props}
@@ -176,3 +239,43 @@ export const ExecutionSettingsFixture = observer(
     );
   },
 );
+
+const startupMetadata = new WeakMap<
+  ServerServices["sync"],
+  ReturnType<typeof createProjectionMetadataMirror>
+>();
+
+/** Drive startup identity through the same native models as production. */
+export function setStartupFixture<T extends { stateDir: string }>(
+  areas: ServerAreas,
+  data: T | null,
+) {
+  const sync = areas.scope.services.sync;
+  const previous = sync.projectionMetadata;
+  let metadata = startupMetadata.get(sync);
+  if (!metadata) {
+    metadata = createProjectionMetadataMirror(previous);
+    startupMetadata.set(sync, metadata);
+    const current = metadata;
+    Object.defineProperty(sync, "projectionMetadata", {
+      get: () => current.current,
+      configurable: true,
+    });
+  }
+  metadata.apply({ ...metadata.current, ready: data !== null });
+  const state = resourceData(areas.scope.store.state().current);
+  const mirror = state && fixtureMirrors.get(state);
+  if (mirror && data)
+    runInAction(() =>
+      mirror.apply([
+        ...serializeStateCollections(mirror.current).filter(
+          (row) => row.collection !== "workspace",
+        ),
+        {
+          collection: "workspace",
+          id: "current",
+          value: { stateDir: data.stateDir },
+        },
+      ]),
+    );
+}

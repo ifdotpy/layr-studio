@@ -1,11 +1,19 @@
+import type { ReadStateOwner } from "../../src/app/conversation/ReadStateOwner.ts";
+import { autorun } from "mobx";
+import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { observable, runInAction } from "mobx";
+import { observer } from "mobx-react-lite";
+import { conversationActionsFixture } from "../../src/components/observableFixture.tsx";
+import type { ServerServices } from "../../src/servers/serverServices.ts";
+import { createServerStore } from "../../src/store/index.ts";
+import { ServerStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import * as api from "../../src/api.ts";
+import { defaultSyncClient } from "../../src/sync/client.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import {
-  useChatReadState,
-  useVisibleChatResult,
-} from "../../src/components/useChatReadState.ts";
-import type { Snapshot } from "../../src/types.ts";
+import { useVisibleChatResult } from "../../src/components/useChatReadState.ts";
 import type { Agent, Message } from "../../src/types.ts";
 import type {
   ChatReadState,
@@ -17,7 +25,7 @@ import {
   fixtureReadState,
 } from "./chat-read-state.fixture.ts";
 import type { ReadWrite } from "./chat-read-state.fixture.ts";
-type Controls = ReturnType<typeof useChatReadState>;
+type Controls = ReadStateOwner;
 type NativeRow = Message & { height: number; marginTop?: number };
 declare global {
   interface Window {
@@ -116,13 +124,34 @@ window.fetch = async (input, options) => {
     { headers: { "Content-Type": "application/json" } },
   );
 };
-function Fixture() {
+const selection = observable({ opened: "one", workspace: "first" });
+const store = createServerStore(defaultSubscriptions);
+const area = conversationActionsFixture(() => {}, store);
+Object.defineProperty(area.scope.services, "api", {
+  value: api satisfies ServerServices["api"],
+});
+Object.defineProperty(area.scope.services, "sync", {
+  value: defaultSyncClient satisfies ServerServices["sync"],
+});
+setStartupFixture(area, {
+  ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
+  stateDir: "/state",
+});
+const stopSelection = autorun(() => {
+  area.startup.workspaceId = selection.workspace;
+  area.navigation.selectedId = selection.opened;
+});
+area.notices.notify = (text) => {
+  window.notifications.push(text);
+};
+const controls = area.read;
+const stopControls = controls.start();
+const Fixture = observer(function Fixture() {
+  const workspace = selection.workspace;
   const [agent, setAgent] = useState<Agent>({
       ...initial,
       readState: window.serverState,
     }),
-    [opened, setOpened] = useState("one"),
-    [workspace, setWorkspace] = useState("first"),
     [loaded, setLoaded] = useState(true),
     [message, setMessage] = useState("turn"),
     [offset, setOffset] = useState(900),
@@ -137,29 +166,24 @@ function Fixture() {
     [nativeRows, setNativeRows] = useState<NativeRow[] | null>(null),
     [rowsOpen, setRowsOpen] = useState(true);
   const scroll = useRef<HTMLDivElement>(null);
-  // The hook uses only stateDir, threads and runtime.agents from this partial snapshot.
-  const data = {
-    stateDir: "/state",
-    threads: [agent],
-    runtime: { agents: [agent] },
-  } as Snapshot;
-  const controls = useChatReadState(
-    data,
-    opened,
-    (text) => window.notifications.push(text),
-    async () => {
-      window.refreshes++;
-    },
-    workspace,
-  );
   window.controls = controls;
   window.agent = agent;
   window.state = controls.readStateFor(agent);
   window.marking = [...controls.marking];
   window.markUnread = () => controls.markUnread(agent);
   window.setAgent = (value) => flushSync(() => setAgent(value));
-  window.setOpened = (value) => flushSync(() => setOpened(value));
-  window.setWorkspace = (value) => flushSync(() => setWorkspace(value));
+  window.setOpened = (value) =>
+    flushSync(() =>
+      runInAction(() => {
+        selection.opened = value;
+      }),
+    );
+  window.setWorkspace = (value) =>
+    flushSync(() =>
+      runInAction(() => {
+        selection.workspace = value;
+      }),
+    );
   window.setLoaded = (value) => flushSync(() => setLoaded(value));
   window.setMessage = (value) => flushSync(() => setMessage(value));
   window.setOffset = (value) => flushSync(() => setOffset(value));
@@ -231,8 +255,20 @@ function Fixture() {
       <button onClick={() => void controls.markUnread(agent)}>Unread</button>
     </>
   );
-}
+});
 const root = document.getElementById("root")!;
 const appRoot = createRoot(root);
-window.unmount = () => appRoot.unmount();
-appRoot.render(<Fixture />);
+window.unmount = () => {
+  appRoot.unmount();
+  stopControls();
+  stopSelection();
+  store.dispose();
+  area.scope.services.close();
+};
+appRoot.render(
+  <ServerStoreProvider value={store}>
+    <Fixture />
+  </ServerStoreProvider>,
+);
+
+import { setStartupFixture } from "../../src/components/observableFixture.tsx";

@@ -67,6 +67,8 @@ export function createDataObserver(
     ) => void,
     failed: (error: unknown) => void,
   ) => {
+    if (ref.kind === "state")
+      return observeEntities?.(ref, accept, failed) ?? (() => {});
     if (ref.kind === "transcript") {
       return sync().subscribeTranscriptProjection(
         `transcript:${ref.agentId}`,

@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { ServerResponse } from "node:http";
 import type { ResourceRef } from "../playwright.ts";
 import { fixtureResources } from "./helpers.ts";
@@ -77,13 +78,12 @@ test("Sync push", async ({ context: testContext }) => {
         pulls++;
         const row = {
           op: "upsert",
-          collection: "agent",
+          collection: "agentSummary",
           id: "lead",
-          value: {
-            id: "lead",
+          value: agentSummaryFixture("lead", {
             name: revision === 1 ? "Initial lead" : "Pushed lead",
             status: "running",
-          },
+          }),
           seq: revision,
         };
         json({
@@ -105,16 +105,17 @@ test("Sync push", async ({ context: testContext }) => {
     await page.goto(fixtureOrigin(server) + `/push-check`);
     await page.evaluate(async () => {
       window.client = await import("/src/sync/client.ts");
-      window.stopPush = window.client.subscribeStateProjection(
+      const { observeGeneratedState } =
+        await import("/src/sync/generatedState.testHelper.ts");
+      window.stopPush = observeGeneratedState(
+        window.client,
         (value) => {
-          window.pushState = value?.threads?.find(
-            (row) => row.id === "lead",
-          )?.name;
+          window.pushState = value.agents.get("lead")?.name;
         },
         (error) => {
           if (error) window.pushError = String(error);
         },
-      );
+      ).stop;
     });
     await page.waitForFunction(() => window.pushState === "Initial lead");
     const before = pulls;

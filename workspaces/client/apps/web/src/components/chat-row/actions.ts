@@ -1,10 +1,8 @@
 import { useMemo, type DragEvent, type KeyboardEvent } from "react";
-import { computed, compareShallow, makeAutoObservable } from "mobx";
+import { computed, compareShallow, makeAutoObservable, untracked } from "mobx";
 import { createArea } from "../area.ts";
 import type { SidebarChatView } from "../sidebar/viewModel.ts";
-type RowArea = ReturnType<
-  typeof import("../sidebar/sidebarActions.ts").useSidebarActions
->["rows"];
+type RowArea = import("../sidebar/sidebarActions.ts").SidebarActions["rows"];
 export type ChatRowActions = ReturnType<RowArea["commands"]>;
 export type SidebarRowActions = RowArea;
 
@@ -21,8 +19,10 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
           row,
           actions: area.commands(row, priority),
           get bindings() {
+            const group = row.groupKey;
             return {
-              ...area.bindings(row),
+              ...untracked(() => area.bindings(row)),
+              "data-sidebar-group": group,
               onDragStart: (event: DragEvent<HTMLElement>) =>
                 area.bindings(row).onDragStart?.(event),
               onDragOver: (event: DragEvent<HTMLElement>) =>
@@ -38,7 +38,7 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
             };
           },
           get dropEdge() {
-            const target = area.ui.dragTarget;
+            const target = area.ui.sorting.target;
             return target?.id === row.id && target.group === row.groupKey
               ? target.after
                 ? "after"
@@ -46,7 +46,7 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
               : undefined;
           },
           get folderDrop() {
-            return area.ui.dropDestination === `convert:${row.id}`
+            return area.ui.sorting.destination === `convert:${row.id}`
               ? "true"
               : undefined;
           },
@@ -57,7 +57,7 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
             return area.disabled(row);
           },
           get selected() {
-            return area.ui.opened === row.id;
+            return area.ui.selection.selectedId === row.id;
           },
           get renaming() {
             return (
@@ -72,10 +72,10 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
             return area.ui.organizing === row.id;
           },
           get markingRead() {
-            return area.ui.markingRead.has(row.id);
+            return area.ui.read.marking.has(row.id);
           },
           get pendingRead() {
-            return area.ui.pendingReadTargets?.get(row.id);
+            return area.ui.read.pendingReadTargets?.get(row.id);
           },
           get pinned() {
             return area.ui.overrides.get(row.id)?.pinned;

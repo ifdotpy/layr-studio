@@ -20,7 +20,7 @@ import { createRoot } from "react-dom/client";
 import TokenRate from "../components/TokenRate.tsx";
 import ReasoningDuration from "../components/conversation/transcript/ReasoningDuration.tsx";
 import ChatStatus from "../components/agents/ChatStatus.tsx";
-import { useTeamTokenRateStream } from "./useTeamTokenRateStream.ts";
+import { watchTeamTokenRates } from "../usage/tokenRate.ts";
 import {
   receiveWorkspaceTokenRates,
   configureTokenRateStream,
@@ -77,7 +77,7 @@ const card = (id: string, reason = true) =>
     ),
   );
 function TeamRateInterest() {
-  useTeamTokenRateStream("team", true);
+  React.useEffect(() => watchTeamTokenRates("team"), []);
   return null;
 }
 const root = createRoot(document.querySelector("#root")!);

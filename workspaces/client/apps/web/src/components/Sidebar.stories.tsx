@@ -10,10 +10,9 @@ import { useMantineColorScheme } from "@mantine/core";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { publishServerAliases } from "../servers/serverAliases";
 import { readServerAliases } from "../servers/registry";
-import Sidebar, { type SidebarProps } from "./Sidebar";
+import Sidebar, { type SidebarProps } from "./Sidebar.fixture";
 import { createStateMirror } from "../generated/observableResources.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
 import { createSidebarServices, type SidebarBackend } from "./sidebar/services";
 import "./sidebar/FleetFixtures.css";
 
@@ -57,11 +56,6 @@ const projectRows = projects.map((name) => ({
   path: `/work/${name}`,
   created: now - 86400,
 }));
-const data = snapshotFixture([], {
-  projects: projectRows,
-  peerTeamsVersion: 1,
-  projectOrganizationVersion: 1,
-});
 function storyCollections(
   agents: components["schemas"]["AgentSummaryEntityDto"][],
 ) {
@@ -77,6 +71,15 @@ function storyCollections(
       id: value.id,
       value,
     })),
+    {
+      collection: "workspace",
+      id: "fixture",
+      value: {
+        stateDir: "/fixture",
+        peerTeamsVersion: 1,
+        projectOrganizationVersion: 1,
+      },
+    },
   ]);
   return mirror.current;
 }
@@ -115,7 +118,6 @@ services.alias = (target) =>
   target.kind === "chat" && target.id === "atlas-api-1" ? "BLD" : "MAC";
 const args: SidebarProps & SidebarCommands = {
   services,
-  data,
   collections: storyCollections(summaries),
   opened: "codex-studio-2",
   open: fn(),

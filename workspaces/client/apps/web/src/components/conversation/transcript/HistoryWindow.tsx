@@ -1,3 +1,5 @@
+import { compareStructural, computed } from "mobx";
+import { observer } from "mobx-react-lite";
 import {
   Fragment,
   memo,
@@ -15,7 +17,6 @@ import { shouldFollowTranscriptTail } from "../../useConversationScroll";
 import type { HistoryGroup } from "../../turnHistoryModel";
 import {
   HISTORY_WINDOW_THRESHOLD,
-  historyWindowIndices,
   historyOffsets,
   historyWindowAnchor,
   historyWindowRange,
@@ -41,18 +42,7 @@ const HistoryRow = memo(function HistoryRow({
   return render(row, revealedMessage);
 });
 
-/** Owns the virtualized viewport and its paging anchor. */
-export default function HistoryWindow({
-  rows,
-  scrollContainer,
-  render,
-  storageKey,
-  rememberScroll,
-  getFollow,
-  followTail = true,
-  hasRecentScrollInput,
-  requiredRows,
-}: {
+type HistoryWindowProps = {
   rows: HistoryGroup[];
   scrollContainer?: RefObject<HTMLDivElement | null> | undefined;
   render: (row: HistoryGroup, revealedMessage?: string) => ReactNode;
@@ -63,6 +53,56 @@ export default function HistoryWindow({
   hasRecentScrollInput?: (() => boolean) | undefined;
   /** Rows with pending user input must remain reachable while history is virtualized. */
   requiredRows?: string[];
+};
+
+/** Observe message geometry outside the viewport's scroll/resize state. */
+export default observer(function HistoryWindow(props: HistoryWindowProps) {
+  const { rows } = props;
+  const geometry = useMemo(
+    () =>
+      computed(
+        () => ({
+          estimates: historyOffsets(rows, new Map()),
+          count: rows.reduce((count, row) => count + row.items.length, 0),
+        }),
+        { equals: compareStructural },
+      ),
+    [rows],
+  ).get();
+  const anchorRows = useMemo(
+    () =>
+      computed(() => {
+        const ids = new Map<string, string>();
+        for (const row of rows)
+          for (const item of row.items)
+            for (const id of [messageRenderKey(item), item.id, item.sourceId])
+              if (id && !ids.has(id)) ids.set(id, row.id);
+        for (const row of rows) if (!ids.has(row.id)) ids.set(row.id, row.id);
+        return ids;
+      }),
+    [rows],
+  ).get();
+  return (
+    <HistoryViewport {...props} geometry={geometry} anchorRows={anchorRows} />
+  );
+});
+
+/** Owns the virtualized viewport and its paging anchor. */
+function HistoryViewport({
+  rows,
+  scrollContainer,
+  render,
+  storageKey,
+  rememberScroll,
+  getFollow,
+  followTail = true,
+  hasRecentScrollInput,
+  requiredRows,
+  geometry,
+  anchorRows,
+}: HistoryWindowProps & {
+  geometry: { estimates: number[]; count: number };
+  anchorRows: ReadonlyMap<string, string>;
 }) {
   const body = useRef<HTMLDivElement>(null);
   const pointerHeld = useRef(false);
@@ -71,10 +111,17 @@ export default function HistoryWindow({
   const heights = useRef(new Map<string, number>());
   const details = useRef(new Map<string, boolean>());
   const [revision, setRevision] = useState(0);
-  const offsets = useMemo(
-    () => historyOffsets(rows, heights.current),
-    [rows, revision],
-  );
+  const offsets = useMemo(() => {
+    const offsets = [0];
+    rows.forEach((row, index) =>
+      offsets.push(
+        offsets[index]! +
+          (heights.current.get(row.id) ??
+            geometry.estimates[index + 1]! - geometry.estimates[index]!),
+      ),
+    );
+    return offsets;
+  }, [rows, geometry, revision]);
   const [visible, setVisible] = useState<string[]>(() =>
     rows.slice(-12).map((row) => row.id),
   );
@@ -103,16 +150,18 @@ export default function HistoryWindow({
   const [pinned, setPinned] = useState<string[]>([]);
   const active =
     !!scrollContainer &&
-    (rows.length > HISTORY_WINDOW_THRESHOLD ||
-      rows.reduce((count, row) => count + row.items.length, 0) > 256);
+    (rows.length > HISTORY_WINDOW_THRESHOLD || geometry.count > 256);
   const indices = useMemo(() => {
-    return historyWindowIndices(
-      rows,
-      visible,
-      [...pinned, ...(requiredRows || [])],
-      [requested, viewportAnchor.current?.id],
-    );
-  }, [rows, visible, pinned, requested, requiredRows]);
+    const keep = new Set([
+      ...visible,
+      ...pinned,
+      ...(requiredRows || []),
+      ...[requested, viewportAnchor.current?.id].flatMap((id) =>
+        id ? [anchorRows.get(id) || id] : [],
+      ),
+    ]);
+    return rows.flatMap((row, index) => (keep.has(row.id) ? [index] : []));
+  }, [rows, visible, pinned, requested, requiredRows, anchorRows]);
   const previousIndices = useRef(indices);
   const rowsById = useMemo(
     () => new Map(rows.map((row) => [row.id, row])),

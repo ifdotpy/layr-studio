@@ -20,7 +20,6 @@ const config = {
     "src/components/conversation-results/conversationResultModel.ts",
     "src/components/file-change/fileChangeModel.ts",
     "src/components/message-delivery/messageDelivery.ts",
-    "src/components/sentence-stream/sentenceStream.ts",
     "src/components/tool-images/toolImages.ts",
     "src/desktop/desktopAlerts.ts",
   ],

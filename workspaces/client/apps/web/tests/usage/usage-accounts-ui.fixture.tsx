@@ -1,4 +1,4 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import { observableFixture } from "../../src/components/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import {
   fixtureRoot,
@@ -10,31 +10,20 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import type { UsageAccount } from "../../src/components/Usage.tsx";
+import type { UsageAccount } from "../../src/app/settings/UsageFixture.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
-import { snapshotFixture } from "../../src/snapshotFixture.ts";
-import Usage from "../../src/components/Usage.tsx";
+import {
+  createSessionCostMirror,
+  createCostsMirror,
+} from "../../src/generated/observableResources.ts";
+import { ServerStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
 import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
 import * as sync from "../../src/sync/client.ts";
 const services = partialUsageServices({
   owner: { id: "fixture", origin: location.origin, credentialId: null },
   sync: {
     ...sync,
-    subscribeStateProjection(
-      accept: Parameters<typeof sync.subscribeStateProjection>[0],
-    ) {
-      accept(
-        snapshotFixture([], {
-          sessionCostsByAgent: {
-            chat: usageSessionCost(),
-          },
-          accountCostsByAccount: {
-            own: usageAccountCost("own"),
-          },
-        }),
-      );
-      return () => {};
-    },
   },
 });
 // Base usage services omit unrelated capabilities and the owner label.
@@ -188,6 +177,18 @@ function Fixture() {
             ] satisfies UsageAccount[])
           : []),
       ];
+  const [models] = useState(() => observableFixture([own]));
+  const [session] = useState(() => createSessionCostMirror(usageSessionCost()));
+  const [costs] = useState(() => createCostsMirror([usageAccountCost("own")]));
+  const store = {
+    ...models.store,
+    sessionCost: () => ({
+      current: { status: "live" as const, data: session.current },
+    }),
+    costs: () => ({
+      current: { status: "live" as const, data: costs.current },
+    }),
+  };
   return (
     <MantineProvider
       theme={theme}
@@ -195,7 +196,7 @@ function Fixture() {
         ? { forceColorScheme: scheme }
         : {})}
     >
-      <AgentModelsFixture agents={[own]}>
+      <ServerStoreProvider value={store}>
         <div
           style={
             geometry
@@ -225,7 +226,7 @@ function Fixture() {
             accounts={accounts}
           />
         </div>
-      </AgentModelsFixture>
+      </ServerStoreProvider>
     </MantineProvider>
   );
 }

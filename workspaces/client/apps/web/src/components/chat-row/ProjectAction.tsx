@@ -12,7 +12,7 @@ export const ProjectAction = observer(function ProjectAction({
   const actions = state.actions;
   const a = row;
   return (
-    !area.ui.compact && (
+    !area.ui.visibility.isCompact && (
       <Menu.Item
         leftSection={<FolderOpen size={14} />}
         disabled={disabled || !a.canChangeProject}

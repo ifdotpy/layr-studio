@@ -1,3 +1,4 @@
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
 import type { Agent } from "../../src/types.ts";
 
 import { createRoot } from "react-dom/client";
@@ -32,17 +33,19 @@ const Team = observer(function Team() {
 });
 createRoot(document.getElementById("root")!).render(
   <MantineProvider>
-    <main
-      style={{
-        maxWidth: 900,
-        margin: "auto",
-        padding: 12,
-        display: "grid",
-        gap: 12,
-      }}
-    >
-      <h1>Team</h1>
-      <Team />
-    </main>
+    <ServerViewStoreProvider>
+      <main
+        style={{
+          maxWidth: 900,
+          margin: "auto",
+          padding: 12,
+          display: "grid",
+          gap: 12,
+        }}
+      >
+        <h1>Team</h1>
+        <Team />
+      </main>
+    </ServerViewStoreProvider>
   </MantineProvider>,
 );

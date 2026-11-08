@@ -30,18 +30,19 @@ export function rowArea(
       services: localSidebarServices,
       aliases: observable.map<string, string>(),
       offline: observable.set<string>(),
-      dragTarget: null,
-      dropDestination: null,
-      opened: props.selected ? id : null,
+      sorting: { target: null, destination: null },
+      selection: { selectedId: props.selected ? id : null },
       renaming: props.renaming ? id : null,
       renameInPriority: false,
       name: props.name || "",
       organizing: props.organizing ? id : null,
-      compact: props.compact || false,
-      markingRead: new Set(props.markingRead ? [id] : []),
-      pendingReadTargets: new Map(
-        props.pendingRead == null ? [] : [[id, props.pendingRead]],
-      ),
+      visibility: { isCompact: props.compact || false },
+      read: {
+        marking: new Set(props.markingRead ? [id] : []),
+        pendingReadTargets: new Map(
+          props.pendingRead == null ? [] : [[id, props.pendingRead]],
+        ),
+      },
       overrides: observable.map<
         string,
         { pinned?: boolean; archived?: boolean }

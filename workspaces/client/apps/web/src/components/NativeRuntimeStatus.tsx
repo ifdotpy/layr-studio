@@ -6,17 +6,14 @@ import {
 } from "../generated/api.ts";
 import { ProviderKind } from "../generated/providerKind.ts";
 import Disclosure from "./ui/Disclosure";
-import { useServerSync } from "../servers/ServerServicesContext";
+import { useServerStore } from "../servers/ServerServicesContext";
 import { localDateTime } from "../local-time";
-import { useEffect, useState } from "react";
-import { type GetResult, errorText } from "../api";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { errorText } from "../api";
 import type { Account } from "./Accounts";
 import ProviderUpdateNotices from "./ProviderUpdateNotices";
 import "./native-runtime-status.css";
-
-type DesktopStatus = GetResult<"/api/desktop">;
-type RuntimeStatus = NonNullable<DesktopStatus["nativeRuntime"]>;
-type ProviderVersions = NonNullable<DesktopStatus["providerVersions"]>;
 
 const accountStatus = {
   current: "Up to date",
@@ -33,47 +30,23 @@ const providerStatus = {
   error: "Version check failed",
 };
 
-export default function NativeRuntimeStatus({
+export default observer(function NativeRuntimeStatus({
   opened,
   accounts,
 }: {
   opened: boolean;
-  accounts: Account[];
+  accounts: readonly Account[];
 }) {
-  const { subscribeStateProjection } = useServerSync();
-
-  const [data, setData] = useState<RuntimeStatus | null>(null);
-  const [providers, setProviders] = useState<ProviderVersions>({
+  const store = useServerStore();
+  const current = opened ? store.desktop().current : undefined;
+  const desktop = current ? resourceData(current) : undefined;
+  const data = desktop?.nativeRuntime ?? null;
+  const providers = desktop?.providerVersions ?? {
     checkedAt: null,
     providers: [],
     warnings: [],
-  });
-  const [error, setError] = useState("");
-  useEffect(() => {
-    setData(null);
-    setProviders({ checkedAt: null, providers: [], warnings: [] });
-    setError("");
-    if (!opened) return;
-    return subscribeStateProjection(
-      (snapshot) => {
-        const result = snapshot?.runtime.desktop;
-        if (result) {
-          setData(result.nativeRuntime ?? null);
-          setProviders(
-            result.providerVersions || {
-              checkedAt: null,
-              providers: [],
-              warnings: [],
-            },
-          );
-          setError("");
-        }
-      },
-      (failure) => {
-        if (failure) setError(errorText(failure));
-      },
-    );
-  }, [opened, subscribeStateProjection]);
+  };
+  const error = current?.status === "error" ? errorText(current.error) : "";
 
   if (!opened) return null;
   const entries = Object.entries(data?.accounts || {});
@@ -297,4 +270,4 @@ export default function NativeRuntimeStatus({
       </Disclosure>
     </section>
   );
-}
+});

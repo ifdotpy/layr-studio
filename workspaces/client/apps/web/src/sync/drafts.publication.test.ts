@@ -1,19 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  effects: [] as (() => void | (() => void))[],
-  setters: [] as ReturnType<typeof vi.fn>[],
-}));
-vi.mock("react", () => ({
-  useEffect: (effect: () => void | (() => void)) => mocks.effects.push(effect),
-  useRef: (current: unknown) => ({ current }),
-  useCallback: (callback: unknown) => callback,
-  useState: (value: unknown) => {
-    const setter = vi.fn();
-    mocks.setters.push(setter);
-    return [typeof value === "function" ? value() : value, setter];
-  },
-}));
 vi.mock("../api.ts", () => ({
   syncPost: vi.fn(),
   ApiError: class extends Error {},
@@ -28,12 +14,10 @@ vi.mock("../unsent/store.ts", () => ({
 }));
 vi.mock("./subscriptions/events.ts", () => ({ watchResourceChanges: vi.fn() }));
 vi.mock("./resourceEvents.ts", () => ({ replaceStream: vi.fn() }));
-import { createBrowserDrafts } from "./drafts.ts";
+import { createDrafts } from "./drafts.ts";
 import type { ResourceVersion } from "./subscriptions/contracts.ts";
 
 afterEach(() => {
-  mocks.effects.length = 0;
-  mocks.setters.length = 0;
   vi.useRealTimers();
 });
 
@@ -41,7 +25,7 @@ it("reports an incomplete snapshot visibly while other drafts continue to sync",
   vi.useFakeTimers();
   let receive: ((version?: ResourceVersion) => void) | undefined;
   const post = vi.fn(async () => []);
-  const useDrafts = createBrowserDrafts({
+  const drafts = createDrafts({
     api: { syncPost: post },
     resources: {
       watchResourceChanges: (_ref, listener) => {
@@ -51,10 +35,7 @@ it("reports an incomplete snapshot visibly while other drafts continue to sync",
       replaceStream: vi.fn(),
     },
   });
-  const drafts = useDrafts();
-  const cleanup = mocks.effects
-    .map((effect) => effect())
-    .filter((value) => typeof value === "function");
+  const cleanup = drafts.start();
   receive?.({
     epoch: "e",
     revision: 3,
@@ -81,21 +62,15 @@ it("reports an incomplete snapshot visibly while other drafts continue to sync",
   drafts.setDrafts({ good: "edited" });
   await vi.advanceTimersByTimeAsync(3000);
   expect(post).toHaveBeenCalled();
-  expect(
-    mocks.setters.some((setter) =>
-      setter.mock.calls.some(
-        ([value]) => value === "Some saved drafts could not be loaded.",
-      ),
-    ),
-  ).toBe(true);
-  cleanup.forEach((dispose) => dispose());
+  expect(drafts.error).toBe("Some saved drafts could not be loaded.");
+  cleanup();
 });
 
 it("publishes an entire baseline before notifying either chat", () => {
   vi.useFakeTimers();
   let receive: ((version?: ResourceVersion) => void) | undefined;
   const stop = vi.fn();
-  const useDrafts = createBrowserDrafts({
+  const drafts = createDrafts({
     api: { syncPost: vi.fn(async () => []) },
     resources: {
       watchResourceChanges: (_ref, listener) => {
@@ -105,14 +80,11 @@ it("publishes an entire baseline before notifying either chat", () => {
       replaceStream: vi.fn(),
     },
   });
-  const drafts = useDrafts();
   const a = vi.fn(() => expect(drafts.getDraft("b")).toBe("complete"));
   const b = vi.fn(() => expect(drafts.getDraft("a")).toBe("complete"));
   drafts.subscribeDraft("a", a);
   drafts.subscribeDraft("b", b);
-  const cleanup = mocks.effects
-    .map((effect) => effect())
-    .filter((value) => typeof value === "function");
+  const cleanup = drafts.start();
   const row = (session: string) => ({
     id: `remote:${session}`,
     seq: 1,
@@ -133,7 +105,7 @@ it("publishes an entire baseline before notifying either chat", () => {
   });
   expect(a).toHaveBeenCalledOnce();
   expect(b).toHaveBeenCalledOnce();
-  cleanup.forEach((dispose) => dispose());
+  cleanup();
   expect(stop).toHaveBeenCalledOnce();
 });
 
@@ -142,7 +114,7 @@ it("reopens on a missing interval and keeps edits until the next baseline", asyn
   let receive: ((version?: ResourceVersion) => void) | undefined;
   const replaceStream = vi.fn();
   const post = vi.fn(async () => []);
-  const useDrafts = createBrowserDrafts({
+  const drafts = createDrafts({
     api: { syncPost: post },
     resources: {
       watchResourceChanges: (_ref, listener) => {
@@ -152,10 +124,7 @@ it("reopens on a missing interval and keeps edits until the next baseline", asyn
       replaceStream,
     },
   });
-  const drafts = useDrafts();
-  const cleanup = mocks.effects
-    .map((effect) => effect())
-    .filter((value) => typeof value === "function");
+  const cleanup = drafts.start();
   receive?.({
     epoch: "e",
     revision: 1,
@@ -181,29 +150,21 @@ it("reopens on a missing interval and keeps edits until the next baseline", asyn
   });
   await vi.advanceTimersByTimeAsync(3000);
   expect(post).toHaveBeenCalledOnce();
-  cleanup.forEach((dispose) => dispose());
+  cleanup();
 });
 
 it("shows the shared notice when another unsent input cannot be saved", () => {
   const windowEvents = new EventTarget();
   vi.stubGlobal("window", windowEvents);
-  const useDrafts = createBrowserDrafts({
+  const drafts = createDrafts({
     api: { syncPost: vi.fn(async () => []) },
     resources: { watchResourceChanges: () => () => {}, replaceStream: vi.fn() },
   });
-  useDrafts();
-  const cleanup = mocks.effects
-    .map((effect) => effect())
-    .filter((value) => typeof value === "function");
+  const cleanup = drafts.start();
   windowEvents.dispatchEvent(new Event("studio-unsent-input-failure"));
-  expect(
-    mocks.setters.some((setter) =>
-      setter.mock.calls.some(
-        ([value]) =>
-          value === "Draft changes could not be saved. Keep this chat open.",
-      ),
-    ),
-  ).toBe(true);
-  cleanup.forEach((dispose) => dispose());
+  expect(drafts.error).toBe(
+    "Draft changes could not be saved. Keep this chat open.",
+  );
+  cleanup();
   vi.unstubAllGlobals();
 });

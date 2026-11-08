@@ -5,7 +5,7 @@ it("returns limits for the selected account", () => {
   const a = { accountKey: "a", data: { accountId: "native-a" } };
   assert.equal(accountLimits(a, "a", "native-a"), a);
   assert.equal(accountLimits(a, "b"), null);
-  assert.equal(accountLimits(a, "a", "replacement-login"), a);
+  assert.equal(accountLimits(a, "a", "replacement-login"), null);
   const legacyWithoutAccountId = { accountKey: "a", data: {} };
   assert.equal(
     accountLimits(legacyWithoutAccountId, "a", "native-a"),

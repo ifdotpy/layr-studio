@@ -1,5 +1,5 @@
 import Workspace from "./shell/Workspace.tsx";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -16,7 +16,7 @@ import { createSubscriptions } from "../sync/subscriptions/module.ts";
 import { ServerStoreProvider } from "../servers/ServerServicesContext.tsx";
 import { ModelWhitelistSettings } from "./models/ModelWhitelistSettings.tsx";
 import { createWorkerCatalog } from "./agents/WorkerModelPicker.tsx";
-import { createAccountsView, useAccounts } from "./Accounts.tsx";
+import { createAccountsView } from "./Accounts.tsx";
 
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
@@ -123,8 +123,14 @@ it("retains the account view object and full login list on an unchanged refresh"
   const f = fixture();
   f.state.apply([summary]);
   const snapshots: unknown[] = [];
+  const accounts = createAccountsView(
+    f.store,
+    async () => {
+      throw new Error("Unexpected account read");
+    },
+    "workspace",
+  );
   const Probe = observer(function Probe() {
-    const accounts = useAccounts("workspace");
     snapshots.push(accounts.data);
     return null;
   });
@@ -228,7 +234,10 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
-  const data = snapshotFixture([]);
+  const data = Object.assign(snapshotFixture([]), {
+    token: "",
+    stateDir: "/fixture",
+  });
   data.stateDir = "profile-draft";
   await act(async () =>
     root.render(
@@ -242,8 +251,6 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
             opened: true,
             initialSection: "profiles",
             onClose: noop,
-            data,
-            allRequests: [],
             onSelect: noop,
             refresh: async () => {},
             notify: noop,

@@ -1,4 +1,5 @@
 import { AccountStatus as GeneratedApiAccountStatus } from "../generated/api.ts";
+import type { DeepReadonly } from "../deepReadonly.ts";
 import type { components } from "../generated/api";
 import { isProviderKind, ProviderKind } from "../generated/providerKind.ts";
 import {
@@ -26,9 +27,11 @@ export type PreferenceAccount = Pick<
   >;
 
 /** The project fields that the default choice reads. */
-export type PreferenceProject = Pick<
-  components["schemas"]["ProjectEntityDto"],
-  "accountKey" | "accountKeys" | "accountGroups"
+export type PreferenceProject = DeepReadonly<
+  Pick<
+    components["schemas"]["ProjectEntityDto"],
+    "accountKey" | "accountKeys" | "accountGroups"
+  >
 >;
 
 export type NewChatDefault = {
@@ -70,11 +73,11 @@ export function parseGroups(text: string): {
 /** The order of a project: its own non-empty order, else the default order. */
 export const effectiveGroups = (
   project: PreferenceProject | null | undefined,
-  defaultGroups: string[] | null | undefined,
+  defaultGroups: readonly string[] | null | undefined,
 ) =>
   project?.accountGroups?.length ? project.accountGroups : defaultGroups || [];
 
-const rank = (group: string | null | undefined, groups: string[]) => {
+const rank = (group: string | null | undefined, groups: readonly string[]) => {
   const index = group ? groups.indexOf(group) : -1;
   return index < 0 ? groups.length : index;
 };
@@ -106,9 +109,9 @@ export const canStart = (account: PreferenceAccount) =>
  * Rust owner (runtime-services `account_preference::new_chat_default`).
  */
 export function newChatDefault(
-  accounts: PreferenceAccount[],
+  accounts: readonly PreferenceAccount[],
   defaultAccountKey: string,
-  defaultGroups: string[] | null | undefined,
+  defaultGroups: readonly string[] | null | undefined,
   project: PreferenceProject | null | undefined,
   model: string | null | undefined,
 ): NewChatDefault {

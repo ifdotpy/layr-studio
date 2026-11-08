@@ -3,7 +3,6 @@ import type { SidebarAgent } from "./viewModel.ts";
 export interface SidebarCommands {
   settings?: () => void;
   open: (id: string) => void;
-  prepareChat?: (id: string) => void;
   newChat: (path?: string, folder?: string) => void;
   newSharedChat?: (path?: string) => void;
   addProject: () => void;

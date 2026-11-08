@@ -28,7 +28,7 @@ export default observer(function ConversationSettings({
         key={agent.id}
         showTransferStatus={false}
         state={actions.accounts}
-        notify={actions.notify}
+        notify={actions.notices.notify}
         refresh={actions.refresh}
         agent={agent}
         lead={lead}

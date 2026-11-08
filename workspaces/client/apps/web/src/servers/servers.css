@@ -213,7 +213,7 @@ html[data-server-view] .workspace {
     inset: 0 0 auto;
     height: 40px;
     border-radius: 0;
-    z-index: 201;
+    z-index: var(--layout-layers-navigation);
   }
   .server-sidebar {
     display: none;

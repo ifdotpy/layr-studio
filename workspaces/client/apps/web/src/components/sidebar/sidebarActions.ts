@@ -1,34 +1,47 @@
-import { useSidebarCommands } from "./commands.ts";
 import { computed, runInAction, type IComputedValue } from "mobx";
 import type { Project } from "../ProjectOrganization";
 import type { PeerTeam } from "../shell/messages/PeerTeams";
-import { useRef, useState } from "react";
 import type { SidebarChatView } from "./viewModel.ts";
 import type { FormEvent, HTMLAttributes } from "react";
 import type { PeerTeamActions } from "../shell/messages/PeerTeams";
 import { DEFAULT_LOCAL_SERVER_ALIAS } from "../../servers/serverAliases.ts";
-import type { useSidebarController } from "./SidebarState.tsx";
+import type { SidebarListOwner } from "../../app/shell/SidebarOwner.ts";
 
 /** Local controls stay with the sidebar; stable command areas read the current handlers. */
-export function useSidebarActions(
-  state: ReturnType<typeof useSidebarController>,
-) {
-  const commands = useSidebarCommands();
-  const current = useRef({ state, commands });
-  current.current = { state, commands };
-  const ui = state.ui;
-  const [rows] = useState(() => ({
+export function createSidebarActions(state: SidebarListOwner) {
+  const ui: Pick<
+    SidebarListOwner,
+    | "services"
+    | "aliases"
+    | "offline"
+    | "renaming"
+    | "renameInPriority"
+    | "name"
+    | "organizing"
+    | "overrides"
+  > & {
+    readonly sorting: Pick<
+      SidebarListOwner["sorting"],
+      "target" | "destination"
+    >;
+    readonly selection: Pick<SidebarListOwner["selection"], "selectedId">;
+    readonly visibility: Pick<SidebarListOwner["visibility"], "isCompact">;
+    readonly read: Pick<
+      SidebarListOwner["read"],
+      "marking" | "pendingReadTargets"
+    >;
+  } = state;
+  const rows = {
     ui,
     commands: (row: SidebarChatView, priority: boolean) => ({
-      prepare: () => current.current.commands.prepareChat?.(row.id),
-      open: () => current.current.state.openChat(row.id),
+      open: () => state.openChat(row.id),
       pin: () => {
-        void current.current.state.organize(row.id, {
+        void state.organize(row.id, {
           pinned: !row.agent.pinned,
         });
       },
       rename: (event: FormEvent) => {
-        void current.current.state.rename(event, row.id);
+        void state.rename(event, row.id);
       },
       name: (value: string) =>
         runInAction(() => {
@@ -46,12 +59,14 @@ export function useSidebarActions(
         }),
       unread: () => {
         if (row.agent.markRead)
-          current.current.commands.markUnread(row.id, {
-            ...row.agent.markRead,
+          void state.run({
+            action: "mark-unread",
+            id: row.id,
+            target: row.agent.markRead,
           });
       },
       move: () => {
-        const s = current.current.state;
+        const s = state;
         if (s.requireProjectSupport())
           s.setDialog({
             title: "Move chat",
@@ -59,13 +74,15 @@ export function useSidebarActions(
             agentId: row.id,
           });
       },
-      changeProject: () => current.current.commands.changeProject(row.id),
+      changeProject: (): void =>
+        void state.run({ action: "change-project", id: row.id }),
       archive: () => {
-        void current.current.state.organize(row.id, {
+        void state.organize(row.id, {
           archived: !row.agent.archived,
         });
       },
-      remove: () => current.current.commands.remove(row.id, false),
+      remove: (): void =>
+        void state.run({ action: "remove-chat", id: row.id, room: false }),
     }),
     disabled: (row: SidebarChatView) =>
       !(ui.services.available?.({ kind: "chat", id: row.id }) ?? true),
@@ -74,9 +91,9 @@ export function useSidebarActions(
     ): HTMLAttributes<HTMLElement> & {
       "data-sidebar-id"?: string;
       "data-sidebar-group"?: string;
-    } => current.current.state.rowBindings(row),
+    } => state.rowBindings(row),
     server: (row: SidebarChatView) => {
-      const services = current.current.state.services,
+      const services = state.services,
         owner = services.serverForChat(row.id);
       return {
         alias:
@@ -84,40 +101,36 @@ export function useSidebarActions(
           ui.aliases.get(owner) ||
           DEFAULT_LOCAL_SERVER_ALIAS,
         show: owner !== ui.services.cache.ownerId,
-        offline: ui.offline.has(owner),
+        offline: !state.canEdit({ kind: "chat", id: row.id }),
       };
     },
-  }));
-  const [teams] = useState<PeerTeamActions>(() => {
+  };
+  const teams: PeerTeamActions = (() => {
     const candidates = new WeakMap<
       Project,
       Map<PeerTeam | undefined, IComputedValue<readonly SidebarChatView[]>>
     >();
     return {
       get scope() {
-        return current.current.state.stateDir;
+        return state.stateDir;
       },
-      openRoom: (id) => current.current.state.openChat(id),
+      openRoom: (id) => state.openChat(id),
       refresh: async () => {
-        await current.current.commands.refresh?.();
+        await state.refresh();
       },
-      closeForm: () => current.current.state.setTeamDialog(null),
+      closeForm: () => state.setTeamDialog(null),
       edit: (team, action) =>
-        current.current.state.setTeamDialog({
+        state.setTeamDialog({
           path: team.projectPath || "",
           id: team.id,
           action,
         }),
       toggle: (team) =>
-        current.current.state.toggleTree(
-          JSON.stringify([team.projectPath, "team", team.id]),
-        ),
+        state.toggleTree(JSON.stringify([team.projectPath, "team", team.id])),
       room: (team) =>
-        current.current.state.runtime?.rooms?.find(
-          (room) => room.radio?.teamId === team.id,
-        )?.id,
+        state.rooms.find((room) => room.radio?.teamId === team.id)?.id,
       disabled: (team) => {
-        const s = current.current.state;
+        const s = state;
         return !s.canEdit(
           s.projectTarget(team.projectPath || "", undefined, team.id),
         );
@@ -128,7 +141,7 @@ export function useSidebarActions(
         const view =
           byTeam.get(team) ??
           computed(() => {
-            const s = current.current.state;
+            const s = state;
             return s.model.rows.filter(
               (row) =>
                 row.projectPath === project.path &&
@@ -147,6 +160,8 @@ export function useSidebarActions(
         return view.get();
       },
     };
-  });
+  })();
   return { rows, teams };
 }
+
+export type SidebarActions = ReturnType<typeof createSidebarActions>;

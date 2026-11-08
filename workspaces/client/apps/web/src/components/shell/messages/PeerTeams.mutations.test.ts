@@ -1,3 +1,4 @@
+import { PeerTeamMoveOwner } from "./peerTeamMutation.ts";
 // @vitest-environment happy-dom
 import { act, createElement, Fragment } from "react";
 import { MantineProvider } from "@mantine/core";
@@ -11,7 +12,7 @@ import {
 import {
   PeerTeamActionsProvider,
   PeerTeamForm,
-  usePeerTeamMove,
+  PeerTeamMoveFeedback,
   type PeerTeamActions,
 } from "./PeerTeams.tsx";
 
@@ -55,8 +56,8 @@ it.each(
       disabled: () => false,
       candidates: () => [],
     };
+    const move = new PeerTeamMoveOwner(backend, refresh);
     function Move() {
-      const move = usePeerTeamMove(refresh);
       return createElement(
         Fragment,
         null,
@@ -65,7 +66,7 @@ it.each(
           { onClick: () => move.move(project, "a", "team") },
           "Move",
         ),
-        move.feedback,
+        createElement(PeerTeamMoveFeedback, { owner: move }),
       );
     }
     const render = () =>

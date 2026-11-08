@@ -2223,8 +2223,17 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                     .map_err(|error| error.to_string())?,
             )?,
         });
+        // Local projection metadata has a Rust owner but is not a wire API change.
+        let mut observable_api = openapi.clone();
+        let mut metadata = schemars::generate::SchemaSettings::draft2020_12()
+            .with(|settings| settings.definitions_path = "/components/schemas".into())
+            .into_generator();
+        metadata.subschema_for::<crate::observable_resources::ProjectionMetadata>();
+        for (name, schema) in metadata.take_definitions(true) {
+            observable_api["components"]["schemas"][name] = schema;
+        }
         let observable = studio_observable_codegen::render(
-            &openapi,
+            &observable_api,
             &crate::observable_resources::models(),
             &crate::observable_resources::resources(),
         )
@@ -2245,7 +2254,7 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
                 "node_modules/oxfmt/bin/oxfmt",
                 "--stdin-filepath=observableFieldTypes.ts",
                 &studio_observable_codegen::render_fields(
-                    &openapi,
+                    &observable_api,
                     &crate::observable_resources::models(),
                     &crate::observable_resources::resources(),
                 )

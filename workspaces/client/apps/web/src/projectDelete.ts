@@ -2,7 +2,7 @@ import { StopOutcome } from "./generated/api.ts";
 import { ApiError, errorText, type post } from "./api";
 import { definiteDeleteRejection } from "./chatDeleteScope";
 import type { components } from "./generated/api";
-import type { Agent, Project } from "./types";
+import type { Agent, DeepReadonly, Project } from "./types";
 
 type DeleteRequest = components["schemas"]["ProjectDeleteRequest"];
 type DeleteReply = components["schemas"]["ProjectDeleteResponse"];
@@ -41,8 +41,11 @@ const unknownMessage =
 
 /** Reader protection only. The server independently selects the full deletion membership. */
 export function projectReaderScope(
-  project: Project,
-  agents: readonly Agent[],
+  project: DeepReadonly<Project>,
+  agents: readonly Pick<
+    Agent,
+    "id" | "parentId" | "projectId" | "projectServerId" | "projectPath"
+  >[],
   rooms: readonly {
     id: string;
     projectPath?: string | null | undefined;

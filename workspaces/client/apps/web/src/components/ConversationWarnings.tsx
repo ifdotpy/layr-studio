@@ -1,82 +1,28 @@
 import { useState } from "react";
+import { observer } from "mobx-react-lite";
+import { warningTitle, isInfoNotice } from "../app/notices/warnings.ts";
 import { ActionIcon, Badge, Modal, Tabs, Text } from "@mantine/core";
 import { CircleAlert, Info } from "lucide-react";
-import { useAppLog } from "../appLog";
-import { displayError, errorDetails } from "../errorPresentation";
-import type { components } from "../generated/api";
-import type { Message } from "../types";
+import { errorDetails } from "../errorPresentation";
 import ErrorDescription from "./ErrorDescription";
-import { isNonBlockingWarning } from "./NativeNotice";
 import "./conversation-warnings.css";
-import {
-  LEVELS,
-  LEVEL_COLORS,
-  StudioErrorList,
-  useStudioErrors,
-} from "./StudioErrors";
+import { LEVEL_COLORS, StudioErrorList, useStudioErrors } from "./StudioErrors";
 
-type NativeNotice =
-  | components["schemas"]["NativeNoticeRecord"]
-  | components["schemas"]["ProviderVersionWarningDto"];
-
-function isInfoNotice(
-  notice: NativeNotice,
-): notice is components["schemas"]["ProviderVersionWarningDto"] {
-  return "level" in notice && notice.level === "info";
-}
-
-function warningTitle(value: unknown, fallback: string) {
-  const text = displayError(value);
-  if (/\b(version|baseline)\b/i.test(text)) {
-    const provider = /\bClaude\b/i.test(text)
-      ? "Claude"
-      : /\bCodex\b/i.test(text)
-        ? "Codex"
-        : "Provider";
-    return `${provider} version needs attention`;
-  }
-  const first = text.split(/\n|[.!?](?:\s|$)/)[0]?.trim();
-  if (!first) return fallback;
-  const words = first.split(/\s+/);
-  return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : first;
-}
-
-export default function ConversationWarnings({
-  scope,
-  notices,
-  accountKey,
-  messages,
-  openAgent = () => {},
-}: {
-  scope: string;
-  notices?: NativeNotice[];
-  accountKey: string;
-  messages: Message[];
-  openAgent?: (id: string) => void;
-}) {
+export default observer(function ConversationWarnings() {
   const errors = useStudioErrors();
-  const logs = useAppLog();
-  const [openScope, setOpenScope] = useState<string | null>(null);
-  const accountNotices =
-    notices?.filter((notice) => notice.accountKey === accountKey) || [];
-  const chatWarnings = messages.filter(isNonBlockingWarning);
-  const highest = LEVELS.find(
-    (level) =>
-      errors.items.some((item) => item.level === level) ||
-      logs.some((item) => item.level === level) ||
-      (level === "warning" &&
-        (accountNotices.some((notice) => !isInfoNotice(notice)) ||
-          chatWarnings.length > 0)),
-  );
-  const hasWarning = highest !== undefined && highest !== "log";
-  const noticeCount = accountNotices.length + chatWarnings.length;
-  const title =
-    hasWarning || (noticeCount === 0 && logs.length === 0)
-      ? "Warnings"
-      : "Notices";
-  const count = noticeCount + errors.items.length + logs.length;
-  const opened = openScope === scope;
-
+  const {
+    logs,
+    accountNotices,
+    chatWarnings,
+    highestLevel: highest,
+    hasWarning,
+    noticeCount,
+    warningTitle: title,
+    warningCount: count,
+  } = errors;
+  const scope = errors.areas.selected.warningScope;
+  const [openedScope, setOpenedScope] = useState<string | null>(null);
+  const close = () => setOpenedScope(null);
   return (
     <>
       <ActionIcon
@@ -86,7 +32,7 @@ export default function ConversationWarnings({
         aria-label={title}
         title={`${title} (${count})`}
         onClick={() => {
-          setOpenScope(scope);
+          setOpenedScope(scope);
         }}
       >
         {hasWarning ? (
@@ -106,8 +52,8 @@ export default function ConversationWarnings({
       </ActionIcon>
       <Modal
         key={scope}
-        opened={opened}
-        onClose={() => setOpenScope(null)}
+        opened={openedScope === scope}
+        onClose={close}
         title={title}
         size="lg"
         centered
@@ -171,34 +117,10 @@ export default function ConversationWarnings({
             </div>
           </Tabs.Panel>
           <Tabs.Panel value="errors" pt="md">
-            {errors.error && (
-              <Text c="red" size="sm" mb="sm" role="alert">
-                {errors.error}
-              </Text>
-            )}
-            {errors.notice && (
-              <Text size="sm" mb="sm" role="status">
-                {errors.notice}
-              </Text>
-            )}
-            <StudioErrorList
-              items={errors.items}
-              selected={errors.selected}
-              busy={errors.busy}
-              onSelect={errors.select}
-              onSelectAll={errors.selectAll}
-              onDelete={() => void errors.remove()}
-              onAction={(item) => {
-                if (item.action === "resume") void errors.resume(item);
-                else if (item.action === "check") {
-                  setOpenScope(null);
-                  openAgent(item.agentId);
-                }
-              }}
-            />
+            <StudioErrorList onOpen={close} />
           </Tabs.Panel>
         </Tabs>
       </Modal>
     </>
   );
-}
+});

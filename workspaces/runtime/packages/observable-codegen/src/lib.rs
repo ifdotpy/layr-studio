@@ -24,6 +24,8 @@ pub struct ObservableModel {
     pub tracked_nested: Option<Vec<String>>,
     /// The existing local projection exposes declared fields of an open wire record.
     pub declared_fields: bool,
+    /// Local models have a Rust schema owner without a wire API component.
+    pub local_fields: bool,
     pub ordered_by: Option<String>,
 }
 impl ObservableModel {
@@ -41,6 +43,7 @@ impl ObservableModel {
             opaque: vec![],
             tracked_nested: None,
             declared_fields: false,
+            local_fields: false,
             ordered_by: None,
         }
     }
@@ -76,6 +79,11 @@ impl ObservableModel {
         self.tracked_nested = Some(fields.iter().map(|field| (*field).into()).collect());
         self
     }
+    pub fn local_fields(mut self) -> Self {
+        self.declared_fields = true;
+        self.local_fields = true;
+        self
+    }
     pub fn declared_fields(mut self) -> Self {
         self.declared_fields = true;
         self
@@ -108,6 +116,7 @@ pub struct ObservableCollection {
     pub collection: String,
     pub facade: String,
     pub schema: String,
+    pub opaque: bool,
 }
 impl ObservableCollection {
     pub fn named(collection: &str, facade: &str, schema: &str) -> Self {
@@ -115,10 +124,16 @@ impl ObservableCollection {
             collection: collection.into(),
             facade: facade.into(),
             schema: schema.into(),
+            opaque: false,
         }
     }
     pub fn of<T: JsonSchema>(collection: &str, facade: &str) -> Self {
         Self::named(collection, facade, &T::schema_name())
+    }
+    /// Preserve an existing union DTO atomically, without projecting its variants.
+    pub fn opaque(mut self) -> Self {
+        self.opaque = true;
+        self
     }
 }
 impl ObservableResource {

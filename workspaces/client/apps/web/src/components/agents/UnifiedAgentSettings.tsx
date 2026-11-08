@@ -6,7 +6,7 @@ import { observer } from "mobx-react-lite";
 import type { Agent } from "../../types";
 import { useServerApi } from "../../servers/ServerServicesContext";
 import "../../api";
-import Accounts, { type useAccounts } from "../Accounts";
+import Accounts, { type AccountsController } from "../Accounts";
 import { ExecutionSettings } from "./ExecutionSettings";
 import { errorText } from "../../api";
 import { useCallback, useState, type ComponentProps } from "react";
@@ -24,21 +24,19 @@ export function UnifiedAgentSettingsView({
 > & {
   agent: Agent;
   lead?: Agent | undefined;
-  state: ReturnType<typeof useAccounts>;
+  state: AccountsController;
   notify: (message: string) => void;
   onAccountModalOpenChange?: (opened: boolean) => void;
   showAccountExclusions?: boolean;
   showTransferStatus?: boolean;
 }) {
   const store = useServerStore();
-  const detail = settings.agent
-    ? resourceData(
-        store.agentDetail(observableAgentId(settings.agent!.id)).current,
-      )
-    : undefined;
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(settings.agent.id)).current,
+  );
   const leadDetail = settings.lead
     ? resourceData(
-        store.agentDetail(observableAgentId(settings.lead!.id)).current,
+        store.agentDetail(observableAgentId(settings.lead.id)).current,
       )
     : undefined;
   const { post } = useServerApi();
@@ -53,6 +51,16 @@ export function UnifiedAgentSettingsView({
     },
     [onAccountModalOpenChange],
   );
+  const saveExclusions = (
+    field: "worker_excluded_account_keys" | "reviewer_excluded_account_keys",
+    keys: string[],
+  ) => {
+    setExclusionsSaving(true);
+    void post("/api/conversation", { id: settings.agent.id, [field]: keys })
+      .then(() => settings.refresh())
+      .catch((error) => notify(errorText(error)))
+      .finally(() => setExclusionsSaving(false));
+  };
   return (
     <Accounts
       state={state}
@@ -83,30 +91,13 @@ export function UnifiedAgentSettingsView({
             accountModalOpen={accountModalOpen}
             onWorkerExcludedAccountKeysChange={
               showExclusions
-                ? (keys) => {
-                    setExclusionsSaving(true);
-                    void post("/api/conversation", {
-                      id: settings.agent.id,
-                      worker_excluded_account_keys: keys,
-                    })
-                      .then(() => settings.refresh())
-                      .catch((error) => notify(errorText(error)))
-                      .finally(() => setExclusionsSaving(false));
-                  }
+                ? (keys) => saveExclusions("worker_excluded_account_keys", keys)
                 : undefined
             }
             onReviewerExcludedAccountKeysChange={
               showExclusions
-                ? (keys) => {
-                    setExclusionsSaving(true);
-                    void post("/api/conversation", {
-                      id: settings.agent.id,
-                      reviewer_excluded_account_keys: keys,
-                    })
-                      .then(() => settings.refresh())
-                      .catch((error) => notify(errorText(error)))
-                      .finally(() => setExclusionsSaving(false));
-                  }
+                ? (keys) =>
+                    saveExclusions("reviewer_excluded_account_keys", keys)
                 : undefined
             }
           />

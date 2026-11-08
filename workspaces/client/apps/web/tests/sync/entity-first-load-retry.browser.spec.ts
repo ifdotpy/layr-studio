@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { required } from "../teams/helpers.ts";
 import type { FixtureResourceChange } from "./helpers.ts";
 import type { Page } from "@playwright/test";
@@ -63,9 +64,9 @@ async function createFixture(page: Page, options: FixtureOptions = {}) {
   });
   const entityDocument = (): SyncEntity => ({
     op: "upsert",
-    collection: "agent",
+    collection: "agentSummary",
     id: "lead",
-    value: { id: "lead", name: `Fixture ${revision}` },
+    value: agentSummaryFixture("lead", { name: `Fixture ${revision}` }),
     seq: revision,
   });
   const json = (res: ServerResponse, status: number, value: unknown) => {
@@ -234,7 +235,7 @@ async function mount(page: Page, options?: FixtureOptions) {
 
 async function waitForData(page: Page) {
   await page.waitForFunction(
-    () => Boolean(window.snapshot) && window.snapshot.data !== null,
+    () => Boolean(window.snapshot) && window.snapshot.state !== null,
     null,
     {
       timeout: 20_000,
@@ -249,7 +250,9 @@ test("first load reports failure and recovers without a legacy request", async (
   const fixture = await mount(page, { available: false });
   try {
     await page.waitForFunction(
-      () => window.snapshot?.data === null && Boolean(window.snapshot.error),
+      () =>
+        window.snapshot?.state === null &&
+        Boolean(window.snapshot.startup.error),
     );
     assert.notEqual((await page.getByRole("alert").textContent())?.trim(), "");
     assert.equal(
@@ -258,7 +261,7 @@ test("first load reports failure and recovers without a legacy request", async (
     );
     fixture.setAvailable(true);
     await waitForData(page);
-    await page.waitForFunction(() => window.snapshot.error === "");
+    await page.waitForFunction(() => window.snapshot.startup.error === "");
     assert.equal(
       fixture.requests.some((request) => request.includes("/api/state")),
       false,
@@ -333,7 +336,7 @@ test("delivers one state change committed before the delayed stream attaches", a
     fixture.publish();
     await fixture.firstConnectedStream;
     await page.waitForFunction(() =>
-      window.snapshot?.data?.runtime?.agents?.some(
+      Array.from(window.snapshot?.state?.agents.values() ?? []).some(
         (agent) => agent.id === "lead" && agent.name === "Fixture 2",
       ),
     );
@@ -392,7 +395,7 @@ test("retries the initial pull after three transient failures", async ({
   try {
     await waitForData(page);
     assert.ok(fixture.counts.pull >= 4);
-    await page.waitForFunction(() => window.snapshot.error === "");
+    await page.waitForFunction(() => window.snapshot.startup.error === "");
   } finally {
     await fixture.close();
   }
@@ -403,10 +406,12 @@ test("keeps the error visible for a permanent 503", async ({ page }) => {
   const fixture = await mount(page, { pullStatus: 503 });
   try {
     await page.waitForFunction(
-      () => window.snapshot?.data === null && Boolean(window.snapshot.error),
+      () =>
+        window.snapshot?.state === null &&
+        Boolean(window.snapshot.startup.error),
     );
     await page.waitForTimeout(6_000);
-    assert.equal(await page.evaluate(() => window.snapshot.data), null);
+    assert.equal(await page.evaluate(() => window.snapshot.state), null);
     assert.notEqual((await page.getByRole("alert").textContent())?.trim(), "");
   } finally {
     await fixture.close();
@@ -422,7 +427,9 @@ test("bounds retries for a permanent 503", async ({ page }) => {
   const fixture = await mount(page, { pullStatus: 503 });
   try {
     await page.waitForFunction(
-      () => window.snapshot?.data === null && Boolean(window.snapshot.error),
+      () =>
+        window.snapshot?.state === null &&
+        Boolean(window.snapshot.startup.error),
     );
     await page.waitForTimeout(6_000);
     const offsets = fixture.pullAttempts.map((attempt) =>
@@ -442,7 +449,9 @@ test("does not retry a permanent 400", async ({ page }) => {
   const fixture = await mount(page, { pullStatus: 400 });
   try {
     await page.waitForFunction(
-      () => window.snapshot?.data === null && Boolean(window.snapshot.error),
+      () =>
+        window.snapshot?.state === null &&
+        Boolean(window.snapshot.startup.error),
     );
     await page.waitForTimeout(2_000);
     assert.equal(fixture.counts.pull, 1);
@@ -458,20 +467,28 @@ test("clears a later subscription error after a successful pull", async ({
   const fixture = await mount(page, {});
   try {
     await waitForData(page);
-    const initial = await page.evaluate(() => window.snapshot.data);
+    const initial = await page.evaluate(() => window.snapshot.state);
     fixture.setPullStatus(503);
     fixture.publish();
-    await page.waitForFunction(() => Boolean(window.snapshot.error), null, {
-      timeout: 10_000,
-    });
-    assert.deepEqual(await page.evaluate(() => window.snapshot.data), initial);
+    await page.waitForFunction(
+      () => Boolean(window.snapshot.startup.error),
+      null,
+      {
+        timeout: 10_000,
+      },
+    );
+    assert.deepEqual(await page.evaluate(() => window.snapshot.state), initial);
     fixture.setPullStatus(undefined);
     fixture.publish();
-    await page.waitForFunction(() => window.snapshot.error === "", null, {
-      timeout: 10_000,
-    });
+    await page.waitForFunction(
+      () => window.snapshot.startup.error === "",
+      null,
+      {
+        timeout: 10_000,
+      },
+    );
 
-    assert.ok(await page.evaluate(() => window.snapshot.data));
+    assert.ok(await page.evaluate(() => window.snapshot.state));
   } finally {
     await fixture.close();
   }

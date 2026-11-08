@@ -1,12 +1,16 @@
+import { stateFromFixture } from "./sidebarSourceFixture.ts";
+import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import { autorun } from "mobx";
 import { expect, it } from "vitest";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
-import {
-  createMergedSidebarSelector,
-  createSidebarSourceStore,
-} from "./mergedSidebar.ts";
+import { createMergedSidebarSelector } from "./mergedSidebar.ts";
 import { sidebarSnapshot, type SidebarEntity } from "./sidebarSnapshot.ts";
-import { snapshotFixture } from "../snapshotFixture.ts";
+import { componentSnapshot } from "../components/componentTestFixtures.ts";
+const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
+  Object.assign(componentSnapshot(...args), {
+    token: "",
+    stateDir: "/fixture",
+  });
 
 const facts = (name = "Original", tail = "old tail"): SidebarEntity[] => [
   {
@@ -18,8 +22,14 @@ const facts = (name = "Original", tail = "old tail"): SidebarEntity[] => [
 ];
 it("keeps equal native summary ids in separate generated source mirrors", () => {
   const store = createSidebarSourceStore();
-  store.update("local", sidebarSnapshot(snapshotFixture([]), facts()));
-  store.update("remote", sidebarSnapshot(snapshotFixture([]), facts()));
+  store.update(
+    "local",
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), facts()),
+  );
+  store.update(
+    "remote",
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), facts()),
+  );
   const sources = store.sources(
     ["local", "remote"],
     new Set(["local", "remote"]),
@@ -36,7 +46,7 @@ it("keeps equal native summary ids in separate generated source mirrors", () => 
 it("status and tail updates leave combined routing and group membership untouched", () => {
   const store = createSidebarSourceStore();
   const snapshot = (entities: SidebarEntity[]) =>
-    sidebarSnapshot(snapshotFixture([]), entities);
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), entities);
   store.update("local", snapshot(facts()));
   const sources = () => store.sources(["local"], new Set(["local"]));
   const select = createMergedSidebarSelector();
@@ -84,7 +94,7 @@ it("rebinds computed project keys when retained routing metadata changes", () =>
     homeServerId: "local-backend",
   };
   const snapshot = (aliased: boolean) =>
-    sidebarSnapshot(snapshotFixture([]), [
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
       { collection: "agentSummary", id: agent.id, value: agent },
       {
         collection: "project",
@@ -127,7 +137,7 @@ it("rebinds computed project keys when retained routing metadata changes", () =>
 it("observes in-place generated project edits without replacing the source envelope", () => {
   const store = createSidebarSourceStore();
   const snapshot = (name: string, folder: string) =>
-    sidebarSnapshot(snapshotFixture([]), [
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
       {
         collection: "project",
         id: "p",
@@ -168,7 +178,9 @@ it("tracks generated membership and folder compatibility through a retained sour
   });
   store.update(
     "local",
-    sidebarSnapshot(snapshotFixture([]), [project("/before", "Before")]),
+    sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
+      project("/before", "Before"),
+    ]),
   );
   const sources = store.sources(["local"], new Set(["local"]));
   const select = createMergedSidebarSelector();
@@ -179,10 +191,15 @@ it("tracks generated membership and folder compatibility through a retained sour
   try {
     store.update(
       "local",
-      sidebarSnapshot(snapshotFixture([]), [project("/after", "After")]),
+      sidebarSnapshot(stateFromFixture(snapshotFixture([])), [
+        project("/after", "After"),
+      ]),
     );
     expect(names.at(-1)).toEqual(["After"]);
-    store.update("local", sidebarSnapshot(snapshotFixture([]), []));
+    store.update(
+      "local",
+      sidebarSnapshot(stateFromFixture(snapshotFixture([])), []),
+    );
     expect(names.at(-1)).toEqual([]);
   } finally {
     stop();

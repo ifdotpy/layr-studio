@@ -1,14 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { useMobileViewport, focusSelectedComposer } from "./mobileViewport";
-
-const effect = vi.hoisted(() => ({
-  run: undefined as undefined | (() => void | (() => void)),
-}));
-vi.mock("react", () => ({
-  useEffect: (callback: () => void | (() => void)) => {
-    effect.run = callback;
-  },
-}));
+import { attachMobileViewport, focusSelectedComposer } from "./mobileViewport";
 
 class Viewport extends EventTarget {
   width = 951;
@@ -134,8 +125,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 function mount(active = true, compact = false) {
-  useMobileViewport(active, compact);
-  cleanup = effect.run?.();
+  cleanup = active ? attachMobileViewport(compact) : undefined;
 }
 function flush(time = 0) {
   const pending = [...frames.values()];

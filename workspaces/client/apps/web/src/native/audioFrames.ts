@@ -23,41 +23,17 @@ type AudioParameters = Record<string, unknown> &
 type NativeAudioEvent = NativeEvent<{ id: string }>;
 type Listen = (callback: (value: unknown) => void) => Promise<() => void>;
 type AudioEvent = NativeEvent;
-type Caller =
-  | { frame: HTMLIFrameElement; origin: string; live: () => boolean }
-  | {
-      owner: object;
-      deliver: (event: AudioEvent) => void;
-      live: () => boolean;
-    };
+type Caller = {
+  owner: object;
+  deliver: (event: AudioEvent) => void;
+  live: () => boolean;
+};
 type Subscription = {
   caller: Caller;
   logical: string;
   capture?: string;
   voice?: string;
 };
-export const audioFrameMethod = (method: string, params: unknown) =>
-  [
-    "desktop.requestMicrophone",
-    "desktop.prepareTranscription",
-    "desktop.cancelTranscription",
-    "media.captureStart",
-    "media.captureStop",
-    "voice.create",
-    "voice.answer",
-    "voice.mute",
-    "voice.close",
-    "speech.uploadBegin",
-    "speech.uploadChunk",
-    "speech.uploadCancel",
-    "speech.transcribe",
-    "audio.unsubscribe",
-  ].includes(method) ||
-  (method === "view.subscribe" &&
-    ["microphone", "transcription", "voice"].includes(
-      (params as AudioParameters)?.topic,
-    ));
-
 export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
   const permits = new Map<string, Caller>();
   const uploads = new Map<string, Caller>();
@@ -67,10 +43,8 @@ export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
   let capture: { caller: Caller; id: string; voice?: boolean } | undefined;
   let closed = false;
   let listening: Promise<() => void> | undefined;
-  const identity = (caller: Caller) =>
-    "frame" in caller ? caller.frame : caller.owner;
   const same = (a: Caller | undefined, b: Caller) =>
-    !!a && identity(a) === identity(b) && a.live() && b.live();
+    !!a && a.owner === b.owner && a.live() && b.live();
   const owns = (owner: Caller | undefined, caller: Caller) => {
     if (closed || !same(owner, caller))
       throw new Error(
@@ -92,7 +66,7 @@ export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
         quiet("speech.uploadCancel", { transfer: id });
       }
     for (const [id, caller] of permits) if (dead(caller)) permits.delete(id);
-    // Closing a frame cancels only its operation; cancellation needs no new
+    // Closing an owner cancels only its operation; cancellation needs no new
     // gesture because the host verifies the attempt capability separately.
     for (const [id, caller] of running)
       if (dead(caller)) quiet("speech.cancel", { id });
@@ -105,15 +79,6 @@ export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
     }
     if (microphone && dead(microphone.caller)) microphone = undefined;
   };
-  const observer =
-    typeof MutationObserver === "function"
-      ? new MutationObserver(prune)
-      : undefined;
-  if (observer && typeof document !== "undefined")
-    observer.observe(document.documentElement, {
-      childList: true,
-      subtree: true,
-    });
   async function subscribeEvents() {
     if (!listen) throw new Error("Native audio events are unavailable.");
     listening ??= listen((input) => {
@@ -127,12 +92,7 @@ export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
       )
         return;
       const event = { event: row.logical, value: value.value };
-      if ("frame" in row.caller)
-        row.caller.frame.contentWindow?.postMessage(
-          { kind: "studio-native-audio-event", ...event },
-          row.caller.origin,
-        );
-      else row.caller.deliver(event);
+      row.caller.deliver(event);
     });
     await listening;
   }
@@ -399,7 +359,6 @@ export function bindAudioFrames(invoke: Invoke, listen?: Listen) {
     },
     dispose() {
       closed = true;
-      observer?.disconnect();
       prune();
       void listening?.then((stop) => stop()).catch(() => {});
     },

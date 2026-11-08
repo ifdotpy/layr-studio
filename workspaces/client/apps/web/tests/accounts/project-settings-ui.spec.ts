@@ -1,4 +1,4 @@
-import type { Account } from "../../src/components/Accounts.tsx";
+import type { Account } from "./fixture-helpers.ts";
 import type { Project } from "../../src/types.ts";
 
 import type {} from "@playwright/test";

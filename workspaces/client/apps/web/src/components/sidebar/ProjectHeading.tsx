@@ -1,4 +1,3 @@
-import { useSidebarCommands } from "./commands.ts";
 import { ActionIcon, Menu, Tooltip, UnstyledButton } from "@mantine/core";
 import { Folder, FolderOpen, MoreHorizontal, Plus } from "lucide-react";
 import { observer } from "mobx-react-lite";
@@ -14,7 +13,6 @@ export const ProjectHeading = observer(function ProjectHeading({
   group: NavigableProject;
 }) {
   const sidebar = useSidebarState();
-  const commands = useSidebarCommands();
   sidebarRender("ProjectHeading");
   const editable = sidebar.canEdit(sidebar.projectTarget(group.path));
   const blocked = sidebar.unavailableReason(sidebar.projectTarget(group.path));
@@ -27,7 +25,7 @@ export const ProjectHeading = observer(function ProjectHeading({
         {...sidebar.sorting.bindings(
           "projects",
           group.path,
-          sidebar.allProjectGroups.map((item) => item.path),
+          sidebar.projectPaths,
         )}
         aria-description="Drag to reorder. Alt + Up or Down also works."
         className="project-tree-toggle"
@@ -45,7 +43,7 @@ export const ProjectHeading = observer(function ProjectHeading({
           archived={sidebar.archive}
         />
       </UnstyledButton>
-      {!sidebar.archive && (!sidebar.ui.compact || !!group.path) && (
+      {!sidebar.archive && (!sidebar.visibility.isCompact || !!group.path) && (
         <Tooltip label={blocked} disabled={!blocked} withinPortal>
           <ActionIcon
             className="project-tree-action"
@@ -54,9 +52,13 @@ export const ProjectHeading = observer(function ProjectHeading({
             {...(blocked ? { "aria-disabled": true } : {})}
             {...(blocked ? { "data-disabled": true } : {})}
             onClick={() => {
-              if (!blocked) commands.newChat(group.path || undefined);
+              if (!blocked)
+                void sidebar.run({
+                  action: "new-chat",
+                  ...(group.path ? { path: group.path } : {}),
+                });
             }}
-            disabled={sidebar.p.creating}
+            disabled={sidebar.creation.isCreating}
           >
             <Plus size={15} />
           </ActionIcon>
@@ -80,14 +82,17 @@ export const ProjectHeading = observer(function ProjectHeading({
             >
               New chat folder
             </Menu.Item>
-            {commands.newSharedChat && (
-              <Menu.Item
-                disabled={!editable}
-                onClick={() => commands.newSharedChat?.(group.path)}
-              >
-                New shared chat
-              </Menu.Item>
-            )}
+            <Menu.Item
+              disabled={!editable}
+              onClick={() =>
+                void sidebar.run({
+                  action: "new-shared-chat",
+                  path: group.path,
+                })
+              }
+            >
+              New shared chat
+            </Menu.Item>
             {sidebar.runtime?.peerTeamsVersion === 1 && (
               <Menu.Item
                 disabled={!editable}
@@ -104,7 +109,7 @@ export const ProjectHeading = observer(function ProjectHeading({
             <Menu.Divider />
             <Menu.Label>View</Menu.Label>
             {(sidebar.viewChatCounts.get(group.path) || 0) >=
-              sidebar.hideOldChatsThreshold && (
+              sidebar.preferences.value.hideOldChatsThreshold && (
               <Menu.Item
                 onClick={() =>
                   sidebar.setCompactProject(
@@ -128,25 +133,38 @@ export const ProjectHeading = observer(function ProjectHeading({
             >
               Rename project
             </Menu.Item>
-            {commands.projectFolders && (
-              <Menu.Item
-                disabled={!editable}
-                onClick={() => commands.projectFolders?.(group.path)}
-              >
-                Folders
-              </Menu.Item>
-            )}
             <Menu.Item
               disabled={!editable}
-              onClick={() => commands.projectAccount(group.path)}
+              onClick={() =>
+                void sidebar.run({
+                  action: "project-folders",
+                  projectId: group.path,
+                })
+              }
+            >
+              Folders
+            </Menu.Item>
+            <Menu.Item
+              disabled={!editable}
+              onClick={() =>
+                void sidebar.run({
+                  action: "project-account",
+                  path: group.path,
+                })
+              }
             >
               Project account
             </Menu.Item>
-            {group.registered && commands.deleteProject && (
+            {group.registered && (
               <Menu.Item
                 color="red"
                 disabled={!editable}
-                onClick={() => commands.deleteProject?.(group.path)}
+                onClick={() =>
+                  void sidebar.run({
+                    action: "delete-project",
+                    projectId: group.path,
+                  })
+                }
               >
                 Delete project…
               </Menu.Item>

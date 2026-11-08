@@ -2731,10 +2731,6 @@
       "fingerprint": "b2d5d6ac5d417be601dd86316f5bf594275166679713d51ea82c74b9448b3725:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/readState.noRefetch.test.ts",
-      "fingerprint": "ad3857efd77e2c68df3e2e3769523323078df4a2bce162303af80e15b7756a79:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
       "fingerprint": "b82160817a0c5d578825d701a5483cae958e3466610c06e5a8e3dc15ad1ce717:0"
     },
@@ -2751,10 +2747,6 @@
       "fingerprint": "edada8886fc62e27c56e89c38a37395a3e8150b2fda9c93394b5e8bbf49614b0:1"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/SidebarWarnings.test.ts",
-      "fingerprint": "b67a32f1b7da5f70d42e609275fdf152fc0c350881bb33fcb97ae9524a6376d3:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/hooks/mobileViewport.test.ts",
       "fingerprint": "69d1dc386914d5abc5b5a3e330ea6d60632d17d778b851eec08d3c91801727ee:0"
     },
@@ -2763,68 +2755,8 @@
       "fingerprint": "41b0e38d1064a7820fcdae1a395462deb510a04127f5437e32094b3aedc559c0:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/native/audioFrames.test.ts",
-      "fingerprint": "c91d87988e59eec9475ab0e5020f7b3ee5d80a7c445f791cae749538a2a0a716:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/close.test.ts",
-      "fingerprint": "1d7ba54c84844dcbd79074ed650a49881b8082ea90a99178e44cc80b35ea3bba:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/close.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/native/close.test.ts",
       "fingerprint": "6c3c396824c7a998a6ad49589a5df2813ecfc0a8455b3c51c58313b9a9a39dd7:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:1"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:2"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:3"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "4d91107033fb9bcddc4a269852ae480979d7741c899bd986c10d1864c66f34a3:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "60064be50e4661964f76fa41524999188a74ebdf75041e586e8b29b715b67412:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "6f9d7d9ded53020c733ccaff44714f31ae8b41169827b03b6dff205f21ef12f3:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "7159e9e110197192b583a8da96647eff283750bd388adf566162cfeb3dee42c1:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "80e1cea481914ec0f6cd62ccab2bc3c61abc2f963cb351a1b33a34c0a6625683:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "bd7352040e5ac9e2b34fda09f6a3309dbf4b696814666804e06d0ad3719c0e51:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "d16d5037c20fc15f799b8a796257f6b14d8aaaee1f67cdea939a56e76526fc3f:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/native/frame.test.ts",
-      "fingerprint": "ffdcc476d3524ddd05da41b8d43d84a5fd917ea20ac0a9747a8d49b029dea353:0"
     },
     {
       "file": "workspaces/client/apps/web/src/servers/eventSource.test.ts",
@@ -2835,36 +2767,12 @@
       "fingerprint": "03d24bdba8c9e272d6948e30c32dbe670cbac161425bf16fe401ee51cdd0a4f1:1"
     },
     {
-      "file": "workspaces/client/apps/web/src/servers/logicalProjects.test.ts",
-      "fingerprint": "9d5d88e384ff762325254c34a39eef2ef92cc361f3e028d9b7cf2bad6f4b860d:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/servers/ServerAccountLimits.reads.test.ts",
-      "fingerprint": "6f2ad7f8927616383aab613be24417028b53d81f30e621f998c3f14f58bb734a:0"
-    },
-    {
       "file": "workspaces/client/apps/web/src/servers/ServerAccountLimits.test.ts",
       "fingerprint": "86fa6d3dee3e84fdca6b05d2f35c055ae078f5a5cd6b5b43fa01dea47193b486:0"
     },
     {
       "file": "workspaces/client/apps/web/src/servers/ServerAccountLimits.test.ts",
       "fingerprint": "946d8fdd234323eb48d8998a3d6abe322a8ba492a3d067861b72c01903361fe3:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/servers/shellTransport.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/servers/shellTransport.test.ts",
-      "fingerprint": "2ceaedd95ba265331ac6d051df71e0f95c557562b9b2c77df9296178d76999bb:1"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/servers/sidebarRpc.test.ts",
-      "fingerprint": "1507e9449002c3eb6292fc06b45c403836368727a31fee409e312a4d806aa6d9:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/servers/sidebarRpc.test.ts",
-      "fingerprint": "a9bc3f808802a0e50667ec0c2841804856773ac46b5aad56d715ed44fa272ef3:0"
     },
     {
       "file": "workspaces/client/apps/web/src/startWait.test.ts",
@@ -2877,10 +2785,6 @@
     {
       "file": "workspaces/client/apps/web/src/sync/client.resourceBootstrap.test.ts",
       "fingerprint": "fd67da7ce2ad142446f48cf59739fe37769dd9933dedb49c477b060e25a92e6c:1"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/sync/entityProjectionObserver.test.ts",
-      "fingerprint": "550ac06d3398d0d7cac3adb12ba747a74c5214b0b13e2b289340e2d025c23806:0"
     },
     {
       "file": "workspaces/client/apps/web/src/sync/subscriptions/entityData.test.ts",
@@ -2901,14 +2805,6 @@
     {
       "file": "workspaces/client/apps/web/src/sync/subscriptions/server.test.ts",
       "fingerprint": "357bddd01f01e74983563c621bc0013cfefb49c854302174df21068711f0abdb:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/useProjectDelete.test.ts",
-      "fingerprint": "2ebfd9d24e18773172e185fca4d5ccb63c9d81261f036418544170bb7aafaa11:0"
-    },
-    {
-      "file": "workspaces/client/apps/web/src/useProjectDelete.test.ts",
-      "fingerprint": "dc87706f322cf57b84a43bd4f1cacf737238e2c2923378e614991ea687e41b6f:0"
     },
     {
       "file": "workspaces/client/apps/web/tests/messages/send-command.ts",

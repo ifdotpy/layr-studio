@@ -41,7 +41,12 @@ const meta = {
       return (
         <fixture.Provider>
           <ConversationProvider value={navigation}>
-            <Story />
+            <Story
+              args={{
+                ...context.args,
+                agent: fixture.mirror.current.agents.get(lead.id),
+              }}
+            />
           </ConversationProvider>
         </fixture.Provider>
       );
@@ -55,7 +60,6 @@ type Story = StoryObj<typeof meta>;
 export const ActiveConversation: Story = {
   args: {
     title: "Refactor the conversation view",
-    agentId: lead.id,
     serverAlias: "MAC",
   },
   play: async ({ canvasElement }) => {

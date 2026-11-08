@@ -1,58 +1,67 @@
-import type {
-  ConnectionActivity,
-  ConnectionHealth,
-} from "../sync/connectionState";
+import { observableFixture } from "../components/observableFixture.tsx";
+// @vitest-environment happy-dom
+import { createServerServices } from "../servers/serverServices.ts";
+import { LocalCollection } from "../sync/localCollection.ts";
+import type { AppScope } from "../app/contracts.ts";
 import { afterEach, expect, it, vi } from "vitest";
+import { reaction } from "mobx";
 import { READ_RECOVERY_MAX_ATTEMPTS } from "../sync/readRetry";
-import type { ResourceConnectionDetail } from "../sync/resourceConnection";
 import { localTime } from "../local-time";
-const h = vi.hoisted(() => ({
+import { StartupOwner } from "../app/startup/StartupOwner.ts";
+const h = {
   effects: [] as (() => void | (() => void))[],
-  session: vi.fn(),
-  database: vi.fn(),
+  session: vi.fn<AppScope["services"]["api"]["refreshSession"]>(),
+  database: vi.fn<AppScope["services"]["sync"]["syncDatabase"]>(),
   writes: [] as unknown[],
   connection: undefined as
-    | undefined
-    | ((
-        state: ConnectionHealth,
-        activity?: ConnectionActivity,
-        detail?: ResourceConnectionDetail,
-      ) => void),
-}));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useEffect: (fn: () => void | (() => void)) => h.effects.push(fn),
-  useLayoutEffect: vi.fn(),
-  useRef: (current: unknown) => ({ current }),
-  useState: (value: unknown) => [
-    typeof value === "function" ? value() : value,
-    (next: unknown) => h.writes.push(next),
-  ],
-  useMemo: (fn: () => unknown) => fn(),
-  useCallback: (fn: unknown) => fn,
-}));
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerServices: () => null,
-  useServerApi: () => ({
-    refreshSession: h.session,
-    saved: (_: string, value: unknown) => value,
-    save: vi.fn(),
-  }),
-  useServerSync: () => ({
-    syncDatabase: h.database,
-    subscribeStateProjection: () => () => {},
-  }),
-  useServerResources: () => ({
-    watchResourceConnection: (fn: typeof h.connection) => {
-      h.connection = fn;
+    | Parameters<
+        AppScope["services"]["resources"]["watchResourceConnection"]
+      >[0]
+    | undefined,
+};
+function mountStartup() {
+  const services = createServerServices({
+    id: `startup-${crypto.randomUUID()}`,
+    origin: "https://startup.fixture",
+    label: "Fixture",
+  });
+  vi.spyOn(services.api, "refreshSession").mockImplementation(h.session);
+  vi.spyOn(services.api, "onApiSchemaMismatch").mockReturnValue(() => {});
+  vi.spyOn(services.sync, "syncDatabase").mockImplementation(h.database);
+  vi.spyOn(services.resources, "watchResourceConnection").mockImplementation(
+    (next) => {
+      h.connection = next;
       return () => {};
     },
-  }),
-}));
-vi.mock("../sync/client", () => ({}));
-vi.mock("../sync/transcriptCache", () => ({}));
-vi.mock("../sync/resume", () => ({ onResume: () => () => {} }));
-import { useSnapshot } from "../hooks";
+  );
+  const models = observableFixture();
+  const owner = new StartupOwner(
+    {
+      services,
+      store: models.store,
+      screen: { active: false, channel: null },
+    },
+    { canUpdateRenderer: () => false, acceptUiPreferences: () => {} },
+  );
+  h.effects.push(() => {
+    const status = reaction(
+      () => ({
+        startupError: owner.startupError,
+        projectionError: owner.projectionError,
+        transportError: owner.transportError,
+      }),
+      (value) => h.writes.push(value),
+    );
+    const stop = owner.start();
+    return () => {
+      status();
+      stop();
+      models.store.dispose();
+      services.close();
+    };
+  });
+  return owner;
+}
 let stops: (() => void)[] = [];
 afterEach(() => {
   stops.forEach((stop) => stop());
@@ -67,14 +76,16 @@ it.each(["credentials", "database"])(
   "bounds %s startup recovery and displays exhaustion",
   async (boundary) => {
     vi.useFakeTimers();
-    vi.stubGlobal("window", new EventTarget());
-    vi.stubGlobal("document", { hidden: false });
     vi.stubGlobal("navigator", { onLine: true });
-    h.database.mockResolvedValue({ workspaceId: "workspace" });
+    h.database.mockResolvedValue({
+      workspaceId: "workspace",
+      db: { projections: new LocalCollection("snapshot-test") },
+      verifyWorkspace: async () => {},
+    });
     h.session.mockResolvedValue({ token: "token" });
     const read = boundary === "credentials" ? h.session : h.database;
     read.mockRejectedValue(new TypeError("unreachable"));
-    const hook = useSnapshot();
+    const hook = mountStartup();
     stops = h.effects.flatMap((effect) => {
       const stop = effect();
       return stop ? [stop] : [];
@@ -89,8 +100,8 @@ it.each(["credentials", "database"])(
     window.dispatchEvent(new Event("focus"));
     await vi.advanceTimersByTimeAsync(60_000);
     expect(read).toHaveBeenCalledTimes(READ_RECOVERY_MAX_ATTEMPTS);
-    h.connection?.("degraded");
-    h.connection?.("live");
+    h.connection?.("degraded", "open", {});
+    h.connection?.("live", "open", {});
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(read).toHaveBeenCalledTimes(READ_RECOVERY_MAX_ATTEMPTS * 2);
     await hook.refresh(true);
@@ -102,30 +113,32 @@ it.each(["credentials", "database"])(
 it.each([true, false])(
   "does not turn the browser offline hint into a startup failure (initiallyOnline=%s)",
   (online) => {
-    vi.stubGlobal("window", new EventTarget());
-    vi.stubGlobal("document", { hidden: false });
     vi.stubGlobal("navigator", { onLine: online });
-    h.database.mockResolvedValue({ workspaceId: "workspace" });
+    h.database.mockResolvedValue({
+      workspaceId: "workspace",
+      db: { projections: new LocalCollection("snapshot-test") },
+      verifyWorkspace: async () => {},
+    });
     h.session.mockResolvedValue({ token: "token" });
-    useSnapshot();
+    mountStartup();
     stops = h.effects.flatMap((effect) => {
       const stop = effect();
       return stop ? [stop] : [];
     });
-    h.connection?.("live");
+    h.connection?.("live", "open", {});
     window.dispatchEvent(new Event("offline"));
     expect(h.writes).not.toContainEqual(
       expect.objectContaining({
         startupError: expect.stringContaining("Offline"),
       }),
     );
-    h.connection?.("degraded");
+    h.connection?.("degraded", "stopped", {});
     expect(h.writes).toContainEqual(
       expect.objectContaining({
         transportError: "Reason unknown. Connection interrupted.",
       }),
     );
-    h.connection?.("paused");
+    h.connection?.("paused", "open", {});
     expect(h.writes.at(-1)).toEqual(
       expect.objectContaining({ transportError: "" }),
     );
@@ -151,11 +164,13 @@ it.each([
 ] as const)(
   "uses actual %s health and %s activity for the snapshot warning",
   (health, activity, detail, transportError) => {
-    vi.stubGlobal("window", new EventTarget());
-    vi.stubGlobal("document", { hidden: false });
-    h.database.mockResolvedValue({ workspaceId: "workspace" });
+    h.database.mockResolvedValue({
+      workspaceId: "workspace",
+      db: { projections: new LocalCollection("snapshot-test") },
+      verifyWorkspace: async () => {},
+    });
     h.session.mockResolvedValue({ token: "token" });
-    useSnapshot();
+    mountStartup();
     stops = h.effects.flatMap((effect) => {
       const stop = effect();
       return stop ? [stop] : [];
@@ -174,11 +189,13 @@ it.each([
   },
 );
 it("shows the scheduled retry deadline in the snapshot warning", () => {
-  vi.stubGlobal("window", new EventTarget());
-  vi.stubGlobal("document", { hidden: false });
-  h.database.mockResolvedValue({ workspaceId: "workspace" });
+  h.database.mockResolvedValue({
+    workspaceId: "workspace",
+    db: { projections: new LocalCollection("snapshot-test") },
+    verifyWorkspace: async () => {},
+  });
   h.session.mockResolvedValue({ token: "token" });
-  useSnapshot();
+  mountStartup();
   stops = h.effects.flatMap((effect) => {
     const stop = effect();
     return stop ? [stop] : [];

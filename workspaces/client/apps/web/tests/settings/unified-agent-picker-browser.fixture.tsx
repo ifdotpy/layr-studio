@@ -1,6 +1,8 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
 import { required } from "./fixture-helpers.ts";
-import type { Snapshot, Agent } from "../../src/types.ts";
+import type { Agent } from "../../src/types.ts";
 import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
 import type { WorkerModelInfo } from "../../src/components/agents/WorkerModelPicker.tsx";
 import type { PostBody } from "../../src/apiTypes.ts";
@@ -393,7 +395,31 @@ function Fixture() {
               />
             ) : (
               <SharedChatCreate
-                data={data}
+                source={{
+                  startup: { creationScope: data.stateDir },
+                  state: {
+                    projects: new Map(
+                      data.runtime.projects.map((project) => [
+                        project.id,
+                        project,
+                      ]),
+                    ),
+                    agents: new Map(
+                      data.threads.map((agent) => [
+                        agent.id,
+                        {
+                          ...agentSummaryFixture(agent.id),
+                          ...agent,
+                          inFlight: agent.inFlight === true,
+                          projectServerId: agent.projectServerId ?? null,
+                        },
+                      ]),
+                    ),
+                    rooms: new Map(
+                      data.runtime.rooms.map((room) => [room.id, room]),
+                    ),
+                  },
+                }}
                 accounts={accountsData}
                 initialPath="/fixture/project"
                 refresh={async () => {}}

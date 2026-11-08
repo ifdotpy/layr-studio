@@ -1,3 +1,4 @@
+import { settingsAreasFixture } from "../../app/settings/SettingsAreasFixture.ts";
 import { observableFixture } from "../observableFixture.tsx";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
 vi.mock("mobx-react-lite", async (original) => ({
@@ -17,7 +18,7 @@ import { Button, NativeSelect, Switch, Textarea } from "@mantine/core";
 import type { PostBody } from "../../apiTypes";
 import { ApiError } from "../../api";
 import * as appLog from "../../appLog";
-import { AccountTransferStatus } from "../Accounts";
+import { AccountTransferStatus, createAccountsView } from "../Accounts";
 import { required, type ComponentHookCell } from "../componentTestFixtures";
 import type { EffectCallback, PropsWithChildren, ComponentProps } from "react";
 import {
@@ -81,6 +82,7 @@ function settingsInput(agent: Agent) {
   };
 }
 const h = vi.hoisted(() => ({
+  chatAgent: null as Agent | null,
   cells: new Map<string, ComponentHookCell[]>(),
   storage: new Map<string, unknown>(),
   scope: "",
@@ -200,7 +202,6 @@ import {
   WorkerLaunchDialog,
   type WorkerLaunch,
 } from "../shell/WorkerLaunchDialog";
-import { componentSnapshot } from "../componentTestFixtures";
 import { WorkerPermissions } from "../shell/WorkerPermissions";
 
 function children(
@@ -521,36 +522,35 @@ test("Daybreak remains available for a Codex main agent and absent for Claude", 
 });
 
 function chatSettings(agent: Agent) {
+  h.chatAgent = agent;
+  const input = settingsInput(agent);
+  const store = required(generatedAgents.get(input.summary.id)).store;
   return invoke(
     createElement(ChatSettingsDialog, {
-      settingsOpen: true,
-      accountModalOpen: false,
-      setSettingsOpen: () => {},
-      agent,
-      accounts: {
-        data: {
-          accounts: [],
-          archivedAccounts: [],
-          defaultAccountKey: "default",
-          defaultAccountGroups: [],
-          logins: [],
-          supportsDelete: true,
-          supportsDisconnect: true,
+      areas: settingsAreasFixture({
+        scope: {
+          store,
+          services: {
+            modelReader: { scope: "settings-receipt", read: h.read },
+          },
         },
-        setData: () => {},
-        error: "",
-        refresh: async () => null,
-        scope: "fixture",
+        navigation: {
+          selectedAgent: input.summary,
+          selectedLead: input.summary,
+        },
+        layout: { isSettingsFullscreen: false },
+        startup: { workspaceId: "workspace" },
+        creation: { isCreating: false },
+        dialogs: { changeProjectFolder() {} },
+        refresh: h.refresh,
+      }),
+      accounts: createAccountsView(store, h.read, "fixture"),
+      settings: {
+        chatOpen: true,
+        accountModalOpen: false,
+        closeChatSettings() {},
       },
-      notify: () => {},
-      agentModels: { models: [], loading: false, error: "", retry: () => {} },
-      data: componentSnapshot([agent]),
-      refresh: h.refresh,
-      workspaceId: "workspace",
-      creating: false,
-      newChat: () => {},
-      project: () => {},
-      setClaudeLoginKey: () => {},
+      onSignIn() {},
     }),
   );
 }
@@ -1532,4 +1532,17 @@ test("a late Claude success preserves the newer unresolved permission request", 
   control().props.onChange({ currentTarget: { value: "default" } });
   await vi.waitFor(() => expect(mutations).toHaveLength(3));
   expect(required(mutations[2]).request_id).toBe(unresolvedId);
+});
+
+test("a canonical effort response reconciles both the picker and saved change details", async () => {
+  const agent = { ...initial, effort: "low" };
+  h.post.mockResolvedValue({ ...agent, effort: "medium" });
+  render(agent).picker.onEffort("high");
+  await vi.waitFor(() => expect(h.post).toHaveBeenCalledOnce());
+  expect(required(h.post.mock.calls[0])[1].effort).toBe("high");
+  const result = render(agent);
+  expect(result.picker.effort).toBe("medium");
+  expect(result.label).toContain("Medium");
+  expect(JSON.stringify(result.statusModal)).not.toContain('"high"');
+  expect(JSON.stringify(result.statusModal)).toContain('"medium"');
 });

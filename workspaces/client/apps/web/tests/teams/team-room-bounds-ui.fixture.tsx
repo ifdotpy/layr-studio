@@ -1,6 +1,7 @@
+import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
 import { messageModels } from "../messages/message-models.fixture";
 import { conversationActionsFixture } from "../../src/components/observableFixture";
-import type { Agent, Room, Snapshot } from "../../src/types.ts";
+import type { Agent, Room } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 declare global {
   interface Window {

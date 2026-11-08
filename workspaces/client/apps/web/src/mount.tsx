@@ -1,6 +1,14 @@
-import { ServerViewStoreProvider } from "./servers/ServerServicesContext.tsx";
-import { BottomInsetBand } from "./hooks/BottomInsetBand";
 import "./browser-reset.css";
+import "@mantine/core/styles.css";
+import {
+  ServerAreas,
+  ServerAreasProvider,
+} from "./app/ServerAreasProvider.tsx";
+import {
+  createServerViewServices,
+  ServerServicesProvider,
+} from "./servers/ServerServicesContext.tsx";
+import { BottomInsetBand } from "./hooks/BottomInsetBand";
 import { NativeServerCredentials } from "./native/serverCredentials";
 import { hasNativeClient } from "./native/client";
 import { isNativeFrame } from "./native/frame";
@@ -12,7 +20,6 @@ import { BrowserServerCredentials } from "./servers/browserCredentials";
 import { setServerCredentialAdapter } from "./servers/transport";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import "@mantine/core/styles.css";
 import App from "./App";
 import { SidebarWarningsProvider } from "./components/SidebarWarnings";
 import MultiServerApp from "./servers/MultiServerApp";
@@ -54,15 +61,20 @@ async function mount() {
   const container = document.getElementById("root")!;
   if (container.dataset.studioMounted !== "true") {
     container.dataset.studioMounted = "true";
+    const services = isServerView
+      ? createServerViewServices((scope) => new ServerAreas(scope))
+      : null;
     createRoot(container).render(
       <UIErrorBoundary label="Studio" fullPage>
         <MantineProvider theme={theme} defaultColorScheme="auto">
           <BottomInsetBand>
             <SidebarWarningsProvider>
-              {isServerView ? (
-                <ServerViewStoreProvider>
-                  <App />
-                </ServerViewStoreProvider>
+              {services ? (
+                <ServerServicesProvider services={services}>
+                  <ServerAreasProvider areas={services.areas}>
+                    <App />
+                  </ServerAreasProvider>
+                </ServerServicesProvider>
               ) : (
                 <MultiServerApp />
               )}
