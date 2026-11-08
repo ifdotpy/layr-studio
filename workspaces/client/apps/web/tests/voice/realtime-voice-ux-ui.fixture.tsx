@@ -1,3 +1,4 @@
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -113,7 +114,9 @@ window.resourceChange = () =>
 window.render = (id) =>
   root.render(
     <MantineProvider defaultColorScheme="dark">
-      <RealtimeVoice agentId={id} notify={() => {}} />
+      <ServerViewStoreProvider>
+        <RealtimeVoice agentId={id} notify={() => {}} />
+      </ServerViewStoreProvider>
     </MantineProvider>,
   );
 watchVoiceTransport(

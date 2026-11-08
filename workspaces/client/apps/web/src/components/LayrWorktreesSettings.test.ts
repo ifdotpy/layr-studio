@@ -7,14 +7,23 @@ const fixture = vi.hoisted(() => ({ configuration: null as unknown }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (initial: unknown) => [
-    initial === null ? fixture.configuration : initial,
+    initial === null
+      ? fixture.configuration
+      : typeof initial === "function"
+        ? initial()
+        : initial,
     vi.fn(),
   ],
   useEffect: () => {},
 }));
+const owner = {
+  nativeLayrSettings: () => ({
+    current: { status: "live", data: fixture.configuration },
+  }),
+};
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => owner,
   useServerApi: () => ({ post: vi.fn() }),
-  useServerResources: () => ({ watchResourceChanges: vi.fn() }),
   useServerFileDialogs: () => ({
     canPickDirectory: () => false,
     pickDirectory: vi.fn(),

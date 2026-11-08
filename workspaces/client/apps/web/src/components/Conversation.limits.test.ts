@@ -1,7 +1,10 @@
 // @vitest-environment happy-dom
 import type { Agent } from "../types.ts";
 import { ServerAreasContextProvider } from "../app/ServerAreasProvider.tsx";
-import { conversationActionsFixture } from "./observableFixture.tsx";
+import {
+  conversationActionsFixture,
+  setStartupFixture,
+} from "./observableFixture.tsx";
 vi.mock("./questions/requestView", () => ({
   createRequestsView: () => ({ requests: [] }),
 }));
@@ -140,9 +143,10 @@ function render(
   const models = observableFixture(agent ? [agent] : []);
   const actions = conversationActionsFixture(() => {}, models.store);
   actions.navigation.selectedId = agent?.id || null;
-  actions.selected.detailSlot = detail
-    ? { current: { status: "live", data: detail } }
-    : undefined;
+  setStartupFixture(actions, { stateDir: "fixture" });
+  actions.layout.geometry.viewport.width = 1280;
+  if (agent && detail) models.details.get(agent.id)?.apply(detail);
+  else if (agent) models.details.delete(agent.id);
   h.read.mockImplementation(async () => {
     reloadLimits();
   });
@@ -363,12 +367,8 @@ it("keeps chat A metadata and recovery while the real Usage dropdown browses B",
   ]);
   const areas = conversationActionsFixture(() => {}, models.store);
   areas.navigation.selectedId = "lead";
-  areas.selected.detailSlot = {
-    current: {
-      status: "live",
-      data: required(models.details.get("lead")).current,
-    },
-  };
+  setStartupFixture(areas, { stateDir: "fixture" });
+  areas.layout.geometry.viewport.width = 1280;
   h.store = models.store;
   h.api = areas.scope.services.api;
   const reads = vi.spyOn(h.api, "get");

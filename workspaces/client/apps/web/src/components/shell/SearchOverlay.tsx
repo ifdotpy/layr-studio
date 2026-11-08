@@ -13,7 +13,7 @@ import { errorText, type GetResult } from "../../api";
 import { observer } from "mobx-react-lite";
 import { useServerStore } from "../../servers/ServerServicesContext";
 import { resourceData } from "../../store/runtime.ts";
-import { useWorkspaceResource as useResource } from "../useWorkspaceResource";
+import type { ReadSlot } from "../../store/runtime.ts";
 import "./Workspace.css";
 export interface SearchSource {
   readonly opened: boolean;
@@ -40,8 +40,14 @@ export default observer(function SearchOverlay({
     </Modal>
   );
 });
-export function SearchContent({ source: c }: { source: SearchSource }) {
-  const { get } = useServerApi();
+export const SearchContent = observer(function SearchContent({
+  source: c,
+}: {
+  source: SearchSource;
+}) {
+  const api = useServerApi(),
+    store = useServerStore();
+  const { get } = api;
 
   const sourceRequest = useRef(0);
   useEffect(
@@ -59,16 +65,27 @@ export function SearchContent({ source: c }: { source: SearchSource }) {
     [sourceError, setSourceError] = useState("");
   const [query, setQuery] = useState(""),
     [search, setSearch] = useState("");
-  const state = useResource(search ? "/api/search" : null, 0, {
-    query: { q: search },
-  });
+  const [read, setRead] = useState<ReadSlot<GetResult<"/api/search">> | null>(
+    null,
+  );
+  const current = read?.current;
+  const state = {
+    data: current ? resourceData(current) : undefined,
+    loading: current?.status === "loading",
+    error: current?.status === "error" ? errorText(current.error) : "",
+  };
   return (
     <>
       <form
         className="workspace-toolbar"
         onSubmit={(e) => {
           e.preventDefault();
-          setSearch(query.trim());
+          const q = query.trim();
+          if (!q) return;
+          setSearch(q);
+          const next = store.reads.search(api, { q });
+          setRead(next);
+          void next.read().catch(() => {});
         }}
       >
         <TextInput
@@ -189,7 +206,7 @@ export function SearchContent({ source: c }: { source: SearchSource }) {
       </Modal>
     </>
   );
-}
+});
 
 const SearchAgentName = observer(function SearchAgentName({
   id,

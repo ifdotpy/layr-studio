@@ -1,17 +1,20 @@
 // @vitest-environment happy-dom
-import { act, createElement } from "react";
+import { act, createElement, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { expect, it, vi } from "vitest";
 import { SearchContent } from "./SearchOverlay.tsx";
+import { createServerStore } from "../../store/server.ts";
+import { createSubscriptions } from "../../sync/subscriptions/module.ts";
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 const fixture = vi.hoisted(() => ({
   get: vi.fn(),
   result: { id: "message", agent: "same", text: "Excerpt", kind: "message" },
 }));
 vi.mock("../../servers/ServerServicesContext", () => ({
-  useServerApi: () => ({ get: fixture.get }),
+  useServerApi: () => ({ get: fixture.get, getStreamSession: () => undefined }),
   useServerStore: () => ({
+    reads: store.reads,
     state: () => ({
       current: {
         status: "live",
@@ -20,16 +23,17 @@ vi.mock("../../servers/ServerServicesContext", () => ({
     }),
   }),
 }));
-vi.mock("../useWorkspaceResource", () => ({
-  useWorkspaceResource: () => ({
-    loading: false,
-    error: "",
-    data: { results: [fixture.result] },
+const store = createServerStore(
+  createSubscriptions({
+    watchResourceChanges: () => () => {},
+    watchResourceConnection: () => () => {},
   }),
-}));
+);
 it("renders scoped names and ignores a source reply after its detail is closed", async () => {
   const pending = Promise.withResolvers<unknown>();
-  fixture.get.mockReturnValueOnce(pending.promise);
+  fixture.get
+    .mockResolvedValueOnce({ results: [fixture.result] })
+    .mockReturnValueOnce(pending.promise);
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -44,10 +48,29 @@ it("renders scoped names and ignores a source reply after its detail is closed",
       createElement(
         MantineProvider,
         null,
-        createElement(SearchContent, { source }),
+        createElement(
+          StrictMode,
+          null,
+          createElement(SearchContent, { source }),
+        ),
       ),
     ),
   );
+  expect(fixture.get).not.toHaveBeenCalled();
+  const input = host.querySelector<HTMLInputElement>("input")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(
+      HTMLInputElement.prototype,
+      "value",
+    )!.set!.call(input, "query");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await act(async () =>
+    host
+      .querySelector("form")!
+      .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })),
+  );
+  expect(fixture.get).toHaveBeenCalledTimes(1);
   expect(host.textContent).toContain("Own server");
   await act(async () =>
     host.querySelector<HTMLButtonElement>(".workspace-row")!.click(),

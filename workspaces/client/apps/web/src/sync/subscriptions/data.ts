@@ -1,3 +1,4 @@
+import type { components } from "../../generated/api.ts";
 import { watchResourceReads } from "./reads";
 import type { ResourceData, ResourceRef, ResourceProgress } from "./contracts";
 import {
@@ -58,6 +59,10 @@ export function createDataObserver(
   events: SubscriptionTransport,
   observeEntities?: ObserveSubscriptionData,
   recoverView?: ViewRecovery,
+  api?: Pick<
+    ReturnType<typeof import("../../api.ts").createApiScope>,
+    "get" | "post"
+  >,
 ): ObserveSubscriptionData {
   return <R extends ResourceRef>(
     ref: R,
@@ -81,6 +86,74 @@ export function createDataObserver(
         true,
         ref,
       );
+    }
+    if (api && (ref.kind === "voice" || ref.kind === "auth-progress")) {
+      let stopped = false;
+      let epoch: string | undefined;
+      let voice: components["schemas"]["VoiceRecordBatch"] | undefined;
+      const stop = watchResourceReads(
+        ref,
+        async (version) => {
+          if (!version) return;
+          if (ref.kind === "auth-progress") {
+            const progress = progressFor("auth-progress", version);
+            if (!progress) return;
+            const value =
+              progress.value ??
+              (await api.get("/api/accounts/claude/login", {
+                query: { request_id: ref.requestId },
+              }));
+            if (!stopped && value.requestId === ref.requestId)
+              accept(
+                selectResourceData(
+                  { "auth-progress": () => value },
+                  ref,
+                  undefined,
+                ),
+                version,
+              );
+            return;
+          }
+          const reset = epoch !== version.epoch;
+          const after = reset ? 0 : (voice?.cursor ?? 0);
+          const inline = version.voiceRecords;
+          const batch =
+            inline && inline.after <= after
+              ? inline
+              : {
+                  ...(await api.post(
+                    "/api/voice/records",
+                    { agent: ref.agentId, after },
+                    { timeoutMs: 15000 },
+                  )),
+                  after,
+                };
+          if (stopped) return;
+          voice = {
+            ...batch,
+            cursor: Math.max(after, batch.cursor),
+            records: [
+              ...new Map(
+                [
+                  ...(reset ? [] : (voice?.records ?? [])),
+                  ...batch.records,
+                ].map((row) => [row.id, row]),
+              ).values(),
+            ],
+          };
+          epoch = version.epoch;
+          accept(
+            selectResourceData({ voice: () => voice }, ref, undefined),
+            version,
+          );
+        },
+        failed,
+        { events, waitForBaseline: true },
+      );
+      return () => {
+        stopped = true;
+        stop();
+      };
     }
     const viewValue = (version?: ResourceVersion) =>
       selectResourceData(viewSelectors, ref, version);
@@ -108,7 +181,7 @@ export function createDataObserver(
         return;
       }
       const data = selectResourceData(transientSelectors, ref, version);
-      if (data !== undefined) accept(data);
+      if (data !== undefined) accept(data, version);
     };
     const stop = events.watchResourceChanges(ref, transient);
     const stopEntities = observeEntities?.(ref, accept, failed);

@@ -1,3 +1,6 @@
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { useServerStore } from "./ServerServicesContext";
 import { AccessClientStatus } from "../generated/api";
 import { outboxRequests } from "../browserPersistence";
 import { randomUUID } from "../uuid";
@@ -7,12 +10,17 @@ import { ActionButton } from "../components/ui/primitives";
 import { Button, SegmentedControl, Textarea, TextInput } from "@mantine/core";
 import { useEffect, useRef, useState } from "react";
 import { errorText } from "../api";
-import type { ServerAccessState, ServerAccessRequest } from "./accessContract";
-export default function ServerAccessSettings({ active }: { active: boolean }) {
+import type { ServerAccessRequest } from "./accessContract";
+export default observer(function ServerAccessSettings({
+  active,
+}: {
+  active: boolean;
+}) {
   const outbox = outboxRequests(useServerStorage());
   const { serverAccess, refreshSession } = useServerApi();
 
-  const [state, setState] = useState<ServerAccessState | null>(null);
+  const store = useServerStore();
+  const state = active ? resourceData(store.multiServer().current) : undefined;
   const [invitation, setInvitation] = useState("");
   const [invitationGrant, setInvitationGrant] = useState<"full" | "observe">(
     "full",
@@ -22,13 +30,8 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef<ServerAccessRequest | null>(null);
-  const load = async () => {
-    const result = await serverAccess("GET");
-    setState(result);
-  };
   useEffect(() => {
     if (!active) return;
-    void load().catch((failure: unknown) => setError(errorText(failure)));
     try {
       pending.current = JSON.parse(outbox.get("serverAccess", "") || "null");
     } catch {}
@@ -67,7 +70,6 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
         }
         pending.current = null;
         outbox.remove("serverAccess", "");
-        await load();
       })
       .catch((failure: unknown) => setError(errorText(failure)))
       .finally(() => setBusy(false));
@@ -155,4 +157,4 @@ export default function ServerAccessSettings({ active }: { active: boolean }) {
       ))}
     </section>
   );
-}
+});

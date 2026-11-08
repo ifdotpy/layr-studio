@@ -1,12 +1,11 @@
-import type { TokenRate } from "./tokenRate.ts";
-import type { components } from "../generated/api";
+import { autorun, reaction, toJS } from "mobx";
+import { expect } from "vitest";
 import assert from "node:assert/strict";
 import { it as test, vi } from "vitest";
 import {
   createTokenRateCache,
   formatTokenRate,
   tweenTokenRate,
-  workerRateKey,
 } from "./tokenRate.ts";
 
 test("tween and display formatting honor user-visible boundaries", () => {
@@ -36,97 +35,56 @@ test("tween and display formatting honor user-visible boundaries", () => {
   assert.equal(formatTokenRate(1e16), runtimeLocaleCompact);
 });
 
-test("team and footer interests share snapshots and replay on reopen", () => {
+test("team and footer observations share stabilized stream interest, replay and release", async () => {
+  vi.useFakeTimers();
   const cache = createTokenRateCache();
-  const callbacks = new Set<
-    Parameters<Parameters<typeof cache.configureTokenRateStream>[0]>[0]
-  >();
-  vi.stubGlobal("window", {});
-  cache.configureTokenRateStream((listener) => {
-    callbacks.add(listener);
-    return () => callbacks.delete(listener);
-  });
-  const record = {
-    agentId: "worker",
-    rootId: "team",
-    turnId: "turn",
-    active: true,
-    estimated: false,
-    rate: 42,
-    outputTokens: 84,
-  };
-  const footer: (TokenRate | null)[] = [],
-    worker: (TokenRate | null)[] = [];
-  const stopFooter = cache.subscribeTokenRate("worker", (value) =>
-    footer.push(value),
-  );
-  const stopWorker = cache.subscribeTokenRate(
-    workerRateKey("team", "worker"),
-    (value) => worker.push(value),
-  );
-  const closeFooter = cache.watchTokenRateInterest();
-  let closeTeam: (() => void) | undefined = cache.watchTeamTokenRates("team");
+  const release = vi.fn();
+  const open = vi.fn(() => release);
+  cache.configureTokenRateStream(open);
+  const read = vi.fn();
   try {
-    assert.equal(callbacks.size, 2);
-    const publish = (record: TokenRate) => {
-      const event: components["schemas"]["ResourceTokenRatesEvent"] = {
-        protocol: 4,
-        workspaceId: "workspace",
-        epoch: "epoch",
-        revision: 1,
-        snapshot: true,
-        removed: [],
-        records: [record],
-      };
-      assert.equal(cache.receiveResourceTokenRates(event), true);
-      for (const callback of callbacks) callback(event);
+    cache.getTokenRate("worker");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(open).not.toHaveBeenCalled();
+    const stop = autorun(() => {
+      cache.getTokenRate("worker");
+    });
+    stop();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(open).not.toHaveBeenCalled();
+    const stopFooter = reaction(
+      () => toJS(cache.getTokenRate("worker")),
+      read,
+      { fireImmediately: true },
+    );
+    const stopTeam = autorun(() => {
+      cache.getWorkspaceTeamTokenRate("team", "worker");
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(open).toHaveBeenCalledOnce();
+    const record = {
+      agentId: "worker",
+      rootId: "team",
+      turnId: "turn",
+      active: true,
+      estimated: false,
+      rate: 42,
+      outputTokens: 84,
     };
-    publish(record);
-    assert.deepEqual(footer, [null, record]);
-    assert.deepEqual(worker, [null, record]);
-    closeTeam();
-    closeTeam = undefined;
-    const latest = { ...record, active: false, rate: 64 };
-    publish(latest);
-    assert.equal(callbacks.size, 1);
-    assert.deepEqual(footer, [null, record, latest]);
-    assert.equal(worker.at(-1), null);
-    closeTeam = cache.watchTeamTokenRates("team");
-    assert.deepEqual(worker.at(-1), latest);
-    assert.equal(callbacks.size, 2);
-  } finally {
-    closeTeam?.();
-    closeFooter();
+    cache.receiveWorkspaceTokenRates({ records: [record] });
+    expect(read).toHaveBeenLastCalledWith(record, null, expect.anything());
     stopFooter();
-    stopWorker();
-    vi.unstubAllGlobals();
+    expect(release).not.toHaveBeenCalled();
+    stopTeam();
+    expect(release).toHaveBeenCalledOnce();
+    const stopLate = autorun(() => {
+      expect(cache.getTokenRate("worker")?.rate).toBe(42);
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(open).toHaveBeenCalledTimes(2);
+    stopLate();
+  } finally {
+    cache.dispose();
+    vi.useRealTimers();
   }
-});
-
-test("subscriptions unsubscribe independently and retain completed turn samples", () => {
-  const cache = createTokenRateCache();
-  const first: (TokenRate | null)[] = [],
-    second: (TokenRate | null)[] = [];
-  const stopFirst = cache.subscribeTokenRate("agent", (value) =>
-    first.push(value),
-  );
-  const stopSecond = cache.subscribeTokenRate("agent", (value) =>
-    second.push(value),
-  );
-  const record = {
-    agentId: "agent",
-    rootId: "root",
-    turnId: "finished",
-    active: false,
-    estimated: false,
-    rate: 4,
-    outputTokens: 8,
-  };
-  cache.receiveWorkspaceTokenRates({ records: [record] });
-  stopFirst();
-  cache.clearWorkspaceTokenRates();
-  assert.deepEqual(first, [null, record]);
-  assert.deepEqual(second, [null, record, null]);
-  assert.equal(cache.getWorkspaceTeamTokenRate("root", "agent"), null);
-  stopSecond();
 });

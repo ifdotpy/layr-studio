@@ -5,6 +5,7 @@ import { MantineProvider } from "@mantine/core";
 import { expect, test, vi } from "vitest";
 import Accounts from "./Accounts.tsx";
 import { ProviderKind } from "../generated/api.ts";
+import { observableFixture } from "./observableFixture.tsx";
 
 test("changing the callback while an account modal is open does not report a close", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -36,19 +37,24 @@ test("changing the callback while an account modal is open does not report a clo
     label: "New account",
     serverLabel: "Fixture",
   };
+  const fixture = observableFixture();
   const render = (report: (open: boolean) => void) =>
     root.render(
       createElement(
-        MantineProvider,
-        { env: "test" },
-        createElement(Accounts, {
-          managerOnly: true,
-          dialogsOnly: true,
-          state,
-          onError() {},
-          externalCommand: command,
-          onModalOpenChange: report,
-        }),
+        fixture.Provider,
+        null,
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(Accounts, {
+            managerOnly: true,
+            dialogsOnly: true,
+            state,
+            onError() {},
+            externalCommand: command,
+            onModalOpenChange: report,
+          }),
+        ),
       ),
     );
   try {

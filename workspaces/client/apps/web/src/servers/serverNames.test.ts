@@ -1,12 +1,8 @@
+import { transientTestFixture } from "../sync/subscriptions/transientTestFixture.ts";
 import { required } from "../components/componentTestFixtures.ts";
-import assert from "node:assert/strict";
 /// <reference lib="es2024.promise" />
 import { afterEach, expect, test, vi } from "vitest";
-import {
-  refreshServerName,
-  validateServerName,
-  watchServerName,
-} from "./serverNames";
+import { validateServerName, watchServerName } from "./serverNames";
 import { readServers, writeServers, SERVER_REGISTRY_KEY } from "./registry";
 import { setServerCredentialAdapter } from "./transport";
 
@@ -49,43 +45,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("a signed status refresh changes only the name of its registered server", async () => {
-  const server = {
-    id: "remote",
-    label: "Old",
-    origin: "https://remote.tailnet.ts.net",
-    credentialId: "credential",
-    alias: "MBP",
-  };
-  const values = new Map([[SERVER_REGISTRY_KEY, JSON.stringify([server])]]);
-  vi.stubGlobal("localStorage", {
-    getItem: (key: string) => values.get(key) ?? null,
-    setItem: (key: string, value: string) => values.set(key, value),
-  });
-  const fetch = vi.fn(
-    async (_server: unknown, _request: Request) =>
-      new Response(JSON.stringify({ serverId: "remote", label: "Igor MBP" })),
-  );
-  setServerCredentialAdapter({
-    fetch,
-    forget: async () => {},
-    hasPairAttempt: async () => false,
-    pair: async () => server,
-  });
-  await refreshServerName(server);
-  assert.ok(fetch.mock.calls[0] != null);
-  expect(fetch.mock.calls[0][0]).toBe(server);
-  expect(readServers()).toEqual([
-    { ...server, label: "Igor MBP", alias: "REM" },
-  ]);
-  fetch.mockImplementation(
-    async () =>
-      new Response(JSON.stringify({ serverId: "different", label: "Wrong" })),
-  );
-  await expect(refreshServerName(server)).rejects.toThrow("another identity");
-  expect(required(readServers()[0]).label).toBe("Igor MBP");
-});
-
 test("saved server names use their own stream with zero idle status reads", async () => {
   vi.useFakeTimers();
   const server = {
@@ -107,30 +66,27 @@ test("saved server names use their own stream with zero idle status reads", asyn
     hasPairAttempt: async () => false,
     pair: async () => server,
   });
-  let accept!: (
-    version?: import("../sync/resourceEvents").ResourceVersion,
-  ) => void;
-  const release = vi.fn();
-  const watchResourceChanges = vi.fn((_resource, callback) => {
-    accept = callback;
-    return release;
-  });
-  const stop = watchServerName(server, { watchResourceChanges });
-  assert.ok(watchResourceChanges.mock.calls[0] != null);
-  expect(watchResourceChanges.mock.calls[0][0]).toEqual({
-    kind: "multi-server",
-  });
+  const f = transientTestFixture();
+  const stop = watchServerName(server, f.store);
+  await vi.advanceTimersByTimeAsync(100);
+  expect(f.transport.watchResourceChanges).toHaveBeenCalledWith(
+    { kind: "multi-server" },
+    expect.any(Function),
+    expect.anything(),
+  );
   await vi.advanceTimersByTimeAsync(5 * 60_000);
   expect(fetch).not.toHaveBeenCalled();
   const deliver = (id: string, label: string) =>
-    accept({
+    f.emit({ kind: "multi-server" }, {
       epoch: "owner",
       revision: 1,
       discoverySnapshot: { identity: { serverId: id, label } },
     } as import("../sync/resourceEvents").ResourceVersion);
   deliver("other", "Wrong");
+  await vi.advanceTimersByTimeAsync(0);
   expect(required(readServers()[0]).label).toBe("remote.tailnet.ts.net");
   deliver("remote", "New");
+  await vi.advanceTimersByTimeAsync(0);
   expect(required(readServers()[0]).label).toBe("New");
   // An old stream cannot restore a forgotten peer or overwrite a replacement.
   values.set(
@@ -140,14 +96,17 @@ test("saved server names use their own stream with zero idle status reads", asyn
     ]),
   );
   deliver("remote", "Stale");
+  await vi.advanceTimersByTimeAsync(0);
   expect(required(readServers()[0]).label).toBe("remote.tailnet.ts.net");
   values.set(SERVER_REGISTRY_KEY, "[]");
   deliver("remote", "Removed");
+  await vi.advanceTimersByTimeAsync(0);
   expect(readServers()).toEqual([]);
   stop();
-  expect(release).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(0);
   values.set(SERVER_REGISTRY_KEY, JSON.stringify([server]));
   deliver("remote", "Stopped");
   expect(required(readServers()[0]).label).toBe("remote.tailnet.ts.net");
   expect(fetch).not.toHaveBeenCalled();
+  f.close();
 });

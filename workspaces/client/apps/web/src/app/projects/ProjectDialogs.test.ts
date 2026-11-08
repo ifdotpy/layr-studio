@@ -5,6 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import { act, createElement, isValidElement, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
+import { ScreenOwner, ScreenSelection } from "../startup/ScreenOwner.ts";
+import FilePreview from "../../components/FilePreview.tsx";
+import { MantineProvider } from "@mantine/core";
 import { ServerAreas } from "../ServerAreasProvider.tsx";
 import { createServerServices } from "../../servers/serverServices.ts";
 import { observableFixture } from "../../components/observableFixture.tsx";
@@ -33,7 +36,9 @@ afterEach(() => {
 const DialogTitle = observer(function DialogTitle() {
   return createElement("div", null, h.area?.ui.descriptor?.title);
 });
-async function fixture() {
+async function fixture(
+  screen: ServerAreas["scope"]["screen"] = { active: true, channel: null },
+) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const services = createServerServices({
     id: `dialogs-${crypto.randomUUID()}`,
@@ -45,7 +50,7 @@ async function fixture() {
   const area = new ServerAreas({
     services,
     store: models.store,
-    screen: { active: true, channel: null },
+    screen,
   });
   setStartupFixture(
     area,
@@ -66,8 +71,61 @@ async function fixture() {
     host.remove();
   });
   await act(async () => root.render(createElement(DialogTitle)));
-  return { area, host, models };
+  return { area, host, models, root };
 }
+const Preview = observer(function Preview({ area }: { area: ServerAreas }) {
+  return area.scope.screen.active
+    ? createElement(FilePreview, {
+        target: area.ui.filePreview,
+        onClose: area.ui.closePreview,
+      })
+    : null;
+});
+it.each(["pending", "settled"])(
+  "leaving server A closes its %s preview before returning from B",
+  async (state) => {
+    const selected = new ScreenSelection(["A", "B"]),
+      screen = new ScreenOwner();
+    screen.connect(null, () => selected.current === "A");
+    const { area, root } = await fixture(screen);
+    cleanup.push(area.ui.start());
+    const pending = Promise.withResolvers<GetResult<"/api/file">>();
+    const get = vi
+      .spyOn(area.scope.services.api, "get")
+      .mockReturnValue(pending.promise);
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:server");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    await act(async () => {
+      root.render(
+        createElement(MantineProvider, null, createElement(Preview, { area })),
+      );
+      area.ui.showPreview({ asset: "file" });
+    });
+    if (state === "settled")
+      await act(async () => {
+        pending.resolve({
+          name: "old-file",
+          mime: "text/plain",
+          base64: "YQ==",
+        });
+        await pending.promise;
+      });
+    await act(async () => selected.select("B"));
+    expect(area.ui.filePreview).toBeNull();
+    if (state === "pending")
+      await act(async () => {
+        pending.resolve({
+          name: "old-file",
+          mime: "text/plain",
+          base64: "YQ==",
+        });
+        await pending.promise;
+      });
+    await act(async () => selected.select("A"));
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(get).toHaveBeenCalledTimes(1);
+  },
+);
 it("opens the deletion confirmation through the committed React dialog state", async () => {
   const { area, host } = await fixture();
   await act(async () => area.ui.requestDelete({ id: "agent" }));

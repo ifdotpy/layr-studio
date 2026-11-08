@@ -4,7 +4,6 @@ import {
   codeVerificationPending,
   codeSubmissionNotApplied,
   codeSubmissionResolved,
-  currentClaudeLoginReadMatches,
 } from "./claudeCodeSubmission";
 
 describe("Claude authorization code submission", () => {
@@ -50,32 +49,5 @@ describe("Claude authorization code submission", () => {
       ),
     ).toBe(false);
     expect(codeSubmissionNotApplied(new Error("Network error"))).toBe(false);
-  });
-
-  it("ignores an old login response after the current flow changes", () => {
-    expect(
-      currentClaudeLoginReadMatches(
-        "new-request",
-        "old-request",
-        "old-request",
-        1,
-        1,
-      ),
-    ).toBe(false);
-    expect(
-      currentClaudeLoginReadMatches(
-        "current",
-        "current",
-        "other-response",
-        1,
-        1,
-      ),
-    ).toBe(false);
-    expect(
-      currentClaudeLoginReadMatches("current", "current", "current", 2, 1),
-    ).toBe(false);
-    expect(
-      currentClaudeLoginReadMatches("current", "current", "current", 2, 2),
-    ).toBe(true);
   });
 });

@@ -68,7 +68,10 @@ import {
 } from "../models/modelOption";
 import { useWorkerModels } from "../agents/WorkerModelPicker";
 import TeamChats from "./messages/TeamChats";
-import FilePreview, { type PreviewTarget } from "../FilePreview";
+import FilePreview, {
+  useFilePreview,
+  type PreviewTarget,
+} from "../FilePreview";
 import "./Workspace.css";
 
 const diffHunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)/;
@@ -189,7 +192,7 @@ export const Workspace = observer(function Workspace(props: Props) {
   const [section, setSection] = useState(props.initialSection || "messages"),
     [agentId, setAgentId] = useState(props.agent?.id || ""),
     [revision, setRevision] = useState(0),
-    [preview, setPreview] = useState<PreviewTarget | null>(null);
+    [preview, setPreview] = useFilePreview();
   const [pending, setPending] = useState(0),
     [filePath, setFilePath] = useState("");
   const navRef = useRef<HTMLElement>(null);

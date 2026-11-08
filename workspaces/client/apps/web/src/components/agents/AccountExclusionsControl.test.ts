@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { MantineProvider } from "@mantine/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test, vi } from "vitest";
+import { observableFixture } from "../observableFixture.tsx";
 import NewChatModelSettings from "../NewChatModelSettings";
 
 const chooser = vi.hoisted(() => vi.fn());
@@ -32,24 +33,33 @@ vi.mock("../models/modelChoices", () => ({
 }));
 
 test("new chat renders the shared chooser with lead and exclusion handlers", () => {
-  renderToStaticMarkup(
-    createElement(
-      MantineProvider,
-      null,
-      createElement(NewChatModelSettings, {
-        projectId: "p",
-        path: "/project",
-        onChange: () => {},
+  const fixture = observableFixture();
+  try {
+    renderToStaticMarkup(
+      createElement(
+        fixture.Provider,
+        null,
+        createElement(
+          MantineProvider,
+          null,
+          createElement(NewChatModelSettings, {
+            projectId: "p",
+            path: "/project",
+            onChange: () => {},
+          }),
+        ),
+      ),
+    );
+    expect(chooser).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workerExcludedAccountKeys: [],
+        reviewerExcludedAccountKeys: [],
+        onWorkerExcludedAccountKeysChange: expect.any(Function),
+        onReviewerExcludedAccountKeysChange: expect.any(Function),
+        onAccountChange: expect.any(Function),
       }),
-    ),
-  );
-  expect(chooser).toHaveBeenCalledWith(
-    expect.objectContaining({
-      workerExcludedAccountKeys: [],
-      reviewerExcludedAccountKeys: [],
-      onWorkerExcludedAccountKeysChange: expect.any(Function),
-      onReviewerExcludedAccountKeysChange: expect.any(Function),
-      onAccountChange: expect.any(Function),
-    }),
-  );
+    );
+  } finally {
+    fixture.store.dispose();
+  }
 });

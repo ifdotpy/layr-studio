@@ -13,7 +13,8 @@ vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (initial: unknown) => {
     const index = h.cursor++;
-    if (!(index in h.cells)) h.cells[index] = initial;
+    if (!(index in h.cells))
+      h.cells[index] = typeof initial === "function" ? initial() : initial;
     return [
       h.cells[index],
       (value: unknown) => {
@@ -22,13 +23,19 @@ vi.mock("react", async (original) => ({
     ];
   },
 }));
+const owner = {};
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerApi: () => ({}),
+  useServerStore: () => owner,
   useServerFileDialogs: () => ({
     canPickDirectory: () => h.native,
     pickDirectory: h.pick,
   }),
 }));
-vi.mock("./ProjectDirectoryPicker", () => ({ default: "directory-picker" }));
+vi.mock("./ProjectDirectoryPicker", () => ({
+  default: "directory-picker",
+  browseDirectory: () => ({}),
+}));
 import DirectoryField from "./DirectoryField";
 type Props = {
   children?: ReactNode;

@@ -1,3 +1,9 @@
+import { useReadView } from "./useReadView.ts";
+import { observer } from "mobx-react-lite";
+import { observable, runInAction } from "mobx";
+import { resourceData, type ReadSlot } from "../store/runtime.ts";
+import { useServerStore } from "../servers/ServerServicesContext";
+import type { GetResult } from "../api.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { useServerFileDialogs } from "../servers/ServerServicesContext";
 
@@ -9,11 +15,11 @@ import {
   UnstyledButton,
 } from "@mantine/core";
 import { ArrowUp, ChevronRight, Folder, Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { errorText } from "../api";
 import type { paths } from "../generated/api";
 import {
-  readProjectServers,
+  discoveryProjectServers,
   type ProjectServerChoice,
 } from "../servers/projectLocations";
 import "./project-directory-picker.css";
@@ -24,9 +30,50 @@ export const parentPath = (path: string) =>
 
 type Directory =
   paths["/api/directories"]["get"]["responses"][200]["content"]["application/json"];
+export type DirectoryBrowse = {
+  path?: string | undefined;
+  directory: ReadSlot<Directory>;
+  matches: ReadSlot<GetResult<"/api/project-locations">> | null;
+};
+export function browseDirectory(
+  store: ReturnType<typeof useServerStore>,
+  api: ReturnType<typeof useServerApi>,
+  path?: string,
+  server = "local",
+  project?: string,
+): DirectoryBrowse {
+  const query = { path, ...(server !== "local" ? { server } : {}) };
+  const browse: DirectoryBrowse = observable.object(
+    {
+      path,
+      directory: store.reads.directories(api, query),
+      matches: null,
+    },
+    {},
+    { deep: false },
+  );
+  void browse.directory
+    .read()
+    .then((result) => {
+      if (!project) return;
+      const matches = store.reads.projectLocations(api, {
+        project,
+        server,
+        action: "matches",
+        path: result.path,
+      });
+      runInAction(() => {
+        browse.matches = matches;
+      });
+      void matches.read().catch(() => {});
+    })
+    .catch(() => {});
+  return browse;
+}
 
-export default function ProjectDirectoryPicker({
+export default observer(function ProjectDirectoryPicker({
   initialPath,
+  initialBrowse,
   onSelect,
   serverChoices,
   initialServer,
@@ -35,6 +82,7 @@ export default function ProjectDirectoryPicker({
   submitLabel = "Add project",
 }: {
   initialPath?: string | undefined;
+  initialBrowse?: DirectoryBrowse | undefined;
   onSelect: (path: string, server: string) => Promise<void>;
   serverChoices?: ProjectServerChoice[] | undefined;
   initialServer?: string | undefined;
@@ -43,104 +91,52 @@ export default function ProjectDirectoryPicker({
   submitLabel?: string;
 }) {
   const { canPickDirectory, pickDirectory } = useServerFileDialogs();
-  const { get } = useServerApi();
+  const api = useServerApi(),
+    store = useServerStore();
 
-  const [fetchedServers, setServers] = useState<ProjectServerChoice[]>([
-    { id: "local", label: "This computer" },
-  ]);
-  const servers = serverChoices ?? fetchedServers;
+  const discovery = serverChoices ? undefined : store.multiServer().current;
+  const snapshot = discovery && resourceData(discovery);
+  const servers =
+    serverChoices ??
+    (snapshot
+      ? discoveryProjectServers(snapshot)
+      : [{ id: "local", label: "This computer" }]);
   const [server, setServer] = useState(
     initialServer || serverChoices?.[0]?.id || "local",
   );
-  const [serverError, setServerError] = useState("");
-  const [matches, setMatches] = useState<string[]>([]);
+  const serverError =
+    discovery?.status === "error" ? errorText(discovery.error) : "";
+  const [browse, setBrowse] = useReadView(initialBrowse || null);
+  const matchRead = browse?.matches;
+  const matches = (
+    matchRead ? resourceData(matchRead.current)?.matches || [] : []
+  ).map((row) => row.path);
   const selectedServer = servers.find((row) => row.id === server);
-  useEffect(() => {
-    if (serverChoices) return;
-    let active = true;
-    void readProjectServers(get)
-      .then((rows) => {
-        if (active) setServers(rows);
-      })
-      .catch((error) => {
-        if (active) setServerError(errorText(error));
-      });
-    return () => {
-      active = false;
-    };
-  }, [serverChoices]);
-  const [path, setPath] = useState(initialPath);
-  const [typedPath, setTypedPath] = useState(initialPath || "");
-  const [directory, setDirectory] = useState<Directory | null>(null);
+  const path = browse?.path || initialPath;
+  const [typedPath, setTypedPath] = useState<string>();
+  const directoryRead = browse?.directory;
+  const directory = directoryRead
+    ? resourceData(directoryRead.current)
+    : undefined;
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(true);
+  const loading = !directoryRead || directoryRead.current.status === "loading";
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState("");
+  const error =
+    directoryRead?.current.status === "error"
+      ? errorText(directoryRead.current.error)
+      : "";
   const [selectionError, setSelectionError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
-    setError("");
-    get("/api/directories", {
-      query: {
-        ...(path ? { path } : {}),
-        ...(server !== "local" ? { server } : {}),
-      },
-    })
-      .then((result) => {
-        if (active) {
-          setDirectory(result);
-          setTypedPath((current) =>
-            current.trim() === (path || "") ? result.path : current,
-          );
-        }
-      })
-      .catch((failure) => {
-        if (active) setError(errorText(failure));
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [path, attempt, server]);
-
-  useEffect(() => {
-    setMatches([]);
-    if (!projectId) return;
-    let active = true;
-    void get("/api/project-locations", {
-      query: {
-        project: projectId,
-        server,
-        action: "matches",
-        ...(directory ? { path: directory.path } : {}),
-      },
-    })
-      .then((result) => {
-        if (active) setMatches((result.matches || []).map((row) => row.path));
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, [projectId, server, directory?.path]);
-
-  const navigate = (next: string) => {
-    setLoading(true);
+  const navigate = (next?: string, nextServer = server) => {
     setSelectionError("");
     setQuery("");
-    if (next === path) setAttempt((value) => value + 1);
-    setPath(next);
-    setTypedPath(next);
+    setTypedPath(undefined);
+    setBrowse(browseDirectory(store, api, next, nextServer, projectId));
   };
   const rows = directory?.directories.filter((row) =>
     row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),
   );
-  const pathChanged = !!directory && typedPath.trim() !== directory.path;
+  const enteredPath = typedPath ?? directory?.path ?? path ?? "";
+  const pathChanged = !!directory && enteredPath.trim() !== directory.path;
   return (
     <div
       className="directory-picker"
@@ -160,11 +156,7 @@ export default function ProjectDirectoryPicker({
           onChange={(next) => {
             if (!next || next === server) return;
             setServer(next);
-            setPath(undefined);
-            setTypedPath("");
-            setDirectory(null);
-            setQuery("");
-            setSelectionError("");
+            void navigate(undefined, next);
           }}
         />
       )}
@@ -173,17 +165,17 @@ export default function ProjectDirectoryPicker({
         className="directory-path-entry"
         onSubmit={(event) => {
           event.preventDefault();
-          if (typedPath.trim()) navigate(typedPath.trim());
+          void navigate(enteredPath.trim() || undefined);
         }}
       >
         <TextInput
           label="Folder path"
           placeholder="/Users/…/Projects/…"
-          value={typedPath}
+          value={enteredPath}
           onChange={(event) => setTypedPath(event.currentTarget.value)}
           disabled={saving}
         />
-        <Button type="submit" disabled={saving || !typedPath.trim()}>
+        <Button type="submit" disabled={saving}>
           Open path
         </Button>
       </form>
@@ -226,9 +218,7 @@ export default function ProjectDirectoryPicker({
         ) : error ? (
           <div role="alert">
             <p>{error}</p>
-            <Button onClick={() => setAttempt((value) => value + 1)}>
-              Retry
-            </Button>
+            <Button onClick={() => void navigate(path)}>Retry</Button>
             {directory && directory.path !== path && (
               <Button onClick={() => navigate(directory.path)}>
                 Back to previous folder
@@ -300,4 +290,4 @@ export default function ProjectDirectoryPicker({
       </div>
     </div>
   );
-}
+});

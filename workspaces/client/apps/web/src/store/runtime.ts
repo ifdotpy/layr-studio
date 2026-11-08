@@ -29,6 +29,13 @@ export function resourceData<T>(current: ResourceStatus<T>): T | undefined {
 export interface ResourceSlot<T> {
   readonly current: ResourceStatus<T>;
 }
+export interface ReadIntent<T> {
+  key: string;
+  read(): Promise<T>;
+}
+export interface ReadSlot<T> extends ResourceSlot<T> {
+  read(): Promise<T>;
+}
 
 /** Maximum cached unobserved keyed facades per server runtime, in entries. */
 export const MAX_INACTIVE_RESOURCE_FACADES = 128;
@@ -63,6 +70,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
     resourceKey: string;
     observed: boolean;
     keyed: boolean;
+    isReading?(): boolean;
     dispose(): void;
     evict(): void;
   };
@@ -76,7 +84,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
   };
   const trim = () => {
     const inactive = [...entries.values()].filter(
-      (entry) => entry.keyed && !entry.observed,
+      (entry) => entry.keyed && !entry.observed && !entry.isReading?.(),
     );
     for (const entry of inactive.slice(
       0,
@@ -106,21 +114,35 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
   };
 
   function slot<R extends ResourceRef, TData>(
-    {
-      key,
-      ref,
-      create,
-      apply,
-    }: ResourceDefinition<R, TData> & { key: string; ref: R },
+    definition: ResourceDefinition<R, TData> & { key: string; ref: R },
     remove?: () => void,
-  ): ResourceSlot<DeepReadonly<TData>> {
+  ): ReadSlot<DeepReadonly<TData>>;
+  function slot<TData>(
+    definition: ReadIntent<TData>,
+    remove?: () => void,
+    releaseOnUnobserved?: boolean,
+  ): ReadSlot<TData>;
+  function slot<R extends ResourceRef, TData>(
+    definition:
+      | (ResourceDefinition<R, TData> & { key: string; ref: R })
+      | ReadIntent<TData>,
+    remove?: () => void,
+    releaseOnUnobserved = false,
+  ) {
+    const { key } = definition;
+    const ref = "ref" in definition ? definition.ref : undefined;
+    let request: Promise<TData> | undefined,
+      generation = 0;
+    let releaseAfterRead = false;
     if (disposed) throw new Error("The observable resource store is closed.");
     if (entries.has(key)) throw new Error(`Duplicate resource slot: ${key}`);
-    let data: ReturnType<typeof create> | undefined;
-    let current: ResourceStatus<DeepReadonly<ReturnType<typeof create>>> = {
-      status: "loading",
+    let data: TData | undefined;
+    let current: ResourceStatus<TData | DeepReadonly<TData>> = {
+      status: ref ? "loading" : "absent",
     };
     const update = () => {
+      if (!("ref" in definition)) return;
+      const { ref, create, apply } = definition;
       const snapshot = subscriptions.getSnapshot(ref);
       if (snapshot.data !== undefined) {
         // Readonly views change no representation. Ref-to-DTO correlation is
@@ -163,38 +185,52 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       current = next;
       atom.reportChanged();
     };
-    const interest = observeInterest(
-      () => {
-        const stop = subscriptions.subscribe(ref, () => schedule(update));
-        schedule(update);
-        return stop;
-      },
-      () => {
-        entry.observed = false;
+    const inactive = () => {
+      entry.observed = false;
+      if (!ref && releaseOnUnobserved) {
+        if (request) releaseAfterRead = true;
+        else
+          schedule(() => {
+            if (entries.get(key) === entry && !entry.observed && !request)
+              entry.evict();
+          });
+      } else {
         runInAction(() => {
-          if (current.status === "live") {
+          if (ref && current.status === "live") {
             current = { status: "stale", data: current.data };
             atom.reportChanged();
           }
         });
         trim();
-      },
-    );
+      }
+    };
+    const interest = observeInterest(() => {
+      if (!ref) return () => {};
+      const stop = subscriptions.subscribe(ref, () => schedule(update));
+      schedule(update);
+      return stop;
+    }, inactive);
     const atom = createAtom(
       key,
       () => {
         entry.observed = true;
+        releaseAfterRead = false;
         touch(key);
-        interest.observed();
+        if (ref) interest.observed();
       },
-      interest.unobserved,
+      ref ? interest.unobserved : inactive,
     );
     const entry: Entry = {
-      resourceKey: subscriptionKey(ref),
+      resourceKey: ref ? subscriptionKey(ref) : key,
       observed: false,
       keyed: remove !== undefined,
-      dispose: interest.dispose,
+      isReading: () => request !== undefined,
+      dispose() {
+        if (ref) interest.dispose();
+      },
       evict() {
+        generation++;
+        request = undefined;
         pending.delete(update);
         runInAction(() => {
           data = undefined;
@@ -204,55 +240,110 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
         if (remove && !entry.observed) {
           entries.delete(key);
           remove();
-          interest.dispose();
+          if (ref) interest.dispose();
         }
       },
     };
     entries.set(key, entry);
     return {
+      read() {
+        if (!("read" in definition))
+          throw new Error("This resource requires observation");
+        releaseAfterRead = false;
+        if (request) return request;
+        const attempt = ++generation;
+        const publish = (next: typeof current) =>
+          runInAction(() => {
+            if (!disposed && generation === attempt) {
+              current = next;
+              atom.reportChanged();
+            }
+          });
+        request = Promise.resolve()
+          .then(() => definition.read())
+          .then(
+            (value) => {
+              publish({ status: "live", data: value });
+              return value;
+            },
+            (error: unknown) => {
+              publish({
+                status: "error",
+                error:
+                  error instanceof Error ? error : new Error(String(error)),
+              });
+              throw error;
+            },
+          )
+          .finally(() => {
+            if (generation === attempt) {
+              request = undefined;
+              if (releaseAfterRead) entry.evict();
+              else trim();
+            }
+          });
+        publish({ status: "loading" });
+        return request;
+      },
       get current() {
         atom.reportObserved();
         return current;
       },
     };
   }
-  const runtime: ObservableResourceRuntime = {
+  const runtime = {
     slot,
-    keyed<R extends ResourceRef, TData>(
-      definition: ResourceDefinition<R, TData>,
-    ): (ref: R) => ResourceSlot<DeepReadonly<TData>> {
-      type Cached = {
-        slot: ResourceSlot<DeepReadonly<TData>>;
-        facade: ResourceSlot<DeepReadonly<TData>>;
-      };
-      const cache = new Map<string, Cached>();
-      const lookup = (ref: R): Cached => {
-        if (disposed)
-          throw new Error("The observable resource store is closed.");
-        const key = subscriptionKey(ref);
-        let entry = cache.get(key);
-        if (!entry) {
-          const inner = slot({ ...definition, key, ref }, () =>
-            cache.delete(key),
-          );
-          const created: Cached = {
-            slot: inner,
-            facade: {
-              get current() {
-                return (disposed ? created : lookup(ref)).slot.current;
-              },
+    keyed,
+  } satisfies ObservableResourceRuntime;
+  function keyed<TData>(definition: {
+    read: true;
+    releaseOnUnobserved?: boolean;
+  }): (ref: ReadIntent<TData>) => ReadSlot<TData>;
+  function keyed<R extends ResourceRef, TData>(
+    definition: ResourceDefinition<R, TData>,
+  ): (ref: R) => ResourceSlot<DeepReadonly<TData>>;
+  function keyed<R extends ResourceRef, TData>(
+    definition:
+      | ResourceDefinition<R, TData>
+      | { read: true; releaseOnUnobserved?: boolean },
+  ) {
+    type Cached = {
+      slot: ReadSlot<TData | DeepReadonly<TData>>;
+      facade: ReadSlot<TData | DeepReadonly<TData>>;
+    };
+    const cache = new Map<string, Cached>();
+    const lookup = (ref: R | ReadIntent<TData>): Cached => {
+      if (disposed) throw new Error("The observable resource store is closed.");
+      const key = "key" in ref ? ref.key : subscriptionKey(ref);
+      let entry = cache.get(key);
+      if (!entry) {
+        const inner =
+          "read" in definition && "key" in ref
+            ? slot(ref, () => cache.delete(key), definition.releaseOnUnobserved)
+            : !("read" in definition) && !("key" in ref)
+              ? slot({ ...definition, key, ref }, () => cache.delete(key))
+              : (() => {
+                  throw new Error("Invalid resource definition");
+                })();
+        const created: Cached = {
+          slot: inner,
+          facade: {
+            read: () => lookup(ref).slot.read(),
+            get current() {
+              return (disposed ? created : lookup(ref)).slot.current;
             },
-          };
-          entry = created;
-          cache.set(key, entry);
-        }
-        touch(key);
-        trim();
-        return entry;
-      };
-      return (ref) => lookup(ref).facade;
-    },
-  };
+          },
+        };
+        entry = created;
+        cache.set(key, entry);
+      }
+      touch(key);
+      trim();
+      return entry;
+    };
+    return (ref: R | ReadIntent<TData>) => lookup(ref).facade;
+  }
+
   return {
     ...runtime,
     dispose() {

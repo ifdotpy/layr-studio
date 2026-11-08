@@ -1,7 +1,10 @@
+import { observer } from "mobx-react-lite";
+import { resourceData, type ReadSlot } from "../store/runtime.ts";
+import { useServerStore } from "../servers/ServerServicesContext";
 import { AnalyticsScope as GeneratedApiAnalyticsScope } from "../generated/api.ts";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { localDateTime, localTime } from "../local-time";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActionIcon,
   Button,
@@ -29,15 +32,15 @@ type AnalyticsTokenGroup =
   | NonNullable<AnalyticsResult["agentTotals"]>[number]
   | NonNullable<AnalyticsResult["modelTotals"]>[number]
   | NonNullable<AnalyticsResult["accountTotals"]>[number];
-type AnalyticsRateLimitRecord = NonNullable<
-  AnalyticsResult["rateLimits"]
->[number];
-type AnalyticsTurnRecord = NonNullable<AnalyticsResult["turns"]>[number];
 type AnalyticsPayload = NonNullable<AnalyticsItemRecord["input"]>;
 type AnalyticsTokens = NonNullable<AnalyticsResult["tokens"]>;
 type AnalyticsContextPoint = AnalyticsUsageRecord & {
   last: AnalyticsUsageRecord["last"] & { totalTokens: number };
   modelContextWindow: number;
+};
+export type AnalyticsSelection = {
+  query: AnalyticsQuery;
+  read: ReadSlot<AnalyticsResult>;
 };
 type AnalyticsQuery = NonNullable<GetOptions<"/api/analytics">["query"]>;
 type AnalyticsScope = NonNullable<AnalyticsQuery["scope"]>;
@@ -426,121 +429,98 @@ function Payload({
     </div>
   );
 }
-export default function Analytics({
+export default observer(function Analytics({
   agent,
+  selection,
   onClose,
 }: {
   agent: Agent;
+  selection: AnalyticsSelection;
   onClose: () => void;
 }) {
-  const { apiDownload, get } = useServerApi();
+  const api = useServerApi(),
+    store = useServerStore();
+  const { apiDownload } = api;
 
-  const [scope, setScope] = useState<AnalyticsScope>("agent");
-  const [period, setPeriod] = useState("all");
-  const [tool, setTool] = useState("");
-  const [offset, setOffset] = useState(0);
-  const [refresh, setRefresh] = useState(0);
-  const [dataRecord, setData] = useState<AnalyticsResult | null>(null);
-  const [loadedQuery, setLoadedQuery] = useState("");
+  const [current, setCurrent] = useState(selection);
+  const { query, read: currentRead } = current;
+  const { scope = "agent", tool = "", offset = 0 } = query;
+  const period =
+    query.from_time && query.to_time
+      ? String(query.to_time - query.from_time)
+      : "all";
+  const data = resourceData(currentRead.current);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(true);
+  const busy = currentRead.current.status === "loading";
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<string | null>("overview");
   const [knownTools, setKnownTools] = useState<string[]>([]);
-  const [olderDetails, setOlderDetails] = useState<{
-    rateLimits: AnalyticsRateLimitRecord[];
-    turns: AnalyticsTurnRecord[];
+  const [details, setDetails] = useState<{
+    rateLimits: ReadSlot<AnalyticsResult>[];
+    turns: ReadSlot<AnalyticsResult>[];
   }>({ rateLimits: [], turns: [] });
-  const [loadingDetails, setLoadingDetails] = useState<Record<string, boolean>>(
-    {},
-  );
-  const snapshotAt = useMemo(
-    () => Math.floor(Date.now() / 1000),
-    [agent.id, scope, period, refresh],
-  );
-  const query = useMemo(
-    () => ({
-      agent: agent.id,
-      scope,
-      limit: 30,
-      offset,
-      to_time: snapshotAt,
-      ...(period !== "all" ? { from_time: snapshotAt - Number(period) } : {}),
-      ...(tool ? { tool } : {}),
-    }),
-    [agent.id, scope, period, tool, offset, snapshotAt],
-  );
-  const viewKey = JSON.stringify([agent.id, scope, period, tool, offset]);
-  const data = loadedQuery === viewKey ? dataRecord : null;
-  useEffect(() => {
-    setOlderDetails({ rateLimits: [], turns: [] });
-  }, [viewKey]);
-  const loadOlderDetails = async (detail: "rateLimits" | "turns") => {
-    if (!data) return;
-    setLoadingDetails((previous) => ({ ...previous, [detail]: true }));
-    setError("");
-    try {
-      const page = await get("/api/analytics", {
-        query: {
-          ...query,
-          view: "detail",
-          detail,
-          limit: 100,
-          offset:
-            (data[detail]?.length || 0) + (olderDetails[detail]?.length || 0),
-        },
-      });
-      if (detail === "turns")
-        setOlderDetails((previous) => ({
-          ...previous,
-          turns: [...previous.turns, ...(page.turns || [])],
-        }));
-      else
-        setOlderDetails((previous) => ({
-          ...previous,
-          rateLimits: [...previous.rateLimits, ...(page.rateLimits || [])],
-        }));
-    } catch (e) {
-      setError(errorText(e));
-    } finally {
-      setLoadingDetails((previous) => ({ ...previous, [detail]: false }));
-    }
+  const olderDetails = {
+    rateLimits: details.rateLimits.flatMap(
+      (slot) => resourceData(slot.current)?.rateLimits || [],
+    ),
+    turns: details.turns.flatMap(
+      (slot) => resourceData(slot.current)?.turns || [],
+    ),
+  };
+  const loadingDetails = {
+    rateLimits: details.rateLimits.some(
+      (slot) => slot.current.status === "loading",
+    ),
+    turns: details.turns.some((slot) => slot.current.status === "loading"),
   };
   useEffect(() => {
-    let active = true;
-    setBusy(true);
+    setKnownTools((previous) =>
+      [
+        ...new Set([
+          ...previous,
+          ...(data?.tools || []).map((tool) => tool.name),
+        ]),
+      ].sort(),
+    );
+  }, [data]);
+  const detailError = [...details.turns, ...details.rateLimits]
+    .map((slot) => slot.current)
+    .find((state) => state.status === "error");
+  const readError =
+    currentRead.current.status === "error"
+      ? currentRead.current.error
+      : detailError?.error;
+  const loadOlderDetails = (detail: "rateLimits" | "turns") => {
+    if (!data) return;
+    const read = store.reads.analytics(api, {
+      ...query,
+      view: "detail",
+      detail,
+      limit: 100,
+      offset: (data[detail]?.length || 0) + olderDetails[detail].length,
+    });
+    setDetails((previous) =>
+      previous[detail].includes(read)
+        ? previous
+        : { ...previous, [detail]: [...previous[detail], read] },
+    );
+    void read.read().catch(() => {});
+  };
+  const load = (patch: Partial<AnalyticsQuery> = {}) => {
+    const next = { ...query, offset: 0, ...patch };
+    const read = store.reads.analytics(api, next);
+    setCurrent({ query: next, read });
+    setSelected(null);
+    setDetails({ rateLimits: [], turns: [] });
     setError("");
-    if (loadedQuery !== viewKey) setSelected(null);
-    get("/api/analytics", { query })
-      .then((result) => {
-        if (!active) return;
-        setData(result);
-        setLoadedQuery(viewKey);
-        setKnownTools(
-          (previous) =>
-            [
-              ...new Set([
-                ...previous,
-                ...(result.tools || []).map((t) => t.name),
-              ]),
-            ].sort() as string[],
-        );
-      })
-      .catch((e) => {
-        if (active) {
-          setError(errorText(e));
-        }
-      })
-      .finally(() => {
-        if (active) setBusy(false);
-      });
-    return () => {
-      active = false;
+    void read.read().catch(() => {});
+  };
+  const timeRange = (value = period) => {
+    const now = Math.floor(Date.now() / 1000);
+    return {
+      to_time: now,
+      from_time: value === "all" ? undefined : now - Number(value),
     };
-  }, [query, refresh]);
-  const filter = (change: () => void) => {
-    change();
-    setOffset(0);
   };
   const download = async () => {
     setError("");
@@ -582,14 +562,15 @@ export default function Analytics({
             label="Scope"
             aria-label="Analytics scope"
             value={scope}
-            onChange={(e) =>
-              filter(() => {
-                if (isAnalyticsScope(e.currentTarget.value))
-                  setScope(e.currentTarget.value);
-                setTool("");
-                setKnownTools([]);
-              })
-            }
+            onChange={(e) => {
+              if (!isAnalyticsScope(e.currentTarget.value)) return;
+              load({
+                ...timeRange(),
+                scope: e.currentTarget.value,
+                tool: undefined,
+              });
+              setKnownTools([]);
+            }}
             data={[
               { value: "agent", label: "This agent" },
               { value: "team", label: "Whole team" },
@@ -600,7 +581,7 @@ export default function Analytics({
             label="Period"
             aria-label="Analytics period"
             value={period}
-            onChange={(e) => filter(() => setPeriod(e.currentTarget.value))}
+            onChange={(e) => load(timeRange(e.currentTarget.value))}
             data={[
               { value: "all", label: "All recorded history" },
               { value: "3600", label: "Last hour" },
@@ -613,12 +594,10 @@ export default function Analytics({
             label="Tool calls"
             aria-label="Analytics tool"
             value={tool}
-            onChange={(e) =>
-              filter(() => {
-                setTool(e.currentTarget.value);
-                setTab("tools");
-              })
-            }
+            onChange={(e) => {
+              load({ tool: e.currentTarget.value || undefined });
+              setTab("tools");
+            }}
             data={[
               { value: "", label: "All tools" },
               ...knownTools.map((name) => ({ value: name, label: name })),
@@ -631,7 +610,7 @@ export default function Analytics({
                 variant="subtle"
                 size="lg"
                 disabled={busy}
-                onClick={() => setRefresh((n) => n + 1)}
+                onClick={() => load(timeRange())}
               >
                 <RefreshCw size={16} />
               </ActionIcon>
@@ -663,9 +642,9 @@ export default function Analytics({
                 : ""}
           </span>
         </div>
-        {error && (
+        {(error || readError) && (
           <p className="analytics-error" role="alert">
-            {error}
+            {error || errorText(readError)}
           </p>
         )}
         {busy && !data && (
@@ -832,7 +811,9 @@ export default function Analytics({
                       t.type === "modelToolCall",
                   )}
                   model
-                  onSelect={(name) => filter(() => setTool(name))}
+                  onSelect={(name) => {
+                    load({ tool: name });
+                  }}
                 />
                 <ToolRanking
                   title="Native protocol output"
@@ -841,7 +822,9 @@ export default function Analytics({
                       t.payloadBoundary !== "model" &&
                       t.type !== "modelToolCall",
                   )}
-                  onSelect={(name) => filter(() => setTool(name))}
+                  onSelect={(name) => {
+                    load({ tool: name });
+                  }}
                 />
                 <Raw
                   value={tools}
@@ -971,7 +954,10 @@ export default function Analytics({
                       variant="subtle"
                       leftSection={<ChevronLeft size={14} />}
                       disabled={busy || offset === 0}
-                      onClick={() => setOffset((n) => Math.max(0, n - 30))}
+                      onClick={() => {
+                        const next = Math.max(0, offset - 30);
+                        load({ offset: next });
+                      }}
                     >
                       Previous
                     </Button>
@@ -980,7 +966,9 @@ export default function Analytics({
                       variant="subtle"
                       rightSection={<ChevronRight size={14} />}
                       disabled={busy || !data.pagination?.hasMore}
-                      onClick={() => setOffset((n) => n + 30)}
+                      onClick={() => {
+                        load({ offset: offset + 30 });
+                      }}
                     >
                       Next
                     </Button>
@@ -1337,4 +1325,4 @@ export default function Analytics({
       </div>
     </Modal>
   );
-}
+});

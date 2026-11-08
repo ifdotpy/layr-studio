@@ -118,7 +118,7 @@ export function createServerServices(server: StudioServer) {
     });
     runtime = { sync, resources, store: createServerStore(resources) };
     if (transport.owner.id !== "local")
-      stopName = watchServerName(transport.owner, resources);
+      stopName = watchServerName(transport.owner, runtime.store);
     return runtime;
   };
   const outbox = createOutbox({
@@ -229,6 +229,7 @@ export function createServerServices(server: StudioServer) {
     storage,
     ready,
     close(removeCache = false) {
+      tokenRates.dispose();
       areas?.dispose();
       audio.close();
       stopName();

@@ -1,54 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { get, type GetResult } from "../api";
+import { useRef, useState } from "react";
+import type { GetResult } from "../api";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
+import { resourceData } from "../store/runtime.ts";
 
 type SkillCatalog = GetResult<"/api/skills">;
 export type SkillItem = SkillCatalog["skills"][number];
 
-interface CacheEntry {
-  expiresAt: number;
-  value?: SkillCatalog;
-  pending?: Promise<SkillCatalog> | undefined;
-  failed?: boolean;
-}
-
-const CACHE_TTL_MS = 2 * 60 * 1000;
-const CACHE_MAX_ENTRIES = 48;
 const MAX_VISIBLE_SKILLS = 8;
-const skillCatalogCache = new Map<string, CacheEntry>();
-
-function catalogFor(key: string, agentId: string): Promise<SkillCatalog> {
-  const existing = skillCatalogCache.get(key);
-  if (existing?.value && existing.expiresAt > Date.now())
-    return Promise.resolve(existing.value);
-  if (existing?.pending) return existing.pending;
-  if (existing?.failed && existing.expiresAt > Date.now())
-    return Promise.reject(new Error("Skill catalog unavailable"));
-
-  const entry: CacheEntry = { expiresAt: Date.now() + CACHE_TTL_MS };
-  const pending = get("/api/skills", { query: { agent: agentId } })
-    .then((result) => {
-      const value = {
-        skills: Array.isArray(result.skills) ? result.skills : [],
-        errors: Array.isArray(result.errors) ? result.errors : [],
-      };
-      entry.value = value;
-      entry.expiresAt = Date.now() + CACHE_TTL_MS;
-      entry.pending = undefined;
-      return value;
-    })
-    .catch((error: unknown) => {
-      entry.pending = undefined;
-      entry.failed = true;
-      entry.expiresAt = Date.now() + CACHE_TTL_MS;
-      throw error;
-    });
-  entry.pending = pending;
-  skillCatalogCache.delete(key);
-  skillCatalogCache.set(key, entry);
-  while (skillCatalogCache.size > CACHE_MAX_ENTRIES)
-    skillCatalogCache.delete(skillCatalogCache.keys().next().value!);
-  return pending;
-}
 
 interface TokenRange {
   start: number;
@@ -85,7 +43,6 @@ export function useSkillAutocomplete({
   account,
   cwd,
   provider,
-  draft,
   input,
   insert,
 }: {
@@ -99,17 +56,27 @@ export function useSkillAutocomplete({
   input: React.RefObject<HTMLTextAreaElement | null>;
   insert: (text: string, start: number, end: number) => void;
 }) {
-  const scopeKey = JSON.stringify([workspace, account, cwd, provider]);
-  const conversationKey = `${agentId}:${scopeKey}`;
-  const [range, setRange] = useState<TokenRange | null>(null);
-  const [catalog, setCatalog] = useState<SkillCatalog | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState(false);
+  const api = useServerApi(),
+    store = useServerStore();
+  const query = { agent: agentId };
+  const read = store.reads.skills(api, query, {
+    workspace,
+    account,
+    cwd,
+    provider,
+  });
+  const catalog = resourceData(read.current);
+  const loading = read.current.status === "loading";
+  const loadError = read.current.status === "error";
+  const [selection, setSelection] = useState<{
+    owner: typeof read;
+    range: TokenRange;
+  } | null>(null);
+  const range = selection?.owner === read ? selection.range : null;
+  const setRange = (range: TokenRange | null) =>
+    setSelection(range ? { owner: read, range } : null);
   const dismissed = useRef("");
-  const visibleConversation = useRef(conversationKey);
-  const scopeIsCurrent = visibleConversation.current === conversationKey;
-
-  const updateRange = useCallback(() => {
+  const updateRange = () => {
     if (!enabled) {
       setRange(null);
       return;
@@ -132,89 +99,47 @@ export function useSkillAutocomplete({
     }
     dismissed.current = "";
     setRange(next);
-  }, [enabled, input]);
+    if (read.current.status !== "live") void read.read().catch(() => {});
+  };
 
-  useEffect(() => {
-    if (visibleConversation.current !== conversationKey) {
-      visibleConversation.current = conversationKey;
-      dismissed.current = "";
-      setRange(null);
-      setCatalog(null);
-      setLoading(false);
-      setLoadError(false);
-    }
-    updateRange();
-  }, [conversationKey, draft, updateRange]);
+  const matches =
+    catalog && range
+      ? catalog.skills
+          .filter((skill) =>
+            skill.name
+              .toLocaleLowerCase()
+              .includes(range.query.toLocaleLowerCase()),
+          )
+          .slice(0, MAX_VISIBLE_SKILLS)
+      : [];
+  const choose = (skill: SkillItem) => {
+    if (!range) return;
+    dismissed.current = range.signature;
+    setRange(null);
+    const suffix = input.current?.value.slice(range.end, range.end + 1) || "";
+    insert(
+      `$${skill.name}${/\s/.test(suffix) ? "" : " "}`,
+      range.start,
+      range.end,
+    );
+  };
 
-  useEffect(() => {
-    if (!enabled || !range || !scopeIsCurrent) return;
-    let current = true;
-    setLoading(true);
-    setLoadError(false);
-    void catalogFor(scopeKey, agentId)
-      .then((value) => {
-        if (current && visibleConversation.current === conversationKey)
-          setCatalog(value);
-      })
-      .catch(() => {
-        if (current && visibleConversation.current === conversationKey)
-          setLoadError(true);
-      })
-      .finally(() => {
-        if (current && visibleConversation.current === conversationKey)
-          setLoading(false);
-      });
-    return () => {
-      current = false;
-    };
-  }, [
-    enabled,
-    range?.start,
-    scopeKey,
-    agentId,
-    conversationKey,
-    scopeIsCurrent,
-  ]);
-
-  const matches = useMemo(() => {
-    if (!catalog || !range) return [];
-    const query = range.query.toLocaleLowerCase();
-    return catalog.skills
-      .filter((skill) => skill.name.toLocaleLowerCase().includes(query))
-      .slice(0, MAX_VISIBLE_SKILLS);
-  }, [catalog, range]);
-
-  const choose = useCallback(
-    (skill: SkillItem) => {
-      if (!range) return;
-      dismissed.current = range.signature;
-      setRange(null);
-      const suffix = input.current?.value.slice(range.end, range.end + 1) || "";
-      insert(
-        `$${skill.name}${/\s/.test(suffix) ? "" : " "}`,
-        range.start,
-        range.end,
-      );
-    },
-    [input, insert, range],
-  );
-
-  const dismiss = useCallback(() => {
+  const dismiss = () => {
     dismissed.current = range?.signature || "";
     setRange(null);
-  }, [range?.signature]);
+  };
 
-  const blur = useCallback(() => {
+  const blur = () => {
     dismissed.current = "";
     setRange(null);
-  }, []);
+  };
 
   return {
-    range: scopeIsCurrent ? range : null,
-    matches: scopeIsCurrent ? matches : [],
-    loading: scopeIsCurrent && loading,
-    loadError: scopeIsCurrent && loadError,
-    hasErrors: scopeIsCurrent && !!catalog?.errors.length,
+    range: range,
+    matches: matches,
+    loading: loading,
+    loadError: loadError,
+    hasErrors: !!catalog?.errors.length,
     updateRange,
     dismiss,
     blur,

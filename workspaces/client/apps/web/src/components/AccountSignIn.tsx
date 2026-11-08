@@ -1,7 +1,11 @@
+import { observer } from "mobx-react-lite";
+import { requestId as resourceRequestId } from "../generated/observableResources.ts";
+import { resourceData } from "../store/runtime.ts";
 import { randomUUID } from "../uuid";
 import {
   useServerApi,
   useServerResources,
+  useServerStore,
 } from "../servers/ServerServicesContext";
 import ErrorDescription from "./ErrorDescription";
 import { Button } from "@mantine/core";
@@ -10,7 +14,6 @@ import { useEffect, useRef, useState } from "react";
 import { errorText, type PostResult } from "../api";
 import type { Account, AccountsController } from "./Accounts";
 import { copyText } from "../clipboard/clipboard";
-import { subscribeProgress } from "../sync/subscriptions/progress";
 
 export type LoginReceipt = PostResult<"/api/accounts/login">;
 const active = (status?: string) =>
@@ -29,7 +32,7 @@ export function deviceCodeCountdownSeconds(
   return Math.max(0, Math.ceil(expiresAt - now));
 }
 
-export default function AccountSignIn({
+export default observer(function AccountSignIn({
   state,
   targetAccount,
   emailHint,
@@ -45,6 +48,7 @@ export default function AccountSignIn({
   const { clearStableRequestId, post, save, saved, stableRequestId } =
     useServerApi();
   const resources = useServerResources();
+  const storeView = useServerStore();
 
   const storageKey = `account-sign-in:${state.scope || "local"}${targetAccount ? `:${targetAccount.id}` : ""}`;
   const [requestId, setRequestId] = useState(() =>
@@ -60,39 +64,23 @@ export default function AccountSignIn({
   const receipts = (state.data.logins || []).filter(
     (r) => r.reauthAccountKey === targetAccount?.id,
   );
+  const liveReceipt = (
+    requestId
+      ? resourceData(
+          storeView.authProgress(resourceRequestId(requestId)).current,
+        )
+      : undefined
+  ) as import("../deepReadonly.ts").DeepReadonly<LoginReceipt> | undefined;
   const receipt =
+    (liveReceipt?.requestId === requestId &&
+    (!targetAccount || liveReceipt.accountKey === targetAccount.id)
+      ? liveReceipt
+      : undefined) ||
     receipts.find((r) => r.requestId === requestId) ||
     [...receipts].reverse().find((r) => active(r.status));
   const account = state.data.accounts.find(
     (a) => a.id === receipt?.resolvedAccountKey,
   );
-  useEffect(() => {
-    if (!requestId) return;
-    return subscribeProgress(
-      resources,
-      { kind: "auth-progress", requestId },
-      (progress) => {
-        if (
-          !progress.value ||
-          progress.value.requestId !== requestId ||
-          (targetAccount && progress.value.accountKey !== targetAccount.id)
-        )
-          return;
-        const result = progress.value;
-        state.setData((old) => ({
-          ...old,
-          logins: [
-            ...(old.logins || []).filter(
-              (item) => item.requestId !== requestId,
-            ),
-            result,
-          ],
-        }));
-      },
-      async () => {},
-      (failure) => setError(errorText(failure)),
-    );
-  }, [requestId, resources, state.setData, targetAccount?.id]);
   useEffect(() => {
     if (
       account &&
@@ -110,13 +98,10 @@ export default function AccountSignIn({
   };
   const store = (result: LoginReceipt) => {
     remember(result.requestId);
-    state.setData((old) => ({
-      ...old,
-      logins: [
-        ...(old.logins || []).filter((r) => r.requestId !== result.requestId),
-        result,
-      ],
-    }));
+    resources.publish(
+      { kind: "auth-progress", requestId: result.requestId },
+      result,
+    );
   };
   const run = async (name: string, action: () => Promise<void>) => {
     if (lock.current) return;
@@ -158,7 +143,6 @@ export default function AccountSignIn({
       clearStableRequestId(mutationKey);
       store({ ...result, requestId: id });
       setCopied(false);
-      await state.refresh();
     });
   const cancel = () =>
     run("cancel", async () => {
@@ -175,7 +159,6 @@ export default function AccountSignIn({
         ),
       );
       clearStableRequestId(mutationKey);
-      await state.refresh();
     });
   // A replay of the same sign-in request starts nothing. The server settles a
   // lost completion from the account credentials, or expires the request.
@@ -191,7 +174,6 @@ export default function AccountSignIn({
         clearStableRequestId(mutationKey);
         store({ ...result, requestId: receipt.requestId });
       }
-      await state.refresh();
     });
   let url: string | null = null;
   try {
@@ -379,4 +361,4 @@ export default function AccountSignIn({
         )}
     </section>
   );
-}
+});

@@ -1,7 +1,12 @@
 import {
   useServerApi,
   useServerFileActions,
+  useServerStore,
 } from "../servers/ServerServicesContext";
+import { useReadView } from "./useReadView.ts";
+import { observer } from "mobx-react-lite";
+import { resourceData, type ReadSlot } from "../store/runtime.ts";
+import type { GetResult } from "../api.ts";
 import { Button, Loader } from "@mantine/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import "../api";
@@ -21,6 +26,10 @@ export interface PreviewTarget {
   asset?: string;
   line?: number | undefined;
 }
+export type FilePreviewSelection = {
+  target: PreviewTarget;
+  slot: ReadSlot<GetResult<"/api/file">>;
+};
 type LoadedFile = {
   key: string;
   name: string;
@@ -30,16 +39,40 @@ type LoadedFile = {
   bytes: Uint8Array;
   format: ReturnType<typeof fileFormat>;
 };
-export default function FilePreview({
-  target,
+export function useFilePreview() {
+  const api = useServerApi(),
+    store = useServerStore();
+  const [target, setTarget] = useReadView<FilePreviewSelection>();
+  return [
+    target,
+    (next: PreviewTarget | null) => {
+      setTarget(next ? openFilePreview(store, api, next) : null);
+    },
+  ] as const;
+}
+export function openFilePreview(
+  store: ReturnType<typeof useServerStore>,
+  api: ReturnType<typeof useServerApi>,
+  target: PreviewTarget,
+) {
+  const { agent, path, asset } = target;
+  const query = { agent, path, asset };
+  const slot = store.reads.file(api, query);
+  void slot.read().catch(() => {});
+  return { target, slot };
+}
+export default observer(function FilePreview({
+  target: selection,
   onClose,
 }: {
-  target: PreviewTarget | null;
+  target: FilePreviewSelection | null;
   onClose: () => void;
 }) {
   const { canUseNativeFiles, openFile, previewFile, revealFile, saveFile } =
     useServerFileActions();
-  const { get } = useServerApi();
+  const target = selection?.target;
+  const slot = target && selection ? selection.slot.current : null;
+  const result = slot ? resourceData(slot) : undefined;
 
   const key = JSON.stringify([target?.agent, target?.path, target?.asset]);
   const [loaded, setLoaded] = useState<LoadedFile | null>(null);
@@ -50,61 +83,50 @@ export default function FilePreview({
   } | null>(null);
   const [source, setSource] = useState(false);
   const selectedLine = useRef<HTMLElement>(null);
-  const error = failure?.key === key ? failure.error : null;
+  const error =
+    failure?.key === key
+      ? failure.error
+      : slot?.status === "error"
+        ? slot.error
+        : null;
   useEffect(() => {
     setLoaded(null);
     setFailure(null);
     setSource(!!target?.line);
-    if (!target) return;
-    let active = true,
-      url = "";
-    const query = {
-      ...(target.agent ? { agent: target.agent } : {}),
-      ...(target.path ? { path: target.path } : {}),
-      ...(target.asset ? { asset: target.asset } : {}),
-    };
-    get("/api/file", { query })
-      .then((result) => {
-        if (!active) return;
-        const bytes = Uint8Array.from(atob(result.base64), (c) =>
-          c.charCodeAt(0),
-        );
-        const format = fileFormat(result.name, result.mime);
-        const text = [
-          "markdown",
-          "csv",
-          "tsv",
-          "json",
-          "text",
-          "html",
-          "svg",
-        ].includes(format)
-          ? new TextDecoder().decode(bytes)
-          : "";
-        const body = format === "svg" ? safeSvg(text) : bytes;
-        url = URL.createObjectURL(
-          new Blob([body], {
-            type: format === "svg" ? "image/svg+xml" : result.mime,
-          }),
-        );
-        setLoaded({
-          key,
-          name: result.name,
-          mime: result.mime,
-          bytes,
-          format,
-          url,
-          text,
-        });
-      })
-      .catch((error) => {
-        if (active) setFailure({ key, error });
-      });
+    if (!target || !result) return;
+    let url = "";
+    const bytes = Uint8Array.from(atob(result.base64), (c) => c.charCodeAt(0));
+    const format = fileFormat(result.name, result.mime);
+    const text = [
+      "markdown",
+      "csv",
+      "tsv",
+      "json",
+      "text",
+      "html",
+      "svg",
+    ].includes(format)
+      ? new TextDecoder().decode(bytes)
+      : "";
+    const body = format === "svg" ? safeSvg(text) : bytes;
+    url = URL.createObjectURL(
+      new Blob([body], {
+        type: format === "svg" ? "image/svg+xml" : result.mime,
+      }),
+    );
+    setLoaded({
+      key,
+      name: result.name,
+      mime: result.mime,
+      bytes,
+      format,
+      url,
+      text,
+    });
     return () => {
-      active = false;
       if (url) URL.revokeObjectURL(url);
     };
-  }, [key]);
+  }, [key, result, selection]);
   useEffect(() => {
     if (target?.line) setSource(true);
   }, [target?.line]);
@@ -351,4 +373,4 @@ export default function FilePreview({
         ))}
     </PreviewModal>
   );
-}
+});

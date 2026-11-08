@@ -135,7 +135,7 @@ export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']]
         : "export type ResourceData<R extends ResourceRef> = components['schemas']['SubscriptionDataMap'][R['kind']];"
     }
     export type SubscriptionError = Error;
-    ${declarations("src/sync/subscriptions/contracts.ts", ["subscriptionKey"]).replace("function subscriptionKey(", "function canonicalSubscriptionKey(")}
+    ${declarations("src/sync/subscriptions/contracts.ts", ["flatResourceKey", "subscriptionKey"]).replace("function subscriptionKey(", "function canonicalSubscriptionKey(")}
     let keyCalls=0;
     export function fixtureKeyComputations():number {return keyCalls;}
     export function subscriptionKey(ref:ResourceRef):string { keyCalls+=1;return canonicalSubscriptionKey(ref); }

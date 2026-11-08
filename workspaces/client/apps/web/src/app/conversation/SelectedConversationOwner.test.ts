@@ -2,6 +2,9 @@
 import { autorun, runInAction } from "mobx";
 import { expect, it, vi } from "vitest";
 import { ownerFixture } from "./ownerFixture.ts";
+import { createServerStore } from "../../store/server.ts";
+import { resourceData } from "../../store/runtime.ts";
+import { agentId } from "../../generated/observableResources.ts";
 import { serializeStateCollections } from "../../generated/observableResources.ts";
 import { projectedLimits } from "../../usage/accountLimits.fixture.ts";
 import {
@@ -10,37 +13,107 @@ import {
   Overage,
   EligibilityState,
 } from "../../generated/api.ts";
+import type { components } from "../../generated/api.ts";
+import {
+  TaskStatus,
+  TaskKind,
+  BackgroundTaskKind,
+  BackgroundTaskKindLabel,
+  BackgroundTaskIndicator,
+  BackgroundTaskLabel,
+} from "../../generated/api.ts";
 import { MessageSendStatus } from "../../generated/api.ts";
 
-it("suspends selected detail and process readers before a project command and reacquires after resume", () => {
+it("observed selected leaves receive live detail and processes with one subscription each", async () => {
+  vi.useFakeTimers();
   const f = ownerFixture();
-  const releases = [vi.fn(), vi.fn()];
-  const subscribe = vi
-    .spyOn(f.services.resources, "subscribe")
-    .mockReturnValueOnce(releases[0]!)
-    .mockReturnValueOnce(releases[1]!)
-    .mockReturnValue(() => {});
-  const stop = f.selected.start();
+  const store = createServerStore(f.services.resources);
+  vi.spyOn(f.models.store, "agentDetail").mockImplementation(store.agentDetail);
+  vi.spyOn(f.models.store, "processes").mockImplementation(store.processes);
+  const subscribe = vi.spyOn(f.services.resources, "subscribe");
+  const stopOwner = f.selected.start();
+  expect(
+    subscribe.mock.calls.filter(([ref]) =>
+      ["agentDetail", "processes"].includes(ref.kind),
+    ),
+  ).toHaveLength(0);
+  const seen: unknown[] = [];
+  const stopLeaf = autorun(() =>
+    seen.push([f.selected.detail?.canSend, f.selected.backgroundTaskCount]),
+  );
+  // Another leaf shares the same generated key.
+  const stopOtherLeaf = autorun(
+    () => resourceData(store.agentDetail(agentId("lead")).current)?.canSend,
+  );
   try {
-    expect(subscribe.mock.calls.map(([ref]) => ref.kind)).toEqual([
-      "agentDetail",
-      "processes",
-    ]);
-    const scope = new Set(["lead"]);
-    const command = vi.fn(() => {
-      releases.forEach((release) => expect(release).toHaveBeenCalledOnce());
-      expect(f.selected.detailSlot).toBeUndefined();
-      expect(f.selected.isConversationVisible).toBe(false);
-    });
-    runInAction(() => {
-      f.selected.suspendReaders(scope);
-      command();
-    });
-    f.selected.resumeReaders(scope);
-    expect(subscribe).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(
+      subscribe.mock.calls
+        .filter(([ref]) => ["agentDetail", "processes"].includes(ref.kind))
+        .map(([ref]) => ref.kind)
+        .sort(),
+    ).toEqual(["agentDetail", "processes"]);
+    f.services.resources.publish(
+      { kind: "agentDetail", agentId: "lead" },
+      { id: "lead", canSend: true },
+    );
+    f.services.resources.publish(
+      { kind: "processes", agentId: "lead" },
+      { processes: [], activities: [] },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.at(-1)).toEqual([true, 0]);
+    f.services.resources.publish(
+      { kind: "agentDetail", agentId: "lead" },
+      { id: "lead", canSend: false },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.at(-1)).toEqual([false, 0]);
+    const activity = {
+      source: "task",
+      value: {
+        id: "background",
+        kind: TaskKind.tool,
+        name: "Background task",
+        turnId: "turn",
+        agent: "lead",
+        created: 1,
+        status: TaskStatus.running,
+        display: {
+          kind: BackgroundTaskKind.command,
+          kindLabel: BackgroundTaskKindLabel.command,
+          title: "Command",
+          active: true,
+          indicator: BackgroundTaskIndicator.working,
+          label: BackgroundTaskLabel.running,
+          inBackgroundList: true,
+          actions: [],
+        },
+      },
+    } satisfies components["schemas"]["BackgroundTaskView"];
+    f.services.resources.publish(
+      { kind: "processes", agentId: "lead" },
+      { processes: [], activities: [activity] },
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(seen.at(-1)).toEqual([false, 1]);
+    runInAction(() => f.selected.suspendReaders(new Set(["lead"])));
+    expect(f.selected.detail).toBeUndefined();
+    f.selected.resumeReaders(new Set(["lead"]));
+    expect(f.selected.detail?.canSend).toBe(false);
+    expect(
+      subscribe.mock.calls.filter(([ref]) =>
+        ["agentDetail", "processes"].includes(ref.kind),
+      ),
+    ).toHaveLength(2);
   } finally {
-    stop();
+    stopLeaf();
+    stopOtherLeaf();
+    stopOwner();
+    store.dispose();
     f.dispose();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
   }
 });
 it("selection alone does not mark a result read and disposal ignores a late CAS receipt", async () => {
@@ -107,8 +180,8 @@ it("deleting another project leaves the selected conversation readers admitted",
   try {
     f.selected.suspendReaders(new Set(["different-project-agent"]));
     expect(release).not.toHaveBeenCalled();
-    expect(subscribe).toHaveBeenCalledTimes(2);
-    expect(f.selected.detailSlot).toBeDefined();
+    expect(subscribe).not.toHaveBeenCalled();
+    expect(f.selected.detail?.id).toBe("lead");
   } finally {
     stop();
     f.dispose();

@@ -16,6 +16,8 @@ pub struct ProjectionMetadata {
 
 pub fn models() -> Vec<ObservableModel> {
     vec![
+        ObservableModel::named("TokenRateSnapshot"),
+        ObservableModel::named("TokenRateRecord").identity("agentId"),
         ObservableModel::named("AccountsSummaryDto").track_nested(&[]),
         ObservableModel::named("ModelEntityDto")
             .declared_fields()
@@ -148,6 +150,49 @@ pub fn models() -> Vec<ObservableModel> {
 pub fn resources() -> Vec<ObservableResource> {
     vec![
         ObservableResource::mirror("ProjectionMetadata", "projectionMetadata"),
+        ObservableResource::mirror("TokenRateSnapshot", "tokenRateSnapshot"),
+        ObservableResource::mapped("multi-server", "multiServer", vec![])
+            .opaque()
+            .transient(),
+        ObservableResource::mapped("native-layr-settings", "nativeLayrSettings", vec![])
+            .opaque()
+            .transient(),
+        ObservableResource::mapped(
+            "auth-progress",
+            "authProgress",
+            vec![ObservableArg {
+                name: "requestId".into(),
+                brand: "RequestId".into(),
+            }],
+        )
+        .opaque()
+        .transient(),
+        ObservableResource::mapped(
+            "rename-progress",
+            "renameProgress",
+            vec![
+                ObservableArg {
+                    name: "agentId".into(),
+                    brand: "AgentId".into(),
+                },
+                ObservableArg {
+                    name: "requestId".into(),
+                    brand: "RequestId".into(),
+                },
+            ],
+        )
+        .opaque()
+        .transient(),
+        ObservableResource::mapped(
+            "voice",
+            "voice",
+            vec![ObservableArg {
+                name: "agentId".into(),
+                brand: "AgentId".into(),
+            }],
+        )
+        .opaque()
+        .transient(),
         ObservableResource::named("desktop", "desktop", "DesktopResponse", vec![]),
         ObservableResource::collections(
             "state",
@@ -361,7 +406,7 @@ mod tests {
     #[test]
     fn pilot_collections_share_the_existing_state_resource() {
         let resources = super::resources();
-        assert_eq!(resources.len(), 25);
+        assert_eq!(resources.len(), 31);
         let state = resources
             .iter()
             .find(|resource| resource.kind == "state")

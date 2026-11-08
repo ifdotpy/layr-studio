@@ -30,7 +30,9 @@ import {
 } from "./chatDeleteScope.ts";
 import { useProjectDelete } from "./useProjectDelete.ts";
 import { ProjectDeleteDialog } from "./components/ProjectDeleteDialog.tsx";
-import ProjectDirectoryPicker from "./components/ProjectDirectoryPicker.tsx";
+import ProjectDirectoryPicker, {
+  browseDirectory,
+} from "./components/ProjectDirectoryPicker.tsx";
 import ProjectFoldersDialog, {
   isLocatedProject,
 } from "./components/ProjectFoldersDialog.tsx";
@@ -52,7 +54,11 @@ import {
 import Workspace from "./components/shell/Workspace.tsx";
 import BackgroundTasks from "./components/shell/BackgroundTasks.tsx";
 import TerminalDock from "./components/TerminalDock.tsx";
-import FilePreview, { type PreviewTarget } from "./components/FilePreview.tsx";
+import FilePreview, {
+  openFilePreview,
+  type PreviewTarget,
+  type FilePreviewSelection,
+} from "./components/FilePreview.tsx";
 import { needsAnswer } from "./approvals.ts";
 import { resourceData } from "./store/runtime.ts";
 import { isRemoteServerView } from "./servers/environment.ts";
@@ -167,7 +173,7 @@ export class AppUi {
   tasksOpen = false;
   searchOpen = false;
   taskFocus: { leadId: string; id: string; requestId: string } | undefined;
-  filePreview: PreviewTarget | null = null;
+  filePreview: FilePreviewSelection | null = null;
   descriptor: { title: string; body: ReactNode } | null = null;
   generation = 0;
   restore = 0;
@@ -341,7 +347,11 @@ export class AppUi {
     this.searchOpen = false;
   }
   showPreview(target: PreviewTarget) {
-    this.filePreview = target;
+    this.filePreview = openFilePreview(
+      this.areas.scope.store,
+      this.areas.scope.services.api,
+      target,
+    );
   }
   closePreview() {
     this.filePreview = null;
@@ -360,6 +370,10 @@ export class AppUi {
       title: "Add project",
       body: (
         <ProjectDirectoryPicker
+          initialBrowse={browseDirectory(
+            this.areas.scope.store,
+            this.areas.scope.services.api,
+          )}
           onSelect={async (path, server) => {
             await registerProject(path, server, randomUUID(), {
               ...this.areas.scope.services.api,
@@ -473,13 +487,44 @@ export class AppUi {
           ));
       if (isLocatedProject(project))
         runInAction(() => {
+          const heads = (project.locations || []).map((location) => {
+            const slot = this.areas.scope.store.reads.projectLocations(
+              this.areas.scope.services.api,
+              {
+                project: project.id,
+                server: location.serverId,
+                path: location.path,
+                action: "info",
+              },
+            );
+            void slot.read().catch(() => {});
+            return {
+              project: project.id,
+              server: location.serverId,
+              path: location.path,
+              slot,
+            };
+          });
           this.areas.sidebar.close();
           this.descriptor = {
             title: "Project settings",
             body: (
               <ProjectFoldersDialog
+                key={request}
                 project={project}
+                initialHeads={heads}
                 initialServer={server}
+                initialBrowse={
+                  server
+                    ? browseDirectory(
+                        this.areas.scope.store,
+                        this.areas.scope.services.api,
+                        undefined,
+                        server,
+                        project.id,
+                      )
+                    : undefined
+                }
                 saved={this.areas.refresh}
               />
             ),
@@ -499,6 +544,11 @@ export class AppUi {
       body: (
         <ProjectDirectoryPicker
           initialPath={agent.projectPath || undefined}
+          initialBrowse={browseDirectory(
+            this.areas.scope.store,
+            this.areas.scope.services.api,
+            agent.projectPath || undefined,
+          )}
           serverChoices={[
             { id: "local", label: this.areas.scope.services.owner.label },
           ]}
@@ -706,6 +756,7 @@ export class AppUi {
         ] as const,
       () => {
         this.closeTeamDrawer();
+        if (!this.areas.scope.screen.active) this.closePreview();
         cancelAnimationFrame(this.restore);
       },
     );
@@ -821,13 +872,8 @@ export const AppTeam = observer(function AppTeam({
     }),
     [a, ui],
   );
-  useEffect(
-    () =>
-      view.view.members.length && ui.isTeamVisible
-        ? a.scope.services.tokenRates.watchTeamTokenRates(lead!.id)
-        : undefined,
-    [view.view.members.length, ui.isTeamVisible, lead?.id],
-  );
+  if (view.view.members.length && ui.isTeamVisible)
+    a.scope.services.tokenRates.observeTokenRates();
   const value = useMemo(
     () => ({
       view: view.view,

@@ -9,9 +9,16 @@ import { expect, test } from "vitest";
 import AccountSignInNotice from "./AccountSignInNotice";
 import ClaudeProfile from "./ClaudeProfile";
 import type { Account } from "./Accounts";
+import { observableFixture } from "./observableFixture.tsx";
 
 const render = (element: ReturnType<typeof createElement>) =>
-  renderToStaticMarkup(createElement(MantineProvider, null, element));
+  renderToStaticMarkup(
+    createElement(
+      observableFixture().Provider,
+      null,
+      createElement(MantineProvider, null, element),
+    ),
+  );
 const expected = { name: "Expected organization", idSuffix: "12345678" };
 const observed = { name: "Observed organization", idSuffix: "87654321" };
 const account: Account = {

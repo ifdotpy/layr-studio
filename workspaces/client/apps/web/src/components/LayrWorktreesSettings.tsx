@@ -1,31 +1,19 @@
-import { useEffect, useState } from "react";
-import { type GetResult } from "../api";
-import {
-  useServerApi,
-  useServerResources,
-} from "../servers/ServerServicesContext";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
 import { SettingsRow } from "./ui/primitives";
 import { LayrStoreDirectory } from "./LayrStoreDirectory";
 
-type Configuration = GetResult<"/api/native-layr/settings">;
-
-export function LayrWorktreesSettings({ active }: { active: boolean }) {
+export const LayrWorktreesSettings = observer(function LayrWorktreesSettings({
+  active,
+}: {
+  active: boolean;
+}) {
   const { post } = useServerApi();
-  const resources = useServerResources();
-  const [configuration, setConfiguration] = useState<Configuration | null>(
-    null,
-  );
-  useEffect(() => {
-    if (!active) return;
-    return resources.watchResourceChanges(
-      { kind: "native-layr-settings" },
-      (version) => {
-        if (version?.nativeLayrSettings) {
-          setConfiguration(version.nativeLayrSettings);
-        }
-      },
-    );
-  }, [active, resources]);
+  const store = useServerStore();
+  const configuration = active
+    ? resourceData(store.nativeLayrSettings().current)
+    : undefined;
   if (!active) return null;
   return (
     <>
@@ -64,4 +52,4 @@ export function LayrWorktreesSettings({ active }: { active: boolean }) {
       </section>
     </>
   );
-}
+});

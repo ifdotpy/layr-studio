@@ -1,38 +1,35 @@
 import { randomUUID } from "../uuid";
-import { useServerApi, useServerResourceReads } from "./ServerServicesContext";
+import { useServerApi, useServerServices } from "./ServerServicesContext";
 import {
   capturePreferenceWrite,
   readPreferenceFields,
 } from "../sync/uiPreferenceStore";
 import { preferenceEvent } from "../sync/uiPreferenceMerge";
 import { ServerManagementRequests } from "./managementRequests";
-import { useEffect, useRef, useState } from "react";
-import type { ResourceVersion } from "../sync/subscriptions/events";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { resourceData } from "../store/runtime.ts";
 import { errorText } from "../api";
-import {
-  discoverySnapshot,
-  effectiveDiscoveryAliases,
-  type DiscoverySnapshot,
-} from "./discoveryModel";
+import { discoverySnapshot, effectiveDiscoveryAliases } from "./discoveryModel";
 import type { ServerAccessRequest } from "./accessContract";
 import { readServers, setLocalServerDetails } from "./registry";
 import { serverCredentialAdapter } from "./transport";
-import { refreshServerName } from "./serverNames";
 import { adoptTrustedServers } from "./trustedServers";
-export const DISCOVERY_REFRESH_EVENT = "studio-server-discovery-refresh";
 export function useServerDiscovery(
   enabled: boolean,
   localAvailable = true,
   workspaceIds: Record<string, string | undefined> = {},
 ) {
   const { refreshSession, serverAccess } = useServerApi();
-  const watchResourceReads = useServerResourceReads();
-
-  const [snapshot, setSnapshot] = useState<DiscoverySnapshot | null>(null);
+  const store = useServerServices()?.store;
+  const state =
+    localAvailable && store
+      ? resourceData(store.multiServer().current)
+      : undefined;
+  const snapshot = state ? discoverySnapshot(state) : null;
   const [, setPreferenceRevision] = useState(0);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [checkedAt, setCheckedAt] = useState<number | null>(null);
+  const checkedAt = useMemo(() => (state ? Date.now() / 1000 : null), [state]);
   useEffect(() => {
     const changed = (event: Event) => {
       if (
@@ -45,7 +42,6 @@ export function useServerDiscovery(
     window.addEventListener(preferenceEvent, changed);
     return () => window.removeEventListener(preferenceEvent, changed);
   }, []);
-  const active = useRef(false);
   const [pending, setPending] = useState<ServerAccessRequest | null>(null);
   const busyRef = useRef(false);
   const management = new ServerManagementRequests(
@@ -90,9 +86,9 @@ export function useServerDiscovery(
       );
     },
   );
-  const apply = async (state: Parameters<typeof discoverySnapshot>[0]) => {
+  useEffect(() => {
+    if (!state) return;
     const next = discoverySnapshot(state);
-    if (!active.current && !localAvailable) return;
     const alias = effectiveDiscoveryAliases(
       next?.aliases,
       workspaceIds,
@@ -103,13 +99,11 @@ export function useServerDiscovery(
         ...(next?.localLabel ? { label: next.localLabel } : {}),
         ...(alias ? { alias } : {}),
       });
-    setSnapshot(next);
-    setCheckedAt(Date.now() / 1000);
     if (next && localAvailable)
       void adoptTrustedServers(next).catch((failure) =>
         setError(errorText(failure)),
       );
-  };
+  }, [state, localAvailable]);
   const effectiveSnapshot = snapshot
     ? {
         ...snapshot,
@@ -129,37 +123,6 @@ export function useServerDiscovery(
     const alias = effectiveSnapshot?.aliases?.local;
     if (alias) setLocalServerDetails({ alias });
   }, [effectiveSnapshot?.aliases?.local]);
-  const load = (version?: ResourceVersion) => {
-    const snapshot = version?.discoverySnapshot;
-    return snapshot ? apply(snapshot) : Promise.resolve();
-  };
-  const loadRef = useRef(load);
-  loadRef.current = load;
-  useEffect(() => {
-    if (!localAvailable) return;
-    const watcher = watchResourceReads(
-      { kind: "multi-server" },
-      async (version) => {
-        await loadRef.current(version);
-        setError("");
-      },
-      (failure) => setError(errorText(failure)),
-      { waitForBaseline: true },
-    );
-    const refresh = () => watcher.refresh();
-    window.addEventListener(DISCOVERY_REFRESH_EVENT, refresh);
-    return () => {
-      window.removeEventListener(DISCOVERY_REFRESH_EVENT, refresh);
-      watcher();
-    };
-  }, [localAvailable, watchResourceReads]);
-  useEffect(() => {
-    if (!localAvailable) return;
-    active.current = true;
-    return () => {
-      active.current = false;
-    };
-  }, [localAvailable]);
   const run = async (request: ServerAccessRequest) => {
     if ((!enabled && request.action !== "name") || busyRef.current)
       return false;
@@ -182,14 +145,6 @@ export function useServerDiscovery(
             JSON.stringify(previous ?? null),
           );
         }
-      }
-      if (
-        !enabled &&
-        request.action === "name" &&
-        (!localAvailable || request.serverId !== "local")
-      ) {
-        const server = readServers().find((row) => row.id === request.serverId);
-        if (server) await refreshServerName(server);
       }
       return true;
     } catch (failure) {

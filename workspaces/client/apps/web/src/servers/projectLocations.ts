@@ -53,10 +53,15 @@ export function projectServerChoices(
       ),
   }));
 }
+/** Explicit action compatibility; lifecycle consumers read the shared facade. */
 export async function readProjectServers(
   read: typeof get = get,
 ): Promise<ProjectServerChoice[]> {
-  const snapshot = await read("/api/multi-server");
+  return discoveryProjectServers(await read("/api/multi-server"));
+}
+export function discoveryProjectServers(
+  snapshot: DeepReadonly<GetResult<"/api/multi-server">>,
+): ProjectServerChoice[] {
   const connections = readServers();
   return [
     {

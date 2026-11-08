@@ -91,6 +91,7 @@ fn render_all(
     }
     parser.roots = roots.values().cloned().collect();
     let mut out = String::from(HEADER);
+    writeln!(out, "export const TRANSIENT_RESOURCE_KINDS: ReadonlySet<ResourceRef[\"kind\"]> = new Set([{}]);", resources.iter().filter(|r| r.persistence == crate::Persistence::Transient).map(|r| quote(&r.kind)).collect::<Vec<_>>().join(", ")).expect("string");
     out.push_str("type ObservableInput<T> = T extends ReadonlyArray<infer Item> ? ReadonlyArray<Item> : { [K in keyof T]: T[K] | ({} extends Pick<T, K> ? undefined : never) };\n");
     out.push_str(FREEZE);
     let mut brands = BTreeSet::new();

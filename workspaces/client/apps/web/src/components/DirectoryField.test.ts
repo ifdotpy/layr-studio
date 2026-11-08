@@ -3,13 +3,19 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 
+const owner = {};
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerApi: () => ({}),
+  useServerStore: () => owner,
   useServerFileDialogs: () => ({
     canPickDirectory: () => false,
     pickDirectory: vi.fn(),
   }),
 }));
-vi.mock("./ProjectDirectoryPicker", () => ({ default: () => null }));
+vi.mock("./ProjectDirectoryPicker", () => ({
+  default: () => null,
+  browseDirectory: () => ({}),
+}));
 import DirectoryField from "./DirectoryField";
 
 const render = (readOnly?: boolean) =>

@@ -1,5 +1,9 @@
+import { autorun } from "mobx";
+import { transientTestFixture } from "./sync/subscriptions/transientTestFixture.ts";
+import { agentId, requestId } from "./generated/observableResources.ts";
+import { resourceData } from "./store/runtime.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { submitRename, watchRenameResult } from "./renameRequest";
+import { submitRename } from "./renameRequest";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -27,37 +31,35 @@ it("a lost response performs one recovery read and preserves the uncertain resul
   expect(recover).toHaveBeenCalledTimes(1);
 });
 
-it("delivers rename failure from the request-scoped stream without HTTP", () => {
-  let deliver!: (
-    version?: import("./sync/resourceEvents").ResourceVersion,
-  ) => void;
-  const release = vi.fn();
-  const events = {
-    watchResourceChanges: vi.fn((_resource, callback) => {
-      deliver = callback;
-      return release;
-    }),
-  };
-  const accept = vi.fn();
-  const stop = watchRenameResult(events, "agent", "request", accept);
-  expect(events.watchResourceChanges).toHaveBeenCalledTimes(1);
-  const resource = {
-    kind: "rename-progress",
-    agentId: "agent",
-    requestId: "request",
-  };
-  const value = {
-    id: "agent",
-    request_id: "request",
-    status: "failed",
-    error: "No title",
-  };
-  deliver({
-    epoch: "owner",
-    revision: 1,
-    progress: { resource, value },
-  } as import("./sync/resourceEvents").ResourceVersion);
-  expect(accept).toHaveBeenCalledWith(value);
-  stop();
-  expect(release).toHaveBeenCalledTimes(1);
+it("delivers request-scoped rename failure through the generated facade without HTTP", async () => {
+  vi.useFakeTimers();
+  const f = transientTestFixture();
+  const slot = f.store.renameProgress(agentId("agent"), requestId("request"));
+  const stop = autorun(() => {
+    void slot.current;
+  });
+  try {
+    await vi.advanceTimersByTimeAsync(100);
+    const ref = {
+      kind: "rename-progress",
+      agentId: "agent",
+      requestId: "request",
+    } as const;
+    const value = {
+      id: "agent",
+      request_id: "request",
+      status: "failed",
+      error: "No title",
+    } as const;
+    f.emit(ref, {
+      epoch: "one",
+      revision: 1,
+      progress: { resource: ref, value },
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(resourceData(slot.current)).toEqual(value);
+  } finally {
+    stop();
+    f.close();
+  }
 });

@@ -1,12 +1,7 @@
 import { useServerTokenRates } from "../servers/ServerServicesContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Agent } from "../types";
-import {
-  formatTokenRate,
-  tweenTokenRate,
-  workerRateKey,
-} from "../usage/tokenRate";
-import type { TokenRate as Rate } from "../usage/tokenRate";
+import { formatTokenRate, tweenTokenRate } from "../usage/tokenRate";
 import { useVisualActivity } from "../hooks/useVisualActivity";
 import { observer } from "mobx-react-lite";
 
@@ -19,12 +14,7 @@ export default observer(function TokenRate({
   agent: Agent;
   variant?: "footer" | "worker";
 }) {
-  const {
-    getTokenRate,
-    getWorkspaceTeamTokenRate,
-    subscribeTokenRate,
-    watchTokenRateInterest,
-  } = useServerTokenRates();
+  const { getTokenRate, getWorkspaceTeamTokenRate } = useServerTokenRates();
 
   const [visualRef, visualActive] = useVisualActivity<HTMLElement>();
   const observeRate = useCallback(
@@ -39,19 +29,11 @@ export default observer(function TokenRate({
     },
     [visualRef, variant],
   );
-  const scope =
-    variant === "worker"
-      ? workerRateKey(agent.rootId || "", agent.id)
-      : agent.id;
+  const scope = agent.id;
   const workspaceTeamRate =
-    variant === "worker"
+    visualActive && variant === "worker"
       ? getWorkspaceTeamTokenRate(agent.rootId || "", agent.id)
       : null;
-  const initialRate = workspaceTeamRate || getTokenRate(scope);
-  const [sample, setSample] = useState<{
-    id: string;
-    value: Rate | null;
-  }>(() => ({ id: scope, value: initialRate }));
   const [motionReduced, setMotionReduced] = useState(
     () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -59,31 +41,16 @@ export default observer(function TokenRate({
   const current = useRef(0);
   const previousTurn = useRef("");
   useEffect(() => {
-    if (!visualActive) return;
-    const stopRate = subscribeTokenRate(scope, (value) =>
-      setSample((previous) =>
-        previous.id === scope && previous.value === value
-          ? previous
-          : { id: scope, value },
-      ),
-    );
-    const stopInterest =
-      variant === "footer" ? watchTokenRateInterest() : undefined;
-    return () => {
-      stopInterest?.();
-      stopRate();
-    };
-  }, [scope, visualActive, variant]);
-  useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setMotionReduced(media.matches);
     media.addEventListener("change", update);
     return () => media.removeEventListener("change", update);
   }, []);
-  const sampleRate = sample?.id === scope ? sample.value : null;
-  const rate =
-    (variant === "worker" ? workspaceTeamRate : getTokenRate(scope)) ||
-    sampleRate;
+  const rate = visualActive
+    ? variant === "worker"
+      ? workspaceTeamRate
+      : getTokenRate(scope)
+    : null;
   // Card metadata can lag the transcript. The batch owns its current turn.
   const matchesTurn =
     variant === "worker" || !agent.turnId || rate?.turnId === agent.turnId;

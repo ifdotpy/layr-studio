@@ -162,6 +162,7 @@ fn resources() -> Vec<ObservableResource> {
         collections: vec![],
         mapped: false,
         mirror_only: false,
+        persistence: crate::Persistence::Durable,
         opaque: false,
     }]
 }

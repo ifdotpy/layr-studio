@@ -20,6 +20,14 @@ import type {
   ObservableResourceRuntime,
 } from "../store/index.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
+export const TRANSIENT_RESOURCE_KINDS: ReadonlySet<ResourceRef["kind"]> =
+  new Set([
+    "multi-server",
+    "native-layr-settings",
+    "auth-progress",
+    "rename-progress",
+    "voice",
+  ]);
 type ObservableInput<T> =
   T extends ReadonlyArray<infer Item>
     ? ReadonlyArray<Item>
@@ -29,6 +37,12 @@ function freezePlain<T>(value: T): T {
     for (const key in value) freezePlain(value[key]);
     Object.freeze(value);
   }
+  return value;
+}
+declare const requestIdBrand: unique symbol;
+export type RequestId = string & { readonly [requestIdBrand]: true };
+export function requestId(value: string): RequestId;
+export function requestId(value: string): string {
   return value;
 }
 declare const agentIdBrand: unique symbol;
@@ -14721,6 +14735,113 @@ class TextBlobResponseModel {
     return this;
   }
 }
+type TokenRateRecordDto = DeepReadonly<
+  components["schemas"]["TokenRateRecord"]
+>;
+class TokenRateRecordModel {
+  active: TokenRateRecordDto["active"];
+  agentId: TokenRateRecordDto["agentId"];
+  estimated: TokenRateRecordDto["estimated"];
+  outputTokens: TokenRateRecordDto["outputTokens"];
+  rate: TokenRateRecordDto["rate"];
+  rootId: TokenRateRecordDto["rootId"];
+  turnId: TokenRateRecordDto["turnId"];
+  constructor(dto: TokenRateRecordDto) {
+    this.active = dto.active;
+    this.agentId = dto.agentId;
+    this.estimated = dto.estimated;
+    this.outputTokens = dto.outputTokens;
+    this.rate = dto.rate;
+    this.rootId = dto.rootId;
+    this.turnId = dto.turnId;
+    makeObservable(this, {
+      active: observableRef,
+      agentId: observableRef,
+      estimated: observableRef,
+      outputTokens: observableRef,
+      rate: observableRef,
+      rootId: observableRef,
+      turnId: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TokenRateRecordDto): this {
+    {
+      const next = dto.active;
+      if (this.active !== next) this.active = next;
+    }
+    {
+      const next = dto.agentId;
+      if (this.agentId !== next) this.agentId = next;
+    }
+    {
+      const next = dto.estimated;
+      if (this.estimated !== next) this.estimated = next;
+    }
+    {
+      const next = dto.outputTokens;
+      if (this.outputTokens !== next) this.outputTokens = next;
+    }
+    {
+      const next = dto.rate;
+      if (this.rate !== next) this.rate = next;
+    }
+    {
+      const next = dto.rootId;
+      if (this.rootId !== next) this.rootId = next;
+    }
+    {
+      const next = dto.turnId;
+      if (this.turnId !== next) this.turnId = next;
+    }
+    return this;
+  }
+}
+function reconcileTokenRateRecord(
+  data: TokenRateRecordModel[],
+  dto: readonly TokenRateRecordDto[],
+): TokenRateRecordModel[] {
+  const ids = new Set<string>();
+  for (const item of dto) {
+    if (ids.has(item.agentId))
+      throw new Error("Duplicate identity in TokenRateRecord");
+    ids.add(item.agentId);
+  }
+  const previous = new Map(data.map((item) => [item.agentId, item]));
+  const next: TokenRateRecordModel[] = [];
+  for (const item of dto) {
+    const existing = previous.get(item.agentId);
+    const row =
+      existing === undefined
+        ? new TokenRateRecordModel(item)
+        : existing.apply(item);
+    next.push(row);
+  }
+  return data.length === next.length &&
+    data.every((item, index) => item === next[index])
+    ? data
+    : next;
+}
+type TokenRateSnapshotDto = DeepReadonly<
+  components["schemas"]["TokenRateSnapshot"]
+>;
+class TokenRateSnapshotModel {
+  records: TokenRateRecordModel[];
+  constructor(dto: TokenRateSnapshotDto) {
+    this.records = reconcileTokenRateRecord([], dto.records);
+    makeObservable(this, {
+      records: observableRef,
+      apply: action,
+    });
+  }
+  apply(dto: TokenRateSnapshotDto): this {
+    {
+      const next = reconcileTokenRateRecord(this.records, dto.records);
+      if (this.records !== next) this.records = next;
+    }
+    return this;
+  }
+}
 type TranscriptAgentDto = DeepReadonly<
   components["schemas"]["TranscriptAgent"]
 >;
@@ -18704,6 +18825,9 @@ function updateRpcId(
         : new RpcIdVariant1Model(dto);
   }
 }
+export type TokenRateRecord = DeepReadonly<
+  components["schemas"]["TokenRateRecord"]
+>;
 export type AccountsSummaryDto = DeepReadonly<
   components["schemas"]["AccountsSummaryDto"]
 >;
@@ -18818,6 +18942,28 @@ export type AgentTail = DeepReadonly<components["schemas"]["AgentTail"]>;
 export type ProjectionMetadata = DeepReadonly<
   import("./observableFieldTypes.ts").ProjectionMetadataFields
 >;
+export type TokenRateSnapshot = DeepReadonly<
+  components["schemas"]["TokenRateSnapshot"]
+>;
+export type MultiServerData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "multi-server" }>>>
+>;
+export type NativeLayrSettingsData = DeepReadonly<
+  ObservableInput<
+    ResourceData<Extract<ResourceRef, { kind: "native-layr-settings" }>>
+  >
+>;
+export type AuthProgressData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "auth-progress" }>>>
+>;
+export type RenameProgressData = DeepReadonly<
+  ObservableInput<
+    ResourceData<Extract<ResourceRef, { kind: "rename-progress" }>>
+  >
+>;
+export type VoiceData = DeepReadonly<
+  ObservableInput<ResourceData<Extract<ResourceRef, { kind: "voice" }>>>
+>;
 export type DesktopResponse = DeepReadonly<
   components["schemas"]["DesktopResponse"]
 >;
@@ -18896,6 +19042,143 @@ export function createProjectionMetadataMirror(dto: ProjectionMetadata): {
     apply(dto: ProjectionMetadata): void {
       runInAction(() => {
         model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createTokenRateSnapshotMirror(): {
+  readonly current: TokenRateSnapshot;
+  apply(dto: TokenRateSnapshot): void;
+} {
+  let model: TokenRateSnapshotModel = new TokenRateSnapshotModel({
+    records: [],
+  });
+  return {
+    get current(): TokenRateSnapshot {
+      return model;
+    },
+    apply(dto: TokenRateSnapshot): void {
+      runInAction(() => {
+        model = model.apply(dto);
+      });
+    },
+  };
+}
+export function createMultiServerMirror(dto: MultiServerData): {
+  readonly current: MultiServerData;
+  apply(dto: MultiServerData): void;
+} {
+  const model = observable.box<MultiServerData>(
+    freezePlain(structuredClone(dto)),
+    { deep: false },
+  );
+  return {
+    get current(): MultiServerData {
+      return model.get();
+    },
+    apply(dto: MultiServerData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export function createNativeLayrSettingsMirror(dto: NativeLayrSettingsData): {
+  readonly current: NativeLayrSettingsData;
+  apply(dto: NativeLayrSettingsData): void;
+} {
+  const model = observable.box<NativeLayrSettingsData>(
+    freezePlain(structuredClone(dto)),
+    { deep: false },
+  );
+  return {
+    get current(): NativeLayrSettingsData {
+      return model.get();
+    },
+    apply(dto: NativeLayrSettingsData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export function createAuthProgressMirror(dto: AuthProgressData): {
+  readonly current: AuthProgressData;
+  apply(dto: AuthProgressData): void;
+} {
+  const model = observable.box<AuthProgressData>(
+    freezePlain(structuredClone(dto)),
+    { deep: false },
+  );
+  return {
+    get current(): AuthProgressData {
+      return model.get();
+    },
+    apply(dto: AuthProgressData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export function createRenameProgressMirror(dto: RenameProgressData): {
+  readonly current: RenameProgressData;
+  apply(dto: RenameProgressData): void;
+} {
+  const model = observable.box<RenameProgressData>(
+    freezePlain(structuredClone(dto)),
+    { deep: false },
+  );
+  return {
+    get current(): RenameProgressData {
+      return model.get();
+    },
+    apply(dto: RenameProgressData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
+      });
+    },
+  };
+}
+export function createVoiceMirror(dto: VoiceData): {
+  readonly current: VoiceData;
+  apply(dto: VoiceData): void;
+} {
+  const model = observable.box<VoiceData>(freezePlain(structuredClone(dto)), {
+    deep: false,
+  });
+  return {
+    get current(): VoiceData {
+      return model.get();
+    },
+    apply(dto: VoiceData): void {
+      runInAction(() => {
+        const current = model.get();
+        model.set(
+          compareStructural(current, dto)
+            ? current
+            : freezePlain(structuredClone(dto)),
+        );
       });
     },
   };
@@ -20269,6 +20552,14 @@ export function createTurnErrorMirror(dto: AnalyticsTurnRecord): {
   };
 }
 export interface ObservableResources {
+  multiServer(): ResourceSlot<MultiServerData>;
+  nativeLayrSettings(): ResourceSlot<NativeLayrSettingsData>;
+  authProgress(requestId: RequestId): ResourceSlot<AuthProgressData>;
+  renameProgress(
+    agentId: AgentId,
+    requestId: RequestId,
+  ): ResourceSlot<RenameProgressData>;
+  voice(agentId: AgentId): ResourceSlot<VoiceData>;
   desktop(): ResourceSlot<DesktopResponse>;
   state(): ResourceSlot<StateCollections>;
   requests(): ResourceSlot<RequestsCollections>;
@@ -20296,6 +20587,32 @@ export interface ObservableResources {
 export function createObservableResources(
   runtime: ObservableResourceRuntime,
 ): ObservableResources {
+  let multiServerSlot: ResourceSlot<MultiServerData> | undefined;
+  let nativeLayrSettingsSlot: ResourceSlot<NativeLayrSettingsData> | undefined;
+  const authProgressSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "auth-progress" }>,
+    AuthProgressData
+  >({
+    create: (dto) => freezePlain(structuredClone(dto)),
+    apply: (data, dto) =>
+      compareStructural(data, dto) ? data : freezePlain(structuredClone(dto)),
+  });
+  const renameProgressSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "rename-progress" }>,
+    RenameProgressData
+  >({
+    create: (dto) => freezePlain(structuredClone(dto)),
+    apply: (data, dto) =>
+      compareStructural(data, dto) ? data : freezePlain(structuredClone(dto)),
+  });
+  const voiceSlots = runtime.keyed<
+    Extract<ResourceRef, { kind: "voice" }>,
+    VoiceData
+  >({
+    create: (dto) => freezePlain(structuredClone(dto)),
+    apply: (data, dto) =>
+      compareStructural(data, dto) ? data : freezePlain(structuredClone(dto)),
+  });
   let desktopSlot: ResourceSlot<DesktopResponse> | undefined;
   let stateSlot: ResourceSlot<StateCollections> | undefined;
   let requestsSlot: ResourceSlot<RequestsCollections> | undefined;
@@ -20570,6 +20887,60 @@ export function createObservableResources(
     apply: (data, dto) => data.apply(dto),
   });
   return {
+    multiServer() {
+      if (multiServerSlot !== undefined) return multiServerSlot;
+      const ref: Extract<ResourceRef, { kind: "multi-server" }> = {
+        kind: "multi-server",
+      };
+      const key = JSON.stringify(["multiServer", subscriptionKey(ref)]);
+      return (multiServerSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => freezePlain(structuredClone(dto)),
+        apply: (data, dto) =>
+          compareStructural(data, dto)
+            ? data
+            : freezePlain(structuredClone(dto)),
+      }));
+    },
+    nativeLayrSettings() {
+      if (nativeLayrSettingsSlot !== undefined) return nativeLayrSettingsSlot;
+      const ref: Extract<ResourceRef, { kind: "native-layr-settings" }> = {
+        kind: "native-layr-settings",
+      };
+      const key = JSON.stringify(["nativeLayrSettings", subscriptionKey(ref)]);
+      return (nativeLayrSettingsSlot = runtime.slot({
+        key,
+        ref,
+        create: (dto) => freezePlain(structuredClone(dto)),
+        apply: (data, dto) =>
+          compareStructural(data, dto)
+            ? data
+            : freezePlain(structuredClone(dto)),
+      }));
+    },
+    authProgress(requestId: RequestId) {
+      const ref: Extract<ResourceRef, { kind: "auth-progress" }> = {
+        kind: "auth-progress",
+        requestId,
+      };
+      return authProgressSlots(ref);
+    },
+    renameProgress(agentId: AgentId, requestId: RequestId) {
+      const ref: Extract<ResourceRef, { kind: "rename-progress" }> = {
+        kind: "rename-progress",
+        agentId,
+        requestId,
+      };
+      return renameProgressSlots(ref);
+    },
+    voice(agentId: AgentId) {
+      const ref: Extract<ResourceRef, { kind: "voice" }> = {
+        kind: "voice",
+        agentId,
+      };
+      return voiceSlots(ref);
+    },
     desktop() {
       if (desktopSlot !== undefined) return desktopSlot;
       const ref: Extract<ResourceRef, { kind: "desktop" }> = {

@@ -372,9 +372,13 @@ export function ConversationView() {
       ? {
           before: before ? String(before) : null,
           load: async (cursor) => {
-            const page = await get("/api/transcript/page", {
-              query: { id: historyAgentId, before: cursor, limit: 500 },
-            });
+            const page = await scope.store.reads
+              .transcriptPage(api, {
+                id: historyAgentId,
+                before: cursor,
+                limit: 500,
+              })
+              .read();
             if (page.unavailable) throw new Error(page.unavailable);
             if (
               historyVersion &&

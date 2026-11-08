@@ -1,3 +1,6 @@
+import { createDataObserver } from "../../src/sync/subscriptions/data.ts";
+import { createSubscriptions } from "../../src/sync/subscriptions/module.ts";
+import { createServerStore } from "../../src/store/server.ts";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -15,27 +18,27 @@ import { fixtureElement } from "./browser-helpers.ts";
 const reads = { facts: 0, auth: 0, jobs: 0 };
 window.reads = reads;
 const selectors: ResourceRef[] = (window.selectors = []);
-const listeners = new Map<string, (version?: ResourceVersion) => void>();
+const listeners = new Map<string, Set<(version?: ResourceVersion) => void>>();
 const resources = {
   watchResourceChanges(
     resource: ResourceRef,
     accept: (version?: ResourceVersion) => void,
   ) {
     const key = JSON.stringify(resource);
-    listeners.set(key, accept);
+    const callbacks = listeners.get(key) ?? new Set();
+    listeners.set(key, callbacks);
+    callbacks.add(accept);
     selectors.push(resource);
     return () => {
-      listeners.delete(key);
+      callbacks.delete(accept);
     };
   },
   watchResourceConnection(
-    accept: (
-      state: Parameters<
-        Parameters<ServerServices["resources"]["watchResourceConnection"]>[0]
-      >[0],
-    ) => void,
+    accept: Parameters<
+      ServerServices["resources"]["watchResourceConnection"]
+    >[0],
   ) {
-    accept("live");
+    accept("live", "open", {});
     return () => {};
   },
 };
@@ -50,11 +53,20 @@ const api = {
   stableRequestId: () => "",
   clearStableRequestId: () => {},
 };
+const subscriptions = createSubscriptions(
+  resources,
+  createDataObserver(
+    () => ({ subscribeTranscriptProjection: () => () => {} }),
+    resources,
+  ),
+);
+const store = createServerStore(subscriptions);
 // This one-off fixture omits unused service adapters and API methods.
 const services: Partial<Record<keyof ServerServices, unknown>> = {
   owner: { id: "local", origin: location.origin },
   api,
-  resources,
+  resources: subscriptions,
+  store,
 };
 const account = {
   id: "claude-one",
@@ -66,12 +78,15 @@ const account = {
 const progress = (
   resource: ResourceProgress["resource"],
   value: ResourceProgress["value"],
-) =>
-  listeners.get(JSON.stringify(resource))?.({
+) => {
+  const version: ResourceVersion = {
     epoch: "fixture",
     revision: 1,
     progress: { resource, value } as ResourceProgress,
-  });
+  };
+  for (const accept of listeners.get(JSON.stringify(resource)) ?? [])
+    accept(version);
+};
 window.progress = progress;
 createRoot(fixtureElement("root")).render(
   <MantineProvider>

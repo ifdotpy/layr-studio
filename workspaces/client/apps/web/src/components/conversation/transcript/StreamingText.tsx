@@ -6,7 +6,7 @@ import { reportPromptComposerRender } from "../../prompt-composer/renderProbe";
 import NativeMarkdown from "../../../native/NativeMarkdown";
 import { useEffect, useState } from "react";
 import PreviewModal from "../../PreviewModal";
-import FilePreview, { type PreviewTarget } from "../../FilePreview";
+import FilePreview, { useFilePreview } from "../../FilePreview";
 import { localFileLink } from "../../fileLinks";
 import { relativeToDocument } from "../../filePreviewFormats";
 
@@ -35,7 +35,7 @@ export default observer(function StreamingText({
       )
     : rawText;
   reportPromptComposerRender("message-text", message?.id, text);
-  const [preview, setPreview] = useState<PreviewTarget | null>(null);
+  const [preview, setPreview] = useFilePreview();
   const [linkError, setLinkError] = useState("");
   const [linkDialogMounted, setLinkDialogMounted] = useState(false);
   const [linkDialogReady, setLinkDialogReady] = useState(false);

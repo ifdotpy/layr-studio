@@ -1,10 +1,6 @@
+import { resourceData } from "../store/runtime.ts";
 import { observer } from "mobx-react-lite";
-import { useEffect, useState } from "react";
-import type { GetResult } from "../api";
-import {
-  useServerApi,
-  useServerResources,
-} from "../servers/ServerServicesContext";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
 import type { LocationProjectView as LocationProject } from "../servers/projectLocations";
 import { LayrStoreDirectory } from "./LayrStoreDirectory";
 
@@ -17,20 +13,8 @@ export const ProjectLayrStoreSettings = observer(
     saved: () => Promise<void>;
   }) {
     const { post } = useServerApi();
-    const resources = useServerResources();
-    const [configuration, setConfiguration] =
-      useState<GetResult<"/api/native-layr/settings"> | null>(null);
-    useEffect(
-      () =>
-        resources.watchResourceChanges(
-          { kind: "native-layr-settings" },
-          (version) => {
-            if (version?.nativeLayrSettings)
-              setConfiguration(version.nativeLayrSettings);
-          },
-        ),
-      [resources],
-    );
+    const store = useServerStore();
+    const configuration = resourceData(store.nativeLayrSettings().current);
     if (!configuration) return null;
     return (
       <LayrStoreDirectory

@@ -5,6 +5,24 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import ProjectFoldersDialog from "./ProjectFoldersDialog.tsx";
 import { createStateMirror } from "../generated/observableResources.ts";
+import { createServerStore } from "../store/server.ts";
+import { createSubscriptions } from "../sync/subscriptions/module.ts";
+const store = createServerStore(
+  createSubscriptions({
+    watchResourceChanges: () => () => {},
+    watchResourceConnection: () => () => {},
+  }),
+);
+
+const fixtureStore = Object.assign(Object.create(store), {
+  nativeLayrSettings: () => ({
+    current: {
+      status: "live",
+      data: { storeRoot: "/default", configured: true },
+    },
+  }),
+  multiServer: () => ({ current: { status: "loading" } }),
+});
 
 const leaf = vi.hoisted(() => ({
   post: vi.fn(async () => ({})),
@@ -23,7 +41,9 @@ const leaf = vi.hoisted(() => ({
   },
 }));
 vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => fixtureStore,
   useServerApi: () => ({
+    getStreamSession: () => undefined,
     post: leaf.post,
     get: async () => ({ gitHead: "main" }),
     refreshSession: async () => ({ token: "fixture" }),

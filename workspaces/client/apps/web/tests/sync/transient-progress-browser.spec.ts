@@ -52,6 +52,7 @@ test("transient auth progress has zero idle HTTP reads", async ({
         { requestId: "login-one", accountKey: "claude-one", status: "ready" },
       ),
     );
+    await page.clock.runFor(1);
     await page.waitForFunction(() => window.ready === true);
     console.log(
       JSON.stringify({

@@ -94,7 +94,6 @@ export default observer(function AccountAddDialog({
           scope={state.scope || "local"}
           opened={opened}
           onClose={close}
-          onReady={state.refresh}
         />
       )}
     </>

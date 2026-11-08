@@ -1,3 +1,4 @@
+import { reaction, toJS, compareStructural } from "mobx";
 import type { components } from "../generated/api";
 import { expect, it, vi } from "vitest";
 import {
@@ -5,11 +6,7 @@ import {
   TOKEN_RATE_MAX_ENTRIES,
   SYNC_PROTOCOL_VERSION,
 } from "../generated/api";
-import {
-  createTokenRateCache,
-  workerRateKey,
-  type TokenRate,
-} from "./tokenRate";
+import { createTokenRateCache, type TokenRate } from "./tokenRate";
 
 it("one token record drives footer and team without an agent projection, moves roots and clears removals", () => {
   const cache = createTokenRateCache();
@@ -25,15 +22,21 @@ it("one token record drives footer and team without an agent projection, moves r
   const footer: (TokenRate | null)[] = [],
     first: (TokenRate | null)[] = [],
     second: (TokenRate | null)[] = [];
-  cache.subscribeTokenRate("worker", (value) => footer.push(value));
-  cache.subscribeTokenRate(workerRateKey("first", "worker"), (value) =>
-    first.push(value),
+  const closeFooter = reaction(
+    () => toJS(cache.getTokenRate("worker")),
+    (value) => footer.push(value),
+    { fireImmediately: true },
   );
-  cache.subscribeTokenRate(workerRateKey("second", "worker"), (value) =>
-    second.push(value),
+  const closeFirst = reaction(
+    () => toJS(cache.getWorkspaceTeamTokenRate("first", "worker")),
+    (value) => first.push(value),
+    { fireImmediately: true },
   );
-  const closeFirst = cache.watchTeamTokenRates("first");
-  const closeSecond = cache.watchTeamTokenRates("second");
+  const closeSecond = reaction(
+    () => toJS(cache.getWorkspaceTeamTokenRate("second", "worker")),
+    (value) => second.push(value),
+    { fireImmediately: true },
+  );
   expect(cache.receiveWorkspaceTokenRates({ records: [record] })).toBe(true);
   expect(footer.at(-1)).toEqual(record);
   expect(first.at(-1)).toEqual(record);
@@ -46,8 +49,10 @@ it("one token record drives footer and team without an agent projection, moves r
   expect(cache.receiveWorkspaceTokenRates({ records: [] })).toBe(true);
   expect(footer.at(-1)).toBeNull();
   expect(second.at(-1)).toBeNull();
+  closeFooter();
   closeFirst();
   closeSecond();
+  cache.dispose();
 });
 
 it("rejects nonfinite, malformed, duplicate and oversized records atomically at the snapshot boundary", async () => {
@@ -143,14 +148,18 @@ it("applies token-rate deltas atomically, preserves quiet records, and replaces 
     cache.receiveResourceTokenRates(frame(true, [record, quiet, gone, other])),
   ).toBe(true);
   const observations: unknown[] = [];
-  cache.subscribeTokenRate("active", () =>
-    observations.push([
-      cache.getTokenRate("quiet"),
-      cache.getTokenRate("gone"),
-      cache.getWorkspaceTeamTokenRate("first", "active"),
-      cache.getWorkspaceTeamTokenRate("second", "active"),
-      cache.getTokenRate("other"),
-    ]),
+  const stop = reaction(
+    () =>
+      toJS([
+        cache.getTokenRate("active"),
+        cache.getTokenRate("quiet"),
+        cache.getTokenRate("gone"),
+        cache.getWorkspaceTeamTokenRate("first", "active"),
+        cache.getWorkspaceTeamTokenRate("second", "active"),
+        cache.getTokenRate("other"),
+      ]),
+    (values) => observations.push(values.slice(1)),
+    { equals: compareStructural },
   );
   observations.length = 0;
   const moved = { ...record, rootId: "second", rate: 5 };
@@ -164,6 +173,8 @@ it("applies token-rate deltas atomically, preserves quiet records, and replaces 
   expect(cache.getTokenRate("quiet")).toEqual(quiet);
   expect(cache.receiveResourceTokenRates(frame(true, [quiet]))).toBe(true);
   expect(cache.getTokenRate("active")).toBeNull();
+  stop();
+  cache.dispose();
 });
 
 it("rejects malformed delta metadata and aggregate overflow without partially applying", () => {
@@ -281,77 +292,27 @@ it("requires a token baseline for each epoch before applying deltas", () => {
   );
 });
 
-it("notifies only delta agents and their previous and current team memberships", () => {
+it("equal replay keeps generated record identities and reactions quiet", () => {
   const cache = createTokenRateCache();
-  const record: TokenRate = {
-    agentId: "active",
-    rootId: "first",
+  const record = {
+    agentId: "agent",
+    rootId: "root",
     turnId: "turn",
     active: true,
     estimated: false,
-    rate: 1,
-    outputTokens: 10,
+    rate: 3,
+    outputTokens: 6,
   };
-  const quiet = { ...record, agentId: "quiet" };
-  const removed = { ...record, agentId: "gone" };
-  const frame = {
-    protocol: SYNC_PROTOCOL_VERSION,
-    workspaceId: "workspace",
-    epoch: "epoch",
-    revision: 1,
-    snapshot: true,
-    records: [record, quiet, removed],
-    removed: [] as string[],
-  };
-  cache.receiveResourceTokenRates(frame);
-  const closeFirst = cache.watchTeamTokenRates("first");
-  const closeSecond = cache.watchTeamTokenRates("second");
-  const ids = [
-    "active",
-    "quiet",
-    "gone",
-    "missing",
-    workerRateKey("first", "active"),
-    workerRateKey("second", "active"),
-    workerRateKey("first", "quiet"),
-    workerRateKey("first", "gone"),
-  ];
-  const callbacks = ids.map((id) => {
-    const callback = vi.fn();
-    cache.subscribeTokenRate(id, callback);
-    callback.mockClear();
-    return callback;
-  });
-  const moved = { ...record, rootId: "second", rate: 5 };
-  expect(
-    cache.receiveResourceTokenRates({
-      ...frame,
-      snapshot: false,
-      records: [moved],
-      removed: ["gone"],
-    }),
-  ).toBe(true);
-  expect(callbacks.map((callback) => callback.mock.calls)).toEqual([
-    [[moved]],
-    [],
-    [[null]],
-    [],
-    [[null]],
-    [[moved]],
-    [],
-    [[null]],
-  ]);
-  expect(cache.getTokenRate("quiet")).toBe(quiet);
-  callbacks.forEach((callback) => callback.mockClear());
-  expect(
-    cache.receiveResourceTokenRates({
-      ...frame,
-      snapshot: false,
-      records: [],
-      removed: [],
-    }),
-  ).toBe(true);
-  expect(callbacks.every((callback) => !callback.mock.calls.length)).toBe(true);
-  closeFirst();
-  closeSecond();
+  cache.receiveWorkspaceTokenRates({ records: [record] });
+  const model = cache.getTokenRate("agent");
+  const changed = vi.fn();
+  const stop = reaction(() => toJS(cache.getTokenRate("agent")), changed);
+  cache.receiveWorkspaceTokenRates({ records: [{ ...record }] });
+  expect(cache.getTokenRate("agent")).toBe(model);
+  expect(changed).not.toHaveBeenCalled();
+  cache.receiveWorkspaceTokenRates({ records: [{ ...record, rate: 4 }] });
+  expect(changed).toHaveBeenCalledOnce();
+  expect(cache.getTokenRate("agent")).toBe(model);
+  stop();
+  cache.dispose();
 });

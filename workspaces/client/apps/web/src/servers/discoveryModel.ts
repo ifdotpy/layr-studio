@@ -50,7 +50,7 @@ export function effectiveDiscoveryAliases(
 }
 
 export function discoverySnapshot(
-  state: ServerAccessState,
+  state: import("../deepReadonly.ts").DeepReadonly<ServerAccessState>,
 ): DiscoverySnapshot | null {
   return {
     localServerId: state.identity.serverId,
@@ -79,6 +79,6 @@ export function discoverySnapshot(
         generation: JSON.stringify([peer.created, peer.publicKey]),
         replacedBy: peer.replacedBy ?? null,
       })),
-    identityAlerts: state.identityAlerts ?? [],
+    identityAlerts: state.identityAlerts ? [...state.identityAlerts] : [],
   };
 }

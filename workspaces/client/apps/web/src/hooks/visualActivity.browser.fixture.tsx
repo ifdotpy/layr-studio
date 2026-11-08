@@ -1,3 +1,4 @@
+import { observer } from "mobx-react-lite";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 declare global {
   interface Window {
@@ -20,7 +21,7 @@ import { createRoot } from "react-dom/client";
 import TokenRate from "../components/TokenRate.tsx";
 import ReasoningDuration from "../components/conversation/transcript/ReasoningDuration.tsx";
 import ChatStatus from "../components/agents/ChatStatus.tsx";
-import { watchTeamTokenRates } from "../usage/tokenRate.ts";
+import { observeTokenRates } from "../usage/tokenRate.ts";
 import {
   receiveWorkspaceTokenRates,
   configureTokenRateStream,
@@ -76,10 +77,10 @@ const card = (id: string, reason = true) =>
         }),
     ),
   );
-function TeamRateInterest() {
-  React.useEffect(() => watchTeamTokenRates("team"), []);
+const TeamRateInterest = observer(function TeamRateInterest() {
+  observeTokenRates();
   return null;
-}
+});
 const root = createRoot(document.querySelector("#root")!);
 root.render(
   e(

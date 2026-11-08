@@ -50,6 +50,315 @@
           }
         ]
       }
+    },
+    {
+      "files": ["workspaces/client/apps/web/src/**/*.{ts,tsx,js,jsx}"],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "allowImportNames": [
+                  "ApiError",
+                  "ApiSchemaMismatchError",
+                  "NetworkTimeoutError",
+                  "errorText",
+                  "isApiSchemaHashMismatch",
+                  "isApiSchemaMismatchHandshake",
+                  "isApiSchemaMismatchResponse",
+                  "READ_DEADLINE_MS",
+                  "saved",
+                  "save",
+                  "stableRequestId",
+                  "clearStableRequestId",
+                  "untilAnswered"
+                ],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions.",
+                "group": [
+                  "**/api",
+                  "**/api.{ts,tsx,js,jsx}",
+                  "!**/generated/api",
+                  "!**/generated/api.{ts,tsx,js,jsx}"
+                ]
+              },
+              {
+                "regex": "(^|/)(sync/(.*/)?client|(sync/)?(resourceEvents|progressSubscription|drafts|send|uploads|uiPreferenceBridge|subscriptions(/.*)?)|(servers/)?(transport|serverTransport|browserCredentials|desktopCredentials|eventSource|routes|summary|serverNames|serverServices|modelReader|serverSidebarBackend)|(native/)?(http|stream|serverCredentials)|(components/)?watchResourceReads)(\\.[jt]sx?)?$",
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)(servers/)?ServerServicesContext(\\.[jt]sx?)?$",
+                "importNames": [
+                  "createServerViewServices",
+                  "useServerApi",
+                  "useServerAudio",
+                  "useServerModelReader",
+                  "useServerOutbox",
+                  "useServerResourceReads",
+                  "useServerResources",
+                  "useServerServices",
+                  "useServerSidebarServices",
+                  "useServerSync",
+                  "useServerTokenRates",
+                  "useServerTranscripts",
+                  "useServerUploads"
+                ],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)(usage/)?tokenRate(\\.[jt]sx?)?$",
+                "importNames": [
+                  "watchTokenRateInterest",
+                  "watchTeamTokenRates",
+                  "configureTokenRateStream"
+                ],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)services(\\.[jt]sx?)?$",
+                "importNames": [
+                  "localSidebarBackend",
+                  "localSidebarServices",
+                  "createSidebarServices",
+                  "useSidebarBackend"
+                ],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)(servers/)?combinedSidebarServices(\\.[jt]sx?)?$",
+                "importNames": ["useCombinedSidebarServices"],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)(servers/)?sidebarServices(\\.[jt]sx?)?$",
+                "importNames": ["createMergedSidebarServices"],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "(^|/)(components/agents/)?WorkerModelPicker(\\.[jt]sx?)?$",
+                "importNames": ["useModelCatalogReader"],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              },
+              {
+                "regex": "^\\.\\.?/(.*/)?client(\\.[jt]sx?)?$",
+                "importNames": [
+                  "createSyncClient",
+                  "defaultSyncClient",
+                  "entityCacheRow",
+                  "projectionMetadata",
+                  "refreshState",
+                  "retainStateDelivery",
+                  "setCachePolicies",
+                  "clearCachePolicies",
+                  "syncDatabase",
+                  "applyCommandRows",
+                  "persistResourceEntityChanges",
+                  "persistStagedEntityTransfer",
+                  "readSubscriptionCursor",
+                  "watchSyncInvalidations",
+                  "persistProjection",
+                  "TRANSCRIPT_PREFETCH_LIMIT",
+                  "prefetchTranscript",
+                  "subscribeTranscriptProjection",
+                  "watchResourceChanges",
+                  "watchResourceConnection"
+                ],
+                "allowTypeImports": true,
+                "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+              }
+            ]
+          }
+        ],
+        "no-restricted-globals": [
+          "error",
+          {
+            "globals": ["fetch", "EventSource", "XMLHttpRequest", "WebSocket"],
+            "checkGlobalObject": true
+          }
+        ],
+        "no-restricted-properties": [
+          "error",
+          {
+            "property": "sendBeacon",
+            "message": "Network access belongs to store/sync transport or a plain owner; React reads the generated store and invokes owner actions."
+          }
+        ]
+      }
+    },
+    {
+      "files": [
+        "workspaces/client/apps/web/src/api.ts",
+        "workspaces/client/apps/web/src/app/conversation/DeliveryOwner.ts",
+        "workspaces/client/apps/web/src/app/conversation/NativeActionOwner.ts",
+        "workspaces/client/apps/web/src/app/conversation/ReadStateOwner.ts",
+        "workspaces/client/apps/web/src/app/conversation/RenameOwner.ts",
+        "workspaces/client/apps/web/src/app/conversation/SelectedConversationOwner.ts",
+        "workspaces/client/apps/web/src/app/projects/CreationOwner.ts",
+        "workspaces/client/apps/web/src/app/shell/LayoutOwner.ts",
+        "workspaces/client/apps/web/src/app/shell/NavigationOwner.ts",
+        "workspaces/client/apps/web/src/app/shell/SidebarOwner.ts",
+        "workspaces/client/apps/web/src/app/startup/ScreenOwner.ts",
+        "workspaces/client/apps/web/src/app/startup/ShellSidebarSource.ts",
+        "workspaces/client/apps/web/src/app/startup/StartupOwner.ts",
+        "workspaces/client/apps/web/src/chatCreation.ts",
+        "workspaces/client/apps/web/src/components/useSidebarOrder.ts",
+        "workspaces/client/apps/web/src/conversation/historySession.ts",
+        "workspaces/client/apps/web/src/generated/observableResources.ts",
+        "workspaces/client/apps/web/src/native/http.ts",
+        "workspaces/client/apps/web/src/native/serverCredentials.ts",
+        "workspaces/client/apps/web/src/native/stream.ts",
+        "workspaces/client/apps/web/src/perf/collector.ts",
+        "workspaces/client/apps/web/src/projectDelete.ts",
+        "workspaces/client/apps/web/src/renameRequest.ts",
+        "workspaces/client/apps/web/src/servers/browserCredentials.ts",
+        "workspaces/client/apps/web/src/servers/desktopCredentials.ts",
+        "workspaces/client/apps/web/src/servers/eventSource.ts",
+        "workspaces/client/apps/web/src/servers/modelReader.ts",
+        "workspaces/client/apps/web/src/servers/projectLocations.ts",
+        "workspaces/client/apps/web/src/servers/routes.ts",
+        "workspaces/client/apps/web/src/servers/serverNames.ts",
+        "workspaces/client/apps/web/src/servers/serverServices.ts",
+        "workspaces/client/apps/web/src/servers/serverSidebarBackend.ts",
+        "workspaces/client/apps/web/src/servers/serverTransport.ts",
+        "workspaces/client/apps/web/src/servers/sidebarRpc.ts",
+        "workspaces/client/apps/web/src/servers/summary.ts",
+        "workspaces/client/apps/web/src/servers/transport.ts",
+        "workspaces/client/apps/web/src/store/**",
+        "workspaces/client/apps/web/src/sync/**",
+        "workspaces/client/apps/web/src/usage/tokenRate.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off",
+        "no-restricted-globals": "off",
+        "no-restricted-properties": "off"
+      },
+      "excludeFiles": [
+        "workspaces/client/apps/web/src/store/**/use*.{ts,tsx,js,jsx}",
+        "workspaces/client/apps/web/src/sync/**/use*.{ts,tsx,js,jsx}"
+      ]
+    },
+    {
+      "files": [
+        "**/*.test.*",
+        "**/*.spec.*",
+        "**/*.type-test.*",
+        "**/*.fixture.*",
+        "**/*.fixtures.*",
+        "**/*.stories.*",
+        "**/*Fixture.*",
+        "**/testFixture.*",
+        "**/tests/**",
+        "**/fixtures/**",
+        "**/*Fixtures.*",
+        "**/*.test-entry.*"
+      ],
+      "rules": {
+        "no-restricted-imports": "off",
+        "no-restricted-globals": "off",
+        "no-restricted-properties": "off"
+      }
+    },
+    {
+      "files": [
+        "workspaces/client/apps/web/src/app/ServerAreasProvider.tsx",
+        "workspaces/client/apps/web/src/components/AccountGroup.tsx",
+        "workspaces/client/apps/web/src/components/AccountSignIn.tsx",
+        "workspaces/client/apps/web/src/components/AccountStartThrottle.tsx",
+        "workspaces/client/apps/web/src/components/Accounts.tsx",
+        "workspaces/client/apps/web/src/components/Analytics.tsx",
+        "workspaces/client/apps/web/src/components/CapacityRetry.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeAddSignIn.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeFileBackups.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeProfile.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeRepairNotice.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeSettings.tsx",
+        "workspaces/client/apps/web/src/components/ClaudeSignIn.tsx",
+        "workspaces/client/apps/web/src/components/CodexSignIn.tsx",
+        "workspaces/client/apps/web/src/components/ComposerAttachments.tsx",
+        "workspaces/client/apps/web/src/components/ConnectionRecovery.tsx",
+        "workspaces/client/apps/web/src/components/Conversation.tsx",
+        "workspaces/client/apps/web/src/components/Dictation.tsx",
+        "workspaces/client/apps/web/src/components/DirectoryField.tsx",
+        "workspaces/client/apps/web/src/components/FederationSettings.tsx",
+        "workspaces/client/apps/web/src/components/FilePreview.tsx",
+        "workspaces/client/apps/web/src/components/LayrWorktreesSettings.tsx",
+        "workspaces/client/apps/web/src/components/LimitRecoveryNotice.tsx",
+        "workspaces/client/apps/web/src/components/MarkdownImage.tsx",
+        "workspaces/client/apps/web/src/components/NewChatModelSettings.tsx",
+        "workspaces/client/apps/web/src/components/OrchestrationSettings.tsx",
+        "workspaces/client/apps/web/src/components/OutboxControls.tsx",
+        "workspaces/client/apps/web/src/components/ProjectDirectoryPicker.tsx",
+        "workspaces/client/apps/web/src/components/ProjectLayrStoreSettings.tsx",
+        "workspaces/client/apps/web/src/components/ProjectLocationsSettings.tsx",
+        "workspaces/client/apps/web/src/components/ProjectPeers.tsx",
+        "workspaces/client/apps/web/src/components/PromptNavigator.tsx",
+        "workspaces/client/apps/web/src/components/RadioChat.tsx",
+        "workspaces/client/apps/web/src/components/RealtimeVoice.tsx",
+        "workspaces/client/apps/web/src/components/SharedChatCreate.tsx",
+        "workspaces/client/apps/web/src/components/SignInPushSettings.tsx",
+        "workspaces/client/apps/web/src/components/TerminalDock.tsx",
+        "workspaces/client/apps/web/src/components/TokenRate.tsx",
+        "workspaces/client/apps/web/src/components/Usage.tsx",
+        "workspaces/client/apps/web/src/components/agents/ExecutionSettings.tsx",
+        "workspaces/client/apps/web/src/components/agents/SubagentConcurrencyControl.tsx",
+        "workspaces/client/apps/web/src/components/agents/TeamPanel.tsx",
+        "workspaces/client/apps/web/src/components/agents/UnifiedAgentSettings.tsx",
+        "workspaces/client/apps/web/src/components/agents/WorkerExcerpt.tsx",
+        "workspaces/client/apps/web/src/components/agents/WorkerModelPicker.tsx",
+        "workspaces/client/apps/web/src/components/conversation/transcript/FullOutput.tsx",
+        "workspaces/client/apps/web/src/components/conversation/transcript/MessageInfo.tsx",
+        "workspaces/client/apps/web/src/components/conversation/transcript/MoveToBackgroundButton.tsx",
+        "workspaces/client/apps/web/src/components/conversation/transcript/SafetyBuffering.tsx",
+        "workspaces/client/apps/web/src/components/models/ModelWhitelistSettings.tsx",
+        "workspaces/client/apps/web/src/components/newChatSettings.ts",
+        "workspaces/client/apps/web/src/components/questions/SignInCard.tsx",
+        "workspaces/client/apps/web/src/components/questions/requestActions.tsx",
+        "workspaces/client/apps/web/src/components/removeSendingMessages.ts",
+        "workspaces/client/apps/web/src/components/shell/McpInventory.tsx",
+        "workspaces/client/apps/web/src/components/shell/SearchOverlay.tsx",
+        "workspaces/client/apps/web/src/components/shell/Tasks.tsx",
+        "workspaces/client/apps/web/src/components/shell/Workspace.tsx",
+        "workspaces/client/apps/web/src/components/shell/backgroundTaskActions.tsx",
+        "workspaces/client/apps/web/src/components/shell/messages/PeerTeams.tsx",
+        "workspaces/client/apps/web/src/components/shell/messages/TeamChats.tsx",
+        "workspaces/client/apps/web/src/components/shell/messages/UserMessages.tsx",
+        "workspaces/client/apps/web/src/components/sidebar/services.tsx",
+        "workspaces/client/apps/web/src/components/useAttachmentDrafts.ts",
+        "workspaces/client/apps/web/src/components/useMessageQueue.ts",
+        "workspaces/client/apps/web/src/components/useProjectSave.ts",
+        "workspaces/client/apps/web/src/components/useSendingMessageRemoval.ts",
+        "workspaces/client/apps/web/src/components/useSkillAutocomplete.ts",
+        "workspaces/client/apps/web/src/components/useTurnErrors.ts",
+        "workspaces/client/apps/web/src/components/useUploadRecovery.ts",
+        "workspaces/client/apps/web/src/components/useWorkspaceResource.ts",
+        "workspaces/client/apps/web/src/components/voiceTransport.ts",
+        "workspaces/client/apps/web/src/components/watchResourceReads.ts",
+        "workspaces/client/apps/web/src/conversation/roomHistory.ts",
+        "workspaces/client/apps/web/src/mount.tsx",
+        "workspaces/client/apps/web/src/servers/CombinedServerSidebar.tsx",
+        "workspaces/client/apps/web/src/servers/MultiServerApp.tsx",
+        "workspaces/client/apps/web/src/servers/ServerAccessSettings.tsx",
+        "workspaces/client/apps/web/src/servers/ServerDetailsEditor.tsx",
+        "workspaces/client/apps/web/src/servers/ServerManager.tsx",
+        "workspaces/client/apps/web/src/servers/ServerServicesContext.tsx",
+        "workspaces/client/apps/web/src/servers/sidebarServices.ts",
+        "workspaces/client/apps/web/src/servers/trustedServers.ts",
+        "workspaces/client/apps/web/src/servers/useServerDiscovery.ts",
+        "workspaces/client/apps/web/src/sync/useSyncedVisualState.ts",
+        "workspaces/client/apps/web/src/unsent/useUnsentText.ts",
+        "workspaces/client/apps/web/src/usePendingCommands.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": "off"
+      }
     }
   ]
 }

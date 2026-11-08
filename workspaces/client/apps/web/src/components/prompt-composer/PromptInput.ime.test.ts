@@ -2,8 +2,16 @@
 import { MantineProvider } from "@mantine/core";
 import { act, createElement, createRef } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { observableFixture } from "../observableFixture.tsx";
+import { expect, it, vi, afterAll } from "vitest";
 import PromptInput from "./PromptInput";
+
+const models = observableFixture();
+vi.mock("../../servers/ServerServicesContext", async (original) => ({
+  ...(await original<typeof import("../../servers/ServerServicesContext")>()),
+  useServerStore: () => models.store,
+}));
+afterAll(() => models.store.dispose());
 
 for (const mobile of [true, false])
   for (const laterNative of [true, false])

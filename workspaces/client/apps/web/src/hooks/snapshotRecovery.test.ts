@@ -1,3 +1,7 @@
+// Startup retry budgets exclude the separately observed remote-name transport.
+vi.mock("../servers/serverNames.ts", () => ({
+  watchServerName: () => () => {},
+}));
 import { observableFixture } from "../components/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { createServerServices } from "../servers/serverServices.ts";

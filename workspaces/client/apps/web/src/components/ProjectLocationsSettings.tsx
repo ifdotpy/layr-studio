@@ -1,3 +1,7 @@
+import { useReadView } from "./useReadView.ts";
+import { resourceData, type ReadSlot } from "../store/runtime.ts";
+import type { GetResult } from "../api.ts";
+import { useServerStore } from "../servers/ServerServicesContext";
 import { observer } from "mobx-react-lite";
 import { randomUUID } from "../uuid";
 import {
@@ -6,7 +10,7 @@ import {
 } from "../servers/ServerServicesContext";
 import { ActionIcon, Button, Menu } from "@mantine/core";
 import { MoreHorizontal } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { errorText } from "../api";
 import {
   saveProjectLocation,
@@ -14,7 +18,10 @@ import {
   type LocationProjectView as LocationProject,
   type ProjectServerChoice,
 } from "../servers/projectLocations";
-import ProjectDirectoryPicker from "./ProjectDirectoryPicker";
+import ProjectDirectoryPicker, {
+  browseDirectory,
+  type DirectoryBrowse,
+} from "./ProjectDirectoryPicker";
 import {
   closeMenuFromTriggerOnEscape,
   restoreMenuTriggerFocusAfterClose,
@@ -22,22 +29,35 @@ import {
 } from "./closeMenuFromTriggerOnEscape";
 import "./project-locations.css";
 import { SettingsRow } from "./ui/primitives";
+export type LocationHeadRead = {
+  project: string;
+  server: string;
+  path: string;
+  slot: ReadSlot<GetResult<"/api/project-locations">>;
+};
 
 const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
   project,
   servers,
   initialServer,
+  initialBrowse,
+  initialHeads = [],
   saved,
 }: {
   project: LocationProject;
   servers?: ProjectServerChoice[] | undefined;
   initialServer?: string | undefined;
+  initialBrowse?: DirectoryBrowse | undefined;
+  initialHeads?: LocationHeadRead[] | undefined;
   saved: () => Promise<void>;
 }) {
-  const { get, post, refreshSession } = useServerApi();
+  const api = useServerApi(),
+    store = useServerStore();
+  const { post, refreshSession } = api;
   const storage = useServerStorage();
 
-  const [adding, setAdding] = useState(!!initialServer);
+  const [adding, setAdding] = useState(initialBrowse);
+  const [heads, setHeads] = useReadView(initialHeads);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [openLocationMenu, setOpenLocationMenu] = useState<string | null>(null);
@@ -51,33 +71,28 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
     path?: string | undefined;
     action: "add_location" | "remove_location";
   } | null>(null);
-  const [heads, setHeads] = useState<Record<string, string>>({});
-  const headKey = (server: string, path: string) =>
-    JSON.stringify([project.id, server, path]);
-  // Opening settings permits the baseline read; location events do not.
-  useEffect(() => {
-    let active = true;
-    for (const location of project.locations || []) {
-      void get("/api/project-locations", {
-        query: {
-          project: project.id,
-          server: location.serverId,
-          action: "info",
-        },
-      })
-        .then((row) => {
-          if (active)
-            setHeads((old) => ({
-              ...old,
-              [headKey(location.serverId, location.path)]: row.gitHead || "",
-            }));
-        })
-        .catch(() => {});
-    }
-    return () => {
-      active = false;
-    };
-  }, [project.id]);
+  const readHead = (server: string, path: string) => {
+    const slot = store.reads.projectLocations(api, {
+      project: project.id,
+      server,
+      path,
+      action: "info",
+    });
+    setHeads([
+      ...(heads || []).filter((row) => row.server !== server),
+      { project: project.id, server, path, slot },
+    ]);
+    return slot.read();
+  };
+  const gitHead = (server: string, path: string) =>
+    resourceData(
+      (heads || []).find(
+        (row) =>
+          row.project === project.id &&
+          row.server === server &&
+          row.path === path,
+      )?.slot.current || { status: "absent" },
+    )?.gitHead;
   const change = async (
     action: "add_location" | "remove_location",
     server: string,
@@ -109,14 +124,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
     await saved();
     if (action === "add_location" && path) {
       // Read only the folder added by this explicit user action.
-      const row = await get("/api/project-locations", {
-        query: { project: project.id, server, action: "info" },
-      }).catch(() => null);
-      if (row)
-        setHeads((old) => ({
-          ...old,
-          [headKey(server, path)]: row.gitHead || "",
-        }));
+      await readHead(server, path).catch(() => {});
     }
   };
   return (
@@ -136,10 +144,8 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
               {location.requestedPath && (
                 <small>Selected folder: {location.requestedPath}</small>
               )}
-              {heads[headKey(location.serverId, location.path)] && (
-                <small>
-                  HEAD {heads[headKey(location.serverId, location.path)]}
-                </small>
+              {gitHead(location.serverId, location.path) && (
+                <small>HEAD {gitHead(location.serverId, location.path)}</small>
               )}
             </div>
           }
@@ -147,6 +153,8 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
           <Menu
             opened={openLocationMenu === location.serverId}
             onChange={(nextOpened) => {
+              if (nextOpened)
+                void readHead(location.serverId, location.path).catch(() => {});
               setOpenLocationMenu((current) =>
                 nextOpened
                   ? location.serverId
@@ -218,6 +226,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
       {error && <p role="alert">{error}</p>}
       {adding ? (
         <ProjectDirectoryPicker
+          initialBrowse={adding}
           serverChoices={servers}
           initialServer={initialServer}
           projectId={project.id}
@@ -225,7 +234,21 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
           onSelect={(path, server) => change("add_location", server, path)}
         />
       ) : (
-        <Button variant="light" disabled={busy} onClick={() => setAdding(true)}>
+        <Button
+          variant="light"
+          disabled={busy}
+          onClick={() =>
+            setAdding(
+              browseDirectory(
+                store,
+                api,
+                undefined,
+                initialServer || servers?.[0]?.id || "local",
+                project.id,
+              ),
+            )
+          }
+        >
           Add folder
         </Button>
       )}

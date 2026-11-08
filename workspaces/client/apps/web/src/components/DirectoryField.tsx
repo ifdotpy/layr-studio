@@ -5,10 +5,18 @@ import {
   type TextInputProps,
 } from "@mantine/core";
 import { FolderOpen } from "lucide-react";
+import { useReadView } from "./useReadView.ts";
 import { useState } from "react";
 import { errorText } from "../api";
-import { useServerFileDialogs } from "../servers/ServerServicesContext";
-import ProjectDirectoryPicker from "./ProjectDirectoryPicker";
+import {
+  useServerApi,
+  useServerStore,
+  useServerFileDialogs,
+} from "../servers/ServerServicesContext";
+import ProjectDirectoryPicker, {
+  browseDirectory,
+  type DirectoryBrowse,
+} from "./ProjectDirectoryPicker";
 import "./directory-field.css";
 
 type Props = Omit<
@@ -29,7 +37,9 @@ export default function DirectoryField({
   readOnly,
   ...input
 }: Props) {
-  const [choosing, setChoosing] = useState(false);
+  const [choosing, setChoosing] = useReadView<DirectoryBrowse>();
+  const api = useServerApi(),
+    store = useServerStore();
   const [error, setError] = useState("");
   const { canPickDirectory, pickDirectory } = useServerFileDialogs();
   return (
@@ -51,7 +61,9 @@ export default function DirectoryField({
               disabled={!!disabled}
               onClick={() => {
                 if (!canPickDirectory()) {
-                  setChoosing(true);
+                  setChoosing(
+                    browseDirectory(store, api, value.trim() || undefined),
+                  );
                   return;
                 }
                 setError("");
@@ -69,18 +81,20 @@ export default function DirectoryField({
       />
       {error && <p role="alert">{error}</p>}
       <Modal
-        opened={choosing}
-        onClose={() => setChoosing(false)}
+        opened={!!choosing}
+        onClose={() => setChoosing(null)}
         title={`Choose ${label.toLowerCase()}`}
       >
         {choosing && (
           <ProjectDirectoryPicker
+            initialBrowse={choosing}
+            serverChoices={[{ id: "local", label: "This server" }]}
             showServerSelector={false}
             initialPath={value.trim() || undefined}
             submitLabel="Use this folder"
             onSelect={async (path) => {
               onChange(path);
-              setChoosing(false);
+              setChoosing(null);
             }}
           />
         )}

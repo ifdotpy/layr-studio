@@ -1,3 +1,5 @@
+import { useReadView } from "./useReadView.ts";
+import type { AnalyticsSelection } from "./Analytics.tsx";
 import { observer } from "mobx-react-lite";
 
 import { LimitColor, RunwayColor } from "../generated/api";
@@ -84,7 +86,7 @@ function Usage({
   const store = useServerStore(),
     api = useServerApi();
   const [localOpen, setLocalOpen] = useState(controlled ?? false),
-    [analyticsOpen, setAnalyticsOpen] = useState(false),
+    [analyticsQuery, setAnalyticsQuery] = useReadView<AnalyticsSelection>(),
     [contextOpen, setContextOpen] = useState(false);
   const opened = onChange ? (controlled ?? false) : localOpen;
   const changeOpened = onChange ?? setLocalOpen;
@@ -301,7 +303,16 @@ function Usage({
     feedback.key === selectedAccountKey ? feedback.notice : "";
   const showAnalytics = () => {
     setContextOpen(false);
-    setAnalyticsOpen(true);
+    const query = {
+      agent: agent.id,
+      scope: "agent" as const,
+      limit: 30,
+      offset: 0,
+      to_time: Math.floor(Date.now() / 1000),
+    };
+    const read = store.reads.analytics(api, query);
+    void read.read().catch(() => {});
+    setAnalyticsQuery({ query, read });
   };
   const limitsButton = (
     <Button
@@ -936,12 +947,13 @@ function Usage({
           <Popover.Dropdown>{contextPanel}</Popover.Dropdown>
         </Popover>
       )}
-      {analyticsOpen && (
+      {analyticsQuery && (
         <Suspense fallback={null}>
           <Analytics
             key={agent.id}
             agent={agent}
-            onClose={() => setAnalyticsOpen(false)}
+            selection={analyticsQuery}
+            onClose={() => setAnalyticsQuery(null)}
           />
         </Suspense>
       )}

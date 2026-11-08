@@ -108,6 +108,12 @@ export function hasAppliedResourceBaseline(
 
 /** Stable identity for subscription ownership and durable cursor keys. Never decode it. */
 export function subscriptionKey(ref: ResourceRef): string {
+  return flatResourceKey(ref);
+}
+
+export function flatResourceKey(
+  ref: Record<string, string | number | boolean | undefined>,
+): string {
   return JSON.stringify(
     Object.entries(ref)
       .filter(([, value]) => value !== undefined)

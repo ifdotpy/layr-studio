@@ -3,7 +3,6 @@ import {
   createRequestsMirror,
   createQuestionHistoryMirror,
   createAgentDetailMirror,
-  type ObservableResources,
 } from "../../generated/observableResources";
 import type { components } from "../../generated/api";
 import { ServerStoreProvider } from "../../servers/ServerServicesContext";
@@ -39,7 +38,7 @@ export function requestFixture(
     watchResourceConnection: () => () => {},
   });
   const resources = createServerStore(subscriptions);
-  const store: ObservableResources & { dispose(): void } = {
+  const store: ReturnType<typeof createServerStore> = {
     ...resources,
     state: () => ({ current: { status: "live", data: state.current } }),
     requests: () => ({ current: { status: "live", data: live.current } }),

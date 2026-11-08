@@ -6,7 +6,7 @@ import { File, Paperclip, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText } from "../api";
 import { IconAction } from "./ui/actions/IconAction";
-import FilePreview from "./FilePreview";
+import FilePreview, { useFilePreview } from "./FilePreview";
 
 export type { LocalMessageAttachment as Attachment } from "../types";
 import type { LocalMessageAttachment as Attachment } from "../types";
@@ -21,7 +21,7 @@ export default function ComposerAttachments(p: {
 }) {
   const { canPickFiles, pickFiles } = useServerFileDialogs();
   const input = useRef<HTMLInputElement>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useFilePreview();
   const unsavedFiles = useRef<{
     files: globalThis.File[];
     add: typeof p.add;
@@ -45,10 +45,7 @@ export default function ComposerAttachments(p: {
   };
   return (
     <div className="composer-attachments">
-      <FilePreview
-        target={preview ? { asset: preview } : null}
-        onClose={() => setPreview(null)}
-      />
+      <FilePreview target={preview} onClose={() => setPreview(null)} />
       <input
         ref={input}
         type="file"
@@ -107,7 +104,7 @@ export default function ComposerAttachments(p: {
                 type="button"
                 className="attachment-preview-button"
                 aria-label={`Preview ${asset.name}`}
-                onClick={() => setPreview(asset.id)}
+                onClick={() => setPreview({ asset: asset.id })}
               >
                 {asset.preview ? (
                   <img src={asset.preview} alt="" />
@@ -184,14 +181,11 @@ export function MessageAttachments(p: {
   assets: readonly Attachment[];
   notify: (message: string) => void;
 }) {
-  const [preview, setPreview] = useState<string | null>(null);
+  const [preview, setPreview] = useFilePreview();
   if (!p.assets.length) return null;
   return (
     <>
-      <FilePreview
-        target={preview ? { asset: preview } : null}
-        onClose={() => setPreview(null)}
-      />
+      <FilePreview target={preview} onClose={() => setPreview(null)} />
       <div className="message-attachments">
         {p.assets.map((asset) => (
           <div
@@ -201,14 +195,14 @@ export function MessageAttachments(p: {
             {asset.image && (
               <AttachmentImage
                 asset={asset}
-                onPreview={() => setPreview(asset.id)}
+                onPreview={() => setPreview({ asset: asset.id })}
               />
             )}
             <Button
               variant="default"
               size="compact-sm"
               leftSection={<File size={14} />}
-              onClick={() => setPreview(asset.id)}
+              onClick={() => setPreview({ asset: asset.id })}
             >
               {asset.name}
             </Button>

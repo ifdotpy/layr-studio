@@ -3,6 +3,8 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { observable, runInAction } from "mobx";
 import { MantineProvider } from "@mantine/core";
+import { observableFixture } from "../../observableFixture.tsx";
+import { ServerStoreProvider } from "../../../servers/ServerServicesContext.tsx";
 import { expect, it, vi } from "vitest";
 import ConversationResults from "./ConversationResults";
 import type { Message } from "../../../types";
@@ -23,13 +25,18 @@ it("unchanged results of a stable group do not rerender when a message arrives",
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  const models = observableFixture();
   try {
     await act(async () =>
       root.render(
         createElement(
           MantineProvider,
           null,
-          createElement(ConversationResults, { messages, agentId: "agent" }),
+          createElement(
+            ServerStoreProvider,
+            { value: models.store },
+            createElement(ConversationResults, { messages, agentId: "agent" }),
+          ),
         ),
       ),
     );
@@ -43,6 +50,7 @@ it("unchanged results of a stable group do not rerender when a message arrives",
     expect(header.renders).toBe(before);
   } finally {
     await act(async () => root.unmount());
+    models.store.dispose();
     host.remove();
     vi.unstubAllGlobals();
   }

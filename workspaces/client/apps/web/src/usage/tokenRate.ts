@@ -1,3 +1,6 @@
+import { createAtom, computed } from "mobx";
+import { createTokenRateSnapshotMirror } from "../generated/observableResources.ts";
+import { observeInterest } from "../store/interest.ts";
 import type { components } from "../generated/api";
 
 import {
@@ -6,12 +9,12 @@ import {
 } from "../generated/api";
 
 // This cache receives volatile SSE events. It never enters the sync database.
-export type TokenRate = components["schemas"]["TokenRateRecord"];
+export type TokenRate = import("../deepReadonly.ts").DeepReadonly<
+  components["schemas"]["TokenRateRecord"]
+>;
 type TokenRateEvent = components["schemas"]["ResourceTokenRatesEvent"];
-type WorkspaceRates = components["schemas"]["TokenRateSnapshot"];
-
-export const workerRateKey = (teamId: string, agentId: string) =>
-  `team:${teamId}:${agentId}`;
+type WorkspaceRates =
+  import("../generated/observableResources.ts").TokenRateSnapshot;
 
 const recordKeys = {
   agentId: true,
@@ -109,46 +112,24 @@ export function createTokenRateCache() {
     watchStream = watch;
   }
 
-  // The coordinator applies each batch once. Interest requests its cached replay.
-  function watchTokenRateInterest() {
-    return typeof window !== "undefined" && watchStream
-      ? watchStream(() => {})
-      : () => {};
+  const mirror = createTokenRateSnapshotMirror();
+  const index = computed(
+    () => new Map(mirror.current.records.map((row) => [row.agentId, row])),
+  );
+  const interest = observeInterest(
+    () => watchStream?.(() => {}) ?? (() => {}),
+    () => {},
+  );
+  const atom = createAtom(
+    "token-rate-interest",
+    interest.observed,
+    interest.unobserved,
+  );
+  function observeTokenRates() {
+    atom.reportObserved();
   }
-
-  let records = new Map<string, TokenRate>();
   let baselineEpoch: string | undefined;
   let baselineWorkspaceId: string | undefined;
-  // A derived index contains identities only; every value belongs to records.
-  let teamAgents = new Map<string, string>();
-  const listeners = new Map<string, Set<(value: TokenRate | null) => void>>();
-  const openTeams = new Map<string, number>();
-
-  function notify(id: string) {
-    const value = getTokenRate(id);
-    for (const listener of listeners.get(id) || []) listener(value);
-  }
-
-  function notifyTeam(teamId: string) {
-    for (const record of records.values())
-      if (record.rootId === teamId)
-        notify(workerRateKey(teamId, record.agentId));
-  }
-
-  function watchTeamTokenRates(teamId: string) {
-    const stopStream = watchTokenRateInterest();
-    openTeams.set(teamId, (openTeams.get(teamId) || 0) + 1);
-    notifyTeam(teamId);
-    return () => {
-      stopStream();
-      const count = (openTeams.get(teamId) || 1) - 1;
-      if (count) openTeams.set(teamId, count);
-      else {
-        openTeams.delete(teamId);
-        notifyTeam(teamId);
-      }
-    };
-  }
 
   function receiveResourceTokenRates(event: TokenRateEvent) {
     if (
@@ -173,6 +154,7 @@ export function createTokenRateCache() {
       return true;
     }
     const removed = new Set<string>();
+    const records = index.get();
     let size = records.size;
     for (const id of event.removed) {
       if (!validIdentifier(id) || removed.has(id) || changed.has(id))
@@ -183,36 +165,16 @@ export function createTokenRateCache() {
     for (const record of event.records)
       if (!records.has(record.agentId)) size++;
     if (size > TOKEN_RATE_MAX_ENTRIES) return false;
-    // Apply the entire frame before notifying: every observer sees the same batch.
-    for (const id of event.removed) {
-      const previous = records.get(id);
-      changed.add(id);
-      if (previous) {
-        const key = workerRateKey(previous.rootId, id);
-        teamAgents.delete(key);
-        changed.add(key);
-      }
-      records.delete(id);
-    }
-    for (const record of event.records) {
-      const previous = records.get(record.agentId);
-      if (previous) {
-        const key = workerRateKey(previous.rootId, record.agentId);
-        teamAgents.delete(key);
-        changed.add(key);
-      }
-      records.set(record.agentId, record);
-      const key = workerRateKey(record.rootId, record.agentId);
-      teamAgents.set(key, record.agentId);
-      changed.add(key);
-    }
-    for (const id of changed) notify(id);
+    const next = new Map(records);
+    for (const id of event.removed) next.delete(id);
+    for (const record of event.records) next.set(record.agentId, record);
+    mirror.apply({ records: [...next.values()] });
     return true;
   }
 
   // Materialize the merged baseline only when a late local or peer subscriber asks.
-  function getWorkspaceTokenRates(): WorkspaceRates {
-    return { records: Array.from(records.values()) };
+  function getWorkspaceTokenRates(): components["schemas"]["TokenRateSnapshot"] {
+    return { records: mirror.current.records.map((record) => ({ ...record })) };
   }
 
   function receiveWorkspaceTokenRates(value: unknown) {
@@ -221,15 +183,7 @@ export function createTokenRateCache() {
   }
 
   function replaceWorkspaceTokenRates(value: WorkspaceRates) {
-    records = new Map(value.records.map((record) => [record.agentId, record]));
-    teamAgents = new Map(
-      value.records.map((record) => [
-        workerRateKey(record.rootId, record.agentId),
-        record.agentId,
-      ]),
-    );
-    // Replacing the full snapshot also clears removed agents and old root memberships.
-    for (const id of listeners.keys()) notify(id);
+    mirror.apply(value);
     return true;
   }
 
@@ -239,57 +193,41 @@ export function createTokenRateCache() {
     receiveWorkspaceTokenRates({ records: [] });
   }
 
-  function subscribeTokenRate(
-    id: string,
-    listener: (value: TokenRate | null) => void,
-  ) {
-    let subscribers = listeners.get(id);
-    if (!subscribers) listeners.set(id, (subscribers = new Set()));
-    subscribers.add(listener);
-    listener(getTokenRate(id));
-    return () => {
-      subscribers.delete(listener);
-      if (!subscribers.size) listeners.delete(id);
-    };
-  }
-
   function getTokenRate(id: string): TokenRate | null {
-    const direct = records.get(id);
-    if (direct) return direct;
-    const agentId = teamAgents.get(id);
-    const record = agentId ? records.get(agentId) : undefined;
-    return record && openTeams.has(record.rootId) ? record : null;
+    observeTokenRates();
+    return index.get().get(id) ?? null;
   }
 
   function getWorkspaceTeamTokenRate(
     teamId: string,
     agentId: string,
   ): TokenRate | null {
-    const record = records.get(agentId);
+    observeTokenRates();
+    const record = index.get().get(agentId);
     return record?.rootId === teamId ? record : null;
   }
   return {
     configureTokenRateStream,
-    watchTokenRateInterest,
-    watchTeamTokenRates,
+    dispose() {
+      interest.dispose();
+    },
+    observeTokenRates,
     receiveResourceTokenRates,
     receiveWorkspaceTokenRates,
     clearWorkspaceTokenRates,
     getWorkspaceTokenRates,
-    subscribeTokenRate,
     getTokenRate,
     getWorkspaceTeamTokenRate,
   };
 }
 export const {
+  dispose,
   configureTokenRateStream,
-  watchTokenRateInterest,
-  watchTeamTokenRates,
+  observeTokenRates,
   receiveResourceTokenRates,
   receiveWorkspaceTokenRates,
   clearWorkspaceTokenRates,
   getWorkspaceTokenRates,
-  subscribeTokenRate,
   getTokenRate,
   getWorkspaceTeamTokenRate,
 } = createTokenRateCache();

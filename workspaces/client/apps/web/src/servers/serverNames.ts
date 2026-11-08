@@ -1,10 +1,7 @@
 import { readServers, writeServers, type StudioServer } from "./registry";
-import { serverCredentialAdapter } from "./transport";
-
-import type {
-  ResourceRef,
-  ResourceVersion,
-} from "../sync/subscriptions/events";
+import { autorun } from "mobx";
+import { resourceData } from "../store/runtime.ts";
+import type { createServerStore } from "../store/server.ts";
 
 export function validateServerName(label: string) {
   if (
@@ -15,23 +12,6 @@ export function validateServerName(label: string) {
     /[^ ]/u.test(label.replace(/[^\s]/gu, ""))
   )
     throw new Error("Use 1 to 80 visible characters without outer spaces.");
-}
-
-export async function refreshServerName(server: StudioServer) {
-  const response = await serverCredentialAdapter().fetch(
-    server,
-    new Request(server.origin + "/api/multi-server/v1/status", {
-      signal: AbortSignal.timeout(15000),
-    }),
-  );
-  if (!response.ok) {
-    await response.body?.cancel().catch(() => {});
-    throw new Error("The server name is unavailable.");
-  }
-  const identity = await response.json();
-  if (identity.serverId !== server.id)
-    throw new Error("The server response has another identity.");
-  applyServerName(server, identity.label);
 }
 
 function applyServerName(server: StudioServer, label: string) {
@@ -60,24 +40,11 @@ function applyServerName(server: StudioServer, label: string) {
 /** Each saved server owns its name through its existing discovery stream. */
 export function watchServerName(
   server: StudioServer,
-  events: {
-    watchResourceChanges: (
-      resource: ResourceRef,
-      accept: (version?: ResourceVersion) => void,
-    ) => () => void;
-  },
+  store: ReturnType<typeof createServerStore>,
 ) {
-  let active = true;
-  const stop = events.watchResourceChanges(
-    { kind: "multi-server" },
-    (version) => {
-      const identity = version?.discoverySnapshot?.identity;
-      if (!active || !identity || identity.serverId !== server.id) return;
+  return autorun(() => {
+    const identity = resourceData(store.multiServer().current)?.identity;
+    if (identity?.serverId === server.id)
       applyServerName(server, identity.label);
-    },
-  );
-  return () => {
-    active = false;
-    stop();
-  };
+  });
 }

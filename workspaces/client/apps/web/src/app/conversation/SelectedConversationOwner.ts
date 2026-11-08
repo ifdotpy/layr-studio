@@ -42,7 +42,6 @@ import { readServerAliases } from "../../servers/registry.ts";
 import { errorText } from "../../api.ts";
 import { busy } from "../../types.ts";
 import { createConversationMenuTools } from "../../components/conversation/ConversationMenuTools.tsx";
-import type { AppScope } from "../contracts.ts";
 import type { NativeActionOwner } from "./NativeActionOwner.ts";
 
 export class SelectedConversationOwner {
@@ -82,8 +81,6 @@ export class SelectedConversationOwner {
     );
   }
   railTools = createConversationMenuTools();
-  detailSlot: ReturnType<AppScope["store"]["agentDetail"]> | undefined;
-  processSlot: ReturnType<AppScope["store"]["processes"]> | undefined;
   stopReaders: (() => void) | undefined;
   history: TranscriptHistory | RoomHistory;
   historyScope = "";
@@ -117,8 +114,6 @@ export class SelectedConversationOwner {
         historyNamespaces: false,
         serverAliases: observableRef,
         railTools: false,
-        detailSlot: observableRef,
-        processSlot: observableRef,
         stopReaders: false,
         team: computed({ equals: compareShallow }),
       },
@@ -277,7 +272,11 @@ export class SelectedConversationOwner {
     };
   }
   get detail() {
-    return this.detailSlot && resourceData(this.detailSlot.current);
+    const id =
+      this.isConversationVisible && this.areas.navigation.selectedAgent?.id;
+    return id
+      ? resourceData(this.areas.scope.store.agentDetail(agentId(id)).current)
+      : undefined;
   }
   get readableLead() {
     const { selectedLead: lead } = this.areas.navigation;
@@ -401,8 +400,10 @@ export class SelectedConversationOwner {
     return busy.has(agent?.status || "") || !!agent?.inFlight;
   }
   get backgroundTaskCount() {
-    return this.processSlot
-      ? resourceData(this.processSlot.current)?.activities.length || 0
+    const root = this.isConversationVisible && this.readableLead?.id;
+    return root
+      ? resourceData(this.areas.scope.store.processes(agentId(root)).current)
+          ?.activities.length || 0
       : 0;
   }
   get warningMessages() {
@@ -457,7 +458,6 @@ export class SelectedConversationOwner {
   releaseReaders() {
     this.stopReaders?.();
     this.stopReaders = undefined;
-    this.detailSlot = this.processSlot = undefined;
   }
   start() {
     const { scope } = this.areas;
@@ -469,15 +469,11 @@ export class SelectedConversationOwner {
     const stop = reaction(
       () =>
         [
-          this.isConversationVisible
-            ? this.areas.navigation.selectedAgent?.id
-            : undefined,
-          this.isConversationVisible ? this.readableLead?.id : undefined,
           this.historyKey,
           this.isConversationVisible &&
             !this.areas.navigation.selectedRoom?.radio,
         ] as const,
-      ([id, root, key, active]) => {
+      ([key, active]) => {
         this.releaseReaders();
         const stops: (() => void)[] = [];
         if (key !== this.historyScope) {
@@ -491,24 +487,6 @@ export class SelectedConversationOwner {
           );
         }
         if (active) stops.push(this.history.start());
-        if (id) {
-          this.detailSlot = scope.store.agentDetail(agentId(id));
-          stops.push(
-            scope.services.resources.subscribe(
-              { kind: "agentDetail", agentId: id },
-              () => {},
-            ),
-          );
-        }
-        if (root) {
-          this.processSlot = scope.store.processes(agentId(root));
-          stops.push(
-            scope.services.resources.subscribe(
-              { kind: "processes", agentId: root },
-              () => {},
-            ),
-          );
-        }
         this.stopReaders = () => stops.forEach((dispose) => dispose());
       },
       { fireImmediately: true, equals: compareShallow },

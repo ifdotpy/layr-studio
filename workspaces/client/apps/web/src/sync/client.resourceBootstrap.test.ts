@@ -1635,3 +1635,21 @@ it("releases the generated observer's single durable state lease after cold-base
   await Promise.resolve();
   expect(f.pulls()).toHaveLength(1);
 });
+
+it.each([
+  { kind: "multi-server" },
+  { kind: "native-layr-settings" },
+  { kind: "auth-progress", requestId: "login" },
+  { kind: "rename-progress", agentId: "agent", requestId: "rename" },
+  { kind: "voice", agentId: "agent" },
+] as const)(
+  "transient $kind cursor preparation never opens the sync database",
+  async (ref) => {
+    mocks.syncGet.mockRejectedValue(
+      new Error("A transient resource must not open the database"),
+    );
+    const client = await import("./client");
+    await expect(client.readSubscriptionCursor(ref)).resolves.toBeUndefined();
+    expect(mocks.syncGet).not.toHaveBeenCalled();
+  },
+);

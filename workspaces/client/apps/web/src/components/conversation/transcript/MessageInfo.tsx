@@ -1,18 +1,17 @@
+import { useReadView } from "../../useReadView.ts";
 import { observer } from "mobx-react-lite";
 import { useServerApi } from "../../../servers/ServerServicesContext";
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { ActionIcon, Popover } from "@mantine/core";
 import { Copy, Info, X } from "lucide-react";
 import { type GetOptions, type GetResult } from "../../../api";
 import { localDateTime } from "../../../local-time";
 import { useServerStore } from "../../../servers/ServerServicesContext";
-import { resourceData } from "../../../store/runtime.ts";
+import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { agentId as storeAgentId } from "../../../generated/observableResources.ts";
 import type { Message } from "../../../types";
 import type { Account } from "../../Accounts.tsx";
 import "./message-info.css";
-
-type Metadata = GetResult<"/api/analytics">;
 
 export type MessageInfoProps = {
   message: Message;
@@ -44,13 +43,13 @@ export default observer(function MessageInfo({
   onCopy,
 }: MessageInfoProps) {
   const store = useServerStore();
-  const { get } = useServerApi();
+  const api = useServerApi();
 
-  const [open, setOpen] = useState(false);
+  const [selection, setSelection] =
+    useReadView<ReadSlot<GetResult<"/api/analytics">>>();
+  const current = selection?.current;
+  const open = !!current;
   const [mounted, setMounted] = useState(false);
-  const [metadata, setMetadata] = useState<Metadata | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [failed, setFailed] = useState(false);
   const target = useRef<HTMLButtonElement>(null);
   // Transcript items can carry renderer metadata; validate optional extension
   // fields at runtime before displaying or querying with them.
@@ -72,13 +71,14 @@ export default observer(function MessageInfo({
     agentId && message.id.startsWith(`${agentId}:`)
       ? message.id.slice(agentId.length + 1)
       : message.id;
-  // Read this detail once per open. Streamed fields continue to render below.
-  useEffect(() => {
-    if (!open || !agentId) return;
-    let active = true;
-    setLoading(true);
-    setFailed(false);
-    setMetadata(null);
+  const metadata = current ? resourceData(current) : undefined;
+  const loading = current?.status === "loading",
+    failed = current?.status === "error";
+  const changeOpen = (next: boolean) => {
+    if (!next || !agentId) {
+      setSelection(null);
+      return;
+    }
     const query = {
       agent: agentId,
       view: "message-info",
@@ -86,22 +86,12 @@ export default observer(function MessageInfo({
       ...(message.turnId ? { turn: message.turnId } : {}),
       ...(threadId ? { thread: threadId } : {}),
     } satisfies NonNullable<GetOptions<"/api/analytics">["query"]>;
-    get("/api/analytics", { query, timeoutMs: 5000 })
-      .then((value) => {
-        if (active) setMetadata(value);
-      })
-      .catch(() => {
-        if (active) setFailed(true);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [open, agentId, itemId]);
+    const slot = store.reads.analytics(api, query);
+    setSelection(slot);
+    void slot.read().catch(() => {});
+  };
   const close = () => {
-    setOpen(false);
+    setSelection(null);
     target.current?.focus({ preventScroll: true });
   };
   const at = message.at ?? message.created ?? timestamp ?? metadata?.at;
@@ -180,7 +170,7 @@ export default observer(function MessageInfo({
       aria-expanded={open}
       onClick={() => {
         setMounted(true);
-        setOpen(!open);
+        changeOpen(!open);
       }}
       onKeyDown={(event) => {
         if (open && event.key === "Escape") {
@@ -197,7 +187,7 @@ export default observer(function MessageInfo({
   return (
     <Popover
       opened={open}
-      onChange={setOpen}
+      onChange={changeOpen}
       onDismiss={close}
       position="bottom-end"
       width={340}

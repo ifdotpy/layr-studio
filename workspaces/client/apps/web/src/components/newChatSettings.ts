@@ -83,35 +83,16 @@ export function projectAllowsWorktree(
   return project?.workspacePolicy !== PROJECT_LAYR_NATIVE_POLICY;
 }
 
-type ChatReadOptions = Pick<GetOptions<"/api/models">, "query" | "signal">;
-type ChatReadPath =
-  | "/api/accounts"
-  | "/api/models"
-  | "/api/projects"
-  | "/api/ui-summary";
-export async function readNewChatResource<P extends ChatReadPath>(
+type ChatReadOptions = Pick<GetOptions<"/api/ui-summary">, "signal">;
+export async function readNewChatResource(
   server: StudioServer | undefined,
-  path: P,
+  path: "/api/ui-summary",
   options: ChatReadOptions = {},
-): Promise<GetResult<P>> {
+): Promise<GetResult<"/api/ui-summary">> {
   if (!server || server.id === "local") {
-    const value =
-      path === "/api/models"
-        ? await get("/api/models", options)
-        : path === "/api/accounts"
-          ? await get("/api/accounts", { signal: options.signal })
-          : path === "/api/projects"
-            ? await get("/api/projects", { signal: options.signal })
-            : await get("/api/ui-summary", { signal: options.signal });
-    return value as GetResult<P>;
+    return get("/api/ui-summary", { signal: options.signal });
   }
   const url = new URL(path, server.origin);
-  const query = "query" in options ? options.query : undefined;
-  if (query)
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== null)
-        url.searchParams.set(key, String(value));
-    }
   const response = await serverCredentialAdapter().fetch(
     server,
     new Request(url, {
@@ -129,7 +110,7 @@ export async function readNewChatResource<P extends ChatReadPath>(
   if (response.headers.get(API_SCHEMA_HASH_HEADER) !== API_SCHEMA_HASH)
     throw new Error("The selected server requires a Studio update.");
   if (!response.ok) throw new ApiError(value, response.status);
-  return value as GetResult<P>;
+  return value as GetResult<"/api/ui-summary">;
 }
 
 const record = (value: unknown): value is Record<string, unknown> =>

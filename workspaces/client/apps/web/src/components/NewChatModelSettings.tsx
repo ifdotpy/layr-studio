@@ -8,14 +8,17 @@ import { modelForValue } from "./models/modelOption";
 import {
   ServerServicesProvider,
   useServerServices,
+  useServerStore,
+  useServerSync,
 } from "../servers/ServerServicesContext";
 import {
   createServerServices,
   type ServerServices,
 } from "../servers/serverServices";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Stack } from "@mantine/core";
-import { errorText, type GetResult } from "../api";
+import { errorText } from "../api.ts";
+import { resourceData } from "../store/runtime.ts";
 import type { Agent } from "../types";
 import { type StudioServer } from "../servers/registry";
 import { ExecutionSettings, settingsFor } from "./agents/ExecutionSettings";
@@ -26,7 +29,6 @@ import {
 } from "../generated/sharedValues";
 import { defaultChatModel, newChatDefault } from "./accountPreference";
 import {
-  readNewChatResource,
   settingsForNewChatRequest,
   settingsForNewChatAccount,
   type NewChatSettings,
@@ -66,7 +68,13 @@ export default function NewChatModelSettings(props: Props) {
     },
     [services, inherited, props.serverServices],
   );
-  const content = <ModelDraft {...props} server={owner} />;
+  const content = (
+    <ModelDraft
+      key={JSON.stringify([serverKey, props.projectId, props.path])}
+      {...props}
+      server={owner}
+    />
+  );
   return services ? (
     <ServerServicesProvider services={services}>
       {content}
@@ -77,15 +85,31 @@ export default function NewChatModelSettings(props: Props) {
 }
 
 const ModelDraft = observer(function ModelDraft({
-  server,
   projectId,
   path,
   onChange,
 }: Props) {
-  const [accounts, setAccounts] = useState<GetResult<"/api/accounts"> | null>(
-    null,
+  const store = useServerStore();
+  const sync = useServerSync();
+  const [retryError, setRetryError] = useState("");
+  const current = store.state().current;
+  const state = resourceData(current);
+  const accounts = state?.accountsSummary.get("current");
+  const project = [...(state?.projects.values() || [])].find(
+    (row) => row.id === projectId || row.path === path,
   );
-  const [accountKey, setAccountKey] = useState("");
+  const [chosenAccountKey, setAccountKey] = useState("");
+  const accountKey =
+    chosenAccountKey ||
+    (accounts
+      ? newChatDefault(
+          accounts.accounts,
+          accounts.defaultAccountKey || "default",
+          accounts.defaultAccountGroups,
+          project,
+          null,
+        ).accountKey
+      : "");
   const [workerExcludedAccountKeys, setWorkerExcludedAccountKeys] = useState<
     string[]
   >([]);
@@ -94,44 +118,8 @@ const ModelDraft = observer(function ModelDraft({
   const [settings, setSettings] = useState<
     Omit<NewChatSettings, "workspaceMode">
   >({});
-  const [error, setError] = useState("");
-  const [attempt, setAttempt] = useState(0);
-  const serverKey = serverIdentity(server);
-  const currentServer = useRef(server);
-  currentServer.current = server;
-  useEffect(() => {
-    const controller = new AbortController();
-    setError("");
-    onChange(null);
-    void Promise.all([
-      readNewChatResource(currentServer.current, "/api/accounts", {
-        signal: controller.signal,
-      }),
-      readNewChatResource(currentServer.current, "/api/projects", {
-        signal: controller.signal,
-      }),
-    ])
-      .then(([value, projects]) => {
-        if (controller.signal.aborted) return;
-        const project = projects.items.find(
-          (row) => row.id === projectId || row.path === path,
-        );
-        setAccounts(value);
-        setAccountKey(
-          newChatDefault(
-            value.accounts,
-            value.defaultAccountKey || "default",
-            value.defaultAccountGroups,
-            project,
-            null,
-          ).accountKey,
-        );
-      })
-      .catch((failure) => {
-        if (!controller.signal.aborted) setError(errorText(failure));
-      });
-    return () => controller.abort();
-  }, [serverKey, projectId, path, attempt, onChange]);
+  const error =
+    "error" in current ? retryError || errorText(current.error) : "";
   const catalog = useWorkerModels(accountKey || "default", !!accounts);
   const provider = accounts?.accounts.find(
     (row) => row.id === accountKey,
@@ -258,8 +246,12 @@ const ModelDraft = observer(function ModelDraft({
           <Button
             size="xs"
             onClick={() => {
-              setAttempt((value) => value + 1);
-              catalog.retry();
+              setRetryError("");
+              if ("error" in current)
+                void sync
+                  .refreshState()
+                  .catch((failure) => setRetryError(errorText(failure)));
+              else catalog.retry();
             }}
           >
             Retry

@@ -1,9 +1,12 @@
+import { FrontendLocality } from "../generated/api.ts";
 import { approval } from "../approvalFixtures.ts";
 import { autorun, makeObservable, observable, spy } from "mobx";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ResourceVersion } from "../sync/resourceEvents.ts";
 import { agentId } from "../generated/observableResources.ts";
 import { createServerStore } from "./server.ts";
+import type { GetResult, ServerApi } from "../api.ts";
+import * as defaultApi from "../api.ts";
 import { createSubscriptions } from "../sync/subscriptions/module.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
 import type { ResourceRef } from "../sync/subscriptions/contracts.ts";
@@ -15,6 +18,153 @@ import {
 } from "./runtime.ts";
 
 const ref = { kind: "native-layr-settings" } as const;
+
+it("action observations schedule no subscription stabilization timer", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const reads = f.runtime.keyed<string>({
+    read: true,
+    releaseOnUnobserved: true,
+  });
+  const pending = Promise.withResolvers<string>();
+  const load = vi.fn(() => pending.promise);
+  const slot = reads({ key: "file/no-timer", read: load });
+  const stop = autorun(() => slot.current);
+  expect(vi.getTimerCount()).toBe(0);
+  const request = slot.read();
+  stop();
+  expect(slot.read()).toBe(request);
+  const again = autorun(() => slot.current);
+  expect(vi.getTimerCount()).toBe(0);
+  pending.resolve("bytes");
+  await request;
+  expect(slot.current.status).toBe("live");
+  again();
+  await Promise.resolve();
+  expect(slot.current.status).toBe("absent");
+  f.runtime.dispose();
+  vi.useRealTimers();
+});
+
+it("action reads join one key, never start on observation, and discard evicted replies", async () => {
+  const f = fixture();
+  const reads = f.runtime.keyed<string>({ read: true });
+  const pending = Promise.withResolvers<string>();
+  const load = vi.fn(() => pending.promise);
+  const intent = { key: "origin/workspace/epoch/file/query", read: load };
+  const first = reads(intent),
+    second = reads(intent);
+  const stop = autorun(() => first.current);
+  stop();
+  const remount = autorun(() => second.current);
+  expect(load).not.toHaveBeenCalled();
+  const a = first.read(),
+    b = second.read();
+  expect(a).toBe(b);
+  await Promise.resolve();
+  expect(load).toHaveBeenCalledTimes(1);
+  const other = reads({ ...intent, key: "other-server/file/query" });
+  const c = other.read();
+  await Promise.resolve();
+  expect(load).toHaveBeenCalledTimes(2);
+  remount();
+  f.runtime.dispose();
+  pending.resolve("late");
+  await Promise.all([a, b, c]);
+  expect(first.current.status).toBe("loading");
+  expect(other.current.status).toBe("loading");
+});
+
+it("action read failures publish into their keyed observable slot", async () => {
+  const f = fixture();
+  const reads = f.runtime.keyed<string>({ read: true });
+  const failure = new Error("unavailable");
+  const slot = reads({
+    key: "failed-query",
+    read: () => Promise.reject(failure),
+  });
+  await expect(slot.read()).rejects.toBe(failure);
+  expect(slot.current).toEqual({ status: "error", error: failure });
+  f.runtime.dispose();
+});
+
+it("canonical action queries isolate servers, epochs, and full analytics filters", async () => {
+  const f = fixture(),
+    other = fixture();
+  const a = createServerStore(f.subscriptions),
+    b = createServerStore(other.subscriptions);
+  const response = Promise.withResolvers<GetResult<"/api/analytics">>();
+  const api = {
+    get: defaultApi.get,
+    getStreamSession: vi.fn<ServerApi["getStreamSession"]>(),
+  };
+  const calls = vi.spyOn(api, "get").mockReturnValue(response.promise);
+  const query = {
+    agent: "same",
+    view: "turn-errors",
+    thread: "thread",
+    turns: "one",
+    limit: 1,
+  };
+  const first = a.reads.analytics(api, query);
+  const joined = a.reads.analytics(api, {
+    limit: 1,
+    turns: "one",
+    thread: "thread",
+    view: "turn-errors",
+    agent: "same",
+    offset: undefined,
+  });
+  expect(first).toBe(joined);
+  const pending = first.read();
+  expect(joined.read()).toBe(pending);
+  const differentQuery = a.reads.analytics(api, { ...query, turns: "two" });
+  const differentServer = b.reads.analytics(api, query);
+  expect(differentQuery).not.toBe(first);
+  expect(differentServer).not.toBe(first);
+  api.getStreamSession.mockReturnValue({
+    workspaceId: "workspace",
+    sessionId: "epoch2",
+    locality: FrontendLocality.local,
+    routes: [],
+    cachePolicies: [],
+  });
+  const differentEpoch = a.reads.analytics(api, query);
+  expect(differentEpoch).not.toBe(first);
+  const requests = [
+    pending,
+    differentQuery.read(),
+    differentServer.read(),
+    differentEpoch.read(),
+  ];
+  await Promise.resolve();
+  expect(calls).toHaveBeenCalledTimes(4);
+  response.resolve({});
+  await Promise.all(requests);
+  expect(first.current.status).toBe("live");
+  a.dispose();
+  b.dispose();
+  f.runtime.dispose();
+  other.runtime.dispose();
+});
+
+it("skills context cannot overwrite the query agent identity", () => {
+  const f = fixture(),
+    store = createServerStore(f.subscriptions);
+  const api = { get: defaultApi.get, getStreamSession: () => undefined };
+  const context = {
+    workspace: "workspace",
+    account: "account",
+    cwd: "/project",
+    provider: "codex",
+    agent: "override",
+  };
+  expect(store.reads.skills(api, { agent: "one" }, context)).not.toBe(
+    store.reads.skills(api, { agent: "two" }, context),
+  );
+  store.dispose();
+  f.runtime.dispose();
+});
 class SettingsModel {
   storeRoot: string | null;
   constructor(storeRoot: string | null) {

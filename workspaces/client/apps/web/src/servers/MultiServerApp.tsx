@@ -1,6 +1,7 @@
 import {
   makeAutoObservable,
   computed,
+  observableStruct,
   compareStructural,
   runInAction,
 } from "mobx";
@@ -75,7 +76,9 @@ import Sidebar from "../components/Sidebar.tsx";
 import ProjectServerCards from "../components/ProjectServerCards";
 import { projectServerChoices, type LocationProject } from "./projectLocations";
 import { projectChatCommand } from "./projectChatCommand";
-import { fetchServerSummary, summaryFailure } from "./summary";
+import { fetchServerSummary } from "./summary";
+import { frameAccounts } from "../components/Accounts.tsx";
+import { resourceData } from "../store/runtime.ts";
 import { recoverMatchingServers } from "./schemaRecovery";
 import {
   localServer,
@@ -172,6 +175,9 @@ class ShellState {
         sidebar: false,
         screens: false,
         screenOwners: false,
+        // Discovery derives fresh objects per render; equal content must not re-render the shell.
+        peers: observableStruct,
+        discoveredAliases: observableStruct,
         servers: computed({ equals: compareStructural }),
         aliases: computed({ equals: compareStructural }),
       },
@@ -693,48 +699,6 @@ const MultiServerShell = observer(function MultiServerShell({
   };
   const mergedSidebar = shell.sidebar.model;
   useEffect(() => {
-    if (
-      !shell.settingsOpen ||
-      (shell.settingsTab !== "servers" && shell.settingsTab !== "accounts")
-    )
-      return;
-    const controllers = new Set<AbortController>();
-    let stopped = false;
-    for (const server of shell.servers) {
-      const controller = new AbortController();
-      controllers.add(controller);
-      void fetchServerSummary(server, controller.signal)
-        .then((value) => {
-          if (stopped || controller.signal.aborted) return;
-          shell.sidebar.setNavigation((old) => ({
-            ...old,
-            [server.id]: { ...old[server.id], ...value },
-          }));
-          shell.setAccountsByServer({
-            ...shell.accountsByServer,
-            [server.id]: value.accounts,
-          });
-          shell.sidebar.setStatus((old) => ({ ...old, [server.id]: "live" }));
-          shell.setLastSeen({
-            ...shell.lastSeen,
-            [server.id]: Date.now() / 1000,
-          });
-        })
-        .catch((error) => {
-          if (!stopped)
-            shell.sidebar.setStatus((old) => ({
-              ...old,
-              [server.id]: summaryFailure(error),
-            }));
-        })
-        .finally(() => controllers.delete(controller));
-    }
-    return () => {
-      stopped = true;
-      controllers.forEach((controller) => controller.abort());
-    };
-  }, [shell.settingsOpen, shell.settingsTab, shell.servers]);
-  useEffect(() => {
     const reread = shell.reread;
     const stored = (event: StorageEvent) => {
       if (event.key === SERVER_REGISTRY_KEY || event.key === null) reread();
@@ -827,6 +791,24 @@ const MultiServerShell = observer(function MultiServerShell({
 
     shell.setAccountsByServer(next);
   };
+  const navigation = { ...shell.sidebar.navigation };
+  const accountsByServer = { ...shell.accountsByServer };
+  for (const [id, service] of services) {
+    const state = resourceData(service.store.state().current);
+    if (!state) continue;
+    const agentsRunning = [...state.agents.values()].filter(
+      (agent) => agent.inFlight,
+    ).length;
+    const accounts = state.accountsSummary.get("current");
+    const previous = navigation[id];
+    if (previous)
+      navigation[id] = {
+        ...previous,
+        agentsRunning,
+        busy: agentsRunning > 0,
+      };
+    if (accounts) accountsByServer[id] = frameAccounts(accounts);
+  }
   const management = (
     <ServerManager
       servers={shell.servers}
@@ -839,8 +821,8 @@ const MultiServerShell = observer(function MultiServerShell({
       }
       statuses={shell.sidebar.status}
       lastSeen={shell.lastSeen}
-      navigation={shell.sidebar.navigation}
-      accountsByServer={shell.accountsByServer}
+      navigation={navigation}
+      accountsByServer={accountsByServer}
     />
   );
   const rememberAccountFocus = (
@@ -851,7 +833,7 @@ const MultiServerShell = observer(function MultiServerShell({
     >,
   ) => {
     const exact = command.accountKey
-      ? serverAccountRows(shell.accountsServers, shell.accountsByServer).find(
+      ? serverAccountRows(shell.accountsServers, accountsByServer).find(
           (row) => row.byServer[serverId]?.accountKey === command.accountKey,
         )
       : undefined;
@@ -892,7 +874,7 @@ const MultiServerShell = observer(function MultiServerShell({
               }
               servicesFor={(id) => services.get(id)}
               servers={shell.accountsServers}
-              accountsByServer={shell.accountsByServer}
+              accountsByServer={accountsByServer}
               statuses={{
                 ...Object.fromEntries(
                   (discovery.snapshot?.servers || [])

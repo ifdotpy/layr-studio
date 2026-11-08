@@ -1,4 +1,6 @@
-import { useServerApi } from "../servers/ServerServicesContext";
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
 import { Button, Checkbox, NativeSelect, Textarea } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { errorText, type PostResult } from "../api";
@@ -20,21 +22,24 @@ function grantsOf(result: PostResult<"/api/federation">): ProjectGrant[] {
   return result.grants;
 }
 
-export function ProjectPeers({
+export const ProjectPeers = observer(function ProjectPeers({
   projectId,
   notify,
 }: {
   projectId: string;
   notify: (message: string) => void;
 }) {
-  const { get, post } = useServerApi();
+  const { post } = useServerApi();
+  const store = useServerStore();
+  const projects = [
+    ...(resourceData(store.state().current)?.projects.values() || []),
+  ];
   const [grants, setGrants] = useState<ProjectGrant[]>([]);
   const [inviteText, setInviteText] = useState("");
   const [pasted, setPasted] = useState("");
   const [invitation, setInvitation] = useState<PeerInvitation | null>(null);
   const [fingerprint, setFingerprint] = useState("");
   const [localProject, setLocalProject] = useState(projectId);
-  const [projects, setProjects] = useState<{ id: string; name: string }[]>([]);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -48,16 +53,6 @@ export function ProjectPeers({
 
   useEffect(() => {
     void load().catch((error) => notify(errorText(error)));
-    void get("/api/projects")
-      .then((result) =>
-        setProjects(
-          result.items.map((row) => ({
-            id: row.id,
-            name: row.name || row.id,
-          })),
-        ),
-      )
-      .catch((error) => notify(errorText(error)));
     // Reload when the project changes only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
@@ -170,7 +165,10 @@ export function ProjectPeers({
               label="Local project"
               value={localProject}
               onChange={(event) => setLocalProject(event.currentTarget.value)}
-              data={projects.map((row) => ({ value: row.id, label: row.name }))}
+              data={projects.map((row) => ({
+                value: row.id,
+                label: row.name || row.id,
+              }))}
             />
             <Checkbox
               label="The fingerprint matches the other owner's fingerprint"
@@ -205,4 +203,4 @@ export function ProjectPeers({
       </section>
     </section>
   );
-}
+});

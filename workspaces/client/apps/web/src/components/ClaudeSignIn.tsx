@@ -1,7 +1,14 @@
+import { observer } from "mobx-react-lite";
+import { requestId as resourceRequestId } from "../generated/observableResources.ts";
+import { resourceData } from "../store/runtime.ts";
+import {
+  useServerStore,
+  useServerResources,
+} from "../servers/ServerServicesContext";
 import { randomUUID } from "../uuid";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Button, Group, Modal, Stack } from "@mantine/core";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { errorText, type PostResult } from "../api";
 import { copyText } from "../clipboard/clipboard";
 import type { Account } from "./Accounts";
@@ -11,11 +18,6 @@ import {
   codeSubmissionResolved,
   codeVerificationPending,
 } from "./claudeCodeSubmission";
-
-import {
-  useClaudeLoginProgress,
-  type ClaudeLoginProgressModel,
-} from "./useClaudeLoginProgress";
 
 type Receipt = PostResult<"/api/accounts/claude/login">;
 type LoginAction = "start" | "code" | "cancel";
@@ -39,7 +41,7 @@ function authUrl(value?: string | null): string | null {
   return null;
 }
 
-export default function ClaudeSignIn({
+export default observer(function ClaudeSignIn({
   account,
   scope,
   onClose,
@@ -60,7 +62,25 @@ export default function ClaudeSignIn({
     saved<string>(storageKey, ""),
   );
   const uncertaintyKey = `${storageKey}:code-submission-uncertain`;
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const storeView = useServerStore();
+  const resources = useServerResources();
+  const observed = requestId
+    ? storeView.authProgress(resourceRequestId(requestId)).current
+    : undefined;
+  const observedReceipt = observed ? resourceData(observed) : undefined;
+  const receipt =
+    observedReceipt?.requestId === requestId &&
+    observedReceipt.accountKey === account.id &&
+    observedReceipt.status !== "duplicate" &&
+    observedReceipt.status !== "uncertain"
+      ? (observedReceipt as Receipt)
+      : null;
+  const publishReceipt = (result: Receipt) => {
+    resources.publish(
+      { kind: "auth-progress", requestId: result.requestId },
+      result,
+    );
+  };
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
@@ -68,12 +88,7 @@ export default function ClaudeSignIn({
   const [codeSubmissionUncertain, setCodeSubmissionUncertain] = useState(() =>
     saved<boolean>(uncertaintyKey, false),
   );
-  const progress = useRef<ClaudeLoginProgressModel>({
-    locked: false,
-    requestId,
-    readGeneration: 0,
-    refresh: () => {},
-  });
+  const lock = useRef(false);
   const preflightRejected = useRef(false);
   const refreshed = useRef("");
   const ready = useRef(onReady);
@@ -82,20 +97,14 @@ export default function ClaudeSignIn({
     save(uncertaintyKey, value);
     setCodeSubmissionUncertain(value);
   };
-  const store = (result: Receipt, id: string, fromStatusRead = false) => {
+  const store = (result: Receipt, id: string) => {
     if (result.requestId !== id || result.accountKey !== account.id)
       throw new Error(
         "The sign-in response belongs to another account or request.",
       );
-    setReceipt(result);
-    if (
-      !fromStatusRead ||
-      result.status !== "pending" ||
-      result.codeSubmitted === true
-    ) {
-      preflightRejected.current = false;
-      setError("");
-    }
+    publishReceipt(result);
+    preflightRejected.current = false;
+    setError("");
     if (codeSubmissionResolved(result)) setCodeSubmissionUnknown(false);
     if (result.status === "ready" && refreshed.current !== id) {
       refreshed.current = id;
@@ -104,14 +113,25 @@ export default function ClaudeSignIn({
       );
     }
   };
-  useClaudeLoginProgress(progress, active(receipt) && !busy, {
-    apply: (result) => store(result, requestId, true),
-    failed: (failure) => setError(errorText(failure)),
-  });
+  useEffect(() => {
+    if (observed?.status === "error") setError(errorText(observed.error));
+    if (receipt && codeSubmissionResolved(receipt))
+      setCodeSubmissionUnknown(false);
+  }, [observed, receipt]);
+  useEffect(() => {
+    if (
+      receipt?.status === "ready" &&
+      refreshed.current !== receipt.requestId
+    ) {
+      refreshed.current = receipt.requestId;
+      void Promise.resolve(ready.current()).catch((failure) =>
+        setError(errorText(failure)),
+      );
+    }
+  }, [receipt]);
   const run = async (action: LoginAction) => {
-    if (progress.current.locked) return;
-    progress.current.readGeneration += 1;
-    progress.current.locked = true;
+    if (lock.current) return;
+    lock.current = true;
     setBusy(action);
     setError("");
     try {
@@ -126,8 +146,6 @@ export default function ClaudeSignIn({
         }
         save(storageKey, id);
         setRequestId(id);
-        progress.current.requestId = id;
-        setReceipt(null);
       }
       const submittedCode = code.trim();
       if (action === "code") preflightRejected.current = false;
@@ -174,7 +192,7 @@ export default function ClaudeSignIn({
       }
       setError(errorText(failure));
     } finally {
-      progress.current.locked = false;
+      lock.current = false;
       setBusy("");
     }
   };
@@ -273,10 +291,7 @@ export default function ClaudeSignIn({
                   Start sign-in
                 </Button>
               ) : pending ? (
-                <Button
-                  onClick={() => progress.current.refresh()}
-                  disabled={!!busy}
-                >
+                <Button onClick={() => resources.retryNow()} disabled={!!busy}>
                   Check sign-in status
                 </Button>
               ) : null}
@@ -321,4 +336,4 @@ export default function ClaudeSignIn({
       </Stack>
     </Modal>
   );
-}
+});

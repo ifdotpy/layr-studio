@@ -10,11 +10,13 @@ declare global {
     svgExecuted?: boolean;
   }
 }
-import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import FilePreview from "../../src/components/FilePreview.tsx";
+import FilePreview, {
+  useFilePreview,
+} from "../../src/components/FilePreview.tsx";
+import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
 import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
 import {
   parseDelimited,
@@ -38,8 +40,7 @@ window.codexDesktop = {
   },
 };
 function App() {
-  const [target, setTarget] =
-    useState<React.ComponentProps<typeof FilePreview>["target"]>(null);
+  const [target, setTarget] = useFilePreview();
   window.show = (path, line) => setTarget({ agent: "agent-a", path, line });
   return (
     <MantineProvider>
@@ -51,4 +52,8 @@ function App() {
     </MantineProvider>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <ServerViewStoreProvider>
+    <App />
+  </ServerViewStoreProvider>,
+);

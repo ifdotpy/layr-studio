@@ -1,4 +1,5 @@
 import { createRequestsMirror } from "../generated/observableResources";
+import { createServerServices } from "../servers/serverServices.ts";
 import NewChatModelSettings from "./NewChatModelSettings.tsx";
 import { type NewChatSettings } from "./newChatSettings.ts";
 import { observable, runInAction } from "mobx";
@@ -25,6 +26,7 @@ import { MantineProvider, Menu } from "@mantine/core";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
   AgentMode,
+  AccountStatus,
   AgentSource,
   AgentStatus,
   AgentPermissionMode,
@@ -64,11 +66,15 @@ const h = vi.hoisted(() => ({
     command: {},
   },
 }));
-vi.mock("../servers/ServerServicesContext", async (original) => ({
-  ...(await original<typeof import("../servers/ServerServicesContext")>()),
-  useServerApi: () => h.api,
-  useServerSync: () => h.sync,
-}));
+vi.mock("../servers/ServerServicesContext", async (original) => {
+  const actual =
+    await original<typeof import("../servers/ServerServicesContext")>();
+  return {
+    ...actual,
+    useServerApi: () => h.api,
+    useServerSync: () => actual.useServerServices()?.sync ?? h.sync,
+  };
+});
 vi.mock("@mantine/core", async (original) => {
   const actual = await original<typeof import("@mantine/core")>();
   const children = ({ children }: { children?: ReactNode }) =>
@@ -105,19 +111,12 @@ vi.mock("./agents/WorkerModelPicker", async (original) => {
   const actual = await original<typeof import("./agents/WorkerModelPicker")>();
   return {
     ...actual,
-    useWorkerModels: (...args: Parameters<typeof actual.useWorkerModels>) =>
-      h.catalog || actual.useWorkerModels(...args),
+    useWorkerModels: (...args: Parameters<typeof actual.useWorkerModels>) => {
+      const catalog = actual.useWorkerModels(...args);
+      return (args[1] && h.catalog) || catalog;
+    },
   };
 });
-vi.mock("./newChatSettings", async (original) => ({
-  ...(await original<typeof import("./newChatSettings")>()),
-  readNewChatResource: async (_server: unknown, path: string) =>
-    path === "/api/accounts"
-      ? accounts.data
-      : path === "/api/projects"
-        ? { items: [] }
-        : { models: h.catalog?.models || [] },
-}));
 vi.mock("./TokenRate", () => ({ default: () => null }));
 vi.mock("./agents/AgentSetupPicker", () => ({
   AgentSetupPicker: (props: AgentSetupPickerProps) => {
@@ -752,11 +751,48 @@ it("edits a new chat draft model, effort and role defaults without a detail subs
     retry: () => {},
   };
   const f = observableFixture();
+  f.apply([
+    {
+      collection: "project",
+      id: "project",
+      value: { id: "project", path: "/project", accountKey: "chosen" },
+    },
+    {
+      collection: "accounts",
+      id: "current",
+      value: {
+        accounts: [
+          {
+            id: "chosen",
+            provider: ProviderKind.codex,
+            status: AccountStatus.ready,
+            label: "Chosen",
+            home: "",
+            source: "fixture",
+          },
+        ],
+        archivedAccounts: [],
+        defaultAccountKey: "other",
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+    },
+  ]);
+  h.api.get.mockClear();
   const reads = vi.spyOn(f.store, "agentDetail");
+  const inherited = observableFixture();
+  const selected = createServerServices({
+    id: "remote",
+    label: "Remote",
+    origin: "https://selected.test",
+  });
+  Object.defineProperty(selected, "store", { value: f.store });
   let draft: Omit<NewChatSettings, "workspaceMode"> | null = null;
   const screen = await mountCaller(
-    f,
+    inherited,
     createElement(NewChatModelSettings, {
+      serverServices: selected,
       projectId: "project",
       path: "/project",
       onChange: (value) => {
@@ -768,13 +804,20 @@ it("edits a new chat draft model, effort and role defaults without a detail subs
     expect(required(h.pickers.at(-1)).disabled).toBe(false);
     await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-luna"));
     await act(async () => required(h.pickers.at(-1)).onEffort("high"));
-    expect(draft).toMatchObject({ model: "gpt-6-luna", effort: "high" });
+    expect(draft).toMatchObject({
+      account_key: "chosen",
+      model: "gpt-6-luna",
+      effort: "high",
+    });
     await act(async () => required(h.pickers.at(-1)).onRole("worker"));
     await act(async () => required(h.pickers.at(-1)).onModel("gpt-6-astra"));
     expect(draft).toMatchObject({ worker_defaults: { model: "gpt-6-astra" } });
     expect(reads).not.toHaveBeenCalled();
+    expect(h.api.get).not.toHaveBeenCalled();
   } finally {
     await screen.close();
+    selected.close();
+    f.store.dispose();
   }
 });
 it("queues supported running-chat settings through UnifiedAgentSettings", async () => {
@@ -864,3 +907,204 @@ it("shows legacy single-agent mode from generated detail through ChatSettingsDia
   expect(html).toContain('data-agent-mode="single"');
   f.store.dispose();
 });
+
+it("observes peer project choices without a projects GET and preserves the grants read", async () => {
+  const { ProjectPeers } = await import("./ProjectPeers.tsx");
+  Object.defineProperty(document, "fonts", {
+    configurable: true,
+    value: { addEventListener() {}, removeEventListener() {} },
+  });
+  const f = observableFixture();
+  f.apply([
+    {
+      collection: "project",
+      id: "one",
+      value: { id: "one", path: "/one", name: "First project" },
+    },
+  ]);
+  h.api.get.mockClear();
+  h.api.post.mockResolvedValue({ grants: [] });
+  const screen = await mountCaller(
+    f,
+    createElement(ProjectPeers, { projectId: "one", notify: vi.fn() }),
+  );
+  try {
+    const input = screen.host.querySelector("textarea");
+    if (!input) throw new Error("Missing invitation input");
+    const setValue = Object.getOwnPropertyDescriptor(
+      HTMLTextAreaElement.prototype,
+      "value",
+    )?.set;
+    if (!setValue) throw new Error("Missing textarea setter");
+    await act(async () => {
+      setValue.call(
+        input,
+        JSON.stringify({
+          protocol: 1,
+          inviteId: "invite",
+          token: "token",
+          stateId: "state",
+          label: "Peer",
+          publicKey: "",
+          expires: 1900000000,
+          scope: "project",
+          projectId: "peer",
+        }),
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const check = [...screen.host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Check invitation",
+    );
+    if (!check) throw new Error("Missing check action");
+    await act(async () => check.click());
+    expect(screen.host.querySelector("select")?.textContent).toContain(
+      "First project",
+    );
+    await act(async () =>
+      f.apply([
+        {
+          collection: "project",
+          id: "one",
+          value: { id: "one", path: "/one", name: "Renamed project" },
+        },
+      ]),
+    );
+    expect(screen.host.querySelector("select")?.textContent).toContain(
+      "Renamed project",
+    );
+    expect(h.api.get).not.toHaveBeenCalled();
+    expect(h.api.post).toHaveBeenCalledExactlyOnceWith("/api/federation", {
+      action: "list_project_grants",
+      project_id: "one",
+    });
+  } finally {
+    await screen.close();
+  }
+});
+
+it.each(["loading", "error"] as const)(
+  "new-chat waits for %s state and recovers through its selected projection",
+  async (status) => {
+    const f = observableFixture();
+    const current = observable.box<ReturnType<typeof f.store.state>["current"]>(
+      status === "error"
+        ? { status, error: new Error("State stream failed") }
+        : { status },
+      { deep: false },
+    );
+    vi.spyOn(f.store, "state").mockReturnValue({
+      get current() {
+        return current.get();
+      },
+    });
+    const inherited = observableFixture();
+    const selected = createServerServices({
+      id: "remote",
+      label: "Remote",
+      origin: "https://recovery.test",
+    });
+    Object.defineProperty(selected, "store", { value: f.store });
+    const refresh = vi.spyOn(selected.sync, "refreshState").mockResolvedValue();
+    const retryModels = vi.fn();
+    h.catalog = {
+      models: [
+        {
+          model: "gpt-6-astra",
+          provider: ProviderKind.codex,
+          supportedReasoningEfforts: [],
+        },
+      ],
+      loading: false,
+      error: "",
+      retry: retryModels,
+    };
+    const onChange = vi.fn();
+    const screen = await mountCaller(
+      inherited,
+      createElement(NewChatModelSettings, {
+        serverServices: selected,
+        projectId: "project",
+        path: "/project",
+        onChange,
+      }),
+    );
+    try {
+      expect(onChange).toHaveBeenLastCalledWith(null);
+      expect(refresh).not.toHaveBeenCalled();
+      if (status === "error") {
+        const retry = [...screen.host.querySelectorAll("button")].find(
+          (button) => button.textContent === "Retry",
+        );
+        if (!retry) throw new Error("Missing projection retry");
+        refresh.mockRejectedValueOnce(new Error("Projection retry failed"));
+        await act(async () => retry.click());
+        expect(
+          screen.host.querySelector('[role="alert"]')?.textContent,
+        ).toContain("Projection retry failed");
+        await act(async () => retry.click());
+        expect(refresh).toHaveBeenCalledTimes(2);
+        expect(retryModels).not.toHaveBeenCalled();
+      } else {
+        expect(screen.host.querySelector('[role="alert"]')).toBeNull();
+      }
+      await act(async () => {
+        f.apply([
+          {
+            collection: "project",
+            id: "project",
+            value: {
+              id: "project",
+              path: "/project",
+              accountKey: "project-account",
+            },
+          },
+          {
+            collection: "accounts",
+            id: "current",
+            value: {
+              accounts: ["default", "project-account"].map((id) => ({
+                id,
+                label: id,
+                provider: ProviderKind.codex,
+                status: AccountStatus.ready,
+                home: "",
+                source: "fixture",
+              })),
+              archivedAccounts: [],
+              defaultAccountKey: "default",
+              defaultAccountGroups: [],
+              supportsDelete: true,
+              supportsDisconnect: true,
+            },
+          },
+        ]);
+        runInAction(() =>
+          current.set({ status: "live", data: f.mirror.current }),
+        );
+      });
+      expect(onChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          account_key: "project-account",
+          model: "gpt-6-astra",
+        }),
+      );
+      expect(screen.host.querySelector('[role="alert"]')).toBeNull();
+      expect(retryModels).not.toHaveBeenCalled();
+      h.catalog = { ...required(h.catalog), error: "Model catalog failed" };
+      await act(async () => required(h.pickers.at(-1)).onEffort("high"));
+      const retryCatalog = [...screen.host.querySelectorAll("button")].find(
+        (button) => button.textContent === "Retry",
+      );
+      if (!retryCatalog) throw new Error("Missing model retry");
+      await act(async () => retryCatalog.click());
+      expect(retryModels).toHaveBeenCalledOnce();
+      expect(refresh).toHaveBeenCalledTimes(status === "error" ? 2 : 0);
+    } finally {
+      await screen.close();
+      selected.close();
+      f.store.dispose();
+      vi.restoreAllMocks();
+    }
+  },
+);

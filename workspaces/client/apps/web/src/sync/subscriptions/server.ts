@@ -15,7 +15,7 @@ import { createEntityDataObserver } from "./entityData";
 
 type ServerSubscriptionOptions = {
   api: ResourceEventsOptions["api"] &
-    Pick<ReturnType<typeof createApiScope>, "fetchApiRequest">;
+    Pick<ReturnType<typeof createApiScope>, "fetchApiRequest" | "post">;
   tokenRates: ResourceEventsOptions["tokenRates"];
   sync: () => ReturnType<typeof createSyncClient>;
   owner: { id: string; origin: string };
@@ -62,7 +62,7 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
     owner.id === "local"
       ? undefined
       : routesFor(owner).onChange(() => transport.replaceStream());
-  return createSubscriptions(
+  const subscriptions = createSubscriptions(
     {
       ...transport,
       dispose() {
@@ -89,6 +89,8 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
         "terminal-output": (ref) =>
           api.get("/api/terminals/output", { query: { id: ref.terminalId } }),
       },
+      api,
     ),
   );
+  return subscriptions;
 }

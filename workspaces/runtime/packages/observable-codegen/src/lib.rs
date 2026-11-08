@@ -108,6 +108,15 @@ pub struct ObservableResource {
     pub(crate) mapped: bool,
     pub(crate) opaque: bool,
     pub(crate) mirror_only: bool,
+    pub(crate) persistence: Persistence,
+}
+
+/// Whether the client persists a resource's projection and resume cursor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Persistence {
+    Durable,
+    /// Inline stream data only; no persisted projection or cursor.
+    Transient,
 }
 
 /// Select one existing tagged payload variant as a keyed readonly collection.
@@ -137,6 +146,11 @@ impl ObservableCollection {
     }
 }
 impl ObservableResource {
+    /// Inline stream data has no persisted projection or resume cursor.
+    pub fn transient(mut self) -> Self {
+        self.persistence = Persistence::Transient;
+        self
+    }
     /// Project an existing one-shot response without inventing a subscription resource.
     pub fn mirror(schema: &str, facade: &str) -> Self {
         let mut resource = Self::named(facade, facade, schema, vec![]);
@@ -160,6 +174,7 @@ impl ObservableResource {
             mapped: true,
             opaque: false,
             mirror_only: false,
+            persistence: Persistence::Durable,
         }
     }
     /// Explicit boundary for an existing open or untagged JSON transport value.
@@ -177,6 +192,7 @@ impl ObservableResource {
             mapped: false,
             opaque: false,
             mirror_only: false,
+            persistence: Persistence::Durable,
         }
     }
     pub fn of<T: JsonSchema>(kind: &str, facade: &str, args: Vec<ObservableArg>) -> Self {
@@ -189,6 +205,7 @@ impl ObservableResource {
             mapped: false,
             opaque: false,
             mirror_only: false,
+            persistence: Persistence::Durable,
         }
     }
     /// Adapt an existing singleton array resource; unselected variants remain outside this store.
@@ -207,6 +224,7 @@ impl ObservableResource {
             mapped: false,
             opaque: false,
             mirror_only: false,
+            persistence: Persistence::Durable,
         }
     }
 }

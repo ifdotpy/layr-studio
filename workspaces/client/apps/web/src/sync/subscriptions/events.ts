@@ -1,3 +1,4 @@
+import * as api from "../../api.ts";
 /** Internal adapters for projection, recovery and non-React consumers. Components
  * use server resources; transport details stay within the subscription boundary. */
 import * as transport from "../resourceEvents";
@@ -12,6 +13,8 @@ const subscriptions = createSubscriptions(
     () => ({ subscribeTranscriptProjection }),
     transport,
     subscribeEntityData,
+    undefined,
+    api,
   ),
 );
 export const {

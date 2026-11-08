@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { Message } from "../../../types";
-import FilePreview from "../../FilePreview";
+import FilePreview, { useFilePreview } from "../../FilePreview";
 import RichPreview from "../../RichPreview";
 import FileDiff from "../../FileDiff";
 import { fileChanges, unifiedDiff } from "../../file-change/fileChangeModel";
@@ -37,6 +37,7 @@ export default observer(function ConversationResults({
       }),
     [messages],
   ).get();
+  const [preview, setPreview] = useFilePreview();
   const [open, setOpen] = useState(true);
   const [all, setAll] = useState(false);
   const [dialogMounted, setDialogMounted] = useState(false);
@@ -107,6 +108,14 @@ export default observer(function ConversationResults({
               onClick={() => {
                 if (result.kind !== "file" && result.kind !== "asset")
                   setDialogMounted(true);
+                if (result.kind === "asset")
+                  setPreview({ asset: result.asset });
+                else if (result.kind === "file")
+                  setPreview({
+                    agent: agentId,
+                    path: result.path,
+                    line: result.line,
+                  });
                 setSelection({ id: result.id, agent: agentId });
               }}
             >
@@ -128,12 +137,11 @@ export default observer(function ConversationResults({
       )}
       {file && (
         <FilePreview
-          target={
-            selected.kind === "asset"
-              ? { asset: selected.asset }
-              : { agent: agentId, path: selected.path, line: selected.line }
-          }
-          onClose={() => setSelection(undefined)}
+          target={preview}
+          onClose={() => {
+            setSelection(undefined);
+            setPreview(null);
+          }}
         />
       )}
       {dialogMounted && (

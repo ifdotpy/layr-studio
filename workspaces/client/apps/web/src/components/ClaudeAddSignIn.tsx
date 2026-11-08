@@ -1,3 +1,10 @@
+import { observer } from "mobx-react-lite";
+import { requestId as resourceRequestId } from "../generated/observableResources.ts";
+import { resourceData } from "../store/runtime.ts";
+import {
+  useServerStore,
+  useServerResources,
+} from "../servers/ServerServicesContext";
 import { randomUUID } from "../uuid";
 import { useServerApi } from "../servers/ServerServicesContext";
 import { Button, Group, Modal, Stack, TextInput } from "@mantine/core";
@@ -10,11 +17,6 @@ import {
   codeSubmissionResolved,
   codeVerificationPending,
 } from "./claudeCodeSubmission";
-
-import {
-  useClaudeLoginProgress,
-  type ClaudeLoginProgressModel,
-} from "./useClaudeLoginProgress";
 
 type Receipt = PostResult<"/api/accounts/claude/login">;
 type SavedFlow = {
@@ -91,14 +93,13 @@ function allowedUrl(value?: string | null) {
   }
 }
 
-export default function ClaudeAddSignIn({
+export default observer(function ClaudeAddSignIn({
   label,
   email,
   serverLabel,
   scope,
   opened,
   onClose,
-  onReady,
 }: {
   label: string;
   email: string;
@@ -106,7 +107,6 @@ export default function ClaudeAddSignIn({
   scope: string;
   opened: boolean;
   onClose: () => void;
-  onReady: () => unknown;
 }) {
   const { post, save, saved } = useServerApi();
 
@@ -115,24 +115,34 @@ export default function ClaudeAddSignIn({
     readSavedFlow(storageKey, { save, saved }),
   );
   const requestId = flow?.requestId || "";
-  const [receipt, setReceipt] = useState<Receipt | null>(null);
+  const storeView = useServerStore();
+  const resources = useServerResources();
+  const observed = requestId
+    ? storeView.authProgress(resourceRequestId(requestId)).current
+    : undefined;
+  const observedReceipt = observed ? resourceData(observed) : undefined;
+  const receipt =
+    observedReceipt?.requestId === requestId &&
+    observedReceipt.status !== "duplicate" &&
+    observedReceipt.status !== "uncertain"
+      ? (observedReceipt as Receipt)
+      : null;
+  const publishReceipt = (result: Receipt) => {
+    resources.publish(
+      { kind: "auth-progress", requestId: result.requestId },
+      result,
+    );
+  };
   const [expectedEmail, setExpectedEmail] = useState(email);
   const [code, setCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [now, setNow] = useState(() => Date.now());
-  const progress = useRef<ClaudeLoginProgressModel>({
-    locked: false,
-    requestId,
-    readGeneration: 0,
-    refresh: () => {},
-  });
-  const readyRequest = useRef("");
+  const lock = useRef(false);
   const persistFlow = (next: SavedFlow) => {
     save(attemptKey(storageKey, next.requestId), next);
     save(storageKey, next.requestId);
-    progress.current.requestId = next.requestId;
     setFlow(next);
   };
   const clearSavedFlow = (savedFlow: SavedFlow) => {
@@ -141,9 +151,8 @@ export default function ClaudeAddSignIn({
       save(storageKey, null);
   };
   const start = async (emailHint = expectedEmail, forceNew = false) => {
-    if (progress.current.locked) return;
-    progress.current.readGeneration += 1;
-    progress.current.locked = true;
+    if (lock.current) return;
+    lock.current = true;
     setBusy("start");
     setError("");
     const canResume =
@@ -161,7 +170,6 @@ export default function ClaudeAddSignIn({
         };
     if (!canResume && flow) clearSavedFlow(flow);
     persistFlow(next);
-    setReceipt(null);
     try {
       const result = await post(
         "/api/accounts/claude/add",
@@ -172,19 +180,18 @@ export default function ClaudeAddSignIn({
         },
         { requestId: next.startRequestId },
       );
-      setReceipt(result);
+      publishReceipt(result);
       setExpectedEmail(next.email);
     } catch (failure) {
       setError(errorText(failure));
     } finally {
-      progress.current.locked = false;
+      lock.current = false;
       setBusy("");
     }
   };
   const run = async (action: "code" | "cancel") => {
-    if (progress.current.locked || !requestId || !flow) return;
-    progress.current.readGeneration += 1;
-    progress.current.locked = true;
+    if (lock.current || !requestId || !flow) return;
+    lock.current = true;
     setBusy(action);
     setError("");
     const submitted = code.trim();
@@ -207,7 +214,7 @@ export default function ClaudeAddSignIn({
           : { login_id: requestId },
         { requestId: mutationId },
       );
-      setReceipt(result);
+      publishReceipt(result);
       if (action === "code") {
         setCode("");
         const confirmedSubmitted = codeSubmissionResolved(result);
@@ -228,43 +235,35 @@ export default function ClaudeAddSignIn({
         setCode("");
       } else if (action === "cancel" && isUnknownRequest(failure)) {
         clearSavedFlow(flow);
-        progress.current.requestId = "";
         setFlow(null);
-        setReceipt(null);
         setError("");
       } else setError(errorText(failure));
     } finally {
-      progress.current.locked = false;
+      lock.current = false;
       setBusy("");
     }
   };
-  useClaudeLoginProgress(progress, !terminal(receipt?.status) && !busy, {
-    apply: (result) => {
-      if (result.requestId !== requestId) return;
-      setReceipt(result);
-      if (flow && codeSubmissionResolved(result)) {
-        persistFlow({
-          ...flow,
-          codeSubmissionUncertain: false,
-          codeRequestId:
-            result.codeSubmitted === true ? undefined : flow.codeRequestId,
-        });
-      }
-      if (result.status === "ready" && readyRequest.current !== requestId) {
-        readyRequest.current = requestId;
-        void Promise.resolve(onReady()).catch((failure) =>
-          setError(errorText(failure)),
-        );
-      }
-    },
-    readFailed: (failure) => {
-      if (isUnknownRequest(failure) && flow && !flow.unknownSince) {
-        persistFlow({ ...flow, unknownSince: Date.now() });
-        setError("");
-      } else if (!isUnknownRequest(failure)) throw failure;
-    },
-    failed: (failure) => setError(errorText(failure)),
-  });
+  useEffect(() => {
+    if (observed?.status !== "error") return;
+    if (isUnknownRequest(observed.error) && flow && !flow.unknownSince) {
+      persistFlow({ ...flow, unknownSince: Date.now() });
+      setError("");
+    } else if (!isUnknownRequest(observed.error))
+      setError(errorText(observed.error));
+  }, [observed]);
+  useEffect(() => {
+    if (
+      receipt &&
+      flow &&
+      codeSubmissionResolved(receipt) &&
+      flow.codeSubmissionUncertain
+    )
+      persistFlow({
+        ...flow,
+        codeSubmissionUncertain: false,
+        codeRequestId: receipt.codeSubmitted ? undefined : flow.codeRequestId,
+      });
+  }, [receipt]);
   useEffect(() => {
     if (!flow?.unknownSince || !requestId || receipt) return;
     const remaining =
@@ -375,7 +374,7 @@ export default function ClaudeAddSignIn({
               <Button
                 variant="default"
                 disabled={!!busy}
-                onClick={() => progress.current.refresh()}
+                onClick={() => resources.retryNow()}
               >
                 Check sign-in status
               </Button>
@@ -457,4 +456,4 @@ export default function ClaudeAddSignIn({
       </Stack>
     </Modal>
   );
-}
+});

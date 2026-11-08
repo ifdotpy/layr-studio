@@ -1,8 +1,12 @@
+import { observer } from "mobx-react-lite";
+import { resourceData } from "../store/runtime.ts";
+import { agentId as resourceAgentId } from "../generated/observableResources.ts";
 import type { ConnectionHealth } from "../sync/connectionState";
 import { VoiceRecordKind as GeneratedApiVoiceRecordKind } from "../generated/api.ts";
 import {
   useServerApi,
   useServerResources,
+  useServerStore,
 } from "../servers/ServerServicesContext";
 import { randomUUID } from "../uuid";
 import { hasNativeClient } from "../native/client";
@@ -13,14 +17,10 @@ import { ActionIcon, Popover } from "@mantine/core";
 import { AudioLines, X } from "lucide-react";
 import { errorText, type PostResult } from "../api";
 
-import type { ResourceVersion } from "../sync/subscriptions/events";
 import "./realtime-voice.css";
-import { useServerResourceReads } from "../servers/ServerServicesContext";
 import { watchVoiceTransport } from "./voiceTransport";
 import { decodeVoiceEvent } from "./voiceEvent";
 
-type VoiceRecords = PostResult<"/api/voice/records">;
-type VoiceRecord = VoiceRecords["records"][number];
 type Session = PostResult<"/api/voice/start">;
 type Peer = {
   id: string;
@@ -45,7 +45,7 @@ export default function RealtimeVoice(props: {
 }) {
   return <NativeVoice key={props.agentId} {...props} />;
 }
-function NativeVoice({
+const NativeVoice = observer(function NativeVoice({
   agentId,
   notify,
 }: {
@@ -53,7 +53,7 @@ function NativeVoice({
   notify: (text: string) => void;
 }) {
   const { dictationBridge, nativeVoice } = useServerAudio();
-  const watchResourceReads = useServerResourceReads();
+  const store = useServerStore();
   const { post } = useServerApi();
   const { watchResourceConnection } = useServerResources();
 
@@ -63,7 +63,6 @@ function NativeVoice({
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
   const [blockedAudio, setBlockedAudio] = useState(false);
-  const [rows, setRows] = useState<VoiceRecord[]>([]);
   const [partial, setPartial] = useState("");
   const peer = useRef<Peer | null>(null);
   const generation = useRef(0);
@@ -72,8 +71,6 @@ function NativeVoice({
   const starting = useRef(false);
   const transportState = useRef<ConnectionHealth>("connecting");
   const pendingSession = useRef<Session | null>(null);
-  const cursor = useRef(0);
-  const cursorEpoch = useRef<string | undefined>(undefined);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
   );
@@ -84,6 +81,11 @@ function NativeVoice({
       { timeoutMs: 15000 },
     );
   const watchVoice = opened || active;
+  const voice = watchVoice
+    ? store.voice(resourceAgentId(agentId)).current
+    : undefined;
+  const data = voice ? resourceData(voice) : undefined;
+  const rows = data?.records ?? [];
   const end = (p: Peer) => {
     p.closed = true;
     clearTimeout(p.deadline);
@@ -149,8 +151,6 @@ function NativeVoice({
   }, []);
   useEffect(() => {
     if (!watchVoice) return;
-    let disposed = false;
-    let fetching = false;
     const stopConnection = watchVoiceTransport(
       (state) => {
         transportState.current = state;
@@ -167,79 +167,27 @@ function NativeVoice({
       },
       watchResourceConnection,
     );
-    const update = async (version?: ResourceVersion) => {
-      if (fetching) return;
-      fetching = true;
-      try {
-        const epochChanged = !!version && cursorEpoch.current !== version.epoch;
-        const after = epochChanged ? 0 : cursor.current;
-        const batch = version?.voiceRecords;
-        // Coalescing, a late listener, or an oversized frame can leave a gap.
-        // Only those recovery paths need the read-like POST.
-        const data =
-          batch && batch.after <= after
-            ? batch
-            : await post(
-                "/api/voice/records",
-                { agent: agentId, after },
-                { timeoutMs: 15000 },
-              );
-        if (disposed) return;
-        cursor.current = epochChanged
-          ? data.cursor
-          : Math.max(cursor.current, data.cursor);
-        if (version) cursorEpoch.current = version.epoch;
-        setRows((previous) => [
-          ...new Map(
-            [...(epochChanged ? [] : previous), ...data.records].map((r) => [
-              r.id,
-              r,
-            ]),
-          ).values(),
-        ]);
-        const p = peer.current;
-        if (p && data.session?.session_id === p.id) {
-          if (p.registered) await apply(p, data.session);
-          else pendingSession.current = data.session;
-        }
-      } catch (e) {
-        // Stop capture on loss of Studio, even if the media peer still works.
-        if (!disposed) {
-          if (peer.current) {
-            failure(
-              new Error(
-                `Studio connection lost. The microphone is off. Start voice again after the connection returns. ${errorText(e)}`,
-              ),
-            );
-            setOpened(true);
-          } else setError((previous) => previous || errorText(e));
-        }
-      } finally {
-        fetching = false;
-      }
-    };
-    const stop = watchResourceReads(
-      { kind: "voice", agentId },
-      update,
-      (error) => {
-        if (disposed) return;
-        if (peer.current) {
-          failure(
-            new Error(
-              `Studio connection lost. The microphone is off. Start voice again after the connection returns. ${errorText(error)}`,
-            ),
-          );
-          setOpened(true);
-        } else setError((previous) => previous || errorText(error));
-      },
-      { waitForBaseline: true },
-    );
-    return () => {
-      disposed = true;
-      stopConnection();
-      stop();
-    };
-  }, [agentId, watchVoice, watchResourceReads, watchResourceConnection]);
+    return stopConnection;
+  }, [watchVoice, watchResourceConnection]);
+  useEffect(() => {
+    const p = peer.current;
+    const failureError = voice && "error" in voice ? voice.error : undefined;
+    if (failureError) {
+      if (p) {
+        failure(
+          new Error(
+            `Studio connection lost. The microphone is off. Start voice again after the connection returns. ${errorText(failureError)}`,
+          ),
+        );
+        setOpened(true);
+      } else setError((previous) => previous || errorText(failureError));
+      return;
+    }
+    if (p && data?.session?.session_id === p.id) {
+      if (p.registered) void apply(p, data.session).catch(failure);
+      else pendingSession.current = data.session;
+    }
+  }, [data, voice]);
   const connectionChanged = (current: Peer, state: string) => {
     current.connectionState = state;
     if (current.closed) return;
@@ -592,4 +540,4 @@ function NativeVoice({
       )}
     </>
   );
-}
+});

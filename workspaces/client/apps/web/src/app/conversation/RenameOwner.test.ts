@@ -1,32 +1,37 @@
+import { observable, runInAction } from "mobx";
+import type { ResourceStatus } from "../../store/runtime.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import type { PostResult } from "../../api.ts";
-const watches = vi.hoisted(
-  () =>
-    [] as {
-      request: string;
-      accept: (receipt: PostResult<"/api/rename">) => void;
-    }[],
-);
-vi.mock("../../renameRequest.ts", async (original) => ({
-  ...(await original<typeof import("../../renameRequest.ts")>()),
-  watchRenameResult: (
-    ...[, , request, accept]: Parameters<
-      typeof import("../../renameRequest.ts").watchRenameResult
-    >
-  ) => {
-    watches.push({ request, accept });
-    return () => {};
-  },
-}));
 import { ownerFixture } from "./ownerFixture.ts";
 import { required } from "../../components/componentTestFixtures.ts";
 afterEach(() => {
-  watches.length = 0;
   vi.restoreAllMocks();
 });
 it("a completed receipt and late HTTP reply cannot clear the newer rename", async () => {
   const f = ownerFixture();
+  type Receipt = PostResult<"/api/rename">;
+  const slots = new Map<
+    string,
+    ReturnType<typeof observable.box<ResourceStatus<Receipt>>>
+  >();
+  vi.spyOn(f.areas.scope.store, "renameProgress").mockImplementation(
+    (_agent, request) => {
+      let slot = slots.get(request);
+      if (!slot) {
+        slot = observable.box<ResourceStatus<Receipt>>(
+          { status: "loading" },
+          { deep: false },
+        );
+        slots.set(request, slot);
+      }
+      return {
+        get current() {
+          return slot!.get() ?? { status: "loading" };
+        },
+      };
+    },
+  );
   let finish: ((receipt: PostResult<"/api/rename">) => void) | undefined;
   f.post.mockReturnValueOnce(
     new Promise((resolve) => {
@@ -36,7 +41,15 @@ it("a completed receipt and late HTTP reply cannot clear the newer rename", asyn
   const stop = f.rename.start();
   try {
     const first = f.rename.submit("lead", "/rename first", "first");
-    const old = required(watches[0]);
+    const request = required(f.rename.pending.get("lead")).id;
+    const old = {
+      request,
+      accept(receipt: Receipt) {
+        runInAction(() =>
+          slots.get(request)?.set({ status: "live", data: receipt }),
+        );
+      },
+    };
     old.accept({
       id: "lead",
       request_id: old.request,

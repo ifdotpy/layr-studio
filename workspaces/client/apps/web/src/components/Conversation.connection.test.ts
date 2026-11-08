@@ -183,9 +183,6 @@ function renderActivity(
   h.store = fixture.store;
   const actions = conversationActionsFixture(() => {}, fixture.store);
   actions.navigation.selectedId = "lead";
-  actions.selected.detailSlot = currentAgent
-    ? { current: { status: "live", data: currentAgent } }
-    : undefined;
   if (!(actions.selected.history instanceof TranscriptHistory))
     throw new Error("Expected transcript history");
   actions.selected.history.connection = selectMessageConnection(

@@ -216,10 +216,6 @@
     "callee": "localStorage.setItem"
   },
   {
-    "file": "servers/serverNames.ts",
-    "callee": "serverCredentialAdapter().fetch"
-  },
-  {
     "file": "servers/serverServices.ts",
     "callee": "fetch"
   },

@@ -20,13 +20,20 @@ vi.mock("../app/ServerAreasProvider.tsx", async (original) => ({
   ...(await original<typeof import("../app/ServerAreasProvider.tsx")>()),
   ServerAreasProvider: ({ children }: { children: ReactNode }) => children,
 }));
+vi.mock("./ServerAccessSettings", () => ({ default: () => null }));
 vi.mock("./useUiPreferenceSync", () => ({ useUiPreferenceSync() {} }));
 vi.mock("./useServerDiscovery", () => ({
+  // Like the real hook, every render derives a fresh snapshot object.
   useServerDiscovery: () => ({
-    snapshot: captured.snapshot,
+    snapshot: captured.snapshot && {
+      ...captured.snapshot,
+      aliases: { ...captured.snapshot.aliases },
+      servers: [...captured.snapshot.servers],
+    },
     error: "",
     busy: false,
     pending: null,
+    actions: { find() {}, setAutoPair() {}, setAutoUpdate() {} },
   }),
 }));
 vi.mock("./registry", async (original) => ({
@@ -124,6 +131,117 @@ it("commits complete sidebar connections before paint without MobX render or act
     host.remove();
     stop();
     warnings.mockRestore();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("opens settings with streamed running counts and accounts without a summary request", async () => {
+  const { observableFixture } =
+    await import("../components/observableFixture.tsx");
+  const serverServices = await import("./serverServices.ts");
+  const { createServerServices } = serverServices;
+  const { AgentSource, AccountStatus, ProviderKind } =
+    await import("../generated/api.ts");
+  const summary = await import("./summary.ts");
+  const read = vi
+    .spyOn(summary, "fetchServerSummary")
+    .mockRejectedValue(new Error("Unexpected summary read"));
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  captured.snapshot = null;
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    media: "",
+    onchange: null,
+    addListener() {},
+    removeListener() {},
+    addEventListener() {},
+    removeEventListener() {},
+    dispatchEvent: () => true,
+  }));
+  const f = observableFixture([
+    { id: "one", source: AgentSource.managed, inFlight: true },
+    { id: "two", source: AgentSource.managed, inFlight: true },
+  ]);
+  const account = {
+    id: "work",
+    provider: ProviderKind.codex,
+    label: "Work",
+    status: AccountStatus.ready,
+    home: "",
+    source: "fixture",
+  };
+  f.apply([
+    ...(
+      await import("../generated/observableResources.ts")
+    ).serializeStateCollections(f.mirror.current),
+    {
+      collection: "accounts",
+      id: "current",
+      value: {
+        accounts: [account],
+        archivedAccounts: [],
+        defaultAccountKey: "work",
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+    },
+  ]);
+  const service = createServerServices({
+    id: "local",
+    label: "Local",
+    origin: "http://localhost",
+  });
+  Object.defineProperty(service, "store", { value: f.store });
+  const create = vi
+    .spyOn(serverServices, "createServerServices")
+    .mockImplementation((owner) =>
+      owner.id === "local" ? service : createServerServices(owner),
+    );
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          { env: "test" },
+          createElement(MultiServerApp),
+        ),
+      ),
+    );
+    await act(async () =>
+      service.screen.channel?.publish({
+        kind: "studio-server-navigation",
+        navigation: {
+          projects: [],
+          chats: [],
+          alerts: [],
+          ready: true,
+          busy: true,
+          agentsRunning: 99,
+          opened: null,
+          error: "",
+        },
+      }),
+    );
+    const open = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="Studio settings"]',
+    );
+    if (!open) throw new Error("Missing settings action");
+    await act(async () => open.click());
+    const cards = [...document.querySelectorAll(".server-settings-facts")];
+    const local = cards.find((card) => card.textContent?.includes("localhost"));
+    expect(local?.textContent).toContain("Codex 1");
+    expect(local?.textContent).toContain("Agents running2");
+    expect(read).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    service.close();
+    f.store.dispose();
+    read.mockRestore();
+    create.mockRestore();
     vi.unstubAllGlobals();
   }
 });

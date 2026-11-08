@@ -38,6 +38,48 @@ Message send receipts and queue projections use the Rust-owned `MessageSendStatu
 contract generated into the web API. An uncertain result keeps its request identity. An expired receipt retains the
 message on the device and cannot be retried with that identity.
 
+### React network boundary
+
+Root `.oxlintrc.json` owns the production boundary in
+`workspaces/client/apps/web/src` (TypeScript and JavaScript): React components
+and hooks cannot import API/transport capabilities or use browser `fetch`,
+`EventSource`, `XMLHttpRequest`, `WebSocket` or `sendBeacon` directly.
+Type-only imports, generated facades and named pure API error/storage helpers
+remain allowed. Tests, fixtures and stories are outside this production boundary.
+
+Permanent exemptions are `store/`, `sync/`, the generated observable contract,
+and the exact plain class, command, credential, routing, stream and telemetry
+owners listed in the configuration. Files named `use*` inside `store/` and
+`sync/` remain subject to the boundary. New exemptions require review; naming a
+file Owner does not grant access. Commands retain explicit action intent and
+request identity; observation only acquires existing store/SSE interest.
+Exempt infrastructure must not re-export transport capabilities to React callers.
+
+The final configuration override is the sorted migration allowlist, based on
+`4b6016b749bf701691bc01a1bb24f87a`. Its single reason manifest is
+[network-boundary-exceptions.json](../workspaces/tooling/apps/repository-checks/tests/network-boundary-exceptions.json).
+Exceptions disable only import restrictions, so globals and beacon access remain
+forbidden. The short-tier `network-boundary.test.ts` checks the manifest/config
+sets, committed file-count ceiling and actual restricted-import diagnostics
+without the final override. Remove each exception and its manifest reason when
+its restricted imports disappear, and lower the ceiling when pruning.
+
+Known limits kept for review:
+
+- Static import/global rules cannot cheaply detect network-starting owner methods
+  called inside `useEffect`/`useLayoutEffect`.
+- `useServerAreas().scope.services.api` remains reachable; narrowing the
+  React-facing ServerAreas context belongs to the next migration wave.
+- The pinned Oxlint rules do not restrict dynamic `import()`, so production
+  dynamic imports require review for transport access.
+- Native bridge capabilities remain allowed and require review for network use:
+  `nativeRequest("servers.request", ...)` from `native/client`, `frameRequest`
+  from `native/frame`, and `nativeHost().core.invoke` can bypass the import boundary.
+- Global aliases and destructuring are not followed; review indirect browser
+  network access, while ordinary asset loads through Image/src remain allowed.
+- Equal-count exception swaps are not detected by the ceiling; they change both
+  the configuration and reason manifest and must be rejected in review.
+
 ## Routes and reconnect
 
 The web client keeps an ordered route list for each paired server. The paired

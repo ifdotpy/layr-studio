@@ -827,64 +827,56 @@ const Accounts = observer(function Accounts({
       onExternalCommandHandled?.();
       return;
     }
-    void state.refresh().then((fresh) => {
-      const current =
-        fresh || (command.action === "account-sign-in" ? state.data : null);
-      if (!current) {
-        setError("Cannot load accounts from this server.");
-        onExternalCommandHandled?.();
-        return;
-      }
-      const account = accountForExternalCommand(current.accounts, command);
-      if (
-        matchingAccountsForExternalCommand(current.accounts, command).length > 1
-      ) {
-        setError("Multiple saved accounts match. Select the exact profile.");
-        onExternalCommandHandled?.();
-        return;
-      }
-      if (command.action === "account-sign-in") {
-        if (command.accountKey && !account) {
-          setError("This account is no longer saved on this server.");
-        } else if (account && (!command.forceAdd || command.accountKey)) {
-          const signIn: Record<ProviderKind, (account: Account) => void> = {
-            [ProviderKind.Codex]: setCodexLogin,
-            [ProviderKind.Claude]: setClaudeLogin,
-          };
-          signIn[account.provider](account);
-        } else {
-          setAddIntent({
-            provider: command.provider,
-            email: command.email,
-            label: command.label,
-            serverLabel: command.serverLabel,
-          });
-          setAddOpen(true);
-        }
-      } else if (!account) {
-        setError("This account is no longer saved on this server.");
-      } else if (command.operation === "rename") {
-        setRenameChoice(account);
-        setRenameLabel(account.label);
-      } else if (command.operation === "default") {
-        void action(`default:${account.id}`, async () => {
-          state.setData(
-            await post("/api/accounts/default", { account_key: account.id }),
-          );
-        });
-      } else if (command.operation === "disconnect") {
-        setDisconnectChoice(account);
-      } else {
-        const requestId = getOrCreateAccountDeleteRequest(
-          state.scope,
-          account.id,
-          storage,
-        );
-        setDeleteRequestId(requestId);
-        setDeleteChoice(account);
-      }
+    const current = state.data;
+    const account = accountForExternalCommand(current.accounts, command);
+    if (
+      matchingAccountsForExternalCommand(current.accounts, command).length > 1
+    ) {
+      setError("Multiple saved accounts match. Select the exact profile.");
       onExternalCommandHandled?.();
-    });
+      return;
+    }
+    if (command.action === "account-sign-in") {
+      if (command.accountKey && !account) {
+        setError("This account is no longer saved on this server.");
+      } else if (account && (!command.forceAdd || command.accountKey)) {
+        const signIn: Record<ProviderKind, (account: Account) => void> = {
+          [ProviderKind.Codex]: setCodexLogin,
+          [ProviderKind.Claude]: setClaudeLogin,
+        };
+        signIn[account.provider](account);
+      } else {
+        setAddIntent({
+          provider: command.provider,
+          email: command.email,
+          label: command.label,
+          serverLabel: command.serverLabel,
+        });
+        setAddOpen(true);
+      }
+    } else if (!account) {
+      setError("This account is no longer saved on this server.");
+    } else if (command.operation === "rename") {
+      setRenameChoice(account);
+      setRenameLabel(account.label);
+    } else if (command.operation === "default") {
+      void action(`default:${account.id}`, async () => {
+        state.setData(
+          await post("/api/accounts/default", { account_key: account.id }),
+        );
+      });
+    } else if (command.operation === "disconnect") {
+      setDisconnectChoice(account);
+    } else {
+      const requestId = getOrCreateAccountDeleteRequest(
+        state.scope,
+        account.id,
+        storage,
+      );
+      setDeleteRequestId(requestId);
+      setDeleteChoice(account);
+    }
+    onExternalCommandHandled?.();
   }, [externalCommand]);
   const selectAccount = (key: string) => {
     const account = accounts.find((candidate) => candidate.id === key);
@@ -939,7 +931,6 @@ const Accounts = observer(function Accounts({
                   account_key: claudeLogin.id,
                 }),
               );
-            else await state.refresh();
           }}
         />
       )}
@@ -1644,7 +1635,9 @@ const Accounts = observer(function Accounts({
 export default Accounts;
 
 /** Frame payloads use the same canonical readback-before-summary source as Accounts. */
-export function frameAccounts(data: AccountsState) {
+export function frameAccounts(
+  data: Pick<AccountsState, "accounts" | "defaultAccountKey">,
+) {
   return data.accounts.map((account) => ({
     accountKey: account.id,
     provider: account.provider,

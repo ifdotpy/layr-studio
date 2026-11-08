@@ -13,6 +13,8 @@ import type { ServerCommand } from "../servers/navigation";
 const hooks = vi.hoisted(() => ({
   effects: [] as (() => void | (() => void))[],
   writes: [] as unknown[],
+  refresh: vi.fn(),
+  post: vi.fn(async () => ({})),
 }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
@@ -27,7 +29,7 @@ vi.mock("react", async (original) => ({
 }));
 vi.mock("../servers/ServerServicesContext", async (original) => ({
   ...(await original<typeof import("../servers/ServerServicesContext")>()),
-  useServerApi: () => ({ post: vi.fn() }),
+  useServerApi: () => ({ post: hooks.post }),
   useServerStorage: () => ({ getItem: () => null, setItem: vi.fn() }),
 }));
 import Accounts from "./Accounts";
@@ -52,6 +54,8 @@ const team: Account = {
 beforeEach(() => {
   hooks.effects = [];
   hooks.writes = [];
+  hooks.refresh.mockReset();
+  hooks.post.mockClear();
 });
 
 async function receive(
@@ -59,6 +63,7 @@ async function receive(
     ServerCommand,
     { action: "account-action" | "account-sign-in" }
   >,
+  replay = false,
 ) {
   const data: AccountsState = {
     accounts: [personal, team],
@@ -74,7 +79,7 @@ async function receive(
       data,
       setData: vi.fn(),
       error: "",
-      refresh: async () => data,
+      refresh: hooks.refresh.mockResolvedValue(data),
       scope: "fixture",
     },
     onError: vi.fn(),
@@ -82,6 +87,10 @@ async function receive(
   });
   const stops = hooks.effects.map((effect) => effect());
   for (let step = 0; step < 4; step++) await Promise.resolve();
+  if (replay) {
+    hooks.effects.forEach((effect) => effect());
+    for (let step = 0; step < 4; step++) await Promise.resolve();
+  }
   for (const stop of stops) stop?.();
 }
 
@@ -140,4 +149,22 @@ it("preserves an explicit Add request even when the email already has profiles",
   expect(hooks.writes).toContain(true);
   expect(hooks.writes).not.toContain(personal);
   expect(hooks.writes).not.toContain(team);
+});
+
+it("resolves an external default command without refreshing accounts and executes it once", async () => {
+  await receive(
+    {
+      action: "account-action",
+      operation: "default",
+      provider: GeneratedProviderProviderKind.Claude,
+      email: personal.email!,
+      label: "Team",
+      accountKey: "team",
+    },
+    true,
+  );
+  expect(hooks.refresh).not.toHaveBeenCalled();
+  expect(hooks.post).toHaveBeenCalledExactlyOnceWith("/api/accounts/default", {
+    account_key: "team",
+  });
 });

@@ -1,6 +1,9 @@
 import { autorun } from "mobx";
 import type { ConnectionHealth } from "./connectionState";
-import { createProjectionMetadataMirror } from "../generated/observableResources.ts";
+import {
+  TRANSIENT_RESOURCE_KINDS,
+  createProjectionMetadataMirror,
+} from "../generated/observableResources.ts";
 import { SubscriptionReplyKind } from "../generated/api";
 import { mergeTerminalOutput } from "./subscriptions/terminalOutput";
 import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
@@ -432,6 +435,7 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   async function readSubscriptionCursor(resource: ResourceRef) {
+    if (TRANSIENT_RESOURCE_KINDS.has(resource.kind)) return undefined;
     const { db, workspaceId } = await syncDatabase();
     await subscriptionCache?.load(resource);
     if (resource.kind === "state") {

@@ -1,8 +1,10 @@
+import { agentId, requestId } from "../../generated/observableResources.ts";
+import { resourceData } from "../../store/runtime.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import { makeAutoObservable, observable, reaction, runInAction } from "mobx";
 import { errorText } from "../../api.ts";
 import { randomUUID } from "../../uuid.ts";
-import { submitRename, watchRenameResult } from "../../renameRequest.ts";
+import { submitRename } from "../../renameRequest.ts";
 
 type PendingRename = { text: string; id: string };
 export class RenameOwner {
@@ -29,26 +31,28 @@ export class RenameOwner {
         fireImmediately: true,
       },
     );
-    let stops: (() => void)[] = [];
     const watch = reaction(
-      () => [...this.pending],
-      (entries) => {
-        stops.forEach((stop) => stop());
-        stops = entries.map(([agentId, request]) =>
-          watchRenameResult(
-            this.areas.scope.services.resources,
-            agentId,
-            request.id,
-            (receipt) => this.settle(agentId, request.id, receipt),
+      () =>
+        [...this.pending].map(([id, request]) => ({
+          id,
+          request,
+          receipt: resourceData(
+            this.areas.scope.store.renameProgress(
+              agentId(id),
+              requestId(request.id),
+            ).current,
           ),
-        );
+        })),
+      (entries) => {
+        for (const { id, request, receipt } of entries)
+          if (receipt && receipt.id === id && receipt.request_id === request.id)
+            this.settle(id, request.id, receipt);
       },
       { fireImmediately: true },
     );
     return () => {
       restore();
       watch();
-      stops.forEach((stop) => stop());
     };
   }
   restore() {

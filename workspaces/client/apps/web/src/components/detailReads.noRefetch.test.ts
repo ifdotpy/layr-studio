@@ -17,6 +17,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { Agent, Message } from "../types";
 import { componentSnapshot as snapshotFixture } from "./componentTestFixtures.ts";
 import type { Account } from "./Accounts";
+import { createServerStore } from "../store/server.ts";
+import { createSubscriptions } from "../sync/subscriptions/module.ts";
+const actionStore = () =>
+  createServerStore(
+    createSubscriptions({
+      watchResourceChanges: () => () => {},
+      watchResourceConnection: () => () => {},
+    }),
+  );
+let reads = actionStore();
 
 const h = vi.hoisted(() => ({
   cost: undefined as
@@ -71,14 +81,23 @@ vi.mock("react", async (original) => ({
     }
   },
 }));
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerStore: () => ({
-    agentDetail: () => ({ current: { status: "loading" } }),
-    sessionCost: () => ({
-      current: h.cost ? { status: "live", data: h.cost } : { status: "absent" },
-    }),
+const detailStore = {
+  get reads() {
+    return reads.reads;
+  },
+  agentDetail: () => ({ current: { status: "loading" } }),
+  sessionCost: () => ({
+    current: h.cost ? { status: "live", data: h.cost } : { status: "absent" },
   }),
-  useServerApi: () => ({ get: h.get, post: h.post, saved: () => null }),
+};
+vi.mock("../servers/ServerServicesContext", () => ({
+  useServerStore: () => detailStore,
+  useServerApi: () => ({
+    get: h.get,
+    post: h.post,
+    saved: () => null,
+    getStreamSession: () => undefined,
+  }),
   useServerStorage: () => ({}),
   useServerSync: () => ({ subscribeStateProjection: h.subscribe }),
 }));
@@ -138,7 +157,10 @@ function find(
   return undefined;
 }
 afterEach(() => {
+  reads.dispose();
+  reads = actionStore();
   for (const cell of h.cells) cell?.cleanup?.();
+  vi.unstubAllGlobals();
   h.cells = [];
   h.effects = [];
   h.get.mockReset();
@@ -252,7 +274,7 @@ it("opening a different thread loads its historical errors once", async () => {
 });
 
 it("message info reads on open and reopen but not streamed turn metadata changes", async () => {
-  h.get.mockResolvedValue({ model: "model" });
+  h.get.mockResolvedValue({ model: "queried-model" });
   let message: Message = {
     id: "item",
     role: "assistant",
@@ -282,6 +304,12 @@ it("message info reads on open and reopen but not streamed turn metadata changes
   view = render(read);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(1);
+  expect(
+    find(
+      view,
+      (node) => node.type === "dd" && node.props.children === "queried-model",
+    ),
+  ).toBeDefined();
   view.props.onChange(false);
   view = render(read);
   view.props.onChange(true);
@@ -430,7 +458,8 @@ it("repair scope changes hide old evidence without reads; refresh uses the curre
   expect(h.get).toHaveBeenCalledTimes(2);
 });
 
-it("location array replacements, additions and path changes do not refetch folder info", async () => {
+it("location menu reads once and location changes do not refetch folder info", async () => {
+  vi.stubGlobal("window", { addEventListener() {}, removeEventListener() {} });
   h.get.mockResolvedValue({ gitHead: "initial-head" });
   const location = { serverId: "local", path: "/one", projectId: "project" };
   let project = {
@@ -439,8 +468,22 @@ it("location array replacements, additions and path changes do not refetch folde
     path: "/one",
     locations: [location],
   };
-  const read = () => ProjectLocationsSettings({ project, saved: vi.fn() });
+  const read = () => {
+    const view = ProjectLocationsSettings({ project, saved: vi.fn() });
+    if (!isValidElement(view)) throw new Error("Expected location settings");
+    return view;
+  };
   render(read);
+  await settle();
+  expect(h.get).not.toHaveBeenCalled();
+  const menu = find(
+    render(read),
+    (node) =>
+      node.props.opened === false && typeof node.props.onChange === "function",
+  );
+  const open = menu?.props.onChange;
+  if (typeof open !== "function") throw new Error("Missing location menu");
+  open(true);
   await settle();
   expect(h.get).toHaveBeenCalledTimes(1);
   for (const locations of [
@@ -449,8 +492,76 @@ it("location array replacements, additions and path changes do not refetch folde
     [location, { ...location, serverId: "remote" }],
   ]) {
     project = { ...project, locations };
-    render(read);
+    const view = render(read);
     await settle();
     expect(h.get).toHaveBeenCalledTimes(1);
+    const row = find(
+      view,
+      (node) => node.props.className === "project-location-row",
+    );
+    const label = row?.props.label;
+    if (!isValidElement(label)) throw new Error("Missing location label");
+    if (locations[0]?.path === "/two")
+      expect(renderToStaticMarkup(label)).not.toContain("initial-head");
   }
+});
+
+it("overlapping location HEAD actions keep their requested paths isolated", async () => {
+  vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+    callback(0);
+    return 0;
+  });
+  vi.stubGlobal("window", { addEventListener() {}, removeEventListener() {} });
+  const one = Promise.withResolvers<{ gitHead: string }>(),
+    two = Promise.withResolvers<{ gitHead: string }>();
+  h.get.mockReturnValueOnce(one.promise).mockReturnValueOnce(two.promise);
+  let project = {
+    id: "project",
+    name: "Project",
+    path: "/one",
+    locations: [{ projectId: "project", serverId: "local", path: "/one" }],
+  };
+  const read = () => {
+    const view = ProjectLocationsSettings({ project, saved: vi.fn() });
+    if (!isValidElement(view)) throw new Error("Missing settings");
+    return view;
+  };
+  const menu = () => {
+    const node = find(
+      render(read),
+      (node) =>
+        typeof node.props.onChange === "function" && "opened" in node.props,
+    );
+    const change = node?.props.onChange;
+    if (typeof change !== "function") throw new Error("Missing menu");
+    return change;
+  };
+  menu()(true);
+  await settle();
+  menu()(false);
+  project = {
+    ...project,
+    locations: [{ projectId: "project", serverId: "local", path: "/two" }],
+  };
+  menu()(true);
+  await settle();
+  expect(h.get).toHaveBeenCalledTimes(2);
+  expect(h.get).toHaveBeenNthCalledWith(
+    2,
+    "/api/project-locations",
+    expect.objectContaining({
+      query: expect.objectContaining({ path: "/two" }),
+    }),
+  );
+  two.resolve({ gitHead: "head-two" });
+  await settle();
+  one.resolve({ gitHead: "head-one" });
+  await settle();
+  const label = find(
+    render(read),
+    (node) => node.props.className === "project-location-row",
+  )?.props.label;
+  if (!isValidElement(label)) throw new Error("Missing location label");
+  expect(renderToStaticMarkup(label)).toContain("head-two");
+  expect(renderToStaticMarkup(label)).not.toContain("head-one");
 });

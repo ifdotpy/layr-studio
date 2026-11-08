@@ -203,6 +203,30 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
       appliedVersion?: ResourceVersion,
     ) {
       const entry = entryFor(ref);
+      // Login receipts have no sequence; completion and code submission are monotonic.
+      if (ref.kind === "auth-progress") {
+        type Auth = ResourceData<
+          Extract<ResourceRef, { kind: "auth-progress" }>
+        >;
+        const previous = entry.state.data as Auth | undefined;
+        const next = data as Auth | undefined;
+        if (
+          previous &&
+          next &&
+          previous.requestId === next.requestId &&
+          previous.accountKey === next.accountKey
+        ) {
+          if (
+            ["ready", "duplicate", "cancelled", "error"].includes(
+              previous.status,
+            ) &&
+            ["starting", "pending", "uncertain"].includes(next.status)
+          )
+            return;
+          if (previous.codeSubmitted === true && next.codeSubmitted !== true)
+            data = { ...next, codeSubmitted: true } as ResourceData<R>;
+        }
+      }
       // An asynchronous view read cannot confirm or overwrite a newer frame.
       if (appliedVersion && appliedVersion !== entry.version) return;
       if (appliedVersion && connection === "live" && entry.consumers.size)

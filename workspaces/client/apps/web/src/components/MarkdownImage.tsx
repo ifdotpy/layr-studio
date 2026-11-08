@@ -2,7 +2,7 @@ import { useServerApi } from "../servers/ServerServicesContext";
 import { useEffect, useMemo, useState } from "react";
 import PreviewModal from "./PreviewModal";
 import { errorText } from "../api";
-import FilePreview, { type PreviewTarget } from "./FilePreview";
+import FilePreview, { useFilePreview, type PreviewTarget } from "./FilePreview";
 import ImageViewer from "./ImageViewer";
 import { relativeToDocument, safeSvg } from "./filePreviewFormats";
 import { localFileLink } from "./fileLinks";
@@ -27,6 +27,7 @@ export default function MarkdownImage({
   const [error, setError] = useState("");
   const [remoteAllowed, setRemoteAllowed] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [filePreview, openFilePreview] = useFilePreview();
   const [attempt, setAttempt] = useState(0);
   const target = useMemo((): PreviewTarget | null => {
     try {
@@ -110,6 +111,7 @@ export default function MarkdownImage({
             event.preventDefault();
             event.stopPropagation();
             setPreview(true);
+            if (target) openFilePreview(target);
           }}
         >
           <img
@@ -151,7 +153,7 @@ export default function MarkdownImage({
       )}
       {target ? (
         <FilePreview
-          target={preview ? target : null}
+          target={preview ? filePreview : null}
           onClose={() => setPreview(false)}
         />
       ) : (
