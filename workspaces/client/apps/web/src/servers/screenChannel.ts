@@ -1,5 +1,5 @@
-import type { ServerCommand } from "./navigation";
-import type { GetResult } from "../api";
+import type { ServerCommand } from "./navigation.ts";
+import type { GetResult } from "../api.ts";
 
 export type ScreenMessage = { kind: string; [key: string]: unknown };
 export type ScreenSearchResults = Pick<GetResult<"/api/search">, "results"> & {

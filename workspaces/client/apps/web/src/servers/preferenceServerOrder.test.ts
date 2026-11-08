@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, expect, it, vi } from "vitest";
-import type { StudioServer } from "./registry";
+import type { StudioServer } from "./registry.ts";
 const state = vi.hoisted(() => ({
   order: ["remote-workspace", "local-workspace"],
 }));
-vi.mock("../sync/uiPreferenceStore", () => ({
+vi.mock("../sync/uiPreferenceStore.ts", () => ({
   readPreferenceFields: () => ({ '["server-order"]': { value: state.order } }),
 }));
-import { orderPreferenceServers } from "./preferenceServerOrder";
+import { orderPreferenceServers } from "./preferenceServerOrder.ts";
 describe("server preference order", () => {
   it("places the local server at its shared position and retains unknown server order", () => {
     const servers = [

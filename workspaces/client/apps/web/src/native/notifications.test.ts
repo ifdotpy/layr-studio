@@ -1,12 +1,12 @@
 import { beforeEach, afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   hasNativeClient: () => true,
   nativeHost: vi.fn(),
   nativeRequest: vi.fn(),
 }));
-vi.mock("./frame", () => ({ isNativeFrame: () => false }));
-import { nativeHost, nativeRequest } from "./client";
-import { notifyDesktop, onDesktopNavigate } from "./notifications";
+vi.mock("./frame.ts", () => ({ isNativeFrame: () => false }));
+import { nativeHost, nativeRequest } from "./client.ts";
+import { notifyDesktop, onDesktopNavigate } from "./notifications.ts";
 beforeEach(() => vi.stubGlobal("window", {}));
 afterEach(() => {
   vi.resetAllMocks();

@@ -1,4 +1,4 @@
-import { saved } from "../api";
+import { saved } from "../api.ts";
 import {
   serializeStateCollections,
   type StateCollections,
@@ -11,8 +11,8 @@ export type SidebarEntity = StateEntity;
 export const sidebarEntities = serializeStateCollections;
 
 import type { components } from "../generated/api.ts";
-import { readPreferenceFields } from "../sync/uiPreferenceStore";
-import type { PreferenceFields } from "../sync/uiPreferenceMerge";
+import { readPreferenceFields } from "../sync/uiPreferenceStore.ts";
+import type { PreferenceFields } from "../sync/uiPreferenceMerge.ts";
 
 export type ServerSidebarSnapshot = {
   entities: readonly SidebarEntity[];

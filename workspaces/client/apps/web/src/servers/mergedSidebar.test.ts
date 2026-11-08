@@ -7,31 +7,31 @@ import {
   replaceSourceAgents,
 } from "./sidebarSourceFixture.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
-import { StudioErrorLevel } from "../generated/api";
-import { StudioErrorEffectCertainty } from "../generated/api";
-import { required } from "../components/componentTestFixtures.ts";
+import { StudioErrorLevel } from "../generated/api.ts";
+import { StudioErrorEffectCertainty } from "../generated/api.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
-import { decodeSidebarRanks } from "./sidebarOrderRanks";
+import { decodeSidebarRanks } from "./sidebarOrderRanks.ts";
 import { describe, expect, it, vi } from "vitest";
-import type { Project } from "../types";
+import type { Project } from "../types.ts";
 import {
   localSidebarBackend,
   type SidebarBackend,
-} from "../components/sidebar/services";
-import { itemGroup } from "../components/sidebar/catalog";
+} from "../components/sidebar/support/services.tsx";
+import { itemGroup } from "../components/sidebar/support/catalog.ts";
 import {
   createMergedSidebarSelector,
   mergeSidebar,
   type SidebarSource,
-} from "./mergedSidebar";
+} from "./mergedSidebar.ts";
 import {
   mergedSidebarPreferences,
   sidebarOrderWrite,
-} from "./mergedSidebarPreferences";
+} from "./mergedSidebarPreferences.ts";
 import {
   mergePreferenceFields,
   type PreferenceFields,
-} from "../sync/uiPreferenceMerge";
+} from "../sync/uiPreferenceMerge.ts";
 
 const path = "/same/project";
 const scope = "/same/state";

@@ -1,12 +1,12 @@
 import { createAtom, computed } from "mobx";
 import { createTokenRateSnapshotMirror } from "../generated/observableResources.ts";
 import { observeInterest } from "../store/interest.ts";
-import type { components } from "../generated/api";
+import type { components } from "../generated/api.ts";
 
 import {
   TOKEN_RATE_MAX_ENTRIES,
   TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS,
-} from "../generated/api";
+} from "../generated/api.ts";
 
 // This cache receives volatile SSE events. It never enters the sync database.
 export type TokenRate = import("../deepReadonly.ts").DeepReadonly<

@@ -1,4 +1,4 @@
-import type { Agent } from "./types";
+import type { Agent } from "./types.ts";
 import assert from "node:assert/strict";
 import { it } from "vitest";
 import { currentCapacityRetry as readCapacityRetry } from "./capacityRetry.ts";

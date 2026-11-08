@@ -1,9 +1,9 @@
-import { randomUUID } from "../uuid";
-import { listenNativeEvents, nativeRequest } from "./client";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { listenNativeEvents, nativeRequest } from "./client.ts";
 import type {
   NativeStreamRetry,
   ServerEventSource,
-} from "../servers/eventSource";
+} from "../servers/eventSource.ts";
 
 type NativeStreamMessage = {
   event?: string;

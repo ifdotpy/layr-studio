@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import type { Agent, Message } from "../../src/types.ts";
@@ -11,7 +12,7 @@ import "@mantine/core/styles.css";
 import {
   NativeError,
   NativeNotice,
-} from "../../src/components/NativeNotice.tsx";
+} from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
 import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
 const now = Number(new URLSearchParams(location.search).get("now"));
 const error = {

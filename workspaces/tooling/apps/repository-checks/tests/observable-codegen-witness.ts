@@ -142,7 +142,7 @@ export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']]
   `,
   );
   write(
-    "src/store/index.ts",
+    "src/store/runtime.ts",
     `
     import type { DeepReadonly } from '../deepReadonly.ts';
     import type { ResourceRef, ResourceData, SubscriptionError } from '../sync/subscriptions/contracts.ts';
@@ -158,7 +158,7 @@ import { autorun, isObservable, spy } from 'mobx';
 import {createStateMirror, createAgentDetailMirror, createProcessesMirror, createTranscriptMirror, createObservableResources, createRequestsMirror, createQuestionHistoryMirror, createTaskDetailMirror, agentId, taskId} from './src/generated/observableResources.ts';
 import type {components} from './src/generated/api.ts';
 import type {DeepReadonly} from './src/deepReadonly.ts';
-import type {ObservableResourceRuntime, ResourceSlot} from './src/store/index.ts';
+import type {ObservableResourceRuntime, ResourceSlot} from './src/store/runtime.ts';
 import {subscriptionKey, type ResourceData} from './src/sync/subscriptions/contracts.ts';
 type Payload=components['schemas']['SyncEntityPayload'];
 function readonlyArrayIdempotence(value: readonly {readonly nested: readonly number[]}[]): DeepReadonly<readonly {nested:number[]}[]> { return value; }
@@ -295,7 +295,7 @@ import assert from 'node:assert/strict';
 import { autorun, spy } from 'mobx';
 import { createObservableResources, createStateMirror, type StateCollections } from './src/generated/observableResources.ts';
 import { fixtureKeyComputations } from './src/sync/subscriptions/contracts.ts';
-import type { ObservableResourceRuntime } from './src/store/index.ts';
+import type { ObservableResourceRuntime } from './src/store/runtime.ts';
 import type { components } from './src/generated/api.ts';
 type Row = components['schemas']['Row'];
 type Payload = components['schemas']['Payload'];
@@ -357,7 +357,7 @@ import {fixtureKeyComputations, subscriptionKey} from './src/sync/subscriptions/
 import { createObservableResources, createFixtureMirror, fixtureArrayOperations, agentId, teamId, type AgentId, type TeamId, type List } from './src/generated/observableResources.ts';
 import type { components } from './src/generated/api.ts';
 import type { DeepReadonly } from './src/deepReadonly.ts';
-import type { ObservableResourceRuntime } from './src/store/index.ts';
+import type { ObservableResourceRuntime } from './src/store/runtime.ts';
 
 const a = agentId('agent'); const t = teamId('team');
 const brandWitness = (agent: AgentId, team: TeamId) => [agent, team];
@@ -387,7 +387,7 @@ let publish: () => void = () => { throw new Error('slot missing'); };
 let opens = 0;
 const runtime: ObservableResourceRuntime = {
   keyed(definition) {
-    const slots = new Map<string, import('./src/store/index.ts').ResourceSlot<DeepReadonly<ReturnType<typeof definition.create>>>>();
+    const slots = new Map<string, import('./src/store/runtime.ts').ResourceSlot<DeepReadonly<ReturnType<typeof definition.create>>>>();
     return (ref) => {
       const key = subscriptionKey(ref); const previous = slots.get(key);
       if (previous) return previous;

@@ -6,14 +6,14 @@ import {
   reaction,
   runInAction,
 } from "mobx";
-import { createSendingMessageRemoval } from "../../components/removeSendingMessages.ts";
+import { createSendingMessageRemoval } from "./delivery/removeSendingMessages.ts";
 import { ApiError, errorText } from "../../api.ts";
 import {
   codePointsExceed,
   sendsTextFile,
   type SendMessageBody,
 } from "../../commands.ts";
-import { randomUUID } from "../../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   AgentSource as GeneratedApiAgentSource,
   MessageSendStatus,
@@ -21,8 +21,8 @@ import {
 import { DeliveryMoment } from "../../generated/deliveryMoment.ts";
 import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../generated/sharedValues.ts";
 import { renameCommand, studioCommand } from "../../nativeCommands.ts";
-import { mergeOutgoing } from "../../components/message-delivery/messageDelivery.ts";
-import type { ConversationSendOptions } from "../../components/conversation/navigation.ts";
+import { mergeOutgoing } from "../../components/conversation/support/messageDelivery.ts";
+import type { ConversationSendOptions } from "../../components/conversation/support/navigation.ts";
 import type { OutgoingMessage } from "../../sync/send.ts";
 
 export function connectionFailureText(value: string) {

@@ -3,9 +3,9 @@ import {
   EntityTransferAssembler,
   type TransferStorage,
   type StagedEntityInterval,
-} from "./entityTransfer";
-import type { components } from "../generated/api";
-import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues";
+} from "./entityTransfer.ts";
+import type { components } from "../generated/api.ts";
+import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
 
 type Batch = components["schemas"]["EntityChangeBatch"];
 class MemoryStaging implements TransferStorage {

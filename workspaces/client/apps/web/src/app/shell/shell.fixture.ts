@@ -1,9 +1,9 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { runInAction } from "mobx";
 import { createServerServices } from "../../servers/serverServices.ts";
-import { observableFixture } from "../../components/observableFixture.tsx";
+import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { AgentSource } from "../../generated/api.ts";
 import { ServerAreas } from "../ServerAreasProvider.tsx";
 

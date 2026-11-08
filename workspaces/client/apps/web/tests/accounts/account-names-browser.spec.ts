@@ -1,3 +1,4 @@
+import type {} from "./account-names.fixture.tsx";
 import type { Page } from "@playwright/test";
 import type { Account, AccountsState } from "./fixture-helpers.ts";
 import {
@@ -7,7 +8,7 @@ import {
   fixtureRequest,
   type FixtureRequest,
 } from "./fixture-helpers.ts";
-import type {} from "./account-names.fixture.tsx";
+
 import { join } from "node:path";
 import { test, expect, createFixtureViteServer } from "../playwright.ts";
 

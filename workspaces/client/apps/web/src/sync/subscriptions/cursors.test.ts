@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { cursorDocumentId, parseAppliedCursor } from "./cursors";
+import { cursorDocumentId, parseAppliedCursor } from "./cursors.ts";
 
 it("keeps a separate durable cursor for each canonical ref and database", async () => {
   const a = { kind: "transcript", agentId: "a" } as const;

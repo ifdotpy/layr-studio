@@ -1,5 +1,6 @@
-import { test, expect } from "./playwright.ts";
 import type {} from "./scrollbars-ui.fixture.tsx";
+import { test, expect } from "./playwright.ts";
+
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import { browserExecutablePath } from "./browser-executable.ts";

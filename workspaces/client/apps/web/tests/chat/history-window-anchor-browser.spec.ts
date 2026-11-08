@@ -1,6 +1,7 @@
+import type {} from "./history-window-anchor-browser.fixture.tsx";
 import { fixtureOrigin, waitForFrames } from "./browser.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
-import type {} from "./history-window-anchor-browser.fixture.tsx";
+
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

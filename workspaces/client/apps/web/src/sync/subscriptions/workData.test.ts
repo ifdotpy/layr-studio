@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
-import { WorkStatus } from "../../generated/api";
-import type { SyncEntityPayload } from "../../generated/api";
-import { createTaskAssignmentSelector } from "./workData";
+import { WorkStatus } from "../../generated/api.ts";
+import type { SyncEntityPayload } from "../../generated/api.ts";
+import { createTaskAssignmentSelector } from "./workData.ts";
 
 it("uses server dependency policy even when the scoped cache omits a dependency", () => {
   const entities = [

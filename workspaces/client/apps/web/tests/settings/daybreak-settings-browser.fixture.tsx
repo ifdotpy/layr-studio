@@ -1,10 +1,11 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
-import type { WorkerModelInfo } from "../../src/components/agents/WorkerModelPicker.tsx";
+import type { WorkerModelInfo } from "../../src/components/agents/support/WorkerModelPicker.tsx";
 import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
-} from "../../src/components/agents/modelCatalogFixture.tsx";
+} from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 import type { PostBody } from "../../src/apiTypes.ts";
 import { fixtureFetchInput, fixturePostBody } from "./fixture-helpers.ts";
 export type DaybreakReset = {
@@ -60,7 +61,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const initial: Agent = {
   id: "first",
   accountKey: "default",

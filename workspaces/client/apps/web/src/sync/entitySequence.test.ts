@@ -5,7 +5,7 @@ import {
   getEntitySequenceCheckpoint,
   getEntitySequenceCheckpointForWorkspace,
   setEntitySequenceProjection,
-} from "./entitySequence";
+} from "./entitySequence.ts";
 
 describe("entity sequence checkpoint", () => {
   it("requires contiguous coverage for in-flight, gate, and persister advancement", async () => {

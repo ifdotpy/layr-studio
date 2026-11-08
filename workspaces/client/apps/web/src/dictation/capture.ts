@@ -1,5 +1,5 @@
-import { hasNativeClient } from "../native/client";
-import { captureNativeAudio } from "../native/dictation";
+import { hasNativeClient } from "../native/client.ts";
+import { captureNativeAudio } from "../native/dictation.ts";
 import workletURL from "./capture-worklet.ts?worker&url";
 export async function captureAudio(
   onChunk: (pcm: Int16Array) => void,

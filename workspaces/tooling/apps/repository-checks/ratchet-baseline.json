@@ -2719,31 +2719,31 @@
       "fingerprint": "a4fc2c6fe5816e16795ca4090209d675f02e5346505e127aabe49153c12acfe6:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/AccountStartThrottle.test.ts",
+      "file": "workspaces/client/apps/web/src/components/accounts/AccountStartThrottle/AccountStartThrottle.test.ts",
       "fingerprint": "52267d508df7d569aba04cdc59896349d716a9af4da62368ba0d7cb3493e1205:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/AccountTiles.test.ts",
+      "file": "workspaces/client/apps/web/src/components/accounts/AccountTiles/AccountTiles.test.ts",
       "fingerprint": "fa4f6030fbefdc035adeef2d5436936265f3b7f870746f8ec99214263f6012f3:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/liveRequestConsumers.test.ts",
+      "file": "workspaces/client/apps/web/src/components/conversation/questions/support/liveRequestConsumers.test.ts",
       "fingerprint": "b2d5d6ac5d417be601dd86316f5bf594275166679713d51ea82c74b9448b3725:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/services.test.ts",
       "fingerprint": "b82160817a0c5d578825d701a5483cae958e3466610c06e5a8e3dc15ad1ce717:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/services.test.ts",
       "fingerprint": "b82160817a0c5d578825d701a5483cae958e3466610c06e5a8e3dc15ad1ce717:1"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/services.test.ts",
       "fingerprint": "edada8886fc62e27c56e89c38a37395a3e8150b2fda9c93394b5e8bbf49614b0:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/sidebar/services.test.ts",
+      "file": "workspaces/client/apps/web/src/components/sidebar/support/services.test.ts",
       "fingerprint": "edada8886fc62e27c56e89c38a37395a3e8150b2fda9c93394b5e8bbf49614b0:1"
     },
     {
@@ -2767,11 +2767,11 @@
       "fingerprint": "03d24bdba8c9e272d6948e30c32dbe670cbac161425bf16fe401ee51cdd0a4f1:1"
     },
     {
-      "file": "workspaces/client/apps/web/src/servers/ServerAccountLimits.test.ts",
+      "file": "workspaces/client/apps/web/src/components/servers/ServerTurnStartLimits/ServerTurnStartLimits.ServerAccountLimits.test.ts",
       "fingerprint": "86fa6d3dee3e84fdca6b05d2f35c055ae078f5a5cd6b5b43fa01dea47193b486:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/servers/ServerAccountLimits.test.ts",
+      "file": "workspaces/client/apps/web/src/components/servers/ServerTurnStartLimits/ServerTurnStartLimits.ServerAccountLimits.test.ts",
       "fingerprint": "946d8fdd234323eb48d8998a3d6abe322a8ba492a3d067861b72c01903361fe3:0"
     },
     {
@@ -2857,7 +2857,7 @@
   ],
   "ts-double-cast-tsx": [
     {
-      "file": "workspaces/client/apps/web/src/components/ConversationWarnings.stories.tsx",
+      "file": "workspaces/client/apps/web/src/components/conversation/ConversationWarnings/ConversationWarnings.stories.tsx",
       "fingerprint": "925bba0caf98ff346b265f0abd0811b92656c45c6afb71110f8c86c3033f9cbb:0"
     }
   ],
@@ -2883,7 +2883,7 @@
       "fingerprint": "f1cf9913728d78fe54debdb506c944f431ed56852a86e2210a8a6dbf9d78f57a:0"
     },
     {
-      "file": "workspaces/client/apps/web/src/components/conversation-results/conversationResultModel.ts",
+      "file": "workspaces/client/apps/web/src/components/conversation/transcript/ConversationResults/conversationResultModel.ts",
       "fingerprint": "f01e944d16680ca56e4af149b78b271b61ed1b8c6e57b242a5f49da9fc73f7b8:0"
     },
     {
@@ -2973,7 +2973,7 @@
   ],
   "ts-json-parse-cast-tsx": [
     {
-      "file": "workspaces/client/apps/web/src/components/ProjectDelete.browser.fixture.tsx",
+      "file": "workspaces/client/apps/web/src/components/projects/ProjectDeleteDialog/ProjectDelete.browser.fixture.tsx",
       "fingerprint": "157c0e43f1fbfe454daf186c9832b6e0d72691505182671193be4af37d079fd2:0"
     },
     {

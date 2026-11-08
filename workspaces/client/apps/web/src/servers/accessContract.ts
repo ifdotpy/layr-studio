@@ -1,4 +1,4 @@
-import type { components, paths } from "../generated/api";
+import type { components, paths } from "../generated/api.ts";
 
 export type ServerAccessState = components["schemas"]["AccessSnapshot"];
 export type ServerIdentityAlert = components["schemas"]["IdentityAlert"];

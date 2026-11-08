@@ -1,4 +1,4 @@
-import { ApiError } from "../api";
+import { ApiError } from "../api.ts";
 
 export function retryableReadError(error: unknown): boolean {
   return (

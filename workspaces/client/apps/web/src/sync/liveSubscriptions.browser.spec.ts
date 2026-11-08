@@ -1,6 +1,6 @@
-import { FrontendLocality } from "../generated/api";
-import type { components } from "../generated/api";
-import type { ResourceRef } from "./resourceEvents";
+import { FrontendLocality } from "../generated/api.ts";
+import type { components } from "../generated/api.ts";
+import type { ResourceRef } from "./resourceEvents.ts";
 import { initializeSubscriptions } from "./liveSubscriptions.browser.fixture.ts";
 import {
   fixturePort,

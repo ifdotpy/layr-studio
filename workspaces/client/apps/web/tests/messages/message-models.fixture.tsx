@@ -2,16 +2,16 @@ import type { ReactNode } from "react";
 import {
   createStateMirror,
   type StateEntity,
-} from "../../src/generated/observableResources";
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
-import { createServerStore } from "../../src/store";
-import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
-import type { Agent } from "../../src/types";
+} from "../../src/generated/observableResources.ts";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
+import type { Agent } from "../../src/types.ts";
 import {
   ConversationProvider,
   type ConversationActions,
-} from "../../src/components/conversation/navigation";
+} from "../../src/components/conversation/support/navigation.ts";
 
 /** Static state facts with the real room/complaint resource acquisition owner. */
 export function messageModels(stateDir: string, agents: readonly Agent[]) {

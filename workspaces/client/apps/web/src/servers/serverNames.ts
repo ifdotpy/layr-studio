@@ -1,4 +1,4 @@
-import { readServers, writeServers, type StudioServer } from "./registry";
+import { readServers, writeServers, type StudioServer } from "./registry.ts";
 import { autorun } from "mobx";
 import { resourceData } from "../store/runtime.ts";
 import type { createServerStore } from "../store/server.ts";

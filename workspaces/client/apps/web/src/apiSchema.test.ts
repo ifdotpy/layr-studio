@@ -3,7 +3,7 @@ import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,
   API_SCHEMA_MISMATCH_HEADER,
-} from "./generated/apiSchema";
+} from "./generated/apiSchema.ts";
 
 afterEach(() => {
   vi.resetModules();
@@ -53,7 +53,7 @@ it("automatically loads a verified new renderer once and permits a later deploym
     Response.json({ version: 1, build, apiSchema: hash }),
   );
   vi.stubGlobal("fetch", fetch);
-  let api = await import("./api");
+  let api = await import("./api.ts");
   api.markApiSchemaMismatch(hash);
   const signal = new AbortController().signal;
   expect(await api.automaticallyUpdateRenderer(() => true, signal)).toBe(true);
@@ -63,14 +63,14 @@ it("automatically loads a verified new renderer once and permits a later deploym
     { cache: "no-store", redirect: "error" },
   ]);
   vi.resetModules();
-  api = await import("./api");
+  api = await import("./api.ts");
   api.markApiSchemaMismatch(hash);
   expect(await api.automaticallyUpdateRenderer(() => true, signal)).toBe(false);
   expect(reload).toHaveBeenCalledOnce();
   hash = "c".repeat(64);
   build = "d".repeat(16);
   vi.resetModules();
-  api = await import("./api");
+  api = await import("./api.ts");
   api.markApiSchemaMismatch(hash);
   expect(await api.automaticallyUpdateRenderer(() => true, signal)).toBe(true);
   expect(reload).toHaveBeenCalledTimes(2);
@@ -78,7 +78,7 @@ it("automatically loads a verified new renderer once and permits a later deploym
 
 it("retains the gate for unknown, unavailable or incompatible renderer metadata", async () => {
   const { reload } = stubRendererUpdate();
-  let api = await import("./api");
+  let api = await import("./api.ts");
   const signal = new AbortController().signal;
   const fetch = vi.fn();
   vi.stubGlobal("fetch", fetch);
@@ -93,7 +93,7 @@ it("retains the gate for unknown, unavailable or incompatible renderer metadata"
     null,
   ]) {
     vi.resetModules();
-    api = await import("./api");
+    api = await import("./api.ts");
     api.markApiSchemaMismatch("a".repeat(64));
     fetch.mockResolvedValue(Response.json(manifest));
     expect(await api.automaticallyUpdateRenderer(() => true, signal)).toBe(
@@ -119,7 +119,7 @@ it("checks local activity again after fetching metadata and preserves cancellati
       apiSchema: "a".repeat(64),
     });
   });
-  const api = await import("./api");
+  const api = await import("./api.ts");
   api.markApiSchemaMismatch("a".repeat(64));
   const controller = new AbortController();
   expect(
@@ -152,7 +152,7 @@ it("accepts a matching server schema hash without entering mismatch state", asyn
         },
       }),
   );
-  const api = await import("./api");
+  const api = await import("./api.ts");
   await expect(api.get("/api/session")).resolves.toEqual({
     token: "session-token",
   });
@@ -168,7 +168,7 @@ it("notifies cache cleanup only after a matching server schema response", async 
         headers: { [API_SCHEMA_HASH_HEADER]: API_SCHEMA_HASH },
       }),
   );
-  const api = await import("./api");
+  const api = await import("./api.ts");
   await api.get("/api/session");
   const confirmed = vi.fn();
   const stop = api.onMatchingApiSchemaResponse(confirmed);
@@ -190,7 +190,7 @@ it("sends the generated schema hash and raises mismatch state from an API respon
     });
   });
 
-  const api = await import("./api");
+  const api = await import("./api.ts");
   const mismatch = vi.fn();
   const matching = vi.fn();
   api.onApiSchemaMismatch(mismatch);
@@ -229,7 +229,7 @@ it("blocks later writes when a rollback returns an identity without a schema has
       ),
   );
   vi.stubGlobal("fetch", fetch);
-  const api = await import("./api");
+  const api = await import("./api.ts");
   const mismatch = vi.fn();
   api.onApiSchemaMismatch(mismatch);
 
@@ -267,7 +267,7 @@ it("accepts the identity when its server schema hash matches", async () => {
         },
       ),
   );
-  const api = await import("./api");
+  const api = await import("./api.ts");
 
   await api.syncGet("/api/sync/identity");
 
@@ -298,7 +298,7 @@ it("rejects mismatched pull and mutation responses", async () => {
         },
       ),
   );
-  let api = await import("./api");
+  let api = await import("./api.ts");
   await expect(
     api.get("/api/sync/pull", {
       query: { scope: "state:entities:v1", after: 0, limit: 500 },
@@ -317,7 +317,7 @@ it("rejects mismatched pull and mutation responses", async () => {
         { headers: { [API_SCHEMA_HASH_HEADER]: "foreign-schema" } },
       ),
   );
-  api = await import("./api");
+  api = await import("./api.ts");
   await expect(
     api.post("/api/projects", {
       action: "reorder",
@@ -338,7 +338,7 @@ it("does not treat an unmarked HTTP 426 as an API schema mismatch", async () => 
         headers: { "Content-Type": "application/json" },
       }),
   );
-  const api = await import("./api");
+  const api = await import("./api.ts");
   const request = api.post("/api/commands", {
     id: "m1",
     client: "c",
@@ -363,7 +363,7 @@ it("raises mismatch state only for the explicitly marked schema-gated 426", asyn
         status: 426,
       }),
   );
-  let api = await import("./api");
+  let api = await import("./api.ts");
   await expect(api.get("/api/session")).rejects.toMatchObject({ status: 426 });
   expect(api.isApiSchemaMismatch()).toBe(false);
 
@@ -376,7 +376,7 @@ it("raises mismatch state only for the explicitly marked schema-gated 426", asyn
         headers: { [API_SCHEMA_MISMATCH_HEADER]: "1" },
       }),
   );
-  api = await import("./api");
+  api = await import("./api.ts");
   await expect(
     api.post("/api/commands", {
       id: "message-1",
@@ -410,7 +410,7 @@ it("clears the update attempt only after a matching response on the reloaded pag
         },
       }),
   );
-  const api = await import("./api");
+  const api = await import("./api.ts");
   await expect(api.get("/api/session")).rejects.toBeInstanceOf(
     api.ApiSchemaMismatchError,
   );
@@ -418,7 +418,7 @@ it("clears the update attempt only after a matching response on the reloaded pag
   expect(api.schemaUpdateFailedAfterReload()).toBe(true);
   vi.resetModules();
   responses[0] = API_SCHEMA_HASH;
-  const reloadedApi = await import("./api");
+  const reloadedApi = await import("./api.ts");
   await reloadedApi.get("/api/session");
   expect(storage.has("studio-api-schema-update-attempted")).toBe(false);
 });
@@ -447,7 +447,7 @@ it("reloads only after Update and distinguishes a matching renderer from a persi
       }),
   );
 
-  let api = await import("./api");
+  let api = await import("./api.ts");
   await expect(api.get("/api/session")).rejects.toBeInstanceOf(
     api.ApiSchemaMismatchError,
   );
@@ -458,7 +458,7 @@ it("reloads only after Update and distinguishes a matching renderer from a persi
 
   vi.resetModules();
   responseHash = API_SCHEMA_HASH;
-  api = await import("./api");
+  api = await import("./api.ts");
   await api.get("/api/session");
   expect(api.isApiSchemaMismatch()).toBe(false);
   expect(api.schemaUpdateFailedAfterReload()).toBe(false);
@@ -466,7 +466,7 @@ it("reloads only after Update and distinguishes a matching renderer from a persi
   storage.set("studio-api-schema-update-attempted", "1");
   vi.resetModules();
   responseHash = "foreign-schema";
-  api = await import("./api");
+  api = await import("./api.ts");
   await expect(api.get("/api/session")).rejects.toBeInstanceOf(
     api.ApiSchemaMismatchError,
   );
@@ -497,7 +497,7 @@ it("clears the completed-update marker when service-worker update fails", async 
       }),
     },
   });
-  const api = await import("./api");
+  const api = await import("./api.ts");
   await expect(api.updateRendererAndReload()).rejects.toThrow("offline");
   expect(storage.has("studio-api-schema-update-attempted")).toBe(false);
 });
@@ -511,7 +511,7 @@ it("reloads the packaged native renderer without requiring a browser service wor
     onLine: true,
     serviceWorker: { getRegistration },
   });
-  const api = await import("./api");
+  const api = await import("./api.ts");
   expect(await api.updateRendererAndReload()).toBe(true);
   expect(reload).toHaveBeenCalledOnce();
   expect(getRegistration).not.toHaveBeenCalled();

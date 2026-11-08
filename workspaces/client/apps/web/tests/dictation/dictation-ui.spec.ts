@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "../misc-fixture.ts";
 import type {} from "./dictation-ui.fixture.tsx";
+import { fixtureOrigin } from "../misc-fixture.ts";
+
 import { createFixtureViteServer, test } from "../playwright.ts";
 // Isolated real React and IndexedDB. Audio capture and native speech are mocks.
 import assert from "node:assert/strict";

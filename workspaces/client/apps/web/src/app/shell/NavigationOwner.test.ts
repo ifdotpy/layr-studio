@@ -1,10 +1,10 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { intercept, runInAction } from "mobx";
 import { expect, test } from "vitest";
 import { AgentSource } from "../../generated/api.ts";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { shellFixture } from "./shell.fixture.ts";
 function fixture(mobile = false) {
   const f = shellFixture(mobile);

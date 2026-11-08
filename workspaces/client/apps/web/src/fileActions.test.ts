@@ -1,7 +1,7 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
-import type { DesktopBridge } from "./desktop";
-import type { FileTarget } from "./fileActions";
+import type { DesktopBridge } from "./desktop.ts";
+import type { FileTarget } from "./fileActions.ts";
 import { afterEach, expect, it, test, vi } from "vitest";
 
 async function setup(remote: boolean, native: boolean) {
@@ -19,7 +19,7 @@ async function setup(remote: boolean, native: boolean) {
     }),
   );
   vi.stubGlobal("__TAURI__", native ? { core: { invoke } } : undefined);
-  return { api: await import("./fileActions"), invoke };
+  return { api: await import("./fileActions.ts"), invoke };
 }
 
 afterEach(() => vi.unstubAllGlobals());

@@ -1,3 +1,4 @@
+import type {} from "./accounts-cards.fixture.tsx";
 import type { Page } from "@playwright/test";
 import type { Account, AccountsState } from "./fixture-helpers.ts";
 import {
@@ -7,7 +8,7 @@ import {
   fixtureRequest,
   type FixtureRequest,
 } from "./fixture-helpers.ts";
-import type {} from "./accounts-cards.fixture.tsx";
+
 import { createFixtureViteServer } from "../playwright.ts";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";

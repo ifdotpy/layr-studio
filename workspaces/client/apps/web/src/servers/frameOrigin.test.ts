@@ -1,4 +1,4 @@
-import { frameMessageOrigin } from "./frameOrigin";
+import { frameMessageOrigin } from "./frameOrigin.ts";
 import { expect, it } from "vitest";
 import { createRequire } from "node:module";
 const native: typeof import("../../../desktop/frame-owner.ts") = createRequire(

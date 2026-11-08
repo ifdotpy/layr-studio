@@ -1,7 +1,7 @@
-import * as legacy from "./environment";
-import type { ScreenMessage } from "./screenChannel";
+import * as legacy from "./environment.ts";
+import type { ScreenMessage } from "./screenChannel.ts";
 import { createContext, useContext, useCallback } from "react";
-import type { ScreenChannel } from "./screenChannel";
+import type { ScreenChannel } from "./screenChannel.ts";
 
 export const ScreenContext = createContext<ScreenChannel | null>(null);
 export const useScreenChannel = () => useContext(ScreenContext);

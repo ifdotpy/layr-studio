@@ -1,6 +1,6 @@
-import { subscriptionKey } from "./contracts";
-export { subscriptionKey } from "./contracts";
-import type { components } from "../../generated/api";
+import { subscriptionKey } from "./contracts.ts";
+export { subscriptionKey } from "./contracts.ts";
+import type { components } from "../../generated/api.ts";
 
 type ResourceRef = components["schemas"]["ResourceRef"];
 export type SubscriptionCursor = components["schemas"]["SubscriptionCursor"];

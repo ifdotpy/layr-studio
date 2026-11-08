@@ -1,5 +1,5 @@
-import { hasNativeClient, nativeRequest } from "./client";
-import { isRemoteServerView } from "../servers/environment";
+import { hasNativeClient, nativeRequest } from "./client.ts";
+import { isRemoteServerView } from "../servers/environment.ts";
 
 export function createFileDialogs(owner: string) {
   const local = owner === "local";

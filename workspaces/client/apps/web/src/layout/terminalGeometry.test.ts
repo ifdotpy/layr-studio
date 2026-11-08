@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { readTerminalDockHeight } from "./terminalGeometry";
+import { readTerminalDockHeight } from "./terminalGeometry.ts";
 it("preserves the measured height across the shell message boundary", () => {
   expect(readTerminalDockHeight(4500.5)).toBe(4500.5);
   expect(readTerminalDockHeight(0)).toBe(0);

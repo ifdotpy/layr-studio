@@ -1,12 +1,12 @@
-import { AccessClientStatus, Reachability } from "../generated/api";
-import type { ConnectionHealth } from "../sync/connectionState";
-import { get, post, refreshSession, type GetResult } from "../api";
-import { serverLocalStorage } from "./storage";
+import { AccessClientStatus, Reachability } from "../generated/api.ts";
+import type { ConnectionHealth } from "../sync/connectionState.ts";
+import { get, post, refreshSession, type GetResult } from "../api.ts";
+import { serverLocalStorage } from "./storage.ts";
 
-import { readServers, type StudioServer } from "./registry";
+import { readServers, type StudioServer } from "./registry.ts";
 
 import type { DeepReadonly } from "../deepReadonly.ts";
-import type { components } from "../generated/api";
+import type { components } from "../generated/api.ts";
 export type ProjectLocation = components["schemas"]["ProjectLocation"];
 export type LocationProject = {
   id: string;

@@ -1,16 +1,16 @@
-import { randomUUID } from "../uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type {
   ServerCredentialAdapter,
   PairAttemptIdentity,
   AutomaticPairApproval,
-} from "./transport";
-import type { StudioServer } from "./registry";
+} from "./transport.ts";
+import type { StudioServer } from "./registry.ts";
 import {
   parseInvitation,
   requestIdentity,
   PairingNotAppliedError,
-} from "./pairing";
-import { serverViewId } from "./environment";
+} from "./pairing.ts";
+import { serverViewId } from "./environment.ts";
 export type {
   CredentialRequest,
   CredentialResponse,

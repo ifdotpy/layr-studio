@@ -1,9 +1,10 @@
+import "../../src/rendererStyles.ts";
 import { observer } from "mobx-react-lite";
 import * as api from "../../src/api.ts";
 import {
   AgentModelsFixture,
   observableFixture,
-} from "../../src/components/observableFixture.tsx";
+} from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent, Project } from "../../src/types.ts";
 import type { GetResult } from "../../src/apiTypes.ts";
 declare global {
@@ -18,17 +19,13 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Picker from "../../src/components/ProjectDirectoryPicker.tsx";
-import { ClaudeSettings } from "../../src/components/ClaudeSettings.tsx";
-import {
-  ProjectNameForm,
-  MoveChatForm,
-} from "../../src/components/ProjectOrganization.tsx";
-import ProjectAccount from "../../src/components/ProjectAccount.tsx";
-import {
-  createAccountsView,
-  AccountTransferStatus,
-} from "../../src/components/Accounts.tsx";
+import Picker from "../../src/components/projects/ProjectDirectoryPicker/ProjectDirectoryPicker.tsx";
+import { ClaudeSettings } from "../../src/components/settings/ClaudeSettings/ClaudeSettings.tsx";
+import { ProjectNameForm } from "../../src/components/projects/ProjectNameForm/ProjectNameForm.tsx";
+import { MoveChatForm } from "../../src/components/projects/MoveChatForm/MoveChatForm.tsx";
+import ProjectAccount from "../../src/components/projects/ProjectAccount/ProjectAccount.tsx";
+import { createAccountsView } from "../../src/components/accounts/Accounts/Accounts.tsx";
+import { AccountTransferStatus } from "../../src/components/accounts/AccountTransferStatus/AccountTransferStatus.tsx";
 const mode = new URLSearchParams(location.search).get("case")!;
 const project: Project = {
   id: "/project",

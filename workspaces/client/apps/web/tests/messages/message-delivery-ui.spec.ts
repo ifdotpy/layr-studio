@@ -1,3 +1,4 @@
+import type {} from "@playwright/test";
 import { required } from "./helpers.ts";
 import { responseJson } from "./helpers.ts";
 import { sendReply, sendRoute, sentMessage } from "./send-command.ts";
@@ -5,7 +6,7 @@ import type { MessageDelivery } from "../../src/commands.ts";
 import type { Page, Route } from "@playwright/test";
 import type { components } from "../../src/generated/api.ts";
 import type { MessageRequest } from "./helpers.ts";
-import type {} from "@playwright/test";
+
 import {
   readTestState,
   stubEntityState,

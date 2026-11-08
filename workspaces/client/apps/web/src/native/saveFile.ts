@@ -1,4 +1,4 @@
-import { nativeRequest } from "./client";
+import { nativeRequest } from "./client.ts";
 
 export async function saveNativeFile(
   name: string,

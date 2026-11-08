@@ -1,7 +1,7 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { serverActivityActive } from "./servers/activity";
+import { serverActivityActive } from "./servers/activity.ts";
 import {
   ApiError,
   errorText,
@@ -15,7 +15,7 @@ import {
   setWorkspace,
   syncGet,
   untilAnswered,
-} from "./api";
+} from "./api.ts";
 
 describe("OpenAPI transport facade", () => {
   it("releases renderer activity when a pending chat delete is aborted", async () => {

@@ -4,22 +4,22 @@ import {
   sourceAgents,
 } from "./sidebarSourceFixture.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { expect, it, vi } from "vitest";
 import {
   mergeSidebar,
   createMergedSidebarSelector,
   type SidebarSource,
-} from "./mergedSidebar";
+} from "./mergedSidebar.ts";
 import {
   mergedSidebarPreferences,
   sidebarOrderWrite,
-} from "./mergedSidebarPreferences";
+} from "./mergedSidebarPreferences.ts";
 import {
   localSidebarBackend,
   type SidebarBackend,
-} from "../components/sidebar/services";
+} from "../components/sidebar/support/services.tsx";
 
 function source(id: string, count = 1, directories = false) {
   const path = "/" + id;

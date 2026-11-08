@@ -1,5 +1,6 @@
-import { createServer } from "vite";
 import type {} from "./workspace-identity-retry-browser.fixture.tsx";
+import { createServer } from "vite";
+
 // A failed workspace identity read at startup must not refuse attachments until a restart.
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";

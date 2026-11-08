@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 declare global {
   interface Window {
     workspace: string | undefined;

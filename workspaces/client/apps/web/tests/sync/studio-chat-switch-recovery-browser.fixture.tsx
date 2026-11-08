@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { studioChatSwitchWorkspaceId as workspaceId } from "./studio-chat-switch-recovery-browser.data.ts";
 import { fixtureElement } from "./browser-helpers.ts";
 
@@ -6,7 +7,7 @@ import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { useConversationHistory } from "../../src/conversation/historyFixture.ts";
 import { createServerServices } from "../../src/servers/serverServices.ts";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 const services = createServerServices({
   id: "local",
   label: "Fixture",

@@ -1,5 +1,5 @@
 import { stateFromFixture } from "./sidebarSourceFixture.ts";
-import { componentSnapshot as snapshotFixture } from "../components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { navigationFromSummaries } from "./sidebarSourceFixture.ts";
 import { expect, it } from "vitest";
@@ -7,7 +7,7 @@ import {
   navigationSnapshot,
   isServerCommand,
   readServerAccounts,
-} from "./navigation";
+} from "./navigation.ts";
 
 it("preserves exact account keys in the received public account snapshot", () => {
   const account = {

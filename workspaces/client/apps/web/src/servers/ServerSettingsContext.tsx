@@ -1,6 +1,6 @@
 import { createContext, useContext, type ReactNode } from "react";
 import type { StudioServer } from "./registry.ts";
-import type { StudioSettingsTab } from "../components/StudioSettingsTabs.tsx";
+import type { StudioSettingsTab } from "../components/settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
 export interface ServerSettings {
   readonly server?: StudioServer;
   readonly settingsOpen: boolean;

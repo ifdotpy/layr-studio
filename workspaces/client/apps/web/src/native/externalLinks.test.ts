@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { openNativeLink } from "./externalLinks";
+import { openNativeLink } from "./externalLinks.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 function host() {

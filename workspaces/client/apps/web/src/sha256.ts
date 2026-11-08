@@ -5,7 +5,7 @@ export async function sha256Hex(input: Uint8Array): Promise<string> {
   const digest =
     typeof subtle?.digest === "function"
       ? new Uint8Array(await subtle.digest("SHA-256", bytes))
-      : await (await import("./wasm/client")).sha256(bytes);
+      : await (await import("./wasm/client.ts")).sha256(bytes);
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(
     "",
   );

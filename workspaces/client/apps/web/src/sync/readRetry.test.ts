@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiError, NetworkTimeoutError } from "../api";
+import { ApiError, NetworkTimeoutError } from "../api.ts";
 import {
   READ_RECOVERY_MAX_ATTEMPTS,
   ReadRecoveryBudget,
@@ -7,7 +7,7 @@ import {
   readRetryDelay,
   retryableReadError,
   retryableTranscriptPullConflict,
-} from "./readRetry";
+} from "./readRetry.ts";
 
 describe("failed resource reads", () => {
   it.each([

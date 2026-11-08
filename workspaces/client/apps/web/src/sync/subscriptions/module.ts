@@ -1,11 +1,14 @@
-import { createSubscriptionStore, type SubscriptionTransport } from "./store";
-import type { ResourceVersion } from "../resourceEvents";
+import {
+  createSubscriptionStore,
+  type SubscriptionTransport,
+} from "./store.ts";
+import type { ResourceVersion } from "../resourceEvents.ts";
 import {
   subscriptionKey,
   type ResourceData,
   type ResourceRef,
   type SubscriptionOptions,
-} from "./contracts";
+} from "./contracts.ts";
 
 export type ObserveSubscriptionData = <R extends ResourceRef>(
   ref: R,

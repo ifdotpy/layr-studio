@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { accountLimits, limitsReadSucceeded } from "./accountUsage";
+import { accountLimits, limitsReadSucceeded } from "./accountUsage.ts";
 it("returns limits for the selected account", () => {
   const a = { accountKey: "a", data: { accountId: "native-a" } };
   assert.equal(accountLimits(a, "a", "native-a"), a);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createLiveText, withLiveText, MAX_LIVE_ITEMS } from "./liveText";
+import { createLiveText, withLiveText, MAX_LIVE_ITEMS } from "./liveText.ts";
 
 const item = "agent:answer";
 const run = (...deltas: [number, string][]) => {

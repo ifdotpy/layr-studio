@@ -1,7 +1,7 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
-import { theme } from "../theme";
+import { theme } from "../theme.ts";
 import { ChatIndicatorKind } from "../status/operationalStatus.ts";
 
 const read = (path: string) =>

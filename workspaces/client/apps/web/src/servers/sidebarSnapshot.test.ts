@@ -1,14 +1,14 @@
-import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { stateFromFixture } from "./sidebarSourceFixture.ts";
-import { StudioErrorLevel } from "../generated/api";
-import { StudioErrorEffectCertainty } from "../generated/api";
+import { StudioErrorLevel } from "../generated/api.ts";
+import { StudioErrorEffectCertainty } from "../generated/api.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { preferenceMemory } from "./storage";
-import { navigationSnapshot } from "./navigation";
+import { preferenceMemory } from "./storage.ts";
+import { navigationSnapshot } from "./navigation.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { agentEntities, sidebarFactsFixture } from "./sidebarSourceFixture.ts";
-import { sidebarSnapshot, sidebarCollectionView } from "./sidebarSnapshot";
+import { sidebarSnapshot, sidebarCollectionView } from "./sidebarSnapshot.ts";
 import {
   createStateMirror,
   serializeStateCollections,

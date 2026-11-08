@@ -2,14 +2,14 @@ import type {
   ServerCredentialAdapter,
   PairAttemptIdentity,
   AutomaticPairApproval,
-} from "../servers/transport";
-import type { StudioServer } from "../servers/registry";
+} from "../servers/transport.ts";
+import type { StudioServer } from "../servers/registry.ts";
 import {
   parseInvitation,
   requestIdentity,
   PairingNotAppliedError,
-} from "../servers/pairing";
-import { nativeRequest } from "./client";
+} from "../servers/pairing.ts";
+import { nativeRequest } from "./client.ts";
 function encode(bytes: Uint8Array) {
   const parts: string[] = [];
   for (let index = 0; index < bytes.length; index += 16384)

@@ -1,6 +1,6 @@
-import type { SidebarBackend } from "../components/sidebar/services";
-import type { MergedSidebar } from "./mergedSidebar";
-import type { ServerSidebarSnapshot } from "./sidebarSnapshot";
+import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
+import type { MergedSidebar } from "./mergedSidebar.ts";
+import type { ServerSidebarSnapshot } from "./sidebarSnapshot.ts";
 
 type Override = {
   value: boolean | undefined;

@@ -1,15 +1,15 @@
 import { createHash, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { monitorInputStoreFixture } from "./monitorInputStore.fixture";
+import { monitorInputStoreFixture } from "./monitorInputStore.fixture.ts";
 
-vi.mock("./environment", () => ({ serverViewId: null }));
-vi.mock("./storage", () => ({ serverLocalStorage: {} }));
+vi.mock("./environment.ts", () => ({ serverViewId: null }));
+vi.mock("./storage.ts", () => ({ serverLocalStorage: {} }));
 import {
   createMutationJournal,
   pendingMonitorInput,
   finishMonitorInput,
-} from "./mutationIdentity";
+} from "./mutationIdentity.ts";
 
 function memoryStorage(): Storage {
   const rows = new Map<string, string>();

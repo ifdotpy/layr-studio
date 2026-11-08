@@ -1,7 +1,7 @@
-import { nativeHost } from "./client";
-import { isNativeFrame } from "./frame";
-import { prepareNativeClose } from "./closeState";
-import { serverParentOrigin } from "../servers/environment";
+import { nativeHost } from "./client.ts";
+import { isNativeFrame } from "./frame.ts";
+import { prepareNativeClose } from "./closeState.ts";
+import { serverParentOrigin } from "../servers/environment.ts";
 
 const QUERY = "studio-native-close-query";
 const REPLY = "studio-native-close-reply";

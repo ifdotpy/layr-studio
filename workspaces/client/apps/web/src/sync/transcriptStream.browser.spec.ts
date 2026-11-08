@@ -1,6 +1,6 @@
 import type { LegacySyncIdentityResponse } from "./syncBrowserFixture.ts";
-import type { components } from "../generated/api";
-import type { ResourceChangeEvent } from "./resourceEvents";
+import type { components } from "../generated/api.ts";
+import type { ResourceChangeEvent } from "./resourceEvents.ts";
 import { initializeTranscript } from "./transcriptStream.browser.fixture.ts";
 import {
   fixturePort,

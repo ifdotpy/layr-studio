@@ -1,4 +1,4 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { Agent } from "../../src/types.ts";
 import type { ChatIndicator } from "../../src/status/operationalStatus.ts";
 import { pilotSnapshot } from "./sidebar-pilot-data.ts";

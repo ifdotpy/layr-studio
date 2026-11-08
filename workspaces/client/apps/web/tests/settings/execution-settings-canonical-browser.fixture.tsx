@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { GetOptions } from "../../src/api.ts";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
@@ -80,9 +81,9 @@ import "@mantine/core/styles.css";
 import {
   ExecutionSettings,
   ExecutionPermissions,
-} from "../../src/components/agents/ExecutionSettings.tsx";
+} from "../../src/components/agents/ExecutionSettings/ExecutionSettings.tsx";
 import { observer } from "mobx-react-lite";
-import { useServerStore } from "../../src/servers/ServerServicesContext.tsx";
+import { useServerStore } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../src/store/runtime.ts";
 import { agentId } from "../../src/generated/observableResources.ts";
 import type { ComponentProps } from "react";
@@ -104,7 +105,7 @@ const CanonicalSettings = observer(function CanonicalSettings({
 import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
-} from "../../src/components/agents/modelCatalogFixture.tsx";
+} from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 import { get } from "../../src/api.ts";
 const fixtureModelRead = (
   options: Pick<GetOptions<"/api/models">, "query" | "signal">,

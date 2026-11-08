@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useServerServices } from "../servers/ServerServicesContext.tsx";
+import { useServerServices } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { serverViewId } from "../servers/environment.ts";
 import { reportUnsentFailure, unsentStore, type TextFeature } from "./store.ts";
 

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { createRecordingStorage, type Recording } from "./storage";
+import { createRecordingStorage, type Recording } from "./storage.ts";
 import type { RecordingValue } from "../unsent/store.ts";
 
 it("restores recordings and undo after reload and rejects late transcription", async () => {

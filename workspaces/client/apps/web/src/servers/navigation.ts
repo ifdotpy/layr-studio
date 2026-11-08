@@ -1,29 +1,27 @@
 import type { components } from "../generated/api.ts";
-import {
-  isStudioSettingsTab,
-  type StudioSettingsTab,
-} from "../components/StudioSettingsTabs";
-import type { DesktopAlert } from "../desktop/desktopAlerts";
+import { isStudioSettingsTab } from "../components/settings/StudioSettingsTabs/StudioSettingsTabs.tsx";
+import type { StudioSettingsTab } from "../components/settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
+import type { DesktopAlert } from "../desktop/desktopAlerts.ts";
 import type {
   StateCollections,
   ProjectionMetadata,
 } from "../generated/observableResources.ts";
-import { saved } from "../api";
+import { saved } from "../api.ts";
 import {
   isNewChatSettings,
   type NewChatSettings,
-} from "../components/newChatSettings";
-import type { LocationProject } from "./projectLocations";
+} from "../app/projects/newChatSettings.ts";
+import type { LocationProject } from "./projectLocations.ts";
 import type {
   SidebarAgent,
   SidebarChatView,
-} from "../components/sidebar/viewModel.ts";
+} from "../components/sidebar/support/viewModel.ts";
 import { toJS } from "mobx";
 import {
   sidebarSnapshot,
   type ServerSidebarSnapshot,
   type SidebarEntity,
-} from "./sidebarSnapshot";
+} from "./sidebarSnapshot.ts";
 import { isProviderKind, ProviderKind } from "../generated/providerKind.ts";
 export type ServerAccount = {
   accountKey?: string;

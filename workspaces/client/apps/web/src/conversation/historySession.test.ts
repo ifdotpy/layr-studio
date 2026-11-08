@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { autorun } from "mobx";
-import { createTranscriptMirror } from "../generated/observableResources";
-import { createMessageViews } from "./messageView";
+import { createTranscriptMirror } from "../generated/observableResources.ts";
+import { createMessageViews } from "./messageView.ts";
 
 it("retains generated record and input references without reading text for membership", () => {
   const mirror = createTranscriptMirror({
@@ -34,14 +34,14 @@ it("retains generated record and input references without reading text for membe
   stopText();
 });
 
-import { TranscriptHistory } from "./historySession";
+import { TranscriptHistory } from "./historySession.ts";
 import {
   mergeTranscript,
   MAX_TRANSCRIPT_PAGE_BYTES,
-} from "../transcriptPageBounds";
-import type { TranscriptPageData } from "../types";
+} from "../transcriptPageBounds.ts";
+import type { TranscriptPageData } from "../types.ts";
 import { vi } from "vitest";
-import type { ResourceLiveDeltaEvent } from "../generated/observableResources";
+import type { ResourceLiveDeltaEvent } from "../generated/observableResources.ts";
 
 function historyFixture(dto: Parameters<typeof createTranscriptMirror>[0]) {
   const mirror = createTranscriptMirror(dto);
@@ -262,7 +262,8 @@ it("focused paging keeps overlapping live model references and streams into thei
 });
 
 it("a backdated live tail preserves the retained prefix proven contiguous by overlap", async () => {
-  const { updateLiveTranscriptPage } = await import("../transcriptPageBounds");
+  const { updateLiveTranscriptPage } =
+    await import("../transcriptPageBounds.ts");
   const a = { id: "a", role: "assistant", text: "earlier", at: 300 };
   const b = { id: "b", role: "assistant", text: "overlap", at: 200 };
   const c = { id: "c", role: "assistant", text: "later", at: 100 };
@@ -271,8 +272,8 @@ it("a backdated live tail preserves the retained prefix proven contiguous by ove
   expect(page.items).toEqual([a, b, c]);
 });
 
-import { RoomHistory } from "./roomHistory";
-import { createRoomMirror } from "../generated/observableResources";
+import { RoomHistory } from "./roomHistory.ts";
+import { createRoomMirror } from "../generated/observableResources.ts";
 const roomRow = (seq: number, text = `message ${seq}`) => ({
   id: `message-${seq}`,
   seq,

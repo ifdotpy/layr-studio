@@ -1,4 +1,4 @@
-import { cssFiles } from "./cssFixtureFiles";
+import { cssFiles } from "./cssFixtureFiles.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +8,7 @@ const sourceRoot = fileURLToPath(new URL(".", import.meta.url));
 const read = (path: string) => readFileSync(join(sourceRoot, path), "utf8");
 
 it("shares the main-area scrollbar palette with native panes and Mantine controls", () => {
-  const css = read("style.css");
+  const css = read("./style.css");
   expect(css).toMatch(/--studio-scrollbar-thumb:\s*var\(--line-strong\)/);
   expect(css).toMatch(
     /\*\s*\{[^}]*scrollbar-width:\s*thin;[^}]*scrollbar-color:\s*var\(--studio-scrollbar-thumb\) transparent;/,
@@ -28,10 +28,10 @@ it("keeps palette ownership global and preserves native scrolling and Mantine vi
     ].map((match) => match[1]),
   );
   expect(declarations).toEqual(["var(--studio-scrollbar-thumb) transparent"]);
-  expect(read("style.css")).toMatch(/#messages\s*\{[^}]*overflow:\s*auto/);
-  expect(read("components/sidebar-projects.css")).toMatch(
+  expect(read("./style.css")).toMatch(/#messages\s*\{[^}]*overflow:\s*auto/);
+  expect(read("./components/sidebar/Sidebar/sidebar-projects.css")).toMatch(
     /\.chat-scroll\s*\{[^}]*overflow-y:\s*auto;[^}]*overflow-x:\s*hidden;[^}]*overscroll-behavior:\s*contain/,
   );
   // Mantine must keep its hidden native viewport scrollbar: never override it globally with !important.
-  expect(read("style.css")).not.toMatch(/scrollbar-width:[^;]*!important/);
+  expect(read("./style.css")).not.toMatch(/scrollbar-width:[^;]*!important/);
 });

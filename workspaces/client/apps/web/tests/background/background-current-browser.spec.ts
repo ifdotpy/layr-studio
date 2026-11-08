@@ -1,3 +1,4 @@
+import type {} from "./background-current-browser.fixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { approval } from "../../src/approvalFixtures.ts";
@@ -8,7 +9,7 @@ import {
   builtActivityFixture,
   builtActivityHtml,
 } from "./builtActivityFixture";
-import type {} from "./background-current-browser.fixture.tsx";
+
 // Current activity lifecycle through the real component. HTTP calls use fixtures.
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -50,7 +51,7 @@ test("Background Current Browser", async ({
   const server = await builtActivityFixture(
     join(root, "workspaces/client/apps/web"),
     temporary,
-    "background-current-browser.fixture.tsx",
+    "./background-current-browser.fixture.tsx",
   );
   await server.listen();
   try {
@@ -127,7 +128,7 @@ test("Background Current Browser", async ({
       created: Date.now() / 1000 - 30,
       processId: "123",
     });
-    const data: import("../../src/components/componentTestFixtures.ts").ComponentSnapshot =
+    const data: import("../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts").ComponentSnapshot =
       {
         ...fixtureSnapshot(agents),
         token: "fixture",
@@ -234,7 +235,7 @@ test("Background Current Browser", async ({
     };
     const render = async (
       leadId = "lead",
-      focus?: import("../../src/components/shell/backgroundTaskActions.tsx").BackgroundTaskProps["initialFocus"],
+      focus?: import("../../src/components/shell/tasks/support/backgroundTaskActions.tsx").BackgroundTaskProps["initialFocus"],
     ) => {
       currentListing = leadId === "other" ? otherListing : listing;
       await page.evaluate<void, unknown>(

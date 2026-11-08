@@ -10,19 +10,19 @@ import {
   type ApiPostPath,
   type PostInput,
   type PostResult,
-} from "../api";
+} from "../api.ts";
 import {
   localSidebarBackend,
   type SidebarBackend,
-} from "../components/sidebar/services";
-import { itemGroup } from "../components/sidebar/catalog";
-import { mergeSidebar } from "./mergedSidebar";
+} from "../components/sidebar/support/services.tsx";
+import { itemGroup } from "../components/sidebar/support/catalog.ts";
+import { mergeSidebar } from "./mergedSidebar.ts";
 import {
   createMergedSidebarServices,
   sidebarOwner,
   sidebarProject,
   sidebarWireRequest,
-} from "./sidebarServices";
+} from "./sidebarServices.ts";
 
 function fixture() {
   const source = (id: string) =>

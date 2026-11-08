@@ -1,12 +1,12 @@
 /// <reference lib="es2024.promise" />
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   nativeRequest: vi.fn(),
   listenNativeEvents: vi.fn(),
 }));
-vi.mock("./frame", () => ({ isNativeFrame: () => false }));
-import { nativeRequest, listenNativeEvents } from "./client";
-import { nativeVoice } from "./voice";
+vi.mock("./frame.ts", () => ({ isNativeFrame: () => false }));
+import { nativeRequest, listenNativeEvents } from "./client.ts";
+import { nativeVoice } from "./voice.ts";
 afterEach(() => vi.resetAllMocks());
 it("subscribes before creating a Rust peer, then applies answer, mute and close", async () => {
   let emit!: (value: unknown) => void;

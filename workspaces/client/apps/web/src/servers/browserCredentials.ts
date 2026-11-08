@@ -1,27 +1,30 @@
-import { randomUUID } from "../uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   browserDatabases,
   browserIndexedDB,
   browserStores,
-} from "../browserPersistence";
-import type { ServerCredentialAdapter, PairAttemptIdentity } from "./transport";
+} from "../browserPersistence.ts";
+import type {
+  ServerCredentialAdapter,
+  PairAttemptIdentity,
+} from "./transport.ts";
 import { isServerMethod } from "../../../desktop/api.ts";
 import {
   isRemoteServerView,
   serverParentOrigin,
   serverViewId,
-} from "./environment";
+} from "./environment.ts";
 import {
   parseInvitation,
   pairedServer,
   signedRequest,
   requestIdentity,
   type PairReceipt,
-} from "./pairing";
-import { deviceKey, replaceDeviceKey } from "./deviceKey";
-import { serveOrigin, type StudioServer } from "./registry";
-import { retarget, routesFor, sendRouted } from "./routes";
-import { ACCESS_PROTOCOL_VERSION } from "../generated/multiServerProtocol";
+} from "./pairing.ts";
+import { deviceKey, replaceDeviceKey } from "./deviceKey.ts";
+import { serveOrigin, type StudioServer } from "./registry.ts";
+import { retarget, routesFor, sendRouted } from "./routes.ts";
+import { ACCESS_PROTOCOL_VERSION } from "../generated/multiServerProtocol.ts";
 type Credential = {
   inviteId?: string;
   id: string;

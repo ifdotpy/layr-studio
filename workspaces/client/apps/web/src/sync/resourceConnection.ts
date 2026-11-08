@@ -1,5 +1,5 @@
-import { hasNativeClient } from "../native/client";
-import type { ReconnectCause } from "./connectionState";
+import { hasNativeClient } from "../native/client.ts";
+import type { ReconnectCause } from "./connectionState.ts";
 
 /**
  * Whether the sync transport treats the page as hidden. The desktop app keeps

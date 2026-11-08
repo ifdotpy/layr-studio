@@ -3,7 +3,7 @@ import {
   type ServerSidebarSnapshot,
   type ServerSidebarView,
 } from "./sidebarSnapshot.ts";
-import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 
 import type { components } from "../generated/api.ts";
@@ -12,7 +12,7 @@ import { createStateMirror } from "../generated/observableResources.ts";
 import {
   createSidebarViewModel,
   type SidebarAgent,
-} from "../components/sidebar/viewModel.ts";
+} from "../components/sidebar/support/viewModel.ts";
 import type { SidebarSource } from "./mergedSidebar.ts";
 import type { SidebarEntity } from "./sidebarSnapshot.ts";
 

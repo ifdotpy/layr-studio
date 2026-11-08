@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { nativeFetch } from "./http";
+import { nativeFetch } from "./http.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 const origin = "http://localhost";

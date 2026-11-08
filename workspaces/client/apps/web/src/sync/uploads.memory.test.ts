@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createUploads, type UploadOptions } from "./uploads";
+import { createUploads, type UploadOptions } from "./uploads.ts";
 import type { StoredUpload } from "../unsent/store.ts";
 
 afterEach(() => vi.unstubAllGlobals());

@@ -1,4 +1,4 @@
-import type { PerfClientReport } from "../generated/perfReporting";
+import type { PerfClientReport } from "../generated/perfReporting.ts";
 
 type Report = PerfClientReport;
 

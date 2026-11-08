@@ -1,6 +1,7 @@
+import type {} from "@playwright/test";
 import type { HistorySnapshot } from "./current-command-history-fixture.tsx";
 import type { Message } from "../../src/types.ts";
-import type {} from "@playwright/test";
+
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 // Completed command rows disappear. Current commands and source records remain.
 import assert from "node:assert/strict";

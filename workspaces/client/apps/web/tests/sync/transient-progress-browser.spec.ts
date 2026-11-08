@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "./helpers.ts";
 import type {} from "./transient-progress-browser.fixture.tsx";
+import { fixtureOrigin } from "./helpers.ts";
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

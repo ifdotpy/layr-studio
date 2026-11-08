@@ -7,8 +7,8 @@ import type {
   CredentialResult,
   StreamChunk,
 } from "../../../desktop/api.ts";
-import { DesktopServerCredentials } from "./desktopCredentials";
-import type { StudioServer } from "./registry";
+import { DesktopServerCredentials } from "./desktopCredentials.ts";
+import type { StudioServer } from "./registry.ts";
 
 const server = {
   id: "remote",

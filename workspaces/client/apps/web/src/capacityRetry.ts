@@ -1,4 +1,4 @@
-import type { Agent } from "./types";
+import type { Agent } from "./types.ts";
 
 export type CapacityRetry = NonNullable<Agent["capacityRetry"]>;
 

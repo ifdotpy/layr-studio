@@ -1,10 +1,11 @@
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import "../../src/rendererStyles.ts";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import RealtimeVoice from "../../src/components/RealtimeVoice.tsx";
-import { watchVoiceTransport } from "../../src/components/voiceTransport.ts";
+import RealtimeVoice from "../../src/components/conversation/RealtimeVoice/RealtimeVoice.tsx";
+import { watchVoiceTransport } from "../../src/components/conversation/RealtimeVoice/voiceTransport.ts";
 import type { ConnectionHealth } from "../../src/sync/connectionState.ts";
 import type { components } from "../../src/generated/api.ts";
 import {

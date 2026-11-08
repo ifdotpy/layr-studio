@@ -3,7 +3,7 @@ import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import { expect, it } from "vitest";
 import { createMergedSidebarSelector } from "./mergedSidebar.ts";
 import { sidebarSnapshot } from "./sidebarSnapshot.ts";
-import { componentSnapshot } from "../components/componentTestFixtures.ts";
+import { componentSnapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
   Object.assign(componentSnapshot(...args), {
     token: "",

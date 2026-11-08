@@ -1,8 +1,8 @@
 import { MessageSendStatus } from "../generated/api.ts";
-import { required } from "../components/componentTestFixtures.ts";
-import type { Message } from "../types";
-import type { OutgoingMessage } from "./send";
-import type { MessageReceipt } from "./messageReceipts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import type { Message } from "../types.ts";
+import type { OutgoingMessage } from "./send.ts";
+import type { MessageReceipt } from "./messageReceipts.ts";
 import assert from "node:assert/strict";
 import {
   checkedMessageReceipts,

@@ -1,8 +1,9 @@
+import type {} from "./ux-request-recovery-browser.fixture.tsx";
 import { required } from "../teams/helpers.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 import type { PostBody } from "../../src/apiTypes.ts";
 import { createServer } from "vite";
-import type {} from "./ux-request-recovery-browser.fixture.tsx";
+
 import {
   apiSchemaHandshakeSse,
   apiSchemaHeaders,

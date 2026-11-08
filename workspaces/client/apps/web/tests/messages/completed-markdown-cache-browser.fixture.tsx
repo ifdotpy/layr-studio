@@ -1,10 +1,11 @@
+import "../../src/rendererStyles.ts";
 import type { Message } from "../../src/types.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
-import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
-import ConversationResults from "../../src/components/conversation/transcript/ConversationResults.tsx";
+import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
+import ConversationResults from "../../src/components/conversation/transcript/ConversationResults/ConversationResults.tsx";
 import { completedMarkdown } from "../../src/native/markdownCache.ts";
 window.markdownCache = completedMarkdown;
 window.compilations = 0;

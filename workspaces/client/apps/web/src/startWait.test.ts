@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import { AgentStatus, StartWaitReason } from "./generated/api";
-import { startWaitLabel } from "./startWait";
-import type { Agent } from "./types";
-import type { components } from "./generated/api";
+import { AgentStatus, StartWaitReason } from "./generated/api.ts";
+import { startWaitLabel } from "./startWait.ts";
+import type { Agent } from "./types.ts";
+import type { components } from "./generated/api.ts";
 
 type Wait = components["schemas"]["AgentEntityStartWaitDto"];
 type ExpectFalse<T extends false> = T;

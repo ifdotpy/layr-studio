@@ -1,9 +1,10 @@
+import type {} from "./complaint-ownership-ui.fixture.tsx";
 import { required } from "./helpers.ts";
 import type { Route } from "@playwright/test";
 import type { components } from "../../src/generated/api.ts";
 import { requestBody } from "./helpers.ts";
 import type { ComplaintBody } from "./helpers.ts";
-import type {} from "./complaint-ownership-ui.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";

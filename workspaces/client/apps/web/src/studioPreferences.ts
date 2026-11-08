@@ -1,4 +1,4 @@
-import type { components } from "./generated/api";
+import type { components } from "./generated/api.ts";
 
 export const studioPreferencesStorageKey = "codex-studio-preferences-v1";
 export const DEFAULT_HIDE_OLD_CHATS_THRESHOLD = 3;

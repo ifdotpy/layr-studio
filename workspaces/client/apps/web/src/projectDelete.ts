@@ -1,8 +1,8 @@
 import { StopOutcome } from "./generated/api.ts";
-import { ApiError, errorText, type post } from "./api";
-import { definiteDeleteRejection } from "./chatDeleteScope";
-import type { components } from "./generated/api";
-import type { Agent, DeepReadonly, Project } from "./types";
+import { ApiError, errorText, type post } from "./api.ts";
+import { definiteDeleteRejection } from "./chatDeleteScope.ts";
+import type { components } from "./generated/api.ts";
+import type { Agent, DeepReadonly, Project } from "./types.ts";
 
 type DeleteRequest = components["schemas"]["ProjectDeleteRequest"];
 type DeleteReply = components["schemas"]["ProjectDeleteResponse"];

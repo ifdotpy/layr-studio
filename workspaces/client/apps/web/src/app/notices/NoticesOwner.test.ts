@@ -1,4 +1,4 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { AgentSource } from "../../generated/api.ts";
 import { runInAction } from "mobx";
 // @vitest-environment happy-dom
@@ -6,11 +6,11 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider } from "@mantine/core";
-import App from "../../App.tsx";
-import { ServerAreasProvider } from "../ServerAreasProvider.tsx";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
-import { observableFixture } from "../../components/observableFixture.tsx";
-import { conversationActionsFixture } from "../../components/observableFixture.tsx";
+import App from "../../components/shell/App/App.tsx";
+import { ServerAreasProvider } from "../../components/shell/ServerAreasProvider/ServerAreasProvider.tsx";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import { conversationActionsFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 
 afterEach(() => vi.useRealTimers());
 it("the app retains offline diagnostics until delivery settles and suppresses only their duplicate toast", () => {

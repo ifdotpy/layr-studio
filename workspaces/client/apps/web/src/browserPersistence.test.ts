@@ -4,7 +4,7 @@ import {
   outboxRequestKeys,
   outboxRequests,
   scopedSessionOutbox,
-} from "./browserPersistence";
+} from "./browserPersistence.ts";
 
 it("keeps typed outbox operations at their existing keys", () => {
   const values = new Map<string, string>();

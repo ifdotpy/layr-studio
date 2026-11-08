@@ -1,5 +1,5 @@
-import type { CommandResponse } from "../commands";
-import { DeliveryMomentInput } from "../generated/api";
+import type { CommandResponse } from "../commands.ts";
+import { DeliveryMomentInput } from "../generated/api.ts";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
@@ -37,8 +37,8 @@ it("settles a sent message when the answer lists the stream receipt row first", 
     removeEventListener: vi.fn(),
   });
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() });
-  const { createCommandClient } = await import("../commands");
-  const { createOutbox } = await import("./send");
+  const { createCommandClient } = await import("../commands.ts");
+  const { createOutbox } = await import("./send.ts");
   const response: CommandResponse = {
     status: "applied",
     kind: "send",

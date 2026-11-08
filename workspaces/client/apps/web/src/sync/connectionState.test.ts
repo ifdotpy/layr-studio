@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { activityOf, healthOf, type ConnectionState } from "./connectionState";
+import {
+  activityOf,
+  healthOf,
+  type ConnectionState,
+} from "./connectionState.ts";
 
 it("derives coarse views from each connection phase", () => {
   const cases: Array<[ConnectionState, string, string]> = [

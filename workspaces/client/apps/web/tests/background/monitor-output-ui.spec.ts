@@ -1,8 +1,9 @@
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import type {} from "./monitor-output-ui.fixture.tsx";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { fixturePostBody } from "../teams/helpers.ts";
 import type { GetResult, PostBody } from "../../src/apiTypes.ts";
-import type {} from "./monitor-output-ui.fixture.tsx";
+
 // Hidden browser fixture for the real activity drawer. Native processes use HTTP fixtures.
 import { test, expect, handleEntitySyncFixtureRequest } from "../playwright.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -26,7 +27,7 @@ for (const width of [320, 1200]) {
     const server = await builtActivityFixture(
       root,
       temporary,
-      "monitor-output-ui.fixture.tsx",
+      "./monitor-output-ui.fixture.tsx",
     );
     await server.listen();
     const calls: { path: string; body: PostBody<"/api/monitor/restart"> }[] =

@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { createDataObserver } from "../../src/sync/subscriptions/data.ts";
 import { createSubscriptions } from "../../src/sync/subscriptions/module.ts";
 import { createServerStore } from "../../src/store/server.ts";
@@ -5,9 +6,9 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import ClaudeSignIn from "../../src/components/ClaudeSignIn.tsx";
+import ClaudeSignIn from "../../src/components/accounts/ClaudeSignIn/ClaudeSignIn.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type {
   ResourceProgress,
   ResourceRef,

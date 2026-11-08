@@ -1,10 +1,10 @@
 import type {
   ConnectionActivity,
   ConnectionHealth,
-} from "../sync/connectionState";
-import type { ResourceConnectionDetail } from "../sync/resourceConnection";
-import { localTime } from "../local-time";
-import { reconnectReasons } from "../sync/connectionState";
+} from "../sync/connectionState.ts";
+import type { ResourceConnectionDetail } from "../sync/resourceConnection.ts";
+import { localTime } from "../local-time.ts";
+import { reconnectReasons } from "../sync/connectionState.ts";
 
 const activityLabels: Record<ConnectionActivity, string> = {
   stopped: "Connection interrupted.",

@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { indexedDb } from "./indexedDb";
+import { indexedDb } from "./indexedDb.ts";
 
 it("closes the connection before deleting its database", async () => {
   const close = vi.fn();

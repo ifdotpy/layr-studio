@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "./performance-fixture.ts";
 import type {} from "./history-window.fixture.tsx";
+import { fixtureOrigin } from "./performance-fixture.ts";
+
 import { mkdtemp, rm, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

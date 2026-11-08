@@ -3,19 +3,19 @@ import {
   sendStore,
   type StoredSend,
   type LocalSend,
-} from "../unsent/store";
-import { serverViewId } from "../servers/environment";
-import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity";
-import { ApiError, command, errorText, getStreamSession } from "../api";
+} from "../unsent/store.ts";
+import { serverViewId } from "../servers/environment.ts";
+import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
+import { ApiError, command, errorText, getStreamSession } from "../api.ts";
 import {
   messageReceipt,
   type MessageDelivery,
   type SendMessageBody,
-} from "../commands";
-import type { Attachment } from "../components/ComposerAttachments";
-import { watchResourceConnection } from "./subscriptions/events";
-import { CommandErrorCode, MessageSendStatus } from "../generated/api";
-import type { MessageReceipt } from "./messageReceipts";
+} from "../commands.ts";
+import type { Attachment } from "../components/conversation/ComposerAttachments/ComposerAttachments.tsx";
+import { watchResourceConnection } from "./subscriptions/events.ts";
+import { CommandErrorCode, MessageSendStatus } from "../generated/api.ts";
+import type { MessageReceipt } from "./messageReceipts.ts";
 
 type DeviceSendState = LocalSend | { kind: "receipt_expired"; error: string };
 export type DeliveryState =
@@ -57,7 +57,7 @@ export function matchesMessageDelivery(value: unknown, id: string) {
 }
 
 export function createOutbox(options: {
-  api: Pick<import("../api").ServerApi, "command" | "getStreamSession">;
+  api: Pick<import("../api.ts").ServerApi, "command" | "getStreamSession">;
   buffer?: ReturnType<typeof sendStore>;
   serverId?: string;
   watchResourceConnection: typeof watchResourceConnection;

@@ -1,10 +1,10 @@
 import { COMPACT_RECENT_WINDOW_SECONDS } from "../../generated/sharedValues.ts";
-import { remoteProjectGroups } from "../../components/sidebar/RemoteProjects.tsx";
-import { SidebarFrameOwner } from "../../components/sidebar/SidebarFrame.tsx";
+import { remoteProjectGroups } from "../../components/sidebar/RemoteProjects/RemoteProjects.tsx";
+import { SidebarFrameOwner } from "../../components/sidebar/SidebarFrame/SidebarFrame.tsx";
 import {
   createSidebarActions,
   type SidebarActions,
-} from "../../components/sidebar/sidebarActions.ts";
+} from "../../components/sidebar/support/sidebarActions.ts";
 import {
   compareShallow,
   computed,
@@ -13,33 +13,33 @@ import {
   reaction,
   runInAction,
 } from "mobx";
-import { errorText } from "../../api";
-import { outboxRequests } from "../../browserPersistence";
-import type { paths } from "../../generated/api";
+import { errorText } from "../../api.ts";
+import { outboxRequests } from "../../browserPersistence.ts";
+import type { paths } from "../../generated/api.ts";
 import { createStateMirror } from "../../generated/observableResources.ts";
-import {
-  type Project,
-  type ProjectFolder,
-} from "../../components/ProjectOrganization";
-import { PeerTeamMoveOwner } from "../../components/shell/messages/peerTeamMutation.ts";
+import type {
+  Project,
+  ProjectFolder,
+} from "../projects/ProjectOrganization.tsx";
+import { PeerTeamMoveOwner } from "../projects/peerTeamMutation.ts";
 
-import type { SidebarCommands } from "../../components/sidebar/commands.ts";
-import {
-  type SidebarServices,
-  type SidebarTarget,
-} from "../../components/sidebar/services";
+import type { SidebarCommands } from "../../components/sidebar/support/commands.ts";
+import type {
+  SidebarServices,
+  SidebarTarget,
+} from "../../components/sidebar/support/services.tsx";
 import {
   createSidebarList,
   localSidebarIdentity,
   createSidebarViewModel,
   SidebarProjectView,
   type SidebarChatView,
-} from "../../components/sidebar/viewModel.ts";
-import { SidebarOrderOwner } from "../../components/useSidebarOrder.ts";
+} from "../../components/sidebar/support/viewModel.ts";
+import { SidebarOrderOwner } from "../../components/sidebar/support/useSidebarOrder.ts";
 
-import { readServerAliases } from "../../servers/registry";
+import { readServerAliases } from "../../servers/registry.ts";
 import { observeServerAliases } from "../../servers/serverAliases.ts";
-import { itemGroup } from "../../components/sidebar/catalog";
+import { itemGroup } from "../../components/sidebar/support/catalog.ts";
 
 import type { MergedSidebar } from "../../servers/mergedSidebar.ts";
 type OrganizationRequest =
@@ -58,7 +58,7 @@ import {
   isClassicServerView,
 } from "../../servers/environment.ts";
 
-import { restoreSidebarFocus } from "../../components/sidebar/SidebarFrame.tsx";
+import { restoreSidebarFocus } from "../../components/sidebar/SidebarFrame/SidebarFrame.tsx";
 /** Visibility choices only. SidebarFrame remains the single sidebar width authority. */
 export class SidebarOwner {
   mobileOpen = false;

@@ -1,13 +1,13 @@
-import { SubscriptionReplyKind } from "../generated/api";
-import { subscriptionKey } from "./subscriptions/contracts";
-import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api";
+import { SubscriptionReplyKind } from "../generated/api.ts";
+import { subscriptionKey } from "./subscriptions/contracts.ts";
+import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api.ts";
 import {
   MAX_SYNC_RESOURCE_COUNT,
   SYNC_ENTITY_TRANSFER_ID_MAX_CODEPOINTS,
   SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
   SYNC_STREAM_EVENT_MAX_BYTES,
-} from "../generated/sharedValues";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
+} from "../generated/sharedValues.ts";
+import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities.ts";
 
 type Batch = components["schemas"]["EntityChangeBatch"];
 type Frame = components["schemas"]["ResourceEntityTransferEvent"];

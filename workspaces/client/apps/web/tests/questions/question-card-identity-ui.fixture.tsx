@@ -1,8 +1,9 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { ComponentProps } from "react";
 import { observer } from "mobx-react-lite";
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
-import { requestFixture } from "../../src/components/questions/requestFixtures";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { requestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -16,8 +17,8 @@ import type { Approval } from "../../src/approvals.ts";
 import Requests, {
   RequestCard,
   RequestArea,
-} from "../../src/components/questions/Requests.tsx";
-import History from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
+} from "../../src/components/conversation/questions/Requests/Requests.tsx";
+import History from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
 function TurnHistory(props: ComponentProps<typeof History>) {
   return (
     <AgentModelsFixture agents={props.agent ? [props.agent] : []}>
@@ -29,7 +30,7 @@ import {
   questionCard,
   transcriptRequests,
   type QuestionLookup,
-} from "../../src/components/questions/questionCardModel.ts";
+} from "../../src/components/conversation/support/questionCardModel.ts";
 
 const question: Message = {
   id: "lead:question-item",

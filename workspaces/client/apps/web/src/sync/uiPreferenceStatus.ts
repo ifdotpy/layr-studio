@@ -1,4 +1,4 @@
-import type { PreferenceScope } from "./uiPreferenceMerge";
+import type { PreferenceScope } from "./uiPreferenceMerge.ts";
 
 export type PreferenceWriteStatus =
   | { state: "saved" }

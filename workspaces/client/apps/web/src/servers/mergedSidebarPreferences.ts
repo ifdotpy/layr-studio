@@ -1,14 +1,14 @@
-import { encodeSidebarRanks, decodeSidebarRanks } from "./sidebarOrderRanks";
-import type { SidebarBackend } from "../components/sidebar/services";
+import { encodeSidebarRanks, decodeSidebarRanks } from "./sidebarOrderRanks.ts";
+import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type {
   MergedSidebar,
   SidebarOrder,
   SidebarSource,
-} from "./mergedSidebar";
+} from "./mergedSidebar.ts";
 import {
   mergePreferenceFields,
   type PreferenceFields,
-} from "../sync/uiPreferenceMerge";
+} from "../sync/uiPreferenceMerge.ts";
 
 const compactPrefix = "codex-project-compact:";
 const treePrefix = "codex-project-tree:";

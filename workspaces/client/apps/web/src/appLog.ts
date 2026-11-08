@@ -1,5 +1,5 @@
 import { createAtom } from "mobx";
-import type { components } from "./generated/api";
+import type { components } from "./generated/api.ts";
 
 /** Maximum retained client log entries. Unit: entries. */
 export const APP_LOG_MAX_ENTRIES = 200;

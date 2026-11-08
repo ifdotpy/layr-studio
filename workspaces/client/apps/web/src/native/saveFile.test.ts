@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({ nativeRequest: vi.fn() }));
-import { nativeRequest } from "./client";
-import { saveNativeFile } from "./saveFile";
+vi.mock("./client.ts", () => ({ nativeRequest: vi.fn() }));
+import { nativeRequest } from "./client.ts";
+import { saveNativeFile } from "./saveFile.ts";
 afterEach(() => vi.resetAllMocks());
 it("sends bounded exact chunks then reports a cancelled save", async () => {
   const invoke = vi.mocked(nativeRequest);

@@ -1,11 +1,11 @@
 import { jsonObject } from "../../usage/accountUsage.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
-import { outboxRequests } from "../../browserPersistence";
-import { randomUUID } from "../../uuid";
+import { outboxRequests } from "../../browserPersistence.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { makeAutoObservable, runInAction } from "mobx";
-import { ApiError } from "../../api";
-import type { PostBody } from "../../api";
-import type { Agent } from "../../types";
+import { ApiError } from "../../api.ts";
+import type { PostBody } from "../../api.ts";
+import type { Agent } from "../../types.ts";
 type Request = Omit<PostBody<"/api/action">, "action"> & {
   action: "compact" | "review";
 };

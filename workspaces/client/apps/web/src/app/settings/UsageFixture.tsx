@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 import { serializeStateCollections } from "../../generated/observableResources.ts";
-import { observableFixture } from "../../components/observableFixture.tsx";
+import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import {
   useServerStore,
   ServerStoreProvider,
-} from "../../servers/ServerServicesContext.tsx";
+} from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../store/runtime.ts";
-import Usage from "../../components/Usage.tsx";
-import type { Account } from "../../components/Accounts.tsx";
+import Usage from "../../components/conversation/Usage/Usage.tsx";
+import type { Account } from "../../components/accounts/support/Accounts.tsx";
 import type { DeepReadonly } from "../../deepReadonly.ts";
 import type { AccountLimitsData } from "../../usage/accountUsage.ts";
 import type { components } from "../../generated/api.ts";

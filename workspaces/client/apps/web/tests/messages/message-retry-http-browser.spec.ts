@@ -1,7 +1,8 @@
+import type {} from "./message-retry-http-browser.fixture.tsx";
 import { required } from "./helpers.ts";
 import { sentMessage } from "./send-command.ts";
 import type { AddressInfo } from "node:net";
-import type {} from "./message-retry-http-browser.fixture.tsx";
+
 import type { MessageRequest } from "./helpers.ts";
 import {
   readTestState,

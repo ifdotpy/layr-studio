@@ -3,8 +3,8 @@ import {
   PERSIST_DEADLINE_MS,
   MAX_PENDING_RESOURCE_FRAMES,
   ResourceEntityDelivery,
-} from "./resourceEntityDelivery";
-import type { ResourceChangeEvent } from "./resourceEvents";
+} from "./resourceEntityDelivery.ts";
+import type { ResourceChangeEvent } from "./resourceEvents.ts";
 
 function frame(
   revision: number,

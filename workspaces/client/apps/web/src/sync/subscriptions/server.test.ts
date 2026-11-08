@@ -1,10 +1,10 @@
 import { expect, it, vi } from "vitest";
-import type { ResourceEventsOptions } from "../resourceEvents";
+import type { ResourceEventsOptions } from "../resourceEvents.ts";
 const mocks = vi.hoisted(() => ({
   options: undefined as ResourceEventsOptions | undefined,
   source: vi.fn(),
 }));
-vi.mock("../resourceEvents", () => ({
+vi.mock("../resourceEvents.ts", () => ({
   createResourceEvents: (options: ResourceEventsOptions) => {
     mocks.options = options;
     return {
@@ -14,18 +14,18 @@ vi.mock("../resourceEvents", () => ({
     };
   },
 }));
-vi.mock("../../servers/eventSource", () => ({
+vi.mock("../../servers/eventSource.ts", () => ({
   SignedEventSource: class {
     constructor(...args: unknown[]) {
       mocks.source(...args);
     }
   },
 }));
-vi.mock("./data", () => ({ createDataObserver: () => () => () => {} }));
-vi.mock("./entityData", () => ({
+vi.mock("./data.ts", () => ({ createDataObserver: () => () => () => {} }));
+vi.mock("./entityData.ts", () => ({
   createEntityDataObserver: () => () => () => {},
 }));
-import { createServerSubscriptions } from "./server";
+import { createServerSubscriptions } from "./server.ts";
 
 it("forwards resumed refs to the same server's fully applied cursor reader", async () => {
   const ref = { kind: "transcript", agentId: "chat" } as const;

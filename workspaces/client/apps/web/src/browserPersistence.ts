@@ -1,4 +1,4 @@
-import { scopedStorage } from "./servers/storage";
+import { scopedStorage } from "./servers/storage.ts";
 
 /** Browser databases allowed for device keys, credentials, and request fences. */
 export const browserDatabases = {

@@ -1,15 +1,15 @@
 import { stateFromFixture } from "./sidebarSourceFixture.ts";
 import { createSidebarSourceStore } from "./sidebarSourceFixture.ts";
 import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
-import { type ApiPostPath, type PostInput, type PostResult } from "../api.ts";
-import type { SidebarBackend } from "../components/sidebar/services.tsx";
-import { type SidebarCommands } from "../components/sidebar/commands.ts";
+import type { ApiPostPath, PostInput, PostResult } from "../api.ts";
+import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
+import type { SidebarCommands } from "../components/sidebar/support/commands.ts";
 import { CombinedSidebarServicesProvider } from "./combinedSidebarServices.ts";
 // @vitest-environment happy-dom
 import { act, createElement, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { createSidebarList } from "../components/sidebar/viewModel.ts";
+import { createSidebarList } from "../components/sidebar/support/viewModel.ts";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { CombinedSidebarFixture as CombinedServerSidebar } from "./CombinedServerSidebar.fixture.tsx";
@@ -22,15 +22,15 @@ import {
   agentEntities,
   withSidebarCollections,
 } from "./sidebarSourceFixture.ts";
-import { componentSnapshot } from "../components/componentTestFixtures.ts";
+import { componentSnapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
   Object.assign(componentSnapshot(...args), {
     token: "",
     stateDir: "/fixture",
   });
 import { navigationSnapshot } from "./navigation.ts";
-import { localSidebarBackend } from "../components/sidebar/services.tsx";
-import { required } from "../components/componentTestFixtures.ts";
+import { localSidebarBackend } from "../components/sidebar/support/services.tsx";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
 const captured = vi.hoisted(() => ({
   owner: null as SidebarListOwner | null,
@@ -46,7 +46,7 @@ const captured = vi.hoisted(() => ({
   groups: null as unknown,
   ordered: null as unknown,
 }));
-vi.mock("../components/Sidebar", () => ({
+vi.mock("../components/sidebar/Sidebar/Sidebar.tsx", () => ({
   default: observer(({ owner }: { owner: SidebarListOwner }) => {
     captured.owner = owner;
     const props = { rows: owner.model.rows, sidebar: owner.runtime };

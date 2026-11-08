@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { emitRuntimeChange } from "./native-runtime-resource-events.fixture.ts";
 import { fixtureAccount } from "./fixture-helpers.ts";
@@ -19,12 +20,12 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
-import NativeRuntimeStatus from "../../src/components/NativeRuntimeStatus.tsx";
-import Accounts from "../../src/components/Accounts.tsx";
+import NativeRuntimeStatus from "../../src/components/settings/NativeRuntimeStatus/NativeRuntimeStatus.tsx";
+import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
 import "../../src/studio-theme.css";
 import "../../src/appearance.css";
-import { ConversationWarningsFixture as ConversationWarnings } from "../../src/components/noticesFixture.tsx";
-import { StudioErrorsProvider } from "../../src/components/noticesFixture.tsx";
+import { ConversationWarningsFixture as ConversationWarnings } from "../../src/components/conversation/notices/support/noticesFixture.tsx";
+import { StudioErrorsProvider } from "../../src/components/conversation/notices/support/noticesFixture.tsx";
 const accounts = [
   { id: "default", label: "Personal", status: "ready" as const },
   {

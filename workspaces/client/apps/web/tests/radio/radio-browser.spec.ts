@@ -1,9 +1,10 @@
+import type {} from "./radio-browser.fixture.tsx";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import type { Room } from "../../src/types.ts";
 import type { PostBody } from "../../src/api.ts";
 import { fixturePostBody } from "../misc-fixture.ts";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./radio-browser.fixture.tsx";
+
 import {
   test,
   expect,

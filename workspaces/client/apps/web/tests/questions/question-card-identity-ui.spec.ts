@@ -11,7 +11,7 @@ test("questions and confirmations edit their original mounted card", async ({
   page,
 }, testInfo) => {
   const server = await createBuiltQuestionServer(
-    "question-card-identity-ui.fixture.tsx",
+    "./question-card-identity-ui.fixture.tsx",
   );
   await server.listen();
   const answers: AnswerRequest[] = [];

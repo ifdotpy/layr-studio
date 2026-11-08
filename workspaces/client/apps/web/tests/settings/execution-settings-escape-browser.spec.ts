@@ -1,5 +1,6 @@
-import { fixtureUrl } from "./fixture-helpers.ts";
 import type {} from "./execution-settings-escape-browser.fixture.tsx";
+import { fixtureUrl } from "./fixture-helpers.ts";
+
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

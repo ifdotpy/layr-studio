@@ -1,7 +1,7 @@
-import { hasNativeClient } from "../native/client";
-import { nativeFetch } from "../native/http";
-import { serverViewId, isolatedServerView } from "./environment";
-import { viewServer, type StudioServer } from "./registry";
+import { hasNativeClient } from "../native/client.ts";
+import { nativeFetch } from "../native/http.ts";
+import { serverViewId, isolatedServerView } from "./environment.ts";
+import { viewServer, type StudioServer } from "./registry.ts";
 
 const LOCAL_FRAME_ACCOUNT_MUTATIONS = new Set([
   "/api/accounts/login",

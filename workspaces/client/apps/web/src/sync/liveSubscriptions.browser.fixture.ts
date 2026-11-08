@@ -1,7 +1,7 @@
 declare global {
   interface Window {
     transport: ReturnType<
-      typeof import("./resourceEvents").createResourceEvents
+      typeof import("./resourceEvents.ts").createResourceEvents
     >;
   }
 }

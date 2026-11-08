@@ -30,9 +30,9 @@ const commit = execFileSync(
 ).trim();
 const groups = [
   ["src/api.ts"],
-  ["src/native/NativeMarkdown.tsx"],
-  ["src/components/conversation/transcript/HistoryWindow.tsx"],
-  ["src/App.tsx"],
+  ["src/components/conversation/markdown/NativeMarkdown/NativeMarkdown.tsx"],
+  ["src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx"],
+  ["src/components/shell/App/App.tsx"],
 ];
 const files = groups.flat();
 const before = new Map(
@@ -53,7 +53,7 @@ const current = new Map(
     ]),
   ),
 );
-const supportPath = "src/components/shell/Workspace.tsx";
+const supportPath = "src/components/shell/Workspace/Workspace.tsx";
 const supportHash = createHash("sha256")
   .update(await readFile(join(root, supportPath)))
   .digest("hex");

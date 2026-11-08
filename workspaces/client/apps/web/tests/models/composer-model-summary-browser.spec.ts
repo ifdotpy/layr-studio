@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "../misc-fixture.ts";
 import type {} from "./composer-model-summary-browser.fixture.tsx";
+import { fixtureOrigin } from "../misc-fixture.ts";
+
 import { join } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { createFixtureViteServer, test, expect } from "../playwright.ts";

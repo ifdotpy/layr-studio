@@ -1,9 +1,10 @@
+import type {} from "./subagent-concurrency-confirmed-browser.fixture.tsx";
 import {
   initialConfirmedLead,
   confirmedWorkspaceId,
 } from "./concurrency-fixture-data.ts";
 import type { components } from "../../src/generated/api.ts";
-import type {} from "./subagent-concurrency-confirmed-browser.fixture.tsx";
+
 import { fixturePostBody } from "./helpers.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import {
@@ -47,13 +48,16 @@ test("subagent concurrency uses the confirmed response", async ({ page }) => {
           if (
             process.env.CONFIRMATION_BASELINE &&
             id ===
-              join(root, "src/components/agents/SubagentConcurrencyControl.tsx")
+              join(
+                root,
+                "src/components/agents/SubagentConcurrencyControl/SubagentConcurrencyControl.tsx",
+              )
           )
             return execFileSync(
               "git",
               [
                 "show",
-                `${process.env.CONFIRMATION_BASELINE}:web/src/components/agents/SubagentConcurrencyControl.tsx`,
+                `${process.env.CONFIRMATION_BASELINE}:web/src/components/agents/SubagentConcurrencyControl/SubagentConcurrencyControl.tsx`,
               ],
               { cwd: root, encoding: "utf8" },
             );

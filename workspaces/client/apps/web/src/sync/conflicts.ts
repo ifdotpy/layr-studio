@@ -1,6 +1,6 @@
 import type { components } from "../generated/api.ts";
 import { encodeDraftPayload } from "./draftPayload.ts";
-import type { DraftVersion } from "../generated/rustOwned";
+import type { DraftVersion } from "../generated/rustOwned.ts";
 // Keep every concurrent text, including two tabs that share the same device branch.
 type Document = components["schemas"]["SyncDocument"];
 export async function resolveDraftConflict(

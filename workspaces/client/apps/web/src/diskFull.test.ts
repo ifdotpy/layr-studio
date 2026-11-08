@@ -1,5 +1,5 @@
-import { AgentSource, AgentStatus } from "./generated/api";
-import type { Agent } from "./types";
+import { AgentSource, AgentStatus } from "./generated/api.ts";
+import type { Agent } from "./types.ts";
 // A turn that failed because the disk was full shows a held agent, not a failure.
 import assert from "node:assert/strict";
 import { it } from "vitest";

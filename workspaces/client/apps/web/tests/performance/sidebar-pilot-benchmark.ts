@@ -43,7 +43,7 @@ const baselineSource = (path: string) =>
   });
 const source = (path: string, baseline: boolean) =>
   baseline ? baselineSource(path) : readFile(path, "utf8");
-const entry = join(import.meta.dirname, "sidebar-pilot.fixture.tsx");
+const entry = join(import.meta.dirname, "./sidebar-pilot.fixture.tsx");
 const variants = [];
 for (const label of ["base", "integrated"]) {
   const baseline = label === "base";
@@ -97,14 +97,14 @@ for (const label of ["base", "integrated"]) {
             async (args) => {
               let contents = await readFile(
                 baseline
-                  ? join(import.meta.dirname, "sidebar-pilot-base.ts")
+                  ? join(import.meta.dirname, "./sidebar-pilot-base.ts")
                   : args.path,
                 "utf8",
               );
               if (baseline)
                 contents = contents.replace(
                   /declare const baselineChatIndicators:[\s\S]*?;/,
-                  'import { chatIndicators as baselineChatIndicators } from "/src/components/chat-status/chatActivity.ts";',
+                  'import { chatIndicators as baselineChatIndicators } from "/src/components/sidebar/chat-status/support/chatActivity.ts";',
                 );
               return { contents, loader: "ts" };
             },

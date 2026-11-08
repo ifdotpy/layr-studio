@@ -1,5 +1,5 @@
-import type { components } from "../../generated/api";
-import { SYNC_TERMINAL_STREAM_MAX_CHARS } from "../../generated/sharedValues";
+import type { components } from "../../generated/api.ts";
+import { SYNC_TERMINAL_STREAM_MAX_CHARS } from "../../generated/sharedValues.ts";
 type Output = components["schemas"]["TerminalOutput"];
 
 /** Offsets count Unicode scalars, matching the persisted Rust terminal buffer. */

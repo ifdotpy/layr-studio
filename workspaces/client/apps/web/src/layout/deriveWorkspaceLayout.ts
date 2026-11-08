@@ -2,7 +2,7 @@ import {
   layoutTokens,
   layoutValues,
   type LayoutLengthKey,
-} from "./layout-contract.generated";
+} from "./layout-contract.generated.ts";
 
 export interface LayoutRect {
   x: number;

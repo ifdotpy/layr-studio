@@ -1,12 +1,12 @@
 import { reaction, toJS, compareStructural } from "mobx";
-import type { components } from "../generated/api";
+import type { components } from "../generated/api.ts";
 import { expect, it, vi } from "vitest";
 import {
   TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS,
   TOKEN_RATE_MAX_ENTRIES,
   SYNC_PROTOCOL_VERSION,
-} from "../generated/api";
-import { createTokenRateCache, type TokenRate } from "./tokenRate";
+} from "../generated/api.ts";
+import { createTokenRateCache, type TokenRate } from "./tokenRate.ts";
 
 it("one token record drives footer and team without an agent projection, moves roots and clears removals", () => {
   const cache = createTokenRateCache();
@@ -57,7 +57,7 @@ it("one token record drives footer and team without an agent projection, moves r
 
 it("rejects nonfinite, malformed, duplicate and oversized records atomically at the snapshot boundary", async () => {
   const { TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS, TOKEN_RATE_MAX_ENTRIES } =
-    await import("../generated/api");
+    await import("../generated/api.ts");
   const cache = createTokenRateCache();
   const record = {
     agentId: "agent",

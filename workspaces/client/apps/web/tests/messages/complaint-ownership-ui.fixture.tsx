@@ -1,12 +1,13 @@
+import "../../src/rendererStyles.ts";
 import type { Complaint } from "../../src/types.ts";
 
 import React from "react";
 import { messageModels } from "./message-models.fixture";
-import { conversationActionsFixture } from "../../src/components/observableFixture";
+import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import UserMessages from "../../src/components/shell/messages/UserMessages.tsx";
+import UserMessages from "../../src/components/shell/messages/UserMessages/UserMessages.tsx";
 const models = messageModels("ownership-contract", [
   { id: "lead", name: "Release lead" },
   { id: "worker", name: "Worker" },

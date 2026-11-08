@@ -1,4 +1,4 @@
-import { FrontendLocality } from "../src/generated/api";
+import { FrontendLocality } from "../src/generated/api.ts";
 import { LimitColor, RunwayColor } from "../src/generated/api.ts";
 import { spawn } from "node:child_process";
 import {

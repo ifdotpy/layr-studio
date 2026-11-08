@@ -1,5 +1,6 @@
-import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const injectedStore = observableFixture();
 import React, { memo, useLayoutEffect, useReducer } from "react";
 import { createRoot } from "react-dom/client";
@@ -7,7 +8,7 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
 import "../../src/appearance.css";
-import Sidebar from "../../src/components/Sidebar.fixture.tsx";
+import Sidebar from "../../src/components/sidebar/Sidebar/Sidebar.fixture.tsx";
 import { createPilotModel } from "./sidebar-pilot-model.ts";
 import { pilotAgents, pilotSize, pilotUpdate } from "./sidebar-pilot-data.ts";
 import { required } from "./performance-fixture.ts";

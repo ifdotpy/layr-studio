@@ -1,7 +1,7 @@
-import { AccessClientStatus } from "../generated/api";
+import { AccessClientStatus } from "../generated/api.ts";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel";
-import type { StudioServer } from "./registry";
+import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel.ts";
+import type { StudioServer } from "./registry.ts";
 
 const mocks = vi.hoisted(() => ({
   saved: [] as StudioServer[],
@@ -9,16 +9,16 @@ const mocks = vi.hoisted(() => ({
   trusted: vi.fn(),
   written: [] as StudioServer[][],
 }));
-vi.mock("./browserCredentials", () => ({ trustedServer: mocks.trusted }));
-vi.mock("./excludedServers", () => ({
+vi.mock("./browserCredentials.ts", () => ({ trustedServer: mocks.trusted }));
+vi.mock("./excludedServers.ts", () => ({
   excludedServers: () => mocks.excluded,
 }));
-vi.mock("./registry", () => ({
+vi.mock("./registry.ts", () => ({
   readServers: () => mocks.saved,
   writeServers: (servers: StudioServer[]) => mocks.written.push(servers),
 }));
 
-import { adoptTrustedServers, trustedCandidates } from "./trustedServers";
+import { adoptTrustedServers, trustedCandidates } from "./trustedServers.ts";
 
 function peer(
   id: string,

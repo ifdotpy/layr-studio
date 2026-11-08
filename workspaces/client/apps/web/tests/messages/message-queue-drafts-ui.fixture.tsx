@@ -1,8 +1,9 @@
-import type { QueueItem } from "../../src/components/MessageQueue.tsx";
+import "../../src/rendererStyles.ts";
+import type { QueueItem } from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
 
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
-import MessageQueue from "../../src/components/MessageQueue.tsx";
+import MessageQueue from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
 function App() {
   const [items, setItems] = useState<QueueItem[]>([
     {

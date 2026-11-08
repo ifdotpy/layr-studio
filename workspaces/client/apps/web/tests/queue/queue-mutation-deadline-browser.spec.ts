@@ -1,5 +1,6 @@
-import { required } from "../messages/helpers.ts";
 import type {} from "./queue-mutation-deadline-browser.fixture.tsx";
+import { required } from "../messages/helpers.ts";
+
 import { createFixtureViteServer } from "../playwright.ts";
 import { requestBody } from "../messages/helpers.ts";
 import { commandOf } from "../messages/send-command.ts";
@@ -262,8 +263,10 @@ test("queue-mutation-deadline-browser @performance", async ({
     };
     const before = withdrawals.length;
     await page.evaluate(async (workspaceId) => {
-      window.removal = await import("/src/components/removeSendingMessages.ts");
-      window.removed = await import("/src/components/removedMessages.ts");
+      window.removal =
+        await import("/src/app/conversation/delivery/removeSendingMessages.ts");
+      window.removed =
+        await import("/src/app/conversation/delivery/removedMessages.ts");
       window.queueDeadlineScope = { stateDir: "deadline-fixture", workspaceId };
       window.target = {
         chat: "chat",

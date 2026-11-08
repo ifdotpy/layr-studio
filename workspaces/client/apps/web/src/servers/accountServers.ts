@@ -1,6 +1,6 @@
-import { AccessClientStatus } from "../generated/api";
-import type { DiscoveredServer } from "./discoveryModel";
-import type { StudioServer } from "./registry";
+import { AccessClientStatus } from "../generated/api.ts";
+import type { DiscoveredServer } from "./discoveryModel.ts";
+import type { StudioServer } from "./registry.ts";
 
 export function accountServers(
   registered: StudioServer[],

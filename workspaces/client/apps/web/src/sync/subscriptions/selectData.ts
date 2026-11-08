@@ -1,4 +1,4 @@
-import type { ResourceData, ResourceRef } from "./contracts";
+import type { ResourceData, ResourceRef } from "./contracts.ts";
 
 type Ref<K extends ResourceRef["kind"]> = Extract<ResourceRef, { kind: K }>;
 

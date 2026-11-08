@@ -1,6 +1,6 @@
-import type { DesktopBridge } from "../desktop";
-import { hasNativeClient, nativeHost, nativeRequest } from "./client";
-import { isNativeFrame } from "./frame";
+import type { DesktopBridge } from "../desktop.ts";
+import { hasNativeClient, nativeHost, nativeRequest } from "./client.ts";
+import { isNativeFrame } from "./frame.ts";
 export function hasDesktopNotifications() {
   return !!window.codexDesktop || (hasNativeClient() && !isNativeFrame());
 }

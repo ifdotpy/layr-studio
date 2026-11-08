@@ -1,5 +1,9 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
-import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import type {
+  Account,
+  AccountsState,
+} from "../../src/components/accounts/support/Accounts.tsx";
 declare global {
   interface Window {
     signInAccount: string;
@@ -9,8 +13,8 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Accounts from "../../src/components/Accounts.tsx";
-import AccountSignInNotice from "../../src/components/AccountSignInNotice.tsx";
+import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
+import AccountSignInNotice from "../../src/components/accounts/AccountSignInNotice/AccountSignInNotice.tsx";
 const account: Partial<Account> = {
   id: "claude",
   label: "Personal",

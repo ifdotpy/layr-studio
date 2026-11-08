@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Json } from "./types";
+import type { Json } from "./types.ts";
 
 const { rows } = vi.hoisted(() => ({ rows: new Map<string, string>() }));
 
-vi.mock(import("./servers/storage"), async (importOriginal) => ({
+vi.mock(import("./servers/storage.ts"), async (importOriginal) => ({
   ...(await importOriginal()),
   serverLocalStorage: {
     get length() {
@@ -16,14 +16,14 @@ vi.mock(import("./servers/storage"), async (importOriginal) => ({
   } as unknown as Storage,
 }));
 
-import { ApiError, NetworkTimeoutError } from "./api";
+import { ApiError, NetworkTimeoutError } from "./api.ts";
 import {
   confirmChatCreationResponse,
   dismissChatCreation,
   pendingChatCreations,
   saveChatCreation,
   settleFailedChatCreation,
-} from "./chatCreation";
+} from "./chatCreation.ts";
 
 describe("saved chat creation recovery", () => {
   beforeEach(() => rows.clear());

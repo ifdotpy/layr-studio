@@ -6,7 +6,7 @@
 // values are saved before the request, so a retry after a lost response reuses them.
 import type { components } from "./generated/api.ts";
 import type { PendingCommands } from "./pendingCommands.ts";
-import { randomUUID } from "./uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { MAX_MANAGED_MESSAGE_CODEPOINTS } from "./generated/sharedValues.ts";
 
 /**

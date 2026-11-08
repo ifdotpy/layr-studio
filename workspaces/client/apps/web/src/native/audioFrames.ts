@@ -1,5 +1,5 @@
-import { randomUUID } from "../uuid";
-import type { NativeEvent } from "./host";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import type { NativeEvent } from "./host.ts";
 // The shell owns every native audio identity. A server view cannot observe,
 // stop, or transcribe another view's recording, even with a copied token.
 type Invoke = (

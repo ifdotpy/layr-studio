@@ -1,13 +1,14 @@
+import "../../src/rendererStyles.ts";
 import "@mantine/core/styles.css";
 import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
-import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
+import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
 import { CombinedSidebarServicesProvider } from "../../src/servers/combinedSidebarServices.ts";
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const injectedStore = observableFixture();
 import type { ServerNavigation } from "../../src/servers/navigation.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { sidebarFixtureRadio } from "./sidebar-fixture-values.ts";
-import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { createStateMirror } from "../../src/generated/observableResources.ts";
 import type { AgentSummaryEntityDto } from "../../src/generated/api.ts";
 import {
@@ -22,10 +23,10 @@ declare global {
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import Sidebar from "../../src/components/Sidebar.fixture.tsx";
+import Sidebar from "../../src/components/sidebar/Sidebar/Sidebar.fixture.tsx";
 import { CombinedSidebarFixture as CombinedServerSidebar } from "../../src/servers/CombinedServerSidebar.fixture.tsx";
 import { mergeSidebar } from "../../src/servers/mergedSidebar.ts";
-import { localSidebarBackend } from "../../src/components/sidebar/services.tsx";
+import { localSidebarBackend } from "../../src/components/sidebar/support/services.tsx";
 import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
 import "../../src/appearance.css";

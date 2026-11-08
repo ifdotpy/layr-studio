@@ -5,13 +5,13 @@ vi.mock("../../servers/serverNames.ts", () => ({
 import {
   observableFixture,
   setStartupFixture,
-} from "../../components/observableFixture.tsx";
+} from "../../components/shell/integration-support/observableFixture.tsx";
 import { LocalCollection } from "../../sync/localCollection.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { reaction } from "mobx";
 import { createServerServices } from "../../servers/serverServices.ts";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { READ_RECOVERY_MAX_ATTEMPTS } from "../../sync/readRetry.ts";
 import { StartupOwner } from "./StartupOwner.ts";
 import { ScreenSelection } from "./ScreenOwner.ts";
@@ -197,16 +197,16 @@ it("shows a generated state query failure before its first value and reload reco
   const { act, createElement } = await import("react");
   const { createRoot } = await import("react-dom/client");
   const { MantineProvider } = await import("@mantine/core");
-  const { default: App } = await import("../../App.tsx");
+  const { default: App } = await import("../../components/shell/App/App.tsx");
   const { ServerAreas, ServerAreasContextProvider } =
     await import("../ServerAreasProvider.tsx");
   const { ServerServicesProvider, ServerStoreProvider } =
-    await import("../../servers/ServerServicesContext.tsx");
+    await import("../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx");
   const { createSubscriptions } =
     await import("../../sync/subscriptions/module.ts");
   const { createEntityDataObserver } =
     await import("../../sync/subscriptions/entityData.ts");
-  const { createServerStore } = await import("../../store/index.ts");
+  const { createServerStore } = await import("../../store/server.ts");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.useFakeTimers();
   const projections = new LocalCollection("startup-query-reload");

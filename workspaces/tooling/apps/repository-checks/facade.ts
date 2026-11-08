@@ -1139,6 +1139,8 @@ export function gateSteps(root: string, name: string): GateStep[] {
       ]),
       nodeTest("fixture-processes", "browser fixture process reaping", [
         "workspaces/client/apps/web/tests/fixture-process-group.test.ts",
+        "workspaces/client/apps/web/tests/fixture-readiness.test.ts",
+        "workspaces/client/apps/web/tests/entity-projection.test.ts",
         "workspaces/client/apps/web/tests/fixtures/rust-ui-fixture.test.ts",
       ]),
       {

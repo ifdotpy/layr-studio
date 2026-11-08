@@ -7,8 +7,8 @@ import {
   type PostResult,
 } from "../../api.ts";
 import type { Json } from "../../types.ts";
-import type { NewChatSettings } from "../../components/newChatSettings.ts";
-import { randomUUID } from "../../uuid.ts";
+import type { NewChatSettings } from "./newChatSettings.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { AgentModel, ServerAreas, SelectionIntent } from "../contracts.ts";
 
 type LeadCreateRequest = PostBody<"/api/leads"> &

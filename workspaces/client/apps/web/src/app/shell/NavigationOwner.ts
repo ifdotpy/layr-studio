@@ -1,12 +1,12 @@
 import { makeAutoObservable, reaction } from "mobx";
 import { AgentSource } from "../../generated/api.ts";
-import { mostRecentActivity } from "../../components/sidebar/catalog.ts";
+import { mostRecentActivity } from "../../components/sidebar/support/catalog.ts";
 import type {
   CreatedAgent,
   SelectionIntent,
   ServerAreas,
 } from "../contracts.ts";
-import { randomUUID } from "../../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 
 export class NavigationOwner {
   selectedId: string | null = null;

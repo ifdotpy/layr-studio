@@ -1,6 +1,6 @@
-import { TerminalState } from "../../generated/api";
+import { TerminalState } from "../../generated/api.ts";
 import { expect, it } from "vitest";
-import { mergeTerminalOutput } from "./terminalOutput";
+import { mergeTerminalOutput } from "./terminalOutput.ts";
 const output = (text: string, offset: number) => ({
   text,
   offset,

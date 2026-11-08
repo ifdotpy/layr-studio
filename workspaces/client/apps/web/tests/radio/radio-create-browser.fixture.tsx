@@ -1,7 +1,8 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "../../src/rendererStyles.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
-import { SidebarCommandsProvider } from "../../src/components/sidebar/commands.ts";
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const injectedStore = observableFixture();
 declare global {
   interface Window {
@@ -15,7 +16,7 @@ declare global {
   }
 }
 const rootElement = document.getElementById("root")!;
-import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
 import { radioSnapshot } from "./radio-fixture.ts";
 
@@ -23,8 +24,8 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal } from "@mantine/core";
 import "@mantine/core/styles.css";
-import SharedChatCreate from "../../src/components/SharedChatCreate.tsx";
-import Sidebar from "../../src/components/Sidebar.fixture.tsx";
+import SharedChatCreate from "../../src/components/projects/SharedChatCreate/SharedChatCreate.tsx";
+import Sidebar from "../../src/components/sidebar/Sidebar/Sidebar.fixture.tsx";
 import "../../src/style.css";
 import "../../src/appearance.css";
 import "../../src/workspace-layout.css";

@@ -1,7 +1,7 @@
-import { AccessClientStatus } from "../generated/api";
+import { AccessClientStatus } from "../generated/api.ts";
 import { expect, it } from "vitest";
-import { accountServers } from "./accountServers";
-import type { DiscoveredServer } from "./discoveryModel";
+import { accountServers } from "./accountServers.ts";
+import type { DiscoveredServer } from "./discoveryModel.ts";
 
 function peer(
   id: string,

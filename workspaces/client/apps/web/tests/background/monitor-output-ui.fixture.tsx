@@ -1,5 +1,6 @@
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
-import { refreshState } from "../../src/sync/client";
+import "../../src/rendererStyles.ts";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { refreshState } from "../../src/sync/client.ts";
 declare global {
   interface Window {
     notices: string[];
@@ -11,7 +12,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
+import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
 // The isolated subtree uses the same singleton bootstrap as App.
 await refreshState();
 createRoot(document.getElementById("root")!).render(

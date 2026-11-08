@@ -1,7 +1,7 @@
-import { saveNativeFile } from "./native/saveFile";
-import type { DesktopBridge } from "./desktop";
-import { hasNativeClient, nativeRequest } from "./native/client";
-import { isRemoteServerView } from "./servers/environment";
+import { saveNativeFile } from "./native/saveFile.ts";
+import type { DesktopBridge } from "./desktop.ts";
+import { hasNativeClient, nativeRequest } from "./native/client.ts";
+import { isRemoteServerView } from "./servers/environment.ts";
 
 export interface FileTarget {
   agent?: string | undefined;

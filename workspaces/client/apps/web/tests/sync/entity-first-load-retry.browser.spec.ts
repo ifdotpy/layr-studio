@@ -1,3 +1,4 @@
+import type {} from "./entity-first-load-retry.browser.fixture.tsx";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { required } from "../teams/helpers.ts";
 import type { FixtureResourceChange } from "./helpers.ts";
@@ -12,7 +13,7 @@ type FixtureOptions = {
   streamFailures?: number;
   streamHeadersDelayMs?: number;
 };
-import type {} from "./entity-first-load-retry.browser.fixture.tsx";
+
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import { fixtureOrigin } from "./helpers.ts";

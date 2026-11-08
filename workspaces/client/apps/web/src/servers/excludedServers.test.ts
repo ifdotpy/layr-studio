@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { excludedServers, setServerExcluded } from "./excludedServers";
+import { excludedServers, setServerExcluded } from "./excludedServers.ts";
 
 function memory(initial?: string) {
   const values = new Map<string, string>(

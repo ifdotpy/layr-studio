@@ -1,10 +1,10 @@
 import { transientTestFixture } from "../sync/subscriptions/transientTestFixture.ts";
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 /// <reference lib="es2024.promise" />
 import { afterEach, expect, test, vi } from "vitest";
-import { validateServerName, watchServerName } from "./serverNames";
-import { readServers, writeServers, SERVER_REGISTRY_KEY } from "./registry";
-import { setServerCredentialAdapter } from "./transport";
+import { validateServerName, watchServerName } from "./serverNames.ts";
+import { readServers, writeServers, SERVER_REGISTRY_KEY } from "./registry.ts";
+import { setServerCredentialAdapter } from "./transport.ts";
 
 test("server names accept visible Unicode and reject controls and outer spaces", () => {
   for (const name of [
@@ -81,7 +81,7 @@ test("saved server names use their own stream with zero idle status reads", asyn
       epoch: "owner",
       revision: 1,
       discoverySnapshot: { identity: { serverId: id, label } },
-    } as import("../sync/resourceEvents").ResourceVersion);
+    } as import("../sync/resourceEvents.ts").ResourceVersion);
   deliver("other", "Wrong");
   await vi.advanceTimersByTimeAsync(0);
   expect(required(readServers()[0]).label).toBe("remote.tailnet.ts.net");

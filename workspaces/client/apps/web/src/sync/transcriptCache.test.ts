@@ -1,16 +1,19 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
-import type { TranscriptWireItem } from "../types";
+import type { TranscriptWireItem } from "../types.ts";
 // Cache-only fixture views omit renderer-only role/text and input truncation fields.
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("./client", () => ({}));
-vi.mock("../servers/ServerServicesContext", () => ({
-  useServerApi: vi.fn(),
-  useServerSync: vi.fn(),
-  useServerResources: vi.fn(),
-  useServerTranscripts: vi.fn(),
-}));
+vi.mock("./client.ts", () => ({}));
+vi.mock(
+  "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
+  () => ({
+    useServerApi: vi.fn(),
+    useServerSync: vi.fn(),
+    useServerResources: vi.fn(),
+    useServerTranscripts: vi.fn(),
+  }),
+);
 
 beforeEach(() => {
   vi.resetModules();
@@ -23,7 +26,7 @@ afterEach(() => {
 });
 
 it("applies every delta immediately and publishes the latest transcript once", async () => {
-  const cache = await import("./transcriptCache");
+  const cache = await import("./transcriptCache.ts");
   cache.cacheTranscriptValue(
     "workspace",
     "a",
@@ -89,7 +92,7 @@ it("applies every delta immediately and publishes the latest transcript once", a
 });
 
 it("keeps workspace notifications separate and cancels notifications for a closed chat", async () => {
-  const cache = await import("./transcriptCache");
+  const cache = await import("./transcriptCache.ts");
   const old = vi.fn();
   const current = vi.fn();
   const stopOld = cache.subscribeTranscript("old", "same", old);
@@ -112,7 +115,7 @@ it("keeps workspace notifications separate and cancels notifications for a close
 });
 
 it("does not publish a cached transcript after it is cleared", async () => {
-  const cache = await import("./transcriptCache");
+  const cache = await import("./transcriptCache.ts");
   const accept = vi.fn();
   const stop = cache.subscribeTranscript("workspace", "a", accept);
   cache.cacheTranscriptValue("workspace", "a", { items: [] }, 1);
@@ -123,8 +126,8 @@ it("does not publish a cached transcript after it is cleared", async () => {
 });
 
 it("keeps a retained conversation snapshot renderable while a removal awaits publication", async () => {
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const { transcriptMessages } = await import("../conversation/messageView");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const { transcriptMessages } = await import("../conversation/messageView.ts");
   const cache = createTranscriptCache();
   const batch = {
     id: "batch",
@@ -178,7 +181,7 @@ it("keeps a retained conversation snapshot renderable while a removal awaits pub
 it.each(["append", "replace", "remove", "reorder"] as const)(
   "preserves published snapshot contents and unchanged item identity on %s",
   async (operation) => {
-    const { createTranscriptCache } = await import("./transcriptCache");
+    const { createTranscriptCache } = await import("./transcriptCache.ts");
     const cache = createTranscriptCache();
     const first = { id: "first", text: "Original" };
     const kept = { id: "kept", text: "Unchanged" };

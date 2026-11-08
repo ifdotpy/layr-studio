@@ -1,9 +1,10 @@
+import type {} from "./native-runtime-status-browser.fixture.tsx";
 import type {
   ResourceRef,
   watchResourceChanges as actualWatch,
   watchResourceConnection as actualConnection,
 } from "../../src/sync/resourceEvents.ts";
-import type {} from "./native-runtime-status-browser.fixture.tsx";
+
 type ChangeListener = Parameters<typeof actualWatch>[1];
 type ConnectionListener = Parameters<typeof actualConnection>[0];
 const subscribers = new Map<ResourceRef["kind"], Set<ChangeListener>>();

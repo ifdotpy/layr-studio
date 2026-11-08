@@ -1,5 +1,6 @@
-import { RequestFixture } from "../../src/components/questions/requestFixtures";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import "../../src/rendererStyles.ts";
+import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
 declare global {
   interface Window {
@@ -17,7 +18,7 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import Requests, {
   RequestArea,
-} from "../../src/components/questions/Requests.tsx";
+} from "../../src/components/conversation/questions/Requests/Requests.tsx";
 const agent = {
   id: "worker",
   rootId: "lead",

@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "../../tests/misc-fixture.ts";
 import type {} from "./visualActivity.browser.fixture.tsx";
+import { fixtureOrigin } from "../../tests/misc-fixture.ts";
+
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

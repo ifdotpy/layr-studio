@@ -1,7 +1,7 @@
-import { outboxRequestKeys, outboxRequests } from "./browserPersistence";
-import { ApiError } from "./api";
-import { serverLocalStorage } from "./servers/storage";
-import type { Json } from "./types";
+import { outboxRequestKeys, outboxRequests } from "./browserPersistence.ts";
+import { ApiError } from "./api.ts";
+import { serverLocalStorage } from "./servers/storage.ts";
+import type { Json } from "./types.ts";
 
 const requestPrefix = (key: string) => `${key}:request:`;
 

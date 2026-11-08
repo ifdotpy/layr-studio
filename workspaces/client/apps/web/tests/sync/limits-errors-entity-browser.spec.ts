@@ -1,3 +1,4 @@
+import type {} from "./limits-errors-entity-browser.fixture.tsx";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import {
@@ -17,7 +18,7 @@ type PendingEntity = SyncEntity extends infer Entity
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import { fixtureOrigin } from "./helpers.ts";
-import type {} from "./limits-errors-entity-browser.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import {

@@ -5,13 +5,13 @@ import {
   post,
   type PostBody,
   type PostOptions,
-} from "../api";
-import type { components } from "../generated/api";
+} from "../api.ts";
+import type { components } from "../generated/api.ts";
 import {
   isServerCommand,
   type ServerCommand,
   type ServerNavigation,
-} from "./navigation";
+} from "./navigation.ts";
 
 type ErrorResponse = components["schemas"]["ErrorResponse"];
 type SidebarError = {

@@ -1,4 +1,4 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { afterEach, expect, it, vi } from "vitest";
 
 async function setup(remote = false) {
@@ -23,7 +23,7 @@ async function setup(remote = false) {
           ],
   }));
   vi.stubGlobal("__TAURI__", { core: { invoke } });
-  return { api: await import("./fileDialogs"), invoke };
+  return { api: await import("./fileDialogs.ts"), invoke };
 }
 afterEach(() => vi.unstubAllGlobals());
 

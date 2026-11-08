@@ -3,7 +3,7 @@ import { resourceData } from "../../store/runtime.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import { makeAutoObservable, observable, reaction, runInAction } from "mobx";
 import { errorText } from "../../api.ts";
-import { randomUUID } from "../../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { submitRename } from "../../renameRequest.ts";
 
 type PendingRename = { text: string; id: string };

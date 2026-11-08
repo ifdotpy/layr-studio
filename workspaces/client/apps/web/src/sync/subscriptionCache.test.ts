@@ -5,12 +5,12 @@ import {
   SUBSCRIPTION_CACHE_VERSION,
   createSubscriptionCache,
   subscriptionRows,
-} from "./subscriptionCache";
-import { LocalCollection } from "./localCollection";
-import { subscriptionKey } from "./subscriptions/contracts";
-import { TRANSCRIPT_PROJECTION_FORMAT } from "./transcriptMetadata";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
-import { AgentStatus, SubscriptionCachePolicy } from "../generated/api";
+} from "./subscriptionCache.ts";
+import { LocalCollection } from "./localCollection.ts";
+import { subscriptionKey } from "./subscriptions/contracts.ts";
+import { TRANSCRIPT_PROJECTION_FORMAT } from "./transcriptMetadata.ts";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
+import { AgentStatus, SubscriptionCachePolicy } from "../generated/api.ts";
 
 const ref = { kind: "transcript", agentId: "agent" } as const;
 const cursor = { workspaceId: "workspace", seq: 4 };

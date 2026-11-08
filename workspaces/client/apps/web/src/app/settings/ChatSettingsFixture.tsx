@@ -1,10 +1,10 @@
-import type { ComponentSnapshot as Snapshot } from "../../components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { settingsAreasFixture } from "./SettingsAreasFixture.ts";
 import { useEffect, useState } from "react";
 import type { Agent } from "../../types.ts";
-import type { AccountsState } from "../../components/Accounts.tsx";
-import { ChatSettingsDialog } from "../../components/agents/ChatSettingsDialog.tsx";
-import { useServerStore } from "../../servers/ServerServicesContext.tsx";
+import type { AccountsState } from "../../components/accounts/support/Accounts.tsx";
+import { ChatSettingsDialog } from "../../components/agents/ChatSettingsDialog/ChatSettingsDialog.tsx";
+import { useServerStore } from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createServerServices } from "../../servers/serverServices.ts";
 import { resourceData } from "../../store/runtime.ts";
 
@@ -65,7 +65,7 @@ export function ChatSettingsFixture({
     <ChatSettingsDialog
       areas={fixture.areas}
       accounts={
-        accounts as import("../../components/Accounts.tsx").AccountsController
+        accounts as import("../../components/accounts/Accounts/Accounts.tsx").AccountsController
       }
       settings={{
         chatOpen: settingsOpen,

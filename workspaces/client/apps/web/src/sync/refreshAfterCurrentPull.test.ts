@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { refreshAfterCurrentPull } from "./refreshAfterCurrentPull";
+import { refreshAfterCurrentPull } from "./refreshAfterCurrentPull.ts";
 
 describe("refresh after the current pull", () => {
   it("starts another pull after an older in-flight pull settles", async () => {

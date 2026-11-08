@@ -4,8 +4,8 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { createHash, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 const rows = new Map<string, string>();
-vi.mock("./environment", () => ({ serverViewId: "remote" }));
-vi.mock("./storage", () => ({
+vi.mock("./environment.ts", () => ({ serverViewId: "remote" }));
+vi.mock("./storage.ts", () => ({
   serverSessionStorage: {
     getItem: () => null,
     setItem() {},
@@ -17,7 +17,7 @@ vi.mock("./storage", () => ({
     removeItem: (key: string) => rows.delete(key),
   },
 }));
-vi.mock("./transport", () => ({
+vi.mock("./transport.ts", () => ({
   apiOrigin: () => "http://localhost",
   serverFetch: (request: Request) => globalThis.fetch(request),
 }));
@@ -25,8 +25,8 @@ import {
   beginServerMutation,
   createMutationJournal,
   serverMutationResponseIsUncertain,
-} from "./mutationIdentity";
-import { post } from "../api";
+} from "./mutationIdentity.ts";
+import { post } from "../api.ts";
 import { NativeCommandAction } from "../generated/api.ts";
 beforeEach(() => rows.clear());
 it("keeps the same durable journal key and uncertain identity without subtle", async () => {

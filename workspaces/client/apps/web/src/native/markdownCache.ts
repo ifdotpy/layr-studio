@@ -1,4 +1,4 @@
-import { ByteBudgetLru } from "../byteBudgetLru";
+import { ByteBudgetLru } from "../byteBudgetLru.ts";
 
 // Compact JSON trees: bare numbers reference interned strings; arrays are
 // tagged as object (0, key/value tuples), array (1), or number (2). This keeps

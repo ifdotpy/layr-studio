@@ -1,6 +1,7 @@
+import type {} from "@playwright/test";
 import { readCachedStorage } from "../cacheFixture.ts";
 import { build } from "esbuild";
-import type {} from "@playwright/test";
+
 import type { Server } from "node:http";
 import {
   readShellManifest,

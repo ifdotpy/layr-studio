@@ -1,14 +1,14 @@
-import { createServerTransport } from "./serverTransport";
-import { hasNativeClient } from "../native/client";
-import { nativeFetch } from "../native/http";
+import { createServerTransport } from "./serverTransport.ts";
+import { hasNativeClient } from "../native/client.ts";
+import { nativeFetch } from "../native/http.ts";
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,
-} from "../generated/apiSchema";
-import type { StudioServer } from "./registry";
-import { serverCredentialAdapter } from "./transport";
-import type { ServerNavigation } from "./navigation";
-import { readServerAccounts, type ServerAccount } from "./navigation";
+} from "../generated/apiSchema.ts";
+import type { StudioServer } from "./registry.ts";
+import { serverCredentialAdapter } from "./transport.ts";
+import type { ServerNavigation } from "./navigation.ts";
+import { readServerAccounts, type ServerAccount } from "./navigation.ts";
 export function isSummaryRequest(request: Request, server: StudioServer) {
   const url = new URL(request.url);
   return (

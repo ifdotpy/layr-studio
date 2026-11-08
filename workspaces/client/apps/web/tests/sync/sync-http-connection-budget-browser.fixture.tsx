@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { fixtureElement } from "./browser-helpers.ts";
 
 import React, { useEffect } from "react";

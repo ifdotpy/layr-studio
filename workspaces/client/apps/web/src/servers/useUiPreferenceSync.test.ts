@@ -4,12 +4,12 @@ import {
   writeServers,
   SERVER_REGISTRY_KEY,
   type StudioServer,
-} from "./registry";
+} from "./registry.ts";
 import {
   readPreferenceFields,
   receivePreferenceFields,
-} from "../sync/uiPreferenceStore";
-import { preferenceMemory } from "./storage";
+} from "../sync/uiPreferenceStore.ts";
+import { preferenceMemory } from "./storage.ts";
 
 const mocks = vi.hoisted(() => ({
   effects: [] as (() => void | (() => void))[],
@@ -20,10 +20,13 @@ vi.mock("react", () => ({
   useEffect: (effect: () => void | (() => void)) => mocks.effects.push(effect),
   useRef: (current: unknown) => ({ current }),
 }));
-vi.mock("./ServerServicesContext", () => ({
-  useServerApi: () => ({ fetchApiRequest: mocks.fetch }),
-}));
-vi.mock("./eventSource", () => ({
+vi.mock(
+  "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
+  () => ({
+    useServerApi: () => ({ fetchApiRequest: mocks.fetch }),
+  }),
+);
+vi.mock("./eventSource.ts", () => ({
   SignedEventSource: class extends EventTarget {
     constructor() {
       super();
@@ -32,7 +35,7 @@ vi.mock("./eventSource", () => ({
     close() {}
   },
 }));
-import { useUiPreferenceSync } from "./useUiPreferenceSync";
+import { useUiPreferenceSync } from "./useUiPreferenceSync.ts";
 
 const local = { id: "local", origin: "http://local.invalid", label: "Local" };
 const paired = {

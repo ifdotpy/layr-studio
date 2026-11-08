@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { expect, it } from "vitest";
-import { MarkdownCache } from "./markdownCache";
+import { MarkdownCache } from "./markdownCache.ts";
 it("preserves JSON types and property names that resemble compact tags", () => {
   const tree = JSON.parse(
     '{"0":[0,1,2,"0",null,true,false],"text":[1],"__proto__":{"index":2},"empty":{},"list":[]}',

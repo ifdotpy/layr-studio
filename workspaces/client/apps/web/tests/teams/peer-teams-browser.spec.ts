@@ -1,4 +1,4 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { peerTeamRowFixtures as row } from "./peer-teams-rows.fixture.ts";
 
 import type { components } from "../../src/generated/api.ts";

@@ -1,12 +1,13 @@
-import { ServerViewStoreProvider } from "../servers/ServerServicesContext";
+import "../rendererStyles.ts";
+import { ServerViewStoreProvider } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { observer } from "mobx-react-lite";
-import { useConversationHistory } from "../conversation/historyFixture";
+import { useConversationHistory } from "../conversation/historyFixture.ts";
 import {
   useConversationScroll,
   TRANSCRIPT_HISTORY_START_PX,
-} from "../components/useConversationScroll";
+} from "../components/conversation/support/useConversationScroll.ts";
 declare global {
   interface Window {
     historyRoot: Root;

@@ -4,7 +4,7 @@ import type { ResourceStatus } from "../../store/runtime.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import type { PostResult } from "../../api.ts";
 import { ownerFixture } from "./ownerFixture.ts";
-import { required } from "../../components/componentTestFixtures.ts";
+import { required } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 afterEach(() => {
   vi.restoreAllMocks();
 });

@@ -1,6 +1,7 @@
+import type {} from "@playwright/test";
 import { fixtureOrigin } from "../misc-fixture.ts";
 import { usageSessionCost, usageAccountCost } from "./usage-fixture.ts";
-import type {} from "@playwright/test";
+
 import type { ServerResponse } from "node:http";
 import type { PostBody, PostResult } from "../../src/apiTypes.ts";
 import { fixturePostBody } from "./fixture-server.ts";

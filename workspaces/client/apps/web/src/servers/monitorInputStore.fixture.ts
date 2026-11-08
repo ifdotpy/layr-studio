@@ -1,4 +1,7 @@
-import { validMonitorInput, type MonitorInputStore } from "./monitorInputStore";
+import {
+  validMonitorInput,
+  type MonitorInputStore,
+} from "./monitorInputStore.ts";
 
 // Deterministic transaction fixture. Real IndexedDB serialization has a browser witness.
 export function monitorInputStoreFixture() {

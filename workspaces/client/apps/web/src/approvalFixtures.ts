@@ -1,4 +1,4 @@
-import type { Approval } from "./approvals";
+import type { Approval } from "./approvals.ts";
 
 type Fixture = {
   request: Approval["request"];

@@ -1,6 +1,7 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
-import type { Account } from "../../src/components/Accounts.tsx";
+import type { Account } from "../../src/components/accounts/support/Accounts.tsx";
 import { fixtureAccount } from "./fixture-helpers.ts";
 declare global {
   interface Window {
@@ -12,8 +13,8 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ClaudeSettings } from "../../src/components/ClaudeSettings.tsx";
-import ClaudeSignIn from "../../src/components/ClaudeSignIn.tsx";
+import { ClaudeSettings } from "../../src/components/settings/ClaudeSettings/ClaudeSettings.tsx";
+import ClaudeSignIn from "../../src/components/accounts/ClaudeSignIn/ClaudeSignIn.tsx";
 const agent: Agent = {
   id: "chat",
   accountKey: "claude-work",

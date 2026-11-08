@@ -1,10 +1,11 @@
+import "../../src/rendererStyles.ts";
 import type { Message } from "../../src/types.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
-import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
+import TurnHistory from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
+import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
 
 const initial: Message[] = [
   {

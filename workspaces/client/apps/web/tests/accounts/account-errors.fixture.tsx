@@ -1,13 +1,13 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import AccountSignIn from "../../src/components/AccountSignIn.tsx";
-import Accounts, {
-  type AccountsState,
-} from "../../src/components/Accounts.tsx";
-import Workspace from "../../src/components/shell/Workspace.tsx";
+import AccountSignIn from "../../src/components/accounts/AccountSignIn/AccountSignIn.tsx";
+import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
+import type { AccountsState } from "../../src/components/accounts/support/Accounts.tsx";
+import Workspace from "../../src/components/shell/Workspace/Workspace.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { JsonInput } from "../../src/apiTypes.ts";
 import { accountErrorFailure } from "./account-errors-data.ts";

@@ -2,11 +2,11 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Page, Route } from "@playwright/test";
-import type { PromptComposerRenderProbe } from "../../src/components/prompt-composer/renderProbe.ts";
+import type { PromptComposerRenderProbe } from "../../src/perf/promptComposerRenderProbe.ts";
 import { commandOf, sendReply } from "../messages/send-command.ts";
 import type { FixtureStep } from "../fixtures/fixture-scripts.ts";
 import type { PostBody } from "../../src/api.ts";
-import { randomUUID } from "../../src/uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   test,
   expect,
@@ -125,13 +125,11 @@ test("App composer typing leaves the application and transcript idle and preserv
   await withComposer(page, async ({ updateModel }) => {
     const input = page.locator("#message");
     await input.fill("Draft ");
-    await page
-      .locator('.composer-tools input[type="file"]')
-      .setInputFiles({
-        name: "isolation-notes.txt",
-        mimeType: "text/plain",
-        buffer: Buffer.from("Keep this attachment through model updates."),
-      });
+    await page.locator('.composer-tools input[type="file"]').setInputFiles({
+      name: "isolation-notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Keep this attachment through model updates."),
+    });
     await expect(
       page.locator(".composer-tools .attachment-list"),
     ).toContainText("isolation-notes.txt");

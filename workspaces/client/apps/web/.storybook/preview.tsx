@@ -1,3 +1,4 @@
+import "../src/rendererStyles.ts";
 import type { Preview } from "@storybook/react-vite";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
@@ -6,9 +7,9 @@ import "../src/workspace-layout.css";
 import "../src/appearance.css";
 import "../src/studio-preferences.css";
 import "../src/design/state.css";
-import "../src/components/team-navigation.css";
-import "../src/components/chat-controls.css";
-import { theme } from "../src/theme";
+import "../src/components/agents/TeamPanelView/team-navigation.css";
+import "../src/components/conversation/support/chat-controls.css";
+import { theme } from "../src/theme.ts";
 
 const preview: Preview = {
   decorators: [

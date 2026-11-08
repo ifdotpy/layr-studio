@@ -1,7 +1,8 @@
+import type {} from "./team-room-bounds-ui.fixture.tsx";
 import type { GetResult } from "../../src/apiTypes.ts";
 import type { components } from "../../src/generated/api.ts";
 import { SYNC_PROTOCOL_VERSION } from "../../src/generated/api.ts";
-import type {} from "./team-room-bounds-ui.fixture.tsx";
+
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";

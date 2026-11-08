@@ -1,6 +1,7 @@
+import type {} from "./claude-repair-ui.fixture.tsx";
 import type { GetResult } from "../../src/apiTypes.ts";
 import { createServer } from "vite";
-import type {} from "./claude-repair-ui.fixture.tsx";
+
 import { apiSchemaHeaders, test, expect } from "../playwright.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

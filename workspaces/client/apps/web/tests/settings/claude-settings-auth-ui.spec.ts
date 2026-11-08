@@ -1,8 +1,9 @@
+import type {} from "./claude-settings-auth-ui.fixture.tsx";
 import type {} from "@playwright/test";
 import type { components } from "../../src/generated/api.ts";
 import type { PostBody, PostResult } from "../../src/api.ts";
 import { fixtureUrl } from "./fixture-helpers.ts";
-import type {} from "./claude-settings-auth-ui.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

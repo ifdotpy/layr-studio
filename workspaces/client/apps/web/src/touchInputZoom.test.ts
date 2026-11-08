@@ -1,4 +1,4 @@
-import { layoutQueries } from "./layout/layout-contract.generated";
+import { layoutQueries } from "./layout/layout-contract.generated.ts";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { beforeAll, expect, test } from "vitest";
@@ -24,10 +24,10 @@ beforeAll(async () => {
     "studio-theme.css",
     "style.css",
     "studio-preferences.css",
-    "components/message-queue.css",
-    "components/accounts.css",
-    "components/agents/subagent-concurrency-control.css",
-    "components/questions/sign-in-card.css",
+    "components/conversation/MessageQueue/message-queue.css",
+    "components/accounts/support/accounts.css",
+    "components/agents/SubagentConcurrencyControl/subagent-concurrency-control.css",
+    "components/conversation/questions/SignInCard/sign-in-card.css",
   ]) {
     const declarations: FontDeclaration[] = [];
     const config = await resolveConfig(
@@ -127,13 +127,19 @@ test("wide touch screens preserve larger composer and sidebar preferences", () =
 
 test("component input font floors consume the shared owner", () => {
   for (const [file, selector] of [
-    ["components/message-queue.css", ".message-queue-editor textarea"],
-    ["components/accounts.css", ".account-name-form input"],
     [
-      "components/agents/subagent-concurrency-control.css",
+      "components/conversation/MessageQueue/message-queue.css",
+      ".message-queue-editor textarea",
+    ],
+    ["components/accounts/support/accounts.css", ".account-name-form input"],
+    [
+      "components/agents/SubagentConcurrencyControl/subagent-concurrency-control.css",
       ".agent-mode-limit-label input",
     ],
-    ["components/questions/sign-in-card.css", ".sign-in-card-paste input"],
+    [
+      "components/conversation/questions/SignInCard/sign-in-card.css",
+      ".sign-in-card-paste input",
+    ],
   ] satisfies [string, string][]) {
     const rules = declarationsFor(file).filter(
       ({ property, selectors }) =>

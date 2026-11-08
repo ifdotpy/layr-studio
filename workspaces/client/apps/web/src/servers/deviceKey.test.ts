@@ -1,6 +1,6 @@
 import { createPublicKey, verify } from "node:crypto";
 import { expect, it } from "vitest";
-import { createDeviceKey, deviceIdOf } from "./deviceKey";
+import { createDeviceKey, deviceIdOf } from "./deviceKey.ts";
 
 it("makes a non-extractable key whose id is derived from its public key", async () => {
   const key = await createDeviceKey();

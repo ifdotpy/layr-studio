@@ -1,6 +1,7 @@
+import type {} from "./daybreak-settings-browser.fixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { DaybreakReset } from "./daybreak-settings-browser.fixture.tsx";
-import type {} from "./daybreak-settings-browser.fixture.tsx";
+
 import { fixtureUrl } from "./fixture-helpers.ts";
 import {
   API_SCHEMA_HASH_HEADER,

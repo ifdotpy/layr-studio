@@ -2,15 +2,15 @@
 vi.mock("../servers/serverNames.ts", () => ({
   watchServerName: () => () => {},
 }));
-import { observableFixture } from "../components/observableFixture.tsx";
+import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { createServerServices } from "../servers/serverServices.ts";
 import { LocalCollection } from "../sync/localCollection.ts";
 import type { AppScope } from "../app/contracts.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import { reaction } from "mobx";
-import { READ_RECOVERY_MAX_ATTEMPTS } from "../sync/readRetry";
-import { localTime } from "../local-time";
+import { READ_RECOVERY_MAX_ATTEMPTS } from "../sync/readRetry.ts";
+import { localTime } from "../local-time.ts";
 import { StartupOwner } from "../app/startup/StartupOwner.ts";
 const h = {
   effects: [] as (() => void | (() => void))[],

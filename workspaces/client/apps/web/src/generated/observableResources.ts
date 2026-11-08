@@ -18,7 +18,7 @@ import type {
 import type {
   ResourceSlot,
   ObservableResourceRuntime,
-} from "../store/index.ts";
+} from "../store/runtime.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
 export const TRANSIENT_RESOURCE_KINDS: ReadonlySet<ResourceRef["kind"]> =
   new Set([

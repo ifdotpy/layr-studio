@@ -1,0 +1,33 @@
+import { expect, it, vi } from "vitest";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MantineProvider } from "@mantine/core";
+vi.mock(
+  "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
+  () => ({
+    useServerOutbox: () => ({ changeOutbox: vi.fn() }),
+  }),
+);
+import OutboxControls from "./OutboxControls.tsx";
+
+it("offers no retry after a fresh expired response", () => {
+  const html = renderToStaticMarkup(
+    createElement(
+      MantineProvider,
+      null,
+      createElement(OutboxControls, {
+        entry: {
+          id: "one",
+          body: { id: "one", room: "chat", text: "hello" },
+          created: 1,
+          status: {
+            source: "device",
+            state: { kind: "receipt_expired", error: "expired" },
+          },
+        },
+      }),
+    ),
+  );
+  expect(html).toContain("Discard");
+  expect(html).not.toContain("Retry");
+});

@@ -1,3 +1,4 @@
+import type {} from "./disconnect-recovery-ui.fixture.tsx";
 import type { Route } from "@playwright/test";
 import type { Agent } from "../../src/types.ts";
 import type { PostResult } from "../../src/apiTypes.ts";
@@ -7,7 +8,7 @@ import {
   restarted,
 } from "./disconnect-recovery-ui.data.ts";
 import { fixtureOrigin } from "./helpers.ts";
-import type {} from "./disconnect-recovery-ui.fixture.tsx";
+
 // Real React with a fake recovery API. No backend, credentials, or model calls.
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";

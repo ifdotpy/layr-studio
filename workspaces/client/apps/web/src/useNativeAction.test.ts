@@ -1,8 +1,8 @@
-import { setStartupFixture } from "./components/observableFixture.tsx";
+import { setStartupFixture } from "./components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
-import { componentSnapshot as snapshotFixture } from "./components/componentTestFixtures.ts";
-import { conversationActionsFixture } from "./components/observableFixture.tsx";
-import { required } from "./components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import { conversationActionsFixture } from "./components/shell/integration-support/observableFixture.tsx";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { expect, it, vi } from "vitest";
 import type { Agent } from "./types.ts";
 function memoryStorage(): Storage {

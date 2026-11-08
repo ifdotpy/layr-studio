@@ -1,15 +1,16 @@
+import "../../src/rendererStyles.ts";
 import { required } from "./performance-fixture.ts";
 import type { Message } from "../../src/types.ts";
 import React, { useState, useMemo } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync, createPortal } from "react-dom";
 import { MantineProvider } from "@mantine/core";
-import TurnHistory from "../../src/components/conversation/transcript/TurnHistory.fixture.tsx";
-import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
-import PromptComposer from "../../src/components/prompt-composer/PromptComposer.tsx";
-import { useConversationScroll } from "../../src/components/useConversationScroll.ts";
-import { revealHistoryMessage } from "../../src/components/conversation/transcript/historyWindowModel.ts";
-import "../../src/components/conversation/transcript/turn-history.css";
+import TurnHistory from "../../src/components/conversation/transcript/TurnHistory/TurnHistory.fixture.tsx";
+import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
+import PromptComposer from "../../src/components/conversation/prompt-composer/PromptComposer/PromptComposer.tsx";
+import { useConversationScroll } from "../../src/components/conversation/support/useConversationScroll.ts";
+import { revealHistoryMessage } from "../../src/components/conversation/support/historyWindowModel.ts";
+import "../../src/components/conversation/transcript/TurnHistory/turn-history.css";
 import "../../src/visual-activity.css";
 const make = (start: number, count: number): Message[] =>
   Array.from({ length: count }, (_, n) => {

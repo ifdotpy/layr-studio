@@ -1,5 +1,6 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
-import type { AccountsState } from "../../src/components/Accounts.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import type { AccountsState } from "../../src/components/accounts/support/Accounts.tsx";
 const initial: AccountsState = await (await fetch("/fixture-data")).json();
 declare global {
   interface Window {
@@ -9,7 +10,7 @@ declare global {
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Tabs } from "@mantine/core";
-import Accounts from "../../src/components/Accounts.tsx";
+import Accounts from "../../src/components/accounts/Accounts/Accounts.tsx";
 import { theme, modalSizes } from "../../src/theme.ts";
 import "@mantine/core/styles.css";
 import "../../src/style.css";

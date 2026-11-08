@@ -1,7 +1,7 @@
 import { MessageSendStatus } from "../generated/api.ts";
-import type { GetResult } from "../api";
-import type { Message } from "../types";
-import type { OutgoingMessage, DeliveryState } from "./send";
+import type { GetResult } from "../api.ts";
+import type { Message } from "../types.ts";
+import type { OutgoingMessage, DeliveryState } from "./send.ts";
 import { serverStatus } from "../messageSendStatus.ts";
 
 type MessageReceiptResponse = GetResult<"/api/messages/receipts">;

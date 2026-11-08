@@ -1,4 +1,4 @@
-import type { PostBody, PostResult } from "./api";
+import type { PostBody, PostResult } from "./api.ts";
 
 type RenameBody = PostBody<"/api/rename">;
 type RenameReceipt = PostResult<"/api/rename">;

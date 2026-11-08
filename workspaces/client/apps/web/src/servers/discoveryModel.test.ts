@@ -3,9 +3,12 @@ import {
   capturePreferenceWrite,
   readPreferenceFields,
   receivePreferenceFields,
-} from "../sync/uiPreferenceStore";
-import type { ServerAccessState } from "./accessContract";
-import { discoverySnapshot, effectiveDiscoveryAliases } from "./discoveryModel";
+} from "../sync/uiPreferenceStore.ts";
+import type { ServerAccessState } from "./accessContract.ts";
+import {
+  discoverySnapshot,
+  effectiveDiscoveryAliases,
+} from "./discoveryModel.ts";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

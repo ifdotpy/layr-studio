@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { fixtureAccount } from "./fixture-helpers.ts";
 const fixtureRoot = document.getElementById("root");
@@ -6,7 +7,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Modal, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const agent: Agent = {
   id: "escape",
   accountKey: "first",

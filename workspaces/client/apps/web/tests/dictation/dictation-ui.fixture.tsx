@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 declare global {
   interface Window {
     speechProgress:
@@ -29,7 +30,7 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/studio-theme.css";
 import { theme } from "../../src/theme.ts";
-import { Dictation } from "../../src/components/Dictation.tsx";
+import { Dictation } from "../../src/components/conversation/Dictation/Dictation.tsx";
 // Base bridge fixture supplies only the five methods used by dictation.
 type BridgeView = Omit<
   Pick<

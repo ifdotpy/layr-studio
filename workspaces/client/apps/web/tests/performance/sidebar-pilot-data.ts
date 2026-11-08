@@ -1,5 +1,5 @@
 import type { Agent } from "../../src/types.ts";
-import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
 /** Fixture sizes are shared by preparation, the browser and validation. */
 export const pilotSize = { chats: 1000, visible: 30, updates: 120 };

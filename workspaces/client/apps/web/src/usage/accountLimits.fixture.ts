@@ -1,4 +1,4 @@
-import { LimitColor, RunwayColor, type components } from "../generated/api";
+import { LimitColor, RunwayColor, type components } from "../generated/api.ts";
 
 export function projectedLimits(
   accountKey: string,

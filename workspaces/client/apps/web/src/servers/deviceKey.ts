@@ -1,9 +1,9 @@
-import { publicKeyPem } from "./pairing";
+import { publicKeyPem } from "./pairing.ts";
 import {
   browserDatabases,
   browserIndexedDB,
   browserStores,
-} from "../browserPersistence";
+} from "../browserPersistence.ts";
 
 /**
  * The one key of this device (a browser profile or a desktop window). It signs for every

@@ -1,25 +1,25 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 type OutgoingTabMessage = { kind: string; [key: string]: unknown };
 import { afterEach, expect, it, vi } from "vitest";
-import { createResourceEvents } from "./resourceEvents";
-import { RESOURCE_CURSOR_PREPARATION_TIMEOUT_MS } from "./resourceConnection";
-import { PERSIST_DEADLINE_MS } from "./resourceEntityDelivery";
-import { createSubscriptionStore } from "./subscriptions/store";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
-import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues";
-import { SYNC_PROTOCOL_VERSION } from "../generated/api";
-import { EventStreamParser } from "../servers/eventSource";
+import { createResourceEvents } from "./resourceEvents.ts";
+import { RESOURCE_CURSOR_PREPARATION_TIMEOUT_MS } from "./resourceConnection.ts";
+import { PERSIST_DEADLINE_MS } from "./resourceEntityDelivery.ts";
+import { createSubscriptionStore } from "./subscriptions/store.ts";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
+import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
+import { SYNC_PROTOCOL_VERSION } from "../generated/api.ts";
+import { EventStreamParser } from "../servers/eventSource.ts";
 
-vi.mock("./client", () => ({ syncDatabase: vi.fn() }));
-vi.mock("../usage/tokenRate", () => ({
+vi.mock("./client.ts", () => ({ syncDatabase: vi.fn() }));
+vi.mock("../usage/tokenRate.ts", () => ({
   configureTokenRateStream: vi.fn(),
   receiveResourceTokenRates: vi.fn(),
   getWorkspaceTokenRates: vi.fn(() => ({ records: [] })),
 }));
 
-vi.mock("./entityTransfer", async (original) => {
-  const module = await original<typeof import("./entityTransfer")>();
+vi.mock("./entityTransfer.ts", async (original) => {
+  const module = await original<typeof import("./entityTransfer.ts")>();
   return {
     ...module,
     EntityTransferAssembler: class extends module.EntityTransferAssembler {

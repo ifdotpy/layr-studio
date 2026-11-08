@@ -453,7 +453,8 @@ async function recordCreateNavigation(
     previousAgentId:
       (
         journal.stages.create!.request as
-          ApiSchemas["CreateLeadRequest"] | undefined
+          | ApiSchemas["CreateLeadRequest"]
+          | undefined
       )?.previous || null,
     chatId: journal.chatId,
     observedAt: new Date().toISOString(),

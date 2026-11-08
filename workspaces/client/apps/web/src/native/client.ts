@@ -1,8 +1,8 @@
-import { randomUUID } from "../uuid";
-import { frameRequest, isNativeFrame } from "./frame";
-import { queueMarkdown } from "./markdownQueue";
-import { nativeHost } from "./host";
-export { nativeHost } from "./host";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { frameRequest, isNativeFrame } from "./frame.ts";
+import { queueMarkdown } from "./markdownQueue.ts";
+import { nativeHost } from "./host.ts";
+export { nativeHost } from "./host.ts";
 export function hasNativeClient() {
   return typeof nativeHost()?.core?.invoke === "function" || isNativeFrame();
 }

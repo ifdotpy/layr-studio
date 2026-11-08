@@ -1,29 +1,29 @@
-import { outboxRequests } from "./browserPersistence";
+import { outboxRequests } from "./browserPersistence.ts";
 import {
   ProcessActionStatus,
   MonitorInputKind,
   MonitorInputStatus,
-} from "./generated/api";
-import { createCommandClient } from "./commands";
-import { createPendingCommands } from "./pendingCommands";
-import { onEntitySequenceAdvance } from "./sync/entitySequence";
-import { randomUUID } from "./uuid";
-import { hasNativeClient } from "./native/client";
+} from "./generated/api.ts";
+import { createCommandClient } from "./commands.ts";
+import { createPendingCommands } from "./pendingCommands.ts";
+import { onEntitySequenceAdvance } from "./sync/entitySequence.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { hasNativeClient } from "./native/client.ts";
 
-import { beginServerActivity } from "./servers/activity";
+import { beginServerActivity } from "./servers/activity.ts";
 
 import {
   beginServerMutation,
   pendingMonitorInput as pendingInput,
   finishMonitorInput,
-} from "./servers/mutationIdentity";
+} from "./servers/mutationIdentity.ts";
 
 import {
   serverLocalStorage as localStorage,
   serverSessionStorage as sessionStorage,
-} from "./servers/storage";
+} from "./servers/storage.ts";
 
-import { apiOrigin, serverFetch } from "./servers/transport";
+import { apiOrigin, serverFetch } from "./servers/transport.ts";
 
 import createClient from "openapi-fetch";
 
@@ -36,7 +36,7 @@ import type {
   PostResult,
   PostBody,
   PostInput,
-} from "./apiTypes";
+} from "./apiTypes.ts";
 export type {
   ApiGetPath,
   ApiPostPath,
@@ -44,26 +44,26 @@ export type {
   PostResult,
   PostBody,
   PostInput,
-} from "./apiTypes";
+} from "./apiTypes.ts";
 
-import type { components, paths } from "./generated/api";
+import type { components, paths } from "./generated/api.ts";
 
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,
   API_SCHEMA_MISMATCH_FIELD,
   API_SCHEMA_MISMATCH_HEADER,
-} from "./generated/apiSchema";
+} from "./generated/apiSchema.ts";
 
 import type {
   ApiGetOptions,
   ApiPathsWithRequiredQuery,
   ApiQueryFor,
-} from "./apiContracts";
+} from "./apiContracts.ts";
 
-import { onResume } from "./sync/resume";
+import { onResume } from "./sync/resume.ts";
 
-import { displayError } from "./errorPresentation";
+import { displayError } from "./errorPresentation.ts";
 
 type QueryOf<Op> = ApiQueryFor<Op>;
 
@@ -588,10 +588,10 @@ export function createApiScope(options: ApiScopeOptions) {
     body?: undefined,
     timeoutMs?: number,
     sessionToken?: string,
-  ): Promise<import("./servers/accessContract").ServerAccessState>;
+  ): Promise<import("./servers/accessContract.ts").ServerAccessState>;
   function serverAccess(
     method: "POST",
-    body: import("./servers/accessContract").ServerAccessRequest,
+    body: import("./servers/accessContract.ts").ServerAccessRequest,
     timeoutMs?: number,
     sessionToken?: string,
   ): Promise<PostResult<"/api/multi-server">>;
@@ -605,12 +605,12 @@ export function createApiScope(options: ApiScopeOptions) {
         ]
       | [
           method: "POST",
-          body: import("./servers/accessContract").ServerAccessRequest,
+          body: import("./servers/accessContract.ts").ServerAccessRequest,
           timeoutMs?: number | undefined,
           sessionToken?: string | undefined,
         ]
   ): Promise<
-    | import("./servers/accessContract").ServerAccessState
+    | import("./servers/accessContract.ts").ServerAccessState
     | PostResult<"/api/multi-server">
   > {
     const [method, body, timeoutMs, sessionToken] = args;

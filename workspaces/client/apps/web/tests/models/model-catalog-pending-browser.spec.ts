@@ -1,7 +1,8 @@
+import type {} from "./model-catalog-pending-browser.fixture.tsx";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./model-catalog-pending-browser.fixture.tsx";
+
 // The model picker consumes streamed model entities while idle. Only its explicit
 // retry action reads /api/models.
 

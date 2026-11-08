@@ -1,7 +1,8 @@
+import type {} from "./playwright-schema-headers.fixture.ts";
 import { build } from "esbuild";
 import { fileURLToPath } from "node:url";
 import type { Page, Route } from "@playwright/test";
-import type {} from "./playwright-schema-headers.fixture.ts";
+
 import assert from "node:assert/strict";
 
 import {

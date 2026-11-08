@@ -1,6 +1,6 @@
-import { ApiError } from "./api";
-import { serverMutationResponseIsUncertain } from "./servers/mutationIdentity";
-import type { CommandResponse } from "./commands";
+import { ApiError } from "./api.ts";
+import { serverMutationResponseIsUncertain } from "./servers/mutationIdentity.ts";
+import type { CommandResponse } from "./commands.ts";
 
 /** Delete a chat through the command path. `finish` gets every id that the server deleted. */
 export async function deleteConversation(

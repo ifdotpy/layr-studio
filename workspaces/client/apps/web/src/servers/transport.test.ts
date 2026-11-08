@@ -1,14 +1,14 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("./environment", () => ({
+vi.mock("./environment.ts", () => ({
   serverViewId: "local",
   isolatedServerView: true,
 }));
-vi.mock("./registry", () => ({
+vi.mock("./registry.ts", () => ({
   viewServer: () => ({ origin: "http://127.0.0.1:1234" }),
 }));
 
-import { serverFetch, setServerCredentialAdapter } from "./transport";
+import { serverFetch, setServerCredentialAdapter } from "./transport.ts";
 
 beforeEach(() => {
   vi.stubGlobal("location", new URL("http://studio-local.localhost:1234/"));

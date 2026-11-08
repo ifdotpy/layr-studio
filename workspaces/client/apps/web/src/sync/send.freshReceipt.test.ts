@@ -1,12 +1,12 @@
 import { expect, it, vi } from "vitest";
-import type { StoredSend } from "../unsent/store";
-import { MessageSendStatus } from "../generated/api";
-import { ApiError } from "../api";
+import type { StoredSend } from "../unsent/store.ts";
+import { MessageSendStatus } from "../generated/api.ts";
+import { ApiError } from "../api.ts";
 
 const observed = vi.hoisted(() => ({ entries: [] as unknown[] }));
 
-import { createOutbox } from "./send";
-import { createCommandClient } from "../commands";
+import { createOutbox } from "./send.ts";
+import { createCommandClient } from "../commands.ts";
 
 it("fresh uncertain receipt blocks reconnect retry until explicit retry", async () => {
   const values = new Map<string, StoredSend>();

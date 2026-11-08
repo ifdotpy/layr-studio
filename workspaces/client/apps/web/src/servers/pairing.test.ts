@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { identityProofMessage } from "../wasm/client";
+import { identityProofMessage } from "../wasm/client.ts";
 import { readFileSync } from "node:fs";
 import { createPublicKey, verify } from "node:crypto";
 
@@ -24,7 +24,7 @@ import {
   pairedServer,
   signedRequest,
   publicKeyPem,
-} from "./pairing";
+} from "./pairing.ts";
 
 // The golden vector of studio-request-signing (Rust). The runtime and client signers
 // produce the same value for the same seed and request.

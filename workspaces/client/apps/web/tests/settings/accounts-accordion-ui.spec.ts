@@ -4,7 +4,7 @@ import type { AccountRateLimitsDto } from "../playwright.ts";
 import { required } from "../teams/helpers.ts";
 import { test, expect } from "../playwright.ts";
 import { fixture } from "../servers/multi-server-fixture.ts";
-import { accountLimitFixtures } from "../../src/components/AccountLimits.fixtures.ts";
+import { accountLimitFixtures } from "../../src/components/accounts/support/AccountLimits.fixtures.ts";
 
 async function keyboardCycle(page: Page, region: Locator) {
   const targets = await region.evaluate((root) => {

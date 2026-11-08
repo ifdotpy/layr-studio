@@ -1,4 +1,4 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { ShellManifest } from "../scripts/build-manifests.ts";
 import assert from "node:assert/strict";
 import {
@@ -45,7 +45,7 @@ test("the production Vite build compresses final outputs without changing shell 
       ),
     );
     await writeFile(
-      join(root, "style.css"),
+      join(root, "./style.css"),
       ':root { --message: "' + "style ".repeat(300) + '"; }',
     );
     for (const extension of [

@@ -1,4 +1,5 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "../../src/rendererStyles.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import "@mantine/core/styles.css";
 declare global {
   interface Window {
@@ -16,20 +17,20 @@ declare global {
   }
 }
 const rootElement = document.getElementById("root")!;
-import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { Room, PeerTeam } from "../../src/types.ts";
 import { radioRoom } from "./radio-fixture.ts";
 
 import { messageModels } from "../messages/message-models.fixture";
-import { conversationActionsFixture } from "../../src/components/observableFixture";
+import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import React, { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import RadioChat from "../../src/components/RadioChat.tsx";
+import RadioChat from "../../src/components/conversation/RadioChat/RadioChat.tsx";
 import {
   PeerTeamGroup,
   PeerTeamActionsProvider,
-} from "../../src/components/shell/messages/PeerTeams.tsx";
+} from "../../src/components/shell/messages/PeerTeamGroup/PeerTeamGroup.tsx";
 import "../../src/style.css";
 import "../../src/appearance.css";
 import { theme } from "../../src/theme.ts";

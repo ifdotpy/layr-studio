@@ -1,15 +1,20 @@
-import { AgentSource, AgentStatus } from "../generated/api";
-import { approval, question, browserOpen } from "../approvalFixtures";
+import { AgentSource, AgentStatus } from "../generated/api.ts";
+import { approval, question, browserOpen } from "../approvalFixtures.ts";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { Button } from "@mantine/core";
-import QuestionCard from "../components/questions/QuestionCard";
-import Requests, { RequestArea } from "../components/questions/Requests";
-import { RequestFixture } from "../components/questions/requestFixtures";
-import { agentSummaryFixture } from "../servers/agentSummaryFixture";
+import QuestionCard from "../components/conversation/questions/QuestionCard/QuestionCard.tsx";
+import Requests, {
+  RequestArea,
+} from "../components/conversation/questions/Requests/Requests.tsx";
+import { RequestFixture } from "../components/conversation/questions/support/requestFixtures.ts";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import { expect } from "storybook/test";
-import { NativeError, NativeNotice } from "../components/NativeNotice";
-import type { Agent, Message } from "../types";
-import { computedContrast } from "./computedContrast";
+import {
+  NativeError,
+  NativeNotice,
+} from "../components/shell/NativeNotice/NativeNotice.tsx";
+import type { Agent, Message } from "../types.ts";
+import { computedContrast } from "./computedContrast.ts";
 import "./foundation.css";
 
 function NoticeAudit() {

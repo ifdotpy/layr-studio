@@ -1,9 +1,13 @@
-import { bindAudioFrames } from "./audioFrames";
-import { hasNativeClient, listenNativeEvents, nativeRequest } from "./client";
-import { createNativeDictation, dictationBridge } from "./dictation";
-import { isNativeFrame } from "./frame";
-import { nativeVoice } from "./voice";
-import { captureAudio } from "../dictation/capture";
+import { bindAudioFrames } from "./audioFrames.ts";
+import {
+  hasNativeClient,
+  listenNativeEvents,
+  nativeRequest,
+} from "./client.ts";
+import { createNativeDictation, dictationBridge } from "./dictation.ts";
+import { isNativeFrame } from "./frame.ts";
+import { nativeVoice } from "./voice.ts";
+import { captureAudio } from "../dictation/capture.ts";
 
 let router: ReturnType<typeof bindAudioFrames> | undefined;
 let clients = 0;

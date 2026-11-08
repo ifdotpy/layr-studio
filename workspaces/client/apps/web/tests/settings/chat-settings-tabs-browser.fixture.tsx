@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent } from "../../src/types.ts";
 import type { PostBody, GetResult } from "../../src/apiTypes.ts";

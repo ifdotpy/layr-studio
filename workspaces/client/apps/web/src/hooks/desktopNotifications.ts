@@ -1,11 +1,11 @@
 import {
   hasDesktopNotifications,
   notifyDesktop,
-} from "../native/notifications";
-import { isServerView } from "../servers/environment";
+} from "../native/notifications.ts";
+import { isServerView } from "../servers/environment.ts";
 import { autorun } from "mobx";
-import { alertsSince, desktopAlerts } from "../desktop/desktopAlerts";
-import { nextAlertChange } from "../desktop/desktopAlerts";
+import { alertsSince, desktopAlerts } from "../desktop/desktopAlerts.ts";
+import { nextAlertChange } from "../desktop/desktopAlerts.ts";
 import type { AlertStore } from "../desktop/desktopAlerts.ts";
 import type { ProjectionMetadata } from "../generated/observableResources.ts";
 import { resourceData } from "../store/runtime.ts";

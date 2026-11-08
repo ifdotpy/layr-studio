@@ -1,5 +1,5 @@
-import { createArea } from "../components/area.ts";
-import type { SidebarBackend } from "../components/sidebar/services.tsx";
+import { createArea } from "../app/area.ts";
+import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
 import type { ServerCommand, ServerNavigation } from "./navigation.ts";
 
 export interface CombinedSidebarServices {

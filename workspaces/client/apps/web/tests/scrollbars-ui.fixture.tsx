@@ -1,3 +1,4 @@
+import "../src/rendererStyles.ts";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { createPortal } from "react-dom";
@@ -5,7 +6,7 @@ import { MantineProvider, ScrollArea } from "@mantine/core";
 import { theme } from "../src/theme.ts";
 import "@mantine/core/styles.css";
 import "../src/style.css";
-import "../src/components/sidebar-projects.css";
+import "../src/components/sidebar/Sidebar/sidebar-projects.css";
 const content = (
   <div style={{ height: 1200, width: 800 }}>Scrollable content</div>
 );

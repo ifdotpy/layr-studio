@@ -27,7 +27,7 @@
 //   FIXTURE_SCRIPT                JSON array of provider scripts (prompt, steps)
 //   FIXTURE_PRICING_ARTIFACT      JSON pricing artifact written before agent seeding
 import type { ApiPostPath, PostBody, PostResult } from "../../src/apiTypes.ts";
-import { randomUUID } from "../../src/uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type {
   components,
   AgentSummaryEntityDto,
@@ -139,7 +139,7 @@ export function fixtureProjectDirectory(root: string) {
   return project;
 }
 const dist = join(repository, "workspaces/client/apps/web/dist");
-const fakeCodex = join(here, "fake-codex-app-server.ts");
+const fakeCodex = join(here, "./fake-codex-app-server.ts");
 /** Longest wait for the server to answer its first request, milliseconds. */
 const SERVER_START_TIMEOUT_MS = 60_000;
 /** Longest wait for the provider model catalog during seeding, milliseconds. */

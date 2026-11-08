@@ -1,3 +1,4 @@
+import "../rendererStyles.ts";
 import { observer } from "mobx-react-lite";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 declare global {
@@ -18,16 +19,16 @@ declare global {
 
 import React from "react";
 import { createRoot } from "react-dom/client";
-import TokenRate from "../components/TokenRate.tsx";
-import ReasoningDuration from "../components/conversation/transcript/ReasoningDuration.tsx";
-import ChatStatus from "../components/agents/ChatStatus.tsx";
+import TokenRate from "../components/conversation/TokenRate/TokenRate.tsx";
+import ReasoningDuration from "../components/conversation/transcript/ReasoningDuration/ReasoningDuration.tsx";
+import ChatStatus from "../components/agents/ChatStatus/ChatStatus.tsx";
 import { observeTokenRates } from "../usage/tokenRate.ts";
 import {
   receiveWorkspaceTokenRates,
   configureTokenRateStream,
 } from "../usage/tokenRate.ts";
 import "../visual-activity.css";
-import "../components/team-navigation.css";
+import "../components/agents/TeamPanelView/team-navigation.css";
 const e = React.createElement;
 window.commits = {};
 window.rateInterests = new Set();

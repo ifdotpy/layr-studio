@@ -24,7 +24,7 @@ test("Terminal Input Approval Ui", async ({
   const server = await builtTerminalFixture(
     join(root, "workspaces/client/apps/web"),
     temporary,
-    "stdin-approval-fixture.tsx",
+    "./stdin-approval-fixture.tsx",
   );
   await server.listen();
   try {

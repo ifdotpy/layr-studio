@@ -1,5 +1,5 @@
 import type { DeepReadonly } from "../../deepReadonly.ts";
-import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api";
+import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api.ts";
 import type { ReviewTask, WorkList } from "./contracts.ts";
 export type { ReviewTask, WorkList } from "./contracts.ts";
 type SyncEntityPayload = DeepReadonly<MutableSyncEntityPayload>;

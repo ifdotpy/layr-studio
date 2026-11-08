@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createServerTransport } from "./serverTransport";
-import type { StudioServer } from "./registry";
+import { createServerTransport } from "./serverTransport.ts";
+import type { StudioServer } from "./registry.ts";
 
 const server = {
   id: "a",

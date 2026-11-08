@@ -7,28 +7,28 @@ import {
   reaction,
   runInAction,
 } from "mobx";
-import { createTranscriptMirror } from "../generated/observableResources";
-import { resourceData, type ResourceSlot } from "../store/runtime";
+import { createTranscriptMirror } from "../generated/observableResources.ts";
+import { resourceData, type ResourceSlot } from "../store/runtime.ts";
 import type {
   useServerApi,
   useServerResources,
-} from "../servers/ServerServicesContext";
-import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues";
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
 import {
   boundTranscriptItems,
   boundTranscriptPage,
   mergeTranscript,
   updateLiveTranscriptPage,
   MAX_TRANSCRIPT_PAGE_BYTES,
-} from "../transcriptPageBounds";
+} from "../transcriptPageBounds.ts";
 import {
   selectMessageConnection,
   type MessageConnection,
-} from "../hooks/messageConnection";
-import { errorText } from "../api";
-import type { Message } from "../types";
-import { createMessageViews } from "./messageView";
-import { createLiveText } from "./liveText";
+} from "../hooks/messageConnection.ts";
+import { errorText } from "../api.ts";
+import type { Message } from "../types.ts";
+import { createMessageViews } from "./messageView.ts";
+import { createLiveText } from "./liveText.ts";
 
 type Transcript = ReturnType<typeof createTranscriptMirror>["current"];
 type Api = Pick<ReturnType<typeof useServerApi>, "syncGet">;

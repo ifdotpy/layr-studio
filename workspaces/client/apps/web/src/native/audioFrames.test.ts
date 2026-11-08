@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { bindAudioFrames } from "./audioFrames";
+import { bindAudioFrames } from "./audioFrames.ts";
 async function caller(audio: ReturnType<typeof bindAudioFrames>) {
   const client = audio.createClient();
   const received = vi.fn();

@@ -1,7 +1,8 @@
+import type {} from "./browser-open-approval-ui.fixture.tsx";
 import { createBuiltQuestionServer } from "./builtQuestionServer";
 import { browserSignInUrl } from "./sign-in.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
-import type {} from "./browser-open-approval-ui.fixture.tsx";
+
 // An agent's sign-in link (browser/open) renders as a sign-in
 // card. Nothing opens before the approval; after it, the desktop opens only the link that the
 // server returned. A refusal from the server, such as a remote window, opens nothing.
@@ -19,7 +20,7 @@ const REMOTE =
 
 test("Browser Open Approval Ui", async ({ page }) => {
   const server = await createBuiltQuestionServer(
-    "browser-open-approval-ui.fixture.tsx",
+    "./browser-open-approval-ui.fixture.tsx",
   );
   await server.listen();
   try {

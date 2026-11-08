@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isUnsentRecord, UNSENT_FORMAT_VERSION as version } from "./schema";
+import { isUnsentRecord, UNSENT_FORMAT_VERSION as version } from "./schema.ts";
 
 // The stored unsent records keep one validation contract, whatever zod build
 // checks them.

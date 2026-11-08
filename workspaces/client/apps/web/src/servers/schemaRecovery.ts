@@ -1,4 +1,4 @@
-import type { StudioServer } from "./registry";
+import type { StudioServer } from "./registry.ts";
 
 /**
  * A server scope that met another API schema stays latched until its service is recreated.

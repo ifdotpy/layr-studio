@@ -1,7 +1,8 @@
+import "../../src/rendererStyles.ts";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
-import { useMessageQueue } from "../../src/components/useMessageQueue.ts";
-import type { removeSendingMessage } from "../../src/components/removeSendingMessages.ts";
+import { useMessageQueue } from "../../src/components/conversation/support/useMessageQueue.ts";
+import type { removeSendingMessage } from "../../src/app/conversation/delivery/removeSendingMessages.ts";
 
 declare global {
   interface Window {
@@ -13,8 +14,8 @@ declare global {
     queueDeadlineRoot: Root;
     outcome: string;
     operation: Promise<string>;
-    removal: typeof import("../../src/components/removeSendingMessages.ts");
-    removed: typeof import("../../src/components/removedMessages.ts");
+    removal: typeof import("../../src/app/conversation/delivery/removeSendingMessages.ts");
+    removed: typeof import("../../src/app/conversation/delivery/removedMessages.ts");
     // Renamed from scope: files/upload-recovery-browser.fixture.tsx declares it as a string.
     queueDeadlineScope: Parameters<typeof removeSendingMessage>[0];
     target: Parameters<typeof removeSendingMessage>[1];

@@ -1,10 +1,11 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "../../src/rendererStyles.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
   createStateMirror,
   createRequestsMirror,
 } from "../../src/generated/observableResources.ts";
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { components } from "../../src/generated/api.ts";
 
 type Focus = React.ComponentProps<typeof BackgroundTasks>["initialFocus"];
@@ -29,9 +30,9 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createServerServices } from "../../src/servers/serverServices.ts";
-import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
+import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
 const services = createServerServices({
   id: "local",
   label: "Fixture",

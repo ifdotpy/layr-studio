@@ -1,15 +1,15 @@
 import { accountLimits } from "../../usage/accountUsage.ts";
 import { trimTranscriptPageCache } from "../../transcriptPageBounds.ts";
 import { receiptTranscript } from "../../sync/messageReceipts.ts";
-import { outgoingTranscript } from "../../components/message-delivery/messageDelivery.ts";
-import { isSendingMessage } from "../../components/removeSendingMessages.ts";
+import { outgoingTranscript } from "../../components/conversation/support/messageDelivery.ts";
+import { isSendingMessage } from "./delivery/removeSendingMessages.ts";
 import type { Message } from "../../types.ts";
-import { createRemovedMessages } from "../../components/removedMessages.ts";
+import { createRemovedMessages } from "./delivery/removedMessages.ts";
 import { TranscriptHistory } from "../../conversation/historySession.ts";
 import { RoomHistory } from "../../conversation/roomHistory.ts";
 import { nativeThreadError } from "../../nativeErrors.ts";
-import { createRequestsView } from "../../components/questions/requestView.ts";
-import { createQuestionCards } from "../../components/questions/useQuestionCards.ts";
+import { createRequestsView } from "../../components/conversation/support/requestView.ts";
+import { createQuestionCards } from "../../components/conversation/support/useQuestionCards.ts";
 import type { ServerAreas } from "../ServerAreasProvider.tsx";
 import {
   makeAutoObservable,
@@ -41,7 +41,7 @@ import {
 import { readServerAliases } from "../../servers/registry.ts";
 import { errorText } from "../../api.ts";
 import { busy } from "../../types.ts";
-import { createConversationMenuTools } from "../../components/conversation/ConversationMenuTools.tsx";
+import { createConversationMenuTools } from "../../components/conversation/ConversationMenuTools/ConversationMenuTools.tsx";
 import type { NativeActionOwner } from "./NativeActionOwner.ts";
 
 export class SelectedConversationOwner {

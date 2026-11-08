@@ -5,16 +5,16 @@ import { resourceData } from "../store/runtime.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 // Captured from the Rust entity transfer writer; see just regenerate-entity-server-frames.
 import coldFrames from "./entityServerFrames.fixture.json";
-import { EventHistory } from "./eventHistory.testHelper";
-import { backgroundDisplay } from "../components/componentTestFixtures";
+import { EventHistory } from "./eventHistory.testHelper.ts";
+import { backgroundDisplay } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
   SubscriptionReplyKind,
   AgentSource,
   AgentStatus,
   TaskStatus,
-} from "../generated/api";
+} from "../generated/api.ts";
 import assert from "node:assert/strict";
-import { DRAFT_SERVER_READY_TIMEOUT_MS } from "./draftServerFixture";
+import { DRAFT_SERVER_READY_TIMEOUT_MS } from "./draftServerFixture.ts";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
@@ -24,17 +24,17 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
 
-import type { components } from "../generated/api";
-import { SYNC_PROTOCOL_VERSION } from "../generated/api";
-import { SYNC_ENTITY_STREAM_MAX_DOCUMENTS } from "../generated/sharedValues";
-import type { ResourceChangeEvent } from "./subscriptions/events";
-import type { ResourceVersion } from "./subscriptions/events";
+import type { components } from "../generated/api.ts";
+import { SYNC_PROTOCOL_VERSION } from "../generated/api.ts";
+import { SYNC_ENTITY_STREAM_MAX_DOCUMENTS } from "../generated/sharedValues.ts";
+import type { ResourceChangeEvent } from "./subscriptions/events.ts";
+import type { ResourceVersion } from "./subscriptions/events.ts";
 
 const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
   invalidations: new Set<(version?: ResourceVersion) => void>(),
 }));
-vi.mock("../api", () => ({
+vi.mock("../api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),
@@ -43,7 +43,7 @@ vi.mock("../api", () => ({
   setWorkspace: vi.fn(),
   isApiSchemaMismatch: () => false,
 }));
-vi.mock("./subscriptions/events", () => ({
+vi.mock("./subscriptions/events.ts", () => ({
   acknowledgeEntitySequences: vi.fn(),
   watchResourceConnection: () => () => {},
   watchResourceChanges: (
@@ -54,9 +54,9 @@ vi.mock("./subscriptions/events", () => ({
     return () => mocks.invalidations.delete(accept);
   },
 }));
-vi.mock("./resume", () => ({ onResume: () => () => {} }));
-vi.mock("./entityCacheStorage", async (original) => ({
-  ...(await original<typeof import("./entityCacheStorage")>()),
+vi.mock("./resume.ts", () => ({ onResume: () => () => {} }));
+vi.mock("./entityCacheStorage.ts", async (original) => ({
+  ...(await original<typeof import("./entityCacheStorage.ts")>()),
   holdEntityProjectionDatabaseLock: async () => true,
   deleteOtherEntityProjectionDatabases: async () => {},
 }));
@@ -136,10 +136,10 @@ beforeAll(async () => {
     compactLines.close();
   }
   await Promise.all([
-    import("./client"),
-    import("./entitySequence"),
-    import("./transcriptCache"),
-    import("./entityTransfer"),
+    import("./client.ts"),
+    import("./entitySequence.ts"),
+    import("./transcriptCache.ts"),
+    import("./entityTransfer.ts"),
   ]);
   if (liveColdTransfer) {
     const query = new URLSearchParams({
@@ -357,9 +357,9 @@ it("completes a recovery pull only after server pages with no documents", async 
       request: (_key: string, write: () => Promise<unknown>) => write(),
     },
   });
-  const module = await import("./client");
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
+  const module = await import("./client.ts");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
   const registered =
     Promise.withResolvers<(version?: ResourceVersion) => void>();
   const completed = Promise.withResolvers<void>();
@@ -435,8 +435,8 @@ it("completes a recovery pull only after server pages with no documents", async 
 async function* resourceFrames(
   response: Response,
 ): AsyncGenerator<ResourceChangeEvent> {
-  const { EntityTransferAssembler } = await import("./entityTransfer");
-  const client = await import("./client");
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
+  const client = await import("./client.ts");
   const assembler = new EntityTransferAssembler(new FixtureTransferStorage());
   try {
     for await (const frame of wireFrames(response)) {
@@ -488,10 +488,10 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
       ? request(path)
       : Promise.resolve({ workspaceId: firstFrame.workspaceId }),
   );
-  const module = await import("./client");
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const { EntityTransferAssembler } = await import("./entityTransfer");
+  const module = await import("./client.ts");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
   const client = module.createSyncClient({
     api: {
       syncGet: mocks.syncGet,
@@ -533,7 +533,7 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
       yield* coldFrames;
     }
   }
-  let complete: import("./entityTransfer").StagedEntityInterval | undefined;
+  let complete: import("./entityTransfer.ts").StagedEntityInterval | undefined;
   let stagedFrames = 0;
   try {
     for await (const frame of frames()) {
@@ -638,10 +638,10 @@ it("revives moved rows after inline and staged local eviction in either scope or
     },
   });
   mocks.syncGet.mockImplementation((path: string) => request(path));
-  const { createSyncClient } = await import("./client");
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const { EntityTransferAssembler } = await import("./entityTransfer");
+  const { createSyncClient } = await import("./client.ts");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
   for (const staged of [false, true])
     for (const oldFirst of [false, true]) {
       const client = createSyncClient({
@@ -767,14 +767,14 @@ it("preserves an existing oversized Work result and >512 history rows, then stre
     },
   });
   mocks.syncGet.mockImplementation((path: string) => request(path));
-  const module = await import("./client");
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const { EntityTransferAssembler } = await import("./entityTransfer");
+  const module = await import("./client.ts");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
   const { createTaskAssignmentSelector } =
-    await import("./subscriptions/workData");
+    await import("./subscriptions/workData.ts");
   const { SYNC_STREAM_EVENT_MAX_BYTES } =
-    await import("../generated/sharedValues");
+    await import("../generated/sharedValues.ts");
   const client = module.createSyncClient({
     api: {
       syncGet: mocks.syncGet,
@@ -806,7 +806,7 @@ it("preserves an existing oversized Work result and >512 history rows, then stre
   });
   const frames = wireFrames(response)[Symbol.asyncIterator]();
   const assembler = new EntityTransferAssembler(new FixtureTransferStorage());
-  let interval: import("./entityTransfer").StagedEntityInterval | undefined;
+  let interval: import("./entityTransfer.ts").StagedEntityInterval | undefined;
   let transfers = 0;
   try {
     while (!interval) {
@@ -945,8 +945,9 @@ it("applies source commits beyond a full entity page through real SSE and the pr
         `${path}${options?.query ? `?${new URLSearchParams(options.query)}` : ""}`,
       ),
   );
-  const client = await import("./client");
-  const { ResourceEntityDelivery } = await import("./resourceEntityDelivery");
+  const client = await import("./client.ts");
+  const { ResourceEntityDelivery } =
+    await import("./resourceEntityDelivery.ts");
   const snapshots = new EventHistory<StateCollections>(1);
   const failed = vi.fn();
   let latest: StateCollections | undefined;

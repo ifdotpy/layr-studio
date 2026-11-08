@@ -10,7 +10,7 @@ vi.mock("react-dom/client", () => ({
       }
     })(),
 }));
-import { createRoot } from "./root";
+import { createRoot } from "./root.tsx";
 it("enables MobX diagnostics with warning-only strict checks", () => {
   expect(_getGlobalState()).toMatchObject({
     enforceActions: true,

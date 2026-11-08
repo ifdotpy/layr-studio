@@ -1,11 +1,12 @@
+import "../../src/rendererStyles.ts";
 const fixtureRoot = document.getElementById("root");
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { OrchestrationSettings } from "../../src/components/OrchestrationSettings.tsx";
-import { IdleCompactionNotice } from "../../src/components/IdleCompactionNotice.tsx";
-import "../../src/components/ui/primitives.css";
+import { OrchestrationSettings } from "../../src/components/settings/OrchestrationSettings/OrchestrationSettings.tsx";
+import { IdleCompactionNotice } from "../../src/components/conversation/IdleCompactionNotice/IdleCompactionNotice.tsx";
+import "../../src/components/ui/support/primitives.css";
 createRoot(fixtureRoot!).render(
   <MantineProvider>
     <main style={{ padding: 16, maxWidth: 900, margin: "auto" }}>

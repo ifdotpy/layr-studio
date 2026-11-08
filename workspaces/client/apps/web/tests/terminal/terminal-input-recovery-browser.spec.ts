@@ -32,7 +32,7 @@ test("terminal-input-recovery-browser", async ({ page: fixturePage }) => {
   const server = await builtTerminalFixture(
     join(root, "workspaces/client/apps/web"),
     temporary,
-    "terminal-input-fixture.ts",
+    "./terminal-input-fixture.ts",
     [
       {
         name: "terminal-input-harness",

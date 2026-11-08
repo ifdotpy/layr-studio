@@ -1,6 +1,6 @@
-import { reportPromptComposerRender } from "../components/prompt-composer/renderProbe";
-import type { Message } from "../types";
-import type { createTranscriptMirror } from "../generated/observableResources";
+import { reportPromptComposerRender } from "../perf/promptComposerRenderProbe.ts";
+import type { Message } from "../types.ts";
+import type { createTranscriptMirror } from "../generated/observableResources.ts";
 
 type RecordModel = ReturnType<
   typeof createTranscriptMirror
@@ -160,7 +160,7 @@ export function createMessageViews(owner: string | null) {
 
 /** One-shot compatibility for existing editing/removal callers. */
 export function transcriptMessages(
-  source: readonly import("../types").TranscriptWireItem[],
+  source: readonly import("../types.ts").TranscriptWireItem[],
   owner: string | null,
 ): Message[] {
   return createMessageViews(owner)(source);

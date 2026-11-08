@@ -1,5 +1,5 @@
-import { AccessClientStatus } from "../generated/api";
-import type { components } from "../generated/api";
+import { AccessClientStatus } from "../generated/api.ts";
+import type { components } from "../generated/api.ts";
 
 // The wire adapter maps the local server's discovery snapshot to this view.
 export type DiscoveredServer = {
@@ -30,9 +30,12 @@ export type DiscoveryActions = {
   setAutoUpdate: (enabled: boolean) => void;
 };
 
-import type { ServerAccessState, ServerIdentityAlert } from "./accessContract";
-import { serveOrigin } from "./registry";
-import type { PreferenceFields } from "../sync/uiPreferenceMerge";
+import type {
+  ServerAccessState,
+  ServerIdentityAlert,
+} from "./accessContract.ts";
+import { serveOrigin } from "./registry.ts";
+import type { PreferenceFields } from "../sync/uiPreferenceMerge.ts";
 
 export function effectiveDiscoveryAliases(
   aliases: Record<string, string> | undefined,

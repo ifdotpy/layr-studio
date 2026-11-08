@@ -1,16 +1,23 @@
 import type { components } from "../../generated/api.ts";
-import { watchResourceReads } from "./reads";
-import type { ResourceData, ResourceRef, ResourceProgress } from "./contracts";
+import { watchResourceReads } from "./reads.ts";
+import type {
+  ResourceData,
+  ResourceRef,
+  ResourceProgress,
+} from "./contracts.ts";
 import {
   selectResourceData,
   recoverResourceData,
   type ResourceDataSelectors,
   type ViewRecovery,
-} from "./selectData";
-import type { ObserveSubscriptionData } from "./module";
-import type { ResourceVersion } from "../resourceEvents";
-import type { createSyncClient, TranscriptProjectionPayload } from "../client";
-import type { SubscriptionTransport } from "./store";
+} from "./selectData.ts";
+import type { ObserveSubscriptionData } from "./module.ts";
+import type { ResourceVersion } from "../resourceEvents.ts";
+import type {
+  createSyncClient,
+  TranscriptProjectionPayload,
+} from "../client.ts";
+import type { SubscriptionTransport } from "./store.ts";
 
 const viewSelectors: Required<
   Pick<ResourceDataSelectors<ResourceVersion | undefined>, keyof ViewRecovery>

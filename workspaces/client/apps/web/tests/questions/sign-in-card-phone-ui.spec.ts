@@ -1,7 +1,8 @@
+import type {} from "./sign-in-card-phone-ui.fixture.tsx";
 import { createBuiltQuestionServer } from "./builtQuestionServer";
 import type { AddressInfo } from "node:net";
 import { phoneSignInUrl } from "./sign-in.fixture.ts";
-import type {} from "./sign-in-card-phone-ui.fixture.tsx";
+
 // A sign-in card at phone width. The window has no
 // desktop bridge and is not on the server's own Mac, so it opens the link in paste mode,
 // then sends the pasted address of the page that did not load once. A device code card
@@ -49,7 +50,7 @@ test("Sign-in card at phone width uses paste mode and the device code", async ({
   page,
 }, testInfo) => {
   const server = await createBuiltQuestionServer(
-    "sign-in-card-phone-ui.fixture.tsx",
+    "./sign-in-card-phone-ui.fixture.tsx",
     { port: PORT },
   );
   await server.listen();

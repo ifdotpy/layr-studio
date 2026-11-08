@@ -1,4 +1,4 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { readFileSync } from "node:fs";
 import { expect, test } from "vitest";
 
@@ -24,7 +24,7 @@ test("touch sizing uses Mantine variables without stretching NumberInput stepper
 });
 
 test("voice surfaces follow the active scheme instead of hard-coded dark colors", () => {
-  const voice = css("../components/realtime-voice.css");
+  const voice = css("../components/conversation/support/realtime-voice.css");
   expect(/#[\da-f]{3,8}\b|--mantine-color-dark-/i.test(voice)).toBe(false);
   expect(voice.includes("var(--surface)")).toBe(true);
   expect(voice.includes("var(--text)")).toBe(true);

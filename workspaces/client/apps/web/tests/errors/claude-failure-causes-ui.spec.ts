@@ -18,8 +18,8 @@ test("Claude failure causes at 320 and 1200 pixels", async ({
     import {MantineProvider} from '@mantine/core';
     import '@mantine/core/styles.css';
     import '/src/style.css';
-    import TurnHistory from '/src/components/conversation/transcript/TurnHistory.tsx';
-    import {NativeNotice} from '/src/components/NativeNotice.tsx';
+    import TurnHistory from '/src/components/conversation/transcript/TurnHistory/TurnHistory.tsx';
+    import {NativeNotice} from '/src/components/shell/NativeNotice/NativeNotice.tsx';
     const agent={id:'agent',threadId:'thread',provider:'claude',status:'failed',epoch:1};
     const failure={message:'Provider failed',codexErrorInfo:'badRequest',claudeFailure:{title:'Tool history does not match',message:"The conversation's tool calls and results do not match. Rewind the conversation or start a new chat.",apiError:'tool_history_mismatch',apiErrorStatus:400,apiErrorCode:'tool_pair_gate'}};
     const items=[{id:'input',role:'user',text:'Update the report.',turnId:'turn',turnStatus:'failed',turnError:failure}];

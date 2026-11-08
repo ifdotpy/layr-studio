@@ -1,18 +1,18 @@
-import { theme } from "../../src/theme";
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext";
+import { theme } from "../../src/theme.ts";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { backgroundDisplay } from "./background.ts";
 import React, { useEffect, useState } from "react";
-import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/studio-theme.css";
 import "../../src/appearance.css";
-import TerminalDock from "../../src/components/TerminalDock.tsx";
-import BackgroundTasks from "../../src/components/shell/BackgroundTasks.tsx";
-import DraftVersions from "../../src/components/DraftVersions.tsx";
-import type { components } from "../../src/generated/api";
+import TerminalDock from "../../src/components/shell/TerminalDock/TerminalDock.tsx";
+import BackgroundTasks from "../../src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx";
+import DraftVersions from "../../src/components/shell/DraftVersions/DraftVersions.tsx";
+import type { components } from "../../src/generated/api.ts";
 import type { Agent } from "../../src/types.ts";
 import { fixtureSnapshot } from "./snapshot.ts";
 

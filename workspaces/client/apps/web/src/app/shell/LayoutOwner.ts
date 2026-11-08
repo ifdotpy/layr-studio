@@ -17,8 +17,8 @@ import {
   type WorkspaceLayoutInput,
 } from "../../layout/deriveWorkspaceLayout.ts";
 
-import { observeEdgeRail } from "../../components/edge-rail/useEdgeRail.ts";
-import type { EdgeRailGeometry } from "../../components/edge-rail/edgeRailPolicy.ts";
+import { observeEdgeRail } from "../../layout/useEdgeRail.ts";
+import type { EdgeRailGeometry } from "../../layout/edgeRailPolicy.ts";
 import { attachMobileViewport } from "../../hooks/mobileViewport.ts";
 const emptyRect: LayoutRect = { x: 0, y: 0, width: 0, height: 0 };
 export class LayoutOwner {

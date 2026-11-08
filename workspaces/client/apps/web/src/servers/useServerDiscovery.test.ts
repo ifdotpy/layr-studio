@@ -16,32 +16,35 @@ vi.mock("react", () => ({
   useRef: (current: unknown) => ({ current }),
   useState: (current: unknown) => [current, vi.fn()],
 }));
-vi.mock("./ServerServicesContext", () => ({
-  useServerApi: () => ({ serverAccess: mocks.access }),
-  useServerServices: () => ({
-    store: {
-      multiServer: () => ({
-        current: mocks.snapshot
-          ? { status: "live", data: mocks.snapshot }
-          : { status: "loading" },
-      }),
-    },
+vi.mock(
+  "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx",
+  () => ({
+    useServerApi: () => ({ serverAccess: mocks.access }),
+    useServerServices: () => ({
+      store: {
+        multiServer: () => ({
+          current: mocks.snapshot
+            ? { status: "live", data: mocks.snapshot }
+            : { status: "loading" },
+        }),
+      },
+    }),
   }),
-}));
-vi.mock("../sync/uiPreferenceStore", () => ({
+);
+vi.mock("../sync/uiPreferenceStore.ts", () => ({
   readPreferenceFields: () => mocks.fields,
   capturePreferenceWrite: vi.fn(),
 }));
-vi.mock("./registry", () => ({
+vi.mock("./registry.ts", () => ({
   readServers: () => [],
   writeServers: () => {},
   setLocalServerDetails: mocks.setLocal,
   serveOrigin: (origin: string) => origin,
 }));
-vi.mock("./trustedServers", () => ({
+vi.mock("./trustedServers.ts", () => ({
   adoptTrustedServers: (snapshot: unknown) => mocks.adopt(snapshot),
 }));
-vi.mock("./managementRequests", () => ({
+vi.mock("./managementRequests.ts", () => ({
   ServerManagementRequests: class {
     pending() {
       return [];

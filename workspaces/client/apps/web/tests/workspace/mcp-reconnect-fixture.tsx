@@ -1,5 +1,6 @@
+import "../../src/rendererStyles.ts";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type {
   ApiGetPath,
   ApiPostPath,
@@ -13,8 +14,8 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Workspace from "../../src/components/shell/Workspace.tsx";
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import Workspace from "../../src/components/shell/Workspace/Workspace.tsx";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 const agent: Agent = {
   id: "agent",
   name: "Claude fixture",

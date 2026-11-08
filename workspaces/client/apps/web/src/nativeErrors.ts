@@ -1,6 +1,6 @@
 import { errorDetails } from "./errorPresentation.ts";
 import { DISK_FULL_ERROR_PATTERN } from "./generated/sharedValues.ts";
-import type { Agent } from "./types";
+import type { Agent } from "./types.ts";
 import type { KnownCodexErrorKind } from "studio-claude-bridge/provider-errors.generated.ts";
 import {
   knownCodexErrorKind,

@@ -4,7 +4,7 @@ import {
   appendAppLog,
   clearAppLog,
   appLogEntries,
-} from "./appLog";
+} from "./appLog.ts";
 
 afterEach(clearAppLog);
 test("evicts the oldest entries at the bounded capacity", () => {

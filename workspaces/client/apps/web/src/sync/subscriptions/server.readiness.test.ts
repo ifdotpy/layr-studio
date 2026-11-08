@@ -1,13 +1,13 @@
-import type { ConnectionHealth } from "../connectionState";
+import type { ConnectionHealth } from "../connectionState.ts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import type { ResourceVersion } from "../resourceEvents";
-import type { ResourceRef } from "./contracts";
+import type { ResourceVersion } from "../resourceEvents.ts";
+import type { ResourceRef } from "./contracts.ts";
 
 const mocks = vi.hoisted(() => ({
   changes: new Map<string, Set<(version?: ResourceVersion) => void>>(),
   connections: new Set<(status: ConnectionHealth, stream: "open") => void>(),
 }));
-vi.mock("../resourceEvents", () => ({
+vi.mock("../resourceEvents.ts", () => ({
   createResourceEvents: () => ({
     watchResourceChanges: (
       ref: ResourceRef,
@@ -29,9 +29,9 @@ vi.mock("../resourceEvents", () => ({
     dispose: vi.fn(),
   }),
 }));
-vi.mock("../client", () => ({ syncDatabase: vi.fn() }));
-vi.mock("../resume", () => ({ onResume: () => () => {} }));
-import { createServerSubscriptions } from "./server";
+vi.mock("../client.ts", () => ({ syncDatabase: vi.fn() }));
+vi.mock("../resume.ts", () => ({ onResume: () => () => {} }));
+import { createServerSubscriptions } from "./server.ts";
 
 const disposals: (() => void)[] = [];
 beforeEach(() => vi.useFakeTimers());

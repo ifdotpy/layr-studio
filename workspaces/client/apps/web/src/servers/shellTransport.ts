@@ -1,7 +1,7 @@
-import { randomUUID } from "../uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { CredentialBridge } from "../../../desktop/api.ts";
-import type { StreamChunk } from "./desktopCredentials";
-import { serverParentOrigin, serverViewId } from "./environment";
+import type { StreamChunk } from "./desktopCredentials.ts";
+import { serverParentOrigin, serverViewId } from "./environment.ts";
 
 export function shellCredentialBridge(): CredentialBridge {
   const pending = new Map<string, (event: MessageEvent) => void>();

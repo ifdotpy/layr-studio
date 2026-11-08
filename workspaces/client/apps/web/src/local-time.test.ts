@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { localDateTime, localTime } from "./local-time";
+import { localDateTime, localTime } from "./local-time.ts";
 
 // The cached formatters must print exactly what the Date methods print.
 describe("cached local time formatters", () => {

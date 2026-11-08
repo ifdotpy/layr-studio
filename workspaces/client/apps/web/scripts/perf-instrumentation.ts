@@ -49,7 +49,7 @@ export function perfInstrumentation(apiOnly = false): Plugin {
       if (apiOnly) return;
       if (id.endsWith("/src/mount.tsx")) {
         source =
-          'import { PerformanceReporting } from "./perf/Reporting";\nimport * as serverViewApi from "./api";\n' +
+          'import { PerformanceReporting } from "./components/performance/PerformanceReporting/PerformanceReporting.tsx";\nimport * as serverViewApi from "./api";\n' +
           source;
         return replace(
           source,
@@ -58,9 +58,11 @@ export function perfInstrumentation(apiOnly = false): Plugin {
           id,
         );
       }
-      if (id.endsWith("/src/servers/MultiServerApp.tsx")) {
+      if (
+        id.endsWith("/src/components/servers/MultiServerApp/MultiServerApp.tsx")
+      ) {
         source =
-          'import { PerformanceReporting } from "../perf/Reporting";\n' +
+          'import { PerformanceReporting } from "../../performance/PerformanceReporting/PerformanceReporting.tsx";\n' +
           source;
         return replace(
           source,

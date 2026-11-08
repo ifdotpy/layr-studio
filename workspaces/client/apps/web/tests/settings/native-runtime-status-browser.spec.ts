@@ -1,5 +1,6 @@
-import type { components } from "../../src/generated/api.ts";
 import type {} from "./native-runtime-status-browser.fixture.tsx";
+import type { components } from "../../src/generated/api.ts";
+
 import { fixtureUrl } from "./fixture-helpers.ts";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
@@ -42,7 +43,7 @@ test("Native runtime status", async ({ context }) => {
           )
             return join(
               import.meta.dirname,
-              "native-runtime-resource-events.fixture.ts",
+              "./native-runtime-resource-events.fixture.ts",
             );
           return undefined;
         },

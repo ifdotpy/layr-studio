@@ -1,6 +1,6 @@
-import { EventHistory } from "./eventHistory.testHelper";
-import { SubscriptionReplyKind, TerminalState } from "../generated/api";
-import { required } from "../components/componentTestFixtures.ts";
+import { EventHistory } from "./eventHistory.testHelper.ts";
+import { SubscriptionReplyKind, TerminalState } from "../generated/api.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
 import { spawn } from "node:child_process";
@@ -10,16 +10,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline";
-import type { ResourceVersion } from "./resourceEvents";
-import { createDataObserver } from "./subscriptions/data";
-import { SYNC_PROTOCOL_VERSION } from "../generated/api";
-import { SYNC_TERMINAL_STREAM_MAX_CHARS } from "../generated/sharedValues";
-import type { ResourceChangeEvent } from "./subscriptions/events";
+import type { ResourceVersion } from "./resourceEvents.ts";
+import { createDataObserver } from "./subscriptions/data.ts";
+import { SYNC_PROTOCOL_VERSION } from "../generated/api.ts";
+import { SYNC_TERMINAL_STREAM_MAX_CHARS } from "../generated/sharedValues.ts";
+import type { ResourceChangeEvent } from "./subscriptions/events.ts";
 
 const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
 }));
-vi.mock("../api", () => ({
+vi.mock("../api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),
@@ -29,14 +29,14 @@ vi.mock("../api", () => ({
   isApiSchemaMismatch: () => false,
   onMatchingApiSchemaResponse: () => () => {},
 }));
-vi.mock("./subscriptions/events", () => ({
+vi.mock("./subscriptions/events.ts", () => ({
   acknowledgeEntitySequences: vi.fn(),
   watchResourceConnection: () => () => {},
   watchResourceChanges: () => () => {},
 }));
-vi.mock("./resume", () => ({ onResume: () => () => {} }));
-vi.mock("./entityCacheStorage", async (original) => ({
-  ...(await original<typeof import("./entityCacheStorage")>()),
+vi.mock("./resume.ts", () => ({ onResume: () => () => {} }));
+vi.mock("./entityCacheStorage.ts", async (original) => ({
+  ...(await original<typeof import("./entityCacheStorage.ts")>()),
   holdEntityProjectionDatabaseLock: async () => true,
   deleteOtherEntityProjectionDatabases: async () => {},
 }));
@@ -164,8 +164,9 @@ it("streams terminal intervals through the projection store and the screen consu
         `${path}${options?.query ? `?${new URLSearchParams(options.query)}` : ""}`,
       ),
   );
-  const client = await import("./client");
-  const { ResourceEntityDelivery } = await import("./resourceEntityDelivery");
+  const client = await import("./client.ts");
+  const { ResourceEntityDelivery } =
+    await import("./resourceEntityDelivery.ts");
   const { workspaceId } = await client.syncDatabase();
   const resource = { kind: "terminal-output", terminalId: "shell" } as const;
   const write = (text: string, offset = 0, status = "running", id = "shell") =>

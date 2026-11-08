@@ -1,4 +1,4 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { SpawnSyncOptions } from "node:child_process";
 import assert from "node:assert/strict";
 import { existsSync, rmSync, writeFileSync } from "node:fs";

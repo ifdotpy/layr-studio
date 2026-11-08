@@ -1,4 +1,5 @@
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import {
   fixtureRoot,
@@ -16,9 +17,9 @@ import {
   createSessionCostMirror,
   createCostsMirror,
 } from "../../src/generated/observableResources.ts";
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { UsageFixture as Usage } from "../../src/app/settings/UsageFixture.tsx";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import * as sync from "../../src/sync/client.ts";
 const services = partialUsageServices({
   owner: { id: "fixture", origin: location.origin, credentialId: null },
@@ -30,7 +31,7 @@ const services = partialUsageServices({
 function partialUsageServices(value: unknown): ServerServices {
   return value as ServerServices;
 }
-import { accountLimitFixtures } from "../../src/components/AccountLimits.fixtures.ts";
+import { accountLimitFixtures } from "../../src/components/accounts/support/AccountLimits.fixtures.ts";
 import { theme } from "../../src/theme.ts";
 const now = Number(new URLSearchParams(location.search).get("now"));
 const geometry = location.search.includes("geometry");

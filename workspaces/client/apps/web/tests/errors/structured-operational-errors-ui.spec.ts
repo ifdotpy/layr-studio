@@ -1,8 +1,9 @@
+import type {} from "./structured-operational-errors-ui.fixture.tsx";
 import type { ServerResponse } from "node:http";
 import type { Route } from "@playwright/test";
 import type { JsonInput } from "../../src/types.ts";
 import { createServer } from "vite";
-import type {} from "./structured-operational-errors-ui.fixture.tsx";
+
 import {
   apiSchemaHandshakeSse,
   apiSchemaHeaders,

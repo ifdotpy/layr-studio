@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { watchVisualActivity } from "./visualActivity";
+import { watchVisualActivity } from "./visualActivity.ts";
 
 function useActivityRef<T extends HTMLElement>(
   listener: (active: boolean) => void,

@@ -1,7 +1,7 @@
 import { autorun } from "mobx";
 import { createEntityDataObserver } from "./subscriptions/entityData.ts";
 import { createSubscriptions } from "./subscriptions/module.ts";
-import { createServerStore } from "../store/index.ts";
+import { createServerStore } from "../store/server.ts";
 import { resourceData } from "../store/runtime.ts";
 import {
   serializeStateCollections,

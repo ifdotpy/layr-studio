@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import "./attachment-drafts.fixture.ts";
 type AttachmentState = ReturnType<typeof useAttachmentDrafts>;
 type FormState = ReturnType<typeof useFormDraft>;
@@ -33,10 +34,10 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import ComposerAttachments from "../../src/components/ComposerAttachments.tsx";
-import { useAttachmentDrafts } from "../../src/components/useAttachmentDrafts.ts";
-import { useUploadRecovery } from "../../src/components/useUploadRecovery.ts";
-import { useFormDraft } from "../../src/components/useFormDraft.ts";
+import ComposerAttachments from "../../src/components/conversation/ComposerAttachments/ComposerAttachments.tsx";
+import { useAttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
+import { useUploadRecovery } from "../../src/components/conversation/support/useUploadRecovery.ts";
+import { useFormDraft } from "../../src/components/shell/Workspace/useFormDraft.ts";
 import { queueUploads, pendingUploads } from "../../src/sync/uploads.ts";
 export function mount() {
   createRoot(document.body).render(

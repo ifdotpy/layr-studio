@@ -1,8 +1,9 @@
+import "../../src/rendererStyles.ts";
 import React, { useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import HistoryWindow from "../../src/components/conversation/transcript/HistoryWindow.tsx";
-import type { HistoryGroup } from "../../src/components/turnHistoryModel.ts";
+import HistoryWindow from "../../src/components/conversation/transcript/HistoryWindow/HistoryWindow.tsx";
+import type { HistoryGroup } from "../../src/components/conversation/support/turnHistoryModel.ts";
 declare global {
   interface Window {
     __lastInput?: number;

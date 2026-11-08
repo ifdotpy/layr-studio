@@ -1,14 +1,14 @@
-import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { autorun, computed, reaction, runInAction } from "mobx";
 
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import { createWaitingChildren } from "../components/agents/waitDetails.ts";
-import { AgentSource, AgentStatus } from "../generated/api";
+import { createWaitingChildren } from "../components/agents/PhaseWaitDetails/waitDetails.ts";
+import { AgentSource, AgentStatus } from "../generated/api.ts";
 import { afterEach, describe, expect, it } from "vitest";
-import { observableFixture } from "../components/observableFixture.tsx";
-import { createAgentCatalog } from "../components/agents/state.ts";
-import { conversationActionsFixture } from "../components/observableFixture.tsx";
-import type { Agent } from "../types";
+import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
+import { createAgentCatalog } from "../components/agents/support/state.ts";
+import { conversationActionsFixture } from "../components/shell/integration-support/observableFixture.tsx";
+import type { Agent } from "../types.ts";
 
 const WORKERS = 512;
 const stops: Array<() => void> = [];

@@ -1,8 +1,8 @@
 import type { StateCollections } from "../generated/observableResources.ts";
-import type { ConnectionHealth } from "./connectionState";
+import type { ConnectionHealth } from "./connectionState.ts";
 
 import type { ViteDevServer } from "vite";
-import type { components } from "../generated/api";
+import type { components } from "../generated/api.ts";
 
 declare global {
   interface Window {

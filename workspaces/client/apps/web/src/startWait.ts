@@ -1,5 +1,5 @@
-import { AgentStatus, StartWaitReason } from "./generated/api";
-import type { Agent } from "./types";
+import { AgentStatus, StartWaitReason } from "./generated/api.ts";
+import type { Agent } from "./types.ts";
 
 /** Render the server's epoch-scoped wait, shared with orchestration_status. */
 export function startWaitLabel(agent: Agent): string | null {

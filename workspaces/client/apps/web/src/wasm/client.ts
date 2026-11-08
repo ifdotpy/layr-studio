@@ -1,4 +1,4 @@
-import type { MarkdownBlock } from "../generated/rustOwned";
+import type { MarkdownBlock } from "../generated/rustOwned.ts";
 import init, {
   identity_proof_message,
   multi_server_signing_bytes,

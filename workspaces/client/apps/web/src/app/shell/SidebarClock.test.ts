@@ -1,20 +1,20 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { runInAction } from "mobx";
-import Sidebar from "../../components/Sidebar.tsx";
+import Sidebar from "../../components/sidebar/Sidebar/Sidebar.tsx";
 import { SidebarListOwner } from "./SidebarOwner.ts";
 import {
   conversationActionsFixture,
   observableFixture,
-} from "../../components/observableFixture.tsx";
+} from "../../components/shell/integration-support/observableFixture.tsx";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import { ServerStoreProvider } from "../../servers/ServerServicesContext.tsx";
+import { ServerStoreProvider } from "../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { COMPACT_RECENT_WINDOW_SECONDS } from "../../generated/sharedValues.ts";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

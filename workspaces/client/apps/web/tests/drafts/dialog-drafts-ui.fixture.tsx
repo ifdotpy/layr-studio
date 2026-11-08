@@ -1,5 +1,6 @@
-import { RequestFixture } from "../../src/components/questions/requestFixtures";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import "../../src/rendererStyles.ts";
+import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import type { Agent, Complaint } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 declare global {
@@ -10,17 +11,17 @@ declare global {
 }
 
 import { messageModels } from "../messages/message-models.fixture";
-import { conversationActionsFixture } from "../../src/components/observableFixture";
+import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import React, { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Picker from "../../src/components/ProjectDirectoryPicker.tsx";
-import UserMessages from "../../src/components/shell/messages/UserMessages.tsx";
-import MessageDate from "../../src/components/conversation/transcript/MessageDate.tsx";
+import Picker from "../../src/components/projects/ProjectDirectoryPicker/ProjectDirectoryPicker.tsx";
+import UserMessages from "../../src/components/shell/messages/UserMessages/UserMessages.tsx";
+import MessageDate from "../../src/components/conversation/transcript/MessageDate/MessageDate.tsx";
 import Requests, {
   RequestArea,
-} from "../../src/components/questions/Requests.tsx";
+} from "../../src/components/conversation/questions/Requests/Requests.tsx";
 const lead = {
   id: "lead",
   rootId: "lead",

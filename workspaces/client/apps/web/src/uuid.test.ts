@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
-import { randomUUID } from "./uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 
 afterEach(() => {
   vi.unstubAllGlobals();

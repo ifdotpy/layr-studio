@@ -5,7 +5,7 @@ import {
   serveOrigin,
   shareServers,
   SERVER_REGISTRY_KEY,
-} from "./registry";
+} from "./registry.ts";
 it("accepts only a Tailscale Serve HTTPS origin without credentials or paths", () => {
   expect(serveOrigin("https://computer.tailnet.ts.net/")).toBe(
     "https://computer.tailnet.ts.net",

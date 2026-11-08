@@ -842,7 +842,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Analytics.css",
+      "path": "src/components/shell/Analytics/Analytics.css",
       "kind": "query",
       "signature": "@media (max-width: 850px) {",
       "key": "legacy_Analytics.width850",
@@ -851,7 +851,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Analytics.css",
+      "path": "src/components/shell/Analytics/Analytics.css",
       "kind": "query",
       "signature": "@media (max-width: 520px) {",
       "key": "legacy_Analytics.width520",
@@ -860,7 +860,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Analytics.css",
+      "path": "src/components/shell/Analytics/Analytics.css",
       "kind": "dimension",
       "signature": "; min-height: 270px",
       "key": "legacy_Analytics.dimension16",
@@ -869,7 +869,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Dictation.css",
+      "path": "src/components/conversation/Dictation/Dictation.css",
       "kind": "dimension",
       "signature": "; min-height: 100px",
       "key": "legacy_Dictation.dimension17",
@@ -878,7 +878,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Usage.css",
+      "path": "src/components/conversation/Usage/Usage.css",
       "kind": "query",
       "signature": "@media (max-width: 600px) {",
       "key": "legacy_Usage.width600",
@@ -887,7 +887,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/Usage.css",
+      "path": "src/components/conversation/Usage/Usage.css",
       "kind": "dimension",
       "signature": "; width: 12px",
       "key": "legacy_Usage.dimension20",
@@ -896,7 +896,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/agents/ExecutionSettings.tsx",
+      "path": "src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
       "kind": "query",
       "signature": "useMediaQuery(\"(max-width: 760px)\"",
       "key": "legacy_ExecutionSettings.width760",
@@ -905,7 +905,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/agents/chat-status.css",
+      "path": "src/components/agents/ChatStatus/chat-status.css",
       "kind": "dimension",
       "signature": "; width: 16px",
       "key": "legacy_chat_status.dimension30",
@@ -914,7 +914,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/agents/chat-status.css",
+      "path": "src/components/agents/ChatStatus/chat-status.css",
       "kind": "dimension",
       "signature": "; height: 16px",
       "key": "legacy_chat_status.dimension31",
@@ -923,7 +923,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/agents/provider-activity.css",
+      "path": "src/components/agents/support/provider-activity.css",
       "kind": "layer",
       "signature": "z-index: 5",
       "key": "legacy_provider_activity.layer34",
@@ -933,7 +933,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/agents/session-activity.css",
+      "path": "src/components/agents/support/session-activity.css",
       "kind": "query",
       "signature": "@media (max-width: 760px) {",
       "key": "legacy_session_activity.width760",
@@ -942,7 +942,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/chat-controls.css",
+      "path": "src/components/conversation/support/chat-controls.css",
       "kind": "query",
       "signature": "@media (max-width: 760px) {",
       "key": "legacy_chat_controls.width760",
@@ -951,7 +951,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/chat-controls.css",
+      "path": "src/components/conversation/support/chat-controls.css",
       "kind": "dimension",
       "signature": "{ width: 24px",
       "key": "legacy_chat_controls.dimension38",
@@ -960,7 +960,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/chat-controls.css",
+      "path": "src/components/conversation/support/chat-controls.css",
       "kind": "dimension",
       "signature": "; height: 24px",
       "key": "legacy_chat_controls.dimension39",
@@ -969,7 +969,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/chat-controls.css",
+      "path": "src/components/conversation/support/chat-controls.css",
       "kind": "dimension",
       "signature": "; max-width: 300px",
       "key": "legacy_chat_controls.dimension40",
@@ -978,7 +978,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/chat-controls.css",
+      "path": "src/components/conversation/support/chat-controls.css",
       "kind": "dimension",
       "signature": "; max-height: 220px",
       "key": "legacy_chat_controls.dimension41",
@@ -987,7 +987,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/claude-settings.css",
+      "path": "src/components/settings/support/claude-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 420px) {",
       "key": "legacy_claude_settings.width420",
@@ -996,7 +996,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/claude-settings.css",
+      "path": "src/components/settings/support/claude-settings.css",
       "kind": "dimension",
       "signature": "{ min-height: 16px",
       "key": "legacy_claude_settings.dimension43",
@@ -1005,7 +1005,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/message-info.css",
+      "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
       "kind": "query",
       "signature": "@media (min-width: 761px) and (hover: hover) and (pointer: fine) {",
       "key": "legacy_message_info.width761",
@@ -1014,7 +1014,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/message-info.css",
+      "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
       "kind": "query",
       "signature": "@media (max-width: 760px), (pointer: coarse) {",
       "key": "legacy_message_info.width760",
@@ -1023,7 +1023,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/message-info.css",
+      "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
       "kind": "dimension",
       "signature": "{ min-width: 44px",
       "key": "legacy_message_info.dimension49",
@@ -1032,7 +1032,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/message-info.css",
+      "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
       "kind": "dimension",
       "signature": "; min-height: 44px",
       "key": "legacy_message_info.dimension50",
@@ -1041,7 +1041,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/reasoning-duration.css",
+      "path": "src/components/conversation/transcript/ReasoningDuration/reasoning-duration.css",
       "kind": "dimension",
       "signature": "; min-height: 24px",
       "key": "legacy_reasoning_duration.dimension51",
@@ -1050,7 +1050,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/conversation/transcript/selection-quote.css",
+      "path": "src/components/conversation/transcript/SelectionQuote/selection-quote.css",
       "kind": "layer",
       "signature": "z-index: 220",
       "key": "legacy_selection_quote.layer52",
@@ -1060,7 +1060,7 @@
       "scope": "global"
     },
     {
-      "path": "src/components/conversation/transcript/turn-history.css",
+      "path": "src/components/conversation/transcript/TurnHistory/turn-history.css",
       "kind": "dimension",
       "signature": "{ height: 8px",
       "key": "legacy_turn_history.dimension53",
@@ -1069,7 +1069,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/file-diff.css",
+      "path": "src/components/conversation/support/file-diff.css",
       "kind": "query",
       "signature": "@media (max-width: 480px) {",
       "key": "legacy_file_diff.width480",
@@ -1078,7 +1078,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/project-directory-picker.css",
+      "path": "src/components/projects/ProjectDirectoryPicker/project-directory-picker.css",
       "kind": "dimension",
       "signature": "{ max-width: 220px",
       "key": "legacy_project_directory_picker.dimension59",
@@ -1087,7 +1087,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/prompt-navigation.css",
+      "path": "src/components/conversation/PromptNavigator/prompt-navigation.css",
       "kind": "query",
       "signature": "@media (max-width: 760px) {",
       "key": "legacy_prompt_navigation.width760",
@@ -1096,7 +1096,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/questions/question-card.css",
+      "path": "src/components/conversation/questions/QuestionCard/question-card.css",
       "kind": "dimension",
       "signature": "; width: 14px",
       "key": "legacy_question_card.dimension62",
@@ -1105,7 +1105,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/questions/request-questions.css",
+      "path": "src/components/conversation/questions/Requests/request-questions.css",
       "kind": "query",
       "signature": "@media (max-width: 560px) {",
       "key": "legacy_request_questions.width560",
@@ -1114,7 +1114,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/questions/request-questions.css",
+      "path": "src/components/conversation/questions/Requests/request-questions.css",
       "kind": "layer",
       "signature": "z-index: 1",
       "key": "legacy_request_questions.layer64",
@@ -1124,7 +1124,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/questions/request-questions.css",
+      "path": "src/components/conversation/questions/Requests/request-questions.css",
       "kind": "dimension",
       "signature": "; min-width: 20px",
       "key": "legacy_request_questions.dimension65",
@@ -1133,7 +1133,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/questions/request-questions.css",
+      "path": "src/components/conversation/questions/Requests/request-questions.css",
       "kind": "dimension",
       "signature": "; height: 20px",
       "key": "legacy_request_questions.dimension66",
@@ -1142,7 +1142,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/radio-chat.css",
+      "path": "src/components/conversation/RadioChat/radio-chat.css",
       "kind": "query",
       "signature": "@media (max-width: 600px) {",
       "key": "legacy_radio_chat.width600",
@@ -1151,7 +1151,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/radio-chat.css",
+      "path": "src/components/conversation/RadioChat/radio-chat.css",
       "kind": "dimension",
       "signature": "; max-width: 900px",
       "key": "legacy_radio_chat.dimension68",
@@ -1160,7 +1160,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "query",
       "signature": "@media (max-width: 480px) {",
       "key": "legacy_rich_preview.width480",
@@ -1169,7 +1169,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "; height: 360px",
       "key": "legacy_rich_preview.dimension72",
@@ -1178,7 +1178,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "; max-height: 480px",
       "key": "legacy_rich_preview.dimension73",
@@ -1187,7 +1187,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "{ height: 300px",
       "key": "legacy_rich_preview.dimension74",
@@ -1196,7 +1196,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "; max-height: 360px",
       "key": "legacy_rich_preview.dimension75",
@@ -1205,7 +1205,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "; min-width: 44px",
       "key": "legacy_rich_preview.dimension76",
@@ -1214,7 +1214,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/rich-preview.css",
+      "path": "src/components/conversation/preview/support/rich-preview.css",
       "kind": "dimension",
       "signature": "; min-height: 44px",
       "key": "legacy_rich_preview.dimension77",
@@ -1223,7 +1223,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/shared-chat-create.css",
+      "path": "src/components/projects/SharedChatCreate/shared-chat-create.css",
       "kind": "query",
       "signature": "@media (max-width: 600px) {",
       "key": "legacy_shared_chat_create.width600",
@@ -1232,7 +1232,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/shared-chat-create.css",
+      "path": "src/components/projects/SharedChatCreate/shared-chat-create.css",
       "kind": "dimension",
       "signature": "{ min-height: 44px",
       "key": "legacy_shared_chat_create.dimension79",
@@ -1241,7 +1241,7 @@
       "plannedOwner": "slice1-contract"
     },
     {
-      "path": "src/components/shell/Tasks.css",
+      "path": "src/components/shell/tasks/Tasks/Tasks.css",
       "kind": "query",
       "signature": "@media (max-width: 480px) {",
       "key": "legacy_Tasks.width480",
@@ -1250,7 +1250,7 @@
       "plannedOwner": "slice3-workspace-panel"
     },
     {
-      "path": "src/components/shell/Tasks.css",
+      "path": "src/components/shell/tasks/Tasks/Tasks.css",
       "kind": "dimension",
       "signature": "; max-height: 360px",
       "key": "legacy_Tasks.dimension81",
@@ -1259,7 +1259,7 @@
       "plannedOwner": "slice3-workspace-panel"
     },
     {
-      "path": "src/components/shell/Workspace.css",
+      "path": "src/components/shell/workspace/support/Workspace.css",
       "kind": "query",
       "signature": "@media (max-width: 760px) {",
       "key": "legacy_Workspace.width760",
@@ -1268,7 +1268,7 @@
       "plannedOwner": "slice3-workspace-panel"
     },
     {
-      "path": "src/components/shell/Workspace.css",
+      "path": "src/components/shell/workspace/support/Workspace.css",
       "kind": "layer",
       "signature": "z-index: 2",
       "key": "legacy_Workspace.layer83",
@@ -1278,7 +1278,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/shell/Workspace.css",
+      "path": "src/components/shell/workspace/support/Workspace.css",
       "kind": "dimension",
       "signature": "; max-height: 420px",
       "key": "legacy_Workspace.dimension84",
@@ -1287,7 +1287,7 @@
       "plannedOwner": "slice3-workspace-panel"
     },
     {
-      "path": "src/components/shell/messages/peer-teams.css",
+      "path": "src/components/shell/messages/support/peer-teams.css",
       "kind": "dimension",
       "signature": "; max-height: 220px",
       "key": "legacy_peer_teams.dimension86",
@@ -1296,7 +1296,7 @@
       "plannedOwner": "slice3-workspace-panel"
     },
     {
-      "path": "src/components/terminal-dock.css",
+      "path": "src/components/shell/TerminalDock/terminal-dock.css",
       "kind": "query",
       "signature": "@media (max-width: 650px) {",
       "key": "legacy_terminal_dock.width650",
@@ -1305,7 +1305,7 @@
       "plannedOwner": "slice4-terminal"
     },
     {
-      "path": "src/components/terminal-dock.css",
+      "path": "src/components/shell/TerminalDock/terminal-dock.css",
       "kind": "layer",
       "signature": "z-index: 2",
       "key": "legacy_terminal_dock.layer102",
@@ -1355,7 +1355,7 @@
       "scope": "local"
     },
     {
-      "path": "src/servers/sidebar-status.css",
+      "path": "src/components/sidebar/chat-row/ChatServerLine/sidebar-status.css",
       "kind": "dimension",
       "signature": "; min-height: 14px",
       "key": "legacy_sidebar_status.dimension109",
@@ -1364,7 +1364,7 @@
       "plannedOwner": "slice2-sidebar"
     },
     {
-      "path": "src/servers/sidebar-status.css",
+      "path": "src/components/sidebar/chat-row/ChatServerLine/sidebar-status.css",
       "kind": "dimension",
       "signature": "; height: 14px",
       "key": "legacy_sidebar_status.dimension110",
@@ -1518,7 +1518,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/Analytics.css",
+      "path": "src/components/shell/Analytics/Analytics.css",
       "kind": "dimension",
       "signature": "; max-width: 320px",
       "count": 1,
@@ -1527,7 +1527,7 @@
       "purpose": "Retain the main component's exact dimension contract during responsive integration"
     },
     {
-      "path": "src/components/Analytics.css",
+      "path": "src/components/shell/Analytics/Analytics.css",
       "kind": "dimension",
       "signature": "; max-height: 320px",
       "count": 1,
@@ -1536,7 +1536,7 @@
       "purpose": "Retain the main component's exact dimension contract during responsive integration"
     },
     {
-      "path": "src/components/Usage.css",
+      "path": "src/components/conversation/Usage/Usage.css",
       "kind": "query",
       "signature": "@container conversation-footer (max-width: 47.5em) {",
       "count": 1,
@@ -1545,7 +1545,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/Usage.css",
+      "path": "src/components/conversation/Usage/Usage.css",
       "kind": "query",
       "signature": "@container conversation-footer (max-width: 28em) {",
       "count": 1,
@@ -1554,7 +1554,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/account-tiles.css",
+      "path": "src/components/accounts/support/account-tiles.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1563,7 +1563,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/accounts.css",
+      "path": "src/components/accounts/support/accounts.css",
       "kind": "query",
       "signature": "@media (max-width: 37.5rem) {",
       "count": 9,
@@ -1572,7 +1572,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/accounts.css",
+      "path": "src/components/accounts/support/accounts.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1581,7 +1581,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/accounts.css",
+      "path": "src/components/accounts/support/accounts.css",
       "kind": "query",
       "signature": "@container account-list (max-width: 22rem) {",
       "count": 3,
@@ -1590,7 +1590,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/agents/chat-settings-dialog.css",
+      "path": "src/components/agents/ChatSettingsDialog/chat-settings-dialog.css",
       "kind": "query",
       "signature": "@container (max-width: 26em) {",
       "count": 3,
@@ -1599,7 +1599,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container conversation-start (max-width: 16em) {",
       "count": 1,
@@ -1608,7 +1608,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container workspace (max-width: 47.5em) {",
       "count": 2,
@@ -1617,7 +1617,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container workspace (max-width: 22.5rem) {",
       "count": 1,
@@ -1626,7 +1626,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container composer (max-width: 70em) {",
       "count": 1,
@@ -1635,7 +1635,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container composer (max-width: 35em) {",
       "count": 2,
@@ -1644,7 +1644,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container composer (20em < width <= 35em) {",
       "count": 1,
@@ -1653,7 +1653,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container composer (max-width: 20em) {",
       "count": 1,
@@ -1662,7 +1662,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "query",
       "signature": "@container workspace (max-width: 24em) {",
       "count": 1,
@@ -1671,7 +1671,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/conversation-chrome.css",
+      "path": "src/components/conversation/support/conversation-chrome.css",
       "kind": "layer",
       "signature": "z-index: 2",
       "count": 1,
@@ -1680,7 +1680,7 @@
       "purpose": "Retain the main component's exact layer contract during responsive integration"
     },
     {
-      "path": "src/components/message-queue.css",
+      "path": "src/components/conversation/MessageQueue/message-queue.css",
       "kind": "query",
       "signature": "@media (max-width: 37.5rem) {",
       "count": 1,
@@ -1689,7 +1689,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/project-settings.css",
+      "path": "src/components/projects/ProjectAccount/project-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1698,7 +1698,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/shell/background-controls.css",
+      "path": "src/components/shell/tasks/BackgroundTasks/background-controls.css",
       "kind": "query",
       "signature": "@media (max-width: 37.5rem) {",
       "count": 1,
@@ -1707,7 +1707,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/shell/messages/team-chats.css",
+      "path": "src/components/shell/messages/TeamChats/team-chats.css",
       "kind": "query",
       "signature": "@container message-rooms (max-width: 40rem) {",
       "count": 1,
@@ -1716,7 +1716,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/sidebar/FleetFixtures.css",
+      "path": "src/components/sidebar/support/FleetFixtures.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5em) {",
       "count": 1,
@@ -1725,7 +1725,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/sidebar-projects.css",
+      "path": "src/components/sidebar/Sidebar/sidebar-projects.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5em) {",
       "count": 1,
@@ -1734,7 +1734,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/studio-settings.css",
+      "path": "src/components/settings/support/studio-settings.css",
       "kind": "query",
       "signature": "@media (min-width: 47.5rem) {",
       "count": 1,
@@ -1753,7 +1753,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/conversation/transcript/message-info.css",
+      "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
       "kind": "layer",
       "signature": "z-index: 1",
       "count": 1,
@@ -1763,7 +1763,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/agents/execution-settings.css",
+      "path": "src/components/agents/support/execution-settings.css",
       "kind": "layer",
       "signature": "z-index: 1",
       "count": 1,
@@ -1773,7 +1773,7 @@
       "scope": "local"
     },
     {
-      "path": "src/components/studio-settings.css",
+      "path": "src/components/settings/support/studio-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1782,7 +1782,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/supervisor-recovery-notice.css",
+      "path": "src/components/shell/SupervisorRecoveryNotice/supervisor-recovery-notice.css",
       "kind": "query",
       "signature": "@container workspace (max-width: 47.5em) {",
       "count": 1,
@@ -1791,7 +1791,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/ui/primitives.css",
+      "path": "src/components/ui/support/primitives.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1800,7 +1800,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/servers/server-settings.css",
+      "path": "src/components/servers/ServerManager/server-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1809,7 +1809,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/servers/server-settings.css",
+      "path": "src/components/servers/ServerManager/server-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 22.5rem) {",
       "count": 1,
@@ -1818,7 +1818,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/servers/server-settings.css",
+      "path": "src/components/servers/ServerManager/server-settings.css",
       "kind": "query",
       "signature": "@media (max-width: 30rem) {",
       "count": 1,
@@ -1962,7 +1962,7 @@
       "purpose": "Retain the main component's exact layer contract during responsive integration"
     },
     {
-      "path": "src/components/conversation-warnings.css",
+      "path": "src/components/conversation/ConversationWarnings/conversation-warnings.css",
       "kind": "query",
       "signature": "@media (max-width: 47.5rem) {",
       "count": 1,
@@ -1971,7 +1971,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/empty-chat-settings.css",
+      "path": "src/components/conversation/support/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (min-width: 50em) {",
       "count": 1,
@@ -1980,7 +1980,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/empty-chat-settings.css",
+      "path": "src/components/conversation/support/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (max-width: 25em) {",
       "count": 2,
@@ -1989,7 +1989,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/conversation/empty-chat-settings.css",
+      "path": "src/components/conversation/support/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (max-width: 50em) {",
       "count": 1,
@@ -1998,7 +1998,7 @@
       "purpose": "Keep the execution summary on one line in a narrow composer"
     },
     {
-      "path": "src/components/conversation/empty-chat-settings.css",
+      "path": "src/components/conversation/support/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (max-width: 30em) {",
       "count": 1,
@@ -2007,7 +2007,7 @@
       "purpose": "Show only the Lead model in a phone composer"
     },
     {
-      "path": "src/components/conversation/empty-chat-settings.css",
+      "path": "src/components/conversation/support/empty-chat-settings.css",
       "kind": "query",
       "signature": "@container composer (max-width: 20em) {",
       "count": 2,
@@ -2016,7 +2016,7 @@
       "purpose": "Retain the main component's exact query contract during responsive integration"
     },
     {
-      "path": "src/components/shell/Workspace.css",
+      "path": "src/components/shell/workspace/support/Workspace.css",
       "kind": "dimension",
       "signature": "; width: 48px",
       "count": 1,
@@ -2043,7 +2043,7 @@
       "purpose": "Existing compact tasks drawer header minimum height"
     },
     {
-      "path": "src/components/sidebar-projects.css",
+      "path": "src/components/sidebar/Sidebar/sidebar-projects.css",
       "kind": "query",
       "signature": "@container chat-list (max-width: 280px) {",
       "count": 1,
@@ -2052,7 +2052,7 @@
       "purpose": "Duo shell sidebar container query; migrate to a layout owner"
     },
     {
-      "path": "src/components/sidebar-projects.css",
+      "path": "src/components/sidebar/Sidebar/sidebar-projects.css",
       "kind": "query",
       "signature": "@container sidebar-header (max-width: 240px) {",
       "count": 1,

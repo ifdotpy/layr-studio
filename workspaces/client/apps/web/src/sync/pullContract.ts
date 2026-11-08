@@ -1,5 +1,5 @@
-import type { GetResult } from "../api";
-import { SYNC_ENTITY_SCOPE } from "../generated/api";
+import type { GetResult } from "../api.ts";
+import { SYNC_ENTITY_SCOPE } from "../generated/api.ts";
 
 export type SyncPullResponse = GetResult<"/api/sync/pull">;
 

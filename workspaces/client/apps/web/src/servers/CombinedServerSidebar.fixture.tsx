@@ -1,5 +1,5 @@
-import { sidebarFixtureAreas } from "../components/Sidebar.fixture.tsx";
-import { localSidebarServices } from "../components/sidebar/services.tsx";
+import { sidebarFixtureAreas } from "../components/sidebar/Sidebar/Sidebar.fixture.tsx";
+import { localSidebarServices } from "../components/sidebar/support/services.tsx";
 import { useEffect, useState } from "react";
 import { observable, runInAction } from "mobx";
 import { useCombinedSidebarServices } from "./combinedSidebarServices.ts";
@@ -7,8 +7,8 @@ import {
   CombinedSidebarOwner,
   type CombinedSidebarShell,
 } from "./CombinedServerSidebar.tsx";
-import { observableFixture } from "../components/observableFixture.tsx";
-import Sidebar from "../components/Sidebar.tsx";
+import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
+import Sidebar from "../components/sidebar/Sidebar/Sidebar.tsx";
 import { defaultStudioPreferences } from "../studioPreferences.ts";
 import type { MergedSidebar } from "./mergedSidebar.ts";
 import type { ServerNavigation } from "./navigation.ts";

@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { attachMobileViewport, focusSelectedComposer } from "./mobileViewport";
+import {
+  attachMobileViewport,
+  focusSelectedComposer,
+} from "./mobileViewport.ts";
 
 class Viewport extends EventTarget {
   width = 951;

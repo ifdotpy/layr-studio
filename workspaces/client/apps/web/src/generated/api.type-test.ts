@@ -1,4 +1,4 @@
-import type { components } from "./api";
+import type { components } from "./api.ts";
 
 type SyncEntity = components["schemas"]["SyncEntity"];
 

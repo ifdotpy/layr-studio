@@ -3,7 +3,7 @@ import {
   accountDisplayName,
   accountTooltip,
   accountCanStart,
-} from "./accountName";
+} from "./accountName.ts";
 
 describe("account names", () => {
   it("uses server eligibility even when status disagrees", () => {
@@ -59,7 +59,7 @@ describe("account names", () => {
 });
 
 it("exports separate account display and login label length contracts", async () => {
-  const values = await import("./generated/sharedValues");
+  const values = await import("./generated/sharedValues.ts");
   expect(values).toHaveProperty("ACCOUNT_NAME_MAX_CHARS", expect.any(Number));
   expect(values).toHaveProperty("LOGIN_LABEL_MAX_CHARS", expect.any(Number));
 });

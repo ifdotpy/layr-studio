@@ -1,6 +1,7 @@
+import type {} from "./file-viewers-browser.fixture.tsx";
 import { required } from "../teams/helpers.ts";
 import { createServer } from "vite";
-import type {} from "./file-viewers-browser.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

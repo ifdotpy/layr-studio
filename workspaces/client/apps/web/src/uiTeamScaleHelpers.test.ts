@@ -1,6 +1,6 @@
 import { agentSummaryFixture } from "./servers/agentSummaryFixture.ts";
-import { AgentStatus } from "./generated/api";
-import { required } from "./components/componentTestFixtures.ts";
+import { AgentStatus } from "./generated/api.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import type { components, AgentEntityDto } from "./generated/api.ts";
 import type {

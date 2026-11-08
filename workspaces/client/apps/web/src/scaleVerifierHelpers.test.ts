@@ -1,8 +1,8 @@
-import { AgentWorktreePreparation } from "./generated/api";
-import { WorkspaceMode, AccountStatus, ProviderKind } from "./generated/api";
-import { required } from "./components/componentTestFixtures.ts";
+import { AgentWorktreePreparation } from "./generated/api.ts";
+import { WorkspaceMode, AccountStatus, ProviderKind } from "./generated/api.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
-import type { components } from "./generated/api";
+import type { components } from "./generated/api.ts";
 import type {
   RetainedInput,
   EntityPage,

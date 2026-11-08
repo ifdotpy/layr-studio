@@ -1,42 +1,35 @@
-import "./browser-reset.css";
-import "@mantine/core/styles.css";
-import {
-  ServerAreas,
-  ServerAreasProvider,
-} from "./app/ServerAreasProvider.tsx";
+import "./rendererStyles.ts";
+
+import { ServerAreas } from "./app/ServerAreasProvider.tsx";
+import { ServerAreasProvider } from "./components/shell/ServerAreasProvider/ServerAreasProvider.tsx";
 import {
   createServerViewServices,
   ServerServicesProvider,
-} from "./servers/ServerServicesContext.tsx";
-import { BottomInsetBand } from "./hooks/BottomInsetBand";
-import { NativeServerCredentials } from "./native/serverCredentials";
-import { hasNativeClient } from "./native/client";
-import { isNativeFrame } from "./native/frame";
+} from "./components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { BottomInsetBand } from "./components/shell/BottomInsetBand/BottomInsetBand.tsx";
+import { NativeServerCredentials } from "./native/serverCredentials.ts";
+import { hasNativeClient } from "./native/client.ts";
+import { isNativeFrame } from "./native/frame.ts";
 import {
   DesktopServerCredentials,
   nativeCredentialBridge,
-} from "./servers/desktopCredentials";
-import { BrowserServerCredentials } from "./servers/browserCredentials";
-import { setServerCredentialAdapter } from "./servers/transport";
+} from "./servers/desktopCredentials.ts";
+import { BrowserServerCredentials } from "./servers/browserCredentials.ts";
+import { setServerCredentialAdapter } from "./servers/transport.ts";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
-import App from "./App";
-import { SidebarWarningsProvider } from "./components/SidebarWarnings";
-import MultiServerApp from "./servers/MultiServerApp";
-import { isServerView } from "./servers/environment";
-import { isRemoteServerView } from "./servers/environment";
-import { isClassicServerView } from "./servers/environment";
-import { shellCredentialBridge } from "./servers/shellTransport";
-import "./servers/servers.css";
-import UIErrorBoundary from "./components/UIErrorBoundary";
-import { theme } from "./theme";
-import "./style.css";
-import "./workspace-layout.css";
-import "./appearance.css";
-import "./studio-preferences.css";
-import "./visual-activity.css";
-import "./design/state.css";
-import { initializeNativeClose } from "./native/close";
+import App from "./components/shell/App/App.tsx";
+import { SidebarWarningsProvider } from "./components/sidebar/SidebarWarnings/SidebarWarnings.tsx";
+import MultiServerApp from "./components/servers/MultiServerApp/MultiServerApp.tsx";
+import { isServerView } from "./servers/environment.ts";
+import { isRemoteServerView } from "./servers/environment.ts";
+import { isClassicServerView } from "./servers/environment.ts";
+import { shellCredentialBridge } from "./servers/shellTransport.ts";
+
+import UIErrorBoundary from "./components/shell/UIErrorBoundary/UIErrorBoundary.tsx";
+import { theme } from "./theme.ts";
+
+import { initializeNativeClose } from "./native/close.ts";
 
 async function mount() {
   await initializeNativeClose();

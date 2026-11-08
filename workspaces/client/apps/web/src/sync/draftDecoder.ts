@@ -1,4 +1,4 @@
-import type { DraftVersion } from "../generated/rustOwned";
+import type { DraftVersion } from "../generated/rustOwned.ts";
 
 export function decodeDraftVersion(value: unknown): DraftVersion {
   if (!value || typeof value !== "object" || Array.isArray(value))

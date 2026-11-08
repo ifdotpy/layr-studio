@@ -1,4 +1,4 @@
-import type { TranscriptPageData } from "../types";
+import type { TranscriptPageData } from "../types.ts";
 
 /** Local transcript metadata format; item hashes remain server-owned. */
 export const TRANSCRIPT_PROJECTION_FORMAT = 3;

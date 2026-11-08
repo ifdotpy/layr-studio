@@ -4,10 +4,10 @@ import { expect, it, vi } from "vitest";
 import {
   localSidebarBackend,
   type SidebarBackend,
-} from "../components/sidebar/services";
-import { mergeSidebar } from "./mergedSidebar";
-import { mergedSidebarPreferences } from "./mergedSidebarPreferences";
-import { createSidebarVisualSession } from "./sidebarVisualSession";
+} from "../components/sidebar/support/services.tsx";
+import { mergeSidebar } from "./mergedSidebar.ts";
+import { mergedSidebarPreferences } from "./mergedSidebarPreferences.ts";
+import { createSidebarVisualSession } from "./sidebarVisualSession.ts";
 
 const scope = "/same/state";
 function source(id: string) {

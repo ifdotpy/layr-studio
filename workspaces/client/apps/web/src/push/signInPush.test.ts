@@ -7,7 +7,7 @@ import {
   pushSupported,
   stopSignInPush,
   subscriptionBody,
-} from "./signInPush";
+} from "./signInPush.ts";
 
 describe("sign-in alerts through Web Push", () => {
   it("fingerprints an endpoint without persisting it", async () => {

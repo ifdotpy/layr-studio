@@ -4,7 +4,7 @@ import {
   useServerApi,
   useServerResources,
   useServerStore,
-} from "../servers/ServerServicesContext.tsx";
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { agentId, transcriptTail } from "../generated/observableResources.ts";
 import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
 import { trimTranscriptPageCache } from "../transcriptPageBounds.ts";

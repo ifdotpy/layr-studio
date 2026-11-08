@@ -1,10 +1,9 @@
-import "./viewport-surface.css";
 import {
   hasTouchCapability,
   touchPointerMedia,
   primaryTouchPointerMedia,
-} from "./touchCapability";
-import { layoutValues } from "../layout/layout-contract.generated";
+} from "./touchCapability.ts";
+import { layoutValues } from "../layout/layout-contract.generated.ts";
 import {
   nativeKeyboardDuration,
   nativeKeyboardEasing,
@@ -12,7 +11,7 @@ import {
   nativeViewport,
   nativeViewportEvent,
   type NativeViewportState,
-} from "../native/nativeViewport";
+} from "../native/nativeViewport.ts";
 
 const selectedComposers = new WeakSet<HTMLTextAreaElement>();
 

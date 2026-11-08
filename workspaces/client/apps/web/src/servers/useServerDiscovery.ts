@@ -1,19 +1,25 @@
-import { randomUUID } from "../uuid";
-import { useServerApi, useServerServices } from "./ServerServicesContext";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import {
+  useServerApi,
+  useServerServices,
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import {
   capturePreferenceWrite,
   readPreferenceFields,
-} from "../sync/uiPreferenceStore";
-import { preferenceEvent } from "../sync/uiPreferenceMerge";
-import { ServerManagementRequests } from "./managementRequests";
+} from "../sync/uiPreferenceStore.ts";
+import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
+import { ServerManagementRequests } from "./managementRequests.ts";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { resourceData } from "../store/runtime.ts";
-import { errorText } from "../api";
-import { discoverySnapshot, effectiveDiscoveryAliases } from "./discoveryModel";
-import type { ServerAccessRequest } from "./accessContract";
-import { readServers, setLocalServerDetails } from "./registry";
-import { serverCredentialAdapter } from "./transport";
-import { adoptTrustedServers } from "./trustedServers";
+import { errorText } from "../api.ts";
+import {
+  discoverySnapshot,
+  effectiveDiscoveryAliases,
+} from "./discoveryModel.ts";
+import type { ServerAccessRequest } from "./accessContract.ts";
+import { readServers, setLocalServerDetails } from "./registry.ts";
+import { serverCredentialAdapter } from "./transport.ts";
+import { adoptTrustedServers } from "./trustedServers.ts";
 export function useServerDiscovery(
   enabled: boolean,
   localAvailable = true,

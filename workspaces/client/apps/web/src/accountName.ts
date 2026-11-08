@@ -1,4 +1,4 @@
-import type { Account } from "./components/Accounts";
+import type { Account } from "./components/accounts/support/Accounts.tsx";
 
 export function accountDisplayName(
   account: Pick<Account, "label" | "email">,

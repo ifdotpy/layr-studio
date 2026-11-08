@@ -1,5 +1,5 @@
-import type { ServerAccount } from "./navigation";
-import type { StudioServer } from "./registry";
+import type { ServerAccount } from "./navigation.ts";
+import type { StudioServer } from "./registry.ts";
 import type { ProviderKind } from "../generated/providerKind.ts";
 
 export type ServerAccountRow = {

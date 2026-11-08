@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { createMergedSidebarSelector } from "./mergedSidebar.ts";
 import { sidebarSnapshot, type SidebarEntity } from "./sidebarSnapshot.ts";
-import { componentSnapshot } from "../components/componentTestFixtures.ts";
+import { componentSnapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 const snapshotFixture = (...args: Parameters<typeof componentSnapshot>) =>
   Object.assign(componentSnapshot(...args), {
     token: "",

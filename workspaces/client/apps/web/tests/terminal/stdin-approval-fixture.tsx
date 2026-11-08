@@ -1,5 +1,6 @@
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
-import { RequestFixture } from "../../src/components/questions/requestFixtures";
+import "../../src/rendererStyles.ts";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
+import { RequestFixture } from "../../src/components/conversation/questions/support/requestFixtures.ts";
 import type { Agent } from "../../src/types.ts";
 import { approval } from "../../src/approvalFixtures.ts";
 
@@ -9,7 +10,7 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import Requests, {
   RequestArea,
-} from "../../src/components/questions/Requests.tsx";
+} from "../../src/components/conversation/questions/Requests/Requests.tsx";
 const agent: Agent = {
   id: "lead",
   rootId: "lead",

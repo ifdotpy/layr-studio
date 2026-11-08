@@ -1,6 +1,6 @@
-import { SubscriptionReplyKind } from "./generated/api";
-import { required } from "./components/componentTestFixtures.ts";
-import type { components } from "./generated/api";
+import { SubscriptionReplyKind } from "./generated/api.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import type { components } from "./generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
 import {
   fixtureProjectDirectory,

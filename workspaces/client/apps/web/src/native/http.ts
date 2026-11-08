@@ -1,6 +1,6 @@
-import { nativeRequest } from "./client";
+import { nativeRequest } from "./client.ts";
 
-import type { HttpResponse } from "./host";
+import type { HttpResponse } from "./host.ts";
 
 // Aborting stops the caller's wait. A submitted mutation may already have
 // committed; never retry it or claim that abort rolled it back.

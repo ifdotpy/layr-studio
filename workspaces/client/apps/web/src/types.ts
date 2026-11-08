@@ -1,6 +1,6 @@
-import { AgentStatus } from "./generated/api";
-import { nativeErrorView } from "./nativeErrors";
-import type { GetResult } from "./api";
+import { AgentStatus } from "./generated/api.ts";
+import { nativeErrorView } from "./nativeErrors.ts";
+import type { GetResult } from "./api.ts";
 import type {
   AgentEntityDto,
   AgentSummaryEntityDto,
@@ -16,7 +16,7 @@ import type {
   TaskEntityDto,
   WorkEntityDto,
   components,
-} from "./generated/api";
+} from "./generated/api.ts";
 
 export type {
   JsonValue,
@@ -26,8 +26,8 @@ export type {
   KnownApiFields,
   TranscriptWireItem,
   TranscriptPageData,
-} from "./apiTypes";
-import type { JsonInput, TranscriptWireItem } from "./apiTypes";
+} from "./apiTypes.ts";
+import type { JsonInput, TranscriptWireItem } from "./apiTypes.ts";
 import type { DeepReadonly } from "./deepReadonly.ts";
 export type { DeepReadonly };
 export type Agent = DeepReadonly<
@@ -80,7 +80,7 @@ export type Message = Omit<
     | readonly (TranscriptAsset | LocalMessageAttachment)[]
     | null
     | undefined;
-  deliveryStatus?: import("./sync/send").DeliveryState | undefined;
+  deliveryStatus?: import("./sync/send.ts").DeliveryState | undefined;
   nativeError?: DeepReadonly<JsonInput> | undefined;
   role: NonNullable<TranscriptWireItem["role"]>;
   text: NonNullable<TranscriptWireItem["text"]>;

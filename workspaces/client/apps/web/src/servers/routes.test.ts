@@ -9,8 +9,8 @@ import {
   vi,
 } from "vitest";
 import { readFileSync } from "node:fs";
-import { publicKeyPem } from "./pairing";
-import { identityProofMessage } from "../wasm/client";
+import { publicKeyPem } from "./pairing.ts";
+import { identityProofMessage } from "../wasm/client.ts";
 
 // The browser loads client_bg.wasm by URL. Node serves the same bytes from disk.
 beforeAll(async () => {
@@ -35,7 +35,7 @@ import {
   retarget,
   routesFor,
   sendRouted,
-} from "./routes";
+} from "./routes.ts";
 
 const PAIRED = "https://mac.tail.ts.net";
 const LAN = "https://192.168.1.5:8443";
@@ -242,7 +242,7 @@ describe("learned routes (rule 3)", () => {
       JSON.stringify([LAN]),
     );
     vi.resetModules();
-    const reloaded = await import("./routes");
+    const reloaded = await import("./routes.ts");
     expect(
       reloaded.routesFor({ id: "reload-test", origin: PAIRED }).routes(),
     ).toEqual([PAIRED, LAN]);

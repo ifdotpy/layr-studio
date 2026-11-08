@@ -1,12 +1,12 @@
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   nativeRequest: vi.fn(),
   listenNativeEvents: vi.fn(),
   hasNativeClient: () => true,
 }));
-vi.mock("./frame", () => ({ isNativeFrame: () => false }));
-import { nativeRequest, listenNativeEvents } from "./client";
-import { captureNativeAudio, dictationBridge } from "./dictation";
+vi.mock("./frame.ts", () => ({ isNativeFrame: () => false }));
+import { nativeRequest, listenNativeEvents } from "./client.ts";
+import { captureNativeAudio, dictationBridge } from "./dictation.ts";
 afterEach(() => {
   vi.resetAllMocks();
   vi.unstubAllGlobals();

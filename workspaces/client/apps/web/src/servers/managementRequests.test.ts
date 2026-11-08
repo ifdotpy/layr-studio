@@ -1,6 +1,6 @@
 /// <reference lib="es2024.promise" />
 import { expect, it, vi } from "vitest";
-import { ServerManagementRequests } from "./managementRequests";
+import { ServerManagementRequests } from "./managementRequests.ts";
 function fixture() {
   const records = new Map<string, string>();
   const storage = {

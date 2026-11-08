@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { API_SCHEMA_HASH, API_SCHEMA_HASH_HEADER } from "./generated/apiSchema";
+import {
+  API_SCHEMA_HASH,
+  API_SCHEMA_HASH_HEADER,
+} from "./generated/apiSchema.ts";
 
 describe("mutation response entity delivery", () => {
   afterEach(() => {
@@ -22,7 +25,7 @@ describe("mutation response entity delivery", () => {
       ),
     );
 
-    const api = await import("./api");
+    const api = await import("./api.ts");
     api.setToken("test-token");
     api.setWorkspace("workspace-a");
     await expect(api.post("/api/sync/drafts", { rows: [] })).resolves.toEqual({

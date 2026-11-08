@@ -1,6 +1,6 @@
-import { createQueueOutbox } from "../browserPersistence";
-import { serverStorageName } from "../servers/environment";
-import { serverLocalStorage } from "../servers/storage";
+import { createQueueOutbox } from "../browserPersistence.ts";
+import { serverStorageName } from "../servers/environment.ts";
+import { serverLocalStorage } from "../servers/storage.ts";
 export const LOCAL_DRAFT_DATABASE_NAME = "codex-studio-draft-writes";
 
 export function createLocalDraftStorage(

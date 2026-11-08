@@ -145,22 +145,22 @@ test("React network boundary rejects direct transports and permits store/owner u
       ],
       [
         "components/ServicesProbe.tsx",
-        'export { useServerApi } from "../servers/ServerServicesContext";',
+        'export { useServerApi } from "../components/servers/ServerServicesProvider/ServerServicesProvider";',
         imported,
       ],
       [
         "components/ReaderProbe.tsx",
-        'export { useServerModelReader } from "../servers/ServerServicesContext";',
+        'export { useServerModelReader } from "../components/servers/ServerServicesProvider/ServerServicesProvider";',
         imported,
       ],
       [
         "servers/FactoryProbe.tsx",
-        'export { createServerViewServices } from "./ServerServicesContext";',
+        'export { createServerViewServices } from "../components/servers/ServerServicesProvider/ServerServicesProvider";',
         imported,
       ],
       [
         "components/SidebarProbe.tsx",
-        'export { useServerSidebarServices } from "../servers/ServerServicesContext";',
+        'export { useServerSidebarServices } from "../components/servers/ServerServicesProvider/ServerServicesProvider";',
         imported,
       ],
       [
@@ -195,7 +195,7 @@ test("React network boundary rejects direct transports and permits store/owner u
       ],
       [
         "servers/ServicesProbe.tsx",
-        'export { useServerApi } from "./ServerServicesContext.tsx";',
+        'export { useServerApi } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";',
         imported,
       ],
       [
@@ -212,7 +212,7 @@ test("React network boundary rejects direct transports and permits store/owner u
       ["sync/useSyncedVisualState.ts", 'fetch("/");', globalViolation],
       [
         "components/StoreProbe.tsx",
-        'export { createServerStore } from "../store/index.ts";',
+        'export { createServerStore } from "../store/server.ts";',
         {},
       ],
       [
@@ -241,7 +241,7 @@ test("React network boundary rejects direct transports and permits store/owner u
       ],
       [
         "components/AudioProbe.tsx",
-        'export { useServerAudio } from "../servers/ServerServicesContext";',
+        'export { useServerAudio } from "../components/servers/ServerServicesProvider/ServerServicesProvider";',
         imported,
       ],
       [

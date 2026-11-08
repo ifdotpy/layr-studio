@@ -1,5 +1,5 @@
-import { isNewChatSettings } from "../components/newChatSettings";
-import type { ServerCommand, ServerNavigation } from "./navigation";
+import { isNewChatSettings } from "../app/projects/newChatSettings.ts";
+import type { ServerCommand, ServerNavigation } from "./navigation.ts";
 
 // The shell accepts a cross-server choice only from the owning frame's project list.
 export function projectChatCommand(

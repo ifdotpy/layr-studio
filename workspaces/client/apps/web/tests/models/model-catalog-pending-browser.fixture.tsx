@@ -1,14 +1,15 @@
+import "../../src/rendererStyles.ts";
 import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
-} from "../../src/components/agents/modelCatalogFixture.tsx";
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+} from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
 import React from "react";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { useWorkerModels } from "../../src/components/agents/WorkerModelPicker.tsx";
+import { useWorkerModels } from "../../src/components/agents/support/WorkerModelPicker.tsx";
 import { get } from "../../src/api.ts";
 
 type Reader = ModelCatalogFixtureSource;

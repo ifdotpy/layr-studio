@@ -1,8 +1,8 @@
-import { AccessClientStatus } from "../generated/api";
+import { AccessClientStatus } from "../generated/api.ts";
 import assert from "node:assert/strict";
 import { describe, expect, it } from "vitest";
-import { relativeSeen, serverRows } from "./serverRows";
-import type { DiscoveredServer } from "./discoveryModel";
+import { relativeSeen, serverRows } from "./serverRows.ts";
+import type { DiscoveredServer } from "./discoveryModel.ts";
 const peer = (
   id: string,
   status: DiscoveredServer["status"],

@@ -1,10 +1,10 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("../native/client", () => ({ hasNativeClient: () => true }));
-vi.mock("../native/http", () => ({ nativeFetch: vi.fn() }));
-import { nativeFetch } from "../native/http";
-import { fetchServerSummary } from "./summary";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
+vi.mock("../native/client.ts", () => ({ hasNativeClient: () => true }));
+vi.mock("../native/http.ts", () => ({ nativeFetch: vi.fn() }));
+import { nativeFetch } from "../native/http.ts";
+import { fetchServerSummary } from "./summary.ts";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 afterEach(() => vi.unstubAllGlobals());
 it("loads the local shell summary through the verified native backend", async () => {
   vi.stubGlobal("window", {});

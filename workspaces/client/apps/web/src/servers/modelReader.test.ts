@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createModelReader } from "./modelReader.ts";
-import type { GetResult } from "../api";
+import type { GetResult } from "../api.ts";
 
 const owner = {
   id: "remote",

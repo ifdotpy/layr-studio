@@ -5,7 +5,7 @@
   "workspaces/client/apps/desktop/recovery.test.ts": [
     "\"/tmp/Codex Studio.app/Contents/MacOS/studio-native-client\","
   ],
-  "workspaces/client/apps/web/src/components/tool-images/toolImages.test.ts": [
+  "workspaces/client/apps/web/src/components/conversation/transcript/Activity/Activity.toolImages.test.ts": [
     "const path = \"/tmp/screenshot #1%:2\";",
     "assert.deepEqual(toolImages({ type: \"imageView\", path: \"/tmp/\" }), [",
     "{ kind: \"path\", source: \"/tmp/\", name: \"Image\" },",

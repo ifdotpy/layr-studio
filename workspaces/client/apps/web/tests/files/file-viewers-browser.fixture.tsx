@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { desktopFixture } from "../files/desktop.fixture.ts";
 import type { DesktopBridge } from "../../src/desktop.ts";
 declare global {
@@ -15,13 +16,13 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import FilePreview, {
   useFilePreview,
-} from "../../src/components/FilePreview.tsx";
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
-import StreamingText from "../../src/components/conversation/transcript/StreamingText.tsx";
+} from "../../src/components/conversation/FilePreview/FilePreview.tsx";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import StreamingText from "../../src/components/conversation/transcript/StreamingText/StreamingText.tsx";
 import {
   parseDelimited,
   safeSvg,
-} from "../../src/components/filePreviewFormats.ts";
+} from "../../src/components/conversation/support/filePreviewFormats.ts";
 window.parseDelimited = parseDelimited;
 window.safeSvg = safeSvg;
 window.actions = [];

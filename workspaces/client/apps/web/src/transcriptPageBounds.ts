@@ -1,5 +1,5 @@
-import type { Message } from "./types";
-import { messageRenderKey } from "./components/message-delivery/messageDelivery";
+import type { Message } from "./types.ts";
+import { messageRenderKey } from "./components/conversation/support/messageDelivery.ts";
 import { isMessagePending } from "./messageSendStatus.ts";
 
 export const MAX_TRANSCRIPT_PAGE_ITEMS = 240;

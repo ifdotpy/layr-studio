@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { syncPost } from "../api";
+import type { syncPost } from "../api.ts";
 
 const mocks = vi.hoisted(() => ({
   acknowledge: vi.fn(),
@@ -19,20 +19,20 @@ const mocks = vi.hoisted(() => ({
   watch: vi.fn((_listener: () => void) => () => {}),
 }));
 
-vi.mock("../api", () => ({
+vi.mock("../api.ts", () => ({
   refreshSession: mocks.sessionRead,
   syncPost: mocks.syncPost,
   errorText: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));
-vi.mock("./uiPreferenceStore", () => ({
+vi.mock("./uiPreferenceStore.ts", () => ({
   acknowledgePreferenceFields: mocks.acknowledge,
   readPreferenceFields: mocks.read,
   receivePreferenceFields: mocks.receive,
   watchPreferenceWrites: mocks.watch,
 }));
 
-import { createUiPreferenceBridge } from "./uiPreferenceBridge";
+import { createUiPreferenceBridge } from "./uiPreferenceBridge.ts";
 
 const storage = {} as Storage;
 

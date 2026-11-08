@@ -1,12 +1,12 @@
-import { randomUUID } from "../uuid";
-import { sha256Hex } from "../sha256";
-import { serverViewId } from "./environment";
-import { serverLocalStorage } from "./storage";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { sha256Hex } from "../sha256.ts";
+import { serverViewId } from "./environment.ts";
+import { serverLocalStorage } from "./storage.ts";
 import {
   createMonitorInputStore,
   type MonitorInputEntry,
   type MonitorInputStore,
-} from "./monitorInputStore";
+} from "./monitorInputStore.ts";
 const MONITOR_INPUT_PATH = "/api/monitor/input";
 const UNCERTAIN_RESPONSE_CODES = new Set([
   "remote_timeout",

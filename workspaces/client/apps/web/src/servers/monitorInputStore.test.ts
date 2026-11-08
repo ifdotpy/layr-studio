@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import {
   createMonitorInputStore,
   MONITOR_INPUT_DATABASE_NAME,
-} from "./monitorInputStore";
+} from "./monitorInputStore.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 

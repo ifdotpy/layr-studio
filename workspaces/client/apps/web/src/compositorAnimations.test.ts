@@ -1,5 +1,5 @@
-import { required } from "./components/componentTestFixtures.ts";
-import { cssFiles } from "./cssFixtureFiles";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import { cssFiles } from "./cssFixtureFiles.ts";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { it } from "vitest";

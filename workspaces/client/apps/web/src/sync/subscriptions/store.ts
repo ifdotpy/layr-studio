@@ -1,8 +1,11 @@
-import type { ConnectionActivity, ConnectionHealth } from "../connectionState";
+import type {
+  ConnectionActivity,
+  ConnectionHealth,
+} from "../connectionState.ts";
 import type {
   ResourceConnectionDetail,
   ResourceVersion,
-} from "../resourceEvents";
+} from "../resourceEvents.ts";
 import {
   DEFAULT_SUBSCRIPTION_GRACE_MS,
   hasAppliedResourceBaseline,
@@ -12,7 +15,7 @@ import {
   type ResourceRef,
   type SubscriptionOptions,
   type SubscriptionState,
-} from "./contracts";
+} from "./contracts.ts";
 
 export type SubscriptionTransport = {
   watchResourceChanges(

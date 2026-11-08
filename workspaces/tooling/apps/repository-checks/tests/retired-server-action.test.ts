@@ -15,7 +15,7 @@ test("the retired server replacement action has no route, request, or UI caller"
   assert.ok(!("ReplaceServer" in spec.components.schemas));
   for (const path of [
     "workspaces/runtime/packages/runtime-http/src/routes/multi_server.rs",
-    "workspaces/client/apps/web/src/servers/ServerManager.tsx",
+    "workspaces/client/apps/web/src/components/servers/ServerManager/ServerManager.tsx",
     "workspaces/client/apps/web/src/servers/useServerDiscovery.ts",
     "workspaces/client/apps/web/src/servers/accessContract.ts",
     "workspaces/client/apps/web/src/servers/sidebarServices.ts",

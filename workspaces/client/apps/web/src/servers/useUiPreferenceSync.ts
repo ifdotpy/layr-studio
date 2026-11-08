@@ -1,15 +1,15 @@
-import { orderPreferenceServers } from "./preferenceServerOrder";
+import { orderPreferenceServers } from "./preferenceServerOrder.ts";
 import { useEffect } from "react";
 import {
   capturePreferenceWrite,
   readPreferenceFields,
   watchPreferenceWrites,
-} from "../sync/uiPreferenceStore";
-import { preferenceEvent } from "../sync/uiPreferenceMerge";
+} from "../sync/uiPreferenceStore.ts";
+import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
 import {
   defaultServerAlias,
   DEFAULT_LOCAL_SERVER_ALIAS,
-} from "./serverAliases";
+} from "./serverAliases.ts";
 import {
   readServers,
   localServer,
@@ -17,7 +17,7 @@ import {
   writeServers,
   SERVER_REGISTRY_EVENT,
   type StudioServer,
-} from "./registry";
+} from "./registry.ts";
 
 /** Applies shell registry preferences; each mounted App owns its projection feed. */
 export function useUiPreferenceSync(servers: StudioServer[]) {

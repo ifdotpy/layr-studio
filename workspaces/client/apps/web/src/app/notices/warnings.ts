@@ -1,7 +1,7 @@
 import { displayError } from "../../errorPresentation.ts";
 import type { components } from "../../generated/api.ts";
 import type { DeepReadonly } from "../../deepReadonly.ts";
-import type { StudioErrorItem } from "../../components/StudioErrors.tsx";
+import type { StudioErrorItem } from "../../components/shell/StudioErrorList/StudioErrorList.tsx";
 export type NativeNotice =
   | components["schemas"]["NativeNoticeRecord"]
   | components["schemas"]["ProviderVersionWarningDto"];

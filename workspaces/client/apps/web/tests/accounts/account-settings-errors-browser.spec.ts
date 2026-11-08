@@ -1,3 +1,4 @@
+import type {} from "./account-errors.fixture.tsx";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { chromium, webkit } from "playwright-core";
@@ -11,7 +12,7 @@ import {
   type SyncFixture,
   type NotifyResources,
 } from "./fixture-helpers.ts";
-import type {} from "./account-errors.fixture.tsx";
+
 import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -73,10 +74,20 @@ test("Account settings errors", async () => {
           });
         },
         load(id) {
-          if (negative && id === join(root, "src/components/AccountSignIn.tsx"))
+          if (
+            negative &&
+            id ===
+              join(
+                root,
+                "src/components/accounts/AccountSignIn/AccountSignIn.tsx",
+              )
+          )
             return execFileSync(
               "git",
-              ["show", "f72c2ce:web/src/components/AccountSignIn.tsx"],
+              [
+                "show",
+                "f72c2ce:web/src/components/accounts/AccountSignIn/AccountSignIn.tsx",
+              ],
               { cwd: root, encoding: "utf8" },
             );
           return undefined;

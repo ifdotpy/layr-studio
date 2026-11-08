@@ -1,15 +1,15 @@
 import {
   sidebarFixtureAreas,
   sidebarFixtureRun,
-} from "../../components/Sidebar.fixture.tsx";
+} from "../../components/sidebar/Sidebar/Sidebar.fixture.tsx";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { reaction, runInAction } from "mobx";
 import { SidebarListOwner } from "./SidebarOwner.ts";
-import { observableFixture } from "../../components/observableFixture.tsx";
+import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { createStateMirror } from "../../generated/observableResources.ts";
 import { agentSummaryFixture } from "../../servers/agentSummaryFixture.ts";
-import type { SidebarCommands } from "../../components/sidebar/commands.ts";
+import type { SidebarCommands } from "../../components/sidebar/support/commands.ts";
 
 const cleanup: (() => void)[] = [];
 afterEach(() =>

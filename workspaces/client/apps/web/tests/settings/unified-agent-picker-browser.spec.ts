@@ -1,5 +1,6 @@
-import type { components } from "../../src/generated/api.ts";
 import type {} from "./unified-agent-picker-browser.fixture.tsx";
+import type { components } from "../../src/generated/api.ts";
+
 import { fixtureUrl } from "./fixture-helpers.ts";
 import {
   API_SCHEMA_HASH_HEADER,

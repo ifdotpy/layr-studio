@@ -1,5 +1,5 @@
-import { hasNativeClient } from "./native/client";
-import { openNativeLink } from "./native/externalLinks";
+import { hasNativeClient } from "./native/client.ts";
+import { openNativeLink } from "./native/externalLinks.ts";
 
 export type { DesktopBridge, SignInForward } from "../../desktop/api.ts";
 

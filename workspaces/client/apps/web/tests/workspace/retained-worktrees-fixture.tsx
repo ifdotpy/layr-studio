@@ -1,15 +1,14 @@
-import { ServerViewStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import "../../src/rendererStyles.ts";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { Agent } from "../../src/types.ts";
 
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import {
-  RetainedWorktree,
-  TeamRetainedWorktrees,
-} from "../../src/components/agents/RetainedWorktrees.tsx";
+import { RetainedWorktree } from "../../src/components/agents/TeamRetainedWorktrees/TeamRetainedWorktrees.tsx";
+import { TeamRetainedWorktrees } from "../../src/components/agents/TeamRetainedWorktrees/TeamRetainedWorktrees.tsx";
 import { observer } from "mobx-react-lite";
-import { useTeamArea } from "../../src/components/agents/TeamPanelContext.tsx";
+import { useTeamArea } from "../../src/components/agents/support/TeamPanelContext.tsx";
 const worker: Agent = {
   id: "worker",
   worktree: true,

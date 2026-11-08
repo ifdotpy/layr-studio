@@ -1,5 +1,5 @@
-import type { GetOptions, GetResult } from "../api";
-import type { StudioServer } from "./registry";
+import type { GetOptions, GetResult } from "../api.ts";
+import type { StudioServer } from "./registry.ts";
 
 type Options = Pick<GetOptions<"/api/models">, "query" | "signal">;
 type Models = GetResult<"/api/models">;

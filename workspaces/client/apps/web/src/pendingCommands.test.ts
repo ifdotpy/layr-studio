@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   PENDING_COMMAND_MAX_MS,
   createPendingCommands,
-} from "./pendingCommands";
+} from "./pendingCommands.ts";
 
 describe("pending layer", () => {
   it("shows the expected result at once and clears when the client has the row", () => {

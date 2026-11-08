@@ -3,7 +3,7 @@ import { transientTestFixture } from "./sync/subscriptions/transientTestFixture.
 import { agentId, requestId } from "./generated/observableResources.ts";
 import { resourceData } from "./store/runtime.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { submitRename } from "./renameRequest";
+import { submitRename } from "./renameRequest.ts";
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();

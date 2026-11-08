@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { SchemaMismatchError } from "./summary";
-import { recoverMatchingServers } from "./schemaRecovery";
+import { SchemaMismatchError } from "./summary.ts";
+import { recoverMatchingServers } from "./schemaRecovery.ts";
 
 const server = (id: string) => ({ id, label: id, origin: `https://${id}` });
 

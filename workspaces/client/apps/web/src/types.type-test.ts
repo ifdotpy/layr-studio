@@ -1,6 +1,6 @@
-import type { PostBody } from "./api";
-import { type Agent } from "./types";
-import { type NewChatWorkspaceMode } from "./components/newChatSettings";
+import type { PostBody } from "./api.ts";
+import type { Agent } from "./types.ts";
+import type { NewChatWorkspaceMode } from "./app/projects/newChatSettings.ts";
 
 type AssertNever<T extends never> = T;
 

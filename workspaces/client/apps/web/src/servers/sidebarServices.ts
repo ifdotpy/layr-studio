@@ -5,18 +5,18 @@ import {
   type PostInput,
   type PostResult,
   type PostOptions,
-} from "../api";
+} from "../api.ts";
 import {
   createSidebarServices,
   type SidebarBackend,
   type SidebarTarget,
-} from "../components/sidebar/services";
-import type { Project } from "../types";
-import { mergeSidebar, type MergedSidebar } from "./mergedSidebar";
+} from "../components/sidebar/support/services.tsx";
+import type { Project } from "../types.ts";
+import { mergeSidebar, type MergedSidebar } from "./mergedSidebar.ts";
 import {
   mergedSidebarPreferences,
   sidebarOrderWrite,
-} from "./mergedSidebarPreferences";
+} from "./mergedSidebarPreferences.ts";
 
 const acknowledgedOrderRevisions = new WeakMap<SidebarBackend, number>();
 

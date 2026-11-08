@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { ApiError } from "./api";
-import { definiteDeleteRejection, deleteConversation } from "./chatDeleteScope";
+import { ApiError } from "./api.ts";
+import {
+  definiteDeleteRejection,
+  deleteConversation,
+} from "./chatDeleteScope.ts";
 
 const applied = (deleted: string[]) => ({
   status: "applied" as const,

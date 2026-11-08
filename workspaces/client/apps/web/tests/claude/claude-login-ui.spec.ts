@@ -1,8 +1,9 @@
+import type {} from "./claude-login-ui.fixture.tsx";
 import { fixturePostBody } from "../mobile/browser-fixture.ts";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureServerOrigin } from "../mobile/browser-fixture.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
-import type {} from "./claude-login-ui.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

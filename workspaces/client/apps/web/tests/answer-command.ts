@@ -1,7 +1,7 @@
 // Answers of the one command path: `POST /api/commands` with `kind: "answer"`. The approval id
 // is the command target, and the answer fields are the body.
 import type { Request } from "@playwright/test";
-import type { components } from "../src/generated/api";
+import type { components } from "../src/generated/api.ts";
 
 export type AnswerResult = components["schemas"]["AnswerResult"];
 export type AnswerRequest = { id: string } & Record<string, unknown>;

@@ -1,16 +1,16 @@
-import { hasNativeClient } from "../native/client";
+import { hasNativeClient } from "../native/client.ts";
 import {
   PAIRED_SERVERS_KEY,
   readPairedServerReferences,
   writePairedServerReferences,
-} from "../browserPersistence";
-import { isolatedServerView, serverParentOrigin } from "./environment";
+} from "../browserPersistence.ts";
+import { isolatedServerView, serverParentOrigin } from "./environment.ts";
 import type { StudioServerIdentity } from "./serverIdentity.ts";
 import {
   defaultServerAlias,
   DEFAULT_LOCAL_SERVER_ALIAS,
   validateServerAlias,
-} from "./serverAliases";
+} from "./serverAliases.ts";
 export type StudioServer = StudioServerIdentity & {
   workspaceId?: string;
   alias?: string | undefined;

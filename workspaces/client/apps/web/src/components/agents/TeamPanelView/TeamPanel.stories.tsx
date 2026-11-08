@@ -1,0 +1,413 @@
+import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+
+import { AgentRole, AgentSource, AgentStatus } from "../../../generated/api.ts";
+import { useState } from "react";
+import type { Decorator, Meta, StoryObj } from "@storybook/react-vite";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import type { Agent } from "../../../types.ts";
+
+import TeamPanel from "../support/TeamFixture.tsx";
+
+const now = Math.floor(Date.now() / 1000);
+const lead: Agent = {
+  id: "lead",
+  name: "Studio release",
+  role: AgentRole.lead,
+  isLead: true,
+  source: AgentSource.managed,
+  status: AgentStatus.running,
+  operationalStatus: { reason: "working" },
+  inFlight: true,
+  model: "gpt-6-astra",
+  created: now - 195,
+  activity: { phase: "thinking", at: now - 32 },
+};
+const workerFixtures: Agent[] = [
+  {
+    id: "question",
+    name: "Permissions review",
+    status: AgentStatus.approval,
+    operationalStatus: { reason: "needs_input", wait: null },
+    role: AgentRole.reviewer,
+    overview: { task: "Confirm the allowed command scope" },
+  },
+  {
+    id: "error",
+    name: "Обновление индексов для нескольких проектов и проверка восстановления после перезапуска",
+    status: AgentStatus.failed,
+    operationalStatus: { reason: "failed" },
+    error: "Type check failed in the project adapter.",
+    overview: { task: "Repair the project migration" },
+  },
+  {
+    id: "running",
+    name: "Transcript worker",
+    status: AgentStatus.running,
+    operationalStatus: { reason: "working" },
+    inFlight: true,
+    activity: { phase: "tool", at: now - 74 },
+    commandProgress: [
+      {
+        monitorId: "typecheck",
+        stage: "pnpm run typecheck:fast",
+        startedAt: now - 74,
+        lastOutputLine: "Checking TypeScript exports",
+      },
+    ],
+    overview: { task: "Verify sticky scroll across long conversations" },
+  },
+  {
+    id: "child",
+    name: "Mobile reviewer",
+    status: AgentStatus.running,
+    operationalStatus: { reason: "working" },
+    inFlight: true,
+    parentId: "running",
+    role: AgentRole.reviewer,
+    overview: { task: "Check 320px composition and long bilingual titles" },
+  },
+  {
+    id: "paused",
+    name: "Package verification",
+    status: AgentStatus.paused,
+    operationalStatus: { reason: "stopped" },
+    autoWake: false,
+    overview: { task: "Wait for the integration branch" },
+  },
+  {
+    id: "none",
+    name: "Queue recovery",
+    status: AgentStatus.idle,
+    operationalStatus: { reason: "ready" },
+    overview: { task: "Preserve drafts after reconnect" },
+  },
+  {
+    id: "unread",
+    name: "Новые результаты проверки доступности интерфейса",
+    status: AgentStatus.completed,
+    operationalStatus: { reason: "unread_result" },
+    threadId: "thread-result",
+    lastCompletedTurn: "turn-result",
+    lastCompletedTurnStatus: "completed",
+    overview: {
+      task: "Accessibility review",
+      result: "Keyboard focus, accessible names, and contrast checks passed.",
+    },
+  },
+  {
+    id: "finished",
+    name: "Storage adapter",
+    status: AgentStatus.completed,
+    operationalStatus: { reason: "read_result" },
+    overview: {
+      task: "Inspect request identities",
+      result: "Request identities remain stable across retries.",
+    },
+  },
+  ...Array.from({ length: 12 }, (_, index): Agent => ({
+    id: `done-${index}`,
+    name: `Completed review ${index + 1}`,
+    status: AgentStatus.completed,
+    operationalStatus: { reason: "read_result" },
+  })),
+];
+const workers: Agent[] = workerFixtures.map((agent) => ({
+  ...agent,
+  source: "managed",
+  rootId: lead.id,
+  parentId: agent.parentId || lead.id,
+  model: agent.role === AgentRole.reviewer ? "opus" : "gpt-6-luna",
+  provider: agent.role === AgentRole.reviewer ? "claude" : "codex",
+  created: now - 180,
+  updated: now - 20,
+  effort: "medium",
+}));
+const storyActions = { open: fn(), previewResult: fn(), remove: fn() };
+const teamDecorator: Decorator = (Story, context) => {
+  const [fixture] = useState(() =>
+    observableFixture([
+      {
+        ...lead,
+        ...(context.name === "Implicit Lead"
+          ? {
+              overview: {
+                result: "Release verification passed.",
+                resultTruncated: true,
+                resultFile: "reports/release.md",
+              },
+            }
+          : {}),
+      },
+      ...workers,
+    ]),
+  );
+  return (
+    <fixture.Provider>
+      <Story />
+    </fixture.Provider>
+  );
+};
+
+const meta = {
+  title: "Agents/Team dispatch",
+  component: TeamPanel,
+  decorators: [teamDecorator],
+  parameters: { layout: "fullscreen" },
+  args: {
+    leadId: lead.id,
+    actions: storyActions,
+    opened: "lead",
+    workerQuery: "",
+    setWorkerQuery: fn(),
+    workerFilter: "all",
+    setWorkerFilter: fn(),
+    completedOpen: false,
+    setCompletedOpen: fn(),
+    setTeamOpen: fn(),
+    setWideTeamOpen: fn(),
+  },
+} satisfies Meta<typeof TeamPanel>;
+export default meta;
+type Story = StoryObj<typeof meta>;
+export const Dispatch: Story = {
+  render: (args) => {
+    const [query, setQuery] = useState("");
+    const [filter, setFilter] = useState("all");
+    const [completed, setCompleted] = useState(false);
+    return (
+      <div
+        style={{
+          height: "100dvh",
+          margin: "calc(-1 * var(--mantine-spacing-lg))",
+          display: "flex",
+          justifyContent: "end",
+          minWidth: 0,
+        }}
+      >
+        <TeamPanel
+          {...args}
+          workerQuery={query}
+          setWorkerQuery={setQuery}
+          workerFilter={filter}
+          setWorkerFilter={setFilter}
+          completedOpen={completed}
+          setCompletedOpen={setCompleted}
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvas.getByRole("complementary", { name: "Team" }),
+    ).toBeVisible();
+    for (const worker of canvasElement.querySelectorAll(".worker-entry"))
+      await expect(getComputedStyle(worker).boxShadow).toBe("none");
+    const failed = canvas.getByRole("region", { name: "Failed" });
+    await expect(
+      within(failed).getByText("Type check failed in the project adapter.", {
+        selector: ".worker-error",
+      }),
+    ).toBeVisible();
+    await expect(
+      canvas.getAllByRole("img", { name: /^Reviewer$/ }).length,
+    ).toBeGreaterThan(0);
+    await expect(
+      canvas.getAllByRole("img", { name: /^Codex$/ }).length,
+    ).toBeGreaterThan(0);
+    await expect(
+      canvasElement.querySelector(
+        '[data-worker="running"] [data-chat-status="working"]',
+      ),
+    ).toBeVisible();
+    await expect(
+      canvas.queryByText("No final report available"),
+    ).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByRole("button", { name: /^Failed$/ }));
+    await expect(
+      canvas.getByRole("button", { name: /^Failed$/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(
+      canvas.queryByText("Transcript worker"),
+    ).not.toBeInTheDocument();
+    await expect(canvasElement.querySelectorAll("[data-worker]")).toHaveLength(
+      1,
+    );
+    await userEvent.click(canvas.getByRole("button", { name: /^All$/ }));
+    await expect(
+      canvasElement.querySelector('[data-worker="running"]'),
+    ).toBeVisible();
+    const progress = canvasElement.querySelector(".worker-command-details")!;
+    await expect(progress).not.toHaveAttribute("data-expanded");
+    await userEvent.click(progress.querySelector(".disclosure-control")!);
+    await waitFor(() =>
+      expect(
+        within(progress as HTMLElement).getByText(
+          "Checking TypeScript exports",
+        ),
+      ).toBeVisible(),
+    );
+    await userEvent.click(progress.querySelector(".disclosure-control")!);
+    await expect(canvas.queryByText("Storage adapter")).not.toBeInTheDocument();
+    await userEvent.click(canvas.getByLabelText("Finished (14)"));
+    // The group opens through an animated Mantine Collapse.
+    await waitFor(() =>
+      expect(canvas.getByText("Storage adapter")).toBeVisible(),
+    );
+    await userEvent.type(
+      canvas.getByRole("searchbox", { name: "Find a subagent" }),
+      "Новые результаты",
+    );
+    await expect(
+      canvas.getByText("Новые результаты проверки доступности интерфейса"),
+    ).toBeVisible();
+    await userEvent.clear(
+      canvas.getByRole("searchbox", { name: "Find a subagent" }),
+    );
+    await userEvent.click(canvas.getByLabelText("Finished (14)"));
+  },
+};
+export const AfUtils: Story = { ...Dispatch };
+export const Attar: Story = { ...Dispatch };
+
+/** Screenshot fixture leaves interaction state untouched. */
+const { play: _play, ...overview } = Dispatch;
+export const Overview: Story = overview;
+
+export const Workspace: Story = {
+  render: (args) => (
+    <div
+      className="workspace-frame"
+      style={
+        {
+          height: "100dvh",
+          margin: "calc(-1 * var(--mantine-spacing-lg))",
+          "--studio-content-width-ratio": 0.6,
+        } as import("react").CSSProperties
+      }
+    >
+      <main
+        className="workspace"
+        style={{ padding: "var(--mantine-spacing-lg)" }}
+      >
+        <h2 style={{ fontSize: "var(--studio-text-title)", fontWeight: 600 }}>
+          Studio release review
+        </h2>
+        <p style={{ color: "var(--muted)" }}>
+          Team activity stays beside the conversation when the content
+          preference leaves enough room.
+        </p>
+      </main>
+      <TeamPanel {...args} />
+    </div>
+  ),
+};
+
+export const ImplicitLead: Story = {
+  args: {
+    opened: "running",
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(
+      canvasElement.querySelector("[data-lead]"),
+    ).not.toBeInTheDocument();
+    const root = canvasElement
+      .querySelector('[data-worker="running"]')!
+      .closest(".worker-entry")!;
+    const child = canvasElement
+      .querySelector('[data-worker="child"]')!
+      .closest(".worker-entry")!;
+    await expect(
+      (root as HTMLElement).style.getPropertyValue("--worker-depth"),
+    ).toBe("0");
+    await expect(
+      (child as HTMLElement).style.getPropertyValue("--worker-depth"),
+    ).toBe("1");
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Back to main agent" }),
+    );
+    await expect(storyActions.open).toHaveBeenLastCalledWith("lead");
+    await userEvent.click(canvas.getByText("Main agent report"));
+    await waitFor(() =>
+      expect(canvas.getByText("Release verification passed.")).toBeVisible(),
+    );
+    await userEvent.click(
+      canvas.getByRole("button", { name: "Continue in main chat" }),
+    );
+    await expect(storyActions.open).toHaveBeenLastCalledWith("lead");
+    await userEvent.click(
+      canvas.getByRole("link", { name: "Open main agent submitted result" }),
+    );
+    await expect(storyActions.previewResult).toHaveBeenLastCalledWith({
+      agent: "lead",
+      path: "reports/release.md",
+    });
+  },
+};
+
+export const SharedGutter: Story = {
+  play: async ({ canvasElement }) => {
+    const panel = canvasElement.querySelector("#team")!;
+    const computed = getComputedStyle(panel);
+    const gutterProbe = document.createElement("div");
+    gutterProbe.style.width = "var(--mantine-spacing-md)";
+    panel.append(gutterProbe);
+    const gutter = gutterProbe.getBoundingClientRect().width;
+    gutterProbe.remove();
+    await expect(parseFloat(computed.paddingInlineStart)).toBe(gutter);
+    const edge =
+      panel.getBoundingClientRect().left +
+      parseFloat(computed.borderInlineStartWidth) +
+      gutter;
+    for (const selector of [
+      ".team-heading h2",
+      ".team-summary-filters",
+      // Only the panel's own search; nested budget fields sit deeper.
+      ":scope > .mantine-TextInput-root",
+      ".team-status-group h3",
+      ".worker-group > .disclosure-control",
+      ".worker-entry:not([data-has-parent])",
+    ]) {
+      for (const element of panel.querySelectorAll(selector)) {
+        await expect(element.getBoundingClientRect().left).toBeCloseTo(edge, 0);
+      }
+    }
+  },
+};
+
+export const ComfortableStrips: Story = {
+  play: async ({ canvasElement }) => {
+    const panel = canvasElement.querySelector("#team")!;
+    const probe = document.createElement("div");
+    probe.style.width = "var(--mantine-spacing-sm)";
+    probe.style.height = "var(--mantine-spacing-xs)";
+    panel.append(probe);
+    const { width: inlinePadding, height: blockPadding } =
+      probe.getBoundingClientRect();
+    probe.remove();
+    for (const strip of panel.querySelectorAll<HTMLElement>(".worker-entry")) {
+      const style = getComputedStyle(strip);
+      await expect(parseFloat(style.paddingInlineStart)).toBeGreaterThanOrEqual(
+        inlinePadding,
+      );
+      await expect(parseFloat(style.paddingBlockStart)).toBeGreaterThanOrEqual(
+        blockPadding,
+      );
+      await expect(parseFloat(style.paddingBlockEnd)).toBeGreaterThanOrEqual(
+        blockPadding,
+      );
+      const name = strip
+        .querySelector(".worker-name-line")!
+        .getBoundingClientRect();
+      const activity = strip
+        .querySelector(".worker-live-line")!
+        .getBoundingClientRect();
+      const model = strip
+        .querySelector(".worker-bottom")!
+        .getBoundingClientRect();
+      await expect(activity.top - name.bottom).toBeGreaterThan(0);
+      await expect(model.top - activity.bottom).toBeGreaterThan(0);
+    }
+  },
+};

@@ -1,6 +1,7 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "../../src/rendererStyles.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { messageModels } from "../messages/message-models.fixture";
-import { conversationActionsFixture } from "../../src/components/observableFixture";
+import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent, Room } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
 declare global {
@@ -13,7 +14,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import TeamChats from "../../src/components/shell/messages/TeamChats.tsx";
+import TeamChats from "../../src/components/shell/messages/TeamChats/TeamChats.tsx";
 import "../../src/style.css";
 import "../../src/workspace-layout.css";
 import "../../src/appearance.css";

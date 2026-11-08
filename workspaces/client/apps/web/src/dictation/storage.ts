@@ -1,6 +1,6 @@
 import { recordingStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
-import { randomUUID } from "../uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { Recording } from "../unsent/schema.ts";
 export type { Recording } from "../unsent/schema.ts";
 export function createRecordingStorage(

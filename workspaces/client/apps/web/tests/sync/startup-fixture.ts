@@ -2,7 +2,7 @@ import { resourceData } from "../../src/store/runtime.ts";
 import { useEffect, useReducer, useState } from "react";
 import { reaction } from "mobx";
 import { StartupOwner } from "../../src/app/startup/StartupOwner.ts";
-import { createServerViewServices } from "../../src/servers/ServerServicesContext.tsx";
+import { createServerViewServices } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ServerAreas } from "../../src/app/ServerAreasProvider.tsx";
 
 /** Legacy recovery pages exercise the production startup lifecycle directly. */

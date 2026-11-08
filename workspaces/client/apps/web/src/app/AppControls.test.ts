@@ -5,11 +5,11 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { runInAction } from "mobx";
 import { AgentStatus, AgentSource } from "../generated/api.ts";
-import { AppTeam } from "../App.tsx";
+import { AppTeam } from "../components/shell/AppTeam/AppTeam.tsx";
 import { ServerAreas } from "./ServerAreasProvider.tsx";
 import { createServerServices } from "../servers/serverServices.ts";
-import { observableFixture } from "../components/observableFixture.tsx";
-import { componentSnapshot as snapshotFixture } from "../components/componentTestFixtures.ts";
+import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
+import { componentSnapshot as snapshotFixture } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 
 const h = vi.hoisted(() => ({
@@ -23,7 +23,7 @@ vi.mock("./ServerAreasProvider.tsx", async (original) => ({
   ...(await original<typeof import("./ServerAreasProvider.tsx")>()),
   useServerAreas: () => h.area,
 }));
-vi.mock("../components/agents/TeamPanelContext.tsx", () => ({
+vi.mock("../components/agents/support/TeamPanelContext.tsx", () => ({
   TeamProvider: ({
     value,
     children,
@@ -49,6 +49,9 @@ vi.mock("../components/agents/TeamPanelContext.tsx", () => ({
     h.retained = retained;
     return { view: { members: [], workers: [] } };
   },
+}));
+vi.mock("../components/agents/TeamPresence/TeamPresence.tsx", () => ({
+  TeamPresence: ({ children }: { children: React.ReactNode }) => children,
 }));
 let cleanup = () => {};
 afterEach(() => {
@@ -153,4 +156,4 @@ it("passes the global retained-only team hint", async () => {
   expect(h.retained).toBe(true);
 });
 
-import { setStartupFixture } from "../components/observableFixture.tsx";
+import { setStartupFixture } from "../components/shell/integration-support/observableFixture.tsx";

@@ -1,16 +1,16 @@
-import { setPreferenceWriteStatus } from "./uiPreferenceStatus";
-import { randomUUID } from "../uuid";
+import { setPreferenceWriteStatus } from "./uiPreferenceStatus.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
   defaultStudioPreferences,
   normalizeStudioPreferences,
   studioPreferencesStorageKey,
-} from "../studioPreferences";
+} from "../studioPreferences.ts";
 import {
   preferenceStorageForServer as scopedPreferenceStorage,
   serverLocalStorage,
   observeStorageWrites,
   preferenceMemory,
-} from "../servers/storage";
+} from "../servers/storage.ts";
 import {
   preferenceCacheKey,
   prunePreferenceFields,
@@ -20,7 +20,7 @@ import {
   mergePreferenceFields,
   type PreferenceFields,
   type PreferenceScope,
-} from "./uiPreferenceMerge";
+} from "./uiPreferenceMerge.ts";
 import { RETIRED_MODEL_WHITELIST_KEY } from "../generated/sharedValues.ts";
 const userStorage = () => preferenceMemory;
 const retiredModelWhitelistField = JSON.stringify([

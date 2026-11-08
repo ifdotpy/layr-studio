@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import type { components } from "../../src/generated/api.ts";
 const rootElement = document.getElementById("root")!;
@@ -9,16 +10,16 @@ import { Paperclip, Mic, Square, ArrowUp, ListEnd } from "lucide-react";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
 import "../../src/appearance.css";
-import "../../src/components/chat-controls.css";
-import "../../src/components/conversation/conversation-chrome.css";
-import "../../src/components/conversation/empty-chat-settings.css";
+import "../../src/components/conversation/support/chat-controls.css";
+import "../../src/components/conversation/support/conversation-chrome.css";
+import "../../src/components/conversation/support/empty-chat-settings.css";
 import { theme } from "../../src/theme.ts";
-import { ExecutionSummaryTrigger } from "../../src/components/agents/ExecutionSummaryTrigger.tsx";
-import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
+import { ExecutionSummaryTrigger } from "../../src/components/agents/ExecutionSummaryTrigger/ExecutionSummaryTrigger.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
-} from "../../src/components/agents/modelCatalogFixture.tsx";
+} from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
 const query = new URLSearchParams(location.search);
 const name =
   query.get("long") === "word"

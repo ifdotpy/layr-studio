@@ -1,19 +1,19 @@
-import { FrontendLocality } from "../generated/api";
-import { required } from "../components/componentTestFixtures.ts";
-import type { TranscriptWireItem } from "../types";
+import { FrontendLocality } from "../generated/api.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import type { TranscriptWireItem } from "../types.ts";
 // Cache separation fixtures omit role; they exercise only item identity and text.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createApiScope,
   ApiSchemaMismatchError,
   NetworkTimeoutError,
-} from "../api";
+} from "../api.ts";
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,
-} from "../generated/apiSchema";
-import { createMutationJournal } from "./mutationIdentity";
-import { scopedStorage } from "./storage";
+} from "../generated/apiSchema.ts";
+import { createMutationJournal } from "./mutationIdentity.ts";
+import { scopedStorage } from "./storage.ts";
 import { cacheFixture } from "../../tests/cacheFixture.ts";
 
 function memory(): Storage {
@@ -260,8 +260,9 @@ describe("concurrent servers in one interface", () => {
 });
 
 it("separates transcript and sequence caches even when server object IDs collide", async () => {
-  const { createTranscriptCache } = await import("../sync/transcriptCache");
-  const { createEntitySequenceScope } = await import("../sync/entitySequence");
+  const { createTranscriptCache } = await import("../sync/transcriptCache.ts");
+  const { createEntitySequenceScope } =
+    await import("../sync/entitySequence.ts");
   const a = createTranscriptCache();
   const b = createTranscriptCache();
   a.cacheTranscriptValue(

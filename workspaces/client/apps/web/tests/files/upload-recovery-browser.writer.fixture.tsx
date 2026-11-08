@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import "./attachment-drafts.fixture.ts";
 import type { RecoveryHarness } from "./upload-recovery-browser.fixture.tsx";
 declare global {
@@ -9,7 +10,7 @@ window.uploadRecoveryBrowserRaceMount = mount;
 
 import React from "react";
 import { createRoot } from "react-dom/client";
-import { useAttachmentDrafts } from "../../src/components/useAttachmentDrafts.ts";
+import { useAttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
 export function mount() {
   createRoot(document.body).render(
     React.createElement(function Writer() {

@@ -1,6 +1,7 @@
+import type {} from "./native-model-selection-browser.fixture.tsx";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./native-model-selection-browser.fixture.tsx";
+
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,13 +1,13 @@
-import { WorkspaceMode } from "./generated/api";
+import { WorkspaceMode } from "./generated/api.ts";
 import { expect, test } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { SignInPushSettings } from "./components/SignInPushSettings";
-import { nativeErrorView } from "./nativeErrors";
-import { workspaceBadgeInfo } from "./components/shell/WorkspaceBadge";
-import { resultTarget } from "./components/questions/signInCardModel";
-import { deviceName } from "./push/signInPush";
-import type { Agent } from "./types";
+import { SignInPushSettings } from "./components/accounts/SignInPushSettings/SignInPushSettings.tsx";
+import { nativeErrorView } from "./nativeErrors.ts";
+import { workspaceBadgeInfo } from "./components/shell/workspace/support/WorkspaceBadge.tsx";
+import { resultTarget } from "./components/conversation/questions/SignInCard/signInCardModel.ts";
+import { deviceName } from "./push/signInPush.ts";
+import type { Agent } from "./types.ts";
 
 test("unsupported push alerts give platform-neutral setup guidance", () => {
   const markup = renderToStaticMarkup(

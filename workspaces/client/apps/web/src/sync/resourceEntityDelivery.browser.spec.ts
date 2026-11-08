@@ -1,6 +1,6 @@
-import { AgentStatus, AgentSource } from "../generated/api";
+import { AgentStatus, AgentSource } from "../generated/api.ts";
 import type { LegacySyncIdentityResponse } from "./syncBrowserFixture.ts";
-import type { ResourceChangeEvent } from "./resourceEvents";
+import type { ResourceChangeEvent } from "./resourceEvents.ts";
 import type { Page } from "@playwright/test";
 import { initializeDelivery } from "./resourceEntityDelivery.browser.fixture.ts";
 import {

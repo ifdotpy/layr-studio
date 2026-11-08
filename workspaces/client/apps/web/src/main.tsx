@@ -1,7 +1,7 @@
-import { cleanupLegacyPersistence } from "./browserPersistence";
+import { cleanupLegacyPersistence } from "./browserPersistence.ts";
 
 void cleanupLegacyPersistence()
-  .then(() => import("./mount"))
+  .then(() => import("./mount.tsx"))
   .catch((error) => {
     const container = document.getElementById("root");
     if (container)

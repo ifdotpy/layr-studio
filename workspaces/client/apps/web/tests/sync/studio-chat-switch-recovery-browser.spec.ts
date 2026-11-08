@@ -1,3 +1,4 @@
+import type {} from "./studio-chat-switch-recovery-browser.fixture.tsx";
 import type { TranscriptPageResponse } from "../playwright.ts";
 import type { ResourceRef } from "../playwright.ts";
 import { fixtureResources, fixturePostBody } from "./helpers.ts";
@@ -5,7 +6,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import { studioChatSwitchWorkspaceId as workspaceId } from "./studio-chat-switch-recovery-browser.data.ts";
 import { fixtureOrigin } from "./helpers.ts";
-import type {} from "./studio-chat-switch-recovery-browser.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";

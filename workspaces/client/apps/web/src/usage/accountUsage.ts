@@ -1,5 +1,5 @@
-import type { JsonInput, JsonInputOf, Json } from "../types";
-import type { ApiError, GetResult } from "../api";
+import type { JsonInput, JsonInputOf, Json } from "../types.ts";
+import type { ApiError, GetResult } from "../api.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 
 export type JsonObject = Json;

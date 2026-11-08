@@ -1,5 +1,5 @@
-import type { DeepReadonly } from "./deepReadonly";
-import type { Approval } from "./generated/rustOwned";
+import type { DeepReadonly } from "./deepReadonly.ts";
+import type { Approval } from "./generated/rustOwned.ts";
 
 export type { Approval };
 

@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 declare global {
   interface Window {
     compactAlias: string | undefined;
@@ -9,9 +10,9 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider, Stack, Paper, Button } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { AgentSetupPicker } from "../../src/components/agents/AgentSetupPicker.tsx";
-import { ModelField } from "../../src/components/models/ModelField.tsx";
-import "../../src/components/agents/execution-settings.css";
+import { AgentSetupPicker } from "../../src/components/agents/AgentSetupPicker/AgentSetupPicker.tsx";
+import { ModelField } from "../../src/components/settings/models/ModelField/ModelField.tsx";
+import "../../src/components/agents/support/execution-settings.css";
 function Fixture() {
   const [model, onModel] = useState("sol");
   return (

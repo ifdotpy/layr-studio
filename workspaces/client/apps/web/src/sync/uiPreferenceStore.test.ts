@@ -3,17 +3,20 @@ import {
   normalizeStudioPreferences,
   studioPreferencesStorageKey,
 } from "../studioPreferences.ts";
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mergePreferenceFields, preferenceCacheKey } from "./uiPreferenceMerge";
+import {
+  mergePreferenceFields,
+  preferenceCacheKey,
+} from "./uiPreferenceMerge.ts";
 import {
   capturePreferenceWrite,
   acknowledgePreferenceFields,
   readPreferenceFields,
   receivePreferenceFields,
   writePreferenceEdit,
-} from "./uiPreferenceStore";
-import { preferenceMemory } from "../servers/storage";
+} from "./uiPreferenceStore.ts";
+import { preferenceMemory } from "../servers/storage.ts";
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
   return {

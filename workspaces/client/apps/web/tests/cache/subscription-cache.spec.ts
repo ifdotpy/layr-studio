@@ -2,7 +2,7 @@ import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import {
   FrontendLocality,
   SubscriptionCachePolicy,
-} from "../../src/generated/api";
+} from "../../src/generated/api.ts";
 import type { AddressInfo } from "node:net";
 import { fileURLToPath } from "node:url";
 import {

@@ -1,4 +1,5 @@
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import {
   initialConfirmedLead,
   confirmedWorkspaceId,
@@ -18,7 +19,7 @@ import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import Control from "../../src/components/agents/SubagentConcurrencyControl.tsx";
+import Control from "../../src/components/agents/SubagentConcurrencyControl/SubagentConcurrencyControl.tsx";
 window.refreshCount = 0;
 window.refreshHold = true;
 window.refreshFailure = false;

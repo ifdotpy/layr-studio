@@ -2,8 +2,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { nativeSignInMethods } from "./signInProtocol";
-import { required } from "../components/componentTestFixtures";
+import { nativeSignInMethods } from "./signInProtocol.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 
 const repository = resolve(
   dirname(fileURLToPath(import.meta.url)),

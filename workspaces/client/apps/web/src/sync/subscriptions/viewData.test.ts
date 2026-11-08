@@ -1,10 +1,10 @@
 import { expect, it, vi } from "vitest";
-import { createDataObserver } from "./data";
-import type { ResourceRef } from "./contracts";
-import type { ResourceDataSelectors, ViewRecovery } from "./selectData";
-import type { TranscriptProjectionPayload } from "../client";
-import type { ResourceVersion } from "../resourceEvents";
-import type { ObserveSubscriptionData } from "./module";
+import { createDataObserver } from "./data.ts";
+import type { ResourceRef } from "./contracts.ts";
+import type { ResourceDataSelectors, ViewRecovery } from "./selectData.ts";
+import type { TranscriptProjectionPayload } from "../client.ts";
+import type { ResourceVersion } from "../resourceEvents.ts";
+import type { ObserveSubscriptionData } from "./module.ts";
 // Partial sync fixtures: these cases never enter the transcript observer path.
 type SyncFixture = ReturnType<Parameters<typeof createDataObserver>[0]>;
 

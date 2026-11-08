@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { createFrameBatch } from "./frameBatch";
+import { createFrameBatch } from "./frameBatch.ts";
 
 afterEach(() => {
   vi.useRealTimers();

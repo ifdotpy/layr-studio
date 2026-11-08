@@ -1,10 +1,11 @@
+import "../../src/rendererStyles.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { Dictation } from "../../src/components/Dictation.tsx";
-import type { Recognition } from "../../src/components/BrowserDictation.tsx";
-import "../../src/components/realtime-voice.css";
+import { Dictation } from "../../src/components/conversation/Dictation/Dictation.tsx";
+import type { Recognition } from "../../src/components/conversation/BrowserDictation/BrowserDictation.tsx";
+import "../../src/components/conversation/support/realtime-voice.css";
 
 declare global {
   interface Window {

@@ -1,6 +1,7 @@
+import type {} from "./execution-settings-canonical-browser.fixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { CanonicalReset } from "./execution-settings-canonical-browser.fixture.tsx";
-import type {} from "./execution-settings-canonical-browser.fixture.tsx";
+
 import { fixtureUrl } from "./fixture-helpers.ts";
 import {
   API_SCHEMA_HASH_HEADER,
@@ -54,13 +55,17 @@ test("execution settings canonical browser", async ({ page }) => {
           if (
             (process.env.BASELINE === "1" ||
               process.env.CONFIRMATION_BASELINE) &&
-            id === join(root, "src/components/agents/ExecutionSettings.tsx")
+            id ===
+              join(
+                root,
+                "src/components/agents/ExecutionSettings/ExecutionSettings.tsx",
+              )
           )
             return execFileSync(
               "layr",
               [
                 "show",
-                `${process.env.CONFIRMATION_BASELINE || "bf59170a063271b7933801a1b7b6b2f6"}:workspaces/client/apps/web/src/components/agents/ExecutionSettings.tsx`,
+                `${process.env.CONFIRMATION_BASELINE || "bf59170a063271b7933801a1b7b6b2f6"}:workspaces/client/apps/web/src/components/agents/ExecutionSettings/ExecutionSettings.tsx`,
               ],
               { cwd: root, encoding: "utf8" },
             );

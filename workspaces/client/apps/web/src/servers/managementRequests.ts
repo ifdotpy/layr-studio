@@ -1,5 +1,5 @@
-import { outboxRequestKeys, outboxRequests } from "../browserPersistence";
-import type { ServerAccessRequest } from "./accessContract";
+import { outboxRequestKeys, outboxRequests } from "../browserPersistence.ts";
+import type { ServerAccessRequest } from "./accessContract.ts";
 function readLegacy(raw: string): ServerAccessRequest {
   const value: ServerAccessRequest = JSON.parse(raw);
   if (

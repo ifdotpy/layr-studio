@@ -1,4 +1,4 @@
-import type { SyncDocument } from "./client";
+import type { SyncDocument } from "./client.ts";
 
 /**
  * An in-memory document collection. The sync client reads and writes its

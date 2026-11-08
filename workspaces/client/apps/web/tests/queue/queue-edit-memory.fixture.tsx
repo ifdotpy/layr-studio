@@ -1,7 +1,8 @@
+import "../../src/rendererStyles.ts";
 import React from "react";
 import { createRoot } from "react-dom/client";
-import MessageQueue from "../../src/components/MessageQueue";
-import type { QueueItemDto } from "../../src/api";
+import MessageQueue from "../../src/components/conversation/MessageQueue/MessageQueue.tsx";
+import type { QueueItemDto } from "../../src/api.ts";
 
 export function mount() {
   const node = document.createElement("div");

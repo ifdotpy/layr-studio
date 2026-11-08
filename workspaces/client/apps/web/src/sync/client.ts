@@ -1,26 +1,29 @@
 import { autorun } from "mobx";
-import type { ConnectionHealth } from "./connectionState";
+import type { ConnectionHealth } from "./connectionState.ts";
 import {
   TRANSIENT_RESOURCE_KINDS,
   createProjectionMetadataMirror,
 } from "../generated/observableResources.ts";
-import { SubscriptionReplyKind } from "../generated/api";
-import { mergeTerminalOutput } from "./subscriptions/terminalOutput";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
-import { cursorDocumentId, parseAppliedCursor } from "./subscriptions/cursors";
-import { serverDatabaseSuffix } from "../servers/environment";
+import { SubscriptionReplyKind } from "../generated/api.ts";
+import { mergeTerminalOutput } from "./subscriptions/terminalOutput.ts";
+import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities.ts";
+import {
+  cursorDocumentId,
+  parseAppliedCursor,
+} from "./subscriptions/cursors.ts";
+import { serverDatabaseSuffix } from "../servers/environment.ts";
 
 import {
   SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
   SYNC_TRANSCRIPT_STREAM_MAX_ITEMS,
-} from "../generated/sharedValues";
+} from "../generated/sharedValues.ts";
 
-import { LocalCollection, type Row } from "./localCollection";
+import { LocalCollection, type Row } from "./localCollection.ts";
 import {
   createSubscriptionCache,
   subscriptionRows,
   type SubscriptionCacheStorage,
-} from "./subscriptionCache";
+} from "./subscriptionCache.ts";
 
 import type { EntityRow } from "./entityContracts.ts";
 
@@ -32,57 +35,57 @@ import {
   save,
   setWorkspace,
   isApiSchemaMismatch,
-} from "../api";
+} from "../api.ts";
 
-import type { SyncEntityPayload } from "../generated/api";
+import type { SyncEntityPayload } from "../generated/api.ts";
 
 import {
   readTranscriptMeta,
   TRANSCRIPT_PROJECTION_FORMAT,
   type TranscriptProjectionMeta,
-} from "./transcriptMetadata";
+} from "./transcriptMetadata.ts";
 
 import {
   entitySequenceInvalidationCovered,
   EntitySequenceCheckpoint,
   getEntitySequenceCheckpoint,
   setEntitySequenceProjection,
-} from "./entitySequence";
+} from "./entitySequence.ts";
 
 import {
   watchResourceChanges,
   watchResourceConnection,
   type ResourceRef,
   type ResourceVersion,
-} from "./subscriptions/events";
+} from "./subscriptions/events.ts";
 
-import { onResume } from "./resume";
+import { onResume } from "./resume.ts";
 
 import {
   ReadRecoveryBudget,
   ReadRecoveryExhaustedError,
   retryableReadError,
   retryableTranscriptPullConflict,
-} from "./readRetry";
+} from "./readRetry.ts";
 
-import { refreshAfterCurrentPull } from "./refreshAfterCurrentPull";
+import { refreshAfterCurrentPull } from "./refreshAfterCurrentPull.ts";
 
-import { isEntityResetResponse, requiredSyncNumber } from "./pullContract";
+import { isEntityResetResponse, requiredSyncNumber } from "./pullContract.ts";
 
 import {
   cacheTranscriptValue,
   peekTranscript,
   patchTranscriptValue,
   subscribeTranscript,
-} from "./transcriptCache";
+} from "./transcriptCache.ts";
 
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 
-import { SYNC_ENTITY_SCOPE, type components } from "../generated/api";
+import { SYNC_ENTITY_SCOPE, type components } from "../generated/api.ts";
 
-import { withEntityProjectionWrite } from "./entityProjectionWrites";
+import { withEntityProjectionWrite } from "./entityProjectionWrites.ts";
 
-import { entityProjectionDatabaseName } from "./entityCacheStorage";
+import { entityProjectionDatabaseName } from "./entityCacheStorage.ts";
 
 export type SyncDocument = EntityRow;
 
@@ -103,9 +106,9 @@ export function entityCacheRow(
 export {
   watchResourceChanges,
   watchResourceConnection,
-} from "./subscriptions/events";
+} from "./subscriptions/events.ts";
 
-export type { ResourceRef } from "./subscriptions/events";
+export type { ResourceRef } from "./subscriptions/events.ts";
 
 type TranscriptSyncPayload = components["schemas"]["TranscriptSyncPayload"];
 
@@ -123,15 +126,15 @@ type ProjectionState = {
 import type { TranscriptProjectionPayload } from "../apiTypes.ts";
 export type { TranscriptProjectionPayload } from "../apiTypes.ts";
 
-import { clearTranscript } from "./transcriptCache";
+import { clearTranscript } from "./transcriptCache.ts";
 export type SyncClientOptions = {
   cacheStorage?: SubscriptionCacheStorage | undefined;
   onFreshReceipts?: (
     workspaceId: string,
-    receipts: import("./messageReceipts").MessageReceipt[],
+    receipts: import("./messageReceipts.ts").MessageReceipt[],
   ) => void | Promise<void>;
   api: Pick<
-    import("../api").ServerApi,
+    import("../api.ts").ServerApi,
     | "syncGet"
     | "syncPost"
     | "saved"
@@ -140,15 +143,15 @@ export type SyncClientOptions = {
     | "isApiSchemaMismatch"
   >;
   resources: Pick<
-    typeof import("./subscriptions/events"),
+    typeof import("./subscriptions/events.ts"),
     "watchResourceChanges" | "watchResourceConnection"
   >;
   sequences: Pick<
-    ReturnType<typeof import("./entitySequence").createEntitySequenceScope>,
+    ReturnType<typeof import("./entitySequence.ts").createEntitySequenceScope>,
     "getEntitySequenceCheckpoint" | "setEntitySequenceProjection"
   >;
   transcripts: ReturnType<
-    typeof import("./transcriptCache").createTranscriptCache
+    typeof import("./transcriptCache.ts").createTranscriptCache
   >;
   databaseSuffix: string;
 };
@@ -664,7 +667,7 @@ export function createSyncClient(options: SyncClientOptions) {
   /** Staging already proved the entire interval. Keep pages bounded and publish
    * the durable cursor only after all writes and snapshot pruning succeed. */
   async function persistStagedEntityTransfer(
-    interval: import("./entityTransfer").StagedEntityInterval,
+    interval: import("./entityTransfer.ts").StagedEntityInterval,
     isCurrent: () => boolean,
   ) {
     const { db, workspaceId } = await syncDatabase();
@@ -819,7 +822,7 @@ export function createSyncClient(options: SyncClientOptions) {
   }
 
   async function persistResourceEntityChanges(
-    event: import("./subscriptions/events").ResourceChangeEvent,
+    event: import("./subscriptions/events.ts").ResourceChangeEvent,
     isCurrent: () => boolean,
   ) {
     // Hints participate in delivery ordering but have no durable projection data.

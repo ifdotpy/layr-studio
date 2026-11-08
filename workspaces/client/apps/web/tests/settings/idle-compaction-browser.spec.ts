@@ -1,6 +1,7 @@
+import type {} from "./idle-compaction-browser.fixture.tsx";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureUrl } from "./fixture-helpers.ts";
-import type {} from "./idle-compaction-browser.fixture.tsx";
+
 import { join } from "node:path";
 import {
   test,

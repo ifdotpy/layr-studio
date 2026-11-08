@@ -1,6 +1,6 @@
-import * as client from "../../src/sync/client";
-import * as cache from "../../src/sync/transcriptCache";
-import type { ResourceVersion } from "../../src/sync/subscriptions/events";
+import * as client from "../../src/sync/client.ts";
+import * as cache from "../../src/sync/transcriptCache.ts";
+import type { ResourceVersion } from "../../src/sync/subscriptions/events.ts";
 
 type Payload = Parameters<
   Parameters<typeof client.subscribeTranscriptProjection>[1]

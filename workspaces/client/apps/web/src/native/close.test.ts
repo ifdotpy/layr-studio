@@ -1,7 +1,7 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { initializeNativeClose } from "./close";
-import { guardNativeClose } from "./closeState";
+import { initializeNativeClose } from "./close.ts";
+import { guardNativeClose } from "./closeState.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 async function setup() {

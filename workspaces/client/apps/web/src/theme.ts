@@ -16,7 +16,10 @@ import {
   SegmentedControl,
 } from "@mantine/core";
 
-import { layoutValues, layerZIndex } from "./layout/layout-contract.generated";
+import {
+  layoutValues,
+  layerZIndex,
+} from "./layout/layout-contract.generated.ts";
 export { layerZIndex };
 export const modalSizes = { settings: layoutValues.modal.settings };
 

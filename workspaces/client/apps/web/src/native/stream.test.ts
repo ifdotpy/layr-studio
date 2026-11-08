@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { NativeEventSource } from "./stream";
+import { NativeEventSource } from "./stream.ts";
 
 afterEach(() => vi.unstubAllGlobals());
 

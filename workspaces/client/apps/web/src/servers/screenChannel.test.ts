@@ -1,5 +1,5 @@
 import { expect, it, vi } from "vitest";
-import { createScreenChannel } from "./screenChannel";
+import { createScreenChannel } from "./screenChannel.ts";
 it("keeps commands and publication with the original connection without replay", async () => {
   const publish = vi.fn();
   const a = createScreenChannel("a", publish),

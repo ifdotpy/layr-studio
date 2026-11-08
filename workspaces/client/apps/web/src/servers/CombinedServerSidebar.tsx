@@ -1,5 +1,5 @@
 import { makeAutoObservable, observableShallow, runInAction } from "mobx";
-import { randomUUID } from "../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { ApiError, errorText, type PostBody } from "../api.ts";
 import {
   createMergedSidebarServices,
@@ -7,7 +7,7 @@ import {
 } from "./sidebarServices.ts";
 import { createSidebarVisualSession } from "./sidebarVisualSession.ts";
 import type { CombinedSidebarServices } from "./combinedSidebarServices.ts";
-import type { SidebarTarget } from "../components/sidebar/services.tsx";
+import type { SidebarTarget } from "../components/sidebar/support/services.tsx";
 import type { ServerCommand } from "./navigation.ts";
 import { SidebarListOwner } from "../app/shell/SidebarOwner.ts";
 import type {

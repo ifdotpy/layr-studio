@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "vitest";
-import { ApiError, NetworkTimeoutError } from "../api";
+import { ApiError, NetworkTimeoutError } from "../api.ts";
 import { isDefinitivelyNotApplied } from "../app/conversation/NativeActionOwner.ts";
 
 it("clears a saved action only after an explicit not_applied receipt", () => {

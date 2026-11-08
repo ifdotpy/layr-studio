@@ -2,22 +2,25 @@ import type {
   ConnectionActivity,
   ConnectionHealth,
   ReconnectCause,
-} from "./connectionState";
-import { SubscriptionReplyKind } from "../generated/api";
+} from "./connectionState.ts";
+import { SubscriptionReplyKind } from "../generated/api.ts";
 import {
   openServerEvents,
   type ServerEventSource,
-} from "../servers/eventSource";
+} from "../servers/eventSource.ts";
 
 import {
   SYNC_PROTOCOL_VERSION,
   type components,
   type operations,
-} from "../generated/api";
+} from "../generated/api.ts";
 
-import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues";
+import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
 
-import { API_SCHEMA_HASH, API_SCHEMA_HASH_PARAM } from "../generated/apiSchema";
+import {
+  API_SCHEMA_HASH,
+  API_SCHEMA_HASH_PARAM,
+} from "../generated/apiSchema.ts";
 
 import {
   clearSchemaUpdateAttemptAfterMatch,
@@ -30,29 +33,29 @@ import {
   post,
   receiveStreamSession,
   clearStreamSession,
-} from "../api";
+} from "../api.ts";
 
 import {
   persistResourceEntityChanges,
   persistStagedEntityTransfer,
   readSubscriptionCursor,
   syncDatabase,
-} from "./client";
-import { subscriptionKey } from "./subscriptions/cursors";
-import { hasAppliedResourceBaseline } from "./subscriptions/contracts";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
+} from "./client.ts";
+import { subscriptionKey } from "./subscriptions/cursors.ts";
+import { hasAppliedResourceBaseline } from "./subscriptions/contracts.ts";
+import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities.ts";
 
-import { ResourceEntityDelivery } from "./resourceEntityDelivery";
-import { EntityTransferAssembler } from "./entityTransfer";
-import { appendAppLog } from "../appLog";
-import { localTime } from "../local-time";
+import { ResourceEntityDelivery } from "./resourceEntityDelivery.ts";
+import { EntityTransferAssembler } from "./entityTransfer.ts";
+import { appendAppLog } from "../appLog.ts";
+import { localTime } from "../local-time.ts";
 import {
   activityOf,
   healthOf,
   reconnectReasons,
   type ConnectionState,
   type ReconnectingActivity,
-} from "./connectionState";
+} from "./connectionState.ts";
 
 import {
   onResourceConnectionLifecycle,
@@ -64,16 +67,16 @@ import {
   RESOURCE_RETRY_MAX_MS,
   RESOURCE_STABLE_MS,
   type ResourceConnectionDetail,
-} from "./resourceConnection";
-export type { ResourceConnectionDetail } from "./resourceConnection";
+} from "./resourceConnection.ts";
+export type { ResourceConnectionDetail } from "./resourceConnection.ts";
 
-import { retryableReadError } from "./readRetry";
+import { retryableReadError } from "./readRetry.ts";
 
 import {
   configureTokenRateStream,
   receiveResourceTokenRates,
   getWorkspaceTokenRates,
-} from "../usage/tokenRate";
+} from "../usage/tokenRate.ts";
 
 export type ResourceRef = components["schemas"]["ResourceRef"];
 
@@ -113,12 +116,12 @@ import type {
   ResourceVersion,
   ResourceProgress,
   ResourceProgressEvent,
-} from "./subscriptions/contracts";
+} from "./subscriptions/contracts.ts";
 export type {
   ResourceVersion,
   ResourceProgress,
   ResourceProgressEvent,
-} from "./subscriptions/contracts";
+} from "./subscriptions/contracts.ts";
 type Version = ResourceVersion;
 
 type Listener = (version?: ResourceVersion) => void;
@@ -131,7 +134,7 @@ export type ResourceEventsOptions = {
   /** Receives the origins the server answers on, once per connection. */
   onRoutes?: (routes: readonly string[]) => void;
   api: Pick<
-    import("../api").ServerApi,
+    import("../api.ts").ServerApi,
     | "clearSchemaUpdateAttemptAfterMatch"
     | "get"
     | "post"
@@ -142,12 +145,12 @@ export type ResourceEventsOptions = {
   > &
     Partial<
       Pick<
-        import("../api").ServerApi,
+        import("../api.ts").ServerApi,
         "receiveStreamSession" | "clearStreamSession"
       >
     >;
   sync: Pick<
-    ReturnType<typeof import("./client").createSyncClient>,
+    ReturnType<typeof import("./client.ts").createSyncClient>,
     "persistResourceEntityChanges"
   > & {
     syncDatabase: () => Promise<
@@ -155,12 +158,12 @@ export type ResourceEventsOptions = {
     >;
   } & Partial<
       Pick<
-        ReturnType<typeof import("./client").createSyncClient>,
+        ReturnType<typeof import("./client.ts").createSyncClient>,
         "readSubscriptionCursor" | "persistStagedEntityTransfer"
       >
     >;
   tokenRates: Pick<
-    ReturnType<typeof import("../usage/tokenRate").createTokenRateCache>,
+    ReturnType<typeof import("../usage/tokenRate.ts").createTokenRateCache>,
     | "configureTokenRateStream"
     | "receiveResourceTokenRates"
     | "getWorkspaceTokenRates"
@@ -168,7 +171,7 @@ export type ResourceEventsOptions = {
   openEvents: typeof openServerEvents;
   /** Where large entity intervals wait for their last page; the default is memory. */
   transferStorage?: () =>
-    | import("./entityTransfer").TransferStorage
+    | import("./entityTransfer.ts").TransferStorage
     | undefined;
 };
 export function createResourceEvents(options: ResourceEventsOptions) {

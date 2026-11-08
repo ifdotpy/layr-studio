@@ -1,4 +1,4 @@
-import { SYNC_ENTITY_SCOPE } from "../generated/api";
+import { SYNC_ENTITY_SCOPE } from "../generated/api.ts";
 
 const ENTITY_SCOPE = SYNC_ENTITY_SCOPE;
 

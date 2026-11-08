@@ -1,11 +1,11 @@
-import type { ConnectionActivity } from "../connectionState";
+import type { ConnectionActivity } from "../connectionState.ts";
 import {
   watchResourceChanges as defaultWatchResourceChanges,
   watchResourceConnection as defaultWatchResourceConnection,
-} from "./events";
-import { onResume } from "../resume";
-import { ReadRecoveryBudget, retryableReadError } from "../readRetry";
-import type { ResourceRef, ResourceVersion } from "./events";
+} from "./events.ts";
+import { onResume } from "../resume.ts";
+import { ReadRecoveryBudget, retryableReadError } from "../readRetry.ts";
+import type { ResourceRef, ResourceVersion } from "./events.ts";
 
 type ResourceReadWatcher = (() => void) & { refresh: () => void };
 type ReadTrigger = {

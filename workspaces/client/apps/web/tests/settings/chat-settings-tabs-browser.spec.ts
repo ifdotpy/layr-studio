@@ -1,5 +1,6 @@
-import type { components } from "../../src/generated/api.ts";
 import type {} from "./chat-settings-tabs-browser.fixture.tsx";
+import type { components } from "../../src/generated/api.ts";
+
 import { fixtureUrl } from "./fixture-helpers.ts";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

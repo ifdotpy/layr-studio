@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import type { components } from "../../src/generated/api.ts";
 import { projectedLimits } from "../../src/usage/accountLimits.fixture.ts";
 import type { Agent } from "../../src/types.ts";
@@ -7,7 +8,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { NativeError } from "../../src/components/NativeNotice.tsx";
+import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
 const dueAt = Number(new URLSearchParams(location.search).get("dueAt"));
 type UsageResume = NonNullable<Agent["usageResume"]>;
 // Base resume omits cause/reason; authResume omits plannedAt/reason.

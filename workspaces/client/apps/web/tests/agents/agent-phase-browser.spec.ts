@@ -1,7 +1,8 @@
+import type {} from "./agent-phase-browser.fixture.tsx";
 import type {} from "./agent-phase-browser.fixture2.tsx";
 import type { PhaseSnapshot } from "./agent-phase-browser.fixture2.tsx";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./agent-phase-browser.fixture.tsx";
+
 // Component check with an isolated Vite server. No backend or model calls.
 import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";

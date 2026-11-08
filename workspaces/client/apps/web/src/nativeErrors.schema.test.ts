@@ -1,4 +1,4 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 // Compare UI coverage to the installed native protocol without model requests.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";

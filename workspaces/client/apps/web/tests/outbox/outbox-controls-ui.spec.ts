@@ -113,7 +113,8 @@ for (const [device, viewport] of [
         async (room) => {
           const { createOutbox } = await import("/src/sync/send.ts");
           const { createCommandClient } = await import("/src/commands.ts");
-          const { randomUUID } = await import("/src/uuid.ts");
+          const { requestId: randomUUID } =
+            await import("studio-claude-bridge/request-id.ts");
           const identity = await (await fetch("/api/sync/identity")).json();
           const session = await (await fetch("/api/session")).json();
           let drop = true;

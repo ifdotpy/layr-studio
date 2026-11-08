@@ -1,4 +1,4 @@
-import type { useAttachmentDrafts } from "../../src/components/useAttachmentDrafts.ts";
+import type { useAttachmentDrafts } from "../../src/components/conversation/support/useAttachmentDrafts.ts";
 /** The renderer under test wrote this local document with useAttachmentDrafts. */
 export function readStoredAttachments(
   empty: "{}" | null = "{}",

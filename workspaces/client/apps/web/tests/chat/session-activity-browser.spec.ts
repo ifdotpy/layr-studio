@@ -1,7 +1,8 @@
+import type {} from "./session-activity-browser.fixture.tsx";
 import { fixtureOrigin, trackBrowserContexts } from "./browser.ts";
 import assert from "node:assert/strict";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
-import type {} from "./session-activity-browser.fixture.tsx";
+
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

@@ -1,17 +1,17 @@
-import { SignedEventSource } from "../../servers/eventSource";
-import { routesFor } from "../../servers/routes";
-import { hasNativeClient } from "../../native/client";
-import { NativeEventSource } from "../../native/stream";
-import type { createApiScope } from "../../api";
-import type { createSyncClient } from "../client";
+import { SignedEventSource } from "../../servers/eventSource.ts";
+import { routesFor } from "../../servers/routes.ts";
+import { hasNativeClient } from "../../native/client.ts";
+import { NativeEventSource } from "../../native/stream.ts";
+import type { createApiScope } from "../../api.ts";
+import type { createSyncClient } from "../client.ts";
 import {
   createResourceEvents,
   type ResourceEventsOptions,
-} from "../resourceEvents";
-import { MemoryTransferStorage } from "../entityTransfer";
-import { createSubscriptions } from "./module";
-import { createDataObserver } from "./data";
-import { createEntityDataObserver } from "./entityData";
+} from "../resourceEvents.ts";
+import { MemoryTransferStorage } from "../entityTransfer.ts";
+import { createSubscriptions } from "./module.ts";
+import { createDataObserver } from "./data.ts";
+import { createEntityDataObserver } from "./entityData.ts";
 
 type ServerSubscriptionOptions = {
   api: ResourceEventsOptions["api"] &

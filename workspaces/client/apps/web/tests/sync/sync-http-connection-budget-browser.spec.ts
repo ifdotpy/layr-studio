@@ -1,3 +1,4 @@
+import type {} from "./sync-http-connection-budget-browser.fixture.tsx";
 import type { FixtureResourceChange } from "./helpers.ts";
 import { sendBody, sendReply } from "../messages/send-command.ts";
 import type { CommandRequest, SendMessageBody } from "../../src/commands.ts";
@@ -6,7 +7,7 @@ import { fixtureResources } from "./helpers.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Connect } from "vite";
 import { fixtureOrigin } from "./helpers.ts";
-import type {} from "./sync-http-connection-budget-browser.fixture.tsx";
+
 import {
   apiSchemaHandshakeSse,
   apiSchemaHeaders,

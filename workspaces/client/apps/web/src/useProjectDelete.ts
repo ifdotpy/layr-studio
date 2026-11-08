@@ -1,17 +1,17 @@
 import { StopOutcome } from "./generated/api.ts";
-import { randomUUID } from "./uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { autorun, makeAutoObservable, observableRef, runInAction } from "mobx";
-import { errorText } from "./api";
+import { errorText } from "./api.ts";
 import type {
   SidebarBackend,
   SidebarServices,
-} from "./components/sidebar/services";
+} from "./components/sidebar/support/services.tsx";
 import type {
   StateCollections,
   ProjectionMetadata,
 } from "./generated/observableResources.ts";
-import { ProjectDeleteIntent, projectReaderScope } from "./projectDelete";
+import { ProjectDeleteIntent, projectReaderScope } from "./projectDelete.ts";
 
 type Project = NonNullable<ReturnType<StateCollections["projects"]["get"]>>;
 type Options = {

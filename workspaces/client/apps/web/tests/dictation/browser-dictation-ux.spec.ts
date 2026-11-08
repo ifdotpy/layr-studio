@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "../misc-fixture.ts";
 import type {} from "./browser-dictation-ux.fixture.tsx";
+import { fixtureOrigin } from "../misc-fixture.ts";
+
 // Real React, simulated browser speech. No audio or service requests.
 import assert from "node:assert/strict";
 import { resolve } from "node:path";

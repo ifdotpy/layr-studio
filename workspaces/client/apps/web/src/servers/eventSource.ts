@@ -1,7 +1,7 @@
-import { hasNativeClient } from "../native/client";
-import { NativeEventSource } from "../native/stream";
-import { apiOrigin, serverFetch } from "./transport";
-import { serverViewId, isolatedServerView } from "./environment";
+import { hasNativeClient } from "../native/client.ts";
+import { NativeEventSource } from "../native/stream.ts";
+import { apiOrigin, serverFetch } from "./transport.ts";
+import { serverViewId, isolatedServerView } from "./environment.ts";
 
 /** A lost native connection; the core reconnects at `retryAt` (epoch ms). */
 export type NativeStreamRetry = { opened: boolean; retryAt: number };

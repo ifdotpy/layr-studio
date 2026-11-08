@@ -1,8 +1,9 @@
+import type {} from "./realtime-voice-ux-ui.fixture.tsx";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import type { ServerResponse } from "node:http";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./realtime-voice-ux-ui.fixture.tsx";
+
 import {
   createFixtureViteServer as createServer,
   apiSchemaHeaders,

@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 declare global {
   interface Window {
     // fixture stores scroll handlers in tests/performance/scroll-restart.fixture.tsx.
@@ -11,7 +12,7 @@ declare global {
 
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import Boundary from "../../src/components/UIErrorBoundary.tsx";
+import Boundary from "../../src/components/shell/UIErrorBoundary/UIErrorBoundary.tsx";
 function Broken({ bad }: { bad: boolean }) {
   if (bad) throw new Error("Fixture display failure");
   return (

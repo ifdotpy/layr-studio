@@ -1,4 +1,4 @@
-import type { DraftVersion } from "./drafts";
+import type { DraftVersion } from "./drafts.ts";
 
 /** Remove draft versions already observed and replaced by a later writer. */
 export function activeDraftVersions(versions: DraftVersion[]) {

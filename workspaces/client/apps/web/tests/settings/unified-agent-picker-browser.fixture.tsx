@@ -1,10 +1,14 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
+import "../../src/rendererStyles.ts";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
-import { AgentModelsFixture } from "../../src/components/observableFixture.tsx";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { required } from "./fixture-helpers.ts";
 import type { Agent } from "../../src/types.ts";
-import type { Account, AccountsState } from "../../src/components/Accounts.tsx";
-import type { WorkerModelInfo } from "../../src/components/agents/WorkerModelPicker.tsx";
+import type {
+  Account,
+  AccountsState,
+} from "../../src/components/accounts/support/Accounts.tsx";
+import type { WorkerModelInfo } from "../../src/components/agents/support/WorkerModelPicker.tsx";
 import type { PostBody } from "../../src/apiTypes.ts";
 import type { components } from "../../src/generated/api.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -50,14 +54,14 @@ import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { theme } from "../../src/theme.ts";
 import "../../src/style.css";
-import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/observableFixture.tsx";
-import { ModelCatalogFixture } from "../../src/components/agents/modelCatalogFixture.tsx";
-import { SettingsRow } from "../../src/components/ui/primitives.tsx";
+import { ExecutionSettingsFixture as ExecutionSettings } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import { ModelCatalogFixture } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
+import { SettingsRow } from "../../src/components/ui/SettingsRow/SettingsRow.tsx";
 import "../../src/appearance.css";
-import { AccountTiles } from "../../src/components/AccountTiles.tsx";
-import ProjectAccount from "../../src/components/ProjectAccount.tsx";
-import SharedChatCreate from "../../src/components/SharedChatCreate.tsx";
-import { writeModelChoices } from "../../src/components/models/modelChoices.ts";
+import { AccountTiles } from "../../src/components/accounts/AccountTiles/AccountTiles.tsx";
+import ProjectAccount from "../../src/components/projects/ProjectAccount/ProjectAccount.tsx";
+import SharedChatCreate from "../../src/components/projects/SharedChatCreate/SharedChatCreate.tsx";
+import { writeModelChoices } from "../../src/components/settings/models/support/modelChoices.ts";
 
 const accounts: Account[] = Array.from({ length: 7 }, (_, i) => ({
   id: "account-" + i,

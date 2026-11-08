@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import type { Agent } from "../../src/types.ts";
 import { original } from "./disconnect-recovery-ui.data.ts";
 import { fixtureElement } from "./browser-helpers.ts";
@@ -6,7 +7,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { NativeError } from "../../src/components/NativeNotice.tsx";
+import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
 import { setToken } from "../../src/api.ts";
 setToken("fixture-token");
 window.disconnectRecoveryUiFixtureRefreshes = [];

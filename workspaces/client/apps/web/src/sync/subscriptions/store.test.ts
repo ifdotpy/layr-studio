@@ -1,8 +1,8 @@
-import type { ConnectionHealth } from "../connectionState";
-import { SubscriptionReplyKind } from "../../generated/api";
+import type { ConnectionHealth } from "../connectionState.ts";
+import { SubscriptionReplyKind } from "../../generated/api.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSubscriptionStore } from "./store";
-import type { ResourceVersion } from "../resourceEvents";
+import { createSubscriptionStore } from "./store.ts";
+import type { ResourceVersion } from "../resourceEvents.ts";
 
 function fixture() {
   const removed = vi.fn();

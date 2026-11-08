@@ -2,14 +2,17 @@ import {
   syncDatabase,
   retainStateDelivery,
   type createSyncClient,
-} from "../client";
+} from "../client.ts";
 import type { DeepReadonly } from "../../deepReadonly.ts";
-import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../../generated/subscriptionEntities";
-import type { ResourceData, ResourceRef } from "./contracts";
-import { selectResourceData, type ResourceDataSelectors } from "./selectData";
-import type { ObserveSubscriptionData } from "./module";
-import { createWorkDataSelector } from "./workData";
+import type { SyncEntityPayload as MutableSyncEntityPayload } from "../../generated/api.ts";
+import { SUBSCRIPTION_ENTITY_SCOPES } from "../../generated/subscriptionEntities.ts";
+import type { ResourceData, ResourceRef } from "./contracts.ts";
+import {
+  selectResourceData,
+  type ResourceDataSelectors,
+} from "./selectData.ts";
+import type { ObserveSubscriptionData } from "./module.ts";
+import { createWorkDataSelector } from "./workData.ts";
 
 type SyncEntityPayload = DeepReadonly<MutableSyncEntityPayload>;
 type ScopeKind = keyof typeof SUBSCRIPTION_ENTITY_SCOPES;

@@ -1,7 +1,7 @@
-import { AccessClientStatus } from "../generated/api";
-import type { ConnectionHealth } from "../sync/connectionState";
-import type { StudioServer } from "./registry";
-import type { DiscoveredServer } from "./discoveryModel";
+import { AccessClientStatus } from "../generated/api.ts";
+import type { ConnectionHealth } from "../sync/connectionState.ts";
+import type { StudioServer } from "./registry.ts";
+import type { DiscoveredServer } from "./discoveryModel.ts";
 
 export type ServerStatus =
   | "Active"

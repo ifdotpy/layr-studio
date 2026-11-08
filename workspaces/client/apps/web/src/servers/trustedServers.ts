@@ -1,8 +1,8 @@
-import { AccessClientStatus } from "../generated/api";
-import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel";
-import { trustedServer } from "./browserCredentials";
-import { excludedServers } from "./excludedServers";
-import { readServers, writeServers, type StudioServer } from "./registry";
+import { AccessClientStatus } from "../generated/api.ts";
+import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel.ts";
+import { trustedServer } from "./browserCredentials.ts";
+import { excludedServers } from "./excludedServers.ts";
+import { readServers, writeServers, type StudioServer } from "./registry.ts";
 
 /** Peers that trust this device and that this UI does not list yet, minus removed ones. */
 export function trustedCandidates(

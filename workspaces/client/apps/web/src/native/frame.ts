@@ -1,4 +1,4 @@
-import { randomUUID } from "../uuid";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 
 const REQUEST = "studio-native-frame-request";
 const RESPONSE = "studio-native-frame-response";

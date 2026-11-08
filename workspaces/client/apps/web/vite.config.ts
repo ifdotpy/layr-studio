@@ -40,15 +40,21 @@ export default defineConfig({
             ),
           },
           {
-            find: "./prompt-composer/PromptComposer",
+            find: "../prompt-composer/PromptComposer/PromptComposer.tsx",
             replacement: fileURLToPath(
-              new URL("./src/perf/ProfiledComposer.tsx", import.meta.url),
+              new URL(
+                "./src/components/performance/ProfiledComposer/ProfiledComposer.tsx",
+                import.meta.url,
+              ),
             ),
           },
           {
-            find: "./conversation/transcript/TurnHistory",
+            find: "../transcript/TurnHistory/TurnHistory.tsx",
             replacement: fileURLToPath(
-              new URL("./src/perf/ProfiledHistory.tsx", import.meta.url),
+              new URL(
+                "./src/components/performance/ProfiledHistory/ProfiledHistory.tsx",
+                import.meta.url,
+              ),
             ),
           },
         ]

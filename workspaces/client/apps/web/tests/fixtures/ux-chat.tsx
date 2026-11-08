@@ -1,20 +1,20 @@
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { runInAction } from "mobx";
 import {
   createServerServices,
   type ServerServices,
 } from "../../src/servers/serverServices.ts";
 import * as fixtureApi from "../../src/api.ts";
-import { createServerStore } from "../../src/store";
-import { defaultSubscriptions } from "../../src/sync/subscriptions/events";
+import { createServerStore } from "../../src/store/server.ts";
+import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import {
   ConversationProvider,
   type ConversationActions,
-} from "../../src/components/conversation/navigation.ts";
+} from "../../src/components/conversation/support/navigation.ts";
 import {
   observableFixture,
   conversationActionsFixture,
-} from "../../src/components/observableFixture.tsx";
+} from "../../src/components/shell/integration-support/observableFixture.tsx";
 import React, {
   useCallback,
   useRef,
@@ -26,7 +26,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import "../../src/style.css";
-import Conversation from "../../src/components/Conversation.tsx";
+import Conversation from "../../src/components/conversation/ObservedConversation/ObservedConversation.tsx";
 import { sidebarEntities } from "../../src/servers/sidebarSnapshot.ts";
 
 import type { Agent } from "../../src/types.ts";
@@ -216,4 +216,4 @@ function Fixture() {
 }
 createRoot(document.getElementById("root")!).render(<Fixture />);
 
-import { setStartupFixture } from "../../src/components/observableFixture.tsx";
+import { setStartupFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";

@@ -1,17 +1,17 @@
-import { AgentStatus } from "../generated/api";
+import { AgentStatus } from "../generated/api.ts";
 import {
   approval,
   browserOpen,
   question,
   simpleRequest,
-} from "../approvalFixtures";
-import type { Approval } from "../approvals";
-import { observableFixture } from "../components/observableFixture.tsx";
+} from "../approvalFixtures.ts";
+import type { Approval } from "../approvals.ts";
+import { observableFixture } from "../components/shell/integration-support/observableFixture.tsx";
 import {
   createRequestsMirror,
   serializeStateCollections,
 } from "../generated/observableResources.ts";
-import type { Agent, Complaint } from "../types";
+import type { Agent, Complaint } from "../types.ts";
 import assert from "node:assert/strict";
 import {
   SIGN_IN_ALERT_GRACE_SECONDS,

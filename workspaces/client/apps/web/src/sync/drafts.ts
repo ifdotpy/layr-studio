@@ -1,7 +1,7 @@
 import { observable, runInAction } from "mobx";
 import { UNSENT_FAILURE_EVENT, draftStore } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
-import { randomUUID } from "../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { DraftVersion } from "../generated/rustOwned.ts";
 import type { components } from "../generated/api.ts";
 import { createDirectDrafts } from "./directDrafts.ts";

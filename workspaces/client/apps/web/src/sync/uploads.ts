@@ -1,13 +1,13 @@
 import { uploadStore } from "../unsent/store.ts";
-import { randomUUID } from "../uuid";
-import { serverStorageName } from "../servers/environment";
-import { syncGet, syncPost, refreshSession, type GetResult } from "../api";
-import { syncDatabase } from "./client";
-import type { Attachment } from "../components/ComposerAttachments";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { serverStorageName } from "../servers/environment.ts";
+import { syncGet, syncPost, refreshSession, type GetResult } from "../api.ts";
+import { syncDatabase } from "./client.ts";
+import type { Attachment } from "../components/conversation/ComposerAttachments/ComposerAttachments.tsx";
 import {
   MAX_USER_ATTACHMENT_BYTES,
   USER_ATTACHMENT_LIMIT_LABEL,
-} from "../generated/sharedValues";
+} from "../generated/sharedValues.ts";
 
 export const attachmentLimit = MAX_USER_ATTACHMENT_BYTES;
 export type PendingUpload = {

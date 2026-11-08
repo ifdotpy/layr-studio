@@ -1,0 +1,101 @@
+import "../../../../rendererStyles.ts";
+import {
+  MantineProvider,
+  TextInput,
+  Textarea,
+  NativeSelect,
+} from "@mantine/core";
+import { createRoot } from "react-dom/client";
+import { useRef, useState } from "react";
+import PromptInput from "./PromptInput.tsx";
+import { theme } from "../../../../theme.ts";
+
+type InputStatePatch = {
+  text?: string;
+  reset?: boolean;
+  canSend?: boolean;
+  tooLong?: boolean;
+};
+declare global {
+  interface Window {
+    inputEvents?: { sends: number; queues: number; changes: number };
+    setInputState?: (patch: InputStatePatch) => void;
+  }
+}
+
+function IsolatedInputHarness({ mobile }: { mobile: boolean }) {
+  const [value, setValue] = useState("");
+  const [draftResetVersion, setDraftResetVersion] = useState(0);
+  const [canSend, setCanSend] = useState(true);
+  const [tooLong, setTooLong] = useState(false);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const testWindow = window;
+  const events = (testWindow.inputEvents ||= {
+    sends: 0,
+    queues: 0,
+    changes: 0,
+  });
+  testWindow.setInputState = (patch: InputStatePatch) => {
+    if (patch.text !== undefined) setValue(patch.text);
+    if (patch.reset) setDraftResetVersion((version) => version + 1);
+    if (patch.canSend !== undefined) setCanSend(patch.canSend);
+    if (patch.tooLong !== undefined) setTooLong(patch.tooLong);
+  };
+  return (
+    <MantineProvider>
+      <PromptInput
+        value={value}
+        draftResetVersion={draftResetVersion}
+        session="isolated-test"
+        getDraft={() => value}
+        setDraft={setValue}
+        input={input}
+        mobile={mobile}
+        managed
+        canSend={canSend}
+        blocked={false}
+        sending={false}
+        uploading={false}
+        draftTooLong={tooLong}
+        modelCommand={false}
+        hasAttachments={false}
+        onChange={(next) => {
+          events.changes++;
+          setValue(next);
+        }}
+        onPasteFiles={() => {}}
+        onSend={() => events.sends++}
+        onQueue={() => events.queues++}
+        onRecallKeyDown={() => false}
+        skillCatalog={{
+          enabled: true,
+          agentId: "isolated-agent",
+          workspace: "isolated-workspace",
+          account: "default",
+          cwd: "/workspace",
+          provider: "codex",
+        }}
+      />
+    </MantineProvider>
+  );
+}
+
+export function mount(mobile = false) {
+  createRoot(document.getElementById("root")!).render(
+    <IsolatedInputHarness mobile={mobile} />,
+  );
+}
+
+export function mountControls() {
+  createRoot(document.getElementById("controls")!).render(
+    <MantineProvider theme={theme}>
+      <TextInput id="form-input" size="xs" />
+      <Textarea id="form-textarea" size="xs" />
+      <NativeSelect id="form-select" size="xs" data={["Test"]} />
+      <TextInput id="worker-search" size="xs" />
+      <div className="analytics-toolbar">
+        <NativeSelect id="analytics-select" size="xs" data={["Test"]} />
+      </div>
+    </MantineProvider>,
+  );
+}

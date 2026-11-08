@@ -1,33 +1,33 @@
-import { FrontendLocality } from "../generated/api";
+import { FrontendLocality } from "../generated/api.ts";
 import assert from "node:assert/strict";
-import type { ResourceConnectionDetail } from "./resourceEvents";
+import type { ResourceConnectionDetail } from "./resourceEvents.ts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_MISMATCH_FIELD,
-} from "../generated/apiSchema";
+} from "../generated/apiSchema.ts";
 
 const workspaceId = "b".repeat(32);
 const { syncDatabase, appendAppLog } = vi.hoisted(() => ({
   syncDatabase: vi.fn(),
   appendAppLog: vi.fn(),
 }));
-vi.mock("../appLog", () => ({ appendAppLog }));
-vi.mock("../uuid", () => ({ randomUUID: () => crypto.randomUUID() }));
-vi.mock("../servers/eventSource", () => ({
+vi.mock("../appLog.ts", () => ({ appendAppLog }));
+vi.mock("../uuid.ts", () => ({ randomUUID: () => crypto.randomUUID() }));
+vi.mock("../servers/eventSource.ts", () => ({
   openServerEvents: (url: string) =>
     new (
       (globalThis as { NativeTestSource?: typeof EventSource })
         .NativeTestSource ?? EventSource
     )(url),
 }));
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   syncDatabase,
   readSubscriptionCursor: vi.fn(async () => undefined),
   persistResourceEntityChanges: vi.fn(async () => {}),
 }));
-vi.mock("../usage/tokenRate", async (original) => ({
-  ...(await original<typeof import("../usage/tokenRate")>()),
+vi.mock("../usage/tokenRate.ts", async (original) => ({
+  ...(await original<typeof import("../usage/tokenRate.ts")>()),
   configureTokenRateStream: vi.fn(),
 }));
 
@@ -174,7 +174,7 @@ async function expectRecovered(listener: ReturnType<typeof vi.fn>) {
 }
 
 async function loadTransport() {
-  const api = await import("../api");
+  const api = await import("../api.ts");
   vi.spyOn(api, "post").mockImplementation(async (_path, body) => {
     const update = body as {
       gen: number;
@@ -190,7 +190,7 @@ async function loadTransport() {
     );
     return { gen: update.gen } as never;
   });
-  const transport = await import("./resourceEvents");
+  const transport = await import("./resourceEvents.ts");
   return {
     ...transport,
     watchResourceChanges: (
@@ -221,14 +221,14 @@ beforeEach(async () => {
   vi.stubGlobal("location", { origin: "http://studio.test" });
   vi.stubGlobal("crypto", { randomUUID: () => "tab-one" });
   vi.stubGlobal("EventSource", Source);
-  const { readSubscriptionCursor } = await import("./client");
+  const { readSubscriptionCursor } = await import("./client.ts");
   vi.mocked(readSubscriptionCursor).mockReset().mockResolvedValue(undefined);
 });
 
 describe("shared resource event transport", () => {
   it("sends an applied subscription cursor when opening the stream", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
-    const { readSubscriptionCursor } = await import("./client");
+    const { readSubscriptionCursor } = await import("./client.ts");
     vi.mocked(readSubscriptionCursor).mockResolvedValue({
       workspaceId,
       seq: 4,
@@ -418,7 +418,7 @@ describe("shared resource event transport", () => {
   afterEach(async () => {
     for (const stop of activeStops) stop();
     await vi.advanceTimersByTimeAsync(0);
-    const api = await import("../api");
+    const api = await import("../api.ts");
     api.markApiSchemaMismatch();
     // Drain deferred coordinator shutdown without assuming a fixed timer deadline.
     // The assertion still rejects recurring timers after cleanup.
@@ -635,7 +635,7 @@ describe("shared resource event transport", () => {
     "delivers other writers' stream changes while a mutation is %s",
     async (outcome) => {
       syncDatabase.mockResolvedValue({ workspaceId });
-      const api = await import("../api");
+      const api = await import("../api.ts");
       // Keep the real mutation caller; loadTransport mocks subscription updates.
       const post = api.post;
       const transport = await loadTransport();
@@ -833,7 +833,7 @@ describe("shared resource event transport", () => {
     stop();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
-    const api = await import("../api");
+    const api = await import("../api.ts");
     api.markApiSchemaMismatch();
     expect(vi.getTimerCount()).toBe(0);
     const removeCalls = windowStub.removeEventListener.mock.calls.length;
@@ -887,7 +887,7 @@ describe("shared resource event transport", () => {
     });
     expect(source.closed).toBe(true);
     const identityRequests = syncDatabase.mock.calls.length;
-    expect((await import("../api")).isApiSchemaMismatch()).toBe(true);
+    expect((await import("../api.ts")).isApiSchemaMismatch()).toBe(true);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(Source.instances).toHaveLength(1);
     expect(syncDatabase).toHaveBeenCalledTimes(identityRequests);
@@ -982,7 +982,7 @@ describe("shared resource event transport", () => {
           }),
       );
       vi.stubGlobal("fetch", fetch);
-      const api = await import("../api");
+      const api = await import("../api.ts");
       const transport = await loadTransport();
       const stop = transport.watchResourceChanges({ kind: "state" }, vi.fn());
       await vi.advanceTimersByTimeAsync(20);
@@ -1034,7 +1034,7 @@ describe("shared resource event transport", () => {
       );
       vi.stubGlobal("fetch", fetch);
       Source.skipNextAutoHandshake = true;
-      const api = await import("../api");
+      const api = await import("../api.ts");
       const transport = await loadTransport();
       const stop = transport.watchResourceChanges({ kind: "state" }, vi.fn());
       await vi.advanceTimersByTimeAsync(20);
@@ -1168,7 +1168,7 @@ describe("shared resource event transport", () => {
         }),
     );
     Source.skipNextAutoHandshake = true;
-    const api = await import("../api");
+    const api = await import("../api.ts");
     const transport = await loadTransport();
     const states: string[] = [];
     const stopStatus = transport.watchResourceConnection((status) =>
@@ -1485,7 +1485,7 @@ describe("shared resource event transport", () => {
 
   it("opens one owner stream when cursor reads take longer than its peer heartbeat", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
-    const { readSubscriptionCursor } = await import("./client");
+    const { readSubscriptionCursor } = await import("./client.ts");
     vi.mocked(readSubscriptionCursor).mockImplementation(
       () =>
         new Promise<undefined>((resolve) =>
@@ -1526,7 +1526,7 @@ describe("shared resource event transport", () => {
 
   it("fences a pending opening when its resource selection changes", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
-    const { readSubscriptionCursor } = await import("./client");
+    const { readSubscriptionCursor } = await import("./client.ts");
     vi.mocked(readSubscriptionCursor).mockImplementation(
       () =>
         new Promise<undefined>((resolve) =>
@@ -1579,7 +1579,7 @@ describe("shared resource event transport", () => {
 
   it("an obsolete cursor read cannot release the resumed owner's pending opening", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
-    const { readSubscriptionCursor } = await import("./client");
+    const { readSubscriptionCursor } = await import("./client.ts");
     vi.mocked(readSubscriptionCursor).mockImplementation(
       () =>
         new Promise<undefined>((resolve) =>
@@ -1936,7 +1936,7 @@ describe("shared resource event transport", () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Unexpected fetch"));
     vi.stubGlobal("fetch", fetch);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api");
+    const api = await import("../api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2002,7 +2002,7 @@ describe("shared resource event transport", () => {
     vi.stubGlobal("fetch", fetch);
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api");
+    const api = await import("../api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2063,7 +2063,7 @@ describe("shared resource event transport", () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Unexpected fetch"));
     vi.stubGlobal("fetch", fetch);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api");
+    const api = await import("../api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2248,7 +2248,7 @@ describe("connection owner: retries, wakeups and stream probes", () => {
   afterEach(async () => {
     for (const stop of activeStops) stop();
     await vi.advanceTimersByTimeAsync(0);
-    const api = await import("../api");
+    const api = await import("../api.ts");
     api.markApiSchemaMismatch();
     // Drain deferred coordinator shutdown without assuming a fixed timer deadline.
     // The assertion still rejects recurring timers after cleanup.
@@ -2387,7 +2387,7 @@ describe("connection owner: retries, wakeups and stream probes", () => {
   });
 
   it("replaces the stream when the probe gets no answer in time", async () => {
-    const api = await import("../api");
+    const api = await import("../api.ts");
     const { windowListeners, goLive } = await open();
     const stream = await goLive();
     vi.spyOn(api, "post").mockImplementation(async () => new Promise(() => {}));
@@ -2413,7 +2413,7 @@ describe("connection owner: retries, wakeups and stream probes", () => {
   it("replaces the stream when the route changes", async () => {
     const { goLive } = await open();
     const stream = await goLive();
-    const transport = await import("./resourceEvents");
+    const transport = await import("./resourceEvents.ts");
     transport.replaceStream();
     expect(stream.closed).toBe(true);
     await vi.advanceTimersByTimeAsync(2_000);

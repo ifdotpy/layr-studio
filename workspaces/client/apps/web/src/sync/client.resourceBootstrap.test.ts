@@ -1,8 +1,11 @@
 import type { StateCollections } from "../generated/observableResources.ts";
 import { observeGeneratedState } from "./generatedState.testHelper.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
-import type { ConnectionActivity, ConnectionHealth } from "./connectionState";
-import { backgroundDisplay } from "../components/componentTestFixtures";
+import type {
+  ConnectionActivity,
+  ConnectionHealth,
+} from "./connectionState.ts";
+import { backgroundDisplay } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
   MessageSendStatus,
   SubscriptionCachePolicy,
@@ -11,18 +14,18 @@ import {
   TaskKind,
   TaskStatus,
   WorkStatus,
-} from "../generated/api";
+} from "../generated/api.ts";
 import assert from "node:assert/strict";
 import { afterEach, expect, it, vi } from "vitest";
 
-import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api";
+import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api.ts";
 import type {
   ResourceChangeEvent,
   ResourceVersion,
-} from "./subscriptions/events";
-import { ResourceEntityDelivery } from "./resourceEntityDelivery";
-import { createSubscriptionStore } from "./subscriptions/store";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
+} from "./subscriptions/events.ts";
+import { ResourceEntityDelivery } from "./resourceEntityDelivery.ts";
+import { createSubscriptionStore } from "./subscriptions/store.ts";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 
 const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
@@ -39,7 +42,7 @@ const mocks = vi.hoisted(() => ({
     emit(name: string, value: unknown): void;
   }[],
 }));
-vi.mock("../servers/eventSource", () => ({
+vi.mock("../servers/eventSource.ts", () => ({
   openServerEvents: vi.fn(),
   SignedEventSource: class {
     listeners = new Map<string, (event: Event) => void>();
@@ -65,7 +68,7 @@ vi.mock("../servers/eventSource", () => ({
     }
   },
 }));
-vi.mock("../api", () => ({
+vi.mock("../api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   get: mocks.syncGet,
@@ -84,19 +87,19 @@ vi.mock("../api", () => ({
   isApiSchemaMismatchHandshake: () => false,
   onMatchingApiSchemaResponse: () => () => {},
 }));
-vi.mock("./subscriptions/events", () => ({
+vi.mock("./subscriptions/events.ts", () => ({
   acknowledgeEntitySequences: vi.fn(),
   watchResourceChanges: mocks.watch,
   watchResourceConnection: mocks.watchConnection,
 }));
-vi.mock("../usage/tokenRate", () => ({
+vi.mock("../usage/tokenRate.ts", () => ({
   configureTokenRateStream: vi.fn(),
   receiveResourceTokenRates: vi.fn(),
   getWorkspaceTokenRates: vi.fn(() => ({ records: [] })),
 }));
-vi.mock("./resume", () => ({ onResume: () => () => {} }));
-vi.mock("./entityTransfer", async (original) => {
-  const actual = await original<typeof import("./entityTransfer")>();
+vi.mock("./resume.ts", () => ({ onResume: () => () => {} }));
+vi.mock("./entityTransfer.ts", async (original) => {
+  const actual = await original<typeof import("./entityTransfer.ts")>();
   return {
     ...actual,
     EntityTransferAssembler: class extends actual.EntityTransferAssembler {
@@ -125,8 +128,8 @@ vi.mock("./entityTransfer", async (original) => {
     },
   };
 });
-vi.mock("./entityCacheStorage", async (original) => ({
-  ...(await original<typeof import("./entityCacheStorage")>()),
+vi.mock("./entityCacheStorage.ts", async (original) => ({
+  ...(await original<typeof import("./entityCacheStorage.ts")>()),
   holdEntityProjectionDatabaseLock: async () => true,
   deleteOtherEntityProjectionDatabases: async () => {},
 }));
@@ -184,7 +187,7 @@ async function setup() {
     mocks.connections.add(listener);
     return () => mocks.connections.delete(listener);
   });
-  const client = await import("./client");
+  const client = await import("./client.ts");
   const { db } = await client.syncDatabase();
   const snapshots: StateCollections[] = [];
   const failed = vi.fn();
@@ -285,8 +288,8 @@ async function setup() {
 
 it("opens workspace and writes projections without IndexedDB", async () => {
   const f = await setup();
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
   const open = vi.fn();
   vi.stubGlobal("indexedDB", { open });
   const client = f.client.createSyncClient({
@@ -318,8 +321,8 @@ it("opens workspace and writes projections without IndexedDB", async () => {
 
 it("reloads a scoped projection before exposing its resume cursor", async () => {
   const f = await setup();
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
   const values = new Map<string, unknown>();
   const storage = {
     get: async (key: string) => values.get(key),
@@ -696,9 +699,9 @@ it("rejects an oversized page that cannot advance the pull cursor", async () => 
 
 it("heals a truncated ready cache on reload and recovers the missing chat", async () => {
   const f = await setup();
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
-  const { subscriptionKey } = await import("./subscriptions/contracts");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
+  const { subscriptionKey } = await import("./subscriptions/contracts.ts");
   const state = { kind: "state" } as const;
   const storage = {
     get: vi.fn().mockResolvedValue({
@@ -835,7 +838,7 @@ it.each([false, true])(
     event.resourceVersions[0].replyKind = "delta";
     event.resourceVersions[0].entityChanges.after = 8;
     if (staged) {
-      const { EntityTransferAssembler } = await import("./entityTransfer");
+      const { EntityTransferAssembler } = await import("./entityTransfer.ts");
       const assembler = new EntityTransferAssembler();
       const interval = await assembler.receive({
         protocol: event.protocol,
@@ -918,7 +921,7 @@ it.each([false, true])(
     // This replacement was captured before the separate task scope committed 11.
     // Its own applied cursor is still 9, so the same-ref stale guard cannot hide the race.
     const captured = snapshot(tasks, 10, []);
-    const { EntityTransferAssembler } = await import("./entityTransfer");
+    const { EntityTransferAssembler } = await import("./entityTransfer.ts");
     const assembler = new EntityTransferAssembler();
     let interval: Awaited<ReturnType<typeof assembler.receive>>;
     try {
@@ -985,8 +988,8 @@ it.each([false, true])(
     vi.stubGlobal("location", { origin: "http://studio.test" });
     vi.stubGlobal("BroadcastChannel", undefined);
     const { createServerSubscriptions } =
-      await import("./subscriptions/server");
-    const api = await import("../api");
+      await import("./subscriptions/server.ts");
+    const api = await import("../api.ts");
     const subscriptions = createServerSubscriptions({
       owner: { id: "local", origin: "http://studio.test" },
       api: { ...api, fetchApiRequest: vi.fn() },
@@ -1179,7 +1182,7 @@ it.each([
         await f.client.persistStagedEntityTransfer(...args);
       },
     );
-    const { createResourceEvents } = await import("./resourceEvents");
+    const { createResourceEvents } = await import("./resourceEvents.ts");
     const transport = createResourceEvents({
       api: {
         get: mocks.syncGet,
@@ -1321,8 +1324,8 @@ it.each(["burst", "inline removal", "staged removal"])(
     vi.stubGlobal("location", { origin: "http://studio.test" });
     vi.stubGlobal("BroadcastChannel", undefined);
     const { createServerSubscriptions } =
-      await import("./subscriptions/server");
-    const api = await import("../api");
+      await import("./subscriptions/server.ts");
+    const api = await import("../api.ts");
     const subscriptions = createServerSubscriptions({
       owner: { id: "local", origin: "http://studio.test" },
       api: { ...api, fetchApiRequest: vi.fn() },
@@ -1505,8 +1508,8 @@ it.each(["burst", "inline removal", "staged removal"])(
 
 it("discards a slow old stream policy after a reset and applies NoCache", async () => {
   const f = await setup();
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
   const identity = Promise.withResolvers<{ workspaceId: string }>();
   const storage = { get: vi.fn(), put: vi.fn(), delete: vi.fn() };
   const client = f.client.createSyncClient({
@@ -1544,8 +1547,8 @@ it("discards a slow old stream policy after a reset and applies NoCache", async 
 
 it("sends only applied live receipt rows to the outbox", async () => {
   const f = await setup();
-  const { createEntitySequenceScope } = await import("./entitySequence");
-  const { createTranscriptCache } = await import("./transcriptCache");
+  const { createEntitySequenceScope } = await import("./entitySequence.ts");
+  const { createTranscriptCache } = await import("./transcriptCache.ts");
   const onFreshReceipts = vi.fn();
   const options = {
     api: {
@@ -1648,7 +1651,7 @@ it.each([
     mocks.syncGet.mockRejectedValue(
       new Error("A transient resource must not open the database"),
     );
-    const client = await import("./client");
+    const client = await import("./client.ts");
     await expect(client.readSubscriptionCursor(ref)).resolves.toBeUndefined();
     expect(mocks.syncGet).not.toHaveBeenCalled();
   },

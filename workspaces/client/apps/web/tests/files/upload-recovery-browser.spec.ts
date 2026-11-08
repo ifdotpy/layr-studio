@@ -1,9 +1,10 @@
+import type {} from "./upload-recovery-browser.writer.fixture.tsx";
+import type {} from "./upload-recovery-browser.fixture.tsx";
 import { required } from "../teams/helpers.ts";
 import type { Browser, Page, Route } from "@playwright/test";
 import type { PostBody } from "../../src/apiTypes.ts";
 import { fixturePostBody } from "../teams/helpers.ts";
-import type {} from "./upload-recovery-browser.fixture.tsx";
-import type {} from "./upload-recovery-browser.writer.fixture.tsx";
+
 // Real File blobs, IndexedDB transactions, recovery hooks, and composer input.
 import { FIXTURE_OPTIMIZE_DEPS } from "../playwright.ts";
 import assert from "node:assert/strict";
@@ -532,7 +533,7 @@ test("upload recovery browser", async ({ browser }) => {
         .uploadRecoveryBrowserReadStoredAttachments(null)
         .lead!.map(
           (
-            asset: import("../../src/components/ComposerAttachments.tsx").Attachment,
+            asset: import("../../src/components/conversation/ComposerAttachments/ComposerAttachments.tsx").Attachment,
           ) => asset.id,
         ),
     );
@@ -619,7 +620,7 @@ async function setupAttachmentWriters(browser: Browser) {
             .uploadRecoveryBrowserReadStoredAttachments()
             .lead?.map(
               (
-                asset: import("../../src/components/ComposerAttachments.tsx").Attachment,
+                asset: import("../../src/components/conversation/ComposerAttachments/ComposerAttachments.tsx").Attachment,
               ) => asset.id,
             ) || [],
       );

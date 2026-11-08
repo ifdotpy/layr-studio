@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { fixtureElement } from "./browser-helpers.ts";
 const mount1 = async () => {
   window.snapshotMountedAt = performance.now();

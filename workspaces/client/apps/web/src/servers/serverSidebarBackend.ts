@@ -1,12 +1,17 @@
-import type { SidebarBackend } from "../components/sidebar/services";
-import type { ApiPostPath, PostInput, PostOptions, PostResult } from "../api";
+import type { SidebarBackend } from "../components/sidebar/support/services.tsx";
+import type {
+  ApiPostPath,
+  PostInput,
+  PostOptions,
+  PostResult,
+} from "../api.ts";
 import {
   readPreferenceFields,
   receivePreferenceFields,
   writePreferenceEdit,
-} from "../sync/uiPreferenceStore";
-import { preferenceEvent } from "../sync/uiPreferenceMerge";
-import type { ServerServices } from "./serverServices";
+} from "../sync/uiPreferenceStore.ts";
+import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
+import type { ServerServices } from "./serverServices.ts";
 
 export function serverSidebarBackend(
   services: ServerServices,

@@ -1,17 +1,17 @@
 import type { ServerAreas } from "../app/contracts.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
-import { decodeSidebarRanks } from "./sidebarOrderRanks";
-import type { PeerTeam, Project } from "../types";
-import { type StateCollections } from "../generated/observableResources.ts";
+import { decodeSidebarRanks } from "./sidebarOrderRanks.ts";
+import type { PeerTeam, Project } from "../types.ts";
+import type { StateCollections } from "../generated/observableResources.ts";
 import { compareStructural, computed, observable, runInAction } from "mobx";
 import {
   createSidebarViewModel,
   type SidebarAgent,
   type SidebarIdentity,
   type SidebarChatView,
-} from "../components/sidebar/viewModel.ts";
-import { sidebarIdentity } from "../components/sidebar/services";
-import { type ServerSidebarView } from "./sidebarSnapshot";
+} from "../components/sidebar/support/viewModel.ts";
+import { sidebarIdentity } from "../components/sidebar/support/services.tsx";
+import type { ServerSidebarView } from "./sidebarSnapshot.ts";
 
 export type SidebarSource = {
   id: string;

@@ -1,7 +1,7 @@
-import { randomUUID } from "../uuid";
-import type { NativeVoiceEvent } from "../generated/rustOwned";
-import { listenNativeEvents, nativeRequest } from "./client";
-import { isNativeFrame } from "./frame";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import type { NativeVoiceEvent } from "../generated/rustOwned.ts";
+import { listenNativeEvents, nativeRequest } from "./client.ts";
+import { isNativeFrame } from "./frame.ts";
 function decodeNativeVoiceEvent(value: unknown): NativeVoiceEvent | undefined {
   if (!value || typeof value !== "object" || !("type" in value)) return;
   switch (value.type) {

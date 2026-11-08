@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, it, vi } from "vitest";
-import { captureAudio } from "./capture";
+import { captureAudio } from "./capture.ts";
 
-vi.mock("../native/client", () => ({ hasNativeClient: () => false }));
-vi.mock("../native/dictation", () => ({ captureNativeAudio: vi.fn() }));
+vi.mock("../native/client.ts", () => ({ hasNativeClient: () => false }));
+vi.mock("../native/dictation.ts", () => ({ captureNativeAudio: vi.fn() }));
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.useRealTimers();

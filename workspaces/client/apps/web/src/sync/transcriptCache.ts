@@ -1,4 +1,4 @@
-import { createFrameBatch } from "./frameBatch";
+import { createFrameBatch } from "./frameBatch.ts";
 
 import type {
   TranscriptPageData,

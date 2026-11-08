@@ -1,4 +1,4 @@
-import type { ComponentSnapshot as Snapshot } from "./components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { runInAction } from "mobx";
 import {
   createStateMirror,
@@ -6,17 +6,17 @@ import {
   serializeStateCollections,
 } from "./generated/observableResources.ts";
 import { stateFromFixture } from "./servers/sidebarSourceFixture.ts";
-import { componentSnapshot as snapshotFixture } from "./components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { writePreferenceEdit } from "./sync/uiPreferenceStore.ts";
 import { StopOutcome } from "./generated/api.ts";
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { beforeEach, expect, it, vi } from "vitest";
 import type {
   SidebarServices,
   SidebarBackend,
-} from "./components/sidebar/services";
+} from "./components/sidebar/support/services.tsx";
 
-import { ApiError } from "./api";
+import { ApiError } from "./api.ts";
 
 // A deterministic render/effect harness, including effect replay, without a DOM dependency.
 const hooks = vi.hoisted(() => ({
@@ -55,7 +55,7 @@ vi.mock("react", () => {
     useLayoutEffect: effect,
   };
 });
-import { useProjectDelete } from "./useProjectDelete";
+import { useProjectDelete } from "./useProjectDelete.ts";
 
 beforeEach(() => {
   hooks.slots = [];

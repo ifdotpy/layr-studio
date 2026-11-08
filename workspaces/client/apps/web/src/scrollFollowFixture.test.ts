@@ -46,7 +46,7 @@ test("the scroll fixture propagates a render failure", async () => {
 
 test("a newer cursor keeps the anchor even at the bottom of the retained page", async () => {
   const { shouldFollowTranscriptTail } =
-    await import("./components/useConversationScroll");
+    await import("./components/conversation/support/useConversationScroll.ts");
   expect(shouldFollowTranscriptTail(0, false)).toBe(false);
   expect(shouldFollowTranscriptTail(0, true)).toBe(true);
   expect(shouldFollowTranscriptTail(100, true)).toBe(false);
@@ -54,7 +54,7 @@ test("a newer cursor keeps the anchor even at the bottom of the retained page", 
 
 test("a remembered history anchor resumes without following the tail", async () => {
   const { anchors, followsStoredAnchor } =
-    await import("./components/conversation/transcript/historyAnchorStore");
+    await import("./components/conversation/support/historyAnchorStore.ts");
   anchors.set("chat-a", { id: "message", offset: 12 });
   expect(followsStoredAnchor("chat-a")).toBe(false);
   expect(followsStoredAnchor("fresh-chat")).toBe(true);

@@ -2,7 +2,7 @@ import {
   browserDatabases,
   browserIndexedDB,
   browserStores,
-} from "../browserPersistence";
+} from "../browserPersistence.ts";
 
 // Monitor input metadata is authoritative here, never in cached preferences.
 export const MONITOR_INPUT_DATABASE_NAME = browserDatabases.monitorInput;

@@ -1,0 +1,533 @@
+import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { resourceData } from "../../../store/runtime.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
+import { observer } from "mobx-react-lite";
+
+import { outboxRequests } from "../../../browserPersistence.ts";
+import { AgentMode } from "../../../generated/api.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { useServerStorage } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { SegmentedControl, NumberInput, Button } from "@mantine/core";
+import { useEffect, useRef, useState } from "react";
+import { ApiError, errorText, type PostBody } from "../../../api.ts";
+import {
+  DEFAULT_SUBAGENT_CONCURRENCY,
+  MAX_SUBAGENT_CONCURRENCY,
+  MIN_SUBAGENT_CONCURRENCY,
+} from "../../../generated/apiSchema.ts";
+import type { Agent } from "../../../types.ts";
+
+const DEFAULT_CONCURRENCY = DEFAULT_SUBAGENT_CONCURRENCY;
+const MIN_CONCURRENCY = MIN_SUBAGENT_CONCURRENCY;
+const MAX_CONCURRENCY = MAX_SUBAGENT_CONCURRENCY;
+const CONCURRENCY_HELP = "0 = lead only; extra work queues.";
+const UNSUPPORTED_HELP =
+  "Update the backend to enable numeric subagent parallelism. Saved changes are retained until then.";
+const CONCURRENCY_SCHEMA_VERSION = 2;
+
+type Confirmed = { concurrency: number; revision: number };
+type PendingRequest = PostBody<"/api/conversation">;
+type Stored = {
+  confirmed?: Confirmed | undefined;
+  pending?: PendingRequest | undefined;
+};
+type ConcurrencyAgent = Pick<
+  Agent,
+  "subagentConcurrencyVersion" | "concurrency" | "agentModeRevision"
+>;
+type Props = {
+  compact?: boolean;
+  lead: Agent;
+  stateDir: string;
+  workspaceId: string;
+  refresh: () => Promise<void>;
+};
+
+const validConcurrency = (value: unknown): value is number =>
+  Number.isSafeInteger(value) &&
+  Number(value) >= MIN_CONCURRENCY &&
+  Number(value) <= MAX_CONCURRENCY;
+const validRevision = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && Number(value) >= 0;
+const stateOf = (agent: ConcurrencyAgent): Confirmed | undefined => {
+  if (
+    !Number.isSafeInteger(agent.subagentConcurrencyVersion) ||
+    agent.subagentConcurrencyVersion! < CONCURRENCY_SCHEMA_VERSION ||
+    !validConcurrency(agent.concurrency) ||
+    !validRevision(agent.agentModeRevision)
+  )
+    return undefined;
+  return {
+    concurrency: agent.concurrency,
+    revision: agent.agentModeRevision,
+  };
+};
+/**
+ * Whether the lead runs without subagents: "Off" (parallelism 0), or the
+ * legacy single mode of an older backend, as the lead record confirms it.
+ */
+export function subagentsOff(
+  lead: ConcurrencyAgent & Pick<Agent, "agentMode" | "agentModeSupported">,
+): boolean {
+  const confirmed = stateOf(lead);
+  if (confirmed) return confirmed.concurrency === MIN_CONCURRENCY;
+  return !!lead.agentModeSupported && lead.agentMode === AgentMode.single;
+}
+const pendingTarget = (
+  request: PendingRequest | undefined,
+): number | undefined => {
+  if (!request) return undefined;
+  if ("subagent_concurrency" in request)
+    return request.subagent_concurrency ?? undefined;
+  return request.agent_mode === AgentMode.single
+    ? MIN_CONCURRENCY
+    : DEFAULT_CONCURRENCY;
+};
+const validPending = (
+  value: unknown,
+  leadId: string,
+): value is PendingRequest => {
+  if (!value || typeof value !== "object") return false;
+  const request = value as Record<string, unknown>;
+  if (
+    request.id !== leadId ||
+    !validRevision(request.expected_mode_revision) ||
+    typeof request.request_id !== "string" ||
+    !request.request_id
+  )
+    return false;
+  if ("subagent_concurrency" in request)
+    return validConcurrency(request.subagent_concurrency);
+  return request.agent_mode === "multi" || request.agent_mode === "single";
+};
+const validConfirmed = (value: unknown): value is Confirmed => {
+  if (!value || typeof value !== "object") return false;
+  const confirmed = value as Partial<Confirmed>;
+  return (
+    validConcurrency(confirmed.concurrency) && validRevision(confirmed.revision)
+  );
+};
+
+export function decodeStoredConcurrency(
+  raw: string | null,
+  leadId: string,
+): Stored {
+  let value: unknown;
+  try {
+    value = raw === null ? {} : JSON.parse(raw);
+  } catch {
+    throw new Error("The saved concurrency request cannot be read.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("The saved concurrency request cannot be read.");
+  const record = value as { confirmed?: unknown; pending?: unknown };
+  const legacy =
+    record.confirmed &&
+    typeof record.confirmed === "object" &&
+    "mode" in record.confirmed &&
+    "revision" in record.confirmed &&
+    (record.confirmed.mode === "multi" || record.confirmed.mode === "single") &&
+    validRevision(record.confirmed.revision);
+  if (
+    (record.confirmed !== undefined &&
+      !validConfirmed(record.confirmed) &&
+      !legacy) ||
+    (record.pending !== undefined && !validPending(record.pending, leadId))
+  )
+    throw new Error("The saved concurrency request cannot be read.");
+  return {
+    ...(validConfirmed(record.confirmed)
+      ? { confirmed: record.confirmed }
+      : {}),
+    ...(validPending(record.pending, leadId)
+      ? { pending: record.pending }
+      : {}),
+  };
+}
+
+export default function SubagentConcurrencyControl(props: Props) {
+  const scope = JSON.stringify([
+    props.stateDir,
+    props.workspaceId,
+    props.lead.id,
+  ]);
+  return (
+    <ScopedConcurrencyControl
+      key={scope}
+      storageKey={`studio-agent-mode:${scope}`}
+      {...props}
+    />
+  );
+}
+
+const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
+  lead,
+  compact = false,
+  workspaceId,
+  storageKey,
+  refresh,
+}: Props & { storageKey: string }) {
+  const store = useServerStore();
+  const storage = useServerStorage();
+  const outbox = outboxRequests(storage);
+  const prefix = outbox.key("agentMode", "");
+  const suffix = storageKey.slice(prefix.length);
+  const writeStored = (value: Stored) => {
+    if (value.pending)
+      outbox.set(
+        "agentMode",
+        suffix,
+        JSON.stringify({ pending: value.pending }),
+      );
+    else outbox.remove("agentMode", suffix);
+  };
+  const { post } = useServerApi();
+
+  const detail = resourceData(
+    store.agentDetail(observableAgentId(lead.id)).current,
+  );
+  const snapshot = stateOf(detail || {});
+  const supported = snapshot !== undefined;
+  const [initial, setInitial] = useState(() => {
+    try {
+      return {
+        value: decodeStoredConcurrency(
+          outbox.get("agentMode", suffix),
+          lead.id,
+        ),
+        error: "",
+      };
+    } catch (cause) {
+      return { value: {} as Stored, error: errorText(cause) };
+    }
+  });
+  const [stored, setStored] = useState(initial.value);
+  const [error, setError] = useState(initial.error);
+  const readStored = () => {
+    try {
+      return decodeStoredConcurrency(outbox.get("agentMode", suffix), lead.id);
+    } catch (cause) {
+      if (mounted.current)
+        setInitial({ value: stored, error: errorText(cause) });
+      throw cause;
+    }
+  };
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<number | string>(() =>
+    snapshot
+      ? (pendingTarget(initial.value.pending) ?? snapshot.concurrency)
+      : "",
+  );
+  const dirty = useRef(false);
+  const lock = useRef(false);
+  const refreshGeneration = useRef(0);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const confirmed = snapshot
+    ? stored.confirmed && stored.confirmed.revision > snapshot.revision
+      ? stored.confirmed
+      : snapshot
+    : undefined;
+  const latest = useRef(confirmed);
+  latest.current = confirmed;
+  const refreshConfirmed = (generation: number) => {
+    void Promise.resolve()
+      .then(refresh)
+      .catch((cause) => {
+        if (mounted.current && generation === refreshGeneration.current)
+          setError(`Setting saved. ${errorText(cause)}`);
+      });
+  };
+
+  // Retain a newer accepted revision while snapshots catch up. Old mode-only
+  // cache entries are intentionally ignored.
+  useEffect(() => {
+    if (
+      !snapshot ||
+      initial.error ||
+      (stored.confirmed?.revision ?? -1) >= snapshot.revision
+    )
+      return;
+    const next = { ...stored, confirmed: snapshot };
+    setStored(next);
+  }, [
+    snapshot?.concurrency,
+    snapshot?.revision,
+    stored,
+    storageKey,
+    initial.error,
+  ]);
+
+  useEffect(() => {
+    if (!confirmed || dirty.current || stored.pending) return;
+    setDraft(confirmed.concurrency);
+  }, [confirmed?.concurrency, confirmed?.revision, stored.pending]);
+
+  const submit = async (target = draft) => {
+    if (
+      !supported ||
+      !confirmed ||
+      lock.current ||
+      initial.error ||
+      !workspaceId
+    )
+      return;
+    const validDraft = validConcurrency(target);
+    if (!stored.pending && (!validDraft || target === confirmed.concurrency)) {
+      if (!validDraft)
+        setError(
+          `Enter a whole number from ${MIN_CONCURRENCY} to ${MAX_CONCURRENCY}.`,
+        );
+      else dirty.current = false;
+      return;
+    }
+    // A saved v1 mode request is replayed byte-for-byte as its original body;
+    // new requests persist the target and identity before touching the server.
+    const expectedRevision =
+      stored.pending?.expected_mode_revision ?? confirmed.revision;
+    const request: PendingRequest = stored.pending ?? {
+      id: lead.id,
+      subagent_concurrency: validDraft ? target : confirmed.concurrency,
+      expected_mode_revision: expectedRevision,
+      request_id: randomUUID(),
+      expected_account_key: lead.accountKey || "default",
+    };
+    const pending: Stored = { confirmed, pending: request };
+    try {
+      writeStored(pending);
+    } catch {
+      setError(
+        "Cannot save the concurrency request on this device. Free browser storage and retry.",
+      );
+      return;
+    }
+    setStored(pending);
+    lock.current = true;
+    setSaving(true);
+    setError("");
+    const generation = ++refreshGeneration.current;
+    try {
+      const result = await post("/api/conversation", request, {
+        workspaceId,
+        timeoutMs: 15000,
+      });
+      const accepted = stateOf(result);
+      if (
+        result.id !== lead.id ||
+        !accepted ||
+        !validConcurrency(result.concurrency) ||
+        !validRevision(result.agentModeRevision) ||
+        result.agentModeRevision < expectedRevision
+      )
+        throw new Error(
+          "The server did not confirm the concurrency request. Retry the same request.",
+        );
+      const disk = readStored();
+      const newest = [latest.current, disk.confirmed, accepted]
+        .filter(validConfirmed)
+        .sort((a, b) => b.revision - a.revision)[0]!;
+      const next: Stored = {
+        confirmed: newest,
+        ...(disk.pending?.request_id !== request.request_id
+          ? { pending: disk.pending }
+          : {}),
+      };
+      writeStored(next);
+      if (mounted.current) {
+        setStored(next);
+        dirty.current = false;
+        setDraft(newest.concurrency);
+      }
+      refreshConfirmed(generation);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.outcome === "not_applied") {
+        try {
+          const disk = readStored();
+          const newest = [disk.confirmed, latest.current]
+            .filter(validConfirmed)
+            .sort((a, b) => b.revision - a.revision)[0];
+          const next: Stored = {
+            confirmed: newest,
+            ...(disk.pending?.request_id !== request.request_id
+              ? { pending: disk.pending }
+              : {}),
+          };
+          writeStored(next);
+          if (mounted.current) {
+            setStored(next);
+            dirty.current = false;
+            if (newest) setDraft(newest.concurrency);
+          }
+        } catch (failure) {
+          // Keep the receipt until its confirmed rejection can be saved.
+          if (mounted.current) setError(errorText(failure));
+          return;
+        }
+        void Promise.resolve()
+          .then(refresh)
+          .catch((failure) => {
+            if (mounted.current && generation === refreshGeneration.current)
+              setError(`${errorText(cause)} ${errorText(failure)}`);
+          });
+      }
+      if (mounted.current) setError(errorText(cause));
+    } finally {
+      lock.current = false;
+      if (mounted.current) setSaving(false);
+    }
+  };
+
+  const legacyMode =
+    detail?.agentModeSupported &&
+    (detail.agentMode === AgentMode.single ||
+      detail.agentMode === AgentMode.multi)
+      ? detail.agentMode
+      : undefined;
+  const mode = confirmed
+    ? confirmed.concurrency === 0
+      ? "single"
+      : "multi"
+    : legacyMode;
+  const pending = stored.pending;
+  return (
+    <form
+      className={`agent-mode-control${compact ? " agent-mode-compact" : ""}`}
+      data-agent-mode={mode ?? "unknown"}
+      {...(confirmed
+        ? {
+            "data-agent-mode-revision": confirmed.revision,
+            "data-concurrency": confirmed.concurrency,
+          }
+        : {})}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      {compact && (
+        <SegmentedControl
+          aria-label="Parallel"
+          value={mode === "single" ? "off" : "on"}
+          data={[
+            { value: "off", label: "Off" },
+            { value: "on", label: "On" },
+          ]}
+          disabled={
+            !supported || !workspaceId || saving || !!pending || !!initial.error
+          }
+          onChange={(value) => {
+            const target = value === "off" ? 0 : DEFAULT_CONCURRENCY;
+            setDraft(target);
+            void submit(target);
+          }}
+        />
+      )}
+      <div className="agent-mode-fields">
+        <NumberInput
+          className="agent-mode-field"
+          label="Subagent parallelism"
+          description={supported ? CONCURRENCY_HELP : UNSUPPORTED_HELP}
+          min={MIN_CONCURRENCY}
+          max={MAX_CONCURRENCY}
+          step={1}
+          allowDecimal={false}
+          value={supported ? draft : ""}
+          disabled={
+            !supported || !workspaceId || saving || !!pending || !!initial.error
+          }
+          onBlur={(event) => {
+            const nextMode = (event.relatedTarget as HTMLInputElement | null)
+              ?.value;
+            if (compact && nextMode !== (mode === "single" ? "on" : "off"))
+              void submit();
+          }}
+          onChange={(value) => {
+            dirty.current = true;
+            setDraft(value);
+            setError("");
+          }}
+        />
+        {!compact && draft !== confirmed?.concurrency && (
+          <Button
+            type="submit"
+            className="agent-mode-apply"
+            disabled={
+              !supported ||
+              !workspaceId ||
+              saving ||
+              !!pending ||
+              !!initial.error
+            }
+          >
+            Apply
+          </Button>
+        )}
+      </div>
+      <span id={`subagent-concurrency-help-${lead.id}`} className="sr-only">
+        {CONCURRENCY_HELP}
+      </span>
+      <span
+        id={`subagent-concurrency-status-${lead.id}`}
+        className={supported ? "sr-only" : "agent-mode-note"}
+        role={supported ? undefined : "status"}
+      >
+        {supported
+          ? ""
+          : "Numeric subagent parallelism is unavailable because this backend does not provide the concurrency setting. Update the backend to enable it."}
+      </span>
+      {saving ? (
+        <span role="status" className="agent-mode-note">
+          Applying…
+        </span>
+      ) : pending && supported ? (
+        <Button
+          type="button"
+          className="agent-mode-retry"
+          disabled={!!initial.error}
+          onClick={() => void submit()}
+        >
+          {"subagent_concurrency" in pending
+            ? "Retry limit change"
+            : "Retry mode change"}
+        </Button>
+      ) : pending ? (
+        <span className="agent-mode-note" role="status">
+          Saved change retained. Update the backend to retry it.
+        </span>
+      ) : !compact && confirmed?.concurrency === 0 ? (
+        <span className="agent-mode-note">No new worker turns will start.</span>
+      ) : null}
+      {error && (
+        <span className="agent-mode-error" role="alert">
+          {error}
+        </span>
+      )}
+      {initial.error && supported && (
+        <Button
+          type="button"
+          className="agent-mode-retry"
+          onClick={() => {
+            try {
+              outbox.remove("agentMode", suffix);
+              setInitial({ value: {}, error: "" });
+              setStored({});
+              dirty.current = false;
+              setDraft(snapshot?.concurrency ?? "");
+              setError("");
+            } catch (cause) {
+              setError(errorText(cause));
+            }
+          }}
+        >
+          Discard unreadable concurrency request
+        </Button>
+      )}
+    </form>
+  );
+});

@@ -5,7 +5,7 @@ import {
   DEFAULT_HIDE_OLD_CHATS_THRESHOLD,
   defaultStudioPreferences,
   parseStudioPreferences,
-} from "./studioPreferences";
+} from "./studioPreferences.ts";
 
 it("shows terminals for legacy preferences and preserves a saved false", () => {
   const schema: unknown = JSON.parse(

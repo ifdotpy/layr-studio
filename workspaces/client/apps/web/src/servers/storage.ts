@@ -2,9 +2,12 @@ import {
   storageKeys,
   storageKeySnapshot,
   type IndexedStorage,
-} from "../storageKeys";
-import { serverViewId } from "./environment";
-import { preferenceCacheKey, preferenceScope } from "../sync/uiPreferenceMerge";
+} from "../storageKeys.ts";
+import { serverViewId } from "./environment.ts";
+import {
+  preferenceCacheKey,
+  preferenceScope,
+} from "../sync/uiPreferenceMerge.ts";
 
 const preferenceValues = new Map<string, string>();
 let preferenceKeys: readonly string[] = Object.freeze([]);

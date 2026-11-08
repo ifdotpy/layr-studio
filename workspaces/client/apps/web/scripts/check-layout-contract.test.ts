@@ -111,11 +111,17 @@ test("rejects stale generated output without a browser", () => {
 
 test("the shell row does not share a class with Workspace list rows", () => {
   const app = readFileSync(
-    new URL("../src/app/shell/LayoutHost.tsx", import.meta.url),
+    new URL(
+      "../src/components/shell/LayoutHost/LayoutHost.tsx",
+      import.meta.url,
+    ),
     "utf8",
   );
   const workspaceCss = readFileSync(
-    new URL("../src/components/shell/Workspace.css", import.meta.url),
+    new URL(
+      "../src/components/shell/workspace/support/Workspace.css",
+      import.meta.url,
+    ),
     "utf8",
   );
   const shellClass = app.match(
@@ -156,7 +162,11 @@ test("preserves font-relative component thresholds in generated metadata", () =>
   const css = output["src/layout/layout-contract.generated.css"];
   assert.ok(css, "The layout contract generates CSS");
   assert.match(css, /--layout-fixture-column: 47.5em;/);
-  assert.ok(output["src/layout/layout-contract.generated.ts"]?.includes("(width <= 47.5em)"));
+  assert.ok(
+    output["src/layout/layout-contract.generated.ts"]?.includes(
+      "(width <= 47.5em)",
+    ),
+  );
 });
 
 test("generates keyboard motion duration with milliseconds intact", () => {

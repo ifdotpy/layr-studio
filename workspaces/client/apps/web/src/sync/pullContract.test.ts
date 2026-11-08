@@ -3,7 +3,7 @@ import {
   isEntityResetResponse,
   requiredSyncNumber,
   type SyncPullResponse,
-} from "./pullContract";
+} from "./pullContract.ts";
 
 const reset: SyncPullResponse = {
   floor: 7,

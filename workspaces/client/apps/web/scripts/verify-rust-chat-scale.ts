@@ -16,7 +16,7 @@ import { runScaleVerifier } from "./scaleVerifierTeardown.ts";
 import { spawnSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
-import { randomUUID as commandId } from "../src/uuid.ts";
+import { requestId as commandId } from "studio-claude-bridge/request-id.ts";
 import { messageReceipt, standaloneCommand } from "../src/commands.ts";
 import type { CommandRequest, CommandResponse } from "../src/commands.ts";
 import {
@@ -2410,7 +2410,8 @@ async function startSyncResourceStream(
   let stateSequence: number | null = null;
   let pendingStateSequence: number | null = null;
   let observeStateResource:
-    ReturnType<typeof createStateResourceAdapter> | undefined;
+    | ReturnType<typeof createStateResourceAdapter>
+    | undefined;
   let failure: unknown;
   let reader;
   try {

@@ -2,14 +2,17 @@ import {
   SubscriptionCachePolicy,
   type SyncEntityPayload,
   type components,
-} from "../generated/api";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
-import type { LocalCollection, Row } from "./localCollection";
-import { subscriptionKey, type ResourceRef } from "./subscriptions/contracts";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities";
-import { cursorDocumentId } from "./subscriptions/cursors";
+} from "../generated/api.ts";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
+import type { LocalCollection, Row } from "./localCollection.ts";
+import {
+  subscriptionKey,
+  type ResourceRef,
+} from "./subscriptions/contracts.ts";
+import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities.ts";
+import { cursorDocumentId } from "./subscriptions/cursors.ts";
 import { parseEntityPayload } from "./entityContracts.ts";
-import { readTranscriptMeta } from "./transcriptMetadata";
+import { readTranscriptMeta } from "./transcriptMetadata.ts";
 
 /** Minimum delay between scheduled cache writes, in milliseconds. */
 export const SUBSCRIPTION_CACHE_WRITE_MS = 5_000;

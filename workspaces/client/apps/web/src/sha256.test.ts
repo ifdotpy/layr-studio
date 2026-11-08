@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash, webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { sha256Hex } from "./sha256";
+import { sha256Hex } from "./sha256.ts";
 
 const encode = (value: string) => new TextEncoder().encode(value);
 const vectors = [

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { codePointsExceed } from "./commands";
+import { codePointsExceed } from "./commands.ts";
 
 it("counts code points, not UTF-16 units, near the limit", () => {
   expect(codePointsExceed("abcd", 4)).toBe(false);

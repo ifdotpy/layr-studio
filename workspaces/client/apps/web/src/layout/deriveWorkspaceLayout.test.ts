@@ -3,8 +3,8 @@ import {
   deriveWorkspaceLayout,
   isCompactTools,
   resolveLayoutLength,
-} from "./deriveWorkspaceLayout";
-import { layoutQueries, layoutValues } from "./layout-contract.generated";
+} from "./deriveWorkspaceLayout.ts";
+import { layoutQueries, layoutValues } from "./layout-contract.generated.ts";
 
 const base = {
   host: { x: 0, y: 0, width: 1400, height: 800 },

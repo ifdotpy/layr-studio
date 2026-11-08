@@ -1,13 +1,13 @@
 import { observeGeneratedState } from "../../src/sync/generatedState.testHelper.ts";
 import { serializeStateCollections } from "../../src/generated/observableResources.ts";
-import { syncGet } from "../../src/api";
-import { createSyncClient } from "../../src/sync/client";
-import { createResourceEvents } from "../../src/sync/resourceEvents";
-import { createEntitySequenceScope } from "../../src/sync/entitySequence";
-import { createTranscriptCache } from "../../src/sync/transcriptCache";
-import { indexedDb } from "../../src/indexedDb";
-import { createTokenRateCache } from "../../src/usage/tokenRate";
-import { subscriptionKey } from "../../src/sync/subscriptions/contracts";
+import { syncGet } from "../../src/api.ts";
+import { createSyncClient } from "../../src/sync/client.ts";
+import { createResourceEvents } from "../../src/sync/resourceEvents.ts";
+import { createEntitySequenceScope } from "../../src/sync/entitySequence.ts";
+import { createTranscriptCache } from "../../src/sync/transcriptCache.ts";
+import { indexedDb } from "../../src/indexedDb.ts";
+import { createTokenRateCache } from "../../src/usage/tokenRate.ts";
+import { subscriptionKey } from "../../src/sync/subscriptions/contracts.ts";
 
 const workspaceId = "b".repeat(32);
 const ref = { kind: "state" } as const;

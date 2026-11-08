@@ -1,6 +1,6 @@
 import type { ServerServices } from "../../servers/serverServices.ts";
 import { sidebarCollectionView } from "../../servers/sidebarSnapshot.ts";
-import { createSidebarViewModel } from "../../components/sidebar/viewModel.ts";
+import { createSidebarViewModel } from "../../components/sidebar/support/viewModel.ts";
 import { makeAutoObservable, observableRef } from "mobx";
 import { layoutQueries } from "../../layout/layout-contract.generated.ts";
 import { createMergedSidebarSelector } from "../../servers/mergedSidebar.ts";

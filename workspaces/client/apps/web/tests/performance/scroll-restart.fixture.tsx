@@ -1,6 +1,7 @@
+import "../../src/rendererStyles.ts";
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
-import { useConversationScroll } from "../../src/components/useConversationScroll.ts";
+import { useConversationScroll } from "../../src/components/conversation/support/useConversationScroll.ts";
 export function mount() {
   createRoot(document.body).render(
     React.createElement(function Harness() {

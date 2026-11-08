@@ -1,7 +1,8 @@
 #!/usr/bin/env node
+import type {} from "./rendering-ux-ui.fixture.tsx";
 import type { GetResult } from "../../src/apiTypes.ts";
 // Isolated component browser checks. No server state or live model requests.
-import type {} from "./rendering-ux-ui.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { rm, mkdtemp } from "node:fs/promises";

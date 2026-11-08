@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { ownerFixture } from "./ownerFixture.ts";
 import type { SendMessageBody } from "../../commands.ts";
-import { required } from "../../components/componentTestFixtures.ts";
+import { required } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { MessageSendStatus } from "../../generated/api.ts";
 
 afterEach(() => vi.restoreAllMocks());

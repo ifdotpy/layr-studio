@@ -1,20 +1,20 @@
-import { errorText } from "../api";
+import { errorText } from "../api.ts";
 import {
   registerPreferenceRetry,
   setPreferenceWriteStatus,
-} from "./uiPreferenceStatus";
-import type { syncPost } from "../api";
+} from "./uiPreferenceStatus.ts";
+import type { syncPost } from "../api.ts";
 import {
   acknowledgePreferenceFields,
   readPreferenceFields,
   receivePreferenceFields,
   watchPreferenceWrites,
-} from "./uiPreferenceStore";
+} from "./uiPreferenceStore.ts";
 import {
   canonicalPreferenceJson,
   type PreferenceFields,
   type PreferenceScope,
-} from "./uiPreferenceMerge";
+} from "./uiPreferenceMerge.ts";
 import type { UiPreferenceProjection } from "./entityContracts.ts";
 
 /** Bridges projected preference rows to memory and gated API writes. */

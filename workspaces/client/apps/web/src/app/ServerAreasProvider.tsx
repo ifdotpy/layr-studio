@@ -1,11 +1,9 @@
-import { AppUi } from "../App.tsx";
+import { AppUi } from "../components/shell/App/App.tsx";
 import { SettingsUi } from "./settings/useAppSettings.ts";
 import { observable, observableRef, runInAction } from "mobx";
-import { useEffect, type ReactNode } from "react";
-
-import { createArea } from "../components/area.ts";
+import { createArea } from "./area.ts";
 import { resourceData } from "../store/runtime.ts";
-import { randomUUID } from "../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { focusSelectedComposer } from "../hooks/mobileViewport.ts";
 import { receiveSidebarRead } from "../servers/receiveSidebarRead.ts";
 import type { ServerCommand } from "../servers/navigation.ts";
@@ -16,7 +14,7 @@ import { NavigationOwner } from "./shell/NavigationOwner.ts";
 import { LayoutOwner } from "./shell/LayoutOwner.ts";
 import { SidebarOwner } from "./shell/SidebarOwner.ts";
 import { CreationOwner } from "./projects/CreationOwner.ts";
-import { createAccountsView } from "../components/Accounts.tsx";
+import { createAccountsView } from "../components/accounts/Accounts/Accounts.tsx";
 import { createUiPreferenceBridge } from "../sync/uiPreferenceBridge.ts";
 import { loadStudioPreferences } from "./settings/useAppPreferences.ts";
 import { DeliveryOwner } from "./conversation/DeliveryOwner.ts";
@@ -189,15 +187,8 @@ export class ServerAreas {
     );
   };
 }
+
 const [Provider, useServerAreas] = createArea<ServerAreas>("ServerAreas");
+export { Provider };
+
 export { useServerAreas, Provider as ServerAreasContextProvider };
-export function ServerAreasProvider({
-  areas,
-  children,
-}: {
-  areas: ServerAreas;
-  children: ReactNode;
-}) {
-  useEffect(() => areas.start(), [areas]);
-  return <Provider value={areas}>{children}</Provider>;
-}

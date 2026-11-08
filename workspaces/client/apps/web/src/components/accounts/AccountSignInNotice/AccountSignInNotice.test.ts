@@ -1,0 +1,55 @@
+import {
+  AccountStatus as GeneratedApiAccountStatus,
+  ProviderKind as GeneratedApiProviderKind,
+} from "../../../generated/api.ts";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { MantineProvider } from "@mantine/core";
+import { expect, test } from "vitest";
+import AccountSignInNotice from "./AccountSignInNotice.tsx";
+import ClaudeProfile from "../../shell/ClaudeProfile/ClaudeProfile.tsx";
+import type { Account } from "../support/Accounts.tsx";
+import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+
+const render = (element: ReturnType<typeof createElement>) =>
+  renderToStaticMarkup(
+    createElement(
+      observableFixture().Provider,
+      null,
+      createElement(MantineProvider, null, element),
+    ),
+  );
+const expected = { name: "Expected organization", idSuffix: "12345678" };
+const observed = { name: "Observed organization", idSuffix: "87654321" };
+const account: Account = {
+  id: "claude",
+  label: "Claude",
+  status: GeneratedApiAccountStatus.changed,
+  provider: GeneratedApiProviderKind.claude,
+  home: "/fixture",
+  source: "Fixture",
+  organization: expected,
+  organizationMismatch: { expected, observed },
+};
+test("organization mismatch keeps the existing sign-in action and profile pin", () => {
+  const html = render(
+    createElement(AccountSignInNotice, {
+      account,
+      errors: [],
+      onSignIn: () => {},
+    }),
+  );
+  expect(html).toContain(
+    "Signed in to a different organization: Observed organization (87654321). This profile requires Expected organization (12345678).",
+  );
+  expect(html).toContain("Sign in to Claude");
+  const profile = render(
+    createElement(ClaudeProfile, {
+      account,
+      onSaved: () => {},
+      expanded: true,
+    }),
+  );
+  expect(profile).toContain("Expected organization (12345678)");
+  expect(profile).not.toContain("Observed organization");
+});

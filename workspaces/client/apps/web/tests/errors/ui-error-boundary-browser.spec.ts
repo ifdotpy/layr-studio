@@ -1,5 +1,6 @@
-import { createServer } from "vite";
 import type {} from "./ui-error-boundary-browser.fixture.tsx";
+import { createServer } from "vite";
+
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

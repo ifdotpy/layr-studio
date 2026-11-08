@@ -1,19 +1,19 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { act, createElement, isValidElement, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { ScreenOwner, ScreenSelection } from "../startup/ScreenOwner.ts";
-import FilePreview from "../../components/FilePreview.tsx";
+import FilePreview from "../../components/conversation/FilePreview/FilePreview.tsx";
 import { MantineProvider } from "@mantine/core";
 import { ServerAreas } from "../ServerAreasProvider.tsx";
 import { createServerServices } from "../../servers/serverServices.ts";
-import { observableFixture } from "../../components/observableFixture.tsx";
-import ProjectDirectoryPicker from "../../components/ProjectDirectoryPicker.tsx";
-import ProjectServerCards from "../../components/ProjectServerCards.tsx";
-import ProjectFoldersDialog from "../../components/ProjectFoldersDialog.tsx";
+import { observableFixture } from "../../components/shell/integration-support/observableFixture.tsx";
+import ProjectDirectoryPicker from "../../components/projects/ProjectDirectoryPicker/ProjectDirectoryPicker.tsx";
+import ProjectServerCards from "../../components/projects/ProjectServerCards/ProjectServerCards.tsx";
+import ProjectFoldersDialog from "../../components/projects/ProjectFoldersDialog/ProjectFoldersDialog.tsx";
 import {
   fixtureGetResult,
   fixturePostResult,
@@ -21,10 +21,15 @@ import {
 import type { GetResult, PostResult } from "../../api.ts";
 
 const h = vi.hoisted(() => ({ area: undefined as ServerAreas | undefined }));
-vi.mock("../ServerAreasProvider.tsx", async (original) => ({
-  ...(await original<typeof import("../ServerAreasProvider.tsx")>()),
-  useServerAreas: () => h.area,
-}));
+vi.mock(
+  "../../components/shell/ServerAreasProvider/ServerAreasProvider.tsx",
+  async (original) => ({
+    ...(await original<
+      typeof import("../../components/shell/ServerAreasProvider/ServerAreasProvider.tsx")
+    >()),
+    useServerAreas: () => h.area,
+  }),
+);
 const cleanup: (() => void)[] = [];
 afterEach(() => {
   cleanup

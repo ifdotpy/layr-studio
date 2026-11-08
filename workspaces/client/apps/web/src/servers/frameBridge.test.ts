@@ -1,4 +1,4 @@
-import type { ComponentSnapshot as Snapshot } from "../components/componentTestFixtures.ts";
+import type { ComponentSnapshot as Snapshot } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
   createStateMirror,
   createRequestsMirror,
@@ -6,44 +6,44 @@ import {
   serializeStateCollections,
 } from "../generated/observableResources.ts";
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
-import { AgentSource } from "../generated/api";
-import { required } from "../components/componentTestFixtures.ts";
+import { AgentSource } from "../generated/api.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-import type { ServerNavigation, ServerAccount } from "./navigation";
-import { createScreenChannel, type ScreenChannel } from "./screenChannel";
+import type { ServerNavigation, ServerAccount } from "./navigation.ts";
+import { createScreenChannel, type ScreenChannel } from "./screenChannel.ts";
 
 const hooks = vi.hoisted(() => ({
   mirror: null as ReturnType<typeof createStateMirror> | null,
   screen: null as ScreenChannel | null,
 }));
-vi.mock("./environment", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./environment")>()),
+vi.mock("./environment.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./environment.ts")>()),
   serverViewId: "remote",
   serverParentOrigin: "https://parent.example",
   serverStorageName: (name: string) => `${name}:server:remote`,
 }));
-vi.mock("./transport", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./transport")>()),
+vi.mock("./transport.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./transport.ts")>()),
   apiOrigin: () => "https://remote.example",
 }));
 const stopConnection = vi.hoisted(() => vi.fn());
-vi.mock("../sync/subscriptions/events", () => ({
+vi.mock("../sync/subscriptions/events.ts", () => ({
   watchResourceConnection: () => stopConnection,
   watchResourceChanges: vi.fn(),
   replaceStream: vi.fn(),
   defaultSubscriptions: { watchResourceConnection: () => stopConnection },
 }));
 
-import * as api from "../api";
-import { startServerFrame } from "./frameBridge";
-import * as sidebarRpc from "./sidebarRpc";
-import { ApiError } from "../api";
-import { preferenceEvent } from "../sync/uiPreferenceMerge";
-import { writePreferenceEdit } from "../sync/uiPreferenceStore";
-import { defaultStudioPreferences } from "../studioPreferences";
-import { preferenceMemory } from "./storage";
+import * as api from "../api.ts";
+import { startServerFrame } from "./frameBridge.ts";
+import * as sidebarRpc from "./sidebarRpc.ts";
+import { ApiError } from "../api.ts";
+import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
+import { writePreferenceEdit } from "../sync/uiPreferenceStore.ts";
+import { defaultStudioPreferences } from "../studioPreferences.ts";
+import { preferenceMemory } from "./storage.ts";
 
 class TestStorageEvent extends Event {
   readonly key: string | null;

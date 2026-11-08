@@ -1,8 +1,12 @@
-import { randomUUID } from "../uuid";
-import type { NativeEvent } from "./host";
-import type { DesktopBridge } from "../desktop";
-import { hasNativeClient, listenNativeEvents, nativeRequest } from "./client";
-import { isNativeFrame } from "./frame";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import type { NativeEvent } from "./host.ts";
+import type { DesktopBridge } from "../desktop.ts";
+import {
+  hasNativeClient,
+  listenNativeEvents,
+  nativeRequest,
+} from "./client.ts";
+import { isNativeFrame } from "./frame.ts";
 
 type SpeechBridge = Pick<
   DesktopBridge,

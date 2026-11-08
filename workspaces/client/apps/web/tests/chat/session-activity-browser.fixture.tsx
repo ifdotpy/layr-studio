@@ -1,8 +1,9 @@
+import "../../src/rendererStyles.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import SessionActivity from "../../src/components/agents/SessionActivity.tsx";
-import type { SessionActivityItem } from "../../src/components/agents/SessionActivity.tsx";
+import SessionActivity from "../../src/components/agents/SessionActivity/SessionActivity.tsx";
+import type { SessionActivityItem } from "../../src/components/agents/SessionActivity/SessionActivity.tsx";
 declare global {
   interface Window {
     opened: SessionActivityItem[];

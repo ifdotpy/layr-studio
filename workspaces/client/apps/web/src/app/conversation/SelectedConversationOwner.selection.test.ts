@@ -1,4 +1,4 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
 import { autorun, runInAction } from "mobx";
@@ -11,8 +11,8 @@ import { MessageSendStatus, AgentSource } from "../../generated/api.ts";
 import {
   observableFixture,
   conversationActionsFixture,
-} from "../../components/observableFixture.tsx";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+} from "../../components/shell/integration-support/observableFixture.tsx";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { fixtureGetResult } from "../../../tests/misc-fixture.ts";
 const cleanups: (() => void)[] = [];
 afterEach(() => {

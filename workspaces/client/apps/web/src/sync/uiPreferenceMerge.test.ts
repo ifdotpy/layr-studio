@@ -6,7 +6,7 @@ import {
   type PreferenceFields,
   preferenceScope,
   storageFields,
-} from "./uiPreferenceMerge";
+} from "./uiPreferenceMerge.ts";
 describe("UI preference fields", () => {
   it("merges independent edits and rejects older versions", () => {
     const theme = { value: "dark", timestamp: 10, writer: "a" };

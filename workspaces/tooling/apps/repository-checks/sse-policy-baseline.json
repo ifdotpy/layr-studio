@@ -52,103 +52,103 @@
     "callee": "localStorage"
   },
   {
-    "file": "components/PromptNavigator.tsx",
+    "file": "components/conversation/PromptNavigator/PromptNavigator.tsx",
     "callee": "syncGet"
   },
   {
-    "file": "components/TerminalDock.tsx",
+    "file": "components/shell/TerminalDock/TerminalDock.tsx",
     "callee": "syncPost"
   },
   {
-    "file": "components/newChatSettings.ts",
+    "file": "app/projects/newChatSettings.ts",
     "callee": "serverCredentialAdapter().fetch"
   },
   {
-    "file": "components/removeSendingMessages.ts",
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/removeSendingMessages.ts",
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/removeSendingMessages.ts",
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/removeSendingMessages.ts",
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/removeSendingMessages.ts",
+    "file": "app/conversation/delivery/removeSendingMessages.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.getItem"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.removeItem"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.getItem"
   },
   {
-    "file": "components/resourceReadRecovery.test.ts",
+    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.getItem"
   },
   {
-    "file": "components/sidebar/FleetIndicator.spec.ts",
+    "file": "components/sidebar/support/FleetIndicator.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/FleetServerBadge.spec.ts",
+    "file": "components/sidebar/support/FleetServerBadge.spec.ts",
     "callee": "fetch"
   },
   {
-    "file": "components/sidebar/FleetServerBadge.spec.ts",
+    "file": "components/sidebar/support/FleetServerBadge.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/PhoneFleetHome.spec.ts",
+    "file": "components/sidebar/support/PhoneFleetHome.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/PhoneFleetHome.spec.ts",
+    "file": "components/sidebar/support/PhoneFleetHome.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/PhoneFleetHome.spec.ts",
+    "file": "components/sidebar/support/PhoneFleetHome.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/PhoneFleetHome.spec.ts",
+    "file": "components/sidebar/support/PhoneFleetHome.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/sidebar/SidebarFocus.spec.ts",
+    "file": "components/sidebar/support/SidebarFocus.spec.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/useMessageQueue.ts",
+    "file": "components/conversation/support/useMessageQueue.ts",
     "callee": "syncPost"
   },
   {
-    "file": "components/useSendingMessageRemoval.ts",
+    "file": "components/conversation/support/useSendingMessageRemoval.ts",
     "callee": "localStorage"
   },
   {
-    "file": "components/useSendingMessageRemoval.ts",
+    "file": "components/conversation/support/useSendingMessageRemoval.ts",
     "callee": "localStorage"
   },
   {

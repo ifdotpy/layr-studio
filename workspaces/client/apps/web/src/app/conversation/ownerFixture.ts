@@ -1,12 +1,12 @@
-import { setStartupFixture } from "../../components/observableFixture.tsx";
+import { setStartupFixture } from "../../components/shell/integration-support/observableFixture.tsx";
 import { CreationOwner } from "../projects/CreationOwner.ts";
 import { vi } from "vitest";
 import { AgentSource } from "../../generated/api.ts";
 import {
   observableFixture,
   conversationActionsFixture,
-} from "../../components/observableFixture.tsx";
-import { componentSnapshot as snapshotFixture } from "../../components/componentTestFixtures.ts";
+} from "../../components/shell/integration-support/observableFixture.tsx";
+import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { createDrafts } from "../../sync/drafts.ts";
 
 export function ownerFixture() {

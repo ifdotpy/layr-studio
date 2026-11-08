@@ -2,7 +2,7 @@ import { expect, it, vi } from "vitest";
 import {
   readPairedServerReferences,
   writePairedServerReferences,
-} from "./browserPersistence";
+} from "./browserPersistence.ts";
 
 it("has no paired servers when browser storage is unavailable", () => {
   vi.stubGlobal("localStorage", undefined);

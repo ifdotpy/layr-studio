@@ -1,24 +1,25 @@
+import "../../src/rendererStyles.ts";
 import type { ReadStateOwner } from "../../src/app/conversation/ReadStateOwner.ts";
 import { autorun } from "mobx";
-import { componentSnapshot as snapshotFixture } from "../../src/components/componentTestFixtures.ts";
+import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { observable, runInAction } from "mobx";
 import { observer } from "mobx-react-lite";
-import { conversationActionsFixture } from "../../src/components/observableFixture.tsx";
+import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
-import { createServerStore } from "../../src/store/index.ts";
-import { ServerStoreProvider } from "../../src/servers/ServerServicesContext.tsx";
+import { createServerStore } from "../../src/store/server.ts";
+import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import * as api from "../../src/api.ts";
 import { defaultSyncClient } from "../../src/sync/client.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { useState, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { useVisibleChatResult } from "../../src/components/useChatReadState.ts";
+import { useVisibleChatResult } from "../../src/components/conversation/support/useChatReadState.ts";
 import type { Agent, Message } from "../../src/types.ts";
 import type {
   ChatReadState,
   ChatReadProof,
-} from "../../src/components/useChatReadState.ts";
+} from "../../src/components/conversation/support/useChatReadState.ts";
 import {
   initialAgent as initial,
   readWrite,
@@ -271,4 +272,4 @@ appRoot.render(
   </ServerStoreProvider>,
 );
 
-import { setStartupFixture } from "../../src/components/observableFixture.tsx";
+import { setStartupFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";

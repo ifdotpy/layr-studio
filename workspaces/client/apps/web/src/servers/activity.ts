@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { serverViewId, serverParentOrigin } from "./environment";
+import { serverViewId, serverParentOrigin } from "./environment.ts";
 export function createServerActivity(changed?: (busy: boolean) => void) {
   const active = new Set<symbol>();
   const listeners = new Set<() => void>();

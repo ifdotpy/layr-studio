@@ -1,5 +1,6 @@
-import type { AddressInfo } from "node:net";
 import type {} from "./completed-markdown-cache-browser.fixture.tsx";
+import type { AddressInfo } from "node:net";
+
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { test, expect, createFixtureViteServer } from "../playwright.ts";

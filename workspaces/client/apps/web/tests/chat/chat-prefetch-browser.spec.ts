@@ -1,3 +1,4 @@
+import type {} from "./chat-prefetch-browser.fixture.ts";
 import type {
   LegacyPullFixture,
   LegacyIdentityFixture,
@@ -6,7 +7,7 @@ import { fixtureOrigin } from "./browser.ts";
 import type { ServerResponse } from "node:http";
 import { SYNC_PROTOCOL_VERSION } from "../../src/generated/api.ts";
 import type { components } from "../../src/generated/api.ts";
-import type {} from "./chat-prefetch-browser.fixture.ts";
+
 import {
   apiSchemaHandshakeSse,
   createFixtureViteServer,

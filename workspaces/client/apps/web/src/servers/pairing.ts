@@ -1,10 +1,13 @@
-import { randomUUID } from "../uuid";
-import { serveOrigin, type StudioServer } from "./registry";
-import { identityProofMessage, multiServerSigningBytes } from "../wasm/client";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { serveOrigin, type StudioServer } from "./registry.ts";
+import {
+  identityProofMessage,
+  multiServerSigningBytes,
+} from "../wasm/client.ts";
 import {
   ACCESS_PROTOCOL_VERSION,
   IDENTITY_PROOF_NONCE_BYTES,
-} from "../generated/multiServerProtocol";
+} from "../generated/multiServerProtocol.ts";
 export class PairingNotAppliedError extends Error {
   constructor() {
     super(

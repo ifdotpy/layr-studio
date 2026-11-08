@@ -1,12 +1,13 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
-import { required } from "../../src/components/componentTestFixtures.ts";
+import type {} from "./radio-create-browser.fixture.tsx";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import { required } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { components } from "../../src/generated/api.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import type { PostBody } from "../../src/api.ts";
 
 import { fixturePostBody } from "../misc-fixture.ts";
 import { fixtureOrigin } from "../misc-fixture.ts";
-import type {} from "./radio-create-browser.fixture.tsx";
+
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";

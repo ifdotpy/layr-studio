@@ -1,8 +1,8 @@
-import { ProviderKind } from "../generated/providerKind";
+import { ProviderKind } from "../generated/providerKind.ts";
 import { expect, it } from "vitest";
-import type { ServerAccount } from "./navigation";
-import type { StudioServer } from "./registry";
-import { rowServers, serverAccountRows } from "./serverAccountRows";
+import type { ServerAccount } from "./navigation.ts";
+import type { StudioServer } from "./registry.ts";
+import { rowServers, serverAccountRows } from "./serverAccountRows.ts";
 
 const server = (id: string, label: string) =>
   ({ id, label, origin: `https://${id}.example` }) as StudioServer;

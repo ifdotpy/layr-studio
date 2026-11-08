@@ -1,10 +1,11 @@
+import type {} from "./session-poll.fixture.tsx";
 import type { AddressInfo } from "node:net";
 import type {
   SyncPullResponse,
   SyncEntity,
   SessionResponse,
 } from "../playwright.ts";
-import type {} from "./session-poll.fixture.tsx";
+
 import type { ServerResponse } from "node:http";
 import { assert } from "./assertions.ts";
 import {

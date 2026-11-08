@@ -14,9 +14,9 @@ It already supports worker completion wakes, command monitors, agent rooms, comp
 Local evidence:
 
 - [Managed tools](../workspaces/runtime/packages/runtime-services/src/managed_host_tools.rs): `ManagedHostTool` and `spawn`. [Busy-turn delivery](../workspaces/runtime/packages/runtime-services/src/account_worker/steer.rs): `claim` and the `turn/steer` request.
-- [Conversation](../workspaces/client/apps/web/src/components/Conversation.tsx): text composer, pending messages, copy, and approval controls.
-- [Sidebar](../workspaces/client/apps/web/src/components/Sidebar.tsx): search over names and recent previews, without full transcript search or archive.
-- [Task panel](../workspaces/client/apps/web/src/components/shell/BackgroundTasks.tsx): process and tool history, monitor approval and cancellation.
+- [Conversation](../workspaces/client/apps/web/src/components/conversation/ObservedConversation/ObservedConversation.tsx): text composer, pending messages, copy, and approval controls.
+- [Sidebar](../workspaces/client/apps/web/src/components/sidebar/Sidebar/Sidebar.tsx): search over names and recent previews, without full transcript search or archive.
+- [Task panel](../workspaces/client/apps/web/src/components/shell/tasks/BackgroundTasks/BackgroundTasks.tsx): process and tool history, monitor approval and cancellation.
 - Resource board (removed after the baseline): command-line resource claims, renewal, release, and wait queues at the baseline.
 - [Native tool evidence](ui-and-tools.md#tool-evidence): tool parity and prior live inventory. Configuration controls actual availability.
 

@@ -1,3 +1,4 @@
+import type {} from "./chat-read-client-browser.fixture.tsx";
 import { initialAgent, fixtureReadState } from "./chat-read-state.fixture.ts";
 import type { EntityFixtureState } from "../playwright.ts";
 import type { Connect } from "vite";
@@ -5,7 +6,7 @@ import { fixtureOrigin, trackBrowserContexts } from "./browser.ts";
 import { handleEntitySyncFixtureRequest, test } from "../playwright.ts";
 import assert from "node:assert/strict";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
-import type {} from "./chat-read-client-browser.fixture.tsx";
+
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

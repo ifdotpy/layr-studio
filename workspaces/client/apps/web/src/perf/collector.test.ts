@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import { createServerServices } from "../servers/serverServices";
+import { createServerServices } from "../servers/serverServices.ts";
 import {
   collector,
   createCollector,
   startPerformanceReporting,
-} from "./collector";
+} from "./collector.ts";
 
 describe("performance reporting windows", () => {
   it("aggregates by event and component and resets after a report", () => {

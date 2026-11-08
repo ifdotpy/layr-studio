@@ -1,13 +1,13 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   nativeRequest: vi.fn(),
   listenNativeEvents: vi.fn(),
   hasNativeClient: () => true,
 }));
-vi.mock("./frame", () => ({ isNativeFrame: () => false }));
-import { nativeRequest, listenNativeEvents } from "./client";
-import { createServerAudio } from "./serverAudio";
+vi.mock("./frame.ts", () => ({ isNativeFrame: () => false }));
+import { nativeRequest, listenNativeEvents } from "./client.ts";
+import { createServerAudio } from "./serverAudio.ts";
 
 afterEach(() => {
   vi.resetAllMocks();

@@ -1,4 +1,4 @@
-import { required } from "./components/componentTestFixtures.ts";
+import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type {
   Audit,
   AuditItem,

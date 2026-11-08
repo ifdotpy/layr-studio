@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import type { Agent } from "../../src/types.ts";
 export type ContextRepairAgent = Omit<Agent, "capacityRetry"> & {
   capacityRetry?: Omit<NonNullable<Agent["capacityRetry"]>, "updatedAt"> | null;
@@ -17,7 +18,7 @@ import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
-import { NativeError } from "../../src/components/NativeNotice.tsx";
+import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
 function Fixture() {
   const [snapshot, setSnapshot] = useState<ContextRepairSnapshot | null>(null);
   window.applyContextRepairSnapshot = setSnapshot;

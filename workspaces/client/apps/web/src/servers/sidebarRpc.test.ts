@@ -1,11 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
 const post = vi.hoisted(() => vi.fn());
-vi.mock("../api", async (original) => ({
-  ...(await original<typeof import("../api")>()),
+vi.mock("../api.ts", async (original) => ({
+  ...(await original<typeof import("../api.ts")>()),
   post,
 }));
-import { executeSidebarRequest } from "./sidebarRpc";
-import { navigationSnapshot } from "./navigation";
+import { executeSidebarRequest } from "./sidebarRpc.ts";
+import { navigationSnapshot } from "./navigation.ts";
 
 afterEach(() => {
   post.mockReset();

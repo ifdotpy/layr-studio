@@ -1,10 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
-vi.mock("./client", () => ({
+vi.mock("./client.ts", () => ({
   nativeRequest: vi.fn(),
   hasNativeClient: () => true,
 }));
-import { nativeRequest } from "./client";
-import { NativeServerCredentials } from "./serverCredentials";
+import { nativeRequest } from "./client.ts";
+import { NativeServerCredentials } from "./serverCredentials.ts";
 const server = {
   id: "remote",
   label: "Remote",
@@ -77,9 +77,10 @@ it("does not retry an uncertain server write", async () => {
   expect(nativeRequest).toHaveBeenCalledOnce();
 });
 it("releases every rejected summary response before the next poll", async () => {
-  const { setServerCredentialAdapter } = await import("../servers/transport");
+  const { setServerCredentialAdapter } =
+    await import("../servers/transport.ts");
   const { fetchServerSummary, SchemaMismatchError } =
-    await import("../servers/summary");
+    await import("../servers/summary.ts");
   vi.stubGlobal("window", {});
   const open = new Set<string>();
   let next = 0;

@@ -1,4 +1,4 @@
-import { required } from "../../src/components/componentTestFixtures.ts";
+import { required } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
   test,
   expect,

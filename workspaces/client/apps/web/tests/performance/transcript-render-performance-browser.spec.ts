@@ -1,5 +1,6 @@
-import { fixtureOrigin } from "./performance-fixture.ts";
 import type {} from "./transcript-render-performance.fixture.tsx";
+import { fixtureOrigin } from "./performance-fixture.ts";
+
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { mkdtemp, rm } from "node:fs/promises";

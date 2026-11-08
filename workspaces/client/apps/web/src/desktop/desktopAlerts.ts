@@ -1,9 +1,9 @@
-import { AgentStatus } from "../generated/api";
-import { approvalCreated, needsAnswer } from "../approvals";
+import { AgentStatus } from "../generated/api.ts";
+import { approvalCreated, needsAnswer } from "../approvals.ts";
 import {
   SIGN_IN_ALERT_GRACE_SECONDS,
   SIGN_IN_REMINDER_SECONDS,
-} from "../generated/sharedValues";
+} from "../generated/sharedValues.ts";
 import type { DeepReadonly } from "../deepReadonly.ts";
 import type { Approval } from "../approvals.ts";
 import {
@@ -32,7 +32,7 @@ export type DesktopAlert = {
 export {
   SIGN_IN_ALERT_GRACE_SECONDS,
   SIGN_IN_REMINDER_SECONDS,
-} from "../generated/sharedValues";
+} from "../generated/sharedValues.ts";
 
 type SignInTimes = { host: string; alertAt: number; reminderAt: number | null };
 

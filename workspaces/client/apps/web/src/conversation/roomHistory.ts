@@ -13,16 +13,19 @@ import {
   type RoomData,
   type ChatRead,
   type MessageRecord,
-} from "../generated/observableResources";
-import { useServerApi, useServerStore } from "../servers/ServerServicesContext";
-import { resourceData, type ResourceSlot } from "../store/runtime";
+} from "../generated/observableResources.ts";
+import {
+  useServerApi,
+  useServerStore,
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { resourceData, type ResourceSlot } from "../store/runtime.ts";
 import {
   boundTranscriptItems,
   trimTranscriptPageCache,
   MAX_TRANSCRIPT_PAGE_BYTES,
-} from "../transcriptPageBounds";
-import { errorText } from "../api";
-import type { Message } from "../types";
+} from "../transcriptPageBounds.ts";
+import { errorText } from "../api.ts";
+import type { Message } from "../types.ts";
 
 type ChatMessage = NonNullable<ChatRead["messages"]>[number];
 type CaptureAnchor = () => { id: string | null; endId: string | null };

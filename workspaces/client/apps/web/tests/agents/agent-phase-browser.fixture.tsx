@@ -1,14 +1,15 @@
-import { useServerStore } from "../../src/servers/ServerServicesContext";
-import { agentId } from "../../src/generated/observableResources";
-import { resourceData } from "../../src/store/runtime";
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import "../../src/rendererStyles.ts";
+import { useServerStore } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { agentId } from "../../src/generated/observableResources.ts";
+import { resourceData } from "../../src/store/runtime.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { observer } from "mobx-react-lite";
 import { useConversationHistory } from "../../src/conversation/historyFixture.ts";
-import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
-import { ServerServicesProvider } from "../../src/servers/ServerServicesContext.tsx";
+import AgentPhase from "../../src/components/agents/AgentPhase/AgentPhase.tsx";
+import { ServerServicesProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { ServerServices } from "../../src/servers/serverServices.ts";
 import { createSubscriptions } from "../../src/sync/subscriptions/module.ts";
 import { createResourceEvents } from "../../src/sync/resourceEvents.ts";
@@ -269,7 +270,7 @@ window.phase = (id, phase) => {
 };
 function liveAgentView(
   agent: Pick<Agent, "id" | "source" | "nativeStatus"> &
-    import("../../src/deepReadonly").DeepReadonly<
+    import("../../src/deepReadonly.ts").DeepReadonly<
       NonNullable<Transcript["agent"]>
     >,
 ): Agent {

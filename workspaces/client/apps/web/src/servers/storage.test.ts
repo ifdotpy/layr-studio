@@ -1,11 +1,11 @@
-import { createChatCreationStore } from "../chatCreation";
-import { createLocalDraftStorage } from "../sync/localDraft";
+import { createChatCreationStore } from "../chatCreation.ts";
+import { createLocalDraftStorage } from "../sync/localDraft.ts";
 import { expect, it } from "vitest";
 import {
   scopedStorage,
   serverStoragePrefix,
   createStorageEventKey,
-} from "./storage";
+} from "./storage.ts";
 function memoryStorage(): Storage {
   const rows = new Map<string, string>();
   return {

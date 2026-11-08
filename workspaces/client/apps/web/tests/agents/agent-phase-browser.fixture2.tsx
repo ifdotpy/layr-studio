@@ -1,11 +1,11 @@
-import type { ComponentSnapshot as Snapshot } from "../../src/components/componentTestFixtures.ts";
-import { observableFixture } from "../../src/components/observableFixture.tsx";
+import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { flushSync } from "react-dom";
-import AgentPhase from "../../src/components/agents/AgentPhase.tsx";
-import ChatStatus from "../../src/components/agents/ChatStatus.tsx";
+import AgentPhase from "../../src/components/agents/AgentPhase/AgentPhase.tsx";
+import ChatStatus from "../../src/components/agents/ChatStatus/ChatStatus.tsx";
 import type { components } from "../../src/generated/api.ts";
 import type { Agent, BackgroundTask, Monitor } from "../../src/types.ts";
 import { simpleRequest } from "../../src/approvalFixtures.ts";

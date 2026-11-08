@@ -4,10 +4,10 @@ import { taskId } from "../../generated/observableResources.ts";
 import { createSubscriptions } from "./module.ts";
 import type { ResourceVersion } from "./contracts.ts";
 import { expect, it, vi } from "vitest";
-import { createEntityDataObserver } from "./entityData";
-import type { createSyncClient } from "../client";
-import type { ObserveSubscriptionData } from "./module";
-vi.mock("../client", () => ({ syncDatabase: vi.fn() }));
+import { createEntityDataObserver } from "./entityData.ts";
+import type { createSyncClient } from "../client.ts";
+import type { ObserveSubscriptionData } from "./module.ts";
+vi.mock("../client.ts", () => ({ syncDatabase: vi.fn() }));
 
 // Published cache rows are shared between observers. Consumers must copy before editing.
 function publicationTypeWitness(observe: ObserveSubscriptionData) {

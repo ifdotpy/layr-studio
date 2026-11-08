@@ -1,9 +1,9 @@
 import { MessageSendStatus } from "../generated/api.ts";
 import { afterEach, expect, it, vi } from "vitest";
-import { createCommandClient } from "../commands";
-import { createOutbox, matchesMessageDelivery } from "./send";
+import { createCommandClient } from "../commands.ts";
+import { createOutbox, matchesMessageDelivery } from "./send.ts";
 import type { StoredSend } from "../unsent/store.ts";
-import { componentAttachment } from "../components/componentTestFixtures.ts";
+import { componentAttachment } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { DeliveryMoment } from "../generated/deliveryMoment.ts";
 
 class MemoryStorage implements Storage {
@@ -305,7 +305,7 @@ it("removes a pending request when the stream confirms the matching workspace an
 });
 
 it("removes a definitive rejection from the buffer", async () => {
-  const { ApiError } = await import("../api");
+  const { ApiError } = await import("../api.ts");
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi
@@ -486,7 +486,7 @@ it("coalesces a reconnect with a send whose persistence callback is still runnin
 });
 
 it("keeps a remote outcome-unknown error uncertain instead of treating it as a refusal", async () => {
-  const { ApiError } = await import("../api");
+  const { ApiError } = await import("../api.ts");
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi

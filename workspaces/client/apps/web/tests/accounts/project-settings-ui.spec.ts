@@ -1,7 +1,7 @@
+import type {} from "@playwright/test";
 import type { Account } from "./fixture-helpers.ts";
 import type { Project } from "../../src/types.ts";
 
-import type {} from "@playwright/test";
 import {
   fixtureAccount,
   fixtureLead,

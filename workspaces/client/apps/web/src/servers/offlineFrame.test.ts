@@ -1,4 +1,4 @@
-import { required } from "../components/componentTestFixtures.ts";
+import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import assert from "node:assert/strict";
 /// <reference lib="webworker" />
 import { expect, test } from "vitest";

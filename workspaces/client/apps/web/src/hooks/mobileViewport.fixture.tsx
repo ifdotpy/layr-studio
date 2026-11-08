@@ -1,3 +1,4 @@
+import "../rendererStyles.ts";
 const fixtureRoot = document.getElementById("root");
 if (!fixtureRoot) throw new Error("Missing fixture root");
 

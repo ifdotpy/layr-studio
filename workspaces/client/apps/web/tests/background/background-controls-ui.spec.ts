@@ -1,5 +1,5 @@
 import { captureActivity } from "./builtActivityFixture";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture";
+import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { backgroundDisplay } from "../fixtures/background.ts";
 import { required } from "../teams/helpers.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";

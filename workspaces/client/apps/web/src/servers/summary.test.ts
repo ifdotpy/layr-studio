@@ -1,12 +1,12 @@
 import { expect, it } from "vitest";
 import type { CredentialResult } from "../../../desktop/api.ts";
-import { API_SCHEMA_HASH } from "../generated/apiSchema";
+import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 import {
   fetchServerSummary,
   isSummaryRequest,
   SchemaMismatchError,
   summaryFailure,
-} from "./summary";
+} from "./summary.ts";
 const server = {
   id: "remote",
   label: "Remote",

@@ -1,5 +1,5 @@
 import type { ServerAreas } from "../app/contracts.ts";
-import { frameAccounts } from "../components/Accounts.tsx";
+import { frameAccounts } from "../components/accounts/Accounts/Accounts.tsx";
 import { reaction } from "mobx";
 import {
   formatAgentStatus,
@@ -23,7 +23,7 @@ import {
 } from "./navigation.ts";
 import { resourceData } from "../store/runtime.ts";
 import { sidebarEntities } from "./sidebarSnapshot.ts";
-import { createSidebarViewModel } from "../components/sidebar/viewModel.ts";
+import { createSidebarViewModel } from "../components/sidebar/support/viewModel.ts";
 import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
 import { preferenceMemory, serverStorageEventKey } from "./storage.ts";
 import type { AppScope, Disposer } from "../app/contracts.ts";
@@ -286,7 +286,7 @@ export function startServerFrame(
 
 import { startDesktopNotifications } from "../hooks/desktopNotifications.ts";
 import { onDesktopNavigate } from "../native/notifications.ts";
-import { randomUUID } from "../uuid.ts";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { parseSidebarShortcut } from "../studioPreferences.ts";
 
 export function publishFrame(

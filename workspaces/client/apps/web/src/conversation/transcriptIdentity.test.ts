@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { createTranscriptMirror } from "../generated/observableResources";
-import { createMessageViews } from "./messageView";
+import { createTranscriptMirror } from "../generated/observableResources.ts";
+import { createMessageViews } from "./messageView.ts";
 
 it("generated transcript references preserve native order, nested changes, omission and removal", () => {
   const initial = {

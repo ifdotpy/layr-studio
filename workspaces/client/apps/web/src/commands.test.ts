@@ -6,8 +6,8 @@ import {
   nextCommandNumber,
   type CommandRequest,
   type CommandResponse,
-} from "./commands";
-import { createPendingCommands } from "./pendingCommands";
+} from "./commands.ts";
+import { createPendingCommands } from "./pendingCommands.ts";
 
 function memoryStorage(): Storage {
   const values = new Map<string, string>();

@@ -1,5 +1,5 @@
-import { readPreferenceFields } from "../sync/uiPreferenceStore";
-import type { StudioServer } from "./registry";
+import { readPreferenceFields } from "../sync/uiPreferenceStore.ts";
+import type { StudioServer } from "./registry.ts";
 
 export function preferenceServerIdentity(server: StudioServer): string {
   return server.workspaceId || server.id;

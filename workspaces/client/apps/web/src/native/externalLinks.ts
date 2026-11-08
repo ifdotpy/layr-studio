@@ -1,5 +1,5 @@
-import { nativeRequest } from "./client";
-import { nativeSignInMethods } from "./signInProtocol";
+import { nativeRequest } from "./client.ts";
+import { nativeSignInMethods } from "./signInProtocol.ts";
 
 export async function openNativeLink(
   value: string,

@@ -1,5 +1,5 @@
-import type { ResourceChangeEvent } from "./subscriptions/events";
-import { subscriptionKey } from "./subscriptions/contracts";
+import type { ResourceChangeEvent } from "./subscriptions/events.ts";
+import { subscriptionKey } from "./subscriptions/contracts.ts";
 
 // Frames waiting for persistence. Accommodates four full 256-resource subscription
 // bursts; the write deadline catches stuck storage before ordinary traffic fills it.

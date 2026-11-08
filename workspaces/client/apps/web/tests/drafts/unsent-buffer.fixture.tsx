@@ -1,3 +1,4 @@
+import "../../src/rendererStyles.ts";
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createDirectDrafts } from "../../src/sync/directDrafts.ts";

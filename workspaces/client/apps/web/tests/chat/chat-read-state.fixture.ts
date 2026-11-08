@@ -1,5 +1,5 @@
 import type { AgentEntityDto as Agent } from "../../src/generated/api.ts";
-import type { ChatReadState } from "../../src/components/useChatReadState.ts";
+import type { ChatReadState } from "../../src/components/conversation/support/useChatReadState.ts";
 import type { PostBody } from "../../src/apiTypes.ts";
 export type ReadWrite = PostBody<"/api/organization"> & {
   read_state: NonNullable<PostBody<"/api/organization">["read_state"]>;

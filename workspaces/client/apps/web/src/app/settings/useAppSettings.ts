@@ -1,9 +1,7 @@
 import { makeAutoObservable } from "mobx";
 import type { ServerSettings } from "../../servers/ServerSettingsContext.tsx";
-import {
-  isStudioSettingsTab,
-  type StudioSettingsTab,
-} from "../../components/StudioSettingsTabs.tsx";
+import { isStudioSettingsTab } from "../../components/settings/StudioSettingsTabs/StudioSettingsTabs.tsx";
+import type { StudioSettingsTab } from "../../components/settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
 import type { AppScope } from "../contracts.ts";
 import type { ServerCommand } from "../../servers/navigation.ts";
 

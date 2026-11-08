@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { defaultServerAlias, validateServerAlias } from "./serverAliases";
-import { readServers, SERVER_REGISTRY_KEY } from "./registry";
+import { defaultServerAlias, validateServerAlias } from "./serverAliases.ts";
+import { readServers, SERVER_REGISTRY_KEY } from "./registry.ts";
 
 it("uses the local default and derives general aliases from the host", () => {
   const row = (
