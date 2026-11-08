@@ -11,6 +11,7 @@ import { theme } from "../../theme";
 
 type InputStatePatch = {
   text?: string;
+  reset?: boolean;
   canSend?: boolean;
   tooLong?: boolean;
 };
@@ -21,8 +22,9 @@ declare global {
   }
 }
 
-function IsolatedInputHarness() {
+function IsolatedInputHarness({ mobile }: { mobile: boolean }) {
   const [value, setValue] = useState("");
+  const [draftResetVersion, setDraftResetVersion] = useState(0);
   const [canSend, setCanSend] = useState(true);
   const [tooLong, setTooLong] = useState(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -34,6 +36,7 @@ function IsolatedInputHarness() {
   });
   testWindow.setInputState = (patch: InputStatePatch) => {
     if (patch.text !== undefined) setValue(patch.text);
+    if (patch.reset) setDraftResetVersion((version) => version + 1);
     if (patch.canSend !== undefined) setCanSend(patch.canSend);
     if (patch.tooLong !== undefined) setTooLong(patch.tooLong);
   };
@@ -41,11 +44,12 @@ function IsolatedInputHarness() {
     <MantineProvider>
       <PromptInput
         value={value}
+        draftResetVersion={draftResetVersion}
         session="isolated-test"
         getDraft={() => value}
         setDraft={setValue}
         input={input}
-        mobile={false}
+        mobile={mobile}
         managed
         canSend={canSend}
         blocked={false}
@@ -75,8 +79,10 @@ function IsolatedInputHarness() {
   );
 }
 
-export function mount() {
-  createRoot(document.getElementById("root")!).render(<IsolatedInputHarness />);
+export function mount(mobile = false) {
+  createRoot(document.getElementById("root")!).render(
+    <IsolatedInputHarness mobile={mobile} />,
+  );
 }
 
 export function mountControls() {

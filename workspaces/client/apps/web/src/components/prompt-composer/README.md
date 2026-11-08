@@ -1,7 +1,7 @@
 # Prompt composer
 
 `PromptComposer.tsx` owns the form subtree and subscribes to the active chat's
-draft. `PromptInput.tsx` owns the controlled textarea, autocomplete, keyboard
+draft. `PromptInput.tsx` owns the native textarea, autocomplete, keyboard
 handling, and caret-sensitive skill insertion. The draft hook in
 [`../../sync/drafts.ts`](../../sync/drafts.ts) owns draft persistence and
 conflict handling. Send reads the current draft by chat ID so an immediate
@@ -12,7 +12,17 @@ programmatic draft changes and width changes. CSS owns its minimum and maximum
 height; long drafts scroll inside the textarea. Live text is subscribed to by
 the transcript subtree so token deltas do not render the composer. Attachments,
 dictation, recall, skill completion, caret placement, Enter, Tab, Shift+Enter,
-and IME composition retain their input paths.
+and IME composition retain their input paths. Native edits publish the draft
+without feeding it back through React's textarea value/defaultValue updates,
+which mutate the backing text during composition. External draft changes write
+the live value only when it differs and composition is inactive. During
+composition an external draft is deferred until composition ends. A later
+native edit drops that pending value and publishes the newer text, as ordinary
+typing does. Only an explicit applied send reset takes precedence over later
+composition input: `DeliveryOwner.draftResetVersions` owns its per-chat sequence.
+The delivery owner still clears only a draft matching the captured send.
+Conflict selection stays in `sync/drafts.ts`. Autocomplete never
+changes focus or selection in a frame while composition is active.
 
 Draft edits update the screen immediately, are written to the unsent input
 buffer at once, and are sent by POST after the typing wait in

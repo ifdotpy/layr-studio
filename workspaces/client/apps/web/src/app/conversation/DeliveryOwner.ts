@@ -36,6 +36,8 @@ export class DeliveryOwner {
   entries: OutgoingMessage[] = [];
   outboxError = "";
   observedSends = new Set<string>();
+  // Per-chat sequence of applied send resets; the composer defers these through IME composition.
+  draftResetVersions = observable.map<string, number>();
   sendingLock: symbol | null = null;
   latestSend: Record<string, symbol> = {};
   sends: Record<string, SendMessageBody> = {};
@@ -176,6 +178,12 @@ export class DeliveryOwner {
       [session]: value,
     }));
   }
+  recordDraftReset(session: string) {
+    this.draftResetVersions.set(
+      session,
+      (this.draftResetVersions.get(session) ?? 0) + 1,
+    );
+  }
   showOutgoing(entry: OutgoingMessage) {
     this.outgoing.set(entry.id, entry);
   }
@@ -253,6 +261,21 @@ export class DeliveryOwner {
       const id = target;
       if (!id) return;
       this.latestSend[id] = attempt;
+      const clearCapturedDraft = (
+        matches: (value: string | undefined) => boolean,
+      ) => {
+        const cleared = new Set<string>();
+        setDrafts((old) => {
+          const next = { ...old };
+          for (const key of new Set([draftKey, id])) {
+            if (!matches(next[key])) continue;
+            delete next[key];
+            cleared.add(key);
+          }
+          return next;
+        });
+        cleared.forEach(this.recordDraftReset);
+      };
       if (
         !fileSend &&
         agent?.source === GeneratedApiAgentSource.managed &&
@@ -315,12 +338,7 @@ export class DeliveryOwner {
           entry.attachments,
           async () => {
             // Keep the draft until the request is saved.
-            setDrafts((old) => {
-              const next = { ...old };
-              if (next[draftKey] === draft) delete next[draftKey];
-              if (next[id] === draft) delete next[id];
-              return next;
-            });
+            clearCapturedDraft((value) => value === draft);
             // The saved command owns this message. A new user submission,
             // including identical text, gets its own identity.
             if (this.sends[id]?.id === entry.id) {
@@ -357,13 +375,7 @@ export class DeliveryOwner {
         )
           notify("Message saved. Some deliveries are not confirmed.");
       }
-      if (!request)
-        setDrafts((old) => {
-          const next = { ...old };
-          if (next[draftKey]?.trim() === text) delete next[draftKey];
-          if (next[id]?.trim() === text) delete next[id];
-          return next;
-        });
+      if (!request) clearCapturedDraft((value) => value?.trim() === text);
       void refresh().catch((error) => notify(errorText(error)));
     } catch (e) {
       if (request) {

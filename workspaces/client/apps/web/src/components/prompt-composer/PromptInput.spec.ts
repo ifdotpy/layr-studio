@@ -8,6 +8,16 @@ import { createServer } from "vite";
 import type { ViteDevServer } from "vite";
 import { expect, test } from "../../../tests/playwright.ts";
 
+declare global {
+  interface Window {
+    imeWitness?: {
+      input: HTMLTextAreaElement;
+      writes: string[];
+      compositionEnds: number;
+    };
+  }
+}
+
 let cacheDir: string;
 let server: ViteDevServer;
 
@@ -24,6 +34,7 @@ test.beforeAll(async () => {
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
         "react-dom/client",
+        "react-dom",
         "@mantine/core",
       ],
     },
@@ -303,3 +314,209 @@ test("touch inputs keep the focus zoom font floor across layout widths", async (
     }
   }
 });
+
+for (const mobile of [true, false])
+  for (const [external, laterNative, reset] of [
+    ["Incoming draft during composition", false, false],
+    ["Incoming draft during composition", true, false],
+    ["Restored draft", false, false],
+    ["Restored draft", true, false],
+    ["", true, false],
+    ["", false, true],
+    ["", true, true],
+  ] as const)
+    test(`composition orders edits for ${JSON.stringify(external)} (mobile=${mobile}, laterNative=${laterNative}, reset=${reset})`, async ({
+      browser,
+    }) => {
+      const page = await browser.newPage({
+        viewport: { width: 390, height: 844 },
+        isMobile: true,
+        hasTouch: true,
+      });
+      try {
+        await page.route("**/prompt-input-ime", (route) =>
+          route.fulfill({
+            contentType: "text/html",
+            body: '<!doctype html><meta name="viewport" content="width=device-width, initial-scale=1"><form id="composer"><div id="root"></div></form>',
+          }),
+        );
+        await page.goto(`${fixtureOrigin(server)}/prompt-input-ime`);
+        await page.evaluate(async (mobile) => {
+          const { mount } =
+            await import("/src/components/prompt-composer/PromptInput.test-entry.tsx");
+          mount(mobile);
+          const { attachMobileViewport } =
+            await import("/src/hooks/mobileViewport.ts");
+          attachMobileViewport();
+        }, mobile);
+        const input = page.locator("#message");
+        await input.fill("Draft");
+        await input.focus();
+        await input.evaluate(async (node) => {
+          if (!(node instanceof HTMLTextAreaElement))
+            throw new Error("Missing textarea");
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          const writes: string[] = [];
+          const backingText = new MutationObserver(() =>
+            writes.push("backing text"),
+          );
+          backingText.observe(node, {
+            childList: true,
+            characterData: true,
+            subtree: true,
+          });
+          for (const name of [
+            "value",
+            "selectionStart",
+            "selectionEnd",
+          ] as const) {
+            const descriptor = Object.getOwnPropertyDescriptor(
+              HTMLTextAreaElement.prototype,
+              name,
+            );
+            if (!descriptor?.set || !descriptor.get) throw new Error(name);
+            Object.defineProperty(node, name, {
+              configurable: true,
+              get: () => descriptor.get!.call(node),
+              set: (value) => {
+                writes.push(name);
+                descriptor.set!.call(node, value);
+              },
+            });
+          }
+          for (const name of ["focus", "blur", "setSelectionRange"] as const) {
+            const original = node[name].bind(node);
+            Object.defineProperty(node, name, {
+              configurable: true,
+              value: (...args: unknown[]) => {
+                writes.push(name);
+                return Reflect.apply(original, node, args);
+              },
+            });
+          }
+          const probe = { input: node, writes, compositionEnds: 0 };
+          window.imeWitness = probe;
+          node.addEventListener(
+            "compositionend",
+            () => probe.compositionEnds++,
+          );
+        });
+        const cdp = await page.context().newCDPSession(page);
+        await cdp.send("Input.imeSetComposition", {
+          text: "編",
+          selectionStart: 1,
+          selectionEnd: 1,
+        });
+        await expect(input).toHaveValue("Draft編");
+        await page.setViewportSize({ width: 390, height: 520 });
+        await page.evaluate(
+          ({ external, reset }) => {
+            window.visualViewport?.dispatchEvent(new Event("resize"));
+            window.dispatchEvent(new Event("resize"));
+            window.setInputState!({
+              tooLong: true,
+              text: external,
+              reset,
+            });
+          },
+          { external, reset },
+        );
+        await expect(input).toHaveAttribute("aria-invalid", "true");
+        expect(
+          await input.evaluate((node) => {
+            const probe = window.imeWitness;
+            if (!probe) throw new Error("Missing IME witness");
+            return {
+              same: node === probe.input,
+              focused: document.activeElement === node,
+              writes: probe.writes,
+              compositionEnds: probe.compositionEnds,
+            };
+          }),
+        ).toEqual({
+          same: true,
+          focused: true,
+          writes: [],
+          compositionEnds: 0,
+        });
+        if (laterNative) {
+          await cdp.send("Input.imeSetComposition", {
+            text: "編集",
+            selectionStart: 2,
+            selectionEnd: 2,
+          });
+          await expect(input).toHaveValue("Draft編集");
+        }
+        await cdp.send("Input.insertText", {
+          text: laterNative ? "編集" : "編",
+        });
+        await expect(input).toHaveValue(
+          laterNative && !reset ? "Draft編集" : external,
+        );
+        expect(
+          await page.evaluate(() => window.imeWitness?.compositionEnds),
+        ).toBe(1);
+        await page.evaluate(() =>
+          window.setInputState!({ text: "Restored draft", tooLong: false }),
+        );
+        await expect(input).toHaveValue("Restored draft");
+      } finally {
+        await page.close();
+      }
+    });
+
+for (const mobile of [true, false])
+  for (const beforeSelection of [true, false])
+    test(`autocomplete leaves composition focus and selection alone (mobile=${mobile}, beforeSelection=${beforeSelection})`, async ({
+      page,
+    }) => {
+      await page.route("**/prompt-autocomplete-ime", (route) =>
+        route.fulfill({
+          contentType: "text/html",
+          body: '<!doctype html><div id="root"></div>',
+        }),
+      );
+      await page.goto(`${fixtureOrigin(server)}/prompt-autocomplete-ime`);
+      await page.evaluate(async (mobile) => {
+        const { mount } =
+          await import("/src/components/prompt-composer/PromptInput.test-entry.tsx");
+        mount(mobile);
+      }, mobile);
+      const input = page.locator("#message");
+      await input.fill("/ren");
+      await expect(page.getByRole("option", { name: /rename/ })).toBeVisible();
+      expect(
+        await page.evaluate(async (beforeSelection) => {
+          const input = document.querySelector<HTMLTextAreaElement>("#message");
+          const option = document.querySelector<HTMLElement>('[role="option"]');
+          if (!input || !option)
+            throw new Error("Missing autocomplete input or option");
+          const writes: string[] = [];
+          for (const name of ["focus", "setSelectionRange"] as const) {
+            const original = input[name].bind(input);
+            Object.defineProperty(input, name, {
+              configurable: true,
+              value: (...args: unknown[]) => {
+                writes.push(name);
+                return Reflect.apply(original, input, args);
+              },
+            });
+          }
+          const start = () =>
+            input.dispatchEvent(
+              new CompositionEvent("compositionstart", { bubbles: true }),
+            );
+          if (beforeSelection) start();
+          option.click();
+          if (!beforeSelection) start();
+          await new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+          return writes;
+        }, beforeSelection),
+      ).toEqual([]);
+      await input.dispatchEvent("compositionend");
+      await expect(input).toHaveValue("/rename ");
+    });

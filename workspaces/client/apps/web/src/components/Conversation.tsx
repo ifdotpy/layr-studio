@@ -1722,6 +1722,9 @@ export function ConversationView() {
               {transferChip}
               <PromptInput
                 value={draft}
+                draftResetVersion={
+                  delivery.draftResetVersions.get(opened || "new") ?? 0
+                }
                 session={opened || "new"}
                 getDraft={drafts.getDraft}
                 setDraft={delivery.editDraft}

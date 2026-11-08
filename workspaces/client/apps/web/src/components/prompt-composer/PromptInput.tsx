@@ -24,6 +24,8 @@ type InputHandlers = Pick<
   | "onKeyUp"
   | "onSelect"
   | "onKeyDown"
+  | "onCompositionStart"
+  | "onCompositionEnd"
 >;
 
 // Autosize measures layout on every render of the textarea, which is expensive
@@ -47,12 +49,17 @@ const AutosizeInput = memo(function AutosizeInput({
       onBlur={(event) => handlers.current.onBlur?.(event)}
       onKeyUp={(event) => handlers.current.onKeyUp?.(event)}
       onSelect={(event) => handlers.current.onSelect?.(event)}
+      onCompositionStart={(event) =>
+        handlers.current.onCompositionStart?.(event)
+      }
+      onCompositionEnd={(event) => handlers.current.onCompositionEnd?.(event)}
     />
   );
 });
 
 export default function PromptInput(p: {
   value: string;
+  draftResetVersion?: number;
   session: string;
   getDraft: DraftReader;
   setDraft: DraftWriter;
@@ -80,6 +87,12 @@ export default function PromptInput(p: {
     provider: string;
   };
 }) {
+  const composing = useRef(false);
+  const nativeEditVersion = useRef(0);
+  const observedResetVersion = useRef(p.draftResetVersion);
+  const pendingExternal = useRef<
+    { value: string; nativeVersion: number; reset: boolean } | undefined
+  >(undefined);
   const resizeFrame = useRef(0);
   const resize = useCallback(() => {
     if (resizeFrame.current) return;
@@ -92,8 +105,25 @@ export default function PromptInput(p: {
     });
   }, [p.input]);
   useLayoutEffect(() => {
+    const element = p.input.current;
+    // React's controlled textarea also rewrites defaultValue (its child text),
+    // disturbing the native IME. Only external draft changes need a value write.
+    const reset = p.draftResetVersion !== observedResetVersion.current;
+    observedResetVersion.current = p.draftResetVersion;
+    if (element) {
+      if (composing.current)
+        pendingExternal.current =
+          element.value === p.value && !reset
+            ? undefined
+            : {
+                value: p.value,
+                nativeVersion: nativeEditVersion.current,
+                reset,
+              };
+      else if (element.value !== p.value) element.value = p.value;
+    }
     resize();
-  }, [p.value, resize]);
+  }, [p.value, p.draftResetVersion, p.input, resize]);
   useEffect(() => {
     const element = p.input.current;
     if (!element) return;
@@ -120,7 +150,7 @@ export default function PromptInput(p: {
       );
       requestAnimationFrame(() => {
         const element = p.input.current;
-        if (!element) return;
+        if (!element || composing.current) return;
         const caret = start + text.length;
         element.focus();
         element.setSelectionRange(caret, caret);
@@ -154,7 +184,29 @@ export default function PromptInput(p: {
         p.onPasteFiles(files);
       }
     },
-    onChange: (event) => p.onChange(event.currentTarget.value),
+    onChange: (event) => {
+      const version = ++nativeEditVersion.current;
+      const pending = pendingExternal.current;
+      if (composing.current && pending?.reset) return;
+      if (pending && version > pending.nativeVersion)
+        pendingExternal.current = undefined;
+      p.onChange(event.currentTarget.value);
+    },
+    onCompositionStart: () => {
+      composing.current = true;
+    },
+    onCompositionEnd: (event) => {
+      composing.current = false;
+      const pending = pendingExternal.current;
+      pendingExternal.current = undefined;
+      // Only a value received after the latest native edit is still pending.
+      // A send reset is explicit and must not resurrect the captured message.
+      if (pending !== undefined) {
+        if (event.currentTarget.value !== pending.value)
+          event.currentTarget.value = pending.value;
+        resize();
+      } else p.onChange(event.currentTarget.value);
+    },
     onClick: skills.updateRange,
     onBlur: skills.blur,
     onKeyUp: skills.updateRange,
@@ -271,7 +323,6 @@ export default function PromptInput(p: {
               : "This session has no live mailbox"
         }
         disabled={!p.canSend}
-        value={p.value}
         error={p.draftTooLong}
         aria-describedby={p.draftTooLong ? "draft-length-error" : undefined}
       />

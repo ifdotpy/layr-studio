@@ -208,6 +208,7 @@ export default {
       "src/components/PromptNavigator.render.test.ts",
       "src/components/Conversation.render.test.ts",
       "src/components/prompt-composer/PromptComposer.render.test.ts",
+      "src/components/prompt-composer/PromptInput.ime.test.ts",
       "src/AppTeam.test.ts",
       "src/components/TerminalDock.actions.test.ts",
       "src/app/startup/ShellSidebarSource.test.ts",

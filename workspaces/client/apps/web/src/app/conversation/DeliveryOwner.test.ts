@@ -59,6 +59,7 @@ it("keeps newer text and holds the send lock until the durable callback complete
     callback.resolve();
     await persisted;
     expect(f.drafts.getDraft("lead")).toBe("newer");
+    expect(f.delivery.draftResetVersions.get("lead") ?? 0).toBe(0);
     expect(saved).toHaveBeenCalledOnce();
     expect(f.delivery.isSending).toBe(false);
     required(complete)();
@@ -90,6 +91,7 @@ it("reuses the first payload after a storage failure and issues a fresh identity
     await f.delivery.send();
     expect(required(bodies[2]).id).not.toBe(required(bodies[0]).id);
     expect(f.drafts.getDraft("lead")).toBe("");
+    expect(f.delivery.draftResetVersions.get("lead")).toBe(2);
   } finally {
     f.dispose();
   }
