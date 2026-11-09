@@ -3,6 +3,7 @@ import type { DeepReadonly } from "../deepReadonly.ts";
 import type {
   ResourceData,
   ResourceRef,
+  ResourceVersion,
   SubscriptionError,
 } from "../sync/subscriptions/contracts.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
@@ -28,6 +29,7 @@ export function resourceData<T>(current: ResourceStatus<T>): T | undefined {
 
 export interface ResourceSlot<T> {
   readonly current: ResourceStatus<T>;
+  readonly appliedVersion?: Readonly<ResourceVersion> | undefined;
 }
 export interface ReadIntent<T> {
   key: string;
@@ -137,6 +139,7 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
     if (disposed) throw new Error("The observable resource store is closed.");
     if (entries.has(key)) throw new Error(`Duplicate resource slot: ${key}`);
     let data: TData | undefined;
+    let appliedVersion: Readonly<ResourceVersion> | undefined;
     let current: ResourceStatus<TData | DeepReadonly<TData>> = {
       status: ref ? "loading" : "absent",
     };
@@ -157,6 +160,8 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       // A live subscription with no selected row is confirmed absence, not loading.
       if (snapshot.status === "live" && snapshot.data === undefined)
         data = undefined;
+      appliedVersion = snapshot.appliedVersion;
+      versionAtom.reportChanged();
       const next =
         snapshot.status === "live" && snapshot.data === undefined
           ? { status: "absent" as const }
@@ -220,6 +225,8 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
       },
       ref ? interest.unobserved : inactive,
     );
+    // Metadata has separate observers so identical data publications stay cheap.
+    const versionAtom = createAtom(`${key}:applied-version`);
     const entry: Entry = {
       resourceKey: ref ? subscriptionKey(ref) : key,
       observed: false,
@@ -234,6 +241,8 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
         pending.delete(update);
         runInAction(() => {
           data = undefined;
+          appliedVersion = undefined;
+          versionAtom.reportChanged();
           current = { status: "loading" };
           atom.reportChanged();
         });
@@ -289,6 +298,11 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
         atom.reportObserved();
         return current;
       },
+      get appliedVersion() {
+        atom.reportObserved();
+        versionAtom.reportObserved();
+        return disposed ? undefined : appliedVersion;
+      },
     };
   }
   const runtime = {
@@ -331,6 +345,9 @@ export function createObservableResourceRuntime(subscriptions: Subscriptions) {
             read: () => lookup(ref).slot.read(),
             get current() {
               return (disposed ? created : lookup(ref)).slot.current;
+            },
+            get appliedVersion() {
+              return (disposed ? created : lookup(ref)).slot.appliedVersion;
             },
           },
         };

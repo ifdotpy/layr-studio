@@ -19,6 +19,29 @@ import {
 
 const ref = { kind: "native-layr-settings" } as const;
 
+it("exposes the applied version when identical values are published again", async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  const versions: (number | undefined)[] = [];
+  const stop = autorun(() => versions.push(f.slot.appliedVersion?.revision));
+  await vi.advanceTimersByTimeAsync(100);
+  f.publish("same");
+  expect(f.slot.appliedVersion).toBeUndefined();
+  await vi.advanceTimersByTimeAsync(0);
+  const model = resourceData(f.slot.current);
+  expect(f.slot.appliedVersion?.revision).toBe(1);
+  f.publish("same");
+  expect(f.slot.appliedVersion?.revision).toBe(1);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(resourceData(f.slot.current)).toBe(model);
+  expect(f.slot.appliedVersion?.revision).toBe(2);
+  expect(versions.at(-1)).toBe(2);
+  stop();
+  f.runtime.dispose();
+  f.subscriptions.dispose();
+  vi.useRealTimers();
+});
+
 it("action observations schedule no subscription stabilization timer", async () => {
   vi.useFakeTimers();
   const f = fixture();
@@ -205,16 +228,21 @@ function fixture() {
     added,
     removed,
     publish(storeRoot: string) {
-      callbacks.get(subscriptionKey(ref))?.({
+      const version: ResourceVersion = {
         epoch: "epoch",
         revision: ++revision,
         nativeLayrSettings: { configured: true, storeRoot, version: null },
-      });
-      subscriptions.publish(ref, {
-        configured: true,
-        storeRoot,
-        version: null,
-      });
+      };
+      callbacks.get(subscriptionKey(ref))?.(version);
+      subscriptions.publish(
+        ref,
+        {
+          configured: true,
+          storeRoot,
+          version: null,
+        },
+        version,
+      );
     },
   };
 }

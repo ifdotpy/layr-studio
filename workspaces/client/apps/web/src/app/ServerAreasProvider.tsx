@@ -109,9 +109,6 @@ export class ServerAreas {
   get state() {
     return resourceData(this.scope.store.state().current);
   }
-  refresh = async () => {
-    await this.startup.refresh(false);
-  };
   open = (id: string) =>
     this.navigation.selectExternal(id, { requestId: randomUUID() });
   finishDeletion = (ids: string[]) => {
@@ -142,7 +139,6 @@ export class ServerAreas {
           : undefined,
         command.settings,
       );
-    else if (command.action === "refresh") await this.refresh();
     else if (command.action === "mark-unread")
       await receiveSidebarRead(command, this.read.markSidebarUnread);
     else if (command.action === "new-shared-chat") {

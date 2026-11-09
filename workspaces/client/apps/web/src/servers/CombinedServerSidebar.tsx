@@ -56,7 +56,6 @@ export class CombinedSidebarOwner {
       },
       commands: {
         rename: this.rename,
-        refresh: this.refresh,
         notify: source.notify,
       },
       run: this.run,
@@ -102,16 +101,6 @@ export class CombinedSidebarOwner {
       this.source.notify(errorText(failure));
     }
   }
-  refresh = async () => {
-    await Promise.all(
-      this.shell.model.sources
-        .filter((source) => this.source.online(source.id))
-        .map(async (source) => {
-          const value = await this.source.refreshOwner(source.id);
-          this.source.applyNavigation(source.id, value);
-        }),
-    );
-  };
   run = (command: ServerCommand) => {
     const { online, send, executeCommand, settings, search, notify } =
       this.source;
@@ -130,7 +119,6 @@ export class CombinedSidebarOwner {
         id: reference.id,
         target: { ...command.target },
       })
-        .then(this.refresh)
         .catch((failure) => notify(errorText(failure)))
         .finally(() => runInAction(() => this.marking.delete(id)));
     } else if (command.action === "open") {
@@ -229,7 +217,6 @@ export class CombinedSidebarOwner {
         request.acknowledged = true;
         backend.storage.setItem(key, JSON.stringify(request));
       }
-      await this.refresh();
       backend.storage.removeItem(key);
     } catch (failure) {
       if (

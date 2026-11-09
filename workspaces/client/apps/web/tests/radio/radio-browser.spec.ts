@@ -10,7 +10,8 @@ import {
   expect,
   API_SCHEMA_HASH_HEADER,
   readApiSchemaHash,
-  apiSchemaHandshakeSse,
+  handleEntitySyncFixtureRequest,
+  syncIdentityFixture,
 } from "../playwright.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -25,6 +26,7 @@ test("Radio browser", async ({
   const root = resolve(import.meta.dirname, "../../");
 
   const cacheDir = await mkdtemp(join(tmpdir(), "studio-radio-"));
+  let streamConnections = 0;
   const streams = new Set<import("node:http").ServerResponse>();
   const roomMessages = [
     {
@@ -52,11 +54,13 @@ test("Radio browser", async ({
     },
   ];
   const roomRef = { kind: "room", roomId: "radio:t" } as const;
-  const frame = (
-    resources: import("../../src/sync/resourceEvents.ts").ResourceRef[],
-    revision: number,
-  ) =>
-    `event: resources\ndata: ${JSON.stringify({ protocol: 4, workspaceId: "1234567890abcdef1234567890abcdef", epoch: "radio-epoch", revision, reason: revision === 1 ? "initial" : "change", resources, resourceVersions: resources.map((resource) => ({ resource, revision, ...(resource.kind === "room" ? { viewSnapshot: { room: { room: { id: "radio:t", members: ["a", "b"] }, messages: roomMessages, nextBefore: null, nextAfter: null } } } : {}) })) })}\n\n`;
+  const snapshot = {
+    stateDir: "radio-test",
+    chats: [],
+    edges: [],
+    runtime: {},
+  };
+  let notifyRoom = () => {};
   const server = await createServer({
     configFile: false,
     root,
@@ -66,17 +70,36 @@ test("Radio browser", async ({
       {
         name: "radio-fixture",
         configureServer(s) {
-          s.middlewares.use("/api/sync/stream", (req, res) => {
-            streams.add(res);
-            res.on("close", () => streams.delete(res));
-            const resources = JSON.parse(
-              new URL(req.url!, "http://localhost").searchParams.get(
-                "resources",
-              ) || "[]",
-            );
-            res.writeHead(200, { "Content-Type": "text/event-stream" });
-            res.write(apiSchemaHandshakeSse());
-            res.write(frame(resources, 1));
+          s.middlewares.use((req, res, next) => {
+            if (
+              new URL(req.url!, "http://fixture").pathname ===
+              "/api/sync/stream"
+            ) {
+              streamConnections++;
+              streams.add(res);
+              res.on("close", () => streams.delete(res));
+            }
+            if (
+              !handleEntitySyncFixtureRequest(req, res, {
+                snapshot,
+                workspaceId: "1234567890abcdef1234567890abcdef",
+                roomSnapshot: () => ({
+                  room: { id: "radio:t", members: ["a", "b"] },
+                  messages: roomMessages.map((message) => ({
+                    ...message,
+                    senderName: message.senderName ?? "You",
+                    room: "radio:t",
+                    deliveries: {},
+                  })),
+                  nextBefore: null,
+                  nextAfter: null,
+                }),
+                onStreamReady: (notify) => {
+                  notifyRoom = () => notify([roomRef]);
+                },
+              })
+            )
+              next();
           });
           s.middlewares.use("/check", (_req, res) => {
             res.setHeader("Content-Type", "text/html");
@@ -101,10 +124,7 @@ test("Radio browser", async ({
     await page.route("**/api/sync/identity", (r) =>
       r.fulfill({
         headers: { [API_SCHEMA_HASH_HEADER]: readApiSchemaHash() },
-        json: {
-          workspaceId: "1234567890abcdef1234567890abcdef",
-          syncProtocol: 2,
-        },
+        json: syncIdentityFixture("1234567890abcdef1234567890abcdef"),
       }),
     );
     await page.route("**/api/agent-chat?*", (r) =>
@@ -155,12 +175,12 @@ test("Radio browser", async ({
       .getByRole("button", { name: "Options for team Research" })
       .click();
     await page.getByRole("menuitem", { name: "Open shared chat" }).click();
-    await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
-    assert.equal(await page.evaluate(() => window.radioOpened), null);
-    await page.getByRole("button", { name: "Retry", exact: true }).click();
     await page.waitForFunction(() => window.radioOpened === "radio:t");
-    assert.equal(requests.length, 2);
-    assert.deepEqual(requests[0], requests[1]);
+    assert.equal(
+      requests.length,
+      0,
+      "The published room opens without a refresh or mutation",
+    );
     requests.length = 0;
     mode = "lost";
     const input = page.getByRole("textbox", { name: "Message both agents" });
@@ -169,7 +189,11 @@ test("Radio browser", async ({
     await page.getByRole("button", { name: "Retry", exact: true }).waitFor();
     assert.equal(await input.inputValue(), "Hello both");
     assert.equal(await input.isDisabled(), true);
+    const reopenedStream = page.waitForResponse(
+      (response) => new URL(response.url()).pathname === "/api/sync/stream",
+    );
     await page.reload({ waitUntil: "domcontentloaded", timeout: 30000 });
+    await reopenedStream;
     await page.getByRole("button", { name: "Retry", exact: true }).click();
     await page.waitForFunction(() => !document.querySelector(".radio-retry"));
     assert.equal(requests.length, 2);
@@ -192,6 +216,7 @@ test("Radio browser", async ({
       ).target,
       "both",
     );
+    const connectionsBeforeCommand = streamConnections;
     mode = "held";
     await page.evaluate(() => {
       window.holdRefresh = true;
@@ -215,19 +240,14 @@ test("Radio browser", async ({
       text: "SSE reply after send",
       created: 1750000030,
     });
-    for (const stream of streams) stream.write(frame([roomRef], 2));
+    notifyRoom();
     await expect(page.getByText("SSE reply after send")).toBeVisible();
-    await page.waitForFunction(
-      () => typeof window.rejectRefresh === "function",
-    );
-    await page.evaluate(() => {
-      window.holdRefresh = false;
-      const reject = window.rejectRefresh;
-
-      reject!(Error("Refresh unavailable"));
-    });
-    await page.waitForFunction(() =>
-      window.notifications?.includes("Refresh unavailable"),
+    assert.equal(await page.evaluate(() => window.refreshCalls), 0);
+    assert.deepEqual(await page.evaluate(() => window.notifications || []), []);
+    assert.equal(
+      streamConnections,
+      connectionsBeforeCommand,
+      "A successful command keeps its SSE connection",
     );
     assert.equal(requests.length, acceptedPosts);
     assert.equal(
@@ -245,9 +265,8 @@ test("Radio browser", async ({
       .getByRole("button", { name: "Discuss (4 replies)", exact: true })
       .click();
     await expect(input).toBeEnabled();
-    await page.waitForFunction(() =>
-      window.notifications?.includes("Refresh failed"),
-    );
+    assert.equal(await page.evaluate(() => window.refreshCalls), 0);
+    assert.deepEqual(await page.evaluate(() => window.notifications || []), []);
     assert.equal(await input.inputValue(), "");
     const posted = requests.length;
     await page.evaluate(() => (window.failRefresh = false));
@@ -445,7 +464,7 @@ test("Radio browser", async ({
     }
     assert.deepEqual(errors, []);
     console.log(
-      `PASS radio UI: ordered transcript, timestamps, durable exact retry, acknowledged refresh, rejected revision, pass, stop, open and responsive layout. Screenshots ${tmpdir()}/studio-radio-{1100,375}.png`,
+      `PASS radio UI: ordered transcript, timestamps, durable exact retry, SSE publication without refresh, rejected revision, pass, stop, open and responsive layout. Screenshots ${tmpdir()}/studio-radio-{1100,375}.png`,
     );
   } finally {
     await runnerPage.close();

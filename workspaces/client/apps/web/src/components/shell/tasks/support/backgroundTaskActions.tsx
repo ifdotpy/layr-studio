@@ -42,7 +42,6 @@ export type BackgroundTaskProps = {
   afterClose?: (() => void) | undefined;
   leadId?: string | undefined;
   openAgent(id: string): void;
-  refresh(): Promise<void>;
   notify(message: string): void;
   initialFocus?: { id: string; leadId: string; requestId: string } | undefined;
 };
@@ -80,7 +79,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
       close = props.close;
       openAgent = props.openAgent;
       notify = props.notify;
-      refresh = props.refresh;
       get current() {
         return store.processes(agentId(leadId)).current;
       }
@@ -193,7 +191,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
           this.notify(
             "Restart queued. The new command waits for the previous command to exit.",
           );
-          void this.refresh().catch((error) => this.notify(errorText(error)));
           return { status: "applied" } as const;
         } catch (error) {
           if (rejected(error)) {
@@ -218,7 +215,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
             result.error
           )
             throw new Error(displayError(result.error));
-          void this.refresh().catch((error) => this.notify(errorText(error)));
           return true;
         } catch (error) {
           this.notify(errorText(error));
@@ -316,7 +312,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
             return;
           }
           this.finish(receipt.result);
-          await this.refresh();
         } catch (error) {
           if (this.disposed) return;
           if (!check && rejected(error)) {
@@ -430,7 +425,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
             close: false,
             openAgent: false,
             notify: false,
-            refresh: false,
             disposed: false,
           },
           { autoBind: true },
@@ -442,7 +436,6 @@ export function useBackgroundTaskArea(props: BackgroundTaskProps) {
   area.close = props.close;
   area.openAgent = props.openAgent;
   area.notify = props.notify;
-  area.refresh = props.refresh;
   return area;
 }
 export type BackgroundTaskActions = ReturnType<typeof useBackgroundTaskArea>;

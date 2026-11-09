@@ -320,10 +320,6 @@
     "callee": "syncGet"
   },
   {
-    "file": "sync/client.ts",
-    "callee": "syncGet"
-  },
-  {
     "file": "sync/drafts.ts",
     "callee": "options.api.syncPost"
   },

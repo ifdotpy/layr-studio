@@ -234,7 +234,12 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
       if (appliedVersion && appliedVersion !== entry.version) return;
       if (appliedVersion && connection === "live" && entry.consumers.size)
         entry.confirmed = hasAppliedResourceBaseline(appliedVersion, ref);
-      entry.state = { ...entry.state, data, error: null };
+      entry.state = {
+        ...entry.state,
+        data,
+        error: null,
+        ...(appliedVersion ? { appliedVersion } : {}),
+      };
       status(entry);
       notify(entry);
     },

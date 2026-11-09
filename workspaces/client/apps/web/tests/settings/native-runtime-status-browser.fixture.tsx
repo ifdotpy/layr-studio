@@ -59,7 +59,6 @@ const accountsState: Partial<
 > = {
   data: { accounts, defaultAccountKey: "default" },
   setData: () => {},
-  refresh: async () => {},
   error: "",
   scope: "fixture",
 };

@@ -66,8 +66,7 @@ const RadioScreen = observer(function RadioScreen({
   const area = useConversationActions();
   const { getDraft, subscribeDraft } = area.scope.services.drafts;
   const { editDraft: setDraft } = area.delivery;
-  const { refresh } = area,
-    { notify } = area.notices;
+  const { notify } = area.notices;
   const radio = room.radio!;
   const stateDir = state.workspaces.values().next().value?.stateDir || "";
   const key = `studio-radio-command:${stateDir}:${room.id}`;
@@ -108,11 +107,7 @@ const RadioScreen = observer(function RadioScreen({
         getDraft(room.id) === next.body.text
       )
         setDraft("", room.id);
-      if (next.rejected) await refresh();
-      messages.reload();
       remember(null);
-      if (next.acknowledged)
-        void refresh().catch((error) => notify(errorText(error)));
     } catch (e) {
       if (
         !next.acknowledged &&
@@ -262,7 +257,7 @@ const RadioScreen = observer(function RadioScreen({
               />
             </article>
           ))}
-          <RequestArea scope={stateDir} refresh={refresh} notify={notify}>
+          <RequestArea scope={stateDir} notify={notify}>
             <Requests
               agentId={radio.active?.agentId}
               turnId={radio.active?.turnId}

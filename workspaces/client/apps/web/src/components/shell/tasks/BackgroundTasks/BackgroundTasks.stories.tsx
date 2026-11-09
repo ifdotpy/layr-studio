@@ -56,7 +56,6 @@ function StoryArea({ children }: { children: ReactNode }) {
     close() {},
     openAgent() {},
     notify() {},
-    refresh: async () => {},
   });
   return (
     <BackgroundTaskActionsProvider value={actions}>

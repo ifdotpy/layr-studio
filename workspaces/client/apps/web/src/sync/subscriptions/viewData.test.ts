@@ -1,7 +1,7 @@
 import { expect, it, vi } from "vitest";
 import { createDataObserver } from "./data.ts";
 import type { ResourceRef } from "./contracts.ts";
-import type { ResourceDataSelectors, ViewRecovery } from "./selectData.ts";
+import type { ResourceDataSelectors } from "./selectData.ts";
 import type { TranscriptProjectionPayload } from "../client.ts";
 import type { ResourceVersion } from "../resourceEvents.ts";
 import type { ObserveSubscriptionData } from "./module.ts";
@@ -47,7 +47,7 @@ it.each([
       () => ({ get }) as { get: typeof get } & SyncFixture,
       events,
       undefined,
-      { processes: get, complaint: get, room: get, "terminal-output": get },
+      { get, post: vi.fn() },
     )(ref as ResourceRef, accept, vi.fn());
     receive({
       epoch: "server",
@@ -73,7 +73,8 @@ it.each([
   },
 );
 
-it("an oversized view recovers once and subsequent complete frames resume zero-read delivery", async () => {
+it("a failed view is visible until complete SSE data recovers it without reads", async () => {
+  const failed = vi.fn();
   let receive: (version?: ResourceVersion) => void = () => {};
   const events = {
     watchResourceChanges: (_ref: unknown, accept: typeof receive) => {
@@ -82,24 +83,27 @@ it("an oversized view recovers once and subsequent complete frames resume zero-r
     },
     watchResourceConnection: () => () => {},
   };
-  const read = vi.fn(async () => ({ processes: [], activities: [] }));
+  const read = vi.fn();
   const accept = vi.fn();
   const stop = createDataObserver(
     () => ({}) as SyncFixture,
     events,
     undefined,
-    { processes: read },
-  )({ kind: "processes", agentId: "lead" }, accept, vi.fn());
+    { get: read, post: vi.fn() },
+  )({ kind: "processes", agentId: "lead" }, accept, failed);
   expect(read).not.toHaveBeenCalled();
   receive({ epoch: "server", revision: 1 });
-  await vi.waitFor(() => expect(accept).toHaveBeenCalledOnce());
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  expect(read).not.toHaveBeenCalled();
+  expect(accept).not.toHaveBeenCalled();
+  expect(failed).toHaveBeenCalledWith(expect.any(Error));
   receive({
     epoch: "server",
     revision: 2,
     viewSnapshot: { processes: { processes: [], activities: [] } },
   });
-  await vi.waitFor(() => expect(accept).toHaveBeenCalledTimes(2));
-  expect(read).toHaveBeenCalledOnce();
+  await vi.waitFor(() => expect(accept).toHaveBeenCalledOnce());
+  expect(read).not.toHaveBeenCalled();
   stop();
 });
 
@@ -126,7 +130,7 @@ it("work baselines and updates use the entity observer even when view recovery e
     () => ({}) as SyncFixture,
     events,
     observe as ObserveSubscriptionData,
-    { processes: recover },
+    { get: recover, post: vi.fn() },
   )(ref, accept, vi.fn());
   expect(observe).toHaveBeenCalledOnce();
   const first = { items: [{ id: "assignment", title: "Before" }], tasks: [] };
@@ -154,20 +158,10 @@ it("work baselines and updates use the entity observer even when view recovery e
 });
 
 // Server recovery and local selectors must preserve the resource's generated data type.
-const invalidRecovery: ViewRecovery = {
-  // @ts-expect-error A process recovery must return ProcessList, never terminal output.
-  processes: async () => ({
-    text: "output",
-    offset: 0,
-    status: "running",
-    truncated: false,
-  }),
-};
 const invalidSelector: ResourceDataSelectors<void> = {
   // @ts-expect-error A task list selector cannot publish work assignment data.
   tasks: () => ({ rootId: "lead", items: [], tasks: [] }),
 };
-void invalidRecovery;
 void invalidSelector;
 
 it("publishes partial local transcript metadata without inventing server fields", () => {

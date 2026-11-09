@@ -1,3 +1,4 @@
+import { agentSseServer } from "../fixtures/agent-sse-server.ts";
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { peerTeamRowFixtures as row } from "./peer-teams-rows.fixture.ts";
 
@@ -6,7 +7,6 @@ type PeerRequest =
   | components["schemas"]["PeerTeamMoveRequest"]
   | components["schemas"]["PeerTeamDeleteRequest"]
   | components["schemas"]["PeerTeamSaveRequest"];
-import type { PeerSidebarEntities } from "./peer-teams-browser.fixture.tsx";
 import { fixturePostBody } from "./helpers.ts";
 import { createFixtureViteServer as createServer } from "../playwright.ts";
 import { apiSchemaHeaders, test } from "../playwright.ts";
@@ -22,6 +22,7 @@ test("Peer teams browser", async ({
   test.setTimeout(180_000);
   const root = resolve(import.meta.dirname, "../../");
   const cacheDir = await mkdtemp(join(tmpdir(), "studio-peer-teams-"));
+  const stream = agentSseServer();
   const server = await createServer({
     configFile: false,
     root,
@@ -31,6 +32,9 @@ test("Peer teams browser", async ({
       {
         name: "fixture",
         configureServer(s) {
+          s.middlewares.use((req, res, next) => {
+            if (!stream.handle(req, res)) next();
+          });
           s.middlewares.use("/check", (_req, res) => {
             res.setHeader("Content-Type", "text/html");
             res.end(
@@ -50,29 +54,33 @@ test("Peer teams browser", async ({
     let state: Snapshot,
       mode = "lost",
       requests: PeerRequest[] = [];
-    await page.route("**/snapshot", (r) => r.fulfill({ json: state }));
+    let recoveryReads = 0;
+    page.on("request", (request) => {
+      if (
+        ["/snapshot", "/api/state", "/api/session", "/api/sync/pull"].includes(
+          new URL(request.url()).pathname,
+        )
+      )
+        recoveryReads++;
+    });
+
     // Each write below states its expected server read model explicitly.
     let sidebarAfterWrite: () => components["schemas"]["AgentSummaryEntityDto"][] =
       () => [{ ...row.a }, { ...row.b }, row.c, row.x];
-    const sidebarPayload = (
-      agents: components["schemas"]["AgentSummaryEntityDto"][],
-    ): PeerSidebarEntities => [
-      ...agents.map((value) => ({
-        collection: "agentSummary" as const,
-        id: value.id,
-        value,
-      })),
-      ...state.runtime.peerTeams.map((value) => ({
-        collection: "peerTeam" as const,
-        id: value.id,
-        value,
-      })),
-      ...state.runtime.projects.map((value) => ({
-        collection: "project" as const,
-        id: value.id!,
-        value,
-      })),
-    ];
+    const publish = async (agents = sidebarAfterWrite()) => {
+      stream.publishSnapshot({
+        stateDir: state.stateDir,
+        chats: [],
+        edges: [],
+        runtime: {
+          peerTeamsVersion: state.runtime.peerTeamsVersion,
+          rooms: state.runtime.rooms,
+          projects: state.runtime.projects.map((p) => ({ ...p, id: p.id! })),
+          peerTeams: state.runtime.peerTeams,
+          agentSummaries: agents,
+        },
+      });
+    };
     const applied = new Map<string, PeerRequest>();
     await page.route("**/api/peer-teams", async (route) => {
       // The peer-team fixture sends only move, delete and save requests.
@@ -86,6 +94,7 @@ test("Peer teams browser", async ({
         });
       if (applied.has(body.request_id)) {
         assert.deepEqual(body, applied.get(body.request_id));
+        await publish();
         return route.fulfill({
           json: { ok: true },
           headers: apiSchemaHeaders(),
@@ -115,22 +124,21 @@ test("Peer teams browser", async ({
               ];
       const project = state.runtime.projects[0]!;
       project.peerTeamsRevision!++;
-      await page.evaluate<void, PeerSidebarEntities>(
-        (dto: PeerSidebarEntities) => window.receivePeerSidebar(dto),
-        sidebarPayload(sidebarAfterWrite()),
-      );
       applied.set(body.request_id, body);
       if (mode === "lost") {
         mode = "ok";
         return route.abort("failed");
       }
+      await publish();
       return route.fulfill({
         json: { ok: true },
         headers: apiSchemaHeaders(),
       });
     });
     await page.goto(`${server.resolvedUrls!.local[0]!}check`);
-    await page.waitForFunction(() => window.peerTeamsData);
+    await page.waitForFunction(
+      () => window.peerTeamsData?.runtime.projects.length,
+    );
     state = await page.evaluate(() => window.peerTeamsData);
     const project = page.locator('[data-project-path="/p"]');
     const menu = async () => {
@@ -200,12 +208,10 @@ test("Peer teams browser", async ({
     sidebarAfterWrite = () => [{ ...row.a }, { ...row.b }, { ...row.c }, row.x];
     await page.evaluate(() => (window.failRefresh = true));
     await form.getByRole("button", { name: "Save team", exact: true }).click();
-    await form.getByRole("alert").waitFor();
-    assert.match(await form.innerText(), /change was saved/);
+    await form.waitFor({ state: "detached" });
     const count = requests.length;
     await page.evaluate(() => (window.failRefresh = false));
-    await form.getByRole("button", { name: "Retry", exact: true }).click();
-    await form.waitFor({ state: "detached" });
+    assert.equal(recoveryReads, 0, "SSE supplies the saved read model");
     assert.equal(requests.length, count);
     await teamMenu();
     await page
@@ -229,20 +235,13 @@ test("Peer teams browser", async ({
       { id: "t1", name: "First team", projectPath: "/p", members: ["a", "b"] },
       { id: "t2", name: "Second team", projectPath: "/p", members: ["c", "e"] },
     ];
-    await page.evaluate<void, unknown>(
-      (value) => window.setFixture(value as Snapshot),
-      state,
-    );
-    await page.evaluate<void, PeerSidebarEntities>(
-      (dto: PeerSidebarEntities) => window.receivePeerSidebar(dto),
-      sidebarPayload([
-        { ...row.a },
-        { ...row.b },
-        { ...row.c },
-        row.x,
-        { ...row.e },
-      ]),
-    );
+    await publish([
+      { ...row.a },
+      { ...row.b },
+      { ...row.c },
+      row.x,
+      { ...row.e },
+    ]);
     const second = page.locator('[data-peer-team="t2"]');
     const teamTarget = second.locator(".peer-team-toggle");
     const projectTarget = project.locator(
@@ -343,10 +342,7 @@ test("Peer teams browser", async ({
         updated: 1,
       },
     ];
-    await page.evaluate<void, unknown>(
-      (value) => window.setFixture(value as Snapshot),
-      state,
-    );
+    await publish();
     await page.locator('[data-room="peer"]').waitFor();
     assert.equal(await page.locator('[data-room="other"]').count(), 0);
     assert.equal(await page.locator('[data-room="unmarked"]').count(), 0);
@@ -366,9 +362,14 @@ test("Peer teams browser", async ({
     await page.screenshot({
       path: process.env.PEER_TEAMS_SCREENSHOT || join(cacheDir, "narrow.png"),
     });
+    assert.equal(
+      recoveryReads,
+      0,
+      "All mutations arrive over SSE without recovery reads",
+    );
     assert.deepEqual(errors, []);
     console.log(
-      "peer teams UI: create, retry, edit, stale revision, refresh failure, dissolve, room privacy, narrow viewport PASS",
+      "peer teams UI: create, retry, edit, stale revision, SSE publication without refresh, dissolve, room privacy, narrow viewport PASS",
     );
   } finally {
     await Promise.all(

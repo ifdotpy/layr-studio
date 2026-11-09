@@ -72,7 +72,6 @@ it("retains and blocks a malformed request introduced while a save is pending", 
     lead: initialConfirmedLead,
     stateDir: "state",
     workspaceId: "workspace",
-    refresh: async () => {},
   };
   const render = () => {
     fixture.cursor = 0;

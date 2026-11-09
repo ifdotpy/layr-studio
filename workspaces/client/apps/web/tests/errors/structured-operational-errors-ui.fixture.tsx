@@ -51,7 +51,6 @@ const agent: Agent = {
 };
 const models = observableFixture([agent]);
 const noop = () => {};
-const refresh = async () => {};
 let renderId = 0;
 class Boundary extends React.Component<React.PropsWithChildren> {
   override state = { error: "" };
@@ -94,7 +93,7 @@ window.renderCase = async (which, value) => {
       },
       React.createElement(
         RequestArea,
-        { scope: "fixture", refresh: async () => {}, notify: () => {} },
+        { scope: "fixture", notify: () => {} },
         React.createElement(Requests, { all: true }),
       ),
     );
@@ -181,7 +180,6 @@ window.renderCase = async (which, value) => {
       close: noop,
       leadId: "lead",
       openAgent: noop,
-      refresh,
       notify: noop,
     });
   }

@@ -124,7 +124,36 @@ impl Fixture {
             .replace(WORKSPACE_MARKER, &workspace[1..workspace.len() - 1]);
         let mut cases: BTreeMap<String, Expected> =
             studio_json::from_str(&source).expect("frozen ingress expectations");
-        cases.remove(name).expect("named ingress expectation")
+        let mut expected = cases.remove(name).expect("named ingress expectation");
+        // These historical roots predate the initial explicit review-model backfill.
+        let current_review = |agent: &mut Value| {
+            if agent["isLead"] == true && agent["reviewDefaults"]["model"].is_null() {
+                agent["reviewDefaults"]["model"] =
+                    json!(studio_runtime_schema::provider_kind::initial_review_model());
+            }
+        };
+        for agent in expected
+            .state
+            .get_mut("agents")
+            .expect("captured agents")
+            .as_object_mut()
+            .expect("captured agent map")
+            .values_mut()
+        {
+            current_review(agent);
+        }
+        for row in expected
+            .state
+            .get_mut("sync_entities")
+            .expect("captured sync entities")
+            .as_array_mut()
+            .expect("captured entity list")
+        {
+            if row["collection"] == "agent" {
+                current_review(&mut row["payload"]["value"]);
+            }
+        }
+        expected
     }
     async fn configure(&self, store: &RuntimeStore, case: &str) {
         let source = std::fs::read_to_string(
@@ -149,6 +178,8 @@ impl Fixture {
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
             studio_runtime_store::migrations::migrate_2026_10_20(tx)?;
             studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            // Seed current roots with the explicit review choice assigned on creation.
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.reviewDefaults.model',?1) WHERE (json_extract(record,'$.isLead')=1 OR json_extract(record,'$.rootId')=id) AND json_extract(record,'$.reviewDefaults.model') IS NULL", [studio_runtime_schema::provider_kind::initial_review_model()])?;
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {
                 tx.execute(&format!("UPDATE runtime_agent_volatile SET \"{field}\"=NULL WHERE \"{field}\"='null'"), [])?;
             }

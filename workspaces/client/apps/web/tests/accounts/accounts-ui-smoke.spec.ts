@@ -14,12 +14,10 @@ import {
   fixtureRequest,
   type FixtureRequest,
   type NotifyResources,
-  readFixtureResponse,
 } from "./fixture-helpers.ts";
 import {
   test,
   expect,
-  entityMutationFixtureResponse,
   handleEntitySyncFixtureRequest,
   syncIdentityFixture,
   accountTileButton,
@@ -85,7 +83,15 @@ async function runAccountsUi(
     name: string,
     accountKey: string,
     empty: boolean,
-  ) => fixtureLead(id, name, accountKey, empty, "/Users/igor/Projects/lumina");
+  ) => ({
+    ...fixtureLead(id, name, accountKey, empty, "/Users/igor/Projects/lumina"),
+    get accountDestinations() {
+      return accounts.map((account) => ({
+        accountKey: account.id,
+        eligibility: account.eligibility!,
+      }));
+    },
+  });
   const agents = [
     makeLead("started", "Started conversation", "default", false),
     makeLead("empty", "New conversation", "default", true),
@@ -286,6 +292,11 @@ async function runAccountsUi(
     const json = (data: unknown) => {
       res.setHeader("Content-Type", "application/json");
       res.end(JSON.stringify(data));
+      if (req.method === "POST" && res.statusCode < 400) {
+        stateForEntities.runtime.accountsSummary!.defaultAccountKey =
+          defaultAccountKey;
+        notifyEntityResources([{ kind: "state" }, { kind: "accounts" }]);
+      }
     };
     if (
       handleEntitySyncFixtureRequest(req, res, {
@@ -369,8 +380,7 @@ async function runAccountsUi(
       const agent = agents.find((a) => a.id === body.id)!;
       agent.accountKey = body.account_key;
       notifyEntityResources([{ kind: "state" }]);
-      const response = entityMutationFixtureResponse(stateForEntities, agent);
-      json(response);
+      json(agent);
       return;
     }
     if (url.pathname === "/api/limits") {
@@ -424,7 +434,16 @@ async function runAccountsUi(
     if (url.pathname === "/api/accounts/login") {
       const body = fixtureRequest("/api/accounts/login", rawBody).body;
       const previous = logins.find((r) => r.requestId === body.login_id);
-      if (previous) return json(previous);
+      if (previous) {
+        if (previous.nativeCompleted) {
+          previous.status = "ready";
+          previous.resolvedAccountKey = previous.accountKey;
+        }
+        notifyEntityResources([
+          { kind: "auth-progress", requestId: previous.requestId },
+        ]);
+        return json(previous);
+      }
       const id = body.account_key || `signed-in-${logins.length}`;
       if (!body.account_key)
         accounts.push(
@@ -503,12 +522,7 @@ async function runAccountsUi(
       if (previous) {
         assert.deepEqual(body, previous);
         notifyEntityResources([{ kind: "state" }]);
-        return json(
-          entityMutationFixtureResponse(stateForEntities, {
-            id: body.request_id,
-            status: "completed",
-          }),
-        );
+        return json({ id: body.request_id, status: "completed" });
       }
       transferReceipts.set(body.request_id, body);
       const agent = agents.find((agent) => agent.id === body.id)!;
@@ -529,12 +543,7 @@ async function runAccountsUi(
         return json({ error: "The transfer response was lost." });
       }
       notifyEntityResources([{ kind: "state" }]);
-      return json(
-        entityMutationFixtureResponse(stateForEntities, {
-          id: body.request_id,
-          status: "completed",
-        }),
-      );
+      return json({ id: body.request_id, status: "completed" });
     }
     if (url.pathname === "/api/claude/session") {
       const body = fixtureRequest("/api/claude/session", rawBody).body;
@@ -655,7 +664,10 @@ async function runAccountsUi(
         agents.push(
           makeLead(`perf-${i}`, `Performance chat ${i}`, "default", false),
         );
-      agents.push(benchAgent);
+      agents.push({
+        ...benchAgent,
+        accountDestinations: benchAgent.accountDestinations ?? [],
+      });
     }
     if (mode === "reauth") {
       accounts[0]!.accountId = "saved-default";
@@ -760,20 +772,19 @@ async function runAccountsUi(
         "Cached ready credentials do not confirm sign-in",
       );
       logins[0]!.nativeCompleted = true;
-      const accountRefresh = page.waitForResponse(
+      const statusCheck = page.waitForResponse(
         (response) =>
-          response.request().method() === "GET" &&
-          new URL(response.url()).pathname === "/api/accounts",
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/accounts/login",
       );
       await login
         .getByRole("button", { name: "Check status", exact: true })
         .click();
-      const refreshedAccounts = await readFixtureResponse(
-        "/api/accounts",
-        await accountRefresh,
-      );
-      assert.equal(refreshedAccounts.logins[0]!.status, "ready");
-      assert.equal(refreshedAccounts.logins[0]!.resolvedAccountKey, "default");
+      const receipt: PostResult<"/api/accounts/login"> = await (
+        await statusCheck
+      ).json();
+      assert.equal(receipt.status, "ready");
+      assert.equal(receipt.resolvedAccountKey, "default");
       await login
         .getByText("Sign-in restored. Send a new instruction to continue.", {
           exact: false,
@@ -1641,7 +1652,10 @@ async function runAccountsUi(
       turnId: "claude-turn",
       status: "running",
     };
-    agents.push(claude);
+    agents.push({
+      ...claude,
+      accountDestinations: claude.accountDestinations ?? [],
+    });
     claudeQueue = [
       {
         id: "claude-queued",

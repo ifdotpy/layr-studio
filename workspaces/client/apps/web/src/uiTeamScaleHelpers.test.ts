@@ -430,6 +430,7 @@ describe("current New chat setup", () => {
 
 const transferMetadata = (seq = 3) =>
   ({
+    payloadKind: "entity" as const,
     protocol: 4 as const,
     complete: false,
     cursor: { seq, workspaceId: "workspace" },

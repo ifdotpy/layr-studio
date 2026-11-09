@@ -47,7 +47,6 @@ export const AppDialogs = observer(function AppDialogs() {
             source={a}
             accounts={a.accounts.data}
             initialPath={a.creation.sharedCreationInitialPath}
-            refresh={a.refresh}
             created={a.creation.sharedCreated}
           />
         </Modal>

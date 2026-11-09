@@ -84,7 +84,7 @@ function Fixture() {
         close={() => setOpened(false)}
         leadId={scope}
         openAgent={() => {}}
-        refresh={async () => {}}
+
         notify={() => {}}
       />
       <textarea

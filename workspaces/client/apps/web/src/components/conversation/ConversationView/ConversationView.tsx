@@ -289,7 +289,6 @@ export function ConversationView() {
     workspaceId: startup.workspaceId,
     observed: delivery.observeSends,
     edited: delivery.editSend,
-    refresh: actions.refresh,
   });
   const deliveryTranscript = selected.deliveryTranscript;
   const visibleMessages = selected.visibleMessages;
@@ -699,7 +698,6 @@ export function ConversationView() {
         this.stopping = true;
         void api.command
           .stop(opened, false)
-          .then(actions.refresh)
           .catch((error) => actions.notices.notify(errorText(error)))
           .finally(() =>
             runInAction(() => {
@@ -794,10 +792,6 @@ export function ConversationView() {
               }));
             },
           });
-          if (id && this.managed)
-            void messageQueue
-              .reload()
-              .catch((error) => notices.notify(errorText(error)));
         } catch {
           setAttachments((current) =>
             operations.latestSend[id] !== attempt
@@ -928,7 +922,6 @@ export function ConversationView() {
                 [branchId]: branchAssets,
               }));
           }
-          await actions.refresh();
           actions.open(branchId);
           this.setBranchDraft(null);
           delete operations.branchRequests[key];
@@ -971,7 +964,6 @@ export function ConversationView() {
               { stateDir: stateDir, workspaceId: startup.workspaceId, kind },
               { chat: opened, message },
             );
-          void messageQueue.reload().catch(() => {});
           notices.notify(
             `Removed ${messages.length} messages. Work already sent continues.`,
           );
@@ -1359,7 +1351,6 @@ export function ConversationView() {
             <RequestArea
               key={request.id}
               scope={stateDir}
-              refresh={actions.refresh}
               notify={notices.notify}
               onAnswerOpen={onAnswerOpen}
               onAnswerPosition={revealRequest}
@@ -1376,7 +1367,6 @@ export function ConversationView() {
     [
       inlineRequests,
       stateDir,
-      actions.refresh,
       notices.notify,
       onAnswerOpen,
       revealRequest,
@@ -1880,7 +1870,6 @@ export function ConversationView() {
         <ObservedNativeError
           agent={agent}
           detail={detail}
-          refresh={actions.refresh}
           planType={planType}
           recovery={selected.limitRecovery}
           openLimits={() => {
@@ -2060,7 +2049,6 @@ export function ConversationView() {
           )}
           <RequestArea
             scope={stateDir}
-            refresh={actions.refresh}
             notify={notices.notify}
             onAnswerOpen={onAnswerOpen}
             onAnswerPosition={revealRequest}

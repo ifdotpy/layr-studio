@@ -23,6 +23,18 @@ pub enum FrontendLocality {
     Remote,
 }
 
+/// Serialized payload carried by the shared resource transfer envelope.
+#[derive(
+    Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, strum::VariantNames,
+)]
+#[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
+pub enum ResourceTransferPayloadKind {
+    Entity,
+    Transcript,
+    View,
+}
+
 /// One resource's entity selection, owned by OpenAPI resource schema extensions.
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -169,6 +181,35 @@ mod tests {
                     "root-only DTO must not select team agents: {collection}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn transfer_payload_kind_is_required_and_strict() {
+        use studio_json::json;
+        let base = json!({"protocol":4,"workspaceId":"workspace","epoch":"epoch","revision":1,"reason":"initial","resource":{"kind":"transcript","agentId":"a"},"cursor":{"workspaceId":"workspace","seq":1},"replyKind":"snapshot","transferId":"transfer","pageIndex":0,"partIndex":0,"partCount":1,"complete":true,"data":"{}"});
+        assert!(
+            crate::first_error("ResourceEntityTransferEvent", &base)
+                .unwrap()
+                .is_some()
+        );
+        for kind in ["entity", "transcript", "view"] {
+            let mut value = base.clone();
+            value["payloadKind"] = json!(kind);
+            assert!(
+                crate::first_error("ResourceEntityTransferEvent", &value)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        for kind in [json!(null), json!("unknown"), json!(4)] {
+            let mut value = base.clone();
+            value["payloadKind"] = kind;
+            assert!(
+                crate::first_error("ResourceEntityTransferEvent", &value)
+                    .unwrap()
+                    .is_some()
+            );
         }
     }
 

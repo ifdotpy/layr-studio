@@ -177,7 +177,7 @@ async function transcriptFixture(tail = 40) {
   };
 }
 
-describe("keyed windows reuse handwritten recovery", () => {
+describe("keyed windows consume completed SSE intervals", () => {
   it("retains transcript window metadata and cursor through normal SSE and equal interval replay, with zero reads", async () => {
     const f = await transcriptFixture();
     await f.deliver(f.snapshot(1));
@@ -221,76 +221,37 @@ describe("keyed windows reuse handwritten recovery", () => {
     expect(f.read).not.toHaveBeenCalled();
   });
 
-  it("drops an old epoch's cursor before recovery and accepts partial local metadata", async () => {
+  it("waits for a transcript snapshot after an epoch hint without HTTP", async () => {
     const f = await transcriptFixture();
     await f.deliver(f.snapshot(5));
-    f.read.mockResolvedValue({
-      workspaceId: f.workspaceId,
-      documents: [
-        {
-          id: "transcript:lead",
-          payload: JSON.stringify({ items: [] }),
-          seq: 1,
-          _deleted: false,
-        },
-      ],
-      checkpoint: { seq: 1 },
-      maxSeq: 1,
-    });
     f.notify(f.ref, {
       epoch: "restarted",
       revision: 1,
       transcriptReadRequired: true,
     });
     await vi.advanceTimersByTimeAsync(50);
-    expect(f.read).toHaveBeenCalledTimes(1);
-    expect(f.read.mock.calls[0]?.[1]?.query).toMatchObject({
-      scope: "transcript:lead",
-      after: 0,
+    expect(f.read).not.toHaveBeenCalled();
+    await f.deliver(f.snapshot(6));
+    expect(f.slot.current).toMatchObject({
+      data: { items: [{ text: "First" }] },
     });
-    const current = f.slot.current;
-    expect(current).toMatchObject({ data: { items: [] } });
-    if (current.status === "live" || current.status === "stale") {
-      expect(current.data.truncated).toBeUndefined();
-      expect(current.data.nextCursor).toBeUndefined();
-    }
   });
 
-  it("recovers one oversized item from the saved cursor and resumes stream delivery without polling", async () => {
+  it("applies a completed oversized transcript snapshot and resumes deltas without HTTP", async () => {
     const f = await transcriptFixture();
     await f.deliver(f.snapshot(1));
     const text = "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES + 1);
-    f.read.mockResolvedValue({
-      workspaceId: f.workspaceId,
-      documents: [
-        {
-          id: "transcript:lead",
-          payload: JSON.stringify({
-            items: [{ id: "answer", role: "assistant", text }],
-            truncated: false,
-            nextCursor: null,
-          }),
-          seq: 2,
-          _deleted: false,
-        },
-      ],
-      checkpoint: { seq: 2 },
-      maxSeq: 2,
-    });
-    f.notify(f.ref, {
-      epoch: "first",
+    await f.deliver({
       revision: 2,
-      transcriptReadRequired: true,
+      cursor: { workspaceId: f.workspaceId, seq: 2 },
+      replyKind: SubscriptionReplyKind.snapshot,
+      transcriptSnapshot: {
+        items: [{ id: "answer", role: "assistant", text }],
+        truncated: false,
+        nextCursor: null,
+      },
     });
-    await vi.advanceTimersByTimeAsync(50);
-    expect(f.read).toHaveBeenCalledTimes(1);
-    expect(f.read.mock.calls[0]?.[1]?.query).toMatchObject({
-      scope: "transcript:lead",
-      after: 1,
-    });
-    expect(f.slot.current).toMatchObject({
-      data: { items: [{ text }], truncated: false, nextCursor: null },
-    });
+    expect(f.slot.current).toMatchObject({ data: { items: [{ text }] } });
     await f.deliver({
       revision: 3,
       cursor: { workspaceId: f.workspaceId, seq: 3 },
@@ -310,10 +271,10 @@ describe("keyed windows reuse handwritten recovery", () => {
       data: { items: [{ text: "Streaming again" }] },
     });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(f.read).toHaveBeenCalledTimes(1);
+    expect(f.read).not.toHaveBeenCalled();
   });
 
-  it("keeps room cursor and window data on inline updates and recovers only a missing view", async () => {
+  it("keeps room data through missing hints until a completed SSE replacement", async () => {
     const f = transportFixture();
     const ref = { kind: "room", roomId: "team" } as const;
     const first = {
@@ -322,13 +283,7 @@ describe("keyed windows reuse handwritten recovery", () => {
       nextBefore: 20,
       nextAfter: null,
     } satisfies ResourceData<typeof ref>;
-    const recovered = {
-      messages: [],
-      room: { id: "team" },
-      nextBefore: null,
-      nextAfter: null,
-    } satisfies ResourceData<typeof ref>;
-    const read = vi.fn(async () => recovered);
+    const read = vi.fn();
     const subscriptions = createSubscriptions(
       f.events,
       createDataObserver(
@@ -337,7 +292,7 @@ describe("keyed windows reuse handwritten recovery", () => {
         }),
         f.events,
         undefined,
-        { room: read },
+        { get: read, post: vi.fn() },
       ),
     );
     const runtime = createObservableResourceRuntime(subscriptions);
@@ -367,7 +322,7 @@ describe("keyed windows reuse handwritten recovery", () => {
     expect(read).not.toHaveBeenCalled();
     f.notify(ref, { epoch: "room", revision: 2 });
     await vi.advanceTimersByTimeAsync(0);
-    expect(slot.current).toMatchObject({ data: recovered });
+    expect(slot.current).toMatchObject({ data: first });
     f.notify(ref, {
       epoch: "room",
       revision: 3,
@@ -377,6 +332,6 @@ describe("keyed windows reuse handwritten recovery", () => {
     });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(slot.current).toMatchObject({ data: first });
-    expect(read).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
   });
 });

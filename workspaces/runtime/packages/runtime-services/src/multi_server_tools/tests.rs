@@ -1299,6 +1299,7 @@ async fn fetch_copies_a_remote_worker_branch_through_a_verified_bundle_once() {
     run_git(&remote, &["commit", "-q", "-m", "base"]);
     let destination = repositories.path().join("local");
     let output = Command::new("git")
+        .current_dir(repositories.path())
         .args(["clone", "-q"])
         .arg(&remote)
         .arg(&destination)

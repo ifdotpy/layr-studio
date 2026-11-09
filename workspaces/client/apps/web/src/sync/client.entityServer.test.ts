@@ -1,3 +1,4 @@
+import { agentId } from "../generated/observableResources.ts";
 import type { StateCollections } from "../generated/observableResources.ts";
 import { observeGeneratedState } from "./generatedState.testHelper.ts";
 import { autorun } from "mobx";
@@ -44,7 +45,7 @@ vi.mock("../api.ts", () => ({
   isApiSchemaMismatch: () => false,
 }));
 vi.mock("./subscriptions/events.ts", () => ({
-  acknowledgeEntitySequences: vi.fn(),
+  replaceStream: vi.fn(),
   watchResourceConnection: () => () => {},
   watchResourceChanges: (
     resource: { kind: string },
@@ -344,94 +345,6 @@ it("bounds a fresh HTTP pull through filtered pages and continues later", async 
   expect(found.has("lead")).toBe(true);
 });
 
-it("completes a recovery pull only after server pages with no documents", async () => {
-  vi.stubGlobal("window", {
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    matchMedia: vi.fn(() => ({ matches: false })),
-  });
-  vi.stubGlobal("document", { hidden: false });
-  vi.stubGlobal("navigator", {
-    onLine: true,
-    locks: {
-      request: (_key: string, write: () => Promise<unknown>) => write(),
-    },
-  });
-  const module = await import("./client.ts");
-  const { createEntitySequenceScope } = await import("./entitySequence.ts");
-  const { createTranscriptCache } = await import("./transcriptCache.ts");
-  const registered =
-    Promise.withResolvers<(version?: ResourceVersion) => void>();
-  const completed = Promise.withResolvers<void>();
-  const pages: number[] = [];
-  let db: Awaited<
-    ReturnType<ReturnType<typeof module.createSyncClient>["syncDatabase"]>
-  >["db"];
-  const syncGet = vi.fn();
-  syncGet.mockImplementation(
-    async (path: string, options?: { query?: Record<string, string> }) => {
-      const query = { ...options?.query };
-      if (path === "/api/sync/pull") {
-        query.limit = pages.length < 2 ? "10" : "500";
-        expect(
-          await db.projections.findOne("state:entities:complete").exec(),
-        ).toBeNull();
-      }
-      const value = await request(
-        `${path}${options?.query ? `?${new URLSearchParams(query)}` : ""}`,
-        undefined,
-        undefined,
-        compact,
-      );
-      if (path === "/api/sync/pull") pages.push(value.documents.length);
-      return value;
-    },
-  );
-  const client = module.createSyncClient({
-    api: {
-      syncGet,
-      syncPost: vi.fn(),
-      saved: (_key, fallback) => fallback,
-      save: vi.fn(),
-      setWorkspace: vi.fn(),
-      isApiSchemaMismatch: () => false,
-    },
-    resources: {
-      watchResourceChanges: (resource, callback) => {
-        if (resource.kind === "state") registered.resolve(callback);
-        return () => {};
-      },
-      watchResourceConnection: () => () => {},
-    },
-    sequences: createEntitySequenceScope(),
-    transcripts: createTranscriptCache(),
-    databaseSuffix: "empty-recovery",
-  });
-  ({ db } = await client.syncDatabase());
-  const { stop } = observeGeneratedState(
-    client,
-    () => {
-      if (client.projectionMetadata.complete) completed.resolve();
-    },
-    (error) => completed.reject(error),
-  );
-  try {
-    const notify = await registered.promise;
-    notify({ epoch: "fixture", revision: 1, reason: "overflow" });
-    await completed.promise;
-    expect(pages).toContain(0);
-    expect(
-      await db.projections.findOne("state:entities:complete").exec(),
-    ).not.toBeNull();
-    expect(
-      await db.projections.findOne("entity:agentSummary:lead").exec(),
-    ).not.toBeNull();
-  } finally {
-    stop();
-    client.disposeCache();
-    vi.unstubAllGlobals();
-  }
-});
 async function* resourceFrames(
   response: Response,
 ): AsyncGenerator<ResourceChangeEvent> {
@@ -582,7 +495,7 @@ it("stages a cold >512 entity SSE interval before projection deletion or cursor 
     expect(
       await client.readSubscriptionCursor({ kind: "state" }),
     ).toBeUndefined();
-    const write = vi.spyOn(db.projections.storageInstance, "bulkWrite");
+    const write = vi.spyOn(db.projections, "applyBatch");
     write.mockRejectedValueOnce(new Error("fixture staging write failure"));
     await expect(
       client.persistStagedEntityTransfer(interval, () => true),
@@ -717,6 +630,7 @@ it("revives moved rows after inline and staged local eviction in either scope or
             replyKind: "snapshot",
             transferId: crypto.randomUUID(),
             pageIndex: 0,
+            payloadKind: "entity",
             partIndex: 0,
             partCount: 1,
             complete: true,
@@ -1194,7 +1108,7 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     expect(await client.readSubscriptionCursor({ kind: "state" })).toEqual(
       cursor,
     );
-    const [stored] = await db.projections.storageInstance.findDocumentsById(
+    const [stored] = await db.projections.getRows(
       ["entity:agentSummary:worker"],
       false,
     );
@@ -1220,7 +1134,7 @@ it("applies source commits beyond a full entity page through real SSE and the pr
         ),
       ),
     );
-    const writes = vi.spyOn(db.projections.storageInstance, "bulkWrite");
+    const writes = vi.spyOn(db.projections, "applyBatch");
     writes.mockRejectedValueOnce(new Error("local storage unavailable"));
     await expect(
       client.persistResourceEntityChanges(titleFrame, () => true),
@@ -1287,3 +1201,312 @@ it("applies source commits beyond a full entity page through real SSE and the pr
     await pump;
   }
 }, 20000);
+
+it("a deleted process owner sends an empty view beside the state tombstone", async () => {
+  const agent = {
+    provider: "codex",
+    id: "delete-stream-owner",
+    rootId: "delete-stream-owner",
+    epoch: 1,
+    status: "idle",
+    accountKey: "default",
+    name: "Delete stream owner",
+    compactions: 0,
+  };
+  await request(
+    "/fixture/entity",
+    {
+      agent,
+      task: {
+        id: "delete-command",
+        agent: agent.id,
+        kind: "command",
+        status: "running",
+        created: 1,
+        itemId: "command",
+        turnId: "turn",
+        type: "commandExecution",
+        name: "command",
+        processId: "pid",
+      },
+    },
+    undefined,
+    compact,
+  );
+  const controller = new AbortController();
+  const query = new URLSearchParams({
+    protocol: String(SYNC_PROTOCOL_VERSION),
+    resources: JSON.stringify([
+      { kind: "state" },
+      { kind: "processes", agentId: agent.id },
+    ]),
+    tokenRates: "false",
+  });
+  const response = await request(
+    `/api/sync/stream?${query}`,
+    undefined,
+    controller.signal,
+    compact,
+  );
+  const events = new EventHistory<
+    components["schemas"]["ResourceChangeEvent"]
+  >();
+  const consume = (async () => {
+    for await (const frame of wireFrames(response))
+      if (frame.name === "resources") {
+        events.next(
+          frame.value as components["schemas"]["ResourceChangeEvent"],
+        );
+      }
+  })();
+  try {
+    await events.wait(
+      (event) =>
+        event.resourceVersions?.some(
+          (entry) => entry.viewSnapshot?.processes?.processes.length === 1,
+        ) === true,
+    );
+    await request(
+      "/fixture/entity",
+      { agent: { ...agent, deletedAt: 1 } },
+      undefined,
+      compact,
+    );
+    const removed = await events.wait(
+      (event) =>
+        event.resourceVersions?.some((entry) =>
+          entry.entityChanges?.documents.some(
+            (row) =>
+              row.collection === "agentSummary" &&
+              row.id === agent.id &&
+              row.op === "delete",
+          ),
+        ) === true,
+    );
+    expect(
+      removed.resourceVersions
+        ?.flatMap((entry) => entry.entityChanges?.documents ?? [])
+        .some((row) => row.id === agent.id && row.seq > 0),
+    ).toBe(true);
+    const absent = await events.wait(
+      (event) =>
+        event.resourceVersions?.some(
+          (entry) =>
+            entry.revision > 0 &&
+            entry.viewSnapshot?.processes?.responseTarget === null &&
+            entry.viewSnapshot.processes.processes.length === 0 &&
+            entry.viewSnapshot.processes.activities.length === 0,
+        ) === true,
+    );
+    expect(
+      absent.resourceVersions?.some((entry) => entry.viewSnapshot?.processes),
+    ).toBe(true);
+    expect(absent.reason).toBe("change");
+  } finally {
+    controller.abort();
+    await consume.catch(() => {});
+  }
+});
+
+it("a failing subscribed view preserves the initial state frame and its own failure hint", async () => {
+  const controller = new AbortController();
+  const query = new URLSearchParams({
+    protocol: String(SYNC_PROTOCOL_VERSION),
+    resources: JSON.stringify([
+      { kind: "state" },
+      { kind: "processes", agentId: "missing-process-owner" },
+    ]),
+    tokenRates: "false",
+  });
+  const response = await request(
+    `/api/sync/stream?${query}`,
+    undefined,
+    controller.signal,
+    compact,
+  );
+  const events = new EventHistory<
+    components["schemas"]["ResourceChangeEvent"]
+  >();
+  const consume = (async () => {
+    for await (const frame of wireFrames(response))
+      if (frame.name === "resources")
+        events.next(
+          frame.value as components["schemas"]["ResourceChangeEvent"],
+        );
+  })();
+  try {
+    await events.wait(
+      (event) =>
+        event.resourceVersions?.some(
+          (entry) =>
+            entry.resource?.kind === "state" &&
+            entry.entityChanges !== undefined,
+        ) === true,
+    );
+    const failed = await events.wait(
+      (event) =>
+        event.resourceVersions?.some(
+          (entry) =>
+            entry.resource?.kind === "processes" &&
+            entry.viewSnapshot === undefined,
+        ) === true,
+    );
+    expect(failed.resources).toContainEqual({
+      kind: "processes",
+      agentId: "missing-process-owner",
+    });
+  } finally {
+    controller.abort();
+    await consume.catch(() => {});
+  }
+});
+
+it("a live view-read failure preserves sibling state and reaches the subscription error", async () => {
+  const { createSubscriptions } = await import("./subscriptions/module.ts");
+  const { createDataObserver } = await import("./subscriptions/data.ts");
+  const { createServerStore } = await import("../store/server.ts");
+  const agent = {
+    provider: "codex",
+    id: "live-failure-owner",
+    rootId: "live-failure-owner",
+    epoch: 1,
+    status: "idle",
+    accountKey: "default",
+    compactions: 0,
+    name: "Before view failure",
+  };
+  await request("/fixture/entity", { agent }, undefined, compact);
+  const controller = new AbortController();
+  const ref = { kind: "processes", agentId: agent.id } as const;
+  const listeners = new Set<(version?: ResourceVersion) => void>();
+  const transport = {
+    watchResourceChanges: (
+      _ref: unknown,
+      accept: (version?: ResourceVersion) => void,
+    ) => {
+      listeners.add(accept);
+      return () => {
+        listeners.delete(accept);
+      };
+    },
+    watchResourceConnection: (
+      accept: (health: "live", stream: "open", detail: {}) => void,
+    ) => {
+      accept("live", "open", {});
+      return () => {};
+    },
+  };
+  const resources = createSubscriptions(
+    transport,
+    createDataObserver(
+      () => ({
+        subscribeTranscriptProjection: () => () => {},
+      }),
+      transport,
+    ),
+  );
+  const store = createServerStore(resources);
+  const slot = store.processes(agentId(agent.id));
+  const stop = autorun(() => {
+    void slot.current;
+  });
+  await vi.waitFor(() => expect(listeners.size).toBe(2));
+  const events = new EventHistory<
+    components["schemas"]["ResourceChangeEvent"]
+  >();
+  const query = new URLSearchParams({
+    protocol: String(SYNC_PROTOCOL_VERSION),
+    resources: JSON.stringify([{ kind: "state" }, ref]),
+    tokenRates: "false",
+  });
+  const response = await request(
+    `/api/sync/stream?${query}`,
+    undefined,
+    controller.signal,
+    compact,
+  );
+  const consume = (async () => {
+    for await (const frame of wireFrames(response))
+      if (frame.name === "resources") {
+        const event =
+          frame.value as components["schemas"]["ResourceChangeEvent"];
+        for (const entry of event.resourceVersions ?? [])
+          if (entry.resource?.kind === "processes") {
+            const version: ResourceVersion = {
+              epoch: event.epoch,
+              revision: entry.revision,
+              ...(entry.viewSnapshot
+                ? { viewSnapshot: entry.viewSnapshot }
+                : {}),
+            };
+            for (const accept of listeners) accept(version);
+          }
+        events.next(event);
+      }
+  })();
+  try {
+    await events.wait(
+      (event) =>
+        event.resourceVersions?.some(
+          (entry) => entry.viewSnapshot?.processes,
+        ) === true,
+    );
+    await vi.waitFor(() => expect(slot.current.status).toBe("live"));
+    await request(
+      "/fixture/entity",
+      {
+        agent: { ...agent, name: "After view failure" },
+        task: {
+          id: "broken-live-task",
+          agent: agent.id,
+          kind: "invalid-kind",
+          status: "running",
+          created: 1,
+          itemId: "broken",
+          turnId: "turn",
+          type: "commandExecution",
+          name: "broken",
+        },
+      },
+      undefined,
+      compact,
+    );
+    const changed = await events.wait(
+      (event) =>
+        event.reason === "change" &&
+        event.resourceVersions?.some((entry) =>
+          entry.entityChanges?.documents.some(
+            (row) =>
+              row.collection === "agentSummary" &&
+              row.id === agent.id &&
+              row.op === "upsert" &&
+              row.value.name === "After view failure",
+          ),
+        ) === true,
+    );
+    expect(changed.reason).toBe("change");
+    await events.wait(
+      (event) =>
+        event.reason === "change" &&
+        event.resourceVersions?.some(
+          (entry) =>
+            entry.resource?.kind === "processes" && !entry.viewSnapshot,
+        ) === true,
+    );
+    await vi.waitFor(() =>
+      expect(resources.getSnapshot(ref).status).toBe("error"),
+    );
+    const current = slot.current;
+    expect("error" in current && current.error?.message).toContain(
+      "Live updates for this view are unavailable",
+    );
+    expect(current.status).not.toBe("loading");
+    expect(resources.getSnapshot(ref).status).toBe("error");
+  } finally {
+    controller.abort();
+    await consume.catch(() => {});
+    stop();
+    store.dispose();
+    resources.dispose();
+  }
+});

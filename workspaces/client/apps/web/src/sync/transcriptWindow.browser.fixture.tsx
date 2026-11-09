@@ -1,5 +1,9 @@
+import { SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS } from "../generated/sharedValues.ts";
 import "../rendererStyles.ts";
-import { ServerViewStoreProvider } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  useServerResources,
+  ServerViewStoreProvider,
+} from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { observer } from "mobx-react-lite";
@@ -11,10 +15,28 @@ import {
 declare global {
   interface Window {
     historyRoot: Root;
+    historyReceipts: (string | undefined)[];
   }
 }
 const workspaceId = document.documentElement.dataset.workspaceId!;
+window.historyReceipts = [];
 const History = observer(function History() {
+  const resources = useServerResources();
+  React.useEffect(
+    () =>
+      resources.watchResourceChanges(
+        {
+          kind: "transcript",
+          agentId: "open",
+          tail: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
+        },
+        (version) => {
+          window.historyReceipts.push(version?.replyKind);
+        },
+        { waitForBaseline: true },
+      ),
+    [resources],
+  );
   const history = useConversationHistory(
     "open",
     "agent",
@@ -28,7 +50,7 @@ const History = observer(function History() {
     null,
     React.createElement(
       "button",
-      { onClick: history.older, disabled: !history.before },
+      { onClick: () => void history.older(), disabled: !history.before },
       "Older history",
     ),
     React.createElement(

@@ -54,7 +54,6 @@ export function ownerFixture() {
     start: () => () => {},
   } satisfies ReturnType<typeof createDrafts>;
   const notify = vi.fn(),
-    refresh = vi.fn(async () => {}),
     post = vi.fn();
   Object.defineProperty(services, "drafts", { value: drafts });
   services.api.post = post;
@@ -70,7 +69,6 @@ export function ownerFixture() {
   areas.navigation.selectedId = "lead";
   areas.layout.geometry.viewport.width = 1280;
   areas.notices.notify = notify;
-  areas.refresh = refresh;
   const { navigation, native, rename, read, delivery, selected } = areas;
   return {
     areas,
@@ -79,7 +77,6 @@ export function ownerFixture() {
     navigation,
     drafts,
     notify,
-    refresh,
     post,
     native,
     rename,

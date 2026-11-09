@@ -90,6 +90,9 @@ pub const SYNC_ENTITY_STREAM_MAX_DOCUMENTS: i64 = 512;
 /// the resource and SSE envelope, then round up to the next power of two.
 pub const SYNC_STREAM_EVENT_MAX_BYTES: usize =
     (MAX_DRAFT_TEXT_CODEPOINTS * 14 + 16 * 1024).next_power_of_two();
+/// Maximum source UTF-8 bytes per serialized transfer fragment. JSON escaping
+/// may expand each byte sixfold; the remainder holds authenticated metadata.
+pub const SYNC_RESOURCE_TRANSFER_FRAGMENT_MAX_BYTES: usize = SYNC_STREAM_EVENT_MAX_BYTES / 8;
 /// Maximum retained terminal output per stream snapshot and renderer cache, in Unicode scalars.
 pub const SYNC_TERMINAL_STREAM_MAX_CHARS: usize = 16_384;
 /// Maximum transfer identity length, in Unicode code points.

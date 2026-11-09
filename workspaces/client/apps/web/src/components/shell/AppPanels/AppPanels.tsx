@@ -50,7 +50,6 @@ export const AppPanels = observer(function AppPanels() {
           }
           agent={agent || lead}
           onSelect={a.open}
-          refresh={a.refresh}
           notify={a.notices.notify}
         />
       )}
@@ -62,7 +61,6 @@ export const AppPanels = observer(function AppPanels() {
         afterClose={ui.afterTaskClose}
         leadId={active && ui.tasksOpen ? lead?.id : undefined}
         openAgent={a.open}
-        refresh={a.refresh}
         notify={a.notices.notify}
       />
       {active && !l.isMobile && a.preferences.value.showTerminals && (

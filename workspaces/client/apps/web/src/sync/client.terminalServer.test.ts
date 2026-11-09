@@ -30,7 +30,7 @@ vi.mock("../api.ts", () => ({
   onMatchingApiSchemaResponse: () => () => {},
 }));
 vi.mock("./subscriptions/events.ts", () => ({
-  acknowledgeEntitySequences: vi.fn(),
+  replaceStream: vi.fn(),
   watchResourceConnection: () => () => {},
   watchResourceChanges: () => () => {},
 }));
@@ -189,7 +189,7 @@ it("streams terminal intervals through the projection store and the screen consu
       watchResourceConnection: () => () => {},
     },
     undefined,
-    { "terminal-output": recover },
+    { get: recover, post: vi.fn() },
   )(resource, accept, failed);
   const applied = new EventHistory<ResourceChangeEvent>();
   const delivery = new ResourceEntityDelivery(

@@ -143,7 +143,6 @@ type SettingsProps = {
   catalog: Catalog;
   accounts?: readonly Account[];
   team?: Array<Pick<Agent, "id" | "rootId" | "deletedAt" | "accountKey">>;
-  refresh: () => Promise<void>;
   initialRole?: SetupRole;
   settingsRow?: boolean;
   showAccountSummary?: boolean;
@@ -547,7 +546,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   workersHidden = false,
   catalog: parentCatalog,
   accounts = [],
-  refresh,
   teamDefaults = false,
   onOpenChange,
   initialRole = "orchestrator",
@@ -660,7 +658,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   }, [accountModalOpen, transferOpen, opened]);
   const [saving, setSaving] = useState(false);
   const saveLock = useRef(false);
-  const refreshGeneration = useRef(0);
   const receiptKey = `next-turn-settings:${JSON.stringify([agent.id, accountOf(agent)])}`;
   const [unconfirmed, setUnconfirmed] = useState<ConversationBody | null>(
     () => {
@@ -708,17 +705,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
   const reviewStored = reviewSettingsFor(detail || {});
   const reviewCurrent = reviewPending?.values || reviewStored;
   const current = pending?.values || stored;
-  const refreshSavedSettings = (
-    generation: number,
-    confirmation = "Settings saved.",
-  ) => {
-    void Promise.resolve()
-      .then(refresh)
-      .catch((failure) => {
-        if (mounted.current && generation === refreshGeneration.current)
-          setError(`${confirmation} ${errorText(failure)}`);
-      });
-  };
   const effectiveAccount = teamDefaults ? null : accountOf(agent);
   const accountCatalog = useWorkerModels(
     effectiveAccount || accountOf(agent),
@@ -916,7 +902,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     setSaving(true);
     setError("");
     setStatus({ kind: "saving", text: "" });
-    ++refreshGeneration.current;
     if (request.next_turn) {
       save(receiptKey, request);
       setUnconfirmed(request);
@@ -1169,7 +1154,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     setSaving(true);
     setError("");
     setStatus({ kind: "saving", text: "" });
-    ++refreshGeneration.current;
     try {
       const canonical = await post(
         "/api/conversation",
@@ -1217,7 +1201,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
     const previousPending = pendingYolo;
     setSaving(true);
     setError("");
-    const generation = ++refreshGeneration.current;
     let confirmed = false;
     try {
       const storageKey = `permissions:${agent.id}:${accountOf(agent)}`;
@@ -1244,7 +1227,6 @@ const ScopedExecutionSettings = observer(function ScopedExecutionSettings({
         baseline:
           detail?.permissionMode === AgentPermissionMode["bypassPermissions"],
       });
-      refreshSavedSettings(generation);
     } catch (failure) {
       if (!mounted.current) return;
       if (!confirmed) setPendingYolo(previousPending);

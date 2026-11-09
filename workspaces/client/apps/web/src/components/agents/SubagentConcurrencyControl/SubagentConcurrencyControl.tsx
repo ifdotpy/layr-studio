@@ -41,7 +41,6 @@ type Props = {
   lead: Agent;
   stateDir: string;
   workspaceId: string;
-  refresh: () => Promise<void>;
 };
 
 const validConcurrency = (value: unknown): value is number =>
@@ -166,7 +165,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   compact = false,
   workspaceId,
   storageKey,
-  refresh,
 }: Props & { storageKey: string }) {
   const store = useServerStore();
   const storage = useServerStorage();
@@ -221,7 +219,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
   );
   const dirty = useRef(false);
   const lock = useRef(false);
-  const refreshGeneration = useRef(0);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -236,14 +233,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
     : undefined;
   const latest = useRef(confirmed);
   latest.current = confirmed;
-  const refreshConfirmed = (generation: number) => {
-    void Promise.resolve()
-      .then(refresh)
-      .catch((cause) => {
-        if (mounted.current && generation === refreshGeneration.current)
-          setError(`Setting saved. ${errorText(cause)}`);
-      });
-  };
 
   // Retain a newer accepted revision while snapshots catch up. Old mode-only
   // cache entries are intentionally ignored.
@@ -311,7 +300,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
     lock.current = true;
     setSaving(true);
     setError("");
-    const generation = ++refreshGeneration.current;
     try {
       const result = await post("/api/conversation", request, {
         workspaceId,
@@ -344,7 +332,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
         dirty.current = false;
         setDraft(newest.concurrency);
       }
-      refreshConfirmed(generation);
     } catch (cause) {
       if (cause instanceof ApiError && cause.outcome === "not_applied") {
         try {
@@ -369,12 +356,6 @@ const ScopedConcurrencyControl = observer(function ScopedConcurrencyControl({
           if (mounted.current) setError(errorText(failure));
           return;
         }
-        void Promise.resolve()
-          .then(refresh)
-          .catch((failure) => {
-            if (mounted.current && generation === refreshGeneration.current)
-              setError(`${errorText(cause)} ${errorText(failure)}`);
-          });
       }
       if (mounted.current) setError(errorText(cause));
     } finally {

@@ -7,6 +7,7 @@ import {
   reaction,
   runInAction,
 } from "mobx";
+import { SubscriptionReplyKind } from "../generated/api.ts";
 import { createTranscriptMirror } from "../generated/observableResources.ts";
 import { resourceData, type ResourceSlot } from "../store/runtime.ts";
 import type {
@@ -34,7 +35,7 @@ type Transcript = ReturnType<typeof createTranscriptMirror>["current"];
 type Api = Pick<ReturnType<typeof useServerApi>, "syncGet">;
 type Resources = Pick<
   ReturnType<typeof useServerResources>,
-  "watchResourceConnection" | "watchLiveDeltas"
+  "watchResourceConnection" | "watchResourceChanges" | "watchLiveDeltas"
 >;
 type CaptureAnchor = () => { id: string | null; endId: string | null };
 type PageQuery = {
@@ -122,6 +123,15 @@ export class TranscriptHistory {
     )
       this.items = items;
   }
+  private resetWindow() {
+    this.historical = false;
+    this.before = null;
+    this.after = null;
+    this.items = [];
+    this.attempt++;
+    this.pageLoading = false;
+    this.live.clear();
+  }
   private accept(data: Transcript) {
     if (
       data.unavailable ||
@@ -129,13 +139,7 @@ export class TranscriptHistory {
         data.historyVersion &&
         this.version !== data.historyVersion)
     ) {
-      this.historical = false;
-      this.before = null;
-      this.after = null;
-      this.items = [];
-      this.attempt++;
-      this.pageLoading = false;
-      this.live.clear();
+      this.resetWindow();
     }
     this.latest = data;
     this.version = data.historyVersion || "";
@@ -217,6 +221,26 @@ export class TranscriptHistory {
             }),
           )
         : () => {};
+    const stopReceipt =
+      this.id && this.managed
+        ? this.resources.watchResourceChanges(
+            {
+              kind: "transcript",
+              agentId: this.id,
+              tail: SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS,
+            },
+            (version) => {
+              if (version?.replyKind !== SubscriptionReplyKind.snapshot) return;
+              runInAction(() => {
+                this.resetWindow();
+                const current = this.slot?.current;
+                const data = current && resourceData(current);
+                if (data) this.accept(data);
+              });
+            },
+            { waitForBaseline: true },
+          )
+        : () => {};
     const stopLive = this.id
       ? this.resources.watchLiveDeltas((event) => {
           if (event.agentId === this.id) this.live.add(event);
@@ -253,6 +277,7 @@ export class TranscriptHistory {
         this.attempt++;
         stop();
         stopConnection();
+        stopReceipt();
         stopLive();
         stopDurable();
         stopBounds();

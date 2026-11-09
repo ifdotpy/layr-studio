@@ -55,7 +55,7 @@ export class ReadStateOwner {
       ),
       suppressed: new Set<string>(),
       attempted: new Set<string>(),
-      uncertain: new Set<string>(),
+      uncertain: observable.map<string, ChatReadState>({}, { deep: false }),
     };
   }
   get marking() {
@@ -74,6 +74,17 @@ export class ReadStateOwner {
       ? saved
       : known || saved;
   }
+  confirmedState(id: string, expected: ChatReadState): ChatReadState | null {
+    const agent = matchingCompletedAgent(this.summary(id), { id, ...expected });
+    const state = agent?.readState;
+    return state &&
+      state.threadId === expected.threadId &&
+      state.turnId === expected.turnId &&
+      (state.revision > expected.revision ||
+        (state.revision === expected.revision && state.read === expected.read))
+      ? { ...state }
+      : null;
+  }
   start() {
     const { startup } = this.areas;
     this.mounted = true;
@@ -81,6 +92,20 @@ export class ReadStateOwner {
       () => JSON.stringify([startup.creationScope, startup.workspaceId]),
       () => {
         this.scope = this.createScope();
+      },
+    );
+    const confirmations = reaction(
+      () =>
+        [...this.scope.uncertain].map(([id, expected]) => ({
+          id,
+          state: this.confirmedState(id, expected),
+        })),
+      (entries) => {
+        for (const { id, state } of entries)
+          if (state) {
+            this.scope.states.set(id, state);
+            this.scope.uncertain.delete(id);
+          }
       },
     );
     const selection = reaction(
@@ -98,6 +123,7 @@ export class ReadStateOwner {
     return () => {
       this.mounted = false;
       reset();
+      confirmations();
       selection();
     };
   }
@@ -154,6 +180,12 @@ export class ReadStateOwner {
         revision: saved?.revision || 0,
         read: false,
       });
+    const expected: ChatReadState = {
+      threadId: proof.threadId,
+      turnId: proof.turnId,
+      read,
+      revision: saved?.revision || 0,
+    };
     const request = (async () => {
       try {
         const body = {
@@ -162,7 +194,7 @@ export class ReadStateOwner {
             thread_id: proof.threadId,
             turn_id: proof.turnId,
             read,
-            expected_revision: saved?.revision || 0,
+            expected_revision: expected.revision,
           },
         };
         const requestWorkspace = this.areas.startup.workspaceId;
@@ -184,7 +216,7 @@ export class ReadStateOwner {
               (error instanceof ApiError &&
                 (error.status >= 500 || [408, 429].includes(error.status)));
             if (!read || !transient || retry >= 2) throw error;
-            current.uncertain.add(proof.id);
+            runInAction(() => current.uncertain.set(proof.id, expected));
             await new Promise((resolve) =>
               setTimeout(resolve, 1000 * (retry + 1)),
             );
@@ -198,46 +230,26 @@ export class ReadStateOwner {
         if (
           response.id !== proof.id ||
           !state ||
-          !Number.isSafeInteger(state.revision) ||
-          state.revision < 0 ||
           state.threadId !== proof.threadId ||
           state.turnId !== proof.turnId ||
           state.read !== read ||
-          state.revision <= (saved?.revision || 0)
+          state.revision < expected.revision
         )
           throw new Error("The server did not confirm the read status.");
         const known = current.states.get(proof.id);
         if (!known || state.revision >= known.revision)
           runInAction(() => current.states.set(proof.id, state));
-        current.uncertain.delete(proof.id);
+        runInAction(() => current.uncertain.delete(proof.id));
         // The mutation response confirms the CAS; the agent stream carries it to other views.
       } catch (error) {
         if (valid()) {
           current.attempted.delete(attempt);
-          current.uncertain.add(proof.id);
-          // Reconcile a lost success from the entity projection before a
-          // queued Unread can use local state.
-          try {
-            await this.areas.scope.services.sync.refreshState({
-              afterCurrentPull: true,
-            });
-            if (!valid()) return;
-            const canonical =
-              this.areas.scope.services.sync.projectionMetadata.workspaceId ===
-              this.areas.startup.workspaceId
-                ? matchingCompletedAgent(this.summary(proof.id), proof)
-                : null;
-            if (canonical) {
-              const state = canonical.readState ?? null;
-              const known = current.states.get(proof.id);
-              if (state && (!known || state.revision >= known.revision))
-                runInAction(() => current.states.set(proof.id, state));
-              if (state || !known) current.uncertain.delete(proof.id);
-            }
-          } catch {
-            // Keep uncertainty visible; a local no-op cannot confirm this write.
-          }
-          if (valid()) this.areas.notices.notify(errorText(error));
+          runInAction(() => current.uncertain.set(proof.id, expected));
+          const state = this.confirmedState(proof.id, expected);
+          if (state) {
+            runInAction(() => current.states.set(proof.id, state));
+            runInAction(() => current.uncertain.delete(proof.id));
+          } else this.areas.notices.notify(errorText(error));
         }
       }
     })();

@@ -558,7 +558,7 @@ async fn sync_stream(
         return error.into_response();
     }
     let mut scoped_sequences = BTreeMap::new();
-    let entity_transfers =
+    let mut entity_transfers =
         match entity_transfer::attach(&state, &mut initial_event, &since, &mut scoped_sequences)
             .await
         {
@@ -612,14 +612,28 @@ async fn sync_stream(
         }
     }
     let mut terminal_cursors = BTreeMap::new();
-    super::subscriptions::attach_terminal_output_cursors(
+    if let Err(error) = super::subscriptions::attach_terminal_output_cursors(
         Some(&state),
         &mut initial_event,
         &mut terminal_cursors,
     )
-    .await;
-    attach_transient_snapshots(Some(&state), &mut initial_event, &mut voice_sequences).await;
-    let recent_tails_sent = attach_recent_transcripts(&state, &mut initial_event).await;
+    .await
+    {
+        return error.into_response();
+    }
+    if let Err(error) =
+        attach_transient_snapshots(Some(&state), &mut initial_event, &mut voice_sequences).await
+    {
+        return error.into_response();
+    }
+    let recent_tails_sent = match attach_recent_transcripts(&state, &mut initial_event).await {
+        Ok(sent) => sent,
+        Err(error) => return error.into_response(),
+    };
+    match entity_transfer::attach_payloads(&mut initial_event, &state.validators).await {
+        Ok(transfers) => entity_transfers.extend(transfers),
+        Err(error) => return error.into_response(),
+    }
     let mut initial = VecDeque::new();
     let session_id = uuid::Uuid::new_v4().to_string();
     let (sender, receiver) = tokio::sync::mpsc::channel(1);
@@ -938,19 +952,25 @@ pub(super) async fn transcript_initial_snapshot(
         entry.reply_kind = Some(crate::generated::SubscriptionReplyKind::Delta);
         entry.transcript_changes = batch.map(Some);
     } else {
-        let document = response.documents.first().ok_or_else(ApiError::internal)?;
-        if document.deleted {
-            return Ok(entry);
+        if after.is_some_and(|after| after > 0) {
+            response = studio_json::from_value(read(0).await.map_err(|_| ApiError::internal())?)
+                .map_err(|_| ApiError::internal())?;
         }
-        let page = studio_json::from_str::<TranscriptPageResponse>(&document.payload)
-            .map_err(|_| ApiError::internal())?;
+        entry.revision = response.checkpoint.seq;
+        let document = response.documents.first().ok_or_else(ApiError::internal)?;
+        let page = if document.deleted {
+            super::generated_json(json!({"items":[],"truncated":false}))?
+        } else {
+            studio_json::from_str::<TranscriptPageResponse>(&document.payload)
+                .map_err(|_| ApiError::internal())?
+        };
         entry.transcript_snapshot = Some(Some(page));
         entry.reply_kind = Some(crate::generated::SubscriptionReplyKind::Snapshot);
     }
     entry.cursor = Some(SubscriptionCursor {
         terminal_generation: None,
         workspace_id: state.workspace_id,
-        seq: through,
+        seq: entry.revision,
     });
     Ok(entry)
 }
@@ -994,7 +1014,10 @@ fn parse_since(
 /// a chat was open. These chats are not subscribed: later changes arrive when the client
 /// subscribes to one.
 #[allow(clippy::wildcard_enum_match_arm)]
-async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChangeEvent) -> bool {
+async fn attach_recent_transcripts(
+    state: &HttpState,
+    event: &mut ResourceChangeEvent,
+) -> Result<bool, ApiError> {
     use studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_RECENT_CHATS;
     let open = event
         .resources
@@ -1007,34 +1030,27 @@ async fn attach_recent_transcripts(state: &HttpState, event: &mut ResourceChange
         })
         .collect::<Vec<_>>();
     let Some(store) = state.store.clone().filter(|_| !open.is_empty()) else {
-        return false;
+        return Ok(false);
     };
-    let Ok(recent) = studio_runtime_services::transcript::recent_chats(
+    let recent = studio_runtime_services::transcript::recent_chats(
         &store,
         SYNC_TRANSCRIPT_RECENT_CHATS,
         open,
     )
     .await
-    else {
-        return true;
-    };
+    .map_err(|_| ApiError::internal())?;
     for agent in recent {
-        let Ok(resource) =
+        let resource =
             studio_json::from_value::<ResourceRef>(json!({"kind":"transcript","agentId":agent}))
-        else {
-            continue;
-        };
-        let Ok(entry) =
-            super::subscriptions::initial_snapshot(state.clone(), resource.clone(), None).await
-        else {
-            continue;
-        };
+                .map_err(ApiError::json)?;
+        let entry =
+            super::subscriptions::initial_snapshot(state.clone(), resource.clone(), None).await?;
         if matches!(entry.transcript_snapshot, Some(Some(_))) {
             event.resources.push(resource);
             event.resource_versions.push(entry);
         }
     }
-    true
+    Ok(true)
 }
 
 async fn attach_initial_entries(
@@ -1054,7 +1070,16 @@ async fn attach_initial_entries(
         let key = studio_json::to_string(resource).map_err(|_| ApiError::internal())?;
         let cursor = since.get(&key).cloned();
         let mut initial =
-            super::subscriptions::initial_snapshot(state.clone(), resource.clone(), cursor).await?;
+            match super::subscriptions::initial_snapshot(state.clone(), resource.clone(), cursor)
+                .await
+            {
+                Ok(initial) => initial,
+                Err(error) => {
+                    eprintln!("initial subscribed view unavailable: {error:?}");
+                    entry.resource = Some(Some(resource.clone()));
+                    continue;
+                }
+            };
         if matches!(resource, ResourceRef::TerminalOutputResource(_)) {
             // Notification revisions belong to the hub; output offsets belong to cursor.seq.
             initial.revision = entry.revision;
@@ -1209,6 +1234,7 @@ async fn read_transcript_changes(
         complete,
     )
     .await
+    .expect("transcript read")
 }
 
 /// One SQLite snapshot proves the advertised interval, including the tombstone floor.
@@ -1284,9 +1310,6 @@ enum TranscriptStreamUpdate {
         revision: i64,
         batch: Box<TranscriptChangeBatch>,
     },
-    Recovery {
-        revision: i64,
-    },
 }
 
 /// Reuse the pull projection owner only for transcript scopes hinted in this flush.
@@ -1296,124 +1319,86 @@ async fn read_transcript_changes_typed(
     resources: &[ResourceRef],
     sequences: &mut BTreeMap<String, i64>,
     complete: bool,
-) -> BTreeMap<String, TranscriptStreamUpdate> {
+) -> Result<BTreeMap<String, TranscriptStreamUpdate>, ApiError> {
     let mut updates: BTreeMap<String, TranscriptStreamUpdate> = BTreeMap::new();
-    let mut inline_bytes = Some(SYNC_STREAM_EVENT_MAX_BYTES);
-    let Some(store) = store else {
-        return updates;
-    };
     for resource in resources {
         let ResourceRef::TranscriptResource(resource) = resource else {
             continue;
         };
+        let store = store.clone().ok_or_else(ApiError::internal)?;
         let agent = resource.agent_id.as_str().to_owned();
         let scope = format!("transcript:{agent}");
-        let after = if complete {
-            sequences.get(&agent).copied()
-        } else {
-            None
-        };
+        let after = complete.then(|| sequences.get(&agent).copied()).flatten();
         #[cfg(test)]
         record_test_transcript_pull(&agent);
-        let result = studio_runtime_services::transcript::pull_scope(
-            store.clone(),
-            &scope,
-            &agent,
-            after.unwrap_or(0),
+        let mut response: TranscriptSyncPage = studio_json::from_value(
+            studio_runtime_services::transcript::pull_scope(
+                store.clone(),
+                &scope,
+                &agent,
+                after.unwrap_or(0),
+            )
+            .await
+            .map_err(|_| ApiError::internal())?,
         )
-        .await;
-        let response = match result
-            .ok()
-            .and_then(|value| studio_json::from_value::<TranscriptSyncPage>(value).ok())
-        {
-            Some(response) => response,
-            None => {
-                sequences.remove(&agent);
-                continue;
-            }
-        };
+        .map_err(|_| ApiError::internal())?;
         let through = response.checkpoint.seq;
         if !(0..=MAX_SAFE_REVISION).contains(&through) {
-            sequences.remove(&agent);
-            continue;
+            return Err(ApiError::internal());
         }
-        if complete && after == Some(through) && response.documents.is_empty() {
+        if after == Some(through) && response.documents.is_empty() {
             updates.insert(agent, TranscriptStreamUpdate::Unchanged);
             continue;
         }
-        if !complete {
-            let snapshot = response
+        let batch = after.and_then(|after| transcript_change_batch(&response, &scope, after));
+        let update = if let Some(batch) = batch {
+            TranscriptStreamUpdate::Changed {
+                revision: through,
+                batch: Box::new(batch),
+            }
+        } else {
+            // Missing/expired remembered pages cannot prove a delta. Read an
+            // authoritative snapshot over SSE instead of announcing fake progress.
+            if after.is_some() {
+                response = studio_json::from_value(
+                    studio_runtime_services::transcript::pull_scope(store, &scope, &agent, 0)
+                        .await
+                        .map_err(|_| ApiError::internal())?,
+                )
+                .map_err(|_| ApiError::internal())?;
+            }
+            let document = response
                 .documents
                 .first()
                 .filter(|document| {
                     response.documents.len() == 1
                         && document.id == scope
-                        && !document.deleted
-                        && document.seq == through
+                        && document.seq == response.checkpoint.seq
                 })
-                .and_then(|document| {
-                    studio_json::from_str::<TranscriptPageResponse>(&document.payload)
-                        .ok()
-                        .map(|page| {
-                            super::transcript::window_snapshot(
-                                page,
-                                resource.tail.map(|tail| tail.get()),
-                            )
-                        })
-                })
-                .map(Box::new);
-            sequences.insert(agent.clone(), through);
-            updates.insert(
-                agent,
-                match snapshot {
-                    Some(snapshot) => TranscriptStreamUpdate::Snapshot {
-                        revision: through,
-                        snapshot,
-                    },
-                    None => TranscriptStreamUpdate::Recovery { revision: through },
-                },
-            );
-            continue;
-        }
-        let batch = after
-            .filter(|after| complete && *after < through)
-            .and_then(|after| {
-                // The pull payload is already serialized. Its byte length bounds
-                // retained inline data without serializing each batch again. The
-                // final SSE writer accounts for the exact envelope and metadata.
-                let remaining = inline_bytes?;
-                let bytes = response
-                    .documents
-                    .iter()
-                    .map(|document| document.payload.len())
-                    .sum();
-                inline_bytes = remaining.checked_sub(bytes);
-                if inline_bytes.is_none() {
-                    for update in updates.values_mut() {
-                        if let TranscriptStreamUpdate::Changed { revision, .. } = update {
-                            *update = TranscriptStreamUpdate::Recovery {
-                                revision: *revision,
-                            };
-                        }
-                    }
-                    return None;
-                }
-                transcript_change_batch(&response, &scope, after)
-            })
-            .map(Box::new);
-        sequences.insert(agent.clone(), through);
-        updates.insert(
-            agent,
-            match batch {
-                Some(batch) => TranscriptStreamUpdate::Changed {
-                    revision: through,
-                    batch,
-                },
-                None => TranscriptStreamUpdate::Recovery { revision: through },
-            },
-        );
+                .ok_or_else(ApiError::internal)?;
+            let page = if document.deleted {
+                super::generated_json(json!({"items":[],"truncated":false}))?
+            } else {
+                studio_json::from_str::<TranscriptPageResponse>(&document.payload)
+                    .map_err(|_| ApiError::internal())?
+            };
+            TranscriptStreamUpdate::Snapshot {
+                revision: response.checkpoint.seq,
+                snapshot: Box::new(super::transcript::window_snapshot(
+                    page,
+                    resource.tail.map(|tail| tail.get()),
+                )),
+            }
+        };
+        let revision = match &update {
+            TranscriptStreamUpdate::Snapshot { revision, .. }
+            | TranscriptStreamUpdate::Changed { revision, .. } => *revision,
+            TranscriptStreamUpdate::Unchanged => unreachable!(),
+        };
+        sequences.insert(agent.clone(), revision);
+        updates.insert(agent, update);
     }
-    updates
+    Ok(updates)
 }
 
 fn transcript_change_batch(
@@ -1527,7 +1512,6 @@ fn attach_transcript_changes(
                     entry.revision = revision;
                     entry.transcript_changes = Some(Some(*batch));
                 }
-                Some(TranscriptStreamUpdate::Recovery { revision }) => entry.revision = revision,
                 None => {}
             }
         }
@@ -1562,9 +1546,9 @@ async fn attach_transient_snapshots(
     state: Option<&HttpState>,
     event: &mut ResourceChangeEvent,
     voice_sequences: &mut BTreeMap<String, i64>,
-) {
-    super::subscriptions::attach_view_snapshots(state, event).await;
-    let Some(state) = state else { return };
+) -> Result<(), ApiError> {
+    super::subscriptions::attach_view_snapshots(state, event).await?;
+    let Some(state) = state else { return Ok(()) };
     for (resource, entry) in event.resources.iter().zip(&mut event.resource_versions) {
         match resource {
             ResourceRef::NativeLayrSettingsResource(_) => {
@@ -1637,6 +1621,7 @@ async fn attach_transient_snapshots(
             | ResourceRef::TerminalOutputResource(_) => {}
         }
     }
+    Ok(())
 }
 
 struct ResourceStream {
@@ -1763,13 +1748,15 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             &mut event,
             &mut state.terminal_cursors,
         )
-        .await;
+        .await
+        .ok()?;
         attach_transient_snapshots(
             state.http_state.as_ref(),
             &mut event,
             &mut state.voice_sequences,
         )
-        .await;
+        .await
+        .ok()?;
         state.entity_transfers.extend(
             entity_transfer::attach(
                 http_state,
@@ -1794,8 +1781,15 @@ async fn subscription_frame(state: &mut ResourceStream, update: SubscriptionChan
             }
         }
         if !state.recent_tails_sent {
-            state.recent_tails_sent = attach_recent_transcripts(http_state, &mut event).await;
+            state.recent_tails_sent = attach_recent_transcripts(http_state, &mut event)
+                .await
+                .ok()?;
         }
+        state.entity_transfers.extend(
+            entity_transfer::attach_payloads(&mut event, &http_state.validators)
+                .await
+                .ok()?,
+        );
         state
             .initial
             .extend(initial_resource_sse_events(view.cursor.revision, event));
@@ -2010,7 +2004,8 @@ async fn next_frame(
                 &mut state.transcript_sequences,
                 !view.overflow,
             )
-            .await;
+            .await
+            .ok()?;
             let mut event = resource_changes_event(
                 &state.workspace_id,
                 &view,
@@ -2044,13 +2039,22 @@ async fn next_frame(
                 &mut event,
                 &mut state.terminal_cursors,
             )
-            .await;
+            .await
+            .ok()?;
             attach_transient_snapshots(
                 state.http_state.as_ref(),
                 &mut event,
                 &mut state.voice_sequences,
             )
-            .await;
+            .await
+            .ok()?;
+            if let Some(http) = &state.http_state {
+                state.entity_transfers.extend(
+                    entity_transfer::attach_payloads(&mut event, &http.validators)
+                        .await
+                        .ok()?,
+                );
+            }
             if event.resources.is_empty() && state.entity_transfers.is_empty() {
                 continue;
             }
@@ -2289,12 +2293,13 @@ pub fn sse_event(name: &str, revision: Option<i64>, payload: impl Serialize) -> 
     }
 }
 
-/// Baselines for independent transcript refs get independent byte budgets. A
-/// crowded subscription set must not force normal windows into pull recovery.
+/// Separate independent entries after oversized transcript/view payloads have
+/// moved to transfers, preserving each ordinary frame byte bound.
 fn initial_resource_sse_events(revision: i64, payload: ResourceChangeEvent) -> Vec<Event> {
     if payload.resources.len() <= 1
         || !payload.resource_versions.iter().any(|entry| {
             entry.transcript_snapshot.is_some()
+                || entry.transcript_changes.is_some()
                 || entry.view_snapshot.is_some()
                 || entry.entity_changes.is_some()
                 || entry.draft_snapshot.is_some()
@@ -2332,7 +2337,8 @@ fn initial_resource_sse_events(revision: i64, payload: ResourceChangeEvent) -> V
 }
 
 /// Write JSON once into Axum's event buffer, counting the complete UTF-8 envelope.
-/// Only an oversized interval is serialized again, after dropping its inline data.
+/// Transcript/view oversize entries have already moved to the shared transfer.
+/// Explicit draft and transient voice fallback semantics remain unchanged.
 fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event {
     let id = revision.to_string();
     // Axum adds a space after each colon and a final blank line. The byte-boundary
@@ -2354,20 +2360,6 @@ fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event 
             result.expect("resource stream DTO serializes");
             return writer.into_event();
         }
-        // Measure the complete UTF-8 envelope, including metadata and cursors.
-        // Keep the newest item; a larger individual item retains scoped recovery.
-        let largest = payload
-            .resource_versions
-            .iter_mut()
-            .filter_map(|entry| entry.transcript_snapshot.as_mut().and_then(Option::as_mut))
-            .filter(|page| page.items.len() > 1)
-            .max_by_key(|page| page.items.len());
-        if let Some(page) = largest {
-            let keep = page.items.len().div_ceil(2);
-            let replacement = super::transcript::window_snapshot(page.clone(), Some(keep as i64));
-            *page = replacement;
-            continue;
-        }
         if let Some(snapshot) = payload
             .resource_versions
             .iter_mut()
@@ -2388,13 +2380,10 @@ fn resource_sse_event(revision: i64, mut payload: ResourceChangeEvent) -> Event 
         entry.reply_kind = None;
         entry.terminal_base_offset = None;
         entry.entity_changes = None;
-        entry.transcript_changes = None;
-        entry.transcript_snapshot = None;
         entry.draft_changes = None;
         entry.draft_snapshot = None;
         entry.discovery_snapshot = None;
         entry.voice_records = None;
-        entry.view_snapshot = None;
     }
     sse_event("resources", Some(revision), payload)
 }
@@ -2626,7 +2615,9 @@ mod tests {
             &mut event,
             &samples.lock().unwrap(),
         );
-        super::super::subscriptions::attach_view_snapshots(Some(&state), &mut event).await;
+        super::super::subscriptions::attach_view_snapshots(Some(&state), &mut event)
+            .await
+            .expect("view snapshots");
         assert_eq!(
             studio_json::to_value(event).unwrap()["resourceVersions"][0]["viewSnapshot"]["processes"]
                 ["processes"][0]["tail"],
@@ -3285,6 +3276,84 @@ mod tests {
         .expect("SSE bytes")
     }
 
+    fn wire_value(bytes: &[u8]) -> Value {
+        studio_json::from_str(
+            std::str::from_utf8(bytes)
+                .expect("UTF8")
+                .lines()
+                .find_map(|line| line.strip_prefix("data: "))
+                .expect("data"),
+        )
+        .expect("JSON")
+    }
+
+    async fn delivered_resource_document(revision: i64, mut event: ResourceChangeEvent) -> Value {
+        let original_resources = event.resources.clone();
+        let validators = crate::validation::Registry::compile(&[]).expect("validators");
+        let readers = entity_transfer::attach_payloads(&mut event, &validators)
+            .await
+            .expect("transfer");
+        let mut entries = BTreeMap::new();
+        for frame in initial_resource_sse_events(revision, event.clone()) {
+            let bytes = frame_bytes(frame).await;
+            assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
+            let value = wire_value(&bytes);
+            for (resource, entry) in value["resources"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .zip(value["resourceVersions"].as_array().unwrap())
+            {
+                entries.insert(resource.to_string(), entry.clone());
+            }
+        }
+        for mut reader in readers {
+            let mut encoded = String::new();
+            let mut index = 0;
+            let mut completed = false;
+            while let Some(frame) = reader.next().await.expect("fragment") {
+                assert!(!completed);
+                let bytes = frame_bytes(frame).await;
+                assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
+                let frame = wire_value(&bytes);
+                assert!(validators.validate_component("ResourceEntityTransferEvent", &frame));
+                assert_eq!(frame["pageIndex"], 0);
+                assert_eq!(frame["partIndex"], index);
+                index += 1;
+                encoded.push_str(frame["data"].as_str().expect("serialized entry"));
+                completed = frame["complete"] == true;
+                assert_eq!(completed, frame["partCount"] == index);
+                if completed {
+                    let entry: Value = studio_json::from_str(&encoded).expect("complete entry");
+                    assert_eq!(entry["resource"], frame["resource"]);
+                    assert_eq!(entry["cursor"], frame["cursor"]);
+                    assert_eq!(entry["replyKind"], frame["replyKind"]);
+                    assert_eq!(
+                        frame["payloadKind"],
+                        if entry.get("viewSnapshot").is_some() {
+                            "view"
+                        } else {
+                            "transcript"
+                        }
+                    );
+                    entries.insert(frame["resource"].to_string(), entry);
+                }
+            }
+            assert!(completed);
+        }
+        let mut value = studio_json::to_value(event).unwrap();
+        value["resources"] = json!(original_resources);
+        value["resourceVersions"] = json!(
+            original_resources
+                .iter()
+                .map(|r| entries
+                    .remove(&studio_json::to_string(r).unwrap())
+                    .expect("complete resource"))
+                .collect::<Vec<_>>()
+        );
+        value
+    }
+
     fn combined_transcript_event() -> ResourceChangeEvent {
         let mut value = resource_event(
             "workspace",
@@ -3341,19 +3410,7 @@ mod tests {
                     .len(),
                 target
             );
-            let bytes = frame_bytes(resource_sse_event(99999, payload)).await;
-            assert!(
-                bytes.len() <= limit,
-                "complete SSE event is {} bytes; limit {limit}",
-                bytes.len()
-            );
-            let wire = String::from_utf8(bytes.to_vec()).expect("UTF8");
-            let body: Value = studio_json::from_str(
-                wire.lines()
-                    .find_map(|line| line.strip_prefix("data: "))
-                    .expect("data"),
-            )
-            .expect("JSON");
+            let body = delivered_resource_document(99999, payload).await;
             assert_eq!(body["revision"], 99999);
             assert_eq!(
                 body["resourceVersions"].as_array().expect("versions").len(),
@@ -3361,13 +3418,13 @@ mod tests {
             );
             for entry in body["resourceVersions"].as_array().expect("versions") {
                 assert_eq!(entry["revision"], 99999);
-                assert_eq!(entry.get("transcriptChanges").is_some(), target <= limit);
+                assert!(entry.get("transcriptChanges").is_some());
             }
         }
     }
 
     #[tokio::test]
-    async fn brotli_resource_event_fallback_drops_all_inline_batches_and_preserves_revisions() {
+    async fn brotli_resource_event_transfer_preserves_all_entry_fields() {
         let mut event = combined_transcript_event();
         let entry = &mut event.resource_versions[0];
         entry.entity_changes = Some(Some(EntityChangeBatch {
@@ -3385,12 +3442,15 @@ mod tests {
         value["resourceVersions"][0]["transcriptChanges"]["delta"]["items"][0]["text"] =
             json!("x".repeat(SYNC_STREAM_EVENT_MAX_BYTES));
         let event = studio_json::from_value(value).expect("event");
-        let document = event_document(Ok(resource_sse_event(99999, event))).await;
+        let document = delivered_resource_document(99999, event).await;
         let entry = &document["resourceVersions"][0];
         assert_eq!(entry["revision"], 99999);
         assert_eq!(entry["entitySequenceReset"], true);
         for field in ["entityChanges", "transcriptChanges", "draftChanges"] {
-            assert!(entry.get(field).is_none(), "{field} must use pull recovery");
+            assert!(
+                entry.get(field).is_some(),
+                "{field} must survive the transfer"
+            );
         }
     }
 
@@ -4565,6 +4625,96 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn state_stream_reconnect_transcript_over_limit_delta_rereads_full_snapshot() {
+        use axum::{body::Body, extract::ConnectInfo, http::Request};
+        use tower::ServiceExt;
+        let root = tempfile::tempdir().expect("isolated reconnect state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        let (after, through) = store.transaction(|tx| {
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({
+                "compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"reconnect-over-limit",
+                "rootId":"reconnect-over-limit","epoch":0,"status":"idle","threadId":"thread","accountKey":"default"
+            }))?)?;
+            tx.execute("DELETE FROM sync_entity_meta WHERE key='transcript_copies'", [])?;
+            let revision = studio_runtime_store::TranscriptRepository::revision(tx, "reconnect-over-limit")?;
+            let page = |prefix: &str, count: usize| json!({"items":(0..count).map(|index| json!({
+                "id":format!("{prefix}:{index}"),"role":"assistant","text":"message"
+            })).collect::<Vec<_>>(),"truncated":false});
+            let baseline = studio_runtime_store::TranscriptRepository::pull_payload(tx,
+                "transcript:reconnect-over-limit", 0, &page("removed", 500), false, Some(revision)).expect("initial retained page");
+            let replacement = studio_runtime_store::TranscriptRepository::pull_payload(tx,
+                "transcript:reconnect-over-limit", 0, &page("current", 120), false, Some(revision)).expect("replacement retained page");
+            tx.execute("UPDATE sync_entities SET payload=?1 WHERE collection='transcript:reconnect-over-limit' AND id='@revision'", [page("current",120).to_string()])?;
+            Ok((baseline["checkpoint"]["seq"].as_i64().expect("baseline"), replacement["checkpoint"]["seq"].as_i64().expect("replacement")))
+        }).await.expect("retained removals and changed items");
+        let delta = studio_runtime_services::transcript::pull_scope(
+            store.clone(),
+            "transcript:reconnect-over-limit",
+            "reconnect-over-limit",
+            after,
+        )
+        .await
+        .expect("delta");
+        let payload: Value =
+            studio_json::from_str(delta["documents"][0]["payload"].as_str().expect("payload"))
+                .expect("delta payload");
+        assert_eq!(payload["removed"].as_array().map(Vec::len), Some(500));
+        assert_eq!(payload["items"].as_array().map(Vec::len), Some(120));
+        let http = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        let resource = json!({"kind":"transcript","agentId":"reconnect-over-limit","tail":120});
+        let query = form_urlencoded::Serializer::new(String::new())
+            .append_pair("protocol", SYNC_PROTOCOL_VERSION_TEXT)
+            .append_pair("resources", &json!([resource]).to_string())
+            .append_pair(
+                "since",
+                &json!([{"resource":resource,"since":{"workspaceId":"workspace","seq":after}}])
+                    .to_string(),
+            )
+            .finish();
+        let response = crate::router(http)
+            .expect("router")
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/sync/stream?{query}"))
+                    .header("host", "127.0.0.1:4321")
+                    .header("x-canvas-token", "token")
+                    .extension(ConnectInfo(std::net::SocketAddr::from((
+                        [127, 0, 0, 1],
+                        12345,
+                    ))))
+                    .body(Body::empty())
+                    .expect("request"),
+            )
+            .await
+            .expect("reconnect");
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body().into_data_stream();
+        body.next().await.expect("session").expect("session bytes");
+        let frame = body
+            .next()
+            .await
+            .expect("baseline")
+            .expect("baseline bytes");
+        let baseline = wire_value(&frame);
+        assert_eq!(baseline["resourceVersions"][0]["replyKind"], "snapshot");
+        assert_eq!(baseline["resourceVersions"][0]["cursor"]["seq"], through);
+        assert_eq!(
+            baseline["resourceVersions"][0]["transcriptSnapshot"]["items"]
+                .as_array()
+                .map(Vec::len),
+            Some(120)
+        );
+    }
+
+    #[tokio::test]
     async fn state_stream_resume_current_old_and_expired_transcript_cursor() {
         let root = tempfile::tempdir().expect("isolated resume state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
@@ -4888,7 +5038,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_stream_oversized_view_snapshot_releases_cursor_for_scoped_recovery() {
+    async fn state_stream_oversized_view_snapshot_preserves_payload_and_cursor() {
         let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
             "workspace",
             "epoch",
@@ -4905,21 +5055,158 @@ mod tests {
             workspace_id: "workspace".into(),
             seq: 1,
         });
-        let bytes = frame_bytes(resource_sse_event(1, event)).await;
-        assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
-        let text = std::str::from_utf8(&bytes).expect("UTF8");
-        let value: Value = studio_json::from_str(
-            text.lines()
-                .find_map(|line| line.strip_prefix("data: "))
-                .expect("data"),
-        )
-        .expect("JSON");
-        assert!(value["resourceVersions"][0].get("viewSnapshot").is_none());
-        assert!(value["resourceVersions"][0].get("cursor").is_none());
+        let value = delivered_resource_document(1, event).await;
+        assert!(value["resourceVersions"][0].get("viewSnapshot").is_some());
+        assert!(value["resourceVersions"][0].get("cursor").is_some());
     }
 
     #[tokio::test]
-    async fn state_stream_subscription_transcript_window_shrinks_by_complete_utf8_event_bytes() {
+    async fn state_stream_oversized_view_producers_preserve_payload_and_receipts() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        let text = "\\\"界".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 3);
+        let stored_text = text.clone();
+        store.transaction(move |tx| {
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"lead","rootId":"lead","isLead":true,"epoch":1,"status":"idle","name":"Lead","threadId":"thread"}))?)?;
+            tx.execute("INSERT INTO runtime_complaints(id,record) VALUES('message',?1)", [json!({"id":"message","leadId":"lead","recipient":"lead","status":"open","responses":[],"author":"lead","text":stored_text,"created":1,"updated":1,"readAt":null,"version":1}).to_string()])?;
+            tx.execute("INSERT INTO runtime_rooms(id,record) VALUES('room',?1)", [json!({"id":"room","kind":"broadcast","rootId":"lead","members":["lead"],"name":"Team"}).to_string()])?;
+            tx.execute("INSERT INTO runtime_chat_messages(id,room,sender,text,created,deliveries) VALUES('large','room','lead',?1,1,'{}')", [stored_text])?;
+            Ok(())
+        }).await.expect("large view sources");
+        let http = HttpState::new(
+            "token".into(),
+            "workspace".into(),
+            root.path().display().to_string(),
+            4321,
+            None,
+            Some(store),
+            None,
+        );
+        for (resource, field) in [
+            (
+                json!({"kind":"complaint","complaintId":"message"}),
+                "complaint",
+            ),
+            (json!({"kind":"room","roomId":"room"}), "room"),
+        ] {
+            let resource: ResourceRef = studio_json::from_value(resource).unwrap();
+            let entry =
+                super::super::subscriptions::initial_snapshot(http.clone(), resource.clone(), None)
+                    .await
+                    .expect("full view baseline");
+            assert!(entry.view_snapshot.is_some());
+            let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
+                "workspace",
+                "epoch",
+                7,
+                "initial",
+                &[studio_json::to_value(&resource).unwrap()],
+                0,
+                false,
+            ))
+            .unwrap();
+            event.resource_versions[0] = entry;
+            let value = delivered_resource_document(7, event).await;
+            let snapshot = &value["resourceVersions"][0]["viewSnapshot"][field];
+            assert_eq!(
+                if field == "room" {
+                    &snapshot["messages"][0]["text"]
+                } else {
+                    &snapshot["text"]
+                },
+                &json!(text)
+            );
+        }
+        let resource =
+            ResourceRef::ProcessesResource(studio_runtime_schema::resource_ref::AgentResource {
+                agent_id: "lead".to_owned().try_into().unwrap(),
+            });
+        let listing = json!({"processes":[{"id":"process","key":"key","generation":"generation","agent":"lead","accountKey":"default","epoch":1,"source":"monitor","status":"running","cancelRequested":false,"created":1,"name":"process","tail":text,"bytes":text.len(),"outputTruncated":false,"outputPatterns":[],"display":{"kind":"monitor","kindLabel":"monitor","title":"process","active":true,"indicator":"working","label":"running","inBackgroundList":true,"actions":[]}}],"activities":[]});
+        let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
+            "workspace",
+            "epoch",
+            7,
+            "change",
+            &[studio_json::to_value(&resource).unwrap()],
+            0,
+            false,
+        ))
+        .unwrap();
+        super::super::subscriptions::attach_sampled_process_snapshots(
+            &mut event,
+            &[(
+                studio_json::to_string(&resource).unwrap(),
+                studio_json::to_vec(&listing).unwrap(),
+            )]
+            .into_iter()
+            .collect(),
+        );
+        assert!(
+            event.resource_versions[0].view_snapshot.is_some(),
+            "oversized sampled process snapshot must survive"
+        );
+        let value = delivered_resource_document(7, event).await;
+        assert!(
+            value["resourceVersions"][0]["viewSnapshot"]["processes"]["processes"][0]["tail"]
+                == listing["processes"][0]["tail"],
+            "full sampled process tail"
+        );
+        assert_eq!(value["resourceVersions"][0]["replyKind"], "snapshot");
+        assert_eq!(
+            value["resourceVersions"][0]["cursor"]["workspaceId"],
+            "workspace"
+        );
+
+        let mut event: ResourceChangeEvent = studio_json::from_value(resource_event(
+            "workspace",
+            "epoch",
+            7,
+            "change",
+            &[json!({"kind":"terminal-output","terminalId":"shell"})],
+            0,
+            false,
+        ))
+        .unwrap();
+        let entry = &mut event.resource_versions[0];
+        entry.view_snapshot = Some(crate::generated::SubscriptionViewSnapshot {
+            terminal_output: Some(crate::generated::TerminalOutput {
+                text,
+                offset: 500,
+                truncated: false,
+                status: crate::generated::TerminalState::Running,
+                available_offset: None,
+                error: None,
+                exit_code: None,
+                has_more: None,
+                history_start: None,
+            }),
+            ..Default::default()
+        });
+        entry.cursor = Some(SubscriptionCursor {
+            workspace_id: "workspace".into(),
+            seq: 500,
+            terminal_generation: Some(3),
+        });
+        entry.reply_kind = Some(crate::generated::SubscriptionReplyKind::Delta);
+        entry.terminal_base_offset = Some(400);
+        let entry = studio_json::to_value(&event.resource_versions[0]).unwrap();
+        let value = delivered_resource_document(7, event).await;
+        for field in [
+            "revision",
+            "cursor",
+            "replyKind",
+            "terminalBaseOffset",
+            "viewSnapshot",
+        ] {
+            assert!(
+                value["resourceVersions"][0][field] == entry[field],
+                "preserve terminal {field}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn state_stream_subscription_transcript_window_preserves_all_items() {
         let text = "🧑‍💻".repeat(SYNC_STREAM_EVENT_MAX_BYTES / 40 / "🧑‍💻".len() + 1);
         let items = (0..40)
             .map(|index| {
@@ -4945,37 +5232,48 @@ mod tests {
         ))
         .expect("event");
         event.resource_versions[0].transcript_snapshot = Some(Some(page));
-        let bytes = frame_bytes(resource_sse_event(1, event)).await;
-        assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
-        let frame = std::str::from_utf8(&bytes).expect("UTF8");
-        let value: Value = studio_json::from_str(
-            frame
-                .lines()
-                .find_map(|line| line.strip_prefix("data: "))
-                .expect("data"),
-        )
-        .expect("JSON");
+        let value = delivered_resource_document(1, event).await;
         let snapshot = &value["resourceVersions"][0]["transcriptSnapshot"];
         let items = snapshot["items"]
             .as_array()
             .expect("inline window, no pull hint");
-        assert!(!items.is_empty() && items.len() < 40);
+        assert_eq!(items.len(), 40);
         assert_eq!(items.last().expect("latest")["id"], "item-039");
-        assert_eq!(snapshot["nextCursor"], items[0]["id"]);
-        assert_eq!(snapshot["truncated"], true);
+        assert_eq!(snapshot["truncated"], false);
+    }
+
+    async fn read_transferred_entry(
+        body: &mut (impl Stream<Item = Result<Bytes, axum::Error>> + Unpin),
+    ) -> Value {
+        let mut encoded = String::new();
+        let mut part = 0;
+        loop {
+            let bytes = body
+                .next()
+                .await
+                .expect("transfer continues")
+                .expect("wire bytes");
+            assert!(bytes.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
+            assert!(bytes.starts_with(b"event: entity-transfer\n"));
+            let frame = wire_value(&bytes);
+            assert_eq!(frame["partIndex"], part);
+            assert_eq!(frame["pageIndex"], 0);
+            part += 1;
+            encoded.push_str(frame["data"].as_str().expect("fragment"));
+            if frame["complete"] == true {
+                assert_eq!(frame["partCount"], part);
+                let entry: Value = studio_json::from_str(&encoded).expect("complete entry");
+                assert_eq!(frame["resource"], entry["resource"]);
+                assert_eq!(frame["cursor"], entry["cursor"]);
+                assert_eq!(frame["replyKind"], entry["replyKind"]);
+                return entry;
+            }
+        }
     }
 
     #[tokio::test]
-    async fn state_stream_subscription_added_oversized_initial_data_stays_revisions_only() {
-        fn document_bytes(bytes: &[u8]) -> Value {
-            let text = std::str::from_utf8(bytes).expect("UTF8");
-            studio_json::from_str(
-                text.lines()
-                    .find_map(|line| line.strip_prefix("data: "))
-                    .expect("data"),
-            )
-            .expect("JSON")
-        }
+    async fn state_stream_subscription_added_oversized_initial_data_and_reconnect_transfer_completely()
+     {
         use axum::extract::ConnectInfo;
         use axum::http::Request;
         use tower::ServiceExt;
@@ -5012,29 +5310,59 @@ mod tests {
                 .body(body)
                 .expect("request")
         };
-        let response = app.clone().oneshot(request("GET", &format!("/api/sync/stream?protocol={SYNC_PROTOCOL_VERSION_TEXT}&resources=%5B%7B%22kind%22%3A%22transcript%22%2C%22agentId%22%3A%22large%22%7D%5D&tokenRates=false"), Body::empty())).await.expect("stream");
+        let uri = format!(
+            "/api/sync/stream?protocol={SYNC_PROTOCOL_VERSION_TEXT}&resources=%5B%7B%22kind%22%3A%22transcript%22%2C%22agentId%22%3A%22large%22%7D%5D&tokenRates=false"
+        );
+        let response = app
+            .clone()
+            .oneshot(request("GET", &uri, Body::empty()))
+            .await
+            .expect("stream");
         assert_eq!(response.status(), StatusCode::OK);
         let mut body = response.into_body().into_data_stream();
-        let session = document_bytes(&body.next().await.expect("session").expect("bytes"));
-        body.next().await.expect("initial").expect("bytes");
-        let full = studio_runtime_services::transcript::pull_scope(
-            store.clone(),
-            "transcript:large",
-            "large",
-            0,
-        )
-        .await
-        .expect("source data");
-        assert!(
-            studio_json::to_vec(&full).expect("source JSON").len() > SYNC_STREAM_EVENT_MAX_BYTES
+        body.next().await.expect("session").expect("bytes");
+        body.next().await.expect("initial metadata").expect("bytes");
+        let first = wire_value(&body.next().await.expect("first fragment").expect("bytes"));
+        assert_eq!(first["payloadKind"], "transcript");
+        assert_eq!(first["partIndex"], 0);
+        assert_eq!(first["complete"], false);
+        drop(body); // No completed entry/cursor was received.
+
+        let response = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                &format!("{uri}&reconnect=true"),
+                Body::empty(),
+            ))
+            .await
+            .expect("reconnect");
+        assert_eq!(response.status(), StatusCode::OK);
+        let mut body = response.into_body().into_data_stream();
+        let session = wire_value(&body.next().await.expect("session").expect("bytes"));
+        body.next().await.expect("initial metadata").expect("bytes");
+        let baseline = read_transferred_entry(&mut body).await;
+        let before = baseline["cursor"]["seq"]
+            .as_i64()
+            .expect("completed cursor");
+        let items = baseline["transcriptSnapshot"]["items"]
+            .as_array()
+            .expect("full snapshot");
+        assert_eq!(items.len(), 2);
+        assert_eq!(
+            items
+                .iter()
+                .find(|item| item["id"] == "large:zlarge")
+                .unwrap()["text"]
+                .as_str()
+                .unwrap()
+                .len(),
+            SYNC_STREAM_EVENT_MAX_BYTES + 1
         );
-        let before = full["checkpoint"]["seq"].as_i64().expect("baseline cursor");
         store.transaction(|tx| {
             tx.execute("UPDATE runtime_items SET record=json_set(record,'$.text','after') WHERE id='large:small'", [])?;
             Ok(())
         }).await.expect("small change inside large transcript");
-        // Removing and adding in one POST requires a new baseline even when the
-        // final resource set retains the selector and its previous stream cursor.
         let resource = json!({"kind":"transcript","agentId":"large"});
         let update = json!({"sessionId":session["sessionId"],"gen":1,"add":[{"resource":resource}],"remove":[resource]});
         let response = app
@@ -5047,24 +5375,21 @@ mod tests {
             .expect("subscription POST");
         assert_eq!(response.status(), StatusCode::OK);
         let ack = body.next().await.expect("ack").expect("bytes");
-        assert!(String::from_utf8_lossy(&ack).starts_with("event: subscriptions\n"));
-        let frame = body
-            .next()
-            .await
-            .expect("added resource initial")
-            .expect("bytes");
-        assert!(frame.len() <= SYNC_STREAM_EVENT_MAX_BYTES);
-        let event = document_bytes(&frame);
-        assert_eq!(event["reason"], "initial");
-        assert_eq!(event["resources"], json!([resource]));
-        let entry = &event["resourceVersions"][0];
-        assert!(entry["revision"].as_i64().expect("revision") > before);
-        for field in ["transcriptChanges", "entityChanges", "draftChanges"] {
-            assert!(
-                entry.get(field).is_none(),
-                "initial data must use pull recovery: {field}"
-            );
-        }
+        assert!(ack.starts_with(b"event: subscriptions\n"));
+        body.next().await.expect("initial metadata").expect("bytes");
+        let entry = read_transferred_entry(&mut body).await;
+        assert!(entry["cursor"]["seq"].as_i64().expect("cursor") > before);
+        assert_eq!(entry["replyKind"], "snapshot");
+        assert_eq!(entry["resource"], resource);
+        assert_eq!(
+            entry["transcriptSnapshot"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|item| item["id"] == "large:small")
+                .unwrap()["text"],
+            "after"
+        );
     }
 
     #[tokio::test]
@@ -5153,7 +5478,8 @@ mod tests {
             &mut state.transcript_sequences,
             true,
         )
-        .await;
+        .await
+        .expect("transcript read");
         assert!(matches!(updates["open"], TranscriptStreamUpdate::Unchanged));
         let mut unchanged_event: ResourceChangeEvent =
             studio_json::from_value(event).expect("event DTO");
@@ -5177,7 +5503,48 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn state_stream_transcript_accumulation_drops_inline_data_at_shared_budget() {
+    async fn state_stream_transcript_read_failure_ends_stream_without_progress() {
+        let hub = Arc::new(ChangeNotificationHub::new());
+        let tokens = TokenRateHub::new();
+        let notifications = Arc::new(ResourceNotifications::new(hub.clone()));
+        let state = test_stream(
+            &hub,
+            &tokens,
+            notifications,
+            &[json!({"kind":"transcript","agentId":"unavailable"})],
+        );
+        hub.notify_one();
+        assert!(
+            next_frame(state).await.is_none(),
+            "an unavailable transcript reader must fail the stream, not announce a revision"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_stream_transcript_read_error_retains_last_cursor() {
+        let root = tempfile::tempdir().expect("isolated state");
+        let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
+        store.transaction(|tx| {
+            studio_runtime_store::AgentRepository::put(tx, &studio_runtime_store::AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","provider":"codex","id":"open","rootId":"open","epoch":1,"status":"idle"}))?)?;
+            tx.execute("DROP TABLE runtime_items", [])?;
+            Ok(())
+        }).await.expect("unreadable transcript source");
+        let resources =
+            vec![studio_json::from_value(json!({"kind":"transcript","agentId":"open"})).unwrap()];
+        let mut sequences = BTreeMap::from([("open".to_owned(), 123)]);
+        assert!(
+            read_transcript_changes_typed(Some(store), &resources, &mut sequences, true)
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            sequences["open"], 123,
+            "a failed read cannot advance a cursor"
+        );
+    }
+
+    #[tokio::test]
+    async fn state_stream_transcript_accumulation_retains_every_payload() {
         let root = tempfile::tempdir().expect("isolated state");
         let store = Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
         store.transaction(|tx| {
@@ -5210,15 +5577,23 @@ mod tests {
             first["first"],
             TranscriptStreamUpdate::Changed { .. }
         ));
-        let updates = read_transcript_changes(Some(store), &resources, &mut sequences, true).await;
+        let updates =
+            read_transcript_changes(Some(store.clone()), &resources, &mut sequences, true).await;
         assert_eq!(updates.len(), 3);
         for agent in ["first", "second", "last"] {
             assert!(sequences[agent] > before[agent]);
             assert!(
-                matches!(updates[agent], TranscriptStreamUpdate::Recovery { revision } if revision == sequences[agent]),
-                "{agent}: only revisions may remain after the budget is crossed"
+                matches!(updates[agent], TranscriptStreamUpdate::Changed { revision, .. } if revision == sequences[agent]),
+                "{agent}: every changed transcript must retain its payload"
             );
         }
+        let mut expired = BTreeMap::from([("first".to_owned(), MAX_SAFE_REVISION)]);
+        let snapshot =
+            read_transcript_changes(Some(store), &resources[..1], &mut expired, true).await;
+        assert!(
+            matches!(snapshot["first"], TranscriptStreamUpdate::Snapshot { .. }),
+            "an unknown transcript base must deliver an SSE snapshot"
+        );
     }
 
     #[tokio::test]

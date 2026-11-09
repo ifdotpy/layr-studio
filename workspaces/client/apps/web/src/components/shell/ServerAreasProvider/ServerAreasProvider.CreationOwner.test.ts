@@ -47,7 +47,6 @@ function fixture() {
     },
     { fireImmediately: true },
   );
-  vi.spyOn(areas, "refresh").mockResolvedValue();
   const owner = areas.creation,
     chatCreations = services.chatCreations,
     mirror = models.mirror;

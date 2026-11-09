@@ -13,7 +13,6 @@ const subscriptions = createSubscriptions(
     () => ({ subscribeTranscriptProjection }),
     transport,
     subscribeEntityData,
-    undefined,
     api,
   ),
 );
@@ -22,7 +21,7 @@ export const {
   watchResourceConnection,
   watchTokenRateEvents,
   watchLiveDeltas,
-  acknowledgeEntitySequences,
+  replaceStream,
 } = subscriptions;
 export const defaultSubscriptions = subscriptions;
 export { createSubscriptions } from "./module.ts";

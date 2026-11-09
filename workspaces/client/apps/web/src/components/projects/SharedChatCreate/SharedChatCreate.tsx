@@ -222,13 +222,11 @@ export default observer(function SharedChatCreate({
   source,
   accounts,
   initialPath,
-  refresh,
   created,
 }: {
   source: SharedCreationSource;
   accounts: AccountsState;
   initialPath?: string | undefined;
-  refresh: () => Promise<void>;
   created: (id: string) => void;
 }) {
   const { post, save, saved } = useServerApi();
@@ -318,7 +316,6 @@ export default observer(function SharedChatCreate({
         next = { ...next, roomId: room.id };
         remember(next);
       }
-      await refresh();
       if (next.rejected) remember(null);
     } catch (e) {
       if (

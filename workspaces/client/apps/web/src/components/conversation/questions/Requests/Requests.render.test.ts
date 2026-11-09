@@ -117,7 +117,7 @@ async function fixture(onLoading?: () => void) {
       createElement(Requests, { agentId: "lead", includeTeam: true }),
       createElement(History),
     ),
-    { scope: "test", refresh: async () => {}, notify() {} },
+    { scope: "test", notify() {} },
   );
   await act(async () => vi.advanceTimersByTimeAsync(100));
   const publish = async (

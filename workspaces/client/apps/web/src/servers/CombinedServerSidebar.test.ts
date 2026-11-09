@@ -377,7 +377,7 @@ it("routes project and folder actions through their wire owners and refuses offl
   expect(search).toHaveBeenCalledOnce();
 });
 
-it("retains the exact rename across a lost reply and retries only refresh after acknowledgement", async () => {
+it("retains the exact rename across a lost reply and settles without a refresh", async () => {
   const model = mergeSidebar(
     ["local", "remote"].map((id) =>
       withSidebarCollections({
@@ -392,8 +392,7 @@ it("retains the exact rename across a lost reply and retries only refresh after 
   );
   const values = new Map<string, string>(),
     requests: unknown[] = [];
-  let transportFailure = true,
-    refreshFailure = true;
+  let transportFailure = true;
   const backend: SidebarBackend = {
     ...localSidebarBackend,
     ownerId: "remote",
@@ -431,8 +430,7 @@ it("retains the exact rename across a lost reply and retries only refresh after 
       {
         backends,
         refreshOwner: async () => {
-          if (refreshFailure) throw Error("Refresh unavailable");
-          return navigationSnapshot(undefined, null, "");
+          throw Error("Unexpected refresh");
         },
       },
     ),
@@ -443,14 +441,10 @@ it("retains the exact rename across a lost reply and retries only refresh after 
     "Lost reply",
   );
   transportFailure = false;
-  await expect(owner.renameChat(id, "Saved name")).rejects.toThrow(
-    "Refresh unavailable",
-  );
+  await owner.renameChat(id, "Saved name");
   expect(requests).toHaveLength(2);
   expect(requests[1]).toEqual(requests[0]);
   expect(requests[0]).toMatchObject({ id: "same", name: "Saved name" });
-  refreshFailure = false;
-  await owner.renameChat(id, "Saved name");
   expect(requests).toHaveLength(2);
   expect(values.has("studio-sidebar-rename:same")).toBe(false);
   const replacementRequests: unknown[] = [];

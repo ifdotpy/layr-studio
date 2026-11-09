@@ -51,7 +51,7 @@ function RequestStory({ requests }: { requests: Approval[] }) {
       agents={[agentSummaryFixture(agent.id, agent)]}
       details={[{ id: agent.id }]}
     >
-      <RequestArea scope="storybook" refresh={async () => {}} notify={() => {}}>
+      <RequestArea scope="storybook" notify={() => {}}>
         <Requests all />
       </RequestArea>
     </RequestFixture>

@@ -77,18 +77,6 @@ export function createServerSubscriptions(options: ServerSubscriptionOptions) {
         () => sync().syncDatabase(),
         (report) => sync().retainStateDelivery(report),
       ),
-      {
-        processes: (ref) =>
-          api.get("/api/processes", { query: { agent: ref.agentId } }),
-        complaint: (ref) =>
-          api.get("/api/complaint", { query: { id: ref.complaintId } }),
-        room: (ref) =>
-          ref.legacy
-            ? api.get("/api/messages", { query: { room: ref.roomId } })
-            : api.get("/api/agent-chat", { query: { room: ref.roomId } }),
-        "terminal-output": (ref) =>
-          api.get("/api/terminals/output", { query: { id: ref.terminalId } }),
-      },
       api,
     ),
   );

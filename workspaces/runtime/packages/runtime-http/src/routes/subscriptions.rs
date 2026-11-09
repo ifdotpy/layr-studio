@@ -46,7 +46,7 @@ pub(super) async fn auth_progress(state: &HttpState, request_id: &str) -> Option
 
 /// Each generated resource kind has exactly one registered handler. A handler
 /// reads its records and durable cursor in one database snapshot. The byte bound
-/// includes its encoded payload; oversized data uses scoped recovery.
+/// includes each encoded frame; oversized transcript/view data uses the transfer.
 pub(crate) trait ResourceKindHandler: Send + Sync {
     fn accepts(&self, resource: &ResourceRef) -> bool;
 
@@ -214,7 +214,7 @@ async fn view_value(
                     json!({"legacyMessages":studio_runtime_store::projection_value(&messages)}),
                 );
             }
-            let mut room = super::messages::room_snapshot(
+            let room = super::messages::room_snapshot(
                 state,
                 r.room_id.as_str().to_owned(),
                 None,
@@ -222,18 +222,6 @@ async fn view_value(
                 studio_runtime_schema::shared_values::SYNC_TRANSCRIPT_INITIAL_TAIL_ITEMS as i64,
             )
             .await?;
-            // Preserve an exclusive history boundary while fitting a bounded tail.
-            while studio_json::to_vec(&room)
-                .map_err(|_| ApiError::internal())?
-                .len()
-                > SYNC_STREAM_EVENT_MAX_BYTES / 2
-            {
-                if room.messages.len() <= 1 {
-                    break;
-                }
-                room.messages.drain(..room.messages.len() / 2);
-                room.next_before = Some(Some(room.messages[0].seq));
-            }
             Ok(json!({"room":room}))
         }
         ResourceRef::TerminalOutputResource(r) => {
@@ -351,8 +339,8 @@ pub(super) async fn attach_terminal_output_cursors(
     state: Option<&HttpState>,
     event: &mut crate::generated::ResourceChangeEvent,
     cursors: &mut std::collections::BTreeMap<String, SubscriptionCursor>,
-) {
-    let Some(state) = state else { return };
+) -> Result<(), ApiError> {
+    let Some(state) = state else { return Ok(()) };
     for (resource, entry) in event.resources.iter().zip(&mut event.resource_versions) {
         let ResourceRef::TerminalOutputResource(terminal) = resource else {
             continue;
@@ -372,6 +360,7 @@ pub(super) async fn attach_terminal_output_cursors(
                 Err(error) => {
                     cursors.remove(terminal.terminal_id.as_str());
                     eprintln!("subscribed terminal interval unavailable: {error:?}");
+                    entry.resource = Some(Some(resource.clone()));
                     continue;
                 }
             }
@@ -380,13 +369,14 @@ pub(super) async fn attach_terminal_output_cursors(
             cursors.insert(terminal.terminal_id.as_str().to_owned(), cursor.clone());
         }
     }
+    Ok(())
 }
 
 pub(super) async fn attach_view_snapshots(
     state: Option<&HttpState>,
     event: &mut crate::generated::ResourceChangeEvent,
-) {
-    let Some(state) = state else { return };
+) -> Result<(), ApiError> {
+    let Some(state) = state else { return Ok(()) };
     for (resource, entry) in event.resources.iter().zip(&mut event.resource_versions) {
         if !is_view_resource(resource) || entry.view_snapshot.is_some() {
             continue;
@@ -396,9 +386,13 @@ pub(super) async fn attach_view_snapshots(
                 snapshot.revision = entry.revision;
                 *entry = snapshot;
             }
-            Err(error) => eprintln!("subscribed view snapshot unavailable: {error:?}"),
+            Err(error) => {
+                eprintln!("subscribed view unavailable: {error:?}");
+                entry.resource = Some(Some(resource.clone()));
+            }
         }
     }
+    Ok(())
 }
 
 pub(super) fn attach_sampled_process_snapshots(
@@ -421,12 +415,6 @@ pub(super) fn attach_sampled_process_snapshots(
             ..Default::default()
         });
         entry.resource = Some(Some(resource.clone()));
-        if studio_json::to_vec(&entry)
-            .map_or(true, |bytes| bytes.len() > SYNC_STREAM_EVENT_MAX_BYTES)
-        {
-            entry.view_snapshot = None;
-            entry.resource = None;
-        }
     }
 }
 
@@ -507,10 +495,13 @@ pub(super) async fn initial_snapshot(
     {
         return Err(ApiError::internal());
     }
-    if studio_json::to_vec(&entry)
-        .map_err(|_| ApiError::internal())?
-        .len()
-        > handler.max_bytes()
+    if entry.transcript_snapshot.is_none()
+        && entry.transcript_changes.is_none()
+        && entry.view_snapshot.is_none()
+        && studio_json::to_vec(&entry)
+            .map_err(|_| ApiError::internal())?
+            .len()
+            > handler.max_bytes()
     {
         return studio_json::from_value(
             studio_json::json!({"revision":entry.revision,"resource":reference}),
@@ -522,8 +513,9 @@ pub(super) async fn initial_snapshot(
 
 pub(super) async fn resource_content(state: HttpState, resource: ResourceRef) -> Option<Vec<u8>> {
     let handler = handler(&resource).ok()?;
+    let view = is_view_resource(&resource);
     let bytes = handler.content_fingerprint(state, resource).await?;
-    (bytes.len() <= handler.max_bytes()).then_some(bytes)
+    (view || bytes.len() <= handler.max_bytes()).then_some(bytes)
 }
 
 fn same_scope(resource: &ResourceRef, changed: &ResourceRef) -> bool {
@@ -762,7 +754,9 @@ mod tests {
                 .collect();
             attach_sampled_process_snapshots(&mut event, &samples);
         } else {
-            attach_view_snapshots(Some(&state), &mut event).await;
+            attach_view_snapshots(Some(&state), &mut event)
+                .await
+                .expect("view snapshots");
         }
         let value = studio_json::to_value(event).unwrap();
         assert_eq!(
@@ -900,7 +894,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn room_tail_reduces_geometrically_and_keeps_history_boundary() {
+    async fn room_tail_preserves_selected_window_and_history_boundary() {
         use std::sync::Arc;
         use studio_runtime_store::{RuntimeStore, StoreError};
         let directory = tempfile::tempdir().expect("isolated state");
@@ -942,8 +936,8 @@ mod tests {
             .expect("room tail");
         let room = &value["room"];
         let messages = room["messages"].as_array().expect("messages");
-        assert!(!messages.is_empty() && messages.len() < initial_count);
-        assert_eq!(room["nextBefore"], messages[0]["seq"]);
+        assert_eq!(messages.len(), initial_count);
+        assert_eq!(room["nextBefore"], initial["nextBefore"]);
         let tail_ids: Vec<String> = messages
             .iter()
             .map(|v| v["id"].as_str().expect("id").to_owned())
@@ -982,7 +976,7 @@ mod tests {
         assert_eq!(tail_ids, expected_tail);
         assert!(
             studio_json::to_vec(room).expect("serialized tail").len()
-                <= SYNC_STREAM_EVENT_MAX_BYTES / 2
+                > SYNC_STREAM_EVENT_MAX_BYTES / 2
         );
     }
 
@@ -1044,7 +1038,9 @@ mod tests {
                 "{field} baseline"
             );
             let mut event:crate::generated::ResourceChangeEvent = studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[resource],"resourceVersions":[{"revision":2}]})).expect("event");
-            attach_view_snapshots(Some(&state), &mut event).await;
+            attach_view_snapshots(Some(&state), &mut event)
+                .await
+                .expect("view snapshots");
             let live = studio_json::to_value(event).expect("live frame");
             assert_eq!(
                 live["resourceVersions"][0]["viewSnapshot"][field],
@@ -1117,7 +1113,9 @@ mod tests {
                 <= SYNC_STREAM_EVENT_MAX_BYTES
         );
         let mut event:crate::generated::ResourceChangeEvent=studio_json::from_value(json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":state.workspace_id,"epoch":"epoch","revision":2,"reason":"change","resources":[work],"resourceVersions":[{"revision":2}]})).expect("work notification");
-        attach_view_snapshots(Some(&state), &mut event).await;
+        attach_view_snapshots(Some(&state), &mut event)
+            .await
+            .expect("view snapshots");
         assert!(
             studio_json::to_value(event).expect("serialize work notification")["resourceVersions"]
                 [0]

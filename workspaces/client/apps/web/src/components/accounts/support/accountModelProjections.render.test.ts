@@ -257,7 +257,6 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
             initialSection: "profiles",
             onClose: noop,
             onSelect: noop,
-            refresh: async () => {},
             notify: noop,
           }),
         ),

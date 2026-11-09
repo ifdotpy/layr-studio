@@ -1,3 +1,4 @@
+import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
 import type { StateCollections } from "../generated/observableResources.ts";
 import { observeGeneratedState } from "./generatedState.testHelper.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
@@ -88,7 +89,7 @@ vi.mock("../api.ts", () => ({
   onMatchingApiSchemaResponse: () => () => {},
 }));
 vi.mock("./subscriptions/events.ts", () => ({
-  acknowledgeEntitySequences: vi.fn(),
+  replaceStream: vi.fn(),
   watchResourceChanges: mocks.watch,
   watchResourceConnection: mocks.watchConnection,
 }));
@@ -319,6 +320,403 @@ it("opens workspace and writes projections without IndexedDB", async () => {
   expect(open).not.toHaveBeenCalled();
 });
 
+it("rejects cursorless entity delivery without changing applied data", async () => {
+  const f = await setup();
+  await f.client.persistResourceEntityChanges(f.frame(4), () => true);
+  const frame = f.frame(5, "first", "Cursorless update");
+  delete frame.resourceVersions[0]!.cursor;
+  await expect(
+    f.client.persistResourceEntityChanges(frame, () => true),
+  ).rejects.toThrow("Entity subscription has no cursor");
+  expect(await f.client.readSubscriptionCursor({ kind: "state" })).toEqual({
+    workspaceId: f.workspaceId,
+    seq: 4,
+  });
+  expect(
+    f.db.projections.all().find((row) => row.id === "entity:agentSummary:lead")
+      ?.seq,
+  ).toBe(4);
+});
+
+it("a cold transcript waits for SSE through disconnect without HTTP reads", async () => {
+  const f = await setup();
+  const stop = f.client.subscribeTranscriptProjection(
+    "transcript:lead",
+    vi.fn(),
+    vi.fn(),
+  );
+  stops.push(stop);
+  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
+  f.connection("degraded", "connecting");
+  await new Promise<void>((resolve) => setTimeout(resolve, 20));
+  expect(f.pulls()).toEqual([]);
+});
+
+function transcriptFrame(
+  workspaceId: string,
+  seq: number,
+  ids: string[],
+  historyVersion = "same",
+  truncated = false,
+): ResourceChangeEvent {
+  const resource = { kind: "transcript", agentId: "lead" } as const;
+  return {
+    protocol: SYNC_PROTOCOL_VERSION,
+    workspaceId,
+    epoch: "first",
+    revision: seq,
+    reason: "reconnect",
+    resources: [resource],
+    resourceVersions: [
+      {
+        resource,
+        revision: seq,
+        cursor: { workspaceId, seq },
+        replyKind: SubscriptionReplyKind.snapshot,
+        transcriptSnapshot: {
+          items: ids.map((id) => ({ id, role: "assistant", text: id })),
+          historyVersion,
+          truncated,
+          nextCursor: truncated ? ids[0] : null,
+        },
+      },
+    ],
+  };
+}
+
+it.each([
+  {
+    historyVersion: "same",
+    tail: ["tail", "newest"],
+    expected: ["tail", "newest"],
+  },
+  {
+    historyVersion: "replacement",
+    tail: ["tail", "newest"],
+    expected: ["tail", "newest"],
+  },
+  {
+    historyVersion: "same",
+    tail: ["disjoint", "newest"],
+    expected: ["disjoint", "newest"],
+  },
+])(
+  "reconnect snapshot replaces the window $historyVersion $tail",
+  async ({ historyVersion, tail, expected }) => {
+    const f = await setup();
+    await f.client.persistResourceEntityChanges(
+      transcriptFrame(f.workspaceId, 4, ["older", "tail"]),
+      () => true,
+    );
+    await f.client.persistResourceEntityChanges(
+      transcriptFrame(f.workspaceId, 5, tail, historyVersion, true),
+      () => true,
+    );
+    const [row] = await f.db.projections.getRows(["transcript:lead"], false);
+    expect(JSON.parse(row!.payload).order).toEqual(expected);
+  },
+);
+
+it.each([4, 5])(
+  "a reset snapshot at seq %s drops an omitted older running tool even with the same history version",
+  async (seq) => {
+    const f = await setup();
+    const { peekTranscript } = await import("./transcriptCache.ts");
+    const before = transcriptFrame(f.workspaceId, 4, ["older-tool", "tail"]);
+    before.resourceVersions[0]!.transcriptSnapshot!.items[0]!.toolStatus =
+      "running";
+    await f.client.persistResourceEntityChanges(before, () => true);
+    // The older tool settles to lost while offline; the reset includes only its newer tail.
+    await f.client.persistResourceEntityChanges(
+      transcriptFrame(f.workspaceId, seq, ["tail", "newest"], "same", true),
+      () => true,
+    );
+    expect(
+      peekTranscript(f.workspaceId, "lead")?.payload?.items.map(
+        (item) => item.id,
+      ),
+    ).toEqual(["tail", "newest"]);
+    const [oldTool] = await f.db.projections.getRows(
+      ["transcript:item:lead:older-tool"],
+      true,
+    );
+    expect(oldTool?._deleted).toBe(true);
+  },
+);
+
+it("an oversized unsubscribed recent transcript reaches the cache like its inline prefetch", async () => {
+  const f = await setup();
+  vi.stubGlobal("navigator", { onLine: true });
+  const { peekTranscript } = await import("./transcriptCache.ts");
+  const { createResourceEvents } = await import("./resourceEvents.ts");
+  class Source {
+    listeners = new Map<string, (event: Event) => void>();
+    onerror = null;
+    onopen = null;
+    addEventListener(name: string, accept: (event: Event) => void) {
+      this.listeners.set(name, accept);
+    }
+    close() {}
+    emit(name: string, value: unknown) {
+      this.listeners.get(name)?.({
+        data: JSON.stringify(value),
+      } as MessageEvent);
+    }
+  }
+  const source = new Source();
+  const transport = createResourceEvents({
+    api: {
+      get: mocks.syncGet,
+      post: vi.fn().mockResolvedValue({ gen: 1 }),
+      clearSchemaUpdateAttemptAfterMatch: vi.fn(),
+      receiveStreamSession: vi.fn(),
+      clearStreamSession: vi.fn(),
+      isApiSchemaMismatch: () => false,
+      matchingApiSchemaResponseGeneration: () => 0,
+      markApiSchemaMismatch: vi.fn(),
+      onApiSchemaMismatch: () => () => {},
+    },
+    sync: {
+      syncDatabase: f.client.syncDatabase,
+      persistResourceEntityChanges: f.client.persistResourceEntityChanges,
+      persistStagedEntityTransfer: f.client.persistStagedEntityTransfer,
+      readSubscriptionCursor: f.client.readSubscriptionCursor,
+    },
+    tokenRates: {
+      configureTokenRateStream: vi.fn(),
+      receiveResourceTokenRates: vi.fn(() => true),
+      getWorkspaceTokenRates: vi.fn(() => ({ records: [] })),
+    },
+    openEvents: () => source,
+  });
+  stops.push(
+    transport.dispose,
+    transport.watchResourceChanges({ kind: "state" }, () => {}),
+  );
+  await vi.waitFor(() => expect(source.listeners.has("resources")).toBe(true));
+  source.emit("api-schema", { hash: API_SCHEMA_HASH });
+  const make = (agentId: string, seq: number) => {
+    const event = transcriptFrame(f.workspaceId, seq, [agentId]);
+    const resource = { kind: "transcript", agentId } as const;
+    event.resources = [resource];
+    event.resourceVersions[0]!.resource = resource;
+    return event;
+  };
+  const small = make("recent-small", 4);
+  source.emit("resources", small);
+  await vi.waitFor(() =>
+    expect(peekTranscript(f.workspaceId, "recent-small")?.seq).toBe(4),
+  );
+  const large = make("recent-large", 5);
+  const entry = large.resourceVersions[0]!;
+  entry.transcriptSnapshot!.items[0]!.text = "界".repeat(
+    Math.ceil(SYNC_STREAM_EVENT_MAX_BYTES / 3) + 1,
+  );
+  const encoded = JSON.stringify(entry),
+    fragmentChars = 30_000;
+  const partCount = Math.ceil(encoded.length / fragmentChars);
+  for (let partIndex = 0; partIndex < partCount; partIndex++)
+    source.emit("entity-transfer", {
+      protocol: SYNC_PROTOCOL_VERSION,
+      workspaceId: f.workspaceId,
+      epoch: "first",
+      revision: 5,
+      reason: "initial",
+      resource: large.resources[0],
+      cursor: entry.cursor,
+      replyKind: SubscriptionReplyKind.snapshot,
+      payloadKind: "transcript",
+      transferId: "recent-prefetch",
+      pageIndex: 0,
+      partIndex,
+      partCount,
+      complete: partIndex + 1 === partCount,
+      data: encoded.slice(
+        partIndex * fragmentChars,
+        (partIndex + 1) * fragmentChars,
+      ),
+    });
+  await vi.waitFor(() =>
+    expect(peekTranscript(f.workspaceId, "recent-large")?.seq).toBe(5),
+  );
+  expect(
+    peekTranscript(f.workspaceId, "recent-large")?.payload?.items[0]?.text,
+  ).toBe(entry.transcriptSnapshot!.items[0]!.text);
+});
+
+it("cancellation at transcript metadata publication keeps its cursor atomic for the next change", async () => {
+  const f = await setup();
+  const resource = { kind: "transcript", agentId: "lead" } as const;
+  await f.client.persistResourceEntityChanges(
+    transcriptFrame(f.workspaceId, 4, ["old"]),
+    () => true,
+  );
+  let current = true;
+  const subscription = f.db.projections.$.subscribe(({ documentData }) => {
+    if (documentData.id === "transcript:lead" && documentData.seq === 5)
+      current = false;
+  });
+  await f.client.persistResourceEntityChanges(
+    transcriptFrame(f.workspaceId, 5, ["old", "new"]),
+    () => current,
+  );
+  subscription.unsubscribe();
+  const cursor = await f.client.readSubscriptionCursor(resource);
+  const [meta] = await f.db.projections.getRows(["transcript:lead"], false);
+  expect(cursor?.seq).toBe(meta!.seq);
+  const next = transcriptFrame(f.workspaceId, 6, []);
+  next.resourceVersions[0]!.transcriptSnapshot = undefined;
+  next.resourceVersions[0]!.replyKind = SubscriptionReplyKind.delta;
+  next.resourceVersions[0]!.transcriptChanges = {
+    after: 5,
+    through: 6,
+    delta: {
+      delta: true,
+      items: [{ id: "next", role: "assistant", text: "next" }],
+      removed: [],
+      truncated: false,
+    },
+  };
+  await f.client.persistResourceEntityChanges(next, () => true);
+  expect((await f.client.readSubscriptionCursor(resource))?.seq).toBe(6);
+});
+
+it("rejects an existing transcript cursor behind its metadata before reconnect", async () => {
+  const f = await setup();
+  await f.client.persistResourceEntityChanges(
+    transcriptFrame(f.workspaceId, 4, ["old"]),
+    () => true,
+  );
+  const [meta] = await f.db.projections.getRows(["transcript:lead"], false);
+  await f.db.projections.applyBatch([{ ...meta!, seq: 5 }]);
+  expect(
+    await f.client.readSubscriptionCursor({
+      kind: "transcript",
+      agentId: "lead",
+    }),
+  ).toBeUndefined();
+  await f.client.persistResourceEntityChanges(
+    transcriptFrame(f.workspaceId, 6, ["latest"]),
+    () => true,
+  );
+  expect(
+    (
+      await f.client.readSubscriptionCursor({
+        kind: "transcript",
+        agentId: "lead",
+      })
+    )?.seq,
+  ).toBe(6);
+});
+
+it("stages a fragmented transcript entry before publishing data and its cursor", async () => {
+  const f = await setup();
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
+  const assembler = new EntityTransferAssembler();
+  const resource = { kind: "transcript", agentId: "lead" } as const;
+  const cursor = { workspaceId: f.workspaceId, seq: 7 };
+  const text = "界".repeat(100_000);
+  const entry: components["schemas"]["ResourceRevisionEntry"] = {
+    resource,
+    revision: 7,
+    cursor,
+    replyKind: SubscriptionReplyKind.snapshot,
+    transcriptSnapshot: {
+      items: [{ id: "large", role: "assistant", text }],
+      truncated: false,
+      nextCursor: null,
+    },
+  };
+  const encoded = JSON.stringify(entry);
+  const partCount = Math.ceil(encoded.length / 30_000);
+  let interval;
+  for (let partIndex = 0; partIndex < partCount; partIndex++) {
+    interval = await assembler.receive({
+      protocol: SYNC_PROTOCOL_VERSION,
+      payloadKind: "transcript",
+      workspaceId: f.workspaceId,
+      epoch: "first",
+      revision: 10,
+      reason: "reconnect",
+      resource,
+      cursor,
+      replyKind: SubscriptionReplyKind.snapshot,
+      transferId: "large-transcript",
+      pageIndex: 0,
+      partIndex,
+      partCount,
+      complete: partIndex + 1 === partCount,
+      data: encoded.slice(partIndex * 30_000, (partIndex + 1) * 30_000),
+    });
+    expect(await f.client.readSubscriptionCursor(resource)).toBeUndefined();
+  }
+  assert.ok(interval);
+  await f.client.persistStagedEntityTransfer(interval, () => false);
+  expect(await f.client.readSubscriptionCursor(resource)).toBeUndefined();
+  await f.client.persistStagedEntityTransfer(interval, () => true);
+  expect(await f.client.readSubscriptionCursor(resource)).toEqual(cursor);
+  expect(f.pulls()).toEqual([]);
+  const [row] = await f.db.projections.getRows(
+    ["transcript:item:lead:large"],
+    false,
+  );
+  expect(JSON.parse(row!.payload).text).toBe(text);
+  await interval.dispose();
+  await assembler.invalidate();
+});
+
+it("a transferred terminal entry retains generation and offset independently of its revision", async () => {
+  const f = await setup();
+  const { EntityTransferAssembler } = await import("./entityTransfer.ts");
+  const assembler = new EntityTransferAssembler();
+  const resource = { kind: "terminal-output", terminalId: "shell" } as const;
+  const cursor = { workspaceId: f.workspaceId, seq: 10, terminalGeneration: 2 };
+  const entry: components["schemas"]["ResourceRevisionEntry"] = {
+    resource,
+    revision: 3,
+    cursor,
+    replyKind: SubscriptionReplyKind.snapshot,
+    viewSnapshot: {
+      terminalOutput: {
+        text: "terminal",
+        offset: 10,
+        status: "running",
+        truncated: false,
+      },
+    },
+  };
+  const frame: components["schemas"]["ResourceEntityTransferEvent"] = {
+    protocol: SYNC_PROTOCOL_VERSION,
+    payloadKind: "view",
+    workspaceId: f.workspaceId,
+    epoch: "first",
+    revision: 20,
+    reason: "reconnect",
+    resource,
+    cursor,
+    replyKind: SubscriptionReplyKind.snapshot,
+    transferId: "terminal-entry",
+    pageIndex: 0,
+    partIndex: 0,
+    partCount: 1,
+    complete: true,
+    data: JSON.stringify(entry),
+  };
+  const interval = await assembler.receive(frame);
+  assert.ok(interval);
+  await f.client.persistStagedEntityTransfer(interval, () => true);
+  expect(await f.client.readSubscriptionCursor(resource)).toEqual(cursor);
+  await interval.dispose();
+  await expect(
+    assembler.receive({
+      ...frame,
+      transferId: "foreign-generation",
+      cursor: { ...cursor, terminalGeneration: 3 },
+    }),
+  ).rejects.toThrow("identity changed");
+  await assembler.invalidate();
+});
+
 it("reloads a scoped projection before exposing its resume cursor", async () => {
   const f = await setup();
   const { createEntitySequenceScope } = await import("./entitySequence.ts");
@@ -440,33 +838,6 @@ it("reloads a scoped projection before exposing its resume cursor", async () => 
   reloaded.disposeCache();
 });
 
-it("keeps the newer row when command replies arrive out of order", async () => {
-  const f = await setup();
-  const row = (
-    seq: number,
-    name: string,
-  ): components["schemas"]["SyncEntity"] => ({
-    op: "upsert",
-    collection: "agentSummary",
-    id: "lead",
-    seq,
-    value: agentSummaryFixture("lead", {
-      id: "lead",
-      rootId: "lead",
-      epoch: 1,
-      name,
-      status: AgentStatus.idle,
-    }),
-  });
-  await f.client.applyCommandRows([row(9, "newer")]);
-  await f.client.applyCommandRows([row(4, "older")]);
-  const saved = await f.db.projections
-    .findOne("entity:agentSummary:lead")
-    .exec();
-  expect(saved?.seq).toBe(9);
-  expect(saved?.entity?.value).toMatchObject({ name: "newer" });
-});
-
 it("waits for the applied cold SSE baseline and publishes it without a speculative pull", async () => {
   const f = await setup();
   f.subscribe();
@@ -553,37 +924,29 @@ it("keeps a partial scoped cache independent from canonical state readiness", as
   expect(f.pulls()).toEqual([]);
 });
 
-it.each(["revision-only", "overflow", "persistence failure"] as const)(
-  "%s explicitly starts one existing bounded recovery read",
+it.each(["revision-only", "overflow"] as const)(
+  "%s replaces the stream and recovers through SSE without HTTP reads",
   async (reason) => {
     const f = await setup();
+    const { replaceStream } = await import("./subscriptions/events.ts");
     f.subscribe();
     await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
-    mocks.syncGet.mockClear();
-    if (reason === "persistence failure") {
-      vi.spyOn(console, "error").mockImplementation(() => {});
-      vi.spyOn(
-        f.db.projections.storageInstance,
-        "bulkWrite",
-      ).mockRejectedValueOnce(new Error("storage unavailable"));
-      f.delivery.receive(f.frame(5));
-    } else {
-      const frame = f.frame(5);
-      frame.reason = reason === "overflow" ? "overflow" : "initial";
-      frame.resourceVersions = [{ revision: 5 }];
-      f.delivery.receive(frame);
-    }
-    await vi.waitFor(() => expect(f.pulls()).toHaveLength(1));
+    const frame = f.frame(5);
+    frame.reason = reason === "overflow" ? "overflow" : "initial";
+    frame.resourceVersions = [{ revision: 5 }];
+    f.delivery.receive(frame);
+    await vi.waitFor(() => expect(replaceStream).toHaveBeenCalledOnce());
+    expect(f.pulls()).toEqual([]);
+    f.delivery.receive(f.frame(5));
     await vi.waitFor(() =>
       expect(f.client.projectionMetadata.complete).toBe(true),
     );
-    expect(f.pulls()).toHaveLength(1);
-    expect(f.failed.mock.calls.filter(([error]) => error !== null)).toEqual([]);
+    expect(f.pulls()).toEqual([]);
   },
 );
 
 it.each(["degraded", "offline", "stopped"] as const)(
-  "cold %s transport starts recovery instead of leaving the watcher loading",
+  "cold %s transport waits for its SSE baseline without HTTP recovery",
   async (state) => {
     const f = await setup();
     f.subscribe();
@@ -592,110 +955,16 @@ it.each(["degraded", "offline", "stopped"] as const)(
       state === "stopped" ? "connecting" : state,
       state === "stopped" ? "stopped" : "open",
     );
+    await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    expect(f.pulls()).toEqual([]);
+    expect(f.client.projectionMetadata.complete).toBe(false);
+    f.delivery.receive(f.frame(5));
     await vi.waitFor(() =>
       expect(f.client.projectionMetadata.complete).toBe(true),
     );
-    expect(f.pulls()).toHaveLength(1);
-    // Repeated transport state is not a new recovery notification.
-    f.connection(
-      state === "stopped" ? "connecting" : state,
-      state === "stopped" ? "stopped" : "open",
-    );
-    expect(f.pulls()).toHaveLength(1);
+    expect(f.pulls()).toEqual([]);
   },
 );
-
-// The captured initial pull had 501 rows at a shared sequence boundary,
-// followed by the missing live chat on a later page.
-it("continues an initial pull when a sequence boundary exceeds the page limit", async () => {
-  const f = await setup();
-  const chatId = "01a1ae42-f050-7fbf-9608-ba90f7316cf2";
-  const boundary = 1863195;
-  const chatSeq = 3131664;
-  mocks.syncGet.mockImplementation(
-    async (path: string, options: { query: { after: number } }) => {
-      if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
-      const first = options.query.after === 0;
-      return {
-        workspaceId: f.workspaceId,
-        initialHigh: 3179588,
-        maxSeq: 3179588,
-        checkpoint: { seq: first ? boundary : 3179588 },
-        complete: !first,
-        documents: first
-          ? Array.from({ length: 501 }, (_, i) => ({
-              op: "delete",
-              collection: "retainedWorktree",
-              id: `old-${i}`,
-              seq: boundary,
-            }))
-          : [
-              {
-                op: "upsert",
-                collection: "agentSummary",
-                id: chatId,
-                seq: chatSeq,
-                value: agentSummaryFixture(chatId, {
-                  id: chatId,
-                  rootId: chatId,
-                  name: "Studio and layr",
-                  projectPath: "/project",
-                  status: AgentStatus.completed,
-                }),
-              },
-              ...Array.from({ length: 500 }, (_, i) => ({
-                op: "delete",
-                collection: "retainedWorktree",
-                id: `final-${i}`,
-                seq: 3179588,
-              })),
-            ],
-      };
-    },
-  );
-  f.subscribe();
-  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
-  f.connection("degraded");
-  await vi.waitFor(() =>
-    expect(f.client.projectionMetadata.complete).toBe(true),
-  );
-  expect(f.pulls()).toHaveLength(2);
-  expect(f.pulls()[1]?.[1].query.after).toBe(boundary);
-  expect(Array.from(f.snapshots.at(-1)?.agents.keys() ?? [])).toContain(chatId);
-});
-
-it("rejects an oversized page that cannot advance the pull cursor", async () => {
-  const f = await setup();
-  mocks.syncGet.mockImplementation(async (path: string) => {
-    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
-    if (f.pulls().length > 1) throw new Error("unexpected repeated pull");
-    return {
-      workspaceId: f.workspaceId,
-      initialHigh: 100,
-      maxSeq: 100,
-      checkpoint: { seq: 0 },
-      complete: false,
-      documents: Array.from({ length: 501 }, (_, i) => ({
-        op: "delete",
-        collection: "retainedWorktree",
-        id: `stalled-${i}`,
-        seq: 0,
-      })),
-    };
-  });
-  f.subscribe();
-  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
-  f.connection("degraded");
-  await vi.waitFor(() =>
-    expect(f.failed).toHaveBeenCalledWith(
-      expect.objectContaining({
-        message: "The server did not advance the sync checkpoint.",
-      }),
-    ),
-  );
-  expect(f.pulls()).toHaveLength(1);
-  expect(f.client.projectionMetadata.complete).not.toBe(true);
-});
 
 it("heals a truncated ready cache on reload and recovers the missing chat", async () => {
   const f = await setup();
@@ -733,90 +1002,28 @@ it("heals a truncated ready cache on reload and recovers the missing chat", asyn
     cacheStorage: storage,
     databaseSuffix: "truncated-cache-test",
   });
-  mocks.syncGet.mockImplementation(
-    async (path: string, options: { query: { after: number } }) => {
-      if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
-      return {
-        workspaceId: f.workspaceId,
-        initialHigh: 100,
-        maxSeq: 100,
-        checkpoint: { seq: 100 },
-        complete: true,
-        documents:
-          options.query.after === 0
-            ? [
-                {
-                  op: "upsert",
-                  collection: "agentSummary",
-                  id: "missing",
-                  seq: 4,
-                  value: agentSummaryFixture("missing", {
-                    id: "missing",
-                    rootId: "missing",
-                    name: "Missing chat",
-                    status: AgentStatus.completed,
-                  }),
-                },
-              ]
-            : [],
-      };
+  expect(await client.readSubscriptionCursor(state)).toBeUndefined();
+  const baseline = f.frame(100);
+  baseline.resourceVersions[0]!.entityChanges!.documents = [
+    {
+      op: "upsert",
+      collection: "agentSummary",
+      id: "missing",
+      seq: 4,
+      value: agentSummaryFixture("missing", {
+        name: "Missing chat",
+        status: AgentStatus.completed,
+      }),
     },
-  );
-  await client.readSubscriptionCursor(state);
-  await client.refreshState();
+  ];
+  await client.persistResourceEntityChanges(baseline, () => true);
   const { db } = await client.syncDatabase();
   const row = await db.projections
     .findOne("entity:agentSummary:missing")
     .exec();
   expect(row?.toJSON().entity?.id).toBe("missing");
-  expect(f.pulls()[0]?.[1].query.after).toBe(0);
+  expect(f.pulls()).toEqual([]);
   client.disposeCache();
-});
-
-it("continues an entity pull when the server declares it incomplete", async () => {
-  const f = await setup();
-  let pages = 0;
-  mocks.syncGet.mockImplementation(async (path: string) => {
-    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
-    pages++;
-    return {
-      workspaceId: f.workspaceId,
-      initialHigh: 100,
-      maxSeq: 100,
-      checkpoint: { seq: pages === 1 ? 100 : 101 },
-      complete: pages > 1,
-      documents: [],
-    };
-  });
-  f.subscribe();
-  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
-  f.connection("degraded");
-  await vi.waitFor(() =>
-    expect(f.client.projectionMetadata.complete).toBe(true),
-  );
-  expect(f.pulls()).toHaveLength(2);
-});
-
-it("stops an entity pull when the server declares it complete", async () => {
-  const f = await setup();
-  mocks.syncGet.mockImplementation(async (path: string) => {
-    if (path === "/api/sync/identity") return { workspaceId: f.workspaceId };
-    return {
-      workspaceId: f.workspaceId,
-      initialHigh: 100,
-      maxSeq: 100,
-      checkpoint: { seq: 4 },
-      complete: true,
-      documents: [],
-    };
-  });
-  f.subscribe();
-  await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
-  f.connection("degraded");
-  await vi.waitFor(() =>
-    expect(f.client.projectionMetadata.complete).toBe(true),
-  );
-  expect(f.pulls()).toHaveLength(1);
 });
 
 it("does not use HTTP recovery to bypass a schema-mismatched stream", async () => {
@@ -851,6 +1058,7 @@ it.each([false, true])(
         replyKind: "delta",
         transferId: "covered-prefix",
         pageIndex: 0,
+        payloadKind: "entity",
         partIndex: 0,
         partCount: 1,
         complete: true,
@@ -938,6 +1146,7 @@ it.each([false, true])(
           replyKind: "snapshot",
           transferId: crypto.randomUUID(),
           pageIndex: 0,
+          payloadKind: "entity",
           partIndex: 0,
           partCount: 1,
           complete: true,
@@ -966,11 +1175,10 @@ it.each([false, true])(
         ["older", 9],
         ["equal", 10],
       ] as const) {
-        const [removed] =
-          await f.db.projections.storageInstance.findDocumentsById(
-            [`entity:task:${id}`],
-            true,
-          );
+        const [removed] = await f.db.projections.getRows(
+          [`entity:task:${id}`],
+          true,
+        );
         expect(removed).toMatchObject({ seq, _deleted: true, evicted: true });
       }
       expect(f.pulls()).toEqual([]);
@@ -1057,10 +1265,9 @@ it.each([false, true])(
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     if (durableBase)
       await f.client.persistResourceEntityChanges(frame(4, true), () => true);
-    vi.spyOn(
-      f.db.projections.storageInstance,
-      "bulkWrite",
-    ).mockRejectedValueOnce(new Error("inline storage unavailable"));
+    vi.spyOn(f.db.projections, "applyBatch").mockRejectedValueOnce(
+      new Error("inline storage unavailable"),
+    );
     source.emit("resources", frame(5, true));
     source.emit("resources", frame(6, false));
     await vi.waitFor(() => expect(mocks.sources).toHaveLength(2), {
@@ -1256,6 +1463,7 @@ it.each([
         };
         source.emit("entity-transfer", {
           ...metadata,
+          payloadKind: "entity",
           partIndex: 0,
           complete: false,
           data: encoded.slice(0, split),
@@ -1271,6 +1479,7 @@ it.each([
         expect(f.pulls()).toEqual([]);
         source.emit("entity-transfer", {
           ...metadata,
+          payloadKind: "entity",
           partIndex: 1,
           complete: true,
           data: encoded.slice(split),
@@ -1440,6 +1649,7 @@ it.each(["burst", "inline removal", "staged removal"])(
           replyKind: "snapshot",
           transferId: "quiet-work",
           pageIndex: 0,
+          payloadKind: "entity",
           partIndex: 0,
           partCount: 1,
           complete: true,
@@ -1626,17 +1836,18 @@ it("releases the generated observer's single durable state lease after cold-base
   await vi.waitFor(() => expect(mocks.watch).toHaveBeenCalledOnce());
   expect(f.pulls()).toEqual([]);
   f.connection("degraded", "connecting");
+  f.delivery.receive(f.frame(5));
   await vi.waitFor(() =>
     expect(f.client.projectionMetadata.complete).toBe(true),
   );
-  expect(f.pulls()).toHaveLength(1);
+  expect(f.pulls()).toEqual([]);
   expect(mocks.watch).toHaveBeenCalledOnce();
   stop();
   await vi.waitFor(() => expect(mocks.changes.size).toBe(0));
   f.notify({ epoch: "late", revision: 100, reason: "overflow" });
   f.connection("degraded", "connecting");
   await Promise.resolve();
-  expect(f.pulls()).toHaveLength(1);
+  expect(f.pulls()).toEqual([]);
 });
 
 it.each([
@@ -1654,5 +1865,22 @@ it.each([
     const client = await import("./client.ts");
     await expect(client.readSubscriptionCursor(ref)).resolves.toBeUndefined();
     expect(mocks.syncGet).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["live", "degraded"] as const)(
+  "explicit retry replaces only an unhealthy stream (%s)",
+  async (health) => {
+    const f = await setup();
+    const stop = vi.fn();
+    mocks.watchConnection.mockImplementation((accept) => {
+      accept(health, health === "live" ? "open" : "connecting", {});
+      return stop;
+    });
+    const { replaceStream } = await import("./subscriptions/events.ts");
+    vi.mocked(replaceStream).mockClear();
+    await f.client.refreshState();
+    expect(stop).toHaveBeenCalledOnce();
+    expect(replaceStream).toHaveBeenCalledTimes(health === "live" ? 0 : 1);
   },
 );

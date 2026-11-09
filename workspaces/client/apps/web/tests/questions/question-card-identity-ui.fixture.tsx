@@ -78,6 +78,48 @@ const Fixture = observer(function Fixture() {
   const [fixture] = useState(() => requestFixture(initial));
   const requests = [...fixture.live.current.requests.values()];
   const [items, setItems] = useState([question, approvalItem]);
+  window.publishAnsweredRequest = (id: string) => {
+    const request = requests.find((entry) => entry.id === id);
+    if (!request) throw new Error("Missing fixture request");
+
+    fixture.live.apply(
+      requests
+        .filter((entry) => entry.id !== request.id)
+        .map((value) => ({
+          collection: "request",
+          id: value.id,
+          value,
+        })),
+    );
+    if (request.id === "question")
+      setItems((current) =>
+        current.map((item) =>
+          item.id === question.id
+            ? {
+                ...question,
+                toolStatus: "completed",
+                text: JSON.stringify({
+                  id: "question-item",
+                  type: "mcpToolCall",
+                  tool: "AskUserQuestion",
+                  status: "completed",
+                  arguments: {
+                    questions: [
+                      {
+                        question: "Continue?",
+                        options: [{ label: "Yes" }],
+                      },
+                    ],
+                  },
+                  result: {
+                    content: 'User has answered: "Continue?"="Yes". Continue.',
+                  },
+                }),
+              }
+            : item,
+        ),
+      );
+  };
   const lookup: QuestionLookup = {
     agentId: "lead",
     history: new Map(),
@@ -94,7 +136,7 @@ const Fixture = observer(function Fixture() {
   };
   return (
     <ServerStoreProvider value={fixture.store}>
-      <RequestArea scope="identity" notify={notify} refresh={async () => {}}>
+      <RequestArea scope="identity" notify={notify}>
         <main id="messages" style={{ maxWidth: 650, margin: "24px auto" }}>
           <TurnHistory
             items={items}
@@ -110,46 +152,6 @@ const Fixture = observer(function Fixture() {
                       key={request.id}
                       scope="identity"
                       notify={notify}
-                      refresh={async () => {
-                        fixture.live.apply(
-                          requests
-                            .filter((entry) => entry.id !== request.id)
-                            .map((value) => ({
-                              collection: "request",
-                              id: value.id,
-                              value,
-                            })),
-                        );
-                        if (request.id === "question")
-                          setItems((current) =>
-                            current.map((item) =>
-                              item.id === question.id
-                                ? {
-                                    ...question,
-                                    toolStatus: "completed",
-                                    text: JSON.stringify({
-                                      id: "question-item",
-                                      type: "mcpToolCall",
-                                      tool: "AskUserQuestion",
-                                      status: "completed",
-                                      arguments: {
-                                        questions: [
-                                          {
-                                            question: "Continue?",
-                                            options: [{ label: "Yes" }],
-                                          },
-                                        ],
-                                      },
-                                      result: {
-                                        content:
-                                          'User has answered: "Continue?"="Yes". Continue.',
-                                      },
-                                    }),
-                                  }
-                                : item,
-                            ),
-                          );
-                      }}
                     >
                       <RequestCard request={request} messageId={messageId} />
                     </RequestArea>
@@ -173,3 +175,9 @@ createRoot(root).render(
     <Fixture />
   </MantineProvider>,
 );
+
+declare global {
+  interface Window {
+    publishAnsweredRequest(id: string): void;
+  }
+}

@@ -1,16 +1,19 @@
 import "../../src/rendererStyles.ts";
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import { messageModels } from "../messages/message-models.fixture";
+import { ConversationProvider } from "../../src/components/conversation/support/navigation.ts";
+import {
+  ServerViewStoreProvider,
+  useServerStore,
+} from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { resourceData } from "../../src/store/runtime.ts";
+import { syncDatabase, defaultSyncClient } from "../../src/sync/client.ts";
+import { when } from "mobx";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
-import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
-const injectedStore = observableFixture();
+
 import { observer } from "mobx-react-lite";
 import { peerTeamRowFixtures } from "./peer-teams-rows.fixture.ts";
-import {
-  createStateMirror,
-  serializeStateCollections,
-} from "../../src/generated/observableResources.ts";
+
 import type { components } from "../../src/generated/api.ts";
 import type { Agent } from "../../src/types.ts";
 import { fixtureSnapshot } from "../fixtures/snapshot.ts";
@@ -106,107 +109,75 @@ const initial: Snapshot = {
     agents: [],
   },
 };
-const sidebar = createStateMirror();
-let currentSnapshot = initial;
-const receiveSidebar = (dto: Parameters<typeof sidebar.apply>[0]) =>
-  sidebar.apply([
-    ...dto.filter(
-      (item) => item.collection !== "workspace" && item.collection !== "room",
-    ),
-    {
-      collection: "workspace",
-      id: "fixture",
-      value: { ...currentSnapshot.runtime, stateDir: currentSnapshot.stateDir },
+await fetch("/fixture/publish-state", {
+  method: "POST",
+  body: JSON.stringify({
+    ...initial,
+    runtime: {
+      ...initial.runtime,
+      agentSummaries: Object.values(peerTeamRowFixtures).filter(
+        (agent) => agent.id !== "e",
+      ),
     },
-    ...currentSnapshot.runtime.rooms.map((value) => ({
-      collection: "room" as const,
-      id: value.id,
-      value,
-    })),
-  ]);
-receiveSidebar([
-  ...[
-    peerTeamRowFixtures.a,
-    peerTeamRowFixtures.b,
-    peerTeamRowFixtures.c,
-    peerTeamRowFixtures.x,
-  ].map((value) => ({
-    collection: "agentSummary" as const,
-    id: value.id,
-    value,
-  })),
-  ...initial.runtime.projects.map((value) => ({
-    collection: "project" as const,
-    id: value.id!,
-    value,
-  })),
-]);
-window.receivePeerSidebar = receiveSidebar;
-const models = messageModels(initial.stateDir, initial.threads);
+  }),
+});
+await syncDatabase();
+const release = defaultSyncClient.retainStateDelivery(() => {});
+await when(() => defaultSyncClient.projectionMetadata.ready);
+window.addEventListener("pagehide", release, { once: true });
 const Fixture = observer(function Fixture() {
-  const [data, setData] = useState(initial);
+  const collections = resourceData(useServerStore().state().current);
   const [opened, open] = useState("a");
-  window.setFixture = (value) => {
-    const next = typeof value === "function" ? value(currentSnapshot) : value;
-    currentSnapshot = next;
-    receiveSidebar(serializeStateCollections(sidebar.current));
-    setData(next);
+  const data = initial;
+  window.peerTeamsData = {
+    ...initial,
+    runtime: {
+      ...initial.runtime,
+      peerTeams: [...(collections?.peerTeams.values() ?? [])].map((team) => ({
+        id: team.id,
+        name: team.name,
+        projectPath: team.projectPath,
+        revision: team.revision,
+        members: team.members ? [...team.members] : team.members,
+      })),
+    },
   };
-  window.peerTeamsData = data;
   window.failRefresh = false;
-  const refresh = async () => {
-    if (window.failRefresh) throw Error("Refresh failed");
-    const r = await fetch("/snapshot");
-    window.setFixture(await r.json());
-  };
-  models.apply([
-    ...data.runtime.rooms.map((value) => ({
-      collection: "room" as const,
-      id: value.id,
-      value,
-    })),
-    ...data.runtime.peerTeams.map((value) => ({
-      collection: "peerTeam" as const,
-      id: value.id,
-      value,
-    })),
-  ]);
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <div style={{ width: 320, maxWidth: "100vw" }}>
-        <injectedStore.Provider>
-          <SidebarCommandsProvider
-            value={{
-              open: open,
-              newChat: () => {},
-              addProject: () => {},
-              changeProject: () => {},
-              projectAccount: () => {},
-              rename: async () => {},
-              remove: () => {},
-              onSearch: () => {},
-              refresh: refresh,
-              markUnread: () => {},
-            }}
-          >
-            <Sidebar
-              data={data}
-              opened={opened}
-              creating={false}
-              mobile={true}
-              close={() => {}}
-              collections={sidebar.current}
-              markingRead={new Set()}
-            />
-          </SidebarCommandsProvider>
-        </injectedStore.Provider>
+        <SidebarCommandsProvider
+          value={{
+            open: open,
+            newChat: () => {},
+            addProject: () => {},
+            changeProject: () => {},
+            projectAccount: () => {},
+            rename: async () => {},
+            remove: () => {},
+            onSearch: () => {},
+            markUnread: () => {},
+          }}
+        >
+          <Sidebar
+            data={data}
+            opened={opened}
+            creating={false}
+            mobile={true}
+            close={() => {}}
+            {...(collections ? { collections } : {})}
+            markingRead={new Set()}
+          />
+        </SidebarCommandsProvider>
       </div>
-      <models.Provider
-        commands={Object.assign(conversationActionsFixture(open), { refresh })}
-      >
+      <ConversationProvider value={conversationActionsFixture(open)}>
         <TeamChats leadId={opened} />
-      </models.Provider>
+      </ConversationProvider>
     </MantineProvider>
   );
 });
-createRoot(document.getElementById("root")!).render(<Fixture />);
+createRoot(document.getElementById("root")!).render(
+  <ServerViewStoreProvider>
+    <Fixture />
+  </ServerViewStoreProvider>,
+);

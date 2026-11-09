@@ -13,6 +13,7 @@ it("serializes only the changed retained item and observes nested metadata", () 
       },
     },
     {
+      watchResourceChanges: () => () => {},
       watchResourceConnection: () => () => {},
       watchLiveDeltas: () => () => {},
     },

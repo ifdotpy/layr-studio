@@ -13,4 +13,5 @@ export const original = {
   epoch: 1,
   accountKey: "default",
   error: disconnected,
+  manualConnectionCheck: { available: true, receipt: null },
 } satisfies Agent;

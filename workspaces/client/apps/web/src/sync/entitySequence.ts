@@ -20,13 +20,6 @@ export class EntitySequenceCheckpoint {
   private hasAssignment = false;
   private durableCheckpointValid = true;
   private workspaceId: string | undefined;
-  private nextCoverageToken = 0;
-  private readonly inFlightCoverage = new Map<
-    number,
-    { after: number; through: number }
-  >();
-  private suppressedRequirement: number | undefined;
-  private readonly coverageInvalidationListeners = new Set<() => void>();
   private readonly advanceListeners = new Set<
     (sequence: number, reset: boolean) => void
   >();
@@ -63,7 +56,6 @@ export class EntitySequenceCheckpoint {
     this.hasAssignment = true;
     this.durableCheckpointValid = false;
     this.resetGeneration++;
-    this.clearInFlightCoverage(false);
     this.notifyAdvance(true);
     return true;
   }
@@ -79,7 +71,6 @@ export class EntitySequenceCheckpoint {
     this.hasAssignment = true;
     this.durableCheckpointValid = false;
     this.resetGeneration++;
-    this.clearInFlightCoverage(false);
     this.notifyAdvance(true);
     return true;
   }
@@ -122,57 +113,10 @@ export class EntitySequenceCheckpoint {
     this.notifyAdvance(true);
     this.hasAssignment = true;
     this.durableCheckpointValid = false;
-    this.clearInFlightCoverage(false);
   }
 
   covers(sequence: number): boolean {
     return Number.isSafeInteger(sequence) && sequence <= this.sequence;
-  }
-
-  beginInFlightCoverage(after: number, through: number): number | undefined {
-    if (
-      !this.durableCheckpointValid ||
-      !isContiguous(after, this.effectiveCoverage(), through)
-    )
-      return undefined;
-    const token = ++this.nextCoverageToken;
-    this.inFlightCoverage.set(token, { after, through });
-    return token;
-  }
-
-  effectiveCoverage(): number {
-    let effective = this.sequence;
-    if (!Number.isSafeInteger(effective)) return -1;
-    let advanced = true;
-    while (advanced) {
-      advanced = false;
-      for (const { after, through } of this.inFlightCoverage.values()) {
-        if (isContiguous(after, effective, through)) {
-          effective = through;
-          advanced = true;
-        }
-      }
-    }
-    return effective;
-  }
-
-  coversWithInFlight(sequence: number): boolean {
-    return (
-      Number.isSafeInteger(sequence) && sequence <= this.effectiveCoverage()
-    );
-  }
-
-  markInFlightCoverageUsed(sequence: number): void {
-    if (!this.covers(sequence) && this.coversWithInFlight(sequence))
-      this.suppressedRequirement = Math.max(
-        this.suppressedRequirement ?? sequence,
-        sequence,
-      );
-  }
-
-  settleInFlightCoverage(token: number): void {
-    if (!this.inFlightCoverage.delete(token)) return;
-    this.notifyUncoveredSuppression();
   }
 
   async advanceIfContiguous(
@@ -196,28 +140,6 @@ export class EntitySequenceCheckpoint {
       return false;
     this.assignWithinEpoch(through);
     return true;
-  }
-
-  onInFlightCoverageInvalidated(listener: () => void): () => void {
-    this.coverageInvalidationListeners.add(listener);
-    return () => this.coverageInvalidationListeners.delete(listener);
-  }
-
-  private clearInFlightCoverage(notify = true): void {
-    this.inFlightCoverage.clear();
-    if (notify) this.notifyUncoveredSuppression();
-    else this.suppressedRequirement = undefined;
-  }
-
-  private notifyUncoveredSuppression(): void {
-    const required = this.suppressedRequirement;
-    if (required === undefined || this.sequence >= required) {
-      this.suppressedRequirement = undefined;
-      return;
-    }
-    if (this.coversWithInFlight(required)) return;
-    this.suppressedRequirement = undefined;
-    for (const listener of this.coverageInvalidationListeners) listener();
   }
 }
 
@@ -285,21 +207,6 @@ export const {
   getEntitySequenceCheckpointForWorkspace,
   onEntitySequenceAdvance,
 } = createEntitySequenceScope();
-
-export function canAcknowledgeEntitySequenceBatch(
-  checkpoint: number,
-  highestSequence: number,
-  persistenceCurrent: boolean,
-  guardsMatch: boolean,
-): boolean {
-  return (
-    persistenceCurrent &&
-    guardsMatch &&
-    Number.isSafeInteger(checkpoint) &&
-    Number.isSafeInteger(highestSequence) &&
-    checkpoint >= highestSequence
-  );
-}
 
 export function entitySequenceInvalidationCovered(
   checkpoint: number,

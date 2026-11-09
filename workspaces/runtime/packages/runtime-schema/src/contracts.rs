@@ -192,6 +192,10 @@ fn shared_values_ts() -> String {
                 values::SYNC_TRANSCRIPT_STREAM_MAX_ITEMS.to_string(),
             ),
             (
+                "SYNC_RESOURCE_TRANSFER_FRAGMENT_MAX_BYTES",
+                values::SYNC_RESOURCE_TRANSFER_FRAGMENT_MAX_BYTES.to_string(),
+            ),
+            (
                 "SYNC_STREAM_EVENT_MAX_BYTES",
                 values::SYNC_STREAM_EVENT_MAX_BYTES.to_string(),
             ),
@@ -714,6 +718,15 @@ pub fn check_schema_parity(openapi: &Value, account_transfer: &Value) -> Result<
         "/components/schemas/DraftSnapshot/properties/documents/maxItems",
         values::SYNC_DRAFT_STREAM_MAX_DOCUMENTS,
     )?;
+    let transfer = &openapi["components"]["schemas"]["ResourceEntityTransferEvent"];
+    if transfer["properties"]["payloadKind"]
+        != studio_json::json!({"type":"string","enum":<crate::sync_protocol::ResourceTransferPayloadKind as strum::VariantNames>::VARIANTS})
+        || !transfer["required"]
+            .as_array()
+            .is_some_and(|fields| fields.iter().any(|field| field == "payloadKind"))
+    {
+        return Err("ResourceEntityTransferEvent.payloadKind must match sync_protocol::ResourceTransferPayloadKind and be required".into());
+    }
     expect_number(
         openapi,
         "/components/schemas/ResourceEntityTransferEvent/properties/transferId/maxLength",
@@ -1371,6 +1384,18 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
     check_provider_sql_parity(root)?;
     let mut openapi = read_json(root, OPENAPI_PATH)?;
     let perf_document = perf_reporting_document();
+    openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["payloadKind"] = studio_json::json!({
+        "type": "string", "enum": <crate::sync_protocol::ResourceTransferPayloadKind as strum::VariantNames>::VARIANTS
+    });
+    openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["description"] = studio_json::json!(
+        "Bounded SSE transfer fragment. Entity pages decode to EntityChangeBatch; transcript and view pages decode to a full ResourceRevisionEntry. Only complete=true commits the staged interval."
+    );
+    let required = openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["required"]
+        .as_array_mut()
+        .ok_or("transfer required fields")?;
+    if !required.iter().any(|field| field == "payloadKind") {
+        required.push(studio_json::json!("payloadKind"));
+    }
     openapi["components"]["schemas"]["ResourceEntityTransferEvent"]["properties"]["data"]["maxLength"] =
         values::SYNC_STREAM_EVENT_MAX_BYTES.into();
     *openapi

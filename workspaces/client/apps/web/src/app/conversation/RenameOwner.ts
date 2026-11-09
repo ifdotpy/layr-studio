@@ -93,7 +93,6 @@ export class RenameOwner {
     const result = await submitRename(
       { id, name, request_id: request.id },
       scope.services.api.post,
-      scope.services.sync.refreshState,
     );
     runInAction(() => {
       this.settle(id, request.id, result);
@@ -114,9 +113,6 @@ export class RenameOwner {
         name,
         request_id: randomUUID(),
       });
-      void scope.services.sync
-        .refreshState()
-        .catch((error) => notices.notify(errorText(error)));
     } catch (error) {
       notices.notify(errorText(error));
       throw error;

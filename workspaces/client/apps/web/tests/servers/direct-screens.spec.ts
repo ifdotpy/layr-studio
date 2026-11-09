@@ -1,3 +1,7 @@
+import {
+  browserDatabases,
+  browserStores,
+} from "../../src/browserPersistence.ts";
 import { required } from "../teams/helpers.ts";
 import { remoteNetwork } from "./browser-fixture.ts";
 import { test, expect } from "../playwright.ts";
@@ -156,6 +160,39 @@ test("direct screens list a trusted server on phones without a manual step", asy
       if ((await toggle.getAttribute("aria-expanded")) === "false")
         await toggle.click();
     };
+    // Seed the remote server's shared device trust before its first signed read.
+    // Discovery advertises that trust; it does not grant it through pairing.
+    await page.route(remote.origin + "/api/**", async (route) => {
+      const device = await page.evaluate(
+        async ({ database, store }) => {
+          const db = await new Promise<IDBDatabase>((resolve, reject) => {
+            const request = indexedDB.open(database, 1);
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+          });
+          try {
+            return await new Promise<{ id: string; publicKey: string }>(
+              (resolve, reject) => {
+                const request = db
+                  .transaction(store)
+                  .objectStore(store)
+                  .get("device");
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject(request.error);
+              },
+            );
+          } finally {
+            db.close();
+          }
+        },
+        {
+          database: browserDatabases.deviceKey,
+          store: browserStores.deviceKey,
+        },
+      );
+      remote.trustDevice(device.id, device.publicKey);
+      await route.continue();
+    });
     await page.goto(home);
     await openChats();
     await expect(chat("Local")).toBeVisible();

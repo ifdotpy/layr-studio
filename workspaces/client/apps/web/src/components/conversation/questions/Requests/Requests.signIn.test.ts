@@ -57,7 +57,6 @@ const forward = {
 
 function card() {
   const notify = vi.fn();
-  const refresh = vi.fn(async () => {});
   const request: Approval = approval({
     id: requestId,
     agent: "agent",
@@ -73,12 +72,12 @@ function card() {
   renderToStaticMarkup(
     createElement(
       RequestArea,
-      { scope: "remote", notify, refresh },
+      { scope: "remote", notify },
       createElement(Requests, { all: true }),
     ),
   );
   expect(controls.cards).toHaveLength(1);
-  return { post: required(controls.cards[0]).post, notify, refresh };
+  return { post: required(controls.cards[0]).post, notify };
 }
 
 beforeEach(() => {
@@ -135,7 +134,7 @@ it("the actual request card prepares native sign-in before a slow approval and o
       result: { status: "answered", openUrl: link, forward },
     };
   });
-  const { post, notify, refresh } = card();
+  const { post, notify } = card();
   const first = post({ decision: "accept", window: "desktop" });
   expect(await post({ decision: "accept", window: "desktop" })).toBe(false);
   expect(await first).toBe(true);
@@ -145,7 +144,6 @@ it("the actual request card prepares native sign-in before a slow approval and o
     decision: "accept",
     window: "desktop",
   });
-  expect(refresh).toHaveBeenCalledOnce();
   expect(controls.write).not.toHaveBeenCalled();
 });
 

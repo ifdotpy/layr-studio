@@ -64,7 +64,6 @@ function Fixture() {
             onAccountChange={() => setAccount(true)}
             onOpenChange={setOpened}
             accountModalOpen={account}
-            refresh={async () => {}}
           />
         </Modal>
         <Modal

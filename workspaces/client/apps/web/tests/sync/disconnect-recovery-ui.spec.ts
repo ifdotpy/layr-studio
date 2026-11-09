@@ -1,3 +1,4 @@
+import { agentSseServer } from "../fixtures/agent-sse-server.ts";
 import type {} from "./disconnect-recovery-ui.fixture.tsx";
 import type { Route } from "@playwright/test";
 import type { Agent } from "../../src/types.ts";
@@ -21,6 +22,7 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
   const { createFixtureViteServer: createServer } =
     await import("../playwright.ts");
   const evidence = await mkdtemp(join(tmpdir(), "studio-disconnect-recovery-"));
+  const stream = agentSseServer();
   const server = await createServer({
     configFile: false,
     root,
@@ -30,6 +32,9 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
       {
         name: "disconnect-recovery-fixture",
         configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (!stream.handle(req, res)) next();
+          });
           server.middlewares.use(
             "/disconnect-recovery-test",
             (_request, response) => {
@@ -61,6 +66,8 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
     let hold = false,
       fail = false;
     await page.route("**/api/**", async (route) => {
+      if (new URL(route.request().url()).pathname.startsWith("/api/sync/"))
+        return route.continue();
       const request = route.request();
       requests.push({
         path: new URL(request.url()).pathname,
@@ -127,9 +134,29 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
     for (const outcome of ["completed", "failed", "interrupted"] as const) {
       reply = { status: "reconciled", outcome };
       await button.click();
-      await page.waitForFunction(
-        (count) => window.disconnectRecoveryUiFixtureRefreshes.length === count,
-        ["completed", "failed", "interrupted"].indexOf(outcome) + 1,
+      await page
+        .getByRole("status")
+        .filter({ hasText: "Connection checked." })
+        .waitFor();
+      await page.evaluate(
+        (agent) => window.disconnectRecoveryUiFixtureSetAgent(agent),
+        {
+          ...original,
+          status: outcome,
+          manualConnectionCheck: { available: false, receipt: null },
+        },
+      );
+      await button.waitFor({ state: "hidden" });
+      assert.equal(await history.evaluate((node) => node.isConnected), true);
+      await page.evaluate(
+        (agent) => window.disconnectRecoveryUiFixtureSetAgent(agent),
+        original,
+      );
+      await button.waitFor();
+
+      assert.deepEqual(
+        await page.evaluate(() => window.disconnectRecoveryUiFixtureRefreshes),
+        [],
       );
     }
     reply = { status: "superseded" };
@@ -142,7 +169,7 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
       await page.evaluate(
         () => window.disconnectRecoveryUiFixtureRefreshes.length,
       ),
-      3,
+      0,
     );
     fail = true;
     await button.click();
@@ -190,6 +217,7 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
         {
           ...original,
           ...patch,
+          manualConnectionCheck: { available: false, receipt: null },
         },
       );
       await button.waitFor({ state: "hidden" });
@@ -252,8 +280,8 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
     );
     assert.deepEqual(
       await page.evaluate(() => window.disconnectRecoveryUiFixtureRefreshes),
-      ["first", "first", "first"],
-      "an old chat response cannot refresh a different chat",
+      [],
+      "no response refreshes the stream of another chat",
     );
     assert.equal(
       await page.getByRole("status").count(),
@@ -269,20 +297,27 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
       original,
     );
     await button.click();
-    await page.waitForFunction(
-      () => window.disconnectRecoveryUiFixtureRefreshes.length === 4,
+    await page
+      .getByRole("status")
+      .filter({ hasText: "Connection checked." })
+      .waitFor();
+    assert.deepEqual(
+      await page.evaluate(() => window.disconnectRecoveryUiFixtureRefreshes),
+      [],
     );
+    const receipt = {
+      at: Date.now() / 1000,
+      epoch: original.epoch,
+      accountKey: original.accountKey,
+      threadId: original.threadId,
+      turnId: original.turnId,
+      previousError: original.error,
+      nativeState: "idle",
+    };
     const checkedAgent = {
       ...original,
-      connectionCheck: {
-        at: Date.now() / 1000,
-        epoch: original.epoch,
-        accountKey: original.accountKey,
-        threadId: original.threadId,
-        turnId: original.turnId,
-        previousError: original.error,
-        nativeState: "idle",
-      },
+      connectionCheck: receipt,
+      manualConnectionCheck: { available: true, receipt },
     } satisfies Agent;
     await page.evaluate((agent) => {
       localStorage.setItem("fixture-agent", JSON.stringify(agent));
@@ -336,6 +371,7 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
         {
           ...checkedAgent,
           ...patch,
+          manualConnectionCheck: { available: true, receipt: null },
         },
       );
       await reviewTitle.waitFor({ state: "hidden" });
@@ -347,6 +383,10 @@ test("disconnect recovery ui", async ({ page: runnerPage }) => {
         connectionCheck: {
           ...checkedAgent.connectionCheck,
           nativeState: "active",
+        },
+        manualConnectionCheck: {
+          available: true,
+          receipt: { ...checkedAgent.connectionCheck, nativeState: "active" },
         },
       },
     );

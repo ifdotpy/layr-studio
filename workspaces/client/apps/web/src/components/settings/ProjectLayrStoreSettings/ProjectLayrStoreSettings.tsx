@@ -8,13 +8,7 @@ import type { LocationProjectView as LocationProject } from "../../../servers/pr
 import { LayrStoreDirectory } from "../../projects/LayrStoreDirectory/LayrStoreDirectory.tsx";
 
 export const ProjectLayrStoreSettings = observer(
-  function ProjectLayrStoreSettings({
-    project,
-    saved,
-  }: {
-    project: LocationProject;
-    saved: () => Promise<void>;
-  }) {
+  function ProjectLayrStoreSettings({ project }: { project: LocationProject }) {
     const { post } = useServerApi();
     const store = useServerStore();
     const configuration = resourceData(store.nativeLayrSettings().current);
@@ -38,7 +32,6 @@ export const ProjectLayrStoreSettings = observer(
             expected_revision: project.layrStoreRootRevision ?? 0,
             layr_store_root,
           });
-          await saved();
         }}
       />
     );

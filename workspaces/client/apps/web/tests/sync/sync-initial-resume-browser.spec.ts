@@ -103,9 +103,9 @@ test("sync initial resume browser", async ({ page }) => {
         seq: 1,
       });
       window.writeCalls = 0;
-      const storage = db.projections.storageInstance;
-      const write = storage.bulkWrite.bind(storage);
-      storage.bulkWrite = (...args) => {
+      const storage = db.projections;
+      const write = storage.applyBatch.bind(storage);
+      storage.applyBatch = (...args) => {
         window.writeCalls++;
         return write(...args);
       };
@@ -145,7 +145,7 @@ test("sync initial resume browser", async ({ page }) => {
         const { db } = await (
           await import("/src/sync/client.ts")
         ).syncDatabase();
-        const [row] = await db.projections.storageInstance.findDocumentsById(
+        const [row] = await db.projections.getRows(
           ["entity:agent:stale"],
           true,
         );

@@ -70,6 +70,8 @@ export type SubscriptionState<T> = {
   data: T | undefined;
   status: SubscriptionStatus;
   error: Error | null;
+  /** Version of the data that was applied, rather than a pending change hint. */
+  readonly appliedVersion?: Readonly<ResourceVersion> | undefined;
 };
 /** The subscription module owns normalization of failures at its ingress. */
 export type SubscriptionError = NonNullable<SubscriptionState<never>["error"]>;

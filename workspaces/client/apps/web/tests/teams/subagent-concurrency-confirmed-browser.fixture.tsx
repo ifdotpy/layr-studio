@@ -1,5 +1,10 @@
+import { observer } from "mobx-react-lite";
 import "../../src/rendererStyles.ts";
-import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import {
+  PublishedAgentFixture,
+  usePublishedAgent,
+  publishFixtureAgent,
+} from "../fixtures/PublishedAgentFixture.tsx";
 import {
   initialConfirmedLead,
   confirmedWorkspaceId,
@@ -14,38 +19,31 @@ declare global {
     setLead?: (lead: Agent) => void;
   }
 }
-import React, { useState } from "react";
+import React from "react";
 import { createRoot } from "react-dom/client";
-import { flushSync } from "react-dom";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import Control from "../../src/components/agents/SubagentConcurrencyControl/SubagentConcurrencyControl.tsx";
 window.refreshCount = 0;
 window.refreshHold = true;
 window.refreshFailure = false;
-function Fixture() {
-  const [lead, setLead] = useState<Agent>(initialConfirmedLead);
-  window.setLead = (value) => flushSync(() => setLead(value));
+const Fixture = observer(function Fixture() {
+  const lead = usePublishedAgent(initialConfirmedLead.id, initialConfirmedLead);
+  window.setLead = publishFixtureAgent;
   return (
     <MantineProvider>
-      <AgentModelsFixture agents={[lead]}>
-        <Control
-          compact
-          lead={lead}
-          stateDir="fixture-state"
-          workspaceId={confirmedWorkspaceId}
-          refresh={async () => {
-            window.refreshCount++;
-            if (window.refreshHold)
-              await new Promise<void>(
-                (resolve) => (window.refreshRelease = resolve),
-              );
-            if (window.refreshFailure)
-              throw new Error("Credentials unavailable");
-          }}
-        />
-      </AgentModelsFixture>
+      <Control
+        compact
+        lead={lead}
+        stateDir="fixture-state"
+        workspaceId={confirmedWorkspaceId}
+      />
     </MantineProvider>
   );
-}
-createRoot(document.getElementById("root")!).render(<Fixture />);
+});
+await publishFixtureAgent(initialConfirmedLead);
+createRoot(document.getElementById("root")!).render(
+  <PublishedAgentFixture>
+    <Fixture />
+  </PublishedAgentFixture>,
+);

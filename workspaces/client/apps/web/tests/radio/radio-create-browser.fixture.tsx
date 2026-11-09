@@ -1,9 +1,17 @@
 import "../../src/rendererStyles.ts";
+import { defaultSyncClient, syncDatabase } from "../../src/sync/client.ts";
+import { when } from "mobx";
+await syncDatabase();
+// The isolated page follows App startup: apply its first SSE baseline before mounting forms.
+const releaseInitialState = defaultSyncClient.retainStateDelivery(() => {});
+await when(() => defaultSyncClient.projectionMetadata.ready);
+window.addEventListener("pagehide", releaseInitialState, { once: true });
 import type { ComponentSnapshot as Snapshot } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import { agentSummaryFixture } from "../../src/servers/agentSummaryFixture.ts";
 import { SidebarCommandsProvider } from "../../src/components/sidebar/support/commands.ts";
-import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
-const injectedStore = observableFixture();
+import { resourceData } from "../../src/store/runtime.ts";
+import { observer } from "mobx-react-lite";
+import { useServerStore } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { ServerViewStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 declare global {
   interface Window {
     // fixture stores scroll handlers in tests/performance/scroll-restart.fixture.tsx.
@@ -17,8 +25,6 @@ declare global {
 }
 const rootElement = document.getElementById("root")!;
 import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
-
-import { radioSnapshot } from "./radio-fixture.ts";
 
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
@@ -72,6 +78,7 @@ const accounts: SharedAccounts = {
     ...account,
     home: "/fixture/" + account.id,
     source: "fixture",
+    eligibility: { kind: "available" as const },
   })),
 };
 const initial: Snapshot = {
@@ -93,8 +100,10 @@ window.radioOpened = null;
 window.reopen = () => {};
 window.failRefresh = false;
 window.ordinary = false;
-function Fixture() {
-  const [data, setData] = useState(initial);
+const Fixture = observer(function Fixture() {
+  const store = useServerStore();
+  const collections = resourceData(store.state().current);
+  const data = initial;
   const [show, setShow] = useState<{ path?: string | undefined } | null>({
     path: "/p",
   });
@@ -102,40 +111,34 @@ function Fixture() {
   window.radioCreateSnapshot = data;
   window.radioOpened = opened;
   window.reopen = () => setShow({ path: "/p" });
-  const refresh = async () => {
-    if (window.failRefresh) throw Error("Snapshot unavailable");
-    const result = await fetch("/snapshot");
-    setData(radioSnapshot(await result.json()));
-  };
+
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
-      <injectedStore.Provider>
-        <SidebarCommandsProvider
-          value={{
-            open: open,
-            newChat: () => (window.ordinary = true),
-            newSharedChat: (path) => setShow({ path }),
-            addProject: () => {},
-            changeProject: () => {},
-            projectAccount: () => {},
-            rename: async () => {},
-            remove: () => {},
-            onSearch: () => {},
-            refresh: refresh,
-            markUnread: () => {},
-          }}
-        >
-          <Sidebar
-            data={data}
-            opened={opened}
-            creating={false}
-            mobile={false}
-            close={() => {}}
-            rows={[]}
-            markingRead={new Set()}
-          />
-        </SidebarCommandsProvider>
-      </injectedStore.Provider>
+      <SidebarCommandsProvider
+        value={{
+          open: open,
+          newChat: () => (window.ordinary = true),
+          newSharedChat: (path) => setShow({ path }),
+          addProject: () => {},
+          changeProject: () => {},
+          projectAccount: () => {},
+          rename: async () => {},
+          remove: () => {},
+          onSearch: () => {},
+          markUnread: () => {},
+        }}
+      >
+        <Sidebar
+          data={data}
+          opened={opened}
+          creating={false}
+          mobile={false}
+          close={() => {}}
+          {...(collections ? { collections } : {})}
+          rows={[]}
+          markingRead={new Set()}
+        />
+      </SidebarCommandsProvider>
       <Modal
         opened={!!show}
         title="New shared chat"
@@ -146,29 +149,10 @@ function Fixture() {
           <SharedChatCreate
             source={{
               startup: { creationScope: data.stateDir },
-              state: {
-                projects: new Map(
-                  data.runtime.projects.map((project) => [project.id, project]),
-                ),
-                agents: new Map(
-                  data.threads.map((agent) => [
-                    agent.id,
-                    {
-                      ...agentSummaryFixture(agent.id),
-                      ...agent,
-                      inFlight: agent.inFlight === true,
-                      projectServerId: agent.projectServerId ?? null,
-                    },
-                  ]),
-                ),
-                rooms: new Map(
-                  data.runtime.rooms.map((room) => [room.id, room]),
-                ),
-              },
+              state: collections,
             }}
             accounts={accounts}
             initialPath={show.path}
-            refresh={refresh}
             created={(id) => {
               open(id);
               setShow(null);
@@ -178,5 +162,9 @@ function Fixture() {
       </Modal>
     </MantineProvider>
   );
-}
-createRoot(rootElement).render(<Fixture />);
+});
+createRoot(rootElement).render(
+  <ServerViewStoreProvider>
+    <Fixture />
+  </ServerViewStoreProvider>,
+);

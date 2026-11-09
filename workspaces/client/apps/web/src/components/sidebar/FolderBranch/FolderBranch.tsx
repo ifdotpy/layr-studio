@@ -126,7 +126,6 @@ export const FolderBranch = observer(function FolderBranch({
                     folder_id: folder.id,
                     expected_revision: group.organizationRevision || 0,
                   });
-                  await sidebar.refresh();
                 } catch (error) {
                   sidebar.notify(errorText(error));
                 }

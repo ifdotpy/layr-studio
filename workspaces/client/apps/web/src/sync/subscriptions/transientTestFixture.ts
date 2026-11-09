@@ -58,7 +58,6 @@ export function transientTestFixture(recovery?: {
       () => ({ subscribeTranscriptProjection: () => () => {} }),
       transport,
       undefined,
-      undefined,
       recovery
         ? {
             get: vi

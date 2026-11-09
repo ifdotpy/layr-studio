@@ -14,7 +14,6 @@ import {
 } from "./fixture-helpers.ts";
 import {
   handleEntitySyncFixtureRequest,
-  entityMutationFixtureResponse,
   syncIdentityFixture,
   test,
 } from "../playwright.ts";
@@ -125,6 +124,14 @@ test("project settings rows and requests", async ({ browser: _browser }) => {
       tasks: [],
       work: [],
       rateLimitsByAccount: {},
+      accountsSummary: {
+        accounts,
+        archivedAccounts,
+        defaultAccountKey,
+        defaultAccountGroups: [],
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
     },
   });
   const stateListeners = new Set<NotifyResources>();
@@ -137,20 +144,10 @@ test("project settings rows and requests", async ({ browser: _browser }) => {
       rawBody = JSON.parse(text || "{}");
       bodies.push(fixtureRequest(url.pathname, rawBody));
     }
-    const json = (
-      data: Record<string, unknown> & {
-        _syncEntities?: ReturnType<
-          typeof entityMutationFixtureResponse
-        >["_syncEntities"];
-      },
-    ) => {
+    const json = (data: unknown) => {
       res.setHeader("Content-Type", "application/json");
-      const reply =
-        req.method === "POST" && res.statusCode < 400 && !data._syncEntities
-          ? entityMutationFixtureResponse(stateForEntities, data)
-          : data;
-      res.end(JSON.stringify(reply));
-      if (reply._syncEntities?.length) {
+      res.end(JSON.stringify(data));
+      if (req.method === "POST" && res.statusCode < 400) {
         for (const notify of stateListeners) notify([{ kind: "state" }]);
       }
     };
@@ -273,15 +270,7 @@ test("project settings rows and requests", async ({ browser: _browser }) => {
       colorScheme: "dark",
     });
     page.setDefaultTimeout(10000);
-    const accountResponse = page.waitForResponse((response) =>
-      response.url().endsWith("/api/accounts"),
-    );
     await page.goto(fixtureUrl(server));
-    await accountResponse;
-    await page
-      .getByText("personal@example.com", { exact: true })
-      .first()
-      .waitFor();
     await page.locator("[data-chat]").first().waitFor();
     const openProject = async () => {
       const button = page.getByRole("button", {

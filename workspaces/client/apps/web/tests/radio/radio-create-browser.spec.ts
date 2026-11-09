@@ -21,6 +21,50 @@ test("radio create browser", async ({ page: runnerPage }) => {
   const root = resolve(import.meta.dirname, "../../");
 
   const cacheDir = await mkdtemp(join(tmpdir(), "studio-radio-create-"));
+  const streamSnapshot: import("../playwright.ts").EntityFixtureState = {
+    stateDir: "create-test",
+    chats: [],
+    edges: [],
+    runtime: {
+      rooms: [],
+      projects: [],
+      requests: [],
+      modelsByAccount: Object.fromEntries(
+        [
+          "codex",
+          "claude",
+          ...Array.from({ length: 5 }, (_, i) => "extra" + i),
+        ].map((accountKey) => [
+          accountKey,
+          (accountKey === "claude"
+            ? [
+                {
+                  model: "opus",
+                  displayName: "Claude · Opus",
+                  description: "Opus 5.5 · Native model",
+                  isDefault: true,
+                  supportedReasoningEfforts: [{ reasoningEffort: "high" }],
+                },
+              ]
+            : [
+                {
+                  model: "gpt-6-astra",
+                  displayName: "Astra",
+                  isDefault: true,
+                },
+                { model: "gpt-6-luna", displayName: "Luna" },
+              ]
+          ).map((model, catalogPosition) => ({
+            ...model,
+            accountKey,
+            catalogPosition,
+            provider: accountKey === "claude" ? "claude" : "codex",
+          })),
+        ]),
+      ),
+    },
+  };
+  let notifyState = () => {};
   const server = await createServer({
     configFile: false,
     root,
@@ -38,24 +82,10 @@ test("radio create browser", async ({ page: runnerPage }) => {
             if (
               handleEntitySyncFixtureRequest(req, res, {
                 workspaceId: "1234567890abcdef1234567890abcdef",
-                snapshot: {
-                  stateDir: "create-test",
-                  chats: [],
-                  edges: [],
-                  runtime: { rooms: [], projects: [], requests: [] },
+                snapshot: streamSnapshot,
+                onStreamReady: (notify) => {
+                  notifyState = () => notify([{ kind: "state" }]);
                 },
-                onStreamReady: (notify) =>
-                  notify([
-                    { kind: "models" },
-                    ...[
-                      "codex",
-                      "claude",
-                      ...Array.from({ length: 5 }, (_, i) => "extra" + i),
-                    ].map((accountKey) => ({
-                      kind: "limits" as const,
-                      accountKey,
-                    })),
-                  ]),
               })
             )
               return;
@@ -120,7 +150,11 @@ test("radio create browser", async ({ page: runnerPage }) => {
         },
       }),
     );
-    await page.route("**/snapshot", (r) => r.fulfill({ json: state }));
+    let recoveryReads = 0;
+    await page.route("**/snapshot", (r) => {
+      recoveryReads++;
+      return r.fulfill({ json: state });
+    });
     await page.route("**/api/peer-teams", async (r) => {
       const body = fixturePostBody<"/api/peer-teams">(
         r.request().postDataJSON(),
@@ -182,6 +216,9 @@ test("radio create browser", async ({ page: runnerPage }) => {
         mode = "ok";
         return r.abort("failed");
       }
+      streamSnapshot.runtime!.rooms = state.runtime.rooms;
+      streamSnapshot.runtime!.projects = state.runtime.projects;
+      notifyState();
       return r.fulfill({ json: { room: state.runtime.rooms[0] } });
     });
     await page.goto(`${fixtureOrigin(server)}/check`);
@@ -336,7 +373,7 @@ test("radio create browser", async ({ page: runnerPage }) => {
         { account_key: "claude", model: "opus" },
       ],
     });
-    assert.equal(await page.locator(".sidebar-row").count(), 1);
+    await expect(page.locator(".sidebar-row")).toHaveCount(1);
     assert.equal(await page.locator(".peer-team").count(), 0);
     assert.equal(
       await page.getByText("Internal 0", { exact: true }).count(),
@@ -358,11 +395,15 @@ test("radio create browser", async ({ page: runnerPage }) => {
     );
     await page.evaluate(() => (window.failRefresh = true));
     await create.click();
-    await page.getByRole("button", { name: "Refresh", exact: true }).waitFor();
+    await form.waitFor({ state: "detached" });
     const posted = requests.length;
     await page.evaluate(() => (window.failRefresh = false));
-    await page.getByRole("button", { name: "Refresh", exact: true }).click();
+    assert.equal(
+      await page.getByRole("button", { name: "Refresh", exact: true }).count(),
+      0,
+    );
     await form.waitFor({ state: "detached" });
+    assert.equal(recoveryReads, 0, "SSE supplies the saved read model");
     assert.equal(requests.length, posted);
     const projectOptions = page.getByRole("button", {
       name: "Options for project Project",
@@ -393,7 +434,7 @@ test("radio create browser", async ({ page: runnerPage }) => {
     ]);
     expect(errors).toEqual([]);
     console.log(
-      `PASS direct shared creation, two account/model selections, exact retry after reload, acknowledged refresh, one sidebar row, ordinary chat and project entry. Screenshots ${screenshots}`,
+      `PASS direct shared creation, two account/model selections, exact retry after reload, SSE publication without refresh, one sidebar row, ordinary chat and project entry. Screenshots ${screenshots}`,
     );
   } finally {
     await server.close();

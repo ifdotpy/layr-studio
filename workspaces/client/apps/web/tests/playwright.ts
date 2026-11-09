@@ -1,3 +1,4 @@
+import { agentSummaryFixture } from "../src/servers/agentSummaryFixture.ts";
 import { FrontendLocality } from "../src/generated/api.ts";
 import { LimitColor, RunwayColor } from "../src/generated/api.ts";
 import { spawn } from "node:child_process";
@@ -1662,7 +1663,21 @@ function entityValuesFromSnapshot(
     for (const row of rows ?? [])
       if (typeof row.id === "string") values.push(project(row));
   };
-  append(runtime.agentSummaries, (row) => ({
+  const summaries =
+    runtime.agentSummaries ??
+    runtime.agents?.map((row) =>
+      agentSummaryFixture(row.id, {
+        ...(pickJsonKeys(
+          row,
+          fixtureEntityPropertyNames(
+            "AgentSummaryEntityDto",
+          ) as (keyof AgentEntityDto)[],
+        ) as Parameters<typeof agentSummaryFixture>[1]),
+        projectPath: row.projectPath ?? row.cwd,
+        updated: row.updated ?? row.created ?? 1,
+      }),
+    );
+  append(summaries, (row) => ({
     collection: "agentSummary",
     id: row.id,
     value: row,
@@ -1870,7 +1885,7 @@ function entityValuesFromSnapshot(
         });
       }
   }
-  append(runtime.agentDetails, (row) => ({
+  append(runtime.agentDetails ?? runtime.agents, (row) => ({
     collection: "agentDetail",
     id: row.id,
     value: pickJsonKeys<AgentDetailEntityDto, keyof AgentDetailEntityDto>(
@@ -2221,6 +2236,10 @@ export function handleEntitySyncFixtureRequest(
     workspaceId: string;
     unixSocket?: boolean | undefined;
     versionedResources?: boolean;
+    draftSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["DraftSnapshot"];
+    transcriptSnapshot?: (
+      resource: Extract<ResourceRef, { kind: "transcript" }>,
+    ) => TranscriptPageResponse | undefined;
     /** The multi-server discovery snapshot the real server attaches to its resource version. */
     discoverySnapshot?: () => unknown;
     additionalEntities?: () => ProjectedFixtureEntity[];
@@ -2230,6 +2249,7 @@ export function handleEntitySyncFixtureRequest(
       | import("../src/generated/api.ts").components["schemas"]["SyncSubscriptionRequest"]
       | undefined;
     progress?: (resource: ResourceRef) => ResourceProgress | undefined;
+    roomSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["ChatRead"];
     processSnapshot?: () => import("../src/generated/api.ts").components["schemas"]["ProcessListing"];
     onStreamReady?: (
       notify: (
@@ -2336,22 +2356,26 @@ export function handleEntitySyncFixtureRequest(
       resources: ResourceRef[],
       advance = false,
     ): FixtureResourceVersions => {
-      const changed = updateEntitySyncFixture(
-        fixture.snapshot,
-        fixture.additionalEntities?.(),
-      );
+      updateEntitySyncFixture(fixture.snapshot, fixture.additionalEntities?.());
       const current = nodeEntityPullStates.get(fixture.snapshot);
       return resources.map((resource) => {
         const key = JSON.stringify(resource);
         const next = (resourceRevisions.get(key) || 0) + (advance ? 1 : 0);
         resourceRevisions.set(key, next || 1);
-        // An empty draft baseline lets the client post its unsent edits.
-        if (resource.kind === "drafts")
+        if (resource.kind === "drafts") {
+          const draftSnapshot = fixture.draftSnapshot?.() ?? {
+            complete: true,
+            documents: [],
+          };
           return {
             resource,
-            revision: next || 1,
-            draftSnapshot: { complete: true, documents: [] },
+            revision: Math.max(
+              1,
+              ...draftSnapshot.documents.map((document) => document.seq),
+            ),
+            draftSnapshot,
           };
+        }
         if (resource.kind === "multi-server" && fixture.discoverySnapshot)
           return {
             resource,
@@ -2359,6 +2383,13 @@ export function handleEntitySyncFixtureRequest(
             discoverySnapshot: fixture.discoverySnapshot() as NonNullable<
               FixtureResourceVersions[number]["discoverySnapshot"]
             >,
+          };
+        if (resource.kind === "room" && fixture.roomSnapshot)
+          return {
+            resource,
+            revision: next || 1,
+            replyKind: "snapshot",
+            viewSnapshot: { room: fixture.roomSnapshot() },
           };
         if (resource.kind === "processes" && fixture.processSnapshot) {
           return {
@@ -2368,55 +2399,20 @@ export function handleEntitySyncFixtureRequest(
             viewSnapshot: { processes: fixture.processSnapshot() },
           };
         }
-        if (
-          resource.kind === "state" &&
-          fixture.snapshot.runtime.viewScopedAgents &&
-          current
-        ) {
+        if (resource.kind === "transcript")
           return {
             resource,
-            revision: current.maxSeq,
-            cursor: { workspaceId: identity.workspaceId, seq: current.maxSeq },
+            revision: current?.maxSeq ?? 1,
+            cursor: {
+              workspaceId: identity.workspaceId,
+              seq: current?.maxSeq ?? 1,
+            },
             replyKind: "snapshot",
-            entityChanges: {
-              after: 0,
-              through: current.maxSeq,
-              documents: [...current.documents.values()].filter(
-                (document) =>
-                  document.op === "upsert" &&
-                  ![
-                    "workDetail",
-                    "workResult",
-                    "workDecision",
-                    "workRelease",
-                    "agentDetail",
-                  ].includes(document.collection),
-              ),
+            transcriptSnapshot: fixture.transcriptSnapshot?.(resource) ?? {
+              items: [],
+              truncated: false,
             },
           };
-        }
-        if (resource.kind === "state") {
-          const documents = changed.filter(
-            (document) =>
-              ![
-                "workDetail",
-                "workResult",
-                "workDecision",
-                "workRelease",
-                "agentDetail",
-              ].includes(document.collection),
-          );
-          if (documents.length)
-            return {
-              resource,
-              revision: documents.at(-1)!.seq,
-              entities: {
-                after: documents[0]!.seq - 1,
-                through: documents.at(-1)!.seq,
-                documents,
-              },
-            };
-        }
         const scopes: Partial<
           Record<
             ResourceRef["kind"],
@@ -2430,18 +2426,19 @@ export function handleEntitySyncFixtureRequest(
         > = SUBSCRIPTION_ENTITY_SCOPES;
         const scope = scopes[resource.kind];
         const selector: Record<string, unknown> = resource;
-        if (resource.kind !== "state" && scope && current) {
+        if (scope && current) {
           const documents = [...current.documents.values()].filter(
             (document) =>
-              document.op === "upsert" &&
               scope.collections.includes(
                 document.collection as (typeof scope.collections)[number],
               ) &&
               (!scope.idField || document.id === selector[scope.idField]) &&
               (!scope.agentField ||
-                ("rootId" in document.value &&
+                (document.op === "upsert" &&
+                  "rootId" in document.value &&
                   document.value.rootId === selector[scope.agentField]) ||
-                ("agent" in document.value &&
+                (document.op === "upsert" &&
+                  "agent" in document.value &&
                   document.value.agent === selector[scope.agentField])),
           );
           return {
@@ -2508,10 +2505,11 @@ export function handleEntitySyncFixtureRequest(
       protocol: RESOURCE_STREAM_PROTOCOL,
       reason: "initial",
       resources: requestedResources,
-      // No per-resource versions: the page must always pull after a fixture frame.
-      resourceVersions: fixture.versionedResources
-        ? withResourceVersions(requestedResources)
-        : [],
+      // Initial data and subsequent changes use the same SSE subscription contract.
+      resourceVersions:
+        fixture.versionedResources !== false
+          ? withResourceVersions(requestedResources)
+          : [],
       revision: ++revision,
       workspaceId: identity.workspaceId,
     };
@@ -2568,9 +2566,10 @@ export function handleEntitySyncFixtureRequest(
         writeFrame("resources", {
           ...initial,
           resources: addedResources,
-          resourceVersions: fixture.versionedResources
-            ? withResourceVersions(addedResources)
-            : [],
+          resourceVersions:
+            fixture.versionedResources !== false
+              ? withResourceVersions(addedResources)
+              : [],
           revision: ++revision,
         });
       writeProgress(addedResources);
@@ -2579,14 +2578,18 @@ export function handleEntitySyncFixtureRequest(
     const cleanup = fixture.onStreamReady?.((resources, reason = "change") => {
       if (response.destroyed) return;
 
+      // A fixture state mutation can change any subscribed entity scope.
+      if (resources.some((resource) => resource.kind === "state"))
+        resources = [...requestedResources];
       const changed: FixtureResourceChangeEvent = {
         epoch,
         protocol: RESOURCE_STREAM_PROTOCOL,
         reason,
         resources,
-        resourceVersions: fixture.versionedResources
-          ? withResourceVersions(resources, true)
-          : [],
+        resourceVersions:
+          fixture.versionedResources !== false
+            ? withResourceVersions(resources, true)
+            : [],
         revision: ++revision,
         workspaceId: identity.workspaceId,
       };

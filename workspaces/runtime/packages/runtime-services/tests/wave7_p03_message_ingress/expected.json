@@ -3432,95 +3432,117 @@
   "excluded-account": {
     "results": [
       {
-        "error": "Account default is disabled for this chat"
+        "id": "message",
+        "status": "queued"
       }
     ],
     "state": {
-      "events": [],
-      "metadata": {},
       "agents": {
         "agent": {
-          "id": "agent",
-          "threadId": null,
           "accountKey": "default",
-          "executionSettingsAccountKey": "default",
-          "provider": "codex",
-          "yoloMode": true,
-          "name": "Message ingress",
-          "prompt": "seed",
-          "cwd": "__INGRESS_WORKSPACE__",
-          "role": "orchestrator",
-          "isLead": true,
-          "needsTitle": false,
-          "parentId": null,
-          "rootId": "agent",
-          "subagentConcurrencyVersion": 2,
-          "maxAgentsExplicit": false,
-          "model": "gpt-6-astra",
-          "effort": "medium",
-          "fastMode": false,
-          "daybreakEnabled": false,
-          "cyberAccessProgram": "standard",
-          "concurrency": 32,
-          "maxAgents": 64,
-          "tokenBudget": null,
-          "status": "idle",
-          "autoWake": false,
-          "epoch": 0,
-          "turnId": null,
-          "inFlight": false,
-          "turnEpoch": 0,
-          "usageResumeEnabled": true,
-          "tokensUsed": 0,
-          "compactions": 0,
-          "compactionsObservedOnly": false,
-          "contextUsage": null,
-          "events": 0,
-          "created": 1792684797.304972,
-          "error": null,
-          "profileId": null,
-          "profileInstructions": "",
-          "tail": "",
-          "worktree": false,
-          "workspaceMode": "worktree",
-          "executionMode": "native",
-          "hostProjectPath": "__INGRESS_WORKSPACE__",
-          "layrReady": false,
-          "workspaceBackend": null,
-          "workspaceModeExplicit": false,
-          "workspaceInGit": false,
-          "worktreeReady": false,
-          "environment": "host",
-          "worktreeWarning": null,
-          "workerBaseRef": null,
-          "workerBaseCommit": null,
-          "workerBaseBehindMain": null,
-          "workerBaseMainRef": null,
-          "workerDefaults": {
-            "model": "gpt-6-luna",
-            "effort": "high",
-            "fastMode": false,
-            "daybreakEnabled": false,
-            "delegationDepth": 1
-          },
-          "reviewDefaults": {
-            "model": null,
-            "effort": null
-          },
           "agentMode": "multi",
           "agentModeRevision": 0,
           "agentModeSupported": true,
-          "workerExcludedAccountKeys": ["default"]
+          "autoWake": true,
+          "capacity": {
+            "kind": "automatic",
+            "max": 64
+          },
+          "compactions": 0,
+          "concurrency": 32,
+          "created": 1792684797.304972,
+          "cwd": "__INGRESS_WORKSPACE__",
+          "cyberAccessProgram": "standard",
+          "daybreakEnabled": false,
+          "effort": "medium",
+          "environment": "host",
+          "epoch": 0,
+          "error": null,
+          "events": 0,
+          "executionMode": "native",
+          "executionSettingsAccountKey": "default",
+          "fastMode": false,
+          "hostProjectPath": "__INGRESS_WORKSPACE__",
+          "id": "agent",
+          "inFlight": false,
+          "isLead": true,
+          "layrReady": false,
+          "model": "gpt-6-astra",
+          "name": "Message ingress",
+          "naming": "automatic",
+          "permissionMode": "bypassPermissions",
+          "profileId": null,
+          "profileInstructions": "",
+          "prompt": "seed",
+          "provider": "codex",
+          "reviewDefaults": {
+            "model": null
+          },
+          "role": "orchestrator",
+          "rootId": "agent",
+          "status": "queued",
+          "subagentConcurrencyVersion": 2,
+          "tail": "",
+          "tokensUsed": 0,
+          "turnEpoch": 0,
+          "usageResumeEnabled": true,
+          "workerDefaults": {
+            "daybreakEnabled": false,
+            "delegationDepth": 1,
+            "effort": "high",
+            "fastMode": false,
+            "model": "gpt-6-luna"
+          },
+          "workerExcludedAccountKeys": ["default"],
+          "workspaceInGit": false,
+          "workspaceMode": "worktree",
+          "workspaceModeExplicit": false,
+          "worktree": false,
+          "worktreeReady": false
         }
       },
-      "messages": [],
-      "runtime_operation_receipts": [],
+      "events": [
+        {
+          "agent": "agent",
+          "epoch": 0,
+          "error": null,
+          "id": "message",
+          "kind": "user",
+          "status": "pending",
+          "text": "hello",
+          "turn_id": null
+        }
+      ],
+      "messages": [
+        {
+          "at": "generated timestamp",
+          "author": "user",
+          "deliveries": {
+            "agent": {
+              "error": null,
+              "status": "queued"
+            }
+          },
+          "id": "message",
+          "room": "agent",
+          "text": "hello"
+        }
+      ],
+      "metadata": {
+        "message": {
+          "assets": [],
+          "delivery": "current_turn",
+          "requestedDelivery": "current_turn"
+        }
+      },
+      "runtime_capacity_retries": [],
+      "sync_documents": [],
       "sync_entities": [
         {
           "collection": "project",
-          "id": "__INGRESS_WORKSPACE__",
-          "seq": 1,
+          "deleted": 0,
           "hash": "verified payload hash",
+          "id": "__INGRESS_WORKSPACE__",
           "payload": {
             "collection": "project",
             "id": "__INGRESS_WORKSPACE__",
@@ -3542,87 +3564,32 @@
               "path": "__INGRESS_WORKSPACE__"
             }
           },
-          "deleted": 0
+          "seq": 1
         },
         {
-          "collection": "agent",
-          "id": "95c5908c-00a6-43fe-a3fa-5f5aa47a840a",
-          "seq": 2,
+          "collection": "event",
+          "deleted": 0,
           "hash": "verified payload hash",
+          "id": "message",
           "payload": {
-            "collection": "agent",
-            "id": "95c5908c-00a6-43fe-a3fa-5f5aa47a840a",
+            "collection": "event",
+            "id": "message",
             "value": {
-              "accountKey": "default",
-              "agentMode": "multi",
-              "agentModeRevision": 0,
-              "agentModeSupported": true,
-              "autoWake": false,
-              "canSend": true,
-              "commandProgress": [],
-              "compactions": 0,
-              "concurrency": 32,
-              "contextUsage": null,
-              "created": 1792684797.304972,
-              "cwd": "__INGRESS_WORKSPACE__",
-              "cyberAccessProgram": "standard",
-              "daybreakEnabled": false,
-              "effort": "medium",
-              "empty": false,
-              "environment": "host",
-              "epoch": 0,
+              "agent": "agent",
+              "created": "generated timestamp",
               "error": null,
-              "executionMode": "native",
-              "fastMode": false,
-              "hostProjectPath": "__INGRESS_WORKSPACE__",
-              "id": "95c5908c-00a6-43fe-a3fa-5f5aa47a840a",
-              "inFlight": false,
-              "isLead": true,
-              "kind": "agent",
-              "launcherAlive": true,
-              "layrReady": false,
-              "model": "gpt-6-astra",
-              "name": "Message ingress",
-              "nextTurnSettingsSupported": true,
-              "parentId": null,
-              "provider": "codex",
-              "readStateSupported": true,
-              "reviewDefaults": {
-                "effort": null,
-                "model": null
-              },
-              "role": "orchestrator",
-              "rootId": "95c5908c-00a6-43fe-a3fa-5f5aa47a840a",
-              "serverId": "80c38292d8aa42e0bd3ffc99f8f15b1f",
-              "source": "managed",
-              "stall": null,
-              "startWait": null,
-              "status": "paused",
-              "subagentConcurrencyVersion": 2,
-              "tail": "",
-              "threadId": null,
-              "tokensUsed": 0,
-              "turnId": null,
-              "workerDefaults": {
-                "daybreakEnabled": false,
-                "delegationDepth": 1,
-                "effort": "high",
-                "fastMode": false,
-                "model": "gpt-6-luna"
-              },
-              "workspaceBackend": null,
-              "workspaceMode": "worktree",
-              "worktree": false,
-              "yoloMode": true
+              "id": "message",
+              "kind": "user",
+              "status": "pending"
             }
           },
-          "deleted": 0
+          "seq": 26
         },
         {
           "collection": "agent",
-          "id": "agent",
-          "seq": 4,
+          "deleted": 0,
           "hash": "verified payload hash",
+          "id": "agent",
           "payload": {
             "collection": "agent",
             "id": "agent",
@@ -3631,12 +3598,15 @@
               "agentMode": "multi",
               "agentModeRevision": 0,
               "agentModeSupported": true,
-              "autoWake": false,
+              "autoWake": true,
               "canSend": true,
+              "capacity": {
+                "kind": "automatic",
+                "max": 64
+              },
               "commandProgress": [],
               "compactions": 0,
               "concurrency": 32,
-              "contextUsage": null,
               "created": 1792684797.304972,
               "cwd": "__INGRESS_WORKSPACE__",
               "cyberAccessProgram": "standard",
@@ -3646,7 +3616,6 @@
               "environment": "host",
               "epoch": 0,
               "error": null,
-              "workerExcludedAccountKeys": ["default"],
               "executionMode": "native",
               "fastMode": false,
               "hostProjectPath": "__INGRESS_WORKSPACE__",
@@ -3658,12 +3627,13 @@
               "layrReady": false,
               "model": "gpt-6-astra",
               "name": "Message ingress",
+              "naming": "automatic",
               "nextTurnSettingsSupported": true,
-              "parentId": null,
+              "permissionMode": "bypassPermissions",
+              "projectPath": "__INGRESS_WORKSPACE__",
               "provider": "codex",
               "readStateSupported": true,
               "reviewDefaults": {
-                "effort": null,
                 "model": null
               },
               "role": "orchestrator",
@@ -3671,13 +3641,14 @@
               "serverId": "80c38292d8aa42e0bd3ffc99f8f15b1f",
               "source": "managed",
               "stall": null,
-              "startWait": null,
-              "status": "idle",
+              "startWait": {
+                "epoch": 0,
+                "reason": "dispatch_pending"
+              },
+              "status": "queued",
               "subagentConcurrencyVersion": 2,
               "tail": "",
-              "threadId": null,
               "tokensUsed": 0,
-              "turnId": null,
               "workerDefaults": {
                 "daybreakEnabled": false,
                 "delegationDepth": 1,
@@ -3685,23 +3656,39 @@
                 "fastMode": false,
                 "model": "gpt-6-luna"
               },
-              "workspaceBackend": null,
+              "workerExcludedAccountKeys": ["default"],
               "workspaceMode": "worktree",
-              "worktree": false,
-              "yoloMode": true
+              "worktree": false
             }
           },
-          "deleted": 0
+          "seq": 28
         }
-      ],
-      "sync_documents": [],
-      "sync_versions": [],
-      "runtime_capacity_retries": []
+      ]
     },
-    "operationReceipts": [],
+    "operationReceipts": [
+      {
+        "id": "message",
+        "signature": {
+          "agent": "agent",
+          "text": "hello",
+          "assets": []
+        },
+        "result": {
+          "id": "message",
+          "status": "queued"
+        }
+      }
+    ],
     "receipts": {
       "agent": "agent",
-      "items": []
+      "items": [
+        {
+          "error": null,
+          "id": "message",
+          "materialized": false,
+          "status": "queued"
+        }
+      ]
     }
   },
   "capture-waiting": {

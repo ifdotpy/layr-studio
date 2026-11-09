@@ -343,7 +343,6 @@ function Fixture() {
                     effort: "medium",
                   });
                 }}
-                refresh={async () => {}}
               />
             ) : scene === "rows" ? (
               <div className="chat-settings-panel chat-settings-rows">
@@ -370,7 +369,6 @@ function Fixture() {
                         retry: () => {},
                       }}
                       onAccountChange={() => {}}
-                      refresh={async () => {}}
                     />
                   </SettingsRow>
                 ))}
@@ -426,7 +424,7 @@ function Fixture() {
                 }}
                 accounts={accountsData}
                 initialPath="/fixture/project"
-                refresh={async () => {}}
+
                 created={(id) => {
                   window.created = id;
                 }}

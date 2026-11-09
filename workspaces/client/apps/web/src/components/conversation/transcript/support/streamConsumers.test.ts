@@ -41,6 +41,7 @@ vi.mock(
 );
 const api = { get: h.get, syncGet: h.get };
 const resources = {
+  watchResourceChanges: () => () => {},
   watchLiveDeltas: () => () => {},
   watchResourceConnection: (
     accept: (health: "live", activity: "open") => void,

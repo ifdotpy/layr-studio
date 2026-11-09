@@ -16,6 +16,7 @@ export type StagedEntityInterval = Omit<
   "data" | "partIndex" | "partCount" | "complete"
 > & {
   after: number;
+  resourceEntry?: components["schemas"]["ResourceRevisionEntry"];
   pages(): AsyncIterable<Batch>;
   has(id: string): Promise<boolean>;
   dispose(): Promise<void>;
@@ -62,6 +63,7 @@ function sequence(value: unknown): value is number {
 }
 const frameFields = new Set([
   "protocol",
+  "payloadKind",
   "workspaceId",
   "epoch",
   "revision",
@@ -92,12 +94,19 @@ function frameValue(value: unknown): Frame {
     ) ||
     !object(value.resource) ||
     typeof value.resource.kind !== "string" ||
-    !(value.resource.kind in SUBSCRIPTION_ENTITY_SCOPES) ||
+    (value.payloadKind === "entity"
+      ? !(value.resource.kind in SUBSCRIPTION_ENTITY_SCOPES)
+      : value.payloadKind === "transcript"
+        ? value.resource.kind !== "transcript"
+        : value.payloadKind !== "view") ||
     !object(value.cursor) ||
     value.cursor.workspaceId !== value.workspaceId ||
     !sequence(value.cursor.seq) ||
+    (value.cursor.terminalGeneration !== undefined &&
+      !sequence(value.cursor.terminalGeneration)) ||
     Object.keys(value.cursor).some(
-      (key) => key !== "workspaceId" && key !== "seq",
+      (key) =>
+        key !== "workspaceId" && key !== "seq" && key !== "terminalGeneration",
     ) ||
     !["snapshot", "delta"].includes(String(value.replyKind)) ||
     typeof value.transferId !== "string" ||
@@ -144,14 +153,7 @@ function pageValue(value: unknown, after: number, through: number): Batch {
       // Rows built from one server change share its number: the order is non-decreasing.
       row.seq < previous ||
       row.seq <= after ||
-      row.seq > value.through ||
-      typeof row.id !== "string" ||
-      typeof row.collection !== "string" ||
-      !["upsert", "delete"].includes(String(row.op)) ||
-      (row.op === "upsert" ? !object(row.value) : "value" in row) ||
-      Object.keys(row).some(
-        (key) => !["op", "collection", "id", "seq", "value"].includes(key),
-      )
+      row.seq > value.through
     )
       throw new TypeError("Invalid canonical entity page record");
     previous = row.seq;
@@ -231,9 +233,11 @@ export class EntityTransferAssembler {
     const first = pending.frame;
     if (
       frame.cursor.seq !== first.cursor.seq ||
+      frame.cursor.terminalGeneration !== first.cursor.terminalGeneration ||
       frame.replyKind !== first.replyKind ||
       frame.revision !== first.revision ||
-      frame.reason !== first.reason
+      frame.reason !== first.reason ||
+      frame.payloadKind !== first.payloadKind
     )
       throw new Error("Entity transfer identity changed");
     if (
@@ -267,6 +271,35 @@ export class EntityTransferAssembler {
     }
     const encoded = chunks.join("");
     const decoded: unknown = JSON.parse(encoded);
+    if (frame.payloadKind !== "entity") {
+      if (frame.pageIndex !== 0 || !frame.complete)
+        throw new Error("Incomplete resource transfer page");
+      // The schema hash fences typed payloads; only the interval identity is checked here.
+      const entry: components["schemas"]["ResourceRevisionEntry"] =
+        JSON.parse(encoded);
+      if (
+        !sequence(entry.revision) ||
+        entry.cursor?.workspaceId !== frame.workspaceId ||
+        entry.cursor.seq !== frame.cursor.seq ||
+        entry.cursor.terminalGeneration !== frame.cursor.terminalGeneration ||
+        entry.replyKind !== frame.replyKind ||
+        !entry.resource ||
+        subscriptionKey(entry.resource) !== subscriptionKey(frame.resource)
+      )
+        throw new Error("Resource transfer identity changed");
+      pending.complete = true;
+      return {
+        ...frame,
+        after: 0,
+        resourceEntry: entry,
+        async *pages() {},
+        has: async () => false,
+        dispose: async () => {
+          await this.storage.remove(prefix);
+          if (this.pending.get(scope) === pending) this.pending.delete(scope);
+        },
+      };
+    }
     const after =
       pending.through ??
       (object(decoded) && sequence(decoded.after) ? decoded.after : -1);

@@ -102,7 +102,6 @@ it("project folders updates the real store and location leaves from one stable g
           null,
           createElement(ProjectFoldersDialog, {
             project: selected,
-            saved: async () => {},
           }),
         ),
       ),

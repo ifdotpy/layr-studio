@@ -62,7 +62,6 @@ function ProjectFixture({ light = false }: { light?: boolean }) {
               { id: "local", label: "Workstation" },
               { id: "build", label: "Build server" },
             ]}
-            saved={async () => {}}
           />
         </SettingsSection>
       </div>

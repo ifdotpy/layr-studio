@@ -135,7 +135,7 @@ function Fixture() {
                         error: "",
                         retry: () => {},
                       }}
-                      refresh={async () => {}}
+
                       renderTrigger={({ agent, opened, ref, onClick }) => (
                         <ExecutionSummaryTrigger
                           agent={agent}

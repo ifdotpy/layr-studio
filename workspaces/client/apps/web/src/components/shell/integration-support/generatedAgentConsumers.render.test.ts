@@ -267,7 +267,6 @@ it.each([
         state: accounts,
         notify: () => {},
         catalog,
-        refresh: async () => {},
       }),
     );
     const picker = required(h.pickers.find((p) => p.role === role));
@@ -327,7 +326,7 @@ it("keeps generated request owners blocked for the same native thread", () => {
       },
       createElement(
         RequestArea,
-        { scope: "owner", refresh: async () => {}, notify() {} },
+        { scope: "owner", notify() {} },
         createElement(Requests, { all: true }),
       ),
     ),
@@ -583,7 +582,6 @@ it("updates settings, context usage and native actions when the owning detail sl
               state: accounts,
               notify: () => {},
               catalog,
-              refresh: async () => {},
             }),
             createElement(Usage, {
               agent,
@@ -680,7 +678,7 @@ it("keeps request approval disabled until its native-thread detail is known", ()
       { value: store },
       createElement(
         RequestArea,
-        { scope: "owner", refresh: async () => {}, notify() {} },
+        { scope: "owner", notify() {} },
         createElement(Requests, { all: true }),
       ),
     ),
@@ -744,7 +742,6 @@ function settingsCaller(
         },
       ],
     },
-    refresh: async () => {},
     ...extra,
   });
 }
@@ -1121,3 +1118,57 @@ it.each(["loading", "error"] as const)(
     }
   },
 );
+
+it("a successful Ask command preserves the server stream", async () => {
+  const { ChatSettingsDialog: SettingsDialog } =
+    await import("../../agents/ChatSettingsDialog/ChatSettingsDialog.tsx");
+  const f = observableFixture([record]);
+  const services = createServerServices({
+    id: "settings",
+    label: "Settings",
+    origin: "https://settings.test",
+  });
+  const areas = conversationActionsFixture(() => {}, f.store, services);
+  areas.navigation.selectedId = "lead";
+  areas.startup.running = true;
+  areas.startup.initialized = true;
+  vi.spyOn(services.api, "refreshSession").mockResolvedValue({
+    token: "fixture",
+  });
+  const refresh = vi.spyOn(services.sync, "refreshState");
+  const replace = vi.spyOn(services.resources, "replaceStream");
+  h.api.post.mockResolvedValue({
+    ...record,
+    accountKey: "default",
+    permissionMode: AgentPermissionMode.default,
+  });
+  const screen = await mountCaller(
+    f,
+    createElement(SettingsDialog, {
+      areas,
+      accounts,
+      settings: {
+        chatOpen: true,
+        accountModalOpen: false,
+        closeChatSettings() {},
+      },
+      onSignIn() {},
+    }),
+  );
+  try {
+    const ask = required(
+      screen.host.querySelector<HTMLInputElement>('input[value="ask"]'),
+    );
+    await act(async () => ask.click());
+    expect(h.api.post).toHaveBeenCalledExactlyOnceWith(
+      "/api/conversation",
+      expect.objectContaining({ id: "lead", yolo_mode: false }),
+    );
+    expect(refresh).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  } finally {
+    await screen.close();
+    services.close();
+    vi.restoreAllMocks();
+  }
+});

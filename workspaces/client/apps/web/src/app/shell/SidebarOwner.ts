@@ -135,7 +135,7 @@ export class SidebarOwner {
 
 export interface CombinedSidebarBoundary {
   readonly model: MergedSidebar;
-  readonly commands: Pick<SidebarCommands, "rename" | "refresh" | "notify">;
+  readonly commands: Pick<SidebarCommands, "rename" | "notify">;
   readonly run:
     | SidebarAreas["run"]
     | ((command: Parameters<SidebarAreas["run"]>[0]) => void);
@@ -169,7 +169,6 @@ export type SidebarAreas = Pick<
   | "creation"
   | "rename"
   | "notices"
-  | "refresh"
   | "run"
 >;
 type Conversion = {
@@ -184,7 +183,6 @@ export class SidebarListOwner {
   readonly read;
   readonly creation;
   readonly run;
-  readonly refresh;
   readonly notify;
   readonly renameChat;
   readonly actions: SidebarActions;
@@ -207,15 +205,13 @@ export class SidebarListOwner {
     this.read = combined?.read ?? areas.read;
     this.creation = combined?.creation ?? areas.creation;
     this.run = combined?.run ?? run;
-    this.refresh = combined?.commands.refresh ?? areas.refresh;
     this.notify = combined?.commands.notify ?? areas.notices.notify;
     this.renameChat = combined?.commands.rename ?? areas.rename.rename;
     this.state = areas.scope.store.state();
     this.lastOpened = { current: this.selection.selectedId };
-    this.sorting = new SidebarOrderOwner(this, this.refresh, this.notify);
+    this.sorting = new SidebarOrderOwner(this, this.notify);
     this.teamMove = new PeerTeamMoveOwner(
       this.services.cache,
-      this.refresh,
       this.notify,
       (path, member, team) =>
         this.services.owner(
@@ -449,7 +445,6 @@ export class SidebarListOwner {
     return false;
   };
   savedProject = async () => {
-    await this.refresh();
     this.setDialog(null);
   };
   editProject = (
@@ -525,8 +520,6 @@ export class SidebarListOwner {
       await this.services
         .owner({ kind: "chat", id })
         .post("/api/organization", { id, ...data });
-      if (hasOptimistic) void this.refresh();
-      else await this.refresh();
       return true;
     } catch (error) {
       if (hasOptimistic) runInAction(() => this.overrides.delete(id));

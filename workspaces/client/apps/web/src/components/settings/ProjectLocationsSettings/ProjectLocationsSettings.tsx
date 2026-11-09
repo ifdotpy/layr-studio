@@ -42,14 +42,12 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
   initialServer,
   initialBrowse,
   initialHeads = [],
-  saved,
 }: {
   project: LocationProject;
   servers?: ProjectServerChoice[] | undefined;
   initialServer?: string | undefined;
   initialBrowse?: DirectoryBrowse | undefined;
   initialHeads?: LocationHeadRead[] | undefined;
-  saved: () => Promise<void>;
 }) {
   const api = useServerApi(),
     store = useServerStore();
@@ -121,7 +119,6 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
       throw error;
     });
     request.current = null;
-    await saved();
     if (action === "add_location" && path) {
       // Read only the folder added by this explicit user action.
       await readHead(server, path).catch(() => {});

@@ -289,9 +289,6 @@ function Fixture() {
                 remove: () => {},
                 markUnread: () => {},
                 deleteProject: (path: string) => deletion.open(path),
-                refresh: async () => {
-                  throw new Error("Unexpected refresh");
-                },
               },
             },
             React.createElement(Sidebar, {

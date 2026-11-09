@@ -166,11 +166,7 @@ function PrimaryAudit() {
         agents={[agentSummaryFixture("audit-lead", { name: "Release lead" })]}
         details={[{ id: "audit-lead" }]}
       >
-        <RequestArea
-          scope="semantic-audit"
-          refresh={async () => {}}
-          notify={() => {}}
-        >
+        <RequestArea scope="semantic-audit" notify={() => {}}>
           <Requests all />
         </RequestArea>
       </RequestFixture>

@@ -7,7 +7,7 @@ import type { SidebarBackend } from "../../components/sidebar/support/services.t
 export type PeerTeamRequest =
   paths["/api/peer-teams"]["post"]["requestBody"]["content"]["application/json"];
 
-/** One body and captured server survive uncertain replies and refresh failures. */
+/** One body and captured server survive uncertain replies. */
 export class PeerTeamMutation {
   request: PeerTeamRequest | null = null;
   committed = false;
@@ -15,17 +15,12 @@ export class PeerTeamMutation {
   pending = false;
   error = "";
   rejected = false;
-  readonly refresh;
   readonly complete;
-  constructor(
-    refresh: (() => Promise<void>) | undefined,
-    complete: (clear: () => void, reload: boolean) => void,
-  ) {
-    this.refresh = refresh;
+  constructor(complete: (clear: () => void, reload: boolean) => void) {
     this.complete = complete;
     makeAutoObservable(
       this,
-      { backend: false, refresh: false, complete: false },
+      { backend: false, complete: false },
       { autoBind: true, deep: false },
     );
   }
@@ -50,7 +45,6 @@ export class PeerTeamMutation {
           this.committed = true;
         });
       }
-      await this.refresh?.();
       runInAction(() => this.complete(this.clear, reload));
     } catch (error) {
       runInAction(() => {
@@ -89,7 +83,6 @@ export class PeerTeamMoveOwner {
   readonly ownerForProject;
   constructor(
     backend: SidebarBackend,
-    refresh?: () => Promise<void>,
     notify?: (text: string) => void,
     ownerForProject?: (
       path: string,
@@ -99,7 +92,7 @@ export class PeerTeamMoveOwner {
   ) {
     this.backend = backend;
     this.ownerForProject = ownerForProject;
-    this.mutation = new PeerTeamMutation(refresh, (clear, reload) => {
+    this.mutation = new PeerTeamMutation((clear, reload) => {
       clear();
       if (!reload) notify?.("Team membership updated.");
     });

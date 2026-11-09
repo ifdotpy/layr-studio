@@ -56,14 +56,8 @@ export interface SidebarOrderSource {
 export class SidebarOrderOwner {
   readonly source: SidebarOrderSource;
   readonly outbox: ReturnType<typeof outboxRequests>;
-  readonly refresh;
   readonly notify;
-  constructor(
-    source: SidebarOrderSource,
-    refresh?: () => Promise<void>,
-    notify?: (message: string) => void,
-  ) {
-    this.refresh = refresh;
+  constructor(source: SidebarOrderSource, notify?: (message: string) => void) {
     this.notify = notify;
     this.source = source;
     this.outbox = outboxRequests(source.services.cache.storage);
@@ -72,7 +66,6 @@ export class SidebarOrderOwner {
       this,
       {
         source: false,
-        refresh: false,
         notify: false,
         outbox: false,
         order: observableRef,
@@ -181,11 +174,6 @@ export class SidebarOrderOwner {
         this.setOrder(result.groups || {});
       }
       this.adoptServerOrder(this.source.runtime?.sidebarOrder);
-      try {
-        await this.refresh?.();
-      } catch (error) {
-        this.notify?.(`Could not refresh sidebar order: ${errorText(error)}`);
-      }
       this.requestBackend = null;
       clearPending = true;
       return true;
@@ -201,16 +189,9 @@ export class SidebarOrderOwner {
         this.setOrder(this.source.runtime?.sidebarOrder?.groups || {});
         this.notify?.(
           error.status === 409
-            ? "Sidebar order changed in another client. Refreshing from the server."
+            ? "Sidebar order changed in another client. Review the current order."
             : `Could not save sidebar order: ${errorText(error)}`,
         );
-        try {
-          await this.refresh?.();
-        } catch (refreshError) {
-          this.notify?.(
-            `Could not refresh sidebar order: ${errorText(refreshError)}`,
-          );
-        }
       } else {
         this.notify?.(`Could not save sidebar order: ${errorText(error)}`);
       }

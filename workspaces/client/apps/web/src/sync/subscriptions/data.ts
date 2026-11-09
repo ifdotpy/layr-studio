@@ -7,9 +7,7 @@ import type {
 } from "./contracts.ts";
 import {
   selectResourceData,
-  recoverResourceData,
   type ResourceDataSelectors,
-  type ViewRecovery,
 } from "./selectData.ts";
 import type { ObserveSubscriptionData } from "./module.ts";
 import type { ResourceVersion } from "../resourceEvents.ts";
@@ -20,7 +18,10 @@ import type {
 import type { SubscriptionTransport } from "./store.ts";
 
 const viewSelectors: Required<
-  Pick<ResourceDataSelectors<ResourceVersion | undefined>, keyof ViewRecovery>
+  Pick<
+    ResourceDataSelectors<ResourceVersion | undefined>,
+    "processes" | "complaint" | "room" | "terminal-output"
+  >
 > = {
   processes: (_ref, version) => version?.viewSnapshot?.processes,
   complaint: (_ref, version) => version?.viewSnapshot?.complaint,
@@ -57,7 +58,7 @@ const transientSelectors: ResourceDataSelectors<ResourceVersion | undefined> = {
   drafts: (_ref, version) => version?.draftChanges,
 };
 
-/** Apply inline stream values; only oversized/missing recovery frames may read HTTP. */
+/** Apply completed stream values; voice and auth actions retain their explicit reads. */
 export function createDataObserver(
   sync: () => Pick<
     ReturnType<typeof createSyncClient>,
@@ -65,7 +66,6 @@ export function createDataObserver(
   >,
   events: SubscriptionTransport,
   observeEntities?: ObserveSubscriptionData,
-  recoverView?: ViewRecovery,
   api?: Pick<
     ReturnType<typeof import("../../api.ts").createApiScope>,
     "get" | "post"
@@ -164,27 +164,18 @@ export function createDataObserver(
     }
     const viewValue = (version?: ResourceVersion) =>
       selectResourceData(viewSelectors, ref, version);
-    if (recoverView && ref.kind in recoverView) {
-      let stopped = false;
-      const stop = watchResourceReads(
-        ref,
-        async (version) => {
-          const value =
-            viewValue(version) ?? (await recoverResourceData(recoverView, ref));
-          if (!stopped) accept(value, version);
-        },
-        failed,
-        { events, waitForBaseline: true, reapplyInlineView: true },
-      );
-      return () => {
-        stopped = true;
-        stop();
-      };
-    }
     const transient = (version?: ResourceVersion) => {
       const viewData = viewValue(version);
       if (viewData !== undefined) {
         accept(viewData, version);
+        return;
+      }
+      if (version && ref.kind in viewSelectors) {
+        failed(
+          new Error(
+            "Live updates for this view are unavailable. Reconnect to retry.",
+          ),
+        );
         return;
       }
       const data = selectResourceData(transientSelectors, ref, version);

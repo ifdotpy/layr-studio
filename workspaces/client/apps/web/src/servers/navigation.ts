@@ -107,7 +107,6 @@ export type ServerCommand =
       projectServerId?: string | undefined;
     }
   | { action: "add-project" }
-  | { action: "refresh" }
   | { action: "terminal"; operation: "toggle" | "new" }
   | { action: "prepare-chat"; id: string }
   | { action: "mark-unread"; id: string; target: ReadStateDto }
@@ -240,7 +239,6 @@ export function isServerCommand(value: unknown): value is ServerCommand {
   const command = value as Record<string, unknown>;
   if (command.action === "delete-project")
     return typeof command.projectId === "string" && !!command.projectId;
-  if (command.action === "refresh") return true;
   if (command.action === "terminal")
     return command.operation === "toggle" || command.operation === "new";
   if (command.action === "prepare-chat" || command.action === "change-project")

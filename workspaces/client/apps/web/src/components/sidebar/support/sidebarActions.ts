@@ -115,9 +115,6 @@ export function createSidebarActions(state: SidebarListOwner) {
         return state.stateDir;
       },
       openRoom: (id) => state.openChat(id),
-      refresh: async () => {
-        await state.refresh();
-      },
       closeForm: () => state.setTeamDialog(null),
       edit: (team, action) =>
         state.setTeamDialog({

@@ -101,7 +101,7 @@ function Fixture() {
       >
         <RequestArea
           scope={workspace}
-          refresh={async () => {}}
+
           notify={(message) => window.notices.push(message)}
         >
           <Requests all />

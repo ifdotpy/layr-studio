@@ -101,7 +101,7 @@ export class StartupOwner {
         });
     }
   }
-  async refresh(credentialsOnly = true, resetRecovery = true): Promise<void> {
+  async refreshCredentials(resetRecovery = true): Promise<void> {
     if (resetRecovery) {
       this.startupExhausted = false;
       this.credentialRecovery = new ReadRecoveryBudget();
@@ -115,8 +115,6 @@ export class StartupOwner {
     const request = ++this.generation;
     try {
       await this.scope.services.api.refreshSession();
-      if (!this.running || request !== this.generation) return;
-      if (!credentialsOnly) await this.scope.services.sync.refreshState();
       if (!this.running || request !== this.generation) return;
       this.startupExhausted = false;
       runInAction(() => {
@@ -132,7 +130,7 @@ export class StartupOwner {
             !document.hidden &&
             navigator.onLine !== false
           )
-            void this.refresh(credentialsOnly, false);
+            void this.refreshCredentials(false);
         }, delay);
     }
   }
@@ -160,7 +158,7 @@ export class StartupOwner {
       runInAction(() => {
         this.workspaceId = storage.workspaceId;
       });
-      await this.refresh(true, false);
+      await this.refreshCredentials(false);
     } catch (error) {
       if (!this.running || request !== this.generation) return;
       const delay = this.reportStartupFailure(error, this.databaseRecovery);
@@ -175,7 +173,7 @@ export class StartupOwner {
     this.databaseRecovery = new ReadRecoveryBudget();
     this.credentialRecovery = new ReadRecoveryBudget();
     this.startupExhausted = false;
-    if (this.initialized) await this.refresh(true, false);
+    if (this.initialized) await this.refreshCredentials(false);
     else await this.initialize();
   }
   start(): Disposer {

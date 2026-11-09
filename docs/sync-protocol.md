@@ -1,6 +1,6 @@
 # Sync protocols
 
-This document defines Studio's change notifications and durable pull recovery.
+This document defines Studio's change notifications and durable SSE delivery.
 The renderer and server use protocol 4 for live notifications. Unsupported and
 unspecified stream protocol selectors receive HTTP 426. Pull projection schemas
 remain separate from the stream transport version.
@@ -136,16 +136,21 @@ limits](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs); its
 Legacy drafts above the current text limit are refused visibly while other drafts remain available.
 Pre-upgrade command retries retain pre-upgrade semantics, including cross-owner identity behavior, and never convert text to a file.
 
-Large entity baselines and deltas use typed `entity-transfer` frames on the same
-connection. Each page is a canonical `EntityChangeBatch` within the shared
+Large baselines and deltas use `entity-transfer` frames on the same connection.
+The required `payloadKind` enum is `entity`, `transcript`, or `view`. An entity
+page is a canonical `EntityChangeBatch` within the shared
 [document and complete-event byte limits](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs).
 The server validates pages and spools the interval to an anonymous temporary file
 from one SQLite read snapshot. It splits at record boundaries first; serialization
 fragments preserve a single existing oversized record. A complete marker proves
 the final interval, without constructing a batch above the canonical document limit.
+Transcript and view transfers serialize one complete `ResourceRevisionEntry` as
+page zero, split by the same `partIndex` and `partCount` string fragmentation.
+Their resource, cursor, and reply kind match the envelope; only the final part
+sets `complete=true`. Protocol 4 is unchanged; the schema hash fences the new field.
 
 The fetch stream stages transfer pages in memory before reading more data.
-Only a complete, validated interval enters the existing projection write lock;
+Only a complete interval enters the per-database projection application queue;
 all scope checks finish before the first write, snapshot pruning follows complete
 staging, and the durable cursor is written last. Interrupted staging leaves the
 previous projection and cursor intact. A write failure retains the old cursor so replay
@@ -159,11 +164,14 @@ Only a relevant movement requests a replacement; status updates, ordinary histor
 appends and tombstones retain row deltas. The indexed fence lookup does not scan
 selected histories.
 
-Scoped durable cursor application retains its existing Web Locks requirement.
-Without that API the client reports the existing projection-write-lock error and
-does not apply a partial interval or cursor. Older browser HTTP recovery does not
-provide the typed stream's durable cursor proof. Supported lock-enabled clients
-need no fallback GET for large entity intervals.
+One queue per server, workspace, and schema orders interval application and cache
+hydration. Typed row batches compare source sequences synchronously and publish
+after the whole batch; they use no optimistic storage adapters or CAS retries.
+A late cache record cannot replace a completed live scope. The subscription cache
+captures data and cursor together through that queue and writes one IndexedDB
+record. Recovery reopens SSE from the last applied cursor; a missing or expired
+cursor receives a snapshot. Entity, transcript, and view delivery never starts
+an automatic HTTP recovery read.
 
 Entity subscriptions read only rows after their last delivered sequence through
 the `(collection, seq)` index, including sequence-bearing deletion tombstones.
@@ -177,9 +185,9 @@ Missing or expired cursors likewise require a replacement baseline.
 Transcript history uses a typed `transcript` reference with an optional `tail`
 window. Its [default item count](../workspaces/runtime/packages/runtime-schema/src/shared_values.rs)
 is generated for the renderer and checked against OpenAPI. The subscription
-baseline contains the newest window and its older-history cursor; the server
-shrinks that window further to fit the complete SSE byte limit. Only a newest
-item that cannot fit by itself requires oversized-item recovery.
+baseline contains the newest window and its older-history cursor. Oversized
+windows and individual items use the existing transfer fragmentation. A reconnect delta preserves loaded older history. A snapshot replaces the
+window, including after a reset; older rows are restored only by explicit paging.
 
 Scrolling to older history uses the [explicit user action exception](#rule-no-polling-only-sse-events):
 one bounded `/api/transcript/page` read starts before the retained boundary.
@@ -343,8 +351,8 @@ after their pending request disappears; secret answers are omitted from this
 persistent projection. Both collections follow their source transaction and
 hard-delete tombstones. A bounded transcript baseline uses `transcriptSnapshot`
 in the subscription's initial resource frame, after its acknowledgement; the
-renderer persists it before notifying transcript readers. Oversized frames keep
-the scoped recovery hint. Saved Claude repair evidence is read on opening the
+renderer persists it before notifying transcript readers. Oversized frames
+retain their full payload and cursor through transfer fragmentation. Saved Claude repair evidence is read on opening the
 view or explicit refresh, never because an agent's status changed. Viewing a
 focused completed result records its read receipt; its confirmed mutation
 response does not cause another session or projection read. An empty local
@@ -359,8 +367,7 @@ Saved server names consume each owner's discovery snapshot through its existing
 stream. Startup credentials and workspace initialization share the finite
 [read-recovery budget](../workspaces/client/apps/web/src/sync/readRetry.ts);
 exhaustion stays visible until reconnect or an explicit retry. The visible transcript
-uses inline stream snapshots and intervals; a revision-only oversized interval
-retains its scoped recovery read.
+uses stream snapshots and intervals, including fragmented oversized entries.
 
 Open process and work-review panels and complaint threads receive their bounded
 records in `viewSnapshot` through typed screen subscriptions. Room baselines
@@ -370,7 +377,7 @@ then only output since its last sent cursor, including status updates with no ne
 text. Buffer loss, an output reset, or an oversized interval sends a bounded
 replacement snapshot. Removing a terminal selector releases its live cursor.
 The renderer applies every resource frame through one FIFO per stream source,
-including hints, overflow frames, and completed staged entity intervals.
+including hints, overflow frames, and completed staged intervals.
 Transfer completion reserves its queue position on arrival; staging prerequisites
 settle before the persistence deadline starts. Each frame is persisted before dispatch;
 its reason does not select a persistence path. Terminal deltas declare
@@ -380,17 +387,15 @@ counter. `TerminalsRepository` increments it whenever replacement output reduces
 the output end offset. An additive migration initializes existing rows to zero.
 A missing or mismatched generation on resume always produces a snapshot, even
 when output has grown past the old offset after a reset. Under the projection
-write lock, persistence compares both generation and base offset with the saved
+application queue, persistence compares both generation and base offset with the saved
 cursor, then stores the merged output and cursor together. Entity and
 transcript deltas use their existing `after` bases. Reconnect and ownership
 changes read persisted cursors; they need no in-memory terminal baseline proof.
 Persisted terminal revisions prevent late snapshots from restoring pre-reset output.
 
-The reply-kind and cursor contract applies to entries carrying those fields.
-Legacy entity and transcript batches without them retain their existing
-persistence paths. Requiring cursors for those producers and removing the legacy
-paths is deferred work; frame reasons do not decide their validity.
-
+Entity and transcript data require a matching workspace cursor. The renderer
+accepts generated typed payloads without structural DTO validation, retaining
+workspace, epoch, revision, sequence, resource, and terminal-generation fences.
 Persistence errors, deadlines, and exhausted queue capacity stop delivery and
 request recovery for the affected resources. Subscription removal strips only
 removed entries; source close silently drops pending frames. Raw server intervals
@@ -473,14 +478,15 @@ replace that ref's projection. The durable store sequence and records come from
 the same SQLite boundary; stream epochs are independent of these cursors.
 
 The client stores each cursor in its in-memory projection after its records are
-applied, under the projection write lock. A failed, cancelled, incomplete, or
-oversized delivery cannot advance the cursor. Reconnect resends active refs with
+applied, through the serialized projection application queue. A failed, cancelled,
+or incomplete delivery cannot advance the cursor. Oversized deliveries advance
+only after all fragments have been applied. Reconnect resends active refs with
 these applied cursors through the same subscription path. A covered reconnect
 requires no sync pull. Transient resources retain their existing in-memory
 snapshot owners and do not create durable cursor rows.
 
 The state resource resumes from the completed entity projection's existing
-checkpoint, shared by bootstrap pulls, mutation responses and streamed deltas.
+checkpoint, advanced by completed state subscription intervals.
 Its ready marker identifies a replacement baseline; ordinary deltas preserve
 that marker and unchanged agent objects. A delta may overlap already applied
 records, but a missing base or forward gap cannot advance the checkpoint.
@@ -494,11 +500,12 @@ An applied reconnect baseline can restore readiness even when its revision has
 not changed. Identity, authentication, and schema checks retain their existing
 boundaries.
 
-Revision-only hints, gaps, overflow, failed local application, and a failed or
-stopped cold stream enter the existing bounded read recovery path. Connection
-startup alone does not request recovery. Schema mismatch pauses synchronization
-without using recovery reads to bypass it. Recovery errors remain visible and
-do not create a polling loop.
+Revision-only hints, gaps, overflow, and failed local application reopen the
+stream with the last applied cursor, or without one when a reset is required.
+A cold watcher waits for its SSE baseline through transport interruption.
+Schema mismatch pauses synchronization through the existing mismatch latch.
+Neither transport recovery nor subscription recovery starts an automatic entity,
+transcript, or view HTTP read.
 
 Cursorless process, complaint, and legacy-room views become ready only after
 their current inline value is applied by the view adapter. A failed or discarded inline
@@ -510,7 +517,7 @@ The server may split a reconnect baseline into separate resource frames.
 A same-epoch passive notification for another resource must not cancel a
 pending entity write. The entity cursor becomes applied only after that write
 commits; state resets, epoch changes, and failed application retain their
-recovery behavior.
+identity and cancellation fences while reopening SSE.
 
 Project deletion uses the dedicated `POST /api/projects/delete` contract in
 [OpenAPI](../workspaces/runtime/packages/runtime-http/openapi.json). The confirmation
@@ -586,10 +593,11 @@ A successful reconnection resumes each current subscription from its last fully
 applied durable cursor or receives a bounded snapshot. It does not retry user
 commands, messages, credit charges or other writes.
 
-A transient failure while reconciling a notified resource may retry that same
+The voice and authentication-progress adapters retain targeted reads when
+their SSE entry lacks the needed value. A transient failure may retry that same
 outstanding read within the shared [read-recovery attempt budget](../workspaces/client/apps/web/src/sync/readRetry.ts),
 with increasing backoff. The budget counts failed attempts, including the initial
-attempt, for both sync pulls and resource reads. Exhaustion reports a visible
+attempt, for those targeted reads. Exhaustion reports a visible
 read-recovery error and leaves no retry timer. Only a newer resource version or
 unversioned notification, a transition back to a live stream, or an explicit user
 retry starts a fresh budget. Duplicate or older versions, repeated live status,
@@ -600,11 +608,9 @@ its initial attempt, then pauses until explicit activity or resume. Pending-writ
 recovery keeps its existing journal and operation identities. A replayed chat deletion reports the current stop confirmation from durable agent state.
 
 An unchanged reconnect baseline still reconciles a subscribed consumer once.
-For transcript prefetch, repeated notifications for the same version during an
-active history read are coalesced; a newer version schedules a follow-up read.
-If that read fails, a coalesced recovery signal permits one further attempt.
-Paginated catch-up drains all available pages before resolving the notification,
-with cancellation and a cursor-progress check.
+Transcript subscriptions apply completed SSE intervals; opening a transcript does
+not prefetch it through HTTP. Explicit older-history paging remains a bounded
+user-action read and preserves the current streamed tail.
 
 An epoch distinguishes a server process restart from an old event revision.
 The client rejects malformed messages, incompatible protocol versions and

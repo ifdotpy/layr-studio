@@ -186,6 +186,7 @@ export function createEntityFrameReader(
         if (version.entityChanges) accept(version.entityChanges.documents);
       }
     } else if (name === "entity-transfer") {
+      if (frame.payloadKind !== "entity") return;
       const transfer = transfers.get(frame.transferId) || {
         pageIndex: 0,
         parts: [],

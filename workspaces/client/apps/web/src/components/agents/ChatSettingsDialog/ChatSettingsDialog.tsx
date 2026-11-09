@@ -79,14 +79,12 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
                   lead={root}
                   stateDir={accounts.scope || ""}
                   workspaceId={areas.startup.workspaceId}
-                  refresh={areas.refresh}
                 />
                 <DelegationSettings
                   settingsRow
                   input={{ kind: "agent", summary: root, detail: rootDetail }}
                   catalog={catalog}
                   accounts={accounts.data.accounts}
-                  refresh={areas.refresh}
                 />
               </div>
             </section>
@@ -99,7 +97,6 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
                     settingsRow
                     input={{ kind: "agent", summary: agent, detail }}
                     catalog={catalog}
-                    refresh={areas.refresh}
                   />
                 )}
               {agent?.provider === ProviderKind.Claude && (

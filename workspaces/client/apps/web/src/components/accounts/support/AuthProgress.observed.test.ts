@@ -8,7 +8,13 @@ import { transientTestFixture } from "../../../sync/subscriptions/transientTestF
 import type { ResourceProgress } from "../../../sync/subscriptions/contracts.ts";
 
 const fixture = vi.hoisted(() => ({
-  services: undefined as ReturnType<typeof transientTestFixture> | undefined,
+  services: undefined as
+    | (Omit<ReturnType<typeof transientTestFixture>, "subscriptions"> & {
+        subscriptions: ReturnType<
+          typeof import("../../../sync/subscriptions/module.ts").createSubscriptions
+        >;
+      })
+    | undefined,
   post: vi.fn(),
   get: vi.fn(),
   retry: vi.fn(),
@@ -252,3 +258,135 @@ it.each(["ready", "codeSubmitted"] as const)(
     }
   },
 );
+
+it("restores a sign-in code after a resource hint finishes behind inline progress", async () => {
+  const { createResourceEvents } =
+    await import("../../../sync/resourceEvents.ts");
+  const { createSubscriptions } =
+    await import("../../../sync/subscriptions/module.ts");
+  const { createDataObserver } =
+    await import("../../../sync/subscriptions/data.ts");
+  const { createServerStore } = await import("../../../store/server.ts");
+  const { API_SCHEMA_HASH } = await import("../../../generated/apiSchema.ts");
+  const workspaceId = "b".repeat(32);
+  const source = Object.assign(new EventTarget(), {
+    onopen: null as ((event: Event) => void) | null,
+    onerror: null as ((event: Event) => void) | null,
+    close: vi.fn(),
+  });
+  const emit = (name: string, value: unknown) =>
+    source.dispatchEvent(
+      new MessageEvent(name, { data: JSON.stringify(value) }),
+    );
+  const api = {
+    get: fixture.get,
+    post: fixture.post,
+    clearSchemaUpdateAttemptAfterMatch: vi.fn(),
+    isApiSchemaMismatch: () => false,
+    matchingApiSchemaResponseGeneration: () => 0,
+    markApiSchemaMismatch: vi.fn(),
+    onApiSchemaMismatch: () => () => {},
+  };
+  const transport = createResourceEvents({
+    api,
+    sync: {
+      syncDatabase: async () => ({ workspaceId }),
+      persistResourceEntityChanges: async () => {},
+    },
+    tokenRates: {
+      configureTokenRateStream() {},
+      receiveResourceTokenRates() {
+        return true;
+      },
+      getWorkspaceTokenRates: () => ({ records: [] }),
+    },
+    openEvents: () => source,
+  });
+  const subscriptions = createSubscriptions(
+    transport,
+    createDataObserver(
+      () => ({ subscribeTranscriptProjection: () => () => {} }),
+      transport,
+      undefined,
+      api,
+    ),
+  );
+  const store = createServerStore(subscriptions);
+  const old = transientTestFixture();
+  fixture.services = {
+    ...old,
+    store,
+    subscriptions,
+    close() {
+      store.dispose();
+      subscriptions.dispose();
+      transport.dispose();
+      old.close();
+    },
+  };
+  const account = {
+    id: "default",
+    label: "Default",
+    home: "/fixture",
+    provider: ProviderKind.codex,
+    source: "Codex",
+    status: "ready",
+    eligibility: { kind: "available" },
+  } as const;
+  const state = {
+    scope: "local",
+    data: {
+      accounts: [account],
+      archivedAccounts: [],
+      defaultAccountKey: "default",
+      defaultAccountGroups: [],
+      logins: [],
+      supportsDelete: true,
+      supportsDisconnect: true,
+    },
+    setData: vi.fn(),
+    error: "",
+    refresh: vi.fn(async () => null),
+  } satisfies ComponentProps<typeof AccountSignIn>["state"];
+  const f = await mount(
+    createElement(AccountSignIn, { state, targetAccount: account }),
+  );
+  const ref = { kind: "auth-progress", requestId: "login" } as const;
+  try {
+    await act(async () => {
+      source.onopen?.(new Event("open"));
+      emit("session", { sessionId: "session", workspaceId, cachePolicies: [] });
+      emit("api-schema", { hash: API_SCHEMA_HASH });
+      emit("resources", {
+        protocol: 4,
+        workspaceId,
+        epoch: "one",
+        revision: 6,
+        reason: "initial",
+        resources: [ref],
+        resourceVersions: [{ resource: ref, revision: 1 }],
+      });
+      emit("resource-progress", {
+        protocol: 4,
+        workspaceId,
+        epoch: "one",
+        revision: 6,
+        resource: ref,
+        value: {
+          requestId: "login",
+          accountKey: "default",
+          reauthAccountKey: "default",
+          status: "pending",
+          userCode: "ABCD-1234",
+          verificationUrl: "https://auth.openai.com/codex/device",
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(document.body.textContent).toContain("ABCD-1234");
+    expect(fixture.post).not.toHaveBeenCalled();
+  } finally {
+    await f.close();
+  }
+});

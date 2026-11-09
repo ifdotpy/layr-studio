@@ -13,7 +13,6 @@ export interface SidebarCommands {
   rename: (id: string, name: string) => Promise<void>;
   remove: (id: string, room: boolean) => void;
   onSearch: () => void;
-  refresh?: () => Promise<void>;
   notify?: (message: string) => void;
   markUnread: (
     id: string,

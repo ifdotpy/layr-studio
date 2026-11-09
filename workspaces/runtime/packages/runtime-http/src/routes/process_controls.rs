@@ -108,6 +108,19 @@ pub(super) async fn read_listing(
     let proof = held_response_proof(&state, &scope).await;
     store
         .read_async("runtime-http/routes/process_controls", move |tx| {
+            if studio_runtime_store::AgentRepository::get(
+                tx,
+                &studio_runtime_store::AgentId::from(scope.as_str()),
+            )
+            .map_err(ApiError::stored)?
+            .is_some_and(|agent| agent.is_deleted())
+            {
+                return Ok(studio_runtime_schema::process_controls::ProcessListing {
+                    response_target: None,
+                    processes: Vec::new(),
+                    activities: Vec::new(),
+                });
+            }
             let owners = controls::owners(tx, &scope).map_err(error)?;
             let rows = controls::process_rows(tx, &owners).map_err(error)?;
             let mut connections = connections(&state, tx, &owners, &rows).map_err(error)?;

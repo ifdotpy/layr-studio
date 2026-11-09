@@ -38,7 +38,6 @@ import { ChatServerLine } from "../../../sidebar/chat-row/ChatServerLine/ChatSer
 export type PeerTeamActions = {
   readonly scope: string;
   openRoom(id: string): void;
-  refresh?: (() => Promise<void>) | undefined;
   closeForm(): void;
   edit(team: PeerTeam, action: "save" | "delete"): void;
   toggle(team: PeerTeam): void;
@@ -172,7 +171,7 @@ export const PeerTeamGroup = observer(function PeerTeamGroup({
 });
 
 function usePeerTeamRoom(team: PeerTeam) {
-  const { scope, openRoom, refresh } = usePeerTeamActions();
+  const { scope, openRoom } = usePeerTeamActions();
   const roomId = usePeerTeamActions().room(team);
   const backend = useRef(useSidebarBackend()).current;
   const { post, saved, save } = backend;
@@ -223,7 +222,6 @@ function usePeerTeamRoom(team: PeerTeam) {
         next = { ...next, acknowledged: true };
         remember();
       }
-      await refresh?.();
       if (next.acknowledged) setSelectRoom(true);
       setRequest(null);
       save(requestKey, null);
@@ -312,7 +310,7 @@ const PeerTeamHeading = observer(function PeerTeamHeading({
           <p>
             {room.error || "Shared chat request needs confirmation."}{" "}
             {room.request.acknowledged || room.request.rejected
-              ? "Refresh to continue."
+              ? "Continue with the current project."
               : "Retry the same request."}
           </p>
           <Button
@@ -321,7 +319,7 @@ const PeerTeamHeading = observer(function PeerTeamHeading({
             onClick={() => void room.openShared()}
           >
             {room.request.acknowledged || room.request.rejected
-              ? "Refresh"
+              ? "Continue"
               : "Retry"}
           </Button>
         </div>
@@ -392,7 +390,7 @@ export const PeerTeamForm = observer(function PeerTeamForm({
         <p role="alert">
           {error}
           {committed
-            ? " The change was saved. Retry to refresh the sidebar."
+            ? " The change was saved. Retry to finish."
             : rejected
               ? " Reload the project before you edit again."
               : " The result is unknown. Retry the same request."}
@@ -443,7 +441,7 @@ function usePeerTeamForm(
   action: "save" | "delete",
 ) {
   const backend = useRef(useSidebarBackend()).current;
-  const { refresh, closeForm: close } = usePeerTeamActions();
+  const { closeForm: close } = usePeerTeamActions();
   const [draft] = useState(() =>
     observable({
       name: team?.name || "",
@@ -451,9 +449,7 @@ function usePeerTeamForm(
       frozen: false,
     }),
   );
-  const [mutation] = useState(
-    () => new PeerTeamMutation(refresh, () => close()),
-  );
+  const [mutation] = useState(() => new PeerTeamMutation(() => close()));
   const id = useRef(team?.id || randomUUID());
   const revision = useRef(project.peerTeamsRevision || 0);
   const submit = () => {
@@ -568,7 +564,7 @@ export const PeerTeamMoveFeedback = observer(function PeerTeamMoveFeedback({
           <p role="alert">
             {owner.mutation.error}{" "}
             {owner.mutation.committed
-              ? "The change was saved. Retry to refresh."
+              ? "The change was saved. Retry to finish."
               : owner.mutation.rejected
                 ? "Reload the project before another move."
                 : "The result is unknown. Retry the same move."}

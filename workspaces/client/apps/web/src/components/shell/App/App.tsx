@@ -519,7 +519,6 @@ export class AppUi {
                       )
                     : undefined
                 }
-                saved={this.areas.refresh}
               />
             ),
           };
@@ -558,7 +557,6 @@ export class AppUi {
               scope === this.areas.startup.creationScope
             )
               this.closeDialog();
-            await this.areas.refresh();
           }}
         />
       ),
@@ -595,7 +593,6 @@ export class AppUi {
               scope === this.areas.startup.creationScope
             )
               this.closeDialog();
-            await this.areas.refresh();
           }}
         />
       ),
@@ -1003,7 +1000,6 @@ const AppSettings = observer(function AppSettings({
                     active={c.studioOpen}
                     leadId={lead.id}
                     agents={catalog.agents}
-                    refresh={a.refresh}
                     notify={a.notices.notify}
                   />
                 )}

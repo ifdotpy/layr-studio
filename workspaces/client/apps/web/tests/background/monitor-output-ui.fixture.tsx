@@ -28,7 +28,6 @@ createRoot(document.getElementById("root")!).render(
         leadId: "lead",
         initialFocus: { id: "monitor", leadId: "lead", requestId: "focus" },
         openAgent: () => {},
-        refresh: async () => {},
         notify: (message) => (window.notices ??= []).push(message),
       }),
     ),

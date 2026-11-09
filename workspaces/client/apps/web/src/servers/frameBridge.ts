@@ -156,7 +156,6 @@ export function startServerFrame(
       void executeSidebarRequest(
         event.data.value,
         async () => {
-          await source.run({ action: "refresh" });
           return navigation();
         },
         execute,

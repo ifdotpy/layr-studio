@@ -214,8 +214,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
 
   const baselineReconciliations = new Set<string>();
 
-  const deliveredEntitySequenceBatches = new Set<string>();
-
   const transportStatusListeners = new Set<
     (
       status: ConnectionHealth,
@@ -448,10 +446,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     pendingResources.add(key);
   }
 
-  function entitySequenceBatchKey(sequences: number[]) {
-    return [...sequences].sort((left, right) => left - right).join(",");
-  }
-
   function rememberResourceVersion(resource: ResourceRef, version: Version) {
     const key = resourceKey(resource);
     const previous = resourceValues.get(key);
@@ -460,41 +454,20 @@ export function createResourceEvents(options: ResourceEventsOptions) {
       previous.revision >= version.revision
     ) {
       if (previous.revision === version.revision) {
-        // Readiness follows the current application outcome, including at an
-        // unchanged revision. Promote a recovered receipt and revoke historical
-        // proof when the current delivery could not be applied.
-        if (
+        // Even an unchanged sequence has a current receipt: snapshot and delta
+        // have different window semantics for their consumers.
+        const receiptChanged =
           hasAppliedResourceBaseline(previous) !==
-          hasAppliedResourceBaseline(version)
-        ) {
-          resourceValues.set(key, version);
-          return true;
-        }
-        if (version.reason) previous.reason = version.reason;
+            hasAppliedResourceBaseline(version) ||
+          previous.replyKind !== version.replyKind;
         resourceValues.delete(key);
-        resourceValues.set(key, previous);
+        resourceValues.set(key, version);
+        return receiptChanged;
       }
       return false;
     }
     resourceValues.set(key, version);
     return true;
-  }
-
-  function acknowledgeEntitySequences(
-    sequences: number[],
-    incomingWorkspaceId?: string,
-  ) {
-    if (incomingWorkspaceId && incomingWorkspaceId !== workspaceId) return;
-    const exactBatch = [...new Set(sequences)]
-      .filter((sequence) => Number.isSafeInteger(sequence) && sequence >= 0)
-      .sort((left, right) => left - right);
-    if (!exactBatch.length) return;
-    deliveredEntitySequenceBatches.add(exactBatch.join(","));
-    while (deliveredEntitySequenceBatches.size > 128) {
-      const oldest = deliveredEntitySequenceBatches.values().next().value;
-      if (oldest === undefined) break;
-      deliveredEntitySequenceBatches.delete(oldest);
-    }
   }
 
   function pruneResourceVersions(active: Set<string>) {
@@ -525,8 +498,18 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     return true;
   }
 
+  function acceptsResourcePayload(
+    resource: ResourceRef,
+    transcriptSnapshot: boolean,
+  ) {
+    return (
+      !blockedSelectors.some((blocked) => sameResource(resource, blocked)) &&
+      (acceptedResources.has(resourceKey(resource)) ||
+        (resource.kind === "transcript" && transcriptSnapshot))
+    );
+  }
+
   function currentResourceEvent(event: ResourceChangeEvent) {
-    if (!blockedSelectors.length) return event;
     // The transport owns this parsed frame. Compact rejected selectors in place:
     // no key serialization, cloning, or extra arrays on the event hot path.
     let kept = 0;
@@ -534,14 +517,12 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     const entryCount = entries?.length ?? 0;
     for (let index = 0; index < event.resources.length; index++) {
       const resource = event.resources[index]!;
-      let blocked = false;
-      for (let removed = 0; removed < blockedSelectors.length; removed++) {
-        if (sameResource(resource, blockedSelectors[removed]!)) {
-          blocked = true;
-          break;
-        }
-      }
-      if (blocked) continue;
+      if (
+        resource.kind === "transcript" && entries?.[index]?.transcriptSnapshot
+          ? !acceptsResourcePayload(resource, true)
+          : blockedSelectors.some((blocked) => sameResource(resource, blocked))
+      )
+        continue;
       event.resources[kept] = resource;
       if (entries && index < entryCount) entries[kept] = entries[index]!;
       kept++;
@@ -571,7 +552,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
       }
       resourceValues.clear();
       progressValues.clear();
-      deliveredEntitySequenceBatches.clear();
     }
     const staleRevision =
       lastRevision !== undefined && event.revision < lastRevision;
@@ -654,16 +634,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
           : revisionEntry.revision;
       if (resource.kind === "state" && revisionEntry?.entitySequenceReset)
         version.entitySequenceReset = true;
-      if (
-        !revisionEntry?.entitySequenceReset &&
-        entitySequences?.length &&
-        deliveredEntitySequenceBatches.delete(
-          entitySequenceBatchKey(entitySequences),
-        )
-      ) {
-        rememberResourceVersion(resource, version);
-        continue;
-      }
       if (active.has(key)) {
         dispatchResource(
           resource,
@@ -822,6 +792,8 @@ export function createResourceEvents(options: ResourceEventsOptions) {
         (ref.kind in SUBSCRIPTION_ENTITY_SCOPES ||
           ref.kind === "transcript" ||
           ref.kind === "terminal-output" ||
+          ref.kind === "auth-progress" ||
+          ref.kind === "rename-progress" ||
           (ref.kind === "room" && !ref.legacy)),
     );
     if (!resources.length || !coordinatorActive) return false;
@@ -896,7 +868,14 @@ export function createResourceEvents(options: ResourceEventsOptions) {
       throw new TypeError("Invalid entity transfer workspace");
     const frame = value as components["schemas"]["ResourceEntityTransferEvent"];
     const key = resourceKey(frame.resource);
-    if (!acceptedResources.has(key)) return;
+    if (
+      !acceptsResourcePayload(
+        frame.resource,
+        frame.payloadKind === "transcript" &&
+          frame.replyKind === SubscriptionReplyKind.snapshot,
+      )
+    )
+      return;
     if (transferEpoch && frame.epoch !== transferEpoch) cancelEntityTransfers();
     transferEpoch = frame.epoch;
     const assembler = (transferAssembler ??= new EntityTransferAssembler(
@@ -966,6 +945,8 @@ export function createResourceEvents(options: ResourceEventsOptions) {
           if (!current() || !interval) return;
           if (!options.sync.persistStagedEntityTransfer)
             throw new Error("Entity staging persistence unavailable");
+          if (interval.resourceEntry)
+            event.resourceVersions = [interval.resourceEntry];
           application = options.sync.persistStagedEntityTransfer(
             interval,
             () => isCurrent() && current(),
@@ -1025,6 +1006,35 @@ export function createResourceEvents(options: ResourceEventsOptions) {
         throw new TypeError("Invalid rename progress");
     }
     const event = value as ResourceProgressEvent;
+    // Progress and resource frames share one publication order. A hint whose
+    // application is pending must not replace a newer inline value at a reader.
+    entityDelivery.receive(
+      {
+        protocol: event.protocol,
+        workspaceId: event.workspaceId,
+        epoch: event.epoch,
+        revision: event.revision,
+        reason: "change",
+        resources: [resource],
+        resourceVersions: [],
+      },
+      undefined,
+      {
+        persist: async () => {},
+        dispatch() {
+          try {
+            dispatchResourceProgress(event);
+          } catch (error) {
+            frameFailed(error, "local-state-error");
+          }
+        },
+        dispose() {},
+      },
+    );
+  }
+
+  function dispatchResourceProgress(event: ResourceProgressEvent) {
+    const resource = event.resource;
     if (
       event.workspaceId !== workspaceId ||
       (lastEpoch && event.epoch !== lastEpoch)
@@ -1903,7 +1913,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
     resourceValues.clear();
     progressValues.clear();
     baselineReconciliations.clear();
-    deliveredEntitySequenceBatches.clear();
     resourceRefs.clear();
     setConnection(
       isApiSchemaMismatch()
@@ -2110,7 +2119,6 @@ export function createResourceEvents(options: ResourceEventsOptions) {
 
   const stopMismatch = onApiSchemaMismatch(stopCoordinator);
   return {
-    acknowledgeEntitySequences,
     watchResourceChanges,
     watchResourceConnection,
     watchTokenRateEvents,
@@ -2166,7 +2174,6 @@ const defaultResourceEvents = createResourceEvents({
 export const {
   retryNow,
   dispose,
-  acknowledgeEntitySequences,
   watchResourceChanges,
   watchResourceConnection,
   watchTokenRateEvents,

@@ -1,15 +1,14 @@
-import { AgentStatus, AgentSource } from "../generated/api.ts";
-import type { LegacySyncIdentityResponse } from "./syncBrowserFixture.ts";
+import {
+  AgentStatus,
+  FrontendLocality,
+  SubscriptionCachePolicy,
+  type components,
+} from "../generated/api.ts";
+import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 import type { ResourceChangeEvent } from "./resourceEvents.ts";
 import type { Page } from "@playwright/test";
 import { initializeDelivery } from "./resourceEntityDelivery.browser.fixture.ts";
-import {
-  fixturePort,
-  legacyPullResponse,
-  type FixturePull,
-  type LegacyAgentChange,
-  type LegacyEntityFrame,
-} from "./syncBrowserFixture.ts";
+import { fixturePort, fixtureSubscriptions } from "./syncBrowserFixture.ts";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -24,7 +23,9 @@ import {
   test,
 } from "../../tests/playwright.ts";
 
-test("state stream persists records across tabs without pulls and repairs missing ranges", async ({
+type Entity = components["schemas"]["SyncEntity"];
+
+test("state stream persists records across tabs and recovers through SSE without HTTP data reads", async ({
   browser,
 }) => {
   test.setTimeout(60_000);
@@ -32,27 +33,27 @@ test("state stream persists records across tabs without pulls and repairs missin
     await import("../../tests/playwright.ts");
   const workspaceId = "b".repeat(32);
   const streams = new Set<import("node:http").ServerResponse>();
-  const pulls: FixturePull[] = [];
-  const rows = new Map<string, LegacyAgentChange>();
+  const dataReads: string[] = [];
+  const rows = new Map<string, Entity>();
+  const resource = { kind: "state" } as const;
   let opened = 0;
   let sequence = 0;
   let revision = 0;
   let epoch = "entity-stream-first";
   const put = (id: string, name: string, deleted = false) => {
-    const row: LegacyAgentChange = {
-      op: "upsert",
-      collection: "agent",
-      id,
-      value: deleted
-        ? {}
-        : {
-            id,
+    const row: Entity = deleted
+      ? { op: "delete", collection: "agentSummary", id, seq: ++sequence }
+      : {
+          op: "upsert",
+          collection: "agentSummary",
+          id,
+          value: agentSummaryFixture(id, {
             name,
             status: AgentStatus.running,
-            source: AgentSource.managed,
-          },
-      seq: ++sequence,
-    };
+            accountDestinations: [],
+          }),
+          seq: ++sequence,
+        };
     rows.set(row.id, row);
     return row;
   };
@@ -61,30 +62,28 @@ test("state stream persists records across tabs without pulls and repairs missin
 
   const frame = (
     reason: ResourceChangeEvent["reason"],
-    documents?: LegacyAgentChange[],
+    documents: Entity[] = [...rows.values()],
     after?: number,
     reset = false,
-  ): LegacyEntityFrame => ({
+  ): ResourceChangeEvent => ({
     protocol: 4,
     workspaceId,
     epoch,
     revision: ++revision,
     reason,
-    resources: [{ kind: "state" }],
+    resources: [resource],
     resourceVersions: [
       {
         revision: sequence,
-        ...(documents
-          ? {
-              entitySequences: documents.map((row) => row.seq),
-              entityChanges: { after: after!, through: sequence, documents },
-            }
-          : {}),
+        resource,
+        cursor: { workspaceId, seq: sequence },
+        replyKind: after === undefined ? "snapshot" : "delta",
+        entityChanges: { after: after ?? 0, through: sequence, documents },
         ...(reset ? { entitySequenceReset: true } : {}),
       },
     ],
   });
-  const send = (event: LegacyEntityFrame) => {
+  const send = (event: ResourceChangeEvent) => {
     for (const response of streams)
       response.write(protocol3SseEvent("resources", event));
   };
@@ -100,7 +99,7 @@ test("state stream persists records across tabs without pulls and repairs missin
       {
         name: "resource-entity-delivery-fixture",
         configureServer(server) {
-          server.middlewares.use((request, response, next) => {
+          server.middlewares.use(async (request, response, next) => {
             const url = new URL(request.url!, "http://localhost");
             if (url.pathname === "/entity-delivery-check") {
               response.setHeader("Content-Type", "text/html");
@@ -113,6 +112,17 @@ test("state stream persists records across tabs without pulls and repairs missin
               response.setHeader("Content-Type", "text/event-stream");
               response.setHeader("Cache-Control", "no-cache");
               response.write(apiSchemaHandshakeSse());
+              response.write(
+                protocol3SseEvent("session", {
+                  sessionId: `entity-session-${opened}`,
+                  workspaceId,
+                  locality: FrontendLocality.remote,
+                  routes: [],
+                  cachePolicies: [
+                    { resource, policy: SubscriptionCachePolicy.cache },
+                  ],
+                } satisfies components["schemas"]["SyncSessionEvent"]),
+              );
               response.write(
                 protocol3SseEvent(
                   "resources",
@@ -129,27 +139,39 @@ test("state stream persists records across tabs without pulls and repairs missin
               response.end(
                 JSON.stringify({
                   workspaceId,
-                } satisfies LegacySyncIdentityResponse),
+                  syncProtocol: 2,
+                } satisfies components["schemas"]["SyncIdentityResponse"]),
               );
               return;
             }
-            if (url.pathname === "/api/sync/pull") {
-              const scope = url.searchParams.get("scope");
-              const after = Number(url.searchParams.get("after"));
-              pulls.push({ scope, after });
+            if (url.pathname === "/api/sync/subscriptions") {
+              const chunks = [];
+              for await (const chunk of request) chunks.push(chunk);
+              const update = fixtureSubscriptions(
+                Buffer.concat(chunks).toString(),
+              );
+              const ack = {
+                gen: update.gen,
+                cachePolicies: [
+                  { resource, policy: SubscriptionCachePolicy.cache },
+                ],
+              };
+              for (const stream of streams) {
+                stream.write(protocol3SseEvent("subscriptions", ack));
+                if (update.add.some((entry) => entry.resource.kind === "state"))
+                  stream.write(
+                    protocol3SseEvent("resources", frame("initial")),
+                  );
+              }
               response.setHeader("Content-Type", "application/json");
               response.setHeader(API_SCHEMA_HASH_HEADER, readApiSchemaHash());
-              response.end(
-                legacyPullResponse({
-                  workspaceId,
-                  documents: [...rows.values()]
-                    .filter((row) => row.seq > after)
-                    .sort((left, right) => left.seq - right.seq),
-                  checkpoint: { seq: sequence },
-                  initialHigh: Number(url.searchParams.get("initialHigh") || 0),
-                  maxSeq: sequence,
-                }),
-              );
+              response.end(JSON.stringify(ack));
+              return;
+            }
+            if (url.pathname.startsWith("/api/")) {
+              dataReads.push(url.pathname);
+              response.statusCode = 500;
+              response.end("Unexpected HTTP data read");
               return;
             }
             next();
@@ -189,21 +211,14 @@ test("state stream persists records across tabs without pulls and repairs missin
     await waitForCheckpoint(page, 2);
     await page.waitForFunction(() => window.connection === "live");
     await settle();
-    const initialPulls = pulls.length;
-    assert.ok(
-      initialPulls > 0,
-      "The initial projection comes from the HTTP pull",
-    );
+    assert.deepEqual(dataReads, [], "The initial projection comes from SSE");
+    const initialOpens = opened;
 
     send(frame("change", [put("lead", "Stream update")], 2));
     await waitForAgent(page, "lead", "Stream update");
     await waitForCheckpoint(page, 3);
     await settle();
-    assert.equal(
-      pulls.length,
-      initialPulls,
-      "A contiguous stream update needs no HTTP pull",
-    );
+    assert.equal(opened, initialOpens, "A contiguous update keeps the stream");
 
     send(frame("change", [put("removed", "", true)], 3));
     await page.waitForFunction(
@@ -214,18 +229,14 @@ test("state stream persists records across tabs without pulls and repairs missin
     );
     await waitForCheckpoint(page, 4);
     await settle();
-    assert.equal(
-      pulls.length,
-      initialPulls,
-      "A stream tombstone needs no HTTP pull",
-    );
+    assert.equal(opened, initialOpens, "A tombstone keeps the stream");
 
     const follower = await openPage();
     await waitForAgent(follower, "lead", "Stream update");
     await follower.waitForFunction(() => window.connection === "live");
-    await expect.poll(() => streams.size).toBe(1);
+    await expect.poll(() => streams.size).toBe(2);
     await settle();
-    const beforePeerUpdate = pulls.length;
+    const beforePeerUpdate = opened;
     send(frame("change", [put("lead", "Shared stream update")], 4));
     await Promise.all(
       pages.map((tab) => waitForAgent(tab, "lead", "Shared stream update")),
@@ -233,14 +244,14 @@ test("state stream persists records across tabs without pulls and repairs missin
     await Promise.all(pages.map((tab) => waitForCheckpoint(tab, 5)));
     await settle();
     assert.equal(
-      pulls.length,
+      opened,
       beforePeerUpdate,
-      "Both tabs use the same durable stream update without pulls",
+      "Both tabs persist the update without replacing their streams",
     );
 
     put("missing", "Missing range row");
     const gapRow = put("lead", "After gap");
-    const beforeGap = pulls.length;
+    const beforeGap = opened;
     send(frame("change", [gapRow], 6));
     await Promise.all(
       pages.map((tab) => waitForAgent(tab, "missing", "Missing range row")),
@@ -248,39 +259,30 @@ test("state stream persists records across tabs without pulls and repairs missin
     await waitForAgent(page, "lead", "After gap");
     await waitForCheckpoint(page, 7);
     assert.ok(
-      pulls.length > beforeGap,
-      "A missing sequence range requires an HTTP pull",
-    );
-    assert.ok(
-      pulls.slice(beforeGap).some((pull) => pull.after <= 5),
-      "The pull must include the missing row",
+      opened > beforeGap,
+      "A missing sequence range reopens the SSE stream for a snapshot",
     );
 
     epoch = "entity-stream-restarted";
-    const beforeEpoch = pulls.length;
     send(frame("change", [put("lead", "New epoch")], 7));
     await Promise.all(
       pages.map((tab) => waitForAgent(tab, "lead", "New epoch")),
     );
     await waitForCheckpoint(page, 8);
-    assert.ok(
-      pulls.length > beforeEpoch,
-      "A changed server epoch requires reconciliation",
-    );
+    assert.deepEqual(dataReads, [], "Epoch changes stay on SSE");
 
     put("overflow", "Overflow recovery");
-    const beforeOverflow = pulls.length;
     send(frame("overflow", undefined, undefined, true));
     await Promise.all(
       pages.map((tab) => waitForAgent(tab, "overflow", "Overflow recovery")),
     );
     await waitForCheckpoint(page, 9);
-    assert.ok(
-      pulls.length > beforeOverflow,
-      "Overflow requires a complete range pull",
+    assert.deepEqual(
+      dataReads,
+      [],
+      "Overflow supplies a complete SSE snapshot",
     );
 
-    const beforeReconnect = pulls.length;
     const beforeOpen = opened;
     for (const response of streams) response.end();
     put("lead", "After reconnect");
@@ -291,11 +293,11 @@ test("state stream persists records across tabs without pulls and repairs missin
       pages.map((tab) => waitForAgent(tab, "lead", "After reconnect")),
     );
     await waitForCheckpoint(page, 10);
-    assert.ok(
-      pulls.length > beforeReconnect,
-      "Reconnect fills changes missed while the stream was closed",
+    assert.deepEqual(
+      dataReads,
+      [],
+      "Reconnect fills missed changes through SSE",
     );
-    assert.ok(pulls.every((pull) => pull.scope === "state:entities:v1"));
     assert.deepEqual(errors, []);
     for (const tab of pages)
       assert.deepEqual(await tab.evaluate(() => window.syncErrors), []);

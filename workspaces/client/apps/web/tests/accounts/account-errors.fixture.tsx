@@ -81,7 +81,7 @@ function Harness() {
           agent={agent}
           onClose={() => window.showSurface("signin")}
           onSelect={() => {}}
-          refresh={async () => {}}
+
           notify={() => {}}
         />
       )}

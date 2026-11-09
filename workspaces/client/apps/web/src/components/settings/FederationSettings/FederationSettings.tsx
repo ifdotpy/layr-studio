@@ -6,7 +6,7 @@ import {
 import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Checkbox, Switch, Textarea, TextInput } from "@mantine/core";
-import { errorText, type PostBody, type PostResult } from "../../../api.ts";
+import { type PostBody, type PostResult } from "../../../api.ts";
 import type { Agent } from "../../../types.ts";
 
 type FederationResponse = PostResult<"/api/federation">;
@@ -35,13 +35,11 @@ export function FederationSettings({
   active,
   leadId,
   agents,
-  refresh,
   notify,
 }: {
   active: boolean;
   leadId: string;
   agents: Agent[];
-  refresh: () => Promise<void>;
   notify: (message: string) => void;
 }) {
   const { post } = useServerApi();
@@ -68,7 +66,6 @@ export function FederationSettings({
     try {
       const result = await post("/api/federation", body);
       if ("peers" in result) setState(result);
-      void refresh().catch((error) => notify(errorText(error)));
       return result;
     } catch (error) {
       notify(error instanceof Error ? error.message : String(error));

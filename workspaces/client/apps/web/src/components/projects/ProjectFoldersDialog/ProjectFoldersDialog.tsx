@@ -20,13 +20,11 @@ export default observer(function ProjectFoldersDialog({
   initialServer,
   initialBrowse,
   initialHeads,
-  saved,
 }: {
   project: LocationProjectView;
   initialServer?: string | undefined;
   initialBrowse?: DirectoryBrowse | undefined;
   initialHeads?: LocationHeadRead[] | undefined;
-  saved: () => Promise<void>;
 }) {
   const store = useServerStore();
   const snapshot = resourceData(store.multiServer().current);
@@ -46,9 +44,8 @@ export default observer(function ProjectFoldersDialog({
           initialServer={initialServer}
           initialBrowse={initialBrowse}
           initialHeads={initialHeads}
-          saved={saved}
         />
-        <ProjectLayrStoreSettings project={project} saved={saved} />
+        <ProjectLayrStoreSettings project={project} />
       </Tabs.Panel>
       <Tabs.Panel value="peers" pt="md">
         <ProjectPeers projectId={project.id} notify={setError} />

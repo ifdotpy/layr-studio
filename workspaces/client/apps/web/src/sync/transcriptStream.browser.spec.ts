@@ -1,18 +1,13 @@
-import type { LegacySyncIdentityResponse } from "./syncBrowserFixture.ts";
-import type { components } from "../generated/api.ts";
+import { FrontendLocality, type components } from "../generated/api.ts";
 import type { ResourceChangeEvent } from "./resourceEvents.ts";
-import { initializeTranscript } from "./transcriptStream.browser.fixture.ts";
+import { initializeTranscript } from "./transcriptStream.browser.fixture";
 import {
   fixturePort,
-  legacyPullResponse,
-  type FixturePull,
+  fixtureResources,
+  fixtureSubscriptions,
 } from "./syncBrowserFixture.ts";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
 import {
   API_SCHEMA_HASH_HEADER,
   apiSchemaHandshakeSse,
@@ -23,46 +18,54 @@ import {
   test,
 } from "../../tests/playwright.ts";
 
-test("an open transcript streams text without pulls and recovers incomplete intervals", async ({
+test("a cached transcript starts instantly and reconnects through SSE without HTTP data reads", async ({
   browser,
 }) => {
   test.setTimeout(60_000);
-  const sharedValues = await readFile(
-    new URL("../generated/sharedValues.ts", import.meta.url),
-    "utf8",
-  );
-  const maxBytes = Number(
-    sharedValues.match(/SYNC_STREAM_EVENT_MAX_BYTES = (\d+)/)?.[1],
-  );
-  assert.ok(Number.isSafeInteger(maxBytes) && maxBytes > 0);
   const workspaceId = "b".repeat(32);
+  const resource = { kind: "transcript", agentId: "open" } as const;
   const streams = new Set<import("node:http").ServerResponse>();
-  const pulls: FixturePull[] = [];
+  const dataReads: string[] = [];
+  const policies = [{ resource, policy: "cache" as const }];
   let sequence = 1;
   let revision = 0;
   let opened = 0;
-  let epoch = "transcript-first";
+  let holdBaseline = false;
   let text = "Before streaming";
-  const item = () => ({ id: "answer", role: "assistant", text });
-  const frame = (
-    reason: ResourceChangeEvent["reason"],
-    after?: number,
-    delta?: components["schemas"]["TranscriptStreamDelta"],
-  ): ResourceChangeEvent => ({
+  const frame = (after?: number): ResourceChangeEvent => ({
     protocol: 4,
     workspaceId,
-    epoch,
+    epoch: "transcript",
     revision: ++revision,
-    reason,
-    resources: [{ kind: "transcript", agentId: "open" }],
+    reason:
+      opened > 1 ? "reconnect" : after === undefined ? "initial" : "change",
+    resources: [resource],
     resourceVersions: [
       {
+        resource,
         revision: sequence,
-        ...(delta
+        cursor: { workspaceId, seq: sequence },
+        replyKind: after === undefined ? "snapshot" : "delta",
+        ...(after === undefined
           ? {
-              transcriptChanges: { after: after!, through: sequence, delta },
+              transcriptSnapshot: {
+                items: [{ id: "answer", role: "assistant", text }],
+                truncated: false,
+                nextCursor: null,
+              },
             }
-          : {}),
+          : {
+              transcriptChanges: {
+                after,
+                through: sequence,
+                delta: {
+                  delta: true,
+                  items: [{ id: "answer", role: "assistant", text }],
+                  removed: [],
+                  truncated: false,
+                },
+              },
+            }),
       },
     ],
   });
@@ -70,84 +73,78 @@ test("an open transcript streams text without pulls and recovers incomplete inte
     for (const response of streams)
       response.write(protocol3SseEvent("resources", event));
   };
-  const delta = (): components["schemas"]["TranscriptStreamDelta"] => ({
-    delta: true,
-    items: [item()],
-    removed: [],
-    truncated: false,
-  });
-  const cacheDir = await mkdtemp(
-    join(tmpdir(), "studio-transcript-stream-vite-"),
-  );
   const server = await createFixtureViteServer({
     configFile: false,
-    cacheDir,
     root: fileURLToPath(new URL("../..", import.meta.url)),
     server: { host: "127.0.0.1", port: 0 },
     plugins: [
       {
         name: "transcript-stream-fixture",
         configureServer(server) {
-          server.middlewares.use((request, response, next) => {
+          server.middlewares.use(async (request, response, next) => {
             const url = new URL(request.url!, "http://localhost");
+            const json = (value: unknown) => {
+              response.setHeader("Content-Type", "application/json");
+              response.setHeader(API_SCHEMA_HASH_HEADER, readApiSchemaHash());
+              response.end(JSON.stringify(value));
+            };
             if (url.pathname === "/transcript-stream-check") {
               response.setHeader("Content-Type", "text/html");
               response.end(
                 "<!doctype html><title>Open transcript</title><main></main>",
               );
-              return;
-            }
-            if (url.pathname === "/api/sync/stream") {
+            } else if (url.pathname === "/api/sync/identity")
+              json({ workspaceId });
+            else if (url.pathname === "/api/sync/stream") {
+              opened++;
               response.setHeader("Content-Type", "text/event-stream");
               response.setHeader("Cache-Control", "no-cache");
               response.write(apiSchemaHandshakeSse());
               response.write(
-                protocol3SseEvent(
-                  "resources",
-                  frame(opened++ ? "reconnect" : "initial"),
-                ),
+                protocol3SseEvent("session", {
+                  sessionId: "transcript-session",
+                  workspaceId,
+                  locality: FrontendLocality.remote,
+                  cachePolicies: policies,
+                  routes: [],
+                } satisfies components["schemas"]["SyncSessionEvent"]),
               );
               streams.add(response);
               response.on("close", () => streams.delete(response));
-              return;
-            }
-            if (
-              url.pathname === "/api/sync/identity" ||
-              url.pathname === "/api/sync/pull"
-            ) {
-              response.setHeader("Content-Type", "application/json");
-              response.setHeader(API_SCHEMA_HASH_HEADER, readApiSchemaHash());
-              if (url.pathname === "/api/sync/identity") {
-                response.end(
-                  JSON.stringify({
-                    workspaceId,
-                  } satisfies LegacySyncIdentityResponse),
-                );
-                return;
-              }
-              const scope = url.searchParams.get("scope");
-              const after = Number(url.searchParams.get("after"));
-              pulls.push({ scope, after });
-              response.end(
-                legacyPullResponse({
-                  workspaceId,
-                  documents: [
-                    {
-                      id: scope!,
-                      payload: JSON.stringify({
-                        items: [item()],
-                        truncated: false,
-                      }),
-                      seq: sequence,
-                      _deleted: false,
-                    },
-                  ],
-                  checkpoint: { seq: sequence },
-                }),
+              if (
+                !holdBaseline &&
+                fixtureResources(
+                  url.searchParams.get("resources") || "[]",
+                ).some((ref) => ref.kind === "transcript")
+              )
+                response.write(protocol3SseEvent("resources", frame()));
+            } else if (url.pathname === "/api/sync/subscriptions") {
+              const chunks = [];
+              for await (const chunk of request) chunks.push(chunk);
+              const update = fixtureSubscriptions(
+                Buffer.concat(chunks).toString(),
               );
-              return;
-            }
-            next();
+              for (const stream of streams) {
+                stream.write(
+                  protocol3SseEvent("subscriptions", {
+                    gen: update.gen,
+                    cachePolicies: policies,
+                  }),
+                );
+                if (
+                  !holdBaseline &&
+                  update.add.some(
+                    (entry) => entry.resource.kind === "transcript",
+                  )
+                )
+                  stream.write(protocol3SseEvent("resources", frame()));
+              }
+              json({ gen: update.gen, cachePolicies: policies });
+            } else if (url.pathname.startsWith("/api/")) {
+              dataReads.push(url.pathname);
+              response.statusCode = 500;
+              json({ error: "Unexpected HTTP data read" });
+            } else next();
           });
         },
       },
@@ -157,57 +154,45 @@ test("an open transcript streams text without pulls and recovers incomplete inte
   try {
     await server.listen();
     const page = await context.newPage();
-    await page.goto(
-      `http://127.0.0.1:${fixturePort(server)}/transcript-stream-check`,
-    );
+    const errors: string[] = [];
+    page.on("pageerror", (error) => errors.push(error.message));
+    const url = `http://127.0.0.1:${fixturePort(server)}/transcript-stream-check`;
+    await page.goto(url);
     await page.evaluate(initializeTranscript);
     await expect(page.locator("main")).toHaveText(text);
-    const settledPulls = pulls.length;
-    text = "Agent streaming text";
     const after = sequence++;
-    const event = frame("change", after, delta());
-    send(event);
+    text = "Streamed text";
+    send(frame(after));
     await expect(page.locator("main")).toHaveText(text);
     await expect
-      .poll(() => page.evaluate(() => window.cursor()))
-      .toBe(sequence);
-    assert.equal(
-      pulls.length,
-      settledPulls,
-      "streaming text must cause zero transcript pulls after baseline",
-    );
-    send(event);
-    await page.evaluate(() => new Promise(requestAnimationFrame));
-    assert.equal(pulls.length, settledPulls, "exact retry is idempotent");
-    for (const recovery of ["gap", "epoch", "oversize", "reconnect"]) {
-      const before = pulls.length;
-      const after = sequence;
-      sequence += recovery === "gap" ? 2 : 1;
-      text = `Recovered ${recovery}`;
-      if (recovery === "epoch") {
-        epoch = "transcript-restarted";
-        sequence = 1;
-      }
-      if (recovery === "reconnect") {
-        for (const response of streams) response.end();
-      } else {
-        const payload = delta();
-        assert.ok(payload.items[0]);
-        if (recovery === "oversize")
-          payload.items[0].text = "x".repeat(maxBytes + 1);
-        send(frame("change", recovery === "gap" ? after + 1 : after, payload));
-      }
-      await expect(page.locator("main")).toHaveText(text);
-      assert.ok(
-        pulls.length > before,
-        `${recovery} requires a transcript pull`,
-      );
-    }
+      .poll(() => page.evaluate(() => window.cacheRecord()), {
+        timeout: 10_000,
+      })
+      .toMatchObject({ cursor: { seq: sequence } });
+    holdBaseline = true;
+    await page.evaluate(() => window.stopTranscript());
+    await page.reload();
+    await page.evaluate(initializeTranscript);
+    await expect(page.locator("main")).toHaveText("Streamed text");
+    const beforeReconnect = opened;
+    text = "Current after reconnect";
+    sequence++;
+    holdBaseline = false;
+    for (const stream of streams) stream.end();
+    await expect(page.locator("main")).toHaveText(text);
+    assert.ok(opened > beforeReconnect);
+    // A forward gap fails application and reopens from the last applied cursor.
+    const gapBase = sequence + 1;
+    sequence += 2;
+    text = "Gap recovered over SSE";
+    send(frame(gapBase));
+    await expect(page.locator("main")).toHaveText(text);
+    assert.deepEqual(dataReads, []);
+    assert.deepEqual(errors, []);
     await page.evaluate(() => window.stopTranscript());
   } finally {
     await context.close();
     for (const response of streams) response.end();
     await server.close();
-    await rm(cacheDir, { recursive: true, force: true });
   }
 });

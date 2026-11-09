@@ -129,7 +129,6 @@ for (const afterTool of [false, true]) {
                     RequestArea,
                     {
                       scope: "empty-async-question",
-                      refresh: async () => {},
                       notify() {},
                     },
                     createElement(RequestCard, { request: entry, messageId }),

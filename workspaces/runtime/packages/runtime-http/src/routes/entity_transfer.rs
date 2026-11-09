@@ -6,8 +6,10 @@ use std::io::{Seek, Write};
 use axum::response::sse::Event;
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
-    SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_STREAM_EVENT_MAX_BYTES,
+    SYNC_ENTITY_STREAM_MAX_DOCUMENTS, SYNC_RESOURCE_TRANSFER_FRAGMENT_MAX_BYTES,
+    SYNC_STREAM_EVENT_MAX_BYTES,
 };
+use studio_runtime_schema::sync_protocol::ResourceTransferPayloadKind;
 use studio_runtime_store::SyncDocumentsRepository;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
@@ -96,6 +98,66 @@ pub(super) async fn attach(
     Ok(readers)
 }
 
+/// Preserve full transcript/view entries when one ordinary resources frame cannot
+/// hold them. The unlinked spool uses the same serialized-fragment writer as entities.
+pub(super) async fn attach_payloads(
+    event: &mut ResourceChangeEvent,
+    validators: &crate::validation::Registry,
+) -> Result<Vec<TransferReader>, ApiError> {
+    let metadata = json!({"protocol":event.protocol,"workspaceId":event.workspace_id,"epoch":event.epoch,"revision":event.revision,"reason":event.reason,"resources":[],"resourceVersions":[]});
+    let resources = std::mem::take(&mut event.resources);
+    let entries = std::mem::take(&mut event.resource_versions);
+    let validators = validators.clone();
+    let (retained, readers) = studio_runtime_process::blocking_pool::spawn_blocking(
+        "runtime-http/resource-transfer",
+        move || {
+            let mut retained = Vec::new();
+            let mut readers = Vec::new();
+            for (resource, mut entry) in resources.into_iter().zip(entries) {
+                let kind = if entry.transcript_snapshot.is_some() || entry.transcript_changes.is_some() {
+                    ResourceTransferPayloadKind::Transcript
+                } else if entry.view_snapshot.is_some() {
+                    ResourceTransferPayloadKind::View
+                } else {
+                    retained.push((resource, entry));
+                    continue;
+                };
+                let mut ordinary = metadata.clone();
+                ordinary["resources"] = json!([&resource]);
+                ordinary["resourceVersions"] = json!([&entry]);
+                if "event: resources\nid: \ndata: \n\n".len() + metadata["revision"].to_string().len()
+                    + studio_json::to_vec(&ordinary).map_err(ApiError::json)?.len() <= SYNC_STREAM_EVENT_MAX_BYTES {
+                    retained.push((resource, entry));
+                    continue;
+                }
+                entry.resource = Some(Some(resource.clone()));
+                let cursor = entry.cursor.get_or_insert_with(|| SubscriptionCursor {
+                    terminal_generation: None,
+                    workspace_id: metadata["workspaceId"].as_str().expect("typed workspace").to_owned(),
+                    seq: entry.revision,
+                }).clone();
+                let reply = entry.reply_kind.get_or_insert(crate::generated::SubscriptionReplyKind::Snapshot).clone();
+                let frame = json!({
+                    "protocol": metadata["protocol"], "workspaceId": metadata["workspaceId"],
+                    "epoch": metadata["epoch"], "revision": metadata["revision"], "reason": metadata["reason"],
+                    "resource": resource, "cursor": cursor, "replyKind": reply,
+                    "payloadKind": kind, "transferId": uuid::Uuid::new_v4().to_string()
+                });
+                let mut file = tempfile::tempfile().map_err(|_| io_error())?;
+                spool_page(&mut file, &frame, 0, true, &entry, &validators)?;
+                file.rewind().map_err(|_| io_error())?;
+                readers.push(TransferReader(BufReader::new(tokio::fs::File::from_std(file))));
+            }
+            Ok::<_, ApiError>((retained, readers))
+        },
+    ).await.map_err(|_| io_error())??;
+    for (resource, entry) in retained {
+        event.resources.push(resource);
+        event.resource_versions.push(entry);
+    }
+    Ok(readers)
+}
+
 async fn prepare(
     state: &HttpState,
     event: &ResourceChangeEvent,
@@ -131,7 +193,7 @@ async fn prepare(
         let mut after = if snapshot { 0 } else { since.as_ref().map_or(0, |cursor| cursor.seq) };
         let cursor = SubscriptionCursor { terminal_generation: None, workspace_id: workspace.clone(), seq: through };
         let transfer_id = uuid::Uuid::new_v4().to_string();
-        let metadata = json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":workspace,"epoch":epoch,"revision":revision,"reason":reason,"resource":resource,"cursor":cursor,"replyKind":if snapshot {"snapshot"}else{"delta"},"transferId":transfer_id});
+        let metadata = json!({"protocol":studio_runtime_schema::SYNC_PROTOCOL_VERSION,"workspaceId":workspace,"epoch":epoch,"revision":revision,"reason":reason,"resource":resource,"cursor":cursor,"replyKind":if snapshot {"snapshot"}else{"delta"},"transferId":transfer_id,"payloadKind":ResourceTransferPayloadKind::Entity});
         let mut spool = None;
         let mut page_index = 0;
         loop {
@@ -218,7 +280,7 @@ fn spool_page(
     metadata: &Value,
     page_index: usize,
     complete: bool,
-    page: &EntityChangeBatch,
+    page: &impl serde::Serialize,
     validators: &crate::validation::Registry,
 ) -> Result<(), ApiError> {
     let data = studio_json::to_string(page).map_err(ApiError::json)?;
@@ -242,7 +304,7 @@ fn spool_page(
     }
     // JSON string escaping can expand each source byte sixfold. Leave room for
     // the resource selector and authenticated stream metadata, then verify exactly.
-    let fragment_bytes = SYNC_STREAM_EVENT_MAX_BYTES / 8;
+    let fragment_bytes = SYNC_RESOURCE_TRANSFER_FRAGMENT_MAX_BYTES;
     let mut parts = Vec::new();
     let mut offset = 0;
     while offset < data.len() {

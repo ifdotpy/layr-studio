@@ -185,7 +185,15 @@ test("queue-mutation-deadline-browser @performance", async ({
         })),
         revision: `revision-${action}`,
       };
-      await page.evaluate(() => window.queue.reload());
+      await page.evaluate((view) => window.receiveDeadlineQueue(view), {
+        ...view,
+        items: view.items.map((item) => ({
+          ...item,
+          created: 1,
+          status: "queued" as const,
+        })),
+        capabilities: { receipts: true, reorder: true },
+      });
       await page.waitForFunction(
         (action) => window.queue.items[0]?.id === `${action}-1`,
         action,

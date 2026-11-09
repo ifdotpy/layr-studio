@@ -1,16 +1,12 @@
 import type {} from "./session-poll.fixture.tsx";
 import type { AddressInfo } from "node:net";
-import type {
-  SyncPullResponse,
-  SyncEntity,
-  SessionResponse,
-} from "../playwright.ts";
+import type { SessionResponse } from "../playwright.ts";
+import { fixtureSnapshot } from "../accounts/fixture-helpers.ts";
 
-import type { ServerResponse } from "node:http";
 import { assert } from "./assertions.ts";
 import {
   apiSchemaHeaders,
-  apiSchemaHandshakeSse,
+  handleEntitySyncFixtureRequest,
   legacySnapshotRoute,
   syncIdentityFixture,
   test,
@@ -18,21 +14,18 @@ import {
 } from "../playwright.ts";
 // Replicated state uses the current credential endpoint and reports failures.
 import { fileURLToPath } from "node:url";
-// This legacy workspace fixture intentionally carries a marker outside the DTO.
-type LegacyWorkspace = Omit<
-  Extract<SyncEntity, { collection: "workspace"; op: "upsert" }>,
-  "value"
-> & { value: unknown };
-type LegacyPull = Omit<SyncPullResponse, "generation" | "documents"> & {
-  documents: LegacyWorkspace[];
-};
-
 test("Session Poll Browser", async ({
   browser: _testBrowser,
   context: _testContext,
   page: testPage,
 }) => {
-  let streamResponse: ServerResponse | undefined;
+  const identity = syncIdentityFixture();
+  const snapshot = fixtureSnapshot({
+    stateDir: "fixture",
+    chats: [],
+    threads: [],
+    runtime: { tasksHistoryLimit: 1 },
+  });
   const server = await createFixtureViteServer({
     configFile: false,
     root: fileURLToPath(new URL("../../", import.meta.url)),
@@ -42,17 +35,13 @@ test("Session Poll Browser", async ({
         name: "session-poll-stream-fixture",
         configureServer(vite) {
           vite.middlewares.use((request, response, next) => {
-            if (request.url?.split("?", 1)[0] !== "/api/sync/stream") {
+            if (
+              !handleEntitySyncFixtureRequest(request, response, {
+                snapshot,
+                workspaceId: identity.workspaceId,
+              })
+            )
               next();
-              return;
-            }
-            streamResponse = response;
-            response.writeHead(200, {
-              ...apiSchemaHeaders(),
-              "Content-Type": "text/event-stream",
-              "Cache-Control": "no-cache",
-            });
-            response.write(`${apiSchemaHandshakeSse()}retry: 60000\n\n`);
           });
         },
       },
@@ -68,8 +57,6 @@ test("Session Poll Browser", async ({
       sessions = 0,
       status = 200,
       token = "first";
-    const identity = syncIdentityFixture();
-    const workspaceId = identity.workspaceId;
     await page.route(legacySnapshotRoute, (route) => {
       snapshotReads++;
       return route.continue();
@@ -96,30 +83,7 @@ test("Session Poll Browser", async ({
     );
     await page.route("**/api/sync/pull?*", (route) => {
       pulls++;
-      const after = Number(
-        new URL(route.request().url()).searchParams.get("after"),
-      );
-      return route.fulfill({
-        json: {
-          workspaceId,
-          documents: after
-            ? []
-            : [
-                {
-                  op: "upsert",
-                  collection: "workspace",
-                  id: "current",
-                  value: { tasksHistoryLimit: 1, stateDir: "fixture" },
-                  seq: 1,
-                },
-              ],
-          complete: true,
-          checkpoint: { seq: 1 },
-          maxSeq: 1,
-          initialHigh: 1,
-        } satisfies LegacyPull,
-        headers: apiSchemaHeaders(),
-      });
+      return route.abort();
     });
     await page.goto(
       `http://127.0.0.1:${(server.httpServer!.address() as AddressInfo).port}/check`,
@@ -130,16 +94,16 @@ test("Session Poll Browser", async ({
         window.snapshot?.state?.workspaces.values().next().value
           ?.tasksHistoryLimit === 1,
     );
-    await page.evaluate(() => window.snapshot.startup.refresh());
+    await page.evaluate(() => window.snapshot.startup.refreshCredentials());
     assert.ok(sessions >= 2);
     assert.equal(
       snapshotReads,
       0,
       "Replicated startup and refresh never download the full state",
     );
-    assert.ok(pulls > 0, "Startup and refresh use the entity pull");
+    assert.equal(pulls, 0, "Startup receives entity baselines over SSE");
     token = "rotated";
-    await page.evaluate(() => window.snapshot.startup.refresh());
+    await page.evaluate(() => window.snapshot.startup.refreshCredentials());
     assert.equal(
       await page.evaluate(() => window.snapshot.api.getToken()),
       "rotated",
@@ -153,7 +117,7 @@ test("Session Poll Browser", async ({
     );
     for (const failure of [503, 404]) {
       status = failure;
-      await page.evaluate(() => window.snapshot.startup.refresh());
+      await page.evaluate(() => window.snapshot.startup.refreshCredentials());
       assert.equal(
         await page.evaluate(() => window.snapshot.startup.error),
         "Session unavailable",
@@ -170,7 +134,7 @@ test("Session Poll Browser", async ({
     }
     status = 200;
     token = "recovered";
-    await page.evaluate(() => window.snapshot.startup.refresh());
+    await page.evaluate(() => window.snapshot.startup.refreshCredentials());
     assert.equal(
       await page.evaluate(() => window.snapshot.api.getToken()),
       "recovered",
@@ -180,10 +144,11 @@ test("Session Poll Browser", async ({
     assert.equal(snapshotReads, 0, "Never invoke the old snapshot fallback");
     assert.deepEqual(errors, []);
     console.log(
-      "session polling PASS: entity pull, rotated token, visible error, missing endpoint rejection",
+      "session polling PASS: SSE baseline, rotated token, visible error, missing endpoint rejection",
     );
   } finally {
-    streamResponse?.end();
+    if (server.httpServer && "closeAllConnections" in server.httpServer)
+      server.httpServer.closeAllConnections();
     await server.close();
   }
 });

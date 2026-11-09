@@ -514,7 +514,7 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
                 Ok(())
             })
             .await
-            .expect("simulate the previous migration catalog");
+            .expect("force catalog replay after submission");
         let original: String = store
             .test_reader()
             .expect("reader")
@@ -537,13 +537,7 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
                 |row| row.get(0),
             )
             .expect("migrated root bytes");
-        assert_eq!(
-            migrated,
-            format!(
-                "{},\"reviewDefaults\":{{\"model\":\"gpt-6-astra\"}}}}",
-                original.strip_suffix('}').expect("root object")
-            )
-        );
+        assert_eq!(migrated, original);
         drop(store);
         let store = studio_runtime_store::RuntimeStore::open(Some(&path))
             .await
@@ -561,11 +555,9 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
         if !failed {
             assert_current_receipts(&store.test_reader().expect("reader"));
         }
-        let mut after = case.after;
-        after["runtime_agents"][0]["record"]["reviewDefaults"] = json!({"model":"gpt-6-astra"});
         compare(
             &store.test_reader().expect("reader"),
-            &after,
+            &case.after,
             &format!("fault={:?}", case.fault),
         );
     }

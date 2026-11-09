@@ -230,7 +230,6 @@ export class DeliveryOwner {
     const { isApiSchemaMismatch, command: serverCommand } = services.api;
     const { durableSend } = services.outbox;
     const { setDrafts, getDraft } = drafts;
-    const refresh = this.areas.refresh;
     if (schemaMismatch || isApiSchemaMismatch()) return;
     const draftKey = opened || "new",
       draft = getDraft(draftKey),
@@ -376,7 +375,6 @@ export class DeliveryOwner {
           notify("Message saved. Some deliveries are not confirmed.");
       }
       if (!request) clearCapturedDraft((value) => value?.trim() === text);
-      void refresh().catch((error) => notify(errorText(error)));
     } catch (e) {
       if (request) {
         // Never replace text the user typed while this request was in flight.

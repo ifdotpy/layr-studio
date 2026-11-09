@@ -6,7 +6,10 @@ import {
   createSubscriptionCache,
   subscriptionRows,
 } from "./subscriptionCache.ts";
-import { LocalCollection } from "./localCollection.ts";
+import {
+  LocalCollection,
+  withEntityProjectionWrite,
+} from "./localCollection.ts";
 import { subscriptionKey } from "./subscriptions/contracts.ts";
 import { TRANSCRIPT_PROJECTION_FORMAT } from "./transcriptMetadata.ts";
 import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
@@ -33,6 +36,53 @@ const cursorRow = {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+});
+
+it("orders hydration behind live application without blocking another server", async () => {
+  const first = new LocalCollection("server-one");
+  const second = new LocalCollection("server-two");
+  const held = Promise.withResolvers<void>();
+  const entered = Promise.withResolvers<void>();
+  const live = withEntityProjectionWrite(first.database.name, async () => {
+    entered.resolve();
+    await held.promise;
+    await first.applyBatch([{ ...row, seq: 8 }]);
+  });
+  await entered.promise;
+  const hydration = first.hydrate([row]);
+  await second.hydrate([row]);
+  expect(second.all()[0]?.seq).toBe(4);
+  expect(first.all()).toEqual([]);
+  held.resolve();
+  await Promise.all([live, hydration]);
+  expect(first.all()[0]?.seq).toBe(8);
+});
+
+it("a failed operation leaves later application and cancellation usable", async () => {
+  const collection = new LocalCollection("failed-queue");
+  await expect(
+    withEntityProjectionWrite(collection.database.name, async () => {
+      throw new Error("failed application");
+    }),
+  ).rejects.toThrow("failed application");
+  await collection.hydrate([row], () => false);
+  expect(collection.all()).toEqual([]);
+  await collection.hydrate([row]);
+  expect(collection.all()[0]?.seq).toBe(4);
+});
+
+it("publishes a whole batch and distinguishes eviction from a source tombstone", async () => {
+  const collection = new LocalCollection("batch");
+  const sizes: number[] = [];
+  collection.$.subscribe(() => sizes.push(collection.all().length));
+  await collection.applyBatch([row, cursorRow]);
+  expect(sizes).toEqual([2, 2]);
+  await collection.applyBatch([{ ...row, _deleted: true, evicted: true }]);
+  await collection.applyBatch([row]);
+  expect((await collection.getRows([row.id], false))[0]?.seq).toBe(4);
+  await collection.applyBatch([{ ...row, seq: 5, _deleted: true }]);
+  await collection.applyBatch([row]);
+  expect(await collection.getRows([row.id], false)).toEqual([]);
 });
 
 function recordPuts(storage: { put: { mock: { calls: unknown[][] } } }) {
@@ -344,6 +394,32 @@ it("does not hydrate a delayed cache load after the server says NoCache", async 
   });
   expect(await loading).toBeUndefined();
   expect(collection.all()).toEqual([]);
+  cache.stop();
+});
+
+it("does not resurrect cached rows after a live scope snapshot completes", async () => {
+  const pending = Promise.withResolvers<unknown>();
+  const storage = {
+    get: vi.fn(() => pending.promise),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const collection = new LocalCollection("late-cache");
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  const loading = cache.load(ref);
+  // The live snapshot is empty. Its completed cursor proves that the cached row left the scope.
+  await collection.hydrate([
+    { ...cursorRow, seq: 8, payload: JSON.stringify({ ...cursor, seq: 8 }) },
+  ]);
+  pending.resolve({
+    version: SUBSCRIPTION_CACHE_VERSION,
+    contractHash: API_SCHEMA_HASH,
+    subscription: subscriptionKey(ref),
+    cursor,
+    data: [cachedRow],
+  });
+  expect(await loading).toBeUndefined();
+  expect(collection.all().map((row) => row.id)).toEqual([cursorRow.id]);
   cache.stop();
 });
 

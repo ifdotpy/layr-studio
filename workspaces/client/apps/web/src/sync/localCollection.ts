@@ -1,67 +1,42 @@
-import type { SyncDocument } from "./client.ts";
+import type { EntityRow } from "./entityContracts.ts";
 
-/**
- * An in-memory document collection. The sync client reads and writes its
- * projections and drafts through this narrow surface. Memory is the
- * only store the UI waits for. A collection may take a `durable` hook that
- * persists a row before the write is acknowledged; unsent input uses it.
- */
-
-export type Row = SyncDocument & Record<string, unknown>;
+/** Typed in-memory projection rows. Unsent input has its own durable store. */
+export type Row = EntityRow;
 type Range = { gte?: string; gt?: string; lt: string };
 /** Sorts after every row id; ends a range that has no upper bound. */
 const AFTER_ALL_IDS = "￿";
 
 /** A row plus the helpers that callers use on a stored document. */
-export type Doc = Row & {
-  getLatest(): Doc;
-  incrementalModify(change: (row: Row) => Row): Promise<Doc>;
-  incrementalPatch(patch: Partial<Row>): Promise<Doc>;
-  toJSON(): Row;
-};
+export type Doc = Row & { toJSON(): Row };
 export type Change = { id: string; documentData: Row; context: string };
 type Listener = (change: Change) => void;
 type Observer<T> =
   | ((value: T) => void)
   | { next: (value: T) => void; error?: (error: unknown) => void };
 
-export type Durable = {
-  /** Persist a row before its write is acknowledged. */
-  put(row: Row): Promise<void>;
-};
+const queues = new Map<string, Promise<unknown>>();
 
-export type CollectionOptions = {
-  durable?: Durable;
-  /** Reads and writes of these ids wait for the returned promise (lazy cache load). */
-  ensure?: (id: string) => Promise<void> | undefined;
-  /** Called with the ids of rows that changed in memory. */
-  onChange?: (change: Change) => void;
-};
-
-export class WriteConflictError extends Error {
-  readonly status = 409;
-  constructor(id: string) {
-    super(`Document ${id} was changed by another writer.`);
-  }
-}
-
-function stable(value: unknown): string {
-  return JSON.stringify(value, (_key, entry: unknown) =>
-    entry && typeof entry === "object" && !Array.isArray(entry)
-      ? Object.fromEntries(
-          Object.entries(entry as Record<string, unknown>).sort(([a], [b]) =>
-            a < b ? -1 : a > b ? 1 : 0,
-          ),
-        )
-      : entry,
+/** This page is the only writer of its projection store, so a queue in this
+ * page orders the writes. Finish old writes before a reset deletes rows. */
+export async function withEntityProjectionWrite<T>(
+  databaseName: string,
+  write: () => Promise<T>,
+): Promise<T> {
+  const run = (queues.get(databaseName) ?? Promise.resolve()).then(
+    write,
+    write,
   );
+  queues.set(
+    databaseName,
+    run.catch(() => {}),
+  );
+  return run;
 }
 
-function plain(row: Row): Row {
-  const copy = { ...row };
-  delete (copy as { getLatest?: unknown }).getLatest;
-  copy._deleted = copy._deleted === true;
-  return copy;
+function projectionSupersedes(previous: Row, incoming: Row) {
+  if (previous.seq !== incoming.seq) return previous.seq > incoming.seq;
+  if (incoming.evicted) return previous._deleted === true;
+  return previous.evicted !== true;
 }
 
 function rangesOf(selector: Record<string, unknown>): Range[] {
@@ -95,29 +70,15 @@ const inRange = (range: Range, id: string) =>
 
 export class LocalCollection {
   readonly database: { name: string };
-  readonly storageInstance: {
-    findDocumentsById: (ids: string[], withDeleted: boolean) => Promise<Row[]>;
-    bulkWrite: (
-      writes: Array<{ previous?: Row; document: Row }>,
-      context: string,
-    ) => Promise<{ success: Row[]; error: Array<{ status: number }> }>;
-  };
   readonly $: {
     subscribe: (observer: Observer<Change>) => { unsubscribe(): void };
   };
   private readonly rows = new Map<string, Row>();
   private readonly docs = new WeakMap<Row, Doc>();
   private readonly listeners = new Set<Listener>();
-  private writes: Promise<unknown> = Promise.resolve();
-  declare private readonly options: CollectionOptions;
 
-  constructor(name: string, options: CollectionOptions = {}) {
-    this.options = options;
+  constructor(name: string) {
     this.database = { name };
-    this.storageInstance = {
-      findDocumentsById: (ids, withDeleted) => this.read(ids, withDeleted),
-      bulkWrite: (writes, context) => this.write(writes, context),
-    };
     this.$ = {
       subscribe: (observer) => {
         const next = typeof observer === "function" ? observer : observer.next;
@@ -127,19 +88,7 @@ export class LocalCollection {
     };
   }
 
-  private async ensure(ids: Iterable<string>) {
-    const ensure = this.options.ensure;
-    if (!ensure) return;
-    const waits = new Set<Promise<void>>();
-    for (const id of ids) {
-      const wait = ensure(id);
-      if (wait) waits.add(wait);
-    }
-    await Promise.all(waits);
-  }
-
-  private async read(ids: string[], withDeleted: boolean) {
-    await this.ensure(ids);
+  async getRows(ids: string[], withDeleted: boolean) {
     return ids.flatMap((id) => {
       const row = this.rows.get(id);
       return row && (withDeleted || !row._deleted) ? [row] : [];
@@ -149,7 +98,6 @@ export class LocalCollection {
   /** The live rows of a query, ordered by id. */
   async query(selector: Record<string, unknown>, limit = Infinity) {
     const ranges = rangesOf(selector);
-    await this.ensure(ranges.map((range) => range.gte ?? range.gt ?? ""));
     return [...this.rows.values()]
       .filter((row) => !row._deleted && ranges.some((r) => inRange(r, row.id)))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
@@ -160,22 +108,7 @@ export class LocalCollection {
     let doc = this.docs.get(row);
     if (!doc) {
       const copy = { ...row } as Doc;
-      Object.defineProperties(copy, {
-        getLatest: {
-          value: () => {
-            const latest = this.rows.get(row.id);
-            return latest && latest !== row ? this.doc(latest) : doc!;
-          },
-        },
-        incrementalModify: {
-          value: (change: (row: Row) => Row) => this.modify(row.id, change),
-        },
-        incrementalPatch: {
-          value: (patch: Partial<Row>) =>
-            this.modify(row.id, (latest) => ({ ...latest, ...patch })),
-        },
-        toJSON: { value: () => ({ ...row }) },
-      });
+      Object.defineProperty(copy, "toJSON", { value: () => ({ ...row }) });
       doc = copy;
       this.docs.set(row, doc);
     }
@@ -184,99 +117,57 @@ export class LocalCollection {
 
   private emit(row: Row, context: string) {
     const change = { id: row.id, documentData: row, context };
-    this.options.onChange?.(change);
     for (const listener of this.listeners) listener(change);
   }
 
-  private async write(
-    writes: Array<{ previous?: Row; document: Row }>,
-    context = "",
-  ) {
-    // Cached rows load before the queue; loading uses the queue itself.
-    await this.ensure(writes.map(({ document: row }) => row.id));
-    // One queue orders every writer, so the optimistic check below sees every
-    // earlier write. A caller whose base row changed gets a conflict.
-    const run = async () => {
-      const success: Row[] = [];
-      const error: Array<{ status: number }> = [];
-      const accepted: Row[] = [];
-      for (const { previous, document: row } of writes) {
-        const stored = this.rows.get(row.id);
-        const same =
-          stored &&
-          previous &&
-          (stored === previous || stable(stored) === stable(plain(previous)));
-        if (previous ? !same : stored) error.push({ status: 409 });
-        else accepted.push(plain(row));
-      }
-      const durable = this.options.durable;
-      if (durable && context === "local")
-        for (const row of accepted) await durable.put(row);
-      for (const row of accepted) {
-        this.rows.set(row.id, row);
-        success.push(row);
-      }
-      for (const row of accepted) this.emit(row, context);
-      return { success, error };
-    };
-    const result = this.writes.then(run, run);
-    this.writes = result.catch(() => {});
-    return result;
+  /** Compare and publish one typed batch without an awaited read or a CAS retry. */
+  async applyBatch(
+    rows: Row[],
+    {
+      isCurrent = () => true,
+      replace = false,
+      hydrate = false,
+    }: {
+      isCurrent?: () => boolean;
+      replace?: boolean;
+      hydrate?: boolean;
+    } = {},
+  ): Promise<boolean> {
+    if (!isCurrent()) return false;
+    const added: Row[] = [];
+    for (const row of rows) {
+      const previous = this.rows.get(row.id);
+      if (
+        previous &&
+        !replace &&
+        (hydrate
+          ? previous.seq >= row.seq
+          : projectionSupersedes(previous, row))
+      )
+        continue;
+      const stored = { ...row, _deleted: row._deleted === true };
+      this.rows.set(stored.id, stored);
+      added.push(stored);
+    }
+    for (const row of added) this.emit(row, hydrate ? "cache" : "projection");
+    return true;
   }
 
-  /** Add cached rows that are absent or older than the cache. Newer rows win. */
-  async hydrate(rows: Row[], isCurrent: () => boolean = () => true) {
-    const run = async () => {
-      if (!isCurrent()) return false;
-      const added: Row[] = [];
-      for (const row of rows) {
-        const current = this.rows.get(row.id);
-        if (current && current.seq >= row.seq) continue;
-        const stored = plain(row);
-        this.rows.set(stored.id, stored);
-        added.push(stored);
-      }
-      for (const row of added) this.emit(row, "cache");
-      return true;
-    };
-    const result = this.writes.then(run, run);
-    this.writes = result.catch(() => {});
-    return result;
+  /** Cache decoding happens outside the interval queue. Live scope receipts win. */
+  hydrate(
+    rows: Row[],
+    isCurrent: () => boolean = () => true,
+    cursorId?: string,
+  ) {
+    return withEntityProjectionWrite(this.database.name, async () => {
+      if (!isCurrent() || (cursorId && this.rows.has(cursorId))) return false;
+      return this.applyBatch(rows, { isCurrent, hydrate: true });
+    });
   }
 
   /** Every stored row, tombstones included. */
   all() {
     return [...this.rows.values()];
-  }
-
-  async insert(row: Row) {
-    const result = await this.write([{ document: row }], "local");
-    if (result.error.length) throw new WriteConflictError(row.id);
-    return this.doc(result.success[0]!);
-  }
-
-  /** Write a row; keep going from the latest row if another writer got in first. */
-  async incrementalUpsert(row: Row) {
-    for (;;) {
-      const [previous] = await this.read([row.id], true);
-      const result = await this.write(
-        [{ ...(previous ? { previous } : {}), document: row }],
-        "local",
-      );
-      if (!result.error.length) return this.doc(result.success[0]!);
-    }
-  }
-
-  private async modify(id: string, change: (row: Row) => Row) {
-    for (;;) {
-      const [previous] = await this.read([id], true);
-      if (!previous) throw new Error(`Document ${id} does not exist.`);
-      const result = await this.write(
-        [{ previous, document: change(plain(previous)) }],
-        "local",
-      );
-      if (!result.error.length) return this.doc(result.success[0]!);
-    }
   }
 
   find(query: { selector?: Record<string, unknown>; limit?: number } = {}) {
@@ -292,7 +183,7 @@ export class LocalCollection {
 
   findOne(id: string) {
     const load = async () => {
-      const [row] = await this.read([id], false);
+      const [row] = await this.getRows([id], false);
       return row ? this.doc(row) : null;
     };
     return { exec: load, $: this.observe((changed) => changed === id, load) };

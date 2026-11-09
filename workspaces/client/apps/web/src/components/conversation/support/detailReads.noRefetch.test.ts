@@ -479,7 +479,7 @@ it("location menu reads once and location changes do not refetch folder info", a
     locations: [location],
   };
   const read = () => {
-    const view = ProjectLocationsSettings({ project, saved: vi.fn() });
+    const view = ProjectLocationsSettings({ project });
     if (!isValidElement(view)) throw new Error("Expected location settings");
     return view;
   };
@@ -532,7 +532,7 @@ it("overlapping location HEAD actions keep their requested paths isolated", asyn
     locations: [{ projectId: "project", serverId: "local", path: "/one" }],
   };
   const read = () => {
-    const view = ProjectLocationsSettings({ project, saved: vi.fn() });
+    const view = ProjectLocationsSettings({ project });
     if (!isValidElement(view)) throw new Error("Missing settings");
     return view;
   };

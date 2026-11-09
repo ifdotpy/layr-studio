@@ -2,7 +2,6 @@ import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import {
   useServerApi,
-  useServerResources,
   useServerStore,
   useServerStorage,
   useServerLocalDrafts,
@@ -85,12 +84,10 @@ type QueueOptions = {
   workspaceId?: string | undefined;
   observed?: ((ids: string[]) => void) | undefined;
   edited?: ((id: string, text: string) => void) | undefined;
-  refresh: () => Promise<void>;
 };
 
 export function useMessageQueue(p: QueueOptions) {
   const store = useServerStore();
-  const resources = useServerResources();
   const api = useServerApi();
   const { syncPost } = api;
   const storage = useServerStorage();
@@ -148,11 +145,6 @@ export function useMessageQueue(p: QueueOptions) {
       syncCommands() {
         this.commands = api.pending.list();
       },
-      async reload() {
-        if (!p.enabled || !p.id) return;
-        // Queue revisions are opaque; only the state stream can order queue facts.
-        resources.replaceStream();
-      },
       async clearRequest(request: QueueMutation) {
         const next = await updateQueueRequest<unknown>(
           suffix,
@@ -172,13 +164,6 @@ export function useMessageQueue(p: QueueOptions) {
         this.busy = true;
         try {
           await operation();
-          if (this.active) {
-            await this.reload().catch(this.fail);
-            void p.refresh().catch(() => {});
-          }
-        } catch (error) {
-          if (this.active) await this.reload().catch(() => {});
-          throw error;
         } finally {
           this.finish();
         }
@@ -292,7 +277,6 @@ export function useMessageQueue(p: QueueOptions) {
     p.enabled,
     p.workspaceId,
     store,
-    resources,
     api,
     storage,
     updateQueueRequest,

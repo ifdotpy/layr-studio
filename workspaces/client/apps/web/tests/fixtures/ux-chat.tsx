@@ -189,7 +189,6 @@ function Fixture() {
     await persist?.();
     return { kind: "confirmed", id: body.id };
   };
-  area.refresh = async () => {};
   area.notices.notify = setNotice;
   return (
     <ServerStoreProvider value={store}>

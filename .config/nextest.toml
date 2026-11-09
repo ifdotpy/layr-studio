@@ -78,6 +78,7 @@ inherits = "ci"
 # JSON facade preserves serde_json behavior for typed, borrowed, and raw values.
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
+# Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
@@ -88,6 +89,7 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -380,7 +382,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
-    | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
+    | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_and_reconnect_transfer_completely) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
     | (package(=studio-runtime-store) & kind(lib) & test(entity_replay_and_patch_preserve_sequence_until_value_or_deletion_changes))
     | (package(=studio-runtime-http) & (kind(lib) | binary(integration)) & test(startup_model))
     | (package(=studio-runtime-services) & kind(lib) & test(sync_policy::tests::model_choices))
@@ -548,6 +550,7 @@ platform = 'cfg(target_os = "linux")'
 # Generated ingress witnesses cover pattern parity and integral-decimal inputs.
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
+# Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
@@ -558,6 +561,7 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -850,7 +854,7 @@ default-filter = '''
     | (package(=studio-runtime-services) & kind(lib) & test(idle_compaction::tests::unload_deadline_))
     | (package(=studio-runtime-services) & kind(lib) & test(entity_publication::tests::studio_error_))
     | (package(=studio-runtime-services) & kind(lib) & (test(entity_publication::tests::retained_worktree_entities_) | test(retained_cleanup_admission_preserves_partial_legacy_fields) | test(retained_cleanup_prefers_present_nested_values_before_type_checks) | test(retained_worktree_effect_tags_match_cleanup_effect_serialization) | test(entity_publication::tests::question_history_entities_) | test(entity_publication::tests::conversation_detail_entities_)))
-    | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_stays_revisions_only) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
+    | (package(=studio-runtime-http) & kind(lib) & (test(subscription_add_streams_bounded_transcript_snapshot_after_ack) | test(transcript_window_reasoning_boundary_retains_a_resolvable_older_cursor) | test(state_stream_subscription_added_oversized_initial_data_and_reconnect_transfer_completely) | test(routes::entity_transfer::tests::) | test(cold_entity_pull_reuses_complete_seed_without_scanning_source_rows) | test(entity_pull_with_current_projections_does_not_wait_for_the_maintenance_lock)))
     | (package(=studio-runtime-store) & kind(lib) & test(entity_replay_and_patch_preserve_sequence_until_value_or_deletion_changes))
     | (package(=studio-runtime-http) & (kind(lib) | binary(integration)) & test(startup_model))
     | (package(=studio-runtime-services) & kind(lib) & test(sync_policy::tests::model_choices))

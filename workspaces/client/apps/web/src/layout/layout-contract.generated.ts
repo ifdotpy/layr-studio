@@ -405,11 +405,6 @@ export const layoutTokens = {
     unit: "px",
     purpose: "Retained style width threshold 44px, owned by slice1-contract",
   },
-  "legacy_client.width760": {
-    value: 760,
-    unit: "px",
-    purpose: "Retained client width threshold 760px, owned by slice1-contract",
-  },
   "viewport.rootFontDefault": {
     value: 16,
     unit: "px",
@@ -994,9 +989,6 @@ export const layoutValues = {
     width1050: 1050,
     dimension121: 44,
     dimension120: 44,
-  },
-  legacy_client: {
-    width760: 760,
   },
   edgeRail: {
     minInset: 64,

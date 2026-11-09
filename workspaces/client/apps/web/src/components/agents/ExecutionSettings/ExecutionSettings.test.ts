@@ -64,7 +64,6 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
           initialRole: "review",
           input: settingsInput(agent),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
         }),
       ),
     );
@@ -105,7 +104,6 @@ test.each([null, INHERITED_MODEL, "gpt-6-luna"])(
           initialRole: "review",
           input: settingsInput(agent),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
         }),
       ),
     );
@@ -133,7 +131,6 @@ test("worker settings retain the same-as-main model option", () => {
           status: AgentStatus.idle,
         }),
         catalog: { models: [], loading: false, error: "", retry: () => {} },
-        refresh: async () => {},
       }),
     ),
   );
@@ -181,7 +178,6 @@ test("shows the server reason alongside an unavailable account", () => {
           },
         ],
         catalog: { models: [], loading: false, error: "", retry: () => {} },
-        refresh: async () => {},
         onAccountChange: () => {},
       }),
     ),
@@ -228,7 +224,6 @@ test("the agent settings chooser shows exclusions even without transfer destinat
         onWorkerExcludedAccountKeysChange: () => {},
         onReviewerExcludedAccountKeysChange: () => {},
         catalog: { models: [], loading: false, error: "", retry: () => {} },
-        refresh: async () => {},
         onAccountChange: () => {},
       }),
     ),
@@ -263,7 +258,6 @@ test.each(["worker", "review"] as const)(
           onWorkerExcludedAccountKeysChange: workers,
           onReviewerExcludedAccountKeysChange: reviewers,
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
           onAccountChange: () => {},
         }),
       ),
@@ -414,7 +408,6 @@ for (const initialRole of ["orchestrator", "worker", "review"] as const) {
               error: "",
               retry: () => {},
             },
-            refresh: async () => {},
           }),
         ),
       );
@@ -445,7 +438,6 @@ for (const isLead of [true, false]) {
             status: AgentStatus.idle,
           }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
         }),
       ),
     );
@@ -474,7 +466,6 @@ for (const initialRole of ["orchestrator", "review"] as const) {
             status: AgentStatus.idle,
           }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
         }),
       ),
     );
@@ -591,7 +582,6 @@ function futureWorkerChoice() {
           },
         ],
         catalog: { models: [], loading: false, error: "", retry: vi.fn() },
-        refresh: async () => {},
       }),
     ),
   );
@@ -685,7 +675,6 @@ for (const provider of ["claude", "future"] as const) {
             status: AgentStatus.idle,
           }),
           catalog: { models: [], loading: false, error: "", retry: () => {} },
-          refresh: async () => {},
         }),
       ),
     );

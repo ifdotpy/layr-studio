@@ -219,7 +219,6 @@ function Fixture() {
               error: "",
               retry: () => window.retries++,
             }}
-            refresh={async () => {}}
           />
         </ModelCatalogFixture>
       </AgentModelsFixture>

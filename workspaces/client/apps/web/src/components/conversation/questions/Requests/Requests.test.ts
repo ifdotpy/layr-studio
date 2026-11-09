@@ -40,8 +40,7 @@ vi.mock("../../../../unsent/useUnsentText.ts", () => ({
   useUnsentText: () => [null, vi.fn(), vi.fn(async () => {})],
 }));
 let root: ReturnType<typeof requestTestRoot>;
-const refresh = vi.fn(async () => {}),
-  notify = vi.fn();
+const notify = vi.fn();
 requestTestEnvironment();
 beforeEach(() => {
   root = requestTestRoot(() => h.store?.dispose());
@@ -50,7 +49,6 @@ afterEach(async () => {
   await root.close();
   h.post.mockClear();
   h.answer.mockClear();
-  refresh.mockClear();
   notify.mockClear();
 });
 async function render(request: Approval, threadId?: string | null) {
@@ -68,7 +66,6 @@ async function render(request: Approval, threadId?: string | null) {
   ).store;
   await root.render(createElement(Requests, { all: true }), {
     scope: "server",
-    refresh,
     notify,
   });
 }
@@ -134,7 +131,6 @@ for (const decision of ["accept", "decline"] as const) {
     expect(document.querySelectorAll("[data-request]")).toHaveLength(1);
     expect(h.answer).toHaveBeenCalledTimes(1);
     expect(h.answer).toHaveBeenCalledWith("approval", { decision });
-    expect(refresh).toHaveBeenCalledTimes(1);
     expect(notify).not.toHaveBeenCalled();
   });
 }

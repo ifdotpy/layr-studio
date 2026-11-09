@@ -24,7 +24,7 @@
     "test:reliability": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance draft-sync-ui.spec message-retry-http-browser.spec",
     "test:ux": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance questions-ux-ui.spec dialog-drafts-ui.spec realtime-voice-ux-ui.spec outbox-controls-ui.spec",
     "test:ux-audit": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance ux-chat-ui.spec messages-focused-ui.spec rendering-ux-ui.spec ux-support-ui.spec browser-dictation-ux.spec limit-recovery-state-ui.spec usage-resume-notice-ui.spec disconnect-recovery-ui.spec",
-    "test:mobile": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance mobile-client-ui.spec mobile-keyboard-ui.spec message-delivery-ui.spec chat-prefetch-browser.spec chat-prefetch-ui.spec mobile-request-deadline-browser.spec outbox-controls-ui.spec mobile-loading-ui.spec",
+    "test:mobile": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance mobile-client-ui.spec mobile-keyboard-ui.spec message-delivery-ui.spec chat-prefetch-ui.spec mobile-request-deadline-browser.spec outbox-controls-ui.spec mobile-loading-ui.spec",
     "test:restart": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance upload-recovery-browser.spec scroll-restart-browser.spec draft-sync-ui.spec dialog-drafts-ui.spec outbox-controls-ui.spec workspace-ui.spec",
     "test:ux-recovery": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance ux-request-recovery-browser.spec account-project-ui.spec project-tree-ui.spec",
     "test:display": "pnpm run build && PLAYWRIGHT_INCLUDE_SPECIAL=1 playwright test --config playwright.config.ts --project=client --project=performance ui-error-boundary-browser.spec",
@@ -64,6 +64,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@playwright/test": "1.64.1",
     "@storybook/addon-vitest": "10.6.3",
     "@storybook/react-vite": "10.6.3",

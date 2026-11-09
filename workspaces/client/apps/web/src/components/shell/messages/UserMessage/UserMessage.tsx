@@ -185,7 +185,6 @@ function MessageResponse({
 }) {
   const { get, post } = useServerApi();
   const area = useConversationActions();
-  const { refresh } = area;
   const { notify } = area.notices;
   const storage = useServerStorage();
   const responseStore = complaintResponseStore(storage, scope);
@@ -241,11 +240,6 @@ function MessageResponse({
       setText((current) => (current === payload.text ? "" : current));
       if ("detail" in outcome) onResponse(outcome.detail);
       else notify(errorText(outcome.reloadError));
-      try {
-        await refresh();
-      } catch (error) {
-        notify(errorText(error));
-      }
     } catch (failure) {
       if (failure instanceof ApiError) {
         if (isDefinitiveComplaintRefusal(failure.status)) {
@@ -268,7 +262,6 @@ function MessageResponse({
               "This message changed. Review the latest response before you send again.",
             );
             try {
-              await refresh();
               onResponse(
                 await get("/api/complaint", { query: { id: detail.id } }),
               );

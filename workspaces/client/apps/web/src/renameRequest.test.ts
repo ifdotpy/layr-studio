@@ -13,22 +13,22 @@ it("a pending rename sends one POST and waits for the entity stream", async () =
   vi.stubGlobal("window", globalThis);
   const post = vi.fn(async () => ({ id: "agent", status: "pending" as const }));
   const recover = vi.fn(async () => {});
-  await submitRename({ id: "agent", request_id: "request" }, post, recover);
+  await submitRename({ id: "agent", request_id: "request" }, post);
   await vi.advanceTimersByTimeAsync(90_000);
   expect(post).toHaveBeenCalledTimes(1);
   expect(recover).not.toHaveBeenCalled();
 });
-it("a lost response performs one recovery read and preserves the uncertain result", async () => {
+it("a lost response preserves uncertainty without disturbing the entity stream", async () => {
   const lost = new TypeError("response lost");
   const post = vi.fn(async () => {
     throw lost;
   });
   const recover = vi.fn(async () => {});
   await expect(
-    submitRename({ id: "agent", request_id: "request" }, post, recover),
+    submitRename({ id: "agent", request_id: "request" }, post),
   ).rejects.toBe(lost);
   expect(post).toHaveBeenCalledTimes(1);
-  expect(recover).toHaveBeenCalledTimes(1);
+  expect(recover).not.toHaveBeenCalled();
 });
 
 it("delivers request-scoped rename failure through the generated facade without HTTP", async () => {

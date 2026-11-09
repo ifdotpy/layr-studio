@@ -738,6 +738,8 @@ it("delivers subscribed auth progress without sending its URL to the entity pers
     resource,
     value,
   });
+  await vi.advanceTimersByTimeAsync(0);
+  expect(listener).toHaveBeenCalledTimes(1);
   expect(listener).toHaveBeenCalledWith(
     expect.objectContaining({ progress: { resource, value } }),
   );
@@ -1207,6 +1209,7 @@ it("new-epoch entity fragments publish only after complete persisted staging and
   };
   f.source.emit("entity-transfer", {
     ...frame,
+    payloadKind: "entity",
     partIndex: 0,
     complete: false,
     data: encoded.slice(0, 40),
@@ -1223,6 +1226,7 @@ it("new-epoch entity fragments publish only after complete persisted staging and
   );
   f.source.emit("entity-transfer", {
     ...frame,
+    payloadKind: "entity",
     partIndex: 1,
     complete: true,
     data: encoded.slice(40),
@@ -1271,6 +1275,7 @@ it.each(["interval", "transfer"])(
         replyKind: "snapshot",
         transferId: "kept",
         pageIndex: 0,
+        payloadKind: "entity",
         partIndex: 0,
         partCount: 1,
         complete: true,
@@ -1331,6 +1336,7 @@ it("a cancelled staging failure cannot close its replacement stream", async () =
     replyKind: "snapshot",
     transferId: "cancelled",
     pageIndex: 0,
+    payloadKind: "entity",
     partIndex: 0,
     partCount: 1,
     complete: true,
@@ -1975,6 +1981,7 @@ it("staged application must not overtake an earlier resource frame", async () =>
     replyKind: "snapshot",
     transferId: "later",
     pageIndex: 0,
+    payloadKind: "entity",
     partIndex: 0,
     partCount: 1,
     complete: true,
@@ -2027,6 +2034,7 @@ it("completed staged intervals retain their pages while queued behind an ordinar
       replyKind: "snapshot",
       transferId: `interval-${revision}`,
       pageIndex: 0,
+      payloadKind: "entity",
       partIndex: 0,
       partCount: 1,
       complete: true,

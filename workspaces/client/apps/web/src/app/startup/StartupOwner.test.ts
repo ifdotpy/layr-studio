@@ -45,7 +45,6 @@ function fixture(credentialId = "first") {
     .mockResolvedValue({
       workspaceId: "workspace",
       db: { projections: new LocalCollection("startup-test") },
-      verifyWorkspace: async () => {},
     });
   let connection: Parameters<
     typeof services.resources.watchResourceConnection
@@ -114,9 +113,8 @@ it.each(["session", "database"] as const)(
     f.database.mockResolvedValue({
       workspaceId: "restored",
       db: { projections: new LocalCollection("restored") },
-      verifyWorkspace: async () => {},
     });
-    await f.owner.refresh();
+    await f.owner.refreshCredentials();
     expect(f.owner.error).toBe("");
   },
 );
@@ -230,7 +228,6 @@ it("shows a generated state query failure before its first value and reload reco
       createEntityDataObserver(async () => ({
         workspaceId: "workspace",
         db: { projections },
-        verifyWorkspace: async () => {},
       })),
     );
     const store = createServerStore(resources);

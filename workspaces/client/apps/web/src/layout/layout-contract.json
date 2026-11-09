@@ -380,11 +380,6 @@
       "unit": "px",
       "purpose": "Retained style width threshold 44px, owned by slice1-contract"
     },
-    "legacy_client.width760": {
-      "value": 760,
-      "unit": "px",
-      "purpose": "Retained client width threshold 760px, owned by slice1-contract"
-    },
     "viewport.rootFontDefault": {
       "value": 16,
       "unit": "px",
@@ -1470,15 +1465,6 @@
       "key": "legacy_style.dimension122",
       "count": 1,
       "purpose": "Retained dimension consumer in style",
-      "plannedOwner": "slice1-contract"
-    },
-    {
-      "path": "src/sync/client.ts",
-      "kind": "query",
-      "signature": "matchMedia(\"(max-width: 760px)\"",
-      "key": "legacy_client.width760",
-      "count": 1,
-      "purpose": "Retained query consumer in client",
       "plannedOwner": "slice1-contract"
     },
     {

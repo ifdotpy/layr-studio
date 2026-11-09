@@ -569,7 +569,7 @@ describe("resource read callers", () => {
     const item = queue.items[0]!;
     await queue.sendNow(item);
     expect(syncPost).toHaveBeenCalledOnce();
-    expect(reconnect).toHaveBeenCalledOnce();
+    expect(reconnect).not.toHaveBeenCalled();
     expect(get).not.toHaveBeenCalled();
     publishQueue("v2", null);
     expect(mount(() => useMessageQueue(props)).items).toEqual([]);
@@ -598,7 +598,6 @@ describe("resource read callers", () => {
         enabled: true,
         scope: "scope",
         workspaceId: "workspace",
-        refresh: vi.fn(async () => {}),
       }),
     );
     syncPost.mockRejectedValueOnce(new ApiError("signature conflict", 409));

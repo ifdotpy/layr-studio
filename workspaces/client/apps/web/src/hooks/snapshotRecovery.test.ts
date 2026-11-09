@@ -84,7 +84,6 @@ it.each(["credentials", "database"])(
     h.database.mockResolvedValue({
       workspaceId: "workspace",
       db: { projections: new LocalCollection("snapshot-test") },
-      verifyWorkspace: async () => {},
     });
     h.session.mockResolvedValue({ token: "token" });
     const read = boundary === "credentials" ? h.session : h.database;
@@ -108,7 +107,7 @@ it.each(["credentials", "database"])(
     h.connection?.("live", "open", {});
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(read).toHaveBeenCalledTimes(READ_RECOVERY_MAX_ATTEMPTS * 2);
-    await hook.refresh(true);
+    await hook.refreshCredentials(true);
     await vi.advanceTimersByTimeAsync(5 * 60_000);
     expect(read).toHaveBeenCalledTimes(READ_RECOVERY_MAX_ATTEMPTS * 3);
   },
@@ -121,7 +120,6 @@ it.each([true, false])(
     h.database.mockResolvedValue({
       workspaceId: "workspace",
       db: { projections: new LocalCollection("snapshot-test") },
-      verifyWorkspace: async () => {},
     });
     h.session.mockResolvedValue({ token: "token" });
     mountStartup();
@@ -171,7 +169,6 @@ it.each([
     h.database.mockResolvedValue({
       workspaceId: "workspace",
       db: { projections: new LocalCollection("snapshot-test") },
-      verifyWorkspace: async () => {},
     });
     h.session.mockResolvedValue({ token: "token" });
     mountStartup();
@@ -196,7 +193,6 @@ it("shows the scheduled retry deadline in the snapshot warning", () => {
   h.database.mockResolvedValue({
     workspaceId: "workspace",
     db: { projections: new LocalCollection("snapshot-test") },
-    verifyWorkspace: async () => {},
   });
   h.session.mockResolvedValue({ token: "token" });
   mountStartup();

@@ -285,7 +285,6 @@ const meta = {
                         <ExecutionSettings
                           agent={lead}
                           catalog={catalog}
-                          refresh={async () => {}}
                           settingsRow
                           initialRole={role}
                         />

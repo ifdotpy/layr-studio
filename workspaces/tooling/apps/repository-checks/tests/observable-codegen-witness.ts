@@ -145,6 +145,7 @@ export type ResourceData<R extends ResourceRef> = SubscriptionDataMap[R['kind']]
     "src/store/runtime.ts",
     `
     import type { DeepReadonly } from '../deepReadonly.ts';
+    import type { ResourceVersion } from '${join(web, "src/sync/subscriptions/contracts.ts")}';
     import type { ResourceRef, ResourceData, SubscriptionError } from '../sync/subscriptions/contracts.ts';
     ${declarations("src/store/runtime.ts", ["ResourceStatus", "ResourceSlot", "ResourceDefinition", "ObservableResourceRuntime"])}
   `,

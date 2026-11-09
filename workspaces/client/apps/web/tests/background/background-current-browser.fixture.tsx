@@ -17,10 +17,6 @@ declare global {
       leadId?: string,
       focus?: Focus,
     ) => void;
-    refreshCalls: number;
-    holdRefresh: boolean;
-    resolveRefresh: () => void;
-    rejectRefresh: (reason: Error) => void;
     notifications: string[];
   }
 }
@@ -83,18 +79,8 @@ window.renderFixture = (data, listing, leadId = "lead", initialFocus) => {
             leadId,
             initialFocus,
             openAgent: () => {},
-            refresh: async () => {
-              window.refreshCalls = (window.refreshCalls || 0) + 1;
-              window.dispatchEvent(new Event("fixture-refresh"));
-              if (window.holdRefresh)
-                await new Promise<void>((resolve, reject) => {
-                  window.resolveRefresh = resolve;
-                  window.rejectRefresh = reject;
-                });
-            },
             notify: (error) => {
               (window.notifications ??= []).push(error);
-              window.dispatchEvent(new Event("fixture-notification"));
             },
           }),
         }),

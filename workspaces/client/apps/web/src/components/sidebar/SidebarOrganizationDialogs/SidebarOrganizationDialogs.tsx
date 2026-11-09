@@ -61,7 +61,6 @@ export const SidebarOrganizationDialogs = observer(
                   target={conversion.target}
                   scope={sidebar.stateDir}
                   saved={async () => {
-                    await sidebar.refresh();
                     sidebar.openChat(conversion.target.id);
                     sidebar.setConversion(null);
                   }}

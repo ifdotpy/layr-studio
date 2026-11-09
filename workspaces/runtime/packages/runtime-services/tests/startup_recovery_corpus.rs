@@ -390,6 +390,9 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
         assert_eq!(fields.remove("needsTitle"), Some(json!(false)));
         fields.insert("capacity".into(), json!({"kind":"automatic","max":64}));
         fields.insert("naming".into(), json!("automatic"));
+        // The initial review-model migration backfills this historical root.
+        fields.get_mut("reviewDefaults").unwrap()["model"] =
+            json!(studio_runtime_schema::provider_kind::initial_review_model());
         fields.remove("workspaceBackend");
         if fields.remove("yoloMode") == Some(json!(true)) {
             fields.insert("permissionMode".into(), json!("bypassPermissions"));
@@ -401,6 +404,8 @@ async fn python_constructor_and_rust_startup_match_requests_monitors_events_and_
             let fields = projection["payload"]["value"].as_object_mut().unwrap();
             fields.insert("capacity".into(), json!({"kind":"automatic","max":64}));
             fields.insert("naming".into(), json!("automatic"));
+            fields.get_mut("reviewDefaults").unwrap()["model"] =
+                json!(studio_runtime_schema::provider_kind::initial_review_model());
             fields.remove("workspaceBackend");
             if fields.remove("yoloMode") == Some(json!(true)) {
                 fields.insert("permissionMode".into(), json!("bypassPermissions"));

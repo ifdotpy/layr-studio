@@ -61,7 +61,7 @@ createRoot(document.getElementById("root")!).render(
           onClose={() => {}}
           agent={agent}
           onSelect={() => {}}
-          refresh={async () => {}}
+
           notify={() => {}}
         />
       </AgentModelsFixture>

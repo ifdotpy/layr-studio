@@ -61,6 +61,7 @@ function historyFixture(dto: Parameters<typeof createTranscriptMirror>[0]) {
     },
     { syncGet },
     {
+      watchResourceChanges: () => () => {},
       watchResourceConnection(accept) {
         connection = accept;
         return () => {};

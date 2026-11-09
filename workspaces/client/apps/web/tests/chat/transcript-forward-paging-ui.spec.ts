@@ -2,7 +2,6 @@ import { cacheFixture } from "../cacheFixture.ts";
 import { required } from "../teams/helpers.ts";
 import {
   API_SCHEMA_HASH_HEADER,
-  entityPullFixtureForRequest,
   handleEntitySyncFixtureRequest,
   readApiSchemaHash,
   readFixtureSyncContract,
@@ -64,6 +63,8 @@ for (const scenario of [
           !handleEntitySyncFixtureRequest(request, response, {
             snapshot: state,
             workspaceId: syncContract.identity.workspaceId,
+            transcriptSnapshot: (resource) =>
+              resource.agentId === lead.id ? initialTranscript : undefined,
           })
         )
           response.end();
@@ -90,8 +91,14 @@ for (const scenario of [
         after: string | null;
       }[] = [];
       page.on("request", (request) => {
-        if (new URL(request.url()).pathname === "/api/transcript")
+        const url = new URL(request.url());
+        if (url.pathname === "/api/transcript")
           transcriptRestReads.push(request.url());
+        if (url.pathname === "/api/sync/pull")
+          transcriptSyncPulls.push({
+            scope: url.searchParams.get("scope") || "",
+            after: url.searchParams.get("after") || "0",
+          });
       });
       await page.addInitScript(({ key, id }) => localStorage.setItem(key, id), {
         key: `codex-desktop-opened:${state.stateDir}`,
@@ -99,7 +106,7 @@ for (const scenario of [
       });
       const initialTranscript = {
         agent: {
-          ...lead,
+          id: lead.id,
           status: "completed",
           inFlight: false,
           turnId: null,
@@ -111,25 +118,6 @@ for (const scenario of [
         historyVersion: "forward-paging-fixture",
         tail: items.at(-1)!.id,
       } satisfies NonNullable<EntityPullFixtureOptions["transcript"]>;
-      await page.route("**/api/sync/pull**", async (route) => {
-        const url = new URL(route.request().url());
-        const scope = url.searchParams.get("scope");
-        if (scope !== `transcript:${lead.id}`) return route.continue();
-        transcriptSyncPulls.push({
-          scope,
-          after: url.searchParams.get("after") || "0",
-        });
-        const projection = entityPullFixtureForRequest(state, url, {
-          transcript: initialTranscript,
-        });
-        await route.fulfill({
-          headers: schemaHeaders,
-          json: {
-            workspaceId: syncContract.identity.workspaceId,
-            ...projection,
-          },
-        });
-      });
       let releaseOlder: (() => void) | undefined;
       const olderStarted = Promise.withResolvers<void>();
       let releaseForward: (() => void) | undefined;
@@ -501,12 +489,10 @@ for (const scenario of [
         forwardPages > 0,
         "the held window advances through forward pages",
       );
-      assert.ok(
-        transcriptSyncPulls.some(
-          (pull) =>
-            pull.scope === `transcript:${lead.id}` && pull.after === "0",
-        ),
-        "the initial transcript arrives through the active transcript sync pull",
+      assert.deepEqual(
+        transcriptSyncPulls,
+        [],
+        "the initial transcript arrives through SSE without automatic pulls",
       );
       assert.equal(
         transcriptRestReads.length,

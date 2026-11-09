@@ -532,32 +532,15 @@ mod tests {
             (rows(&db), journal(&db), catalog(&db, "trigger"))
         };
         drop(store);
-        let mut migrated_rows = before.0;
-        for (_, id, raw) in &mut migrated_rows {
-            if id == "lead" || id == "bare" {
-                assert!(!raw.contains("\"reviewDefaults\""));
-                *raw = format!(
-                    "{},\"reviewDefaults\":{{\"model\":\"gpt-6-astra\"}}}}",
-                    raw.strip_suffix('}').expect("root object")
-                );
-            }
-        }
+        let migrated_rows = before.0;
         let mut previous_indexes = None;
-        let mut migrated_journal = None;
         for _ in 0..2 {
             let store = RuntimeStore::open(Some(root.path()))
                 .await
                 .expect("legacy state migrates");
             let db = store.test_reader().expect("reader");
             assert_eq!(rows(&db), migrated_rows);
-            let current_journal = journal(&db);
-            if let Some(expected) = &migrated_journal {
-                assert_eq!(&current_journal, expected);
-            } else {
-                // The two review-model writes publish their ordinary record changes.
-                assert_ne!(current_journal, before.1);
-                migrated_journal = Some(current_journal);
-            }
+            assert_eq!(journal(&db), before.1);
             assert_eq!(catalog(&db, "trigger"), before.2);
             let dependent: i64 = db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name='runtime_agents' AND sql LIKE '%start_attempt_%'", [], |row| row.get(0)).expect("index definitions");
             assert_eq!(dependent, 0);

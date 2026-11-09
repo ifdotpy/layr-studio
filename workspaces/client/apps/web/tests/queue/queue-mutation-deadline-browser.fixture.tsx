@@ -1,4 +1,6 @@
 import "../../src/rendererStyles.ts";
+import { observableFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
+import type { QueueEntityDto } from "../../src/generated/observableResources.ts";
 import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { useMessageQueue } from "../../src/components/conversation/support/useMessageQueue.ts";
@@ -6,6 +8,7 @@ import type { removeSendingMessage } from "../../src/app/conversation/delivery/r
 
 declare global {
   interface Window {
+    receiveDeadlineQueue(view: QueueEntityDto): void;
     queue: ReturnType<typeof useMessageQueue>;
     observed: string[][];
     edited: Array<{ id: string; text: string }>;
@@ -28,7 +31,6 @@ function Harness({ workspaceId }: { workspaceId: string }) {
     enabled: true,
     scope: "deadline-fixture",
     workspaceId,
-    refresh: async () => {},
     observed: (ids) => window.observed.push(ids),
     edited: (id, text) => window.edited.push({ id, text }),
   });
@@ -36,7 +38,14 @@ function Harness({ workspaceId }: { workspaceId: string }) {
 }
 
 export function mount(workspaceId: string) {
+  const models = observableFixture();
+  window.receiveDeadlineQueue = (value) =>
+    models.apply([{ collection: "queue", id: "chat", value }]);
   const root = createRoot(document.body);
-  root.render(<Harness workspaceId={workspaceId} />);
+  root.render(
+    <models.Provider>
+      <Harness workspaceId={workspaceId} />
+    </models.Provider>,
+  );
   return root;
 }

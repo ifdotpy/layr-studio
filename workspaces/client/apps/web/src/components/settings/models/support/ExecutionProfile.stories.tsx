@@ -293,7 +293,6 @@ function InlineSettings({ worker = false }: { worker?: boolean }) {
               error: "",
               retry: () => {},
             }}
-            refresh={async () => {}}
           />
         </Stack>
       </>
@@ -351,7 +350,6 @@ export const ComposerRolePopover: Story = {
               error: "",
               retry: () => {},
             }}
-            refresh={async () => {}}
             renderTrigger={({
               agent,
               detail,

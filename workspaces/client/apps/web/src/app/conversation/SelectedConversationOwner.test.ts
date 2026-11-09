@@ -316,3 +316,169 @@ it("plan and limit recovery follow the selected agent account A to B to A", () =
     f.dispose();
   }
 });
+
+it.each(["before-final-failure", "after-final-failure"] as const)(
+  "streamed read confirmation %s settles uncertainty without another write",
+  async (timing) => {
+    vi.useFakeTimers();
+    const f = ownerFixture();
+    const proof = { id: "lead", threadId: "thread", turnId: "turn" };
+    const publish = (read: boolean, revision: number) => {
+      const agent = f.models.mirror.current.agents.get("lead")!;
+      f.models.apply([
+        ...serializeStateCollections(f.models.mirror.current).filter(
+          (row) => row.collection !== "agentSummary" || row.id !== "lead",
+        ),
+        {
+          collection: "agentSummary",
+          id: "lead",
+          value: {
+            ...agent,
+            markRead: { ...proof, read, revision },
+            readState: {
+              threadId: proof.threadId,
+              turnId: proof.turnId,
+              read,
+              revision,
+            },
+          },
+        },
+      ]);
+    };
+    publish(false, 0);
+    const stop = f.read.start();
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    const replace = vi.spyOn(f.services.resources, "replaceStream");
+    f.post.mockImplementation(async () => {
+      if (timing === "before-final-failure" && f.post.mock.calls.length === 3)
+        publish(true, 1);
+      throw new TypeError("Read response lost");
+    });
+    try {
+      const write = f.read.write(proof, true);
+      await vi.advanceTimersByTimeAsync(3100);
+      await write;
+      if (timing === "after-final-failure") publish(true, 1);
+      expect(f.read.scope.uncertain.has("lead")).toBe(false);
+      if (timing === "before-final-failure")
+        expect(f.notify).not.toHaveBeenCalled();
+      f.notify.mockClear();
+      const sent = f.post.mock.calls.length;
+      f.read.select("lead");
+      await vi.advanceTimersByTimeAsync(3100);
+      expect(f.post).toHaveBeenCalledTimes(sent);
+      expect(f.notify).not.toHaveBeenCalled();
+      expect(f.services.sync.refreshState).not.toHaveBeenCalled();
+      expect(replace).not.toHaveBeenCalled();
+    } finally {
+      stop();
+      f.dispose();
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  },
+);
+
+it("accepts an idempotent read receipt with the existing confirmed revision", async () => {
+  const f = ownerFixture();
+  const proof = { id: "lead", threadId: "thread", turnId: "turn" };
+  const agent = f.models.mirror.current.agents.get("lead")!;
+  const readState = {
+    threadId: "thread",
+    turnId: "turn",
+    read: false,
+    revision: 1,
+  };
+  f.models.apply([
+    {
+      collection: "agentSummary",
+      id: "lead",
+      value: {
+        ...agent,
+        markRead: readState,
+        readState,
+      },
+    },
+  ]);
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  f.post.mockResolvedValue({
+    id: "lead",
+    readState: { ...readState, read: true },
+  });
+  try {
+    await f.read.write(proof, true);
+    expect(f.read.scope.states.get("lead")).toMatchObject({
+      read: true,
+      revision: 1,
+    });
+    expect(f.notify).not.toHaveBeenCalled();
+  } finally {
+    f.dispose();
+    vi.restoreAllMocks();
+  }
+});
+
+it("a superseding Unread stream settles a lost Read and confirms an idempotent lost Unread", async () => {
+  vi.useFakeTimers();
+  const f = ownerFixture();
+  const proof = { id: "lead", threadId: "thread", turnId: "turn" };
+  const publish = (read: boolean, revision: number) => {
+    const agent = f.models.mirror.current.agents.get("lead")!;
+    const state = {
+      threadId: proof.threadId,
+      turnId: proof.turnId,
+      read,
+      revision,
+    };
+    f.models.apply([
+      {
+        collection: "agentSummary",
+        id: "lead",
+        value: {
+          ...agent,
+          markRead: state,
+          readState: state,
+        },
+      },
+    ]);
+  };
+  publish(false, 0);
+  const stop = f.read.start();
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  const replace = vi.spyOn(f.services.resources, "replaceStream");
+  f.post.mockRejectedValue(new TypeError("Read response lost"));
+  try {
+    const read = f.read.write(proof, true);
+    await vi.advanceTimersByTimeAsync(3100);
+    await read;
+    expect(f.read.scope.uncertain.has("lead")).toBe(true);
+    // Another client committed Unread after our Read, before its SSE arrived.
+    publish(false, 2);
+    expect(f.read.scope.uncertain.has("lead")).toBe(false);
+    // Explicit idempotent Unread has the same canonical revision and loses its receipt.
+    f.notify.mockClear();
+    await f.read.write(proof, false, {
+      threadId: "thread",
+      turnId: "turn",
+      read: true,
+      revision: 2,
+    });
+    publish(false, 2);
+    expect(f.read.scope.uncertain.has("lead")).toBe(false);
+    expect(f.read.scope.states.get("lead")).toMatchObject({
+      read: false,
+      revision: 2,
+    });
+    expect(f.notify).not.toHaveBeenCalled();
+    expect(f.services.sync.refreshState).not.toHaveBeenCalled();
+    expect(replace).not.toHaveBeenCalled();
+  } finally {
+    stop();
+    f.dispose();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
+});

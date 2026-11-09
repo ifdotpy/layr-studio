@@ -232,7 +232,7 @@ test("Sync http connection budget browser", async ({
     const started = Date.now();
     await pages[0].evaluate(() => {
       window.refresh =
-        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refresh();
+        window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials();
     });
     await pages[0].waitForFunction(
       () =>
@@ -295,36 +295,11 @@ test("Sync http connection budget browser", async ({
       "a shared invalidation must reconcile through the authoritative pull",
     );
 
-    // Slow background history must retain capacity for reads and durable writes.
-    await Promise.all(
-      pages.map((page, index) =>
-        page.evaluate(
-          ({ workspaceId, index }) => {
-            window.warm = window
-              .prefetchTranscript(workspaceId, "warm-" + index)
-              .catch(() => false);
-          },
-          { workspaceId, index },
-        ),
-      ),
-    );
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    assert.equal(held.size, 2);
-    await Promise.all(
-      pages.map((page) =>
-        page.evaluate(async (workspaceId) => {
-          if (await window.prefetchTranscript(workspaceId, "warm-over-limit"))
-            throw new Error(
-              "a second background history request exceeded the limit",
-            );
-        }, workspaceId),
-      ),
-    );
     const controlStarted = Date.now();
     await Promise.all(
       pages.map((page, index) =>
         page.evaluate(async (index) => {
-          await window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refresh();
+          await window.syncHttpConnectionBudgetBrowserFixtureSnapshot.startup.refreshCredentials();
           const id = "exact-request-" + index;
           const receipt = await window.durableSend({
             id,

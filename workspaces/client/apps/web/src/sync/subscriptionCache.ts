@@ -367,6 +367,7 @@ export function createSubscriptionCache(
             () =>
               loaded.get(id) === result &&
               policies.get(id) !== SubscriptionCachePolicy.noCache,
+            ref.kind === "state" ? "state:entities:complete" : cursorId,
           );
           if (applied) await touch(id, byteLength(raw)).catch(() => {});
           return applied ? value.cursor : undefined;

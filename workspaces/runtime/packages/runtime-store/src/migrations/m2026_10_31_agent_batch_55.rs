@@ -225,13 +225,7 @@ mod tests {
             )
             .unwrap();
         let value: studio_json::Value = studio_json::from_str(&before).unwrap();
-        assert_eq!(
-            before,
-            format!(
-                "{},\"reviewDefaults\":{{\"model\":\"gpt-6-astra\"}}}}",
-                original.strip_suffix('}').expect("root object")
-            )
-        );
+        assert_eq!(before, original);
         assert_eq!(
             value["error"]["studioRawEvidence"],
             studio_json::json!({"message":"failed","data":{"id":1}})

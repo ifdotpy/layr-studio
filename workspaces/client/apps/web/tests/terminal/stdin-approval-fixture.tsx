@@ -57,7 +57,7 @@ createRoot(document.getElementById("root")!).render(
       },
       React.createElement(
         RequestArea,
-        { scope: "fixture", refresh: async () => {}, notify: () => {} },
+        { scope: "fixture", notify: () => {} },
         React.createElement(Requests, { all: true }),
       ),
     ),

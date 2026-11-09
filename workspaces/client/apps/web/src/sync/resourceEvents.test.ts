@@ -243,6 +243,70 @@ describe("shared resource event transport", () => {
     ]);
     stop();
   });
+  it.each(["auth-progress", "rename-progress"] as const)(
+    "orders %s behind the preceding resource application",
+    async (kind) => {
+      syncDatabase.mockResolvedValue({ workspaceId });
+      const transport = await loadTransport();
+      const client = await import("./client.ts");
+      const write = Promise.withResolvers<void>();
+      vi.mocked(client.persistResourceEntityChanges).mockImplementationOnce(
+        () => write.promise,
+      );
+      const resource =
+        kind === "auth-progress"
+          ? ({ kind, requestId: "login" } as const)
+          : ({ kind, agentId: "agent", requestId: "login" } as const);
+      const accept = vi.fn();
+      transport.watchResourceChanges(resource, accept);
+      await vi.advanceTimersByTimeAsync(0);
+      const source = Source.instances[0]!;
+      try {
+        source.emit("resources", {
+          protocol: 4,
+          workspaceId,
+          epoch: "one",
+          revision: 6,
+          reason: "initial",
+          resources: [resource],
+          resourceVersions: [{ resource, revision: 1 }],
+        });
+        source.emit("resource-progress", {
+          protocol: 4,
+          workspaceId,
+          epoch: "one",
+          revision: 6,
+          resource,
+          value:
+            kind === "auth-progress"
+              ? {
+                  requestId: "login",
+                  accountKey: "default",
+                  status: "pending",
+                  userCode: "ABCD-1234",
+                }
+              : {
+                  id: "agent",
+                  request_id: "login",
+                  status: "failed",
+                  error: "No title",
+                },
+        });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(accept).not.toHaveBeenCalled();
+        write.resolve();
+        await vi.advanceTimersByTimeAsync(0);
+        expect(
+          accept.mock.calls.map(([version]) =>
+            version.progress ? "progress" : "hint",
+          ),
+        ).toEqual(["hint", "progress"]);
+      } finally {
+        write.resolve();
+      }
+    },
+  );
+
   it("delivers rename failure as transient progress for its exact agent and request", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
     const transport = await loadTransport();
@@ -269,6 +333,7 @@ describe("shared resource event transport", () => {
       resource,
       value,
     });
+    await vi.advanceTimersByTimeAsync(0);
     expect(accept).toHaveBeenCalledOnce();
     assert.ok(accept.mock.calls[0] != null);
     expect(accept.mock.calls[0][0].progress).toEqual({ resource, value });
@@ -700,7 +765,7 @@ describe("shared resource event transport", () => {
     },
   );
 
-  it("suppresses only the exact entity sequence batch applied from a response", async () => {
+  it("dispatches every newer entity sequence batch and suppresses duplicate revisions", async () => {
     syncDatabase.mockResolvedValue({ workspaceId });
 
     const transport = await loadTransport();
@@ -742,14 +807,13 @@ describe("shared resource event transport", () => {
       revision: 1,
       entitySequence: 1,
     });
-    transport.acknowledgeEntitySequences([2, 3], workspaceId);
     emit(3, [2, 3]);
     await Promise.resolve();
-    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledTimes(2);
 
     emit(4, [2, 4]);
     await vi.advanceTimersByTimeAsync(20);
-    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenCalledTimes(3);
     expect(onChange).toHaveBeenLastCalledWith({
       epoch: "epoch-one",
       revision: 4,
@@ -764,15 +828,14 @@ describe("shared resource event transport", () => {
       resources: [state],
     });
     await vi.advanceTimersByTimeAsync(20);
-    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(onChange).toHaveBeenCalledTimes(4);
 
-    transport.acknowledgeEntitySequences([5, 6], workspaceId);
     emit(6, [5, 6]);
     await vi.advanceTimersByTimeAsync(30);
-    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(onChange).toHaveBeenCalledTimes(5);
     emit(7, [5, 6], 6);
     await vi.advanceTimersByTimeAsync(30);
-    expect(onChange).toHaveBeenCalledTimes(3);
+    expect(onChange).toHaveBeenCalledTimes(5);
     stop();
   });
 

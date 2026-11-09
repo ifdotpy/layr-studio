@@ -19,14 +19,30 @@ runtime components.
 
 ## Invalidation and snapshots
 
-Protocol-3 resource notifications invalidate subscribed projections after
-their source writes commit. These transient notification revisions do not
-replace the durable entity and transcript pull checkpoints. Compact per-agent
-transcript revisions avoid rebuilding a page after an unrelated commit.
+Protocol-4 subscriptions deliver committed snapshots and deltas over SSE. Each
+server owns its durable cursor space. Entity scopes read changes since the
+applied cursor, or a replacement snapshot when that cursor cannot resume.
+Notification revisions remain separate from durable entity and transcript
+checkpoints. Compact per-agent transcript revisions avoid rebuilding a page
+after an unrelated commit.
+
+The renderer applies typed batches through one per-database queue, including
+cache hydration and data-plus-cursor capture for IndexedDB. Interrupted transfers
+publish no cursor. Reconnect resumes from the applied cursor; entity, transcript,
+and view delivery has no automatic HTTP recovery adapter. Explicit history
+paging remains a bounded user-action read.
+
+Oversized entity, transcript, and view payloads share the `entity-transfer`
+fragmentation contract. Its required `payloadKind` selects entity pages or one
+complete transcript/view resource entry. Completion publishes the payload and
+its cursor together. Deltas preserve loaded older history; a snapshot replaces
+the window, and an explicit history page can restore older rows after a reset.
 
 ## Transaction ownership
 
-Entity pulls use a committed SQLite read snapshot with `query_only` enabled.
+Entity subscription intervals use one committed SQLite read snapshot with
+`query_only` enabled for all their pages. The explicit pull endpoint shares
+the same source reader.
 They neither claim the writer nor repair projections, retire windows, or
 schedule cleanup. Initialization upgrades and repairs existing views before
 the server accepts requests. Runtime attachment prepares projections and

@@ -19660,7 +19660,7 @@ export interface components {
       /** Workspaceid */
       workspaceId: string;
     };
-    /** @description Bounded entity-transfer SSE fragment. Each completed page decodes to one canonical EntityChangeBatch; only complete=true commits the staged interval. */
+    /** @description Bounded SSE transfer fragment. Entity pages decode to EntityChangeBatch; transcript and view pages decode to a full ResourceRevisionEntry. Only complete=true commits the staged interval. */
     ResourceEntityTransferEvent: {
       complete: boolean;
       cursor: components["schemas"]["SubscriptionCursor"];
@@ -19670,6 +19670,8 @@ export interface components {
       pageIndex: number;
       partCount: number;
       partIndex: number;
+      /** @enum {string} */
+      payloadKind: "entity" | "transcript" | "view";
       /**
        * Protocol
        * @constant

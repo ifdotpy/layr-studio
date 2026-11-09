@@ -15,6 +15,8 @@ type QueuedFrame = {
   prerequisite?: Promise<boolean>;
   operation?: {
     persist(isCurrent: () => boolean): Promise<void>;
+    /** Transient progress publishes through this FIFO without projection writes. */
+    dispatch?(): void;
     dispose(): void;
   };
 };
@@ -208,7 +210,8 @@ export class ResourceEntityDelivery {
           }
           if (isCurrent()) {
             this.current = undefined;
-            this.dispatch(event);
+            if (queued.operation?.dispatch) queued.operation.dispatch();
+            else this.dispatch(event);
           }
         } finally {
           queued.operation?.dispose();

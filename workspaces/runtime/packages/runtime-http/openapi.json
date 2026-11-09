@@ -44363,7 +44363,7 @@
       },
       "ResourceEntityTransferEvent": {
         "additionalProperties": false,
-        "description": "Bounded entity-transfer SSE fragment. Each completed page decodes to one canonical EntityChangeBatch; only complete=true commits the staged interval.",
+        "description": "Bounded SSE transfer fragment. Entity pages decode to EntityChangeBatch; transcript and view pages decode to a full ResourceRevisionEntry. Only complete=true commits the staged interval.",
         "properties": {
           "complete": {
             "type": "boolean"
@@ -44394,6 +44394,14 @@
             "maximum": 9007199254740991,
             "minimum": 0,
             "type": "integer"
+          },
+          "payloadKind": {
+            "enum": [
+              "entity",
+              "transcript",
+              "view"
+            ],
+            "type": "string"
           },
           "protocol": {
             "const": 4,
@@ -44450,7 +44458,8 @@
           "partIndex",
           "partCount",
           "complete",
-          "data"
+          "data",
+          "payloadKind"
         ],
         "type": "object"
       },

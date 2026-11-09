@@ -291,9 +291,6 @@ export class CreationOwner {
         this.acceptCreated(receipt, intent, generation);
       });
       if (!this.isCurrent(intent, generation)) return null;
-      void this.areas
-        .refresh()
-        .catch((failure) => this.areas.notices.notify(errorText(failure)));
       return receipt.id;
     } catch (failure) {
       const settled = chatCreations.settleFailedChatCreation(

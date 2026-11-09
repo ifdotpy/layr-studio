@@ -637,7 +637,6 @@ const PersonalFeed = observer(function PersonalFeed({
   focusRequestId: string | undefined;
 }) {
   const area = useConversationActions();
-  const { refresh } = area;
   const { notify } = area.notices;
   const requests = useRequestsView({ all: true });
   useMessageRenderProbe("personal-feed");
@@ -646,7 +645,7 @@ const PersonalFeed = observer(function PersonalFeed({
     requests.allRequests.filter(isPending),
   ).sort((a, b) => (a.created || 0) - (b.created || 0));
   return (
-    <RequestArea scope={stateDir} refresh={refresh} notify={notify}>
+    <RequestArea scope={stateDir} notify={notify}>
       {items.map((item) => {
         const request = "request" in item;
         const id = (request ? "request:" : "complaint:") + item.id;

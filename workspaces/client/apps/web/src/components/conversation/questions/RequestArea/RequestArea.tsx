@@ -36,7 +36,6 @@ export type RequestModel =
     : never;
 type RequestCommands = {
   scope: string;
-  refresh(): Promise<void>;
   notify(message: string): void;
   onAnswerOpen?: (() => void) | undefined;
   onAnswerPosition?: ((node: HTMLElement) => void) | undefined;
@@ -47,10 +46,10 @@ export function RequestArea({
   children,
   ...commands
 }: RequestCommands & { children?: ReactNode }) {
-  const { scope, refresh, notify, onAnswerOpen, onAnswerPosition } = commands;
+  const { scope, notify, onAnswerOpen, onAnswerPosition } = commands;
   const value = useMemo(
-    () => ({ scope, refresh, notify, onAnswerOpen, onAnswerPosition }),
-    [scope, refresh, notify, onAnswerOpen, onAnswerPosition],
+    () => ({ scope, notify, onAnswerOpen, onAnswerPosition }),
+    [scope, notify, onAnswerOpen, onAnswerPosition],
   );
   return <Provider value={value}>{children}</Provider>;
 }
@@ -212,7 +211,6 @@ export function useRequestView(request: RequestModel) {
           runInAction(() => {
             this.open = false;
           });
-          await latest.current.refresh();
           return true;
         } catch (error) {
           if (
@@ -258,7 +256,6 @@ export function useRequestView(request: RequestModel) {
             runInAction(() => {
               this.open = false;
             });
-          await latest.current.refresh();
         } catch (error) {
           if (this.mounted) {
             runInAction(() => {

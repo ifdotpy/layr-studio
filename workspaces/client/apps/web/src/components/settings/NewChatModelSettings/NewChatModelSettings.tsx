@@ -237,7 +237,6 @@ const ModelDraft = observer(function ModelDraft({
         input={{ kind: "draft", draft: agent }}
         catalog={catalog}
         accounts={accounts?.accounts || []}
-        refresh={async () => {}}
         presentation="panel"
         settingsRow
         showAccountSummary

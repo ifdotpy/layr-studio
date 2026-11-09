@@ -8,149 +8,49 @@ import {
 } from "./entitySequence.ts";
 
 describe("entity sequence checkpoint", () => {
-  it("requires contiguous coverage for in-flight, gate, and persister advancement", async () => {
+  it("publishes coverage only after contiguous data is persisted", async () => {
     const checkpoint = new EntitySequenceCheckpoint();
     checkpoint.assign(100);
-    const resetVersion = checkpoint.resetVersion;
-    const token = checkpoint.beginInFlightCoverage(100, 102)!;
-
-    // A foreign commit is pulled between this response's sampled `after` and
-    // its own row. The same after <= checkpoint < through rule allows it.
-    checkpoint.assignWithinEpoch(101);
-    expect(checkpoint.effectiveCoverage()).toBe(102);
+    let finish!: () => void;
+    const persistence = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const pending = checkpoint.advanceIfContiguous(
+      100,
+      102,
+      checkpoint.resetVersion,
+      100,
+      () => persistence,
+    );
+    expect(checkpoint.covers(102)).toBe(false);
     expect(
-      await checkpoint.advanceIfContiguous(
-        100,
-        102,
-        resetVersion,
-        101,
-        async () => {},
-      ),
-    ).toBe(true);
-    checkpoint.settleInFlightCoverage(token);
-    expect(checkpoint.value).toBe(102);
-    expect(
-      entitySequenceInvalidationCovered(
-        checkpoint.effectiveCoverage(),
-        102,
-        false,
-      ),
-    ).toBe(true);
-  });
-
-  it("covers invalidations during and after advancing a foreign commit", async () => {
-    for (const frameOrder of ["during-response", "after-response"] as const) {
-      const checkpoint = new EntitySequenceCheckpoint();
-      checkpoint.assign(100);
-      const resetVersion = checkpoint.resetVersion;
-      const coverage = checkpoint.beginInFlightCoverage(100, 102)!;
-      checkpoint.assignWithinEpoch(101);
-
-      if (frameOrder === "during-response") {
-        expect(checkpoint.coversWithInFlight(102)).toBe(true);
-        checkpoint.markInFlightCoverageUsed(102);
-      }
-      expect(
-        await checkpoint.advanceIfContiguous(
-          100,
-          102,
-          resetVersion,
-          101,
-          async () => {},
-        ),
-      ).toBe(true);
-      checkpoint.settleInFlightCoverage(coverage);
-      expect(
-        entitySequenceInvalidationCovered(
-          checkpoint.effectiveCoverage(),
-          102,
-          false,
-        ),
-        frameOrder,
-      ).toBe(true);
-    }
-  });
-
-  it("refuses in-flight coverage across a gap", async () => {
-    const checkpoint = new EntitySequenceCheckpoint();
-    checkpoint.assign(100);
-    expect(checkpoint.beginInFlightCoverage(101, 110)).toBeUndefined();
-    expect(
-      entitySequenceInvalidationCovered(
-        checkpoint.effectiveCoverage(),
-        105,
-        false,
-      ),
+      entitySequenceInvalidationCovered(checkpoint.value, 102, false),
     ).toBe(false);
+    finish();
+    expect(await pending).toBe(true);
+    expect(checkpoint.covers(102)).toBe(true);
   });
 
-  it("invalidates used in-flight coverage once when settled without advancement", () => {
+  it("rejects gaps, stale resets, and persistence finishing after a reset", async () => {
     const checkpoint = new EntitySequenceCheckpoint();
     checkpoint.assign(100);
-    const token = checkpoint.beginInFlightCoverage(100, 110)!;
-    const fallback = vi.fn();
-    checkpoint.onInFlightCoverageInvalidated(fallback);
-    checkpoint.markInFlightCoverageUsed(105);
-    checkpoint.settleInFlightCoverage(token);
-    expect(fallback).toHaveBeenCalledOnce();
-    expect(checkpoint.effectiveCoverage()).toBe(100);
-  });
-
-  it("invalidates later contiguous coverage when an earlier response fails", () => {
-    const checkpoint = new EntitySequenceCheckpoint();
-    checkpoint.assign(100);
-    const first = checkpoint.beginInFlightCoverage(100, 110)!;
-    const second = checkpoint.beginInFlightCoverage(110, 120)!;
-    const fallback = vi.fn();
-    checkpoint.onInFlightCoverageInvalidated(fallback);
-    checkpoint.markInFlightCoverageUsed(120);
-
-    checkpoint.settleInFlightCoverage(first);
-    expect(checkpoint.effectiveCoverage()).toBe(100);
-    expect(fallback).toHaveBeenCalledOnce();
-    checkpoint.settleInFlightCoverage(second);
-    expect(fallback).toHaveBeenCalledOnce();
-  });
-
-  it("settles overlapping responses out of order without retaining their tokens", async () => {
-    const checkpoint = new EntitySequenceCheckpoint();
-    checkpoint.assign(100);
-    const first = checkpoint.beginInFlightCoverage(100, 110)!;
-    const second = checkpoint.beginInFlightCoverage(110, 120)!;
-    expect(checkpoint.effectiveCoverage()).toBe(120);
-    checkpoint.settleInFlightCoverage(second);
-    expect(checkpoint.effectiveCoverage()).toBe(110);
-    checkpoint.settleInFlightCoverage(first);
-    expect(checkpoint.effectiveCoverage()).toBe(100);
+    const persist = vi.fn(async () => {});
+    const version = checkpoint.resetVersion;
     expect(
-      await checkpoint.advanceIfContiguous(
-        110,
-        120,
-        checkpoint.resetVersion,
-        100,
-        async () => {},
-      ),
+      await checkpoint.advanceIfContiguous(101, 110, version, 100, persist),
     ).toBe(false);
-  });
-
-  it("clears in-flight coverage on reset and rejects the stale persister", async () => {
-    const checkpoint = new EntitySequenceCheckpoint();
-    checkpoint.assign(100);
-    const resetVersion = checkpoint.resetVersion;
-    const token = checkpoint.beginInFlightCoverage(100, 120)!;
-    checkpoint.markInFlightCoverageUsed(120);
-    checkpoint.reset();
-    checkpoint.settleInFlightCoverage(token);
-    expect(checkpoint.effectiveCoverage()).toBe(-1);
-    expect(checkpoint.coversWithInFlight(120)).toBe(false);
     expect(
-      await checkpoint.advanceIfContiguous(
-        100,
-        120,
-        resetVersion,
-        100,
-        async () => {},
-      ),
+      await checkpoint.advanceIfContiguous(100, 110, version, 99, persist),
+    ).toBe(false);
+    expect(persist).not.toHaveBeenCalled();
+    expect(
+      await checkpoint.advanceIfContiguous(100, 110, version, 100, async () => {
+        checkpoint.reset();
+      }),
+    ).toBe(false);
+    expect(checkpoint.value).toBe(-1);
+    expect(
+      await checkpoint.advanceIfContiguous(100, 110, version, 100, persist),
     ).toBe(false);
   });
 
@@ -159,7 +59,6 @@ describe("entity sequence checkpoint", () => {
     const schema = "checkpoint-schema";
     const checkpoint = setEntitySequenceProjection(workspace, schema);
     checkpoint.assign(950);
-    const token = checkpoint.beginInFlightCoverage(950, 1021)!;
     let finish!: () => void;
     const persistence = new Promise<void>((resolve) => {
       finish = resolve;
@@ -200,7 +99,6 @@ describe("entity sequence checkpoint", () => {
     ).toBeUndefined();
     finish();
     expect(await persister).toBe(true);
-    checkpoint.settleInFlightCoverage(token);
     expect(checkpoint.value).toBe(1021);
   });
 

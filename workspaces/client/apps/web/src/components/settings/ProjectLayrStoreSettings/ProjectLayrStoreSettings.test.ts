@@ -48,7 +48,6 @@ it("uses the shared chooser and displays the project store", () => {
           name: "Project",
           layrStoreRoot: "/project-store",
         },
-        saved: async () => {},
       }),
     ),
   );
@@ -66,7 +65,6 @@ it("displays the default when the project has no override", () => {
       null,
       createElement(ProjectLayrStoreSettings, {
         project: { id: "/project", path: "/project", name: "Project" },
-        saved: async () => {},
       }),
     ),
   );

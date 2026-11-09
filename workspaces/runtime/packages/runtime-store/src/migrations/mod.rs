@@ -1662,7 +1662,7 @@ static CATALOG: &[&dyn Migration] = &[
     },
     &SqlMigration {
         definition: MigrationDefinition {
-            id: "2026-11-07-explicit-review-model",
+            id: m2026_11_07_explicit_review_model::ID,
             introduced: NOVEMBER_7,
             target: MigrationTarget::Canvas,
             supported_source: "Root chats without an explicit review model",
@@ -1966,7 +1966,7 @@ fn apply_once(
             Ok(())
         } else {
             Err(StoreError::RecordContract(
-                "invalid room projection migration checkpoint",
+                "invalid once-only migration checkpoint",
             ))
         };
     }
@@ -2805,10 +2805,78 @@ mod role_account_exclusions_regression {
 mod explicit_review_model_regression {
     use super::*;
 
+    #[tokio::test]
+    async fn initialized_catalog_before_review_backfill_is_upgraded_once() {
+        let root = tempfile::tempdir().unwrap();
+        let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+        store.transaction(|tx| {
+            crate::AgentRepository::put(tx, &crate::AgentRecord::from_value(studio_json::json!({
+                "id":"lead", "rootId":"lead", "isLead":true, "epoch":0,
+                "status":"idle", "accountKey":"default", "provider":"codex", "compactions":0,
+                "reviewDefaults":{"model":null}
+            }))?)?;
+            tx.execute("DELETE FROM runtime_payload_migrations WHERE name=?1", [m2026_11_07_explicit_review_model::ID])?;
+            let position = CATALOG.iter().position(|step| step.definition().id == m2026_11_07_explicit_review_model::ID).unwrap();
+            let parent = catalog_fingerprint(&CATALOG[..position], MigrationTarget::Canvas);
+            tx.execute("UPDATE sync_entity_meta SET value=?1 WHERE key='migration_catalog'", [catalog_marker(tx, &parent)?])?;
+            Ok(())
+        }).await.unwrap();
+        drop(store);
+        let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+        let raw = crate::AgentRepository::get_raw(
+            &store.test_reader().unwrap(),
+            &crate::AgentId::from("lead"),
+        )
+        .unwrap()
+        .unwrap();
+        let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+        assert_eq!(
+            record["reviewDefaults"]["model"],
+            studio_runtime_schema::provider_kind::initial_review_model()
+        );
+    }
+
+    #[tokio::test]
+    async fn unset_review_model_survives_later_schema_changes() {
+        for legacy_catalog in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+            store.transaction(move |tx| {
+                crate::AgentRepository::put(tx, &crate::AgentRecord::from_value(studio_json::json!({
+                    "id":"lead", "rootId":"lead", "isLead":true, "epoch":0,
+                    "status":"idle", "accountKey":"default", "provider":"codex", "compactions":0,
+                    "reviewDefaults":{"model":null}
+                }))?)?;
+                if legacy_catalog {
+                    // The original step ran before it used the once-only ledger.
+                    tx.execute("DELETE FROM runtime_payload_migrations WHERE name=?1", [m2026_11_07_explicit_review_model::ID])?;
+                }
+                tx.execute_batch("CREATE TABLE later_schema_change(id TEXT)")?;
+                Ok(())
+            }).await.unwrap();
+            drop(store);
+            let store = crate::RuntimeStore::open(Some(root.path())).await.unwrap();
+            let raw = crate::AgentRepository::get_raw(
+                &store.test_reader().unwrap(),
+                &crate::AgentId::from("lead"),
+            )
+            .unwrap()
+            .unwrap();
+            let record: studio_json::Value = studio_json::from_str(&raw).unwrap();
+            assert_eq!(
+                record["reviewDefaults"]["model"],
+                studio_json::Value::Null,
+                "legacy catalog: {legacy_catalog}"
+            );
+        }
+    }
+
     #[test]
     fn migration_fills_only_unset_root_review_models_once() {
         let mut db = Connection::open_in_memory().unwrap();
         db.execute_batch(r#"CREATE TABLE runtime_agents(id TEXT PRIMARY KEY, record TEXT NOT NULL);
+          CREATE TABLE runtime_payload_migrations(name TEXT PRIMARY KEY,cursor INTEGER,complete INTEGER,status TEXT);
+          CREATE TABLE sync_entity_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
           INSERT INTO runtime_agents VALUES('missing','{"id":"missing","isLead":true,"unknown":123456789012345678901234567890}');
           INSERT INTO runtime_agents VALUES('null','{"id":"null","isLead":true,"reviewDefaults":{"model":null,"effort":"high","fastMode":true}}');
           INSERT INTO runtime_agents VALUES('explicit','{"id":"explicit","isLead":true,"reviewDefaults":{"model":"gpt-6-luna"}}');
@@ -2816,7 +2884,7 @@ mod explicit_review_model_regression {
         let tx = db.transaction().unwrap();
         let step = CATALOG
             .iter()
-            .find(|step| step.definition().id == "2026-11-07-explicit-review-model")
+            .find(|step| step.definition().id == m2026_11_07_explicit_review_model::ID)
             .expect("explicit review migration");
         step.apply(&Context::Sql(SqlContext { transaction: &tx }))
             .unwrap();
@@ -2843,8 +2911,10 @@ mod explicit_review_model_regression {
             read("child"),
             r#"{"id":"child","rootId":"missing","isLead":false}"#
         );
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.reviewDefaults.model',NULL) WHERE id='missing'", []).unwrap();
+        let cleared = read("missing");
         step.apply(&Context::Sql(SqlContext { transaction: &tx }))
             .unwrap();
-        assert_eq!(read("missing"), raw);
+        assert_eq!(read("missing"), cleared);
     }
 }

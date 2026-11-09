@@ -58,7 +58,6 @@ it("leaves the desktop close action to the workspace header", () => {
               rename: async () => {},
               remove: () => {},
               markUnread: () => {},
-              refresh: async () => {},
             },
           },
           createElement(Sidebar, {
@@ -130,7 +129,6 @@ it("shows an upgraded chat at the project root without changing its old line fol
               rename: async () => {},
               remove: () => {},
               markUnread: () => {},
-              refresh: async () => {},
             },
           },
           createElement(Sidebar, {

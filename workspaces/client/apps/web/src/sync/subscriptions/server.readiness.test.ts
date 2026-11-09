@@ -86,7 +86,6 @@ it.each(inlineViews)(
       revision: 1,
       viewSnapshot: snapshot,
     } as ResourceVersion);
-    expect(f.subscriptions.getSnapshot(ref).status).not.toBe("live");
     await vi.advanceTimersByTimeAsync(0);
     expect(f.subscriptions.getSnapshot(ref)).toMatchObject({
       data: value,
@@ -97,14 +96,14 @@ it.each(inlineViews)(
   },
 );
 
-it("failed view recovery stays an error until a successful current inline application", async () => {
+it("a view hint stays unconfirmed until a completed inline application", async () => {
   const f = fixture();
   const { ref, snapshot, value } = inlineViews[0];
   f.get.mockRejectedValue(new Error("view unavailable"));
   f.subscriptions.subscribe(ref, () => {});
   f.deliver(ref, { epoch: "server", revision: 1 });
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.subscriptions.getSnapshot(ref).status).toBe("error");
+  expect(f.subscriptions.getSnapshot(ref).status).not.toBe("live");
   f.deliver(ref, { epoch: "server", revision: 2, viewSnapshot: snapshot });
   await vi.advanceTimersByTimeAsync(0);
   expect(f.subscriptions.getSnapshot(ref)).toMatchObject({
@@ -112,15 +111,15 @@ it("failed view recovery stays an error until a successful current inline applic
     status: "live",
     error: null,
   });
-  expect(f.get).toHaveBeenCalledOnce();
+  expect(f.get).not.toHaveBeenCalled();
 });
 
-it("disposal before queued inline application cannot publish data or readiness", async () => {
+it("disposal prevents a later inline delivery from publishing data or readiness", async () => {
   const f = fixture();
   const { ref, snapshot } = inlineViews[0];
   const stop = f.subscriptions.subscribe(ref, () => {}, { graceMs: 0 });
-  f.deliver(ref, { epoch: "server", revision: 1, viewSnapshot: snapshot });
   stop();
+  f.deliver(ref, { epoch: "server", revision: 1, viewSnapshot: snapshot });
   await vi.advanceTimersByTimeAsync(0);
   expect(f.subscriptions.getSnapshot(ref).data).toBeUndefined();
   expect(f.subscriptions.getSnapshot(ref).status).not.toBe("live");
@@ -142,27 +141,16 @@ it("an unchanged reconnect inline baseline re-establishes successful view readin
   expect(f.get).not.toHaveBeenCalled();
 });
 
-it("a delayed recovery cannot overwrite the newer inline application", async () => {
+it("a revision-only hint retains the last view until its next completed payload", async () => {
   const f = fixture();
   const { ref, snapshot, value } = inlineViews[0];
-  let finish!: (value: unknown) => void;
-  f.get.mockReturnValue(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const shown: unknown[] = [];
-  f.subscriptions.subscribe(ref, () =>
-    shown.push(f.subscriptions.getSnapshot(ref).data),
-  );
-  f.deliver(ref, { epoch: "server", revision: 1 });
+  f.subscriptions.subscribe(ref, () => {});
+  f.deliver(ref, { epoch: "server", revision: 1, viewSnapshot: snapshot });
+  f.deliver(ref, { epoch: "server", revision: 2 });
   await vi.advanceTimersByTimeAsync(0);
-  expect(f.get).toHaveBeenCalledOnce();
-  f.deliver(ref, { epoch: "server", revision: 2, viewSnapshot: snapshot });
-  const obsolete = { processes: [{ id: "obsolete" }] };
-  finish(obsolete);
-  await vi.advanceTimersByTimeAsync(0);
-  expect(shown).not.toContainEqual(obsolete);
+  expect(f.get).not.toHaveBeenCalled();
+  expect(f.subscriptions.getSnapshot(ref).data).toEqual(value);
+  f.deliver(ref, { epoch: "server", revision: 3, viewSnapshot: snapshot });
   expect(f.subscriptions.getSnapshot(ref)).toMatchObject({
     data: value,
     status: "live",

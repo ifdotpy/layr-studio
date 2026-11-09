@@ -1,4 +1,10 @@
+import { observer } from "mobx-react-lite";
 import "../../src/rendererStyles.ts";
+import {
+  PublishedAgentFixture,
+  usePublishedAgent,
+  publishFixtureAgent,
+} from "../fixtures/PublishedAgentFixture.tsx";
 import type { Agent } from "../../src/types.ts";
 import { original } from "./disconnect-recovery-ui.data.ts";
 import { fixtureElement } from "./browser-helpers.ts";
@@ -11,24 +17,29 @@ import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotic
 import { setToken } from "../../src/api.ts";
 setToken("fixture-token");
 window.disconnectRecoveryUiFixtureRefreshes = [];
-function Harness() {
-  const [agent, setAgent] = useState<Agent>(() => readAgent());
-  window.disconnectRecoveryUiFixtureSetAgent = setAgent;
+const Harness = observer(function Harness() {
+  const [selectedId, setSelectedId] = useState(readAgent().id);
+  const agent = usePublishedAgent(selectedId, readAgent());
+  window.disconnectRecoveryUiFixtureSetAgent = async (value) => {
+    const next = typeof value === "function" ? value(agent) : value;
+    setSelectedId(next.id);
+    await publishFixtureAgent(next);
+  };
   return (
     <MantineProvider>
       <div data-agent={agent.id}>
-        <NativeError
-          agent={agent}
-          refresh={async () => {
-            window.disconnectRecoveryUiFixtureRefreshes.push(agent.id);
-          }}
-        />
+        <NativeError agent={agent} />
         <p data-history>Previously recorded conversation remains available.</p>
       </div>
     </MantineProvider>
   );
-}
-createRoot(fixtureElement("root")).render(<Harness />);
+});
+await publishFixtureAgent(readAgent());
+createRoot(fixtureElement("root")).render(
+  <PublishedAgentFixture>
+    <Harness />
+  </PublishedAgentFixture>,
+);
 
 declare global {
   interface Window {

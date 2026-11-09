@@ -92,14 +92,24 @@ test("Background Current Browser", async ({
         });
       if (url.pathname === "/api/processes")
         return route.fulfill({ json: currentListing });
-      if (
-        request.method() === "POST" &&
-        url.pathname === "/api/commands" &&
-        holdAnswer
-      )
-        await new Promise<void>((resolve) => {
-          releaseAnswer = resolve;
+      if (request.method() === "POST" && url.pathname === "/api/commands") {
+        if (holdAnswer)
+          await new Promise<void>((resolve) => {
+            releaseAnswer = resolve;
+          });
+        return route.fulfill({
+          json: {
+            kind: "answer",
+            status: "applied",
+            ref_kind: "request",
+            ref_id: "approve-id",
+            rev: 1,
+            rows: [],
+            seq: 1,
+            result: { status: "answered" },
+          } satisfies components["schemas"]["CommandResponse"],
         });
+      }
       return route.fulfill({
         json: { id: url.searchParams.get("id"), tail: "Live fixture output" },
       });
@@ -164,12 +174,8 @@ test("Background Current Browser", async ({
             ...(["completed", "failed", "interrupted", "lost"] as const).map(
               (status) => task(status, status),
             ),
-            // @ts-expect-error cancelled is a deliberately legacy task status.
-            task("cancelled", "cancelled"),
             task("starting", "starting"),
             task("pending", "pending"),
-            // @ts-expect-error stopping is a deliberately legacy task status.
-            task("stopping", "stopping"),
           ],
         },
       };
@@ -396,10 +402,9 @@ test("Background Current Browser", async ({
     await page
       .getByRole("button", { name: "Stop selected process", exact: true })
       .waitFor();
-    await page.evaluate(() => {
-      window.holdRefresh = true;
-      window.refreshCalls = 0;
-    });
+    const processReadsBeforeAnswer = calls.filter(
+      (call) => call.path === "/api/processes",
+    ).length;
     holdAnswer = true;
     const approve = page.getByRole("button", {
       name: "Approve command",
@@ -417,35 +422,22 @@ test("Background Current Browser", async ({
     await approve.click();
     await answerRequest;
     await expect(pendingControl).toBeDisabled();
-    assert.equal(await page.evaluate(() => window.refreshCalls), 0);
     holdAnswer = false;
-    const refreshed = page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          if (window.refreshCalls === 1) return resolve();
-          window.addEventListener("fixture-refresh", () => resolve(), {
-            once: true,
-          });
-        }),
-    );
     required(releaseAnswer)();
     await expect(pendingControl).toBeEnabled({ timeout: 2000 });
-    await refreshed;
-    const notified = page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          if (window.notifications?.includes("Credential refresh unavailable"))
-            return resolve();
-          window.addEventListener("fixture-notification", () => resolve(), {
-            once: true,
-          });
-        }),
+    await expect(approve).toBeVisible();
+    assert.equal(
+      calls.filter((call) => call.path === "/api/processes").length,
+      processReadsBeforeAnswer,
+      "Approval acknowledgment does not refresh activity over HTTP",
     );
-    await page.evaluate(() => {
-      window.holdRefresh = false;
-      window.rejectRefresh(new Error("Credential refresh unavailable"));
-    });
-    await notified;
+    data.runtime.requests = [];
+    monitor.status = "running";
+    monitor.display.label = "running";
+    monitor.display.actions = ["readOutput", "stop"];
+    await render();
+    await expect(approve).toHaveCount(0);
+    assert.deepEqual(await page.evaluate(() => window.notifications ?? []), []);
     assert.equal(
       calls.filter(
         (call) => call.method === "POST" && call.path === "/api/commands",
@@ -520,7 +512,7 @@ test("Background Current Browser", async ({
     console.log(JSON.stringify({ taskSummaryIdleGets: 0 }));
     assert.deepEqual(errors, []);
     console.log(
-      "PASS: current snapshot only, completion hides details, approval acknowledgment releases controls before refresh, filters, chat scope, 320/1920 viewports, no history reads or duplicate writes",
+      "PASS: current snapshot only, completion hides details, approval acknowledgment releases controls before streamed activity updates, filters, chat scope, 320/1920 viewports, no history reads or duplicate writes",
     );
   } finally {
     await server.close();

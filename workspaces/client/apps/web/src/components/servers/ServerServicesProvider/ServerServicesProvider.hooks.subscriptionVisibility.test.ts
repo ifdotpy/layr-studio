@@ -35,6 +35,7 @@ vi.mock("./ServerServicesProvider.tsx", async (original) => ({
 }));
 const api = { syncGet: h.get };
 const resources = {
+  watchResourceChanges: () => () => {},
   watchLiveDeltas: (accept: NonNullable<typeof h.delta>) => {
     h.delta = accept;
     return () => {

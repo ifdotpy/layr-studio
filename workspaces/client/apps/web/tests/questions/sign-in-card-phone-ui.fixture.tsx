@@ -68,7 +68,6 @@ const render = () =>
             RequestArea,
             {
               scope: "fixture",
-              refresh: async () => {},
               notify: (s: string) => window.__notes.push(s),
             },
             React.createElement(Requests, { all: true }),

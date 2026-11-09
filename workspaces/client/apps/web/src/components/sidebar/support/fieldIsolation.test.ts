@@ -198,7 +198,6 @@ it("resolves a newly arrived combined row against the current services before la
     visibility,
     commands: {
       rename: areas.rename.rename,
-      refresh: areas.refresh,
       notify: areas.notices.notify,
     },
     selection: areas.navigation,

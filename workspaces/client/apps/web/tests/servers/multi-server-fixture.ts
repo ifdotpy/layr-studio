@@ -102,6 +102,8 @@ export async function fixture(
     expires: Math.floor(Date.now() / 1000) + 900,
   } satisfies Invitation;
   const clients = new Map<string, string>();
+  const drafts = new Map<string, components["schemas"]["SyncDocument"]>();
+  let draftSequence = 1;
   const accessClients: Pick<
     components["schemas"]["AccessClient"],
     "clientId" | "label" | "status"
@@ -342,7 +344,15 @@ export async function fixture(
       });
     }
     if (url.pathname === "/api/sync/drafts") {
+      for (const { newDocumentState: row } of bodyFor("/api/sync/drafts").rows)
+        drafts.set(row.id, {
+          id: row.id,
+          payload: row.payload,
+          _deleted: row.deleted ?? false,
+          seq: ++draftSequence,
+        });
       json([]);
+      notify.forEach((send) => send([{ kind: "drafts" }]));
       return;
     }
     if (url.pathname === "/api/sync/preferences" && request.method === "POST") {
@@ -369,6 +379,10 @@ export async function fixture(
             : [],
         snapshot,
         workspaceId,
+        draftSnapshot: () => ({
+          complete: true,
+          documents: [...drafts.values()],
+        }),
         processSnapshot: () => processListing,
         subscriptionUpdate: bodyFor("/api/sync/subscriptions"),
         progress: (resource) =>
@@ -794,6 +808,9 @@ export async function fixture(
     },
     staleSettingsReceipts(value: boolean) {
       staleSettingsReceipts = value;
+    },
+    trustDevice(clientId: string, devicePublicKey: string) {
+      clients.set(clientId, devicePublicKey);
     },
     discoverPeer(
       peer: { invitation: Invitation },

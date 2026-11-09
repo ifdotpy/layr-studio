@@ -18,7 +18,7 @@ import {
 
 it.each(
   (["save", "delete", "move"] as const).flatMap((action) =>
-    ["lost", "refresh", "rejected"].map((failure) => ({ action, failure })),
+    ["lost", "success", "rejected"].map((failure) => ({ action, failure })),
   ),
 )(
   "$action preserves its request through $failure in the shared flow",
@@ -28,15 +28,12 @@ it.each(
     const other = { ...localSidebarBackend, post: vi.fn() };
     let activeBackend = backend;
     const post = vi.spyOn(backend, "post").mockResolvedValue({ ok: true });
-    if (failure !== "refresh")
+    if (failure !== "success")
       post.mockRejectedValueOnce(
         failure === "lost"
           ? new Error("Lost response")
           : new ApiError("Project changed", 409),
       );
-    const refresh = vi.fn(async () => {});
-    if (failure === "refresh")
-      refresh.mockRejectedValueOnce(new Error("Refresh lost"));
     const close = vi.fn();
     const project = { id: "/source", path: "/source", peerTeamsRevision: 7 };
     const team = {
@@ -47,7 +44,6 @@ it.each(
     };
     const area: PeerTeamActions = {
       scope: "scope",
-      refresh,
       closeForm: close,
       openRoom: () => {},
       edit: () => {},
@@ -56,7 +52,7 @@ it.each(
       disabled: () => false,
       candidates: () => [],
     };
-    const move = new PeerTeamMoveOwner(backend, refresh);
+    const move = new PeerTeamMoveOwner(backend);
     function Move() {
       return createElement(
         Fragment,
@@ -114,17 +110,17 @@ it.each(
     await render();
     project.peerTeamsRevision = 99;
     team.name = "Changed during retry";
-    await click(
-      failure === "rejected"
-        ? "Reload project"
-        : action === "move"
-          ? "Retry move"
-          : "Retry",
-    );
+    if (failure !== "success")
+      await click(
+        failure === "rejected"
+          ? "Reload project"
+          : action === "move"
+            ? "Retry move"
+            : "Retry",
+      );
     expect(post).toHaveBeenCalledTimes(failure === "lost" ? 2 : 1);
     if (failure === "lost") expect(post.mock.calls[1]?.[1]).toBe(request);
     expect(other.post).not.toHaveBeenCalled();
-    expect(refresh).toHaveBeenCalledTimes(failure === "refresh" ? 2 : 1);
     if (action !== "move") expect(close).toHaveBeenCalledTimes(1);
     await f.close();
   },

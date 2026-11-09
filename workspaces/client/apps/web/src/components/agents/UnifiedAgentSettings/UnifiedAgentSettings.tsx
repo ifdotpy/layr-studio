@@ -10,8 +10,10 @@ import Accounts, {
   type AccountsController,
 } from "../../accounts/Accounts/Accounts.tsx";
 import { ExecutionSettings } from "../ExecutionSettings/ExecutionSettings.tsx";
-import { errorText } from "../../../api.ts";
-import { useCallback, useState, type ComponentProps } from "react";
+import { ApiError, ApiSchemaMismatchError, errorText } from "../../../api.ts";
+import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
+import type { ResourceVersion } from "../../../sync/subscriptions/contracts.ts";
+import { useCallback, useEffect, useState, type ComponentProps } from "react";
 
 export function UnifiedAgentSettingsView({
   state,
@@ -33,9 +35,9 @@ export function UnifiedAgentSettingsView({
   showTransferStatus?: boolean;
 }) {
   const store = useServerStore();
-  const detail = resourceData(
-    store.agentDetail(observableAgentId(settings.agent.id)).current,
-  );
+  const detailSlot = store.agentDetail(observableAgentId(settings.agent.id));
+  const detail = resourceData(detailSlot.current);
+  const appliedVersion = detailSlot.appliedVersion;
   const leadDetail = settings.lead
     ? resourceData(
         store.agentDetail(observableAgentId(settings.lead.id)).current,
@@ -44,7 +46,19 @@ export function UnifiedAgentSettingsView({
   const { post } = useServerApi();
 
   const [accountModalOpen, setAccountModalOpen] = useState(false);
-  const [exclusionsSaving, setExclusionsSaving] = useState(false);
+  const [exclusionsSaving, setExclusionsSaving] = useState<
+    Readonly<ResourceVersion> | null | undefined
+  >(null);
+  useEffect(() => {
+    if (exclusionsSaving === null || !appliedVersion) return;
+    if (
+      !exclusionsSaving ||
+      appliedVersion.epoch !== exclusionsSaving.epoch ||
+      appliedVersion.revision > exclusionsSaving.revision
+    ) {
+      setExclusionsSaving(null);
+    }
+  }, [appliedVersion, exclusionsSaving]);
   const showExclusions = showAccountExclusions ?? settings.agent.isLead;
   const updateAccountModalOpen = useCallback(
     (opened: boolean) => {
@@ -57,11 +71,22 @@ export function UnifiedAgentSettingsView({
     field: "worker_excluded_account_keys" | "reviewer_excluded_account_keys",
     keys: string[],
   ) => {
-    setExclusionsSaving(true);
-    void post("/api/conversation", { id: settings.agent.id, [field]: keys })
-      .then(() => settings.refresh())
-      .catch((error) => notify(errorText(error)))
-      .finally(() => setExclusionsSaving(false));
+    setExclusionsSaving(appliedVersion);
+    void post("/api/conversation", {
+      id: settings.agent.id,
+      [field]: keys,
+    }).catch((error) => {
+      notify(errorText(error));
+      if (
+        error instanceof ApiError &&
+        (!(error instanceof ApiSchemaMismatchError) || error.markedResponse) &&
+        !serverMutationResponseIsUncertain(error.status, error.response)
+      ) {
+        setExclusionsSaving((pending) =>
+          pending === appliedVersion ? null : pending,
+        );
+      }
+    });
   };
   return (
     <Accounts
@@ -89,7 +114,7 @@ export function UnifiedAgentSettingsView({
             }
             accounts={state.data.accounts}
             onAccountChange={selectAccount}
-            accountDisabled={disabled || exclusionsSaving}
+            accountDisabled={disabled || exclusionsSaving !== null}
             accountModalOpen={accountModalOpen}
             onWorkerExcludedAccountKeysChange={
               showExclusions

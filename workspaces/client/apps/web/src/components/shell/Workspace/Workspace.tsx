@@ -96,7 +96,6 @@ type Props = WorkspacePanelPresentationProps & {
   onClose: () => void;
   agent?: Agent | undefined;
   onSelect: (id: string, messageId?: string) => void;
-  refresh: () => Promise<void>;
   notify: (s: string) => void;
 };
 type WorkspaceAction = <Path extends ApiPostPath>(
@@ -193,7 +192,6 @@ export const Workspace = observer(function Workspace(props: Props) {
       (complaint) => complaint.leadId === rootId && complaint.needsUserResponse,
     ).length;
   const { post } = useServerApi();
-  const sync = useServerSync();
 
   const [section, setSection] = useState(props.initialSection || "messages"),
     [agentId, setAgentId] = useState(props.agent?.id || ""),
@@ -208,10 +206,6 @@ export const Workspace = observer(function Workspace(props: Props) {
         ?.querySelector('[aria-current="page"]')
         ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [section, props.opened]);
-  const refreshRef = useRef(props.refresh),
-    notifyRef = useRef(props.notify);
-  refreshRef.current = props.refresh;
-  notifyRef.current = props.notify;
   const [previousEntry, setPreviousEntry] = useState({
     opened: props.opened,
     agent: props.agent?.id,
@@ -247,24 +241,16 @@ export const Workspace = observer(function Workspace(props: Props) {
       setPending((n) => n + 1);
       try {
         const result = await post(path, body);
-        if (path === "/api/annotation") {
-          await sync
-            .applyCommandRows((result as PostResult<"/api/annotation">).rows)
-            .catch((error: unknown) =>
-              console.error("Could not apply command rows", error),
-            );
-        }
         reload();
-        await refreshRef.current();
         return result;
       } catch (e) {
-        notifyRef.current(errorText(e));
+        props.notify(errorText(e));
         throw e;
       } finally {
         setPending((n) => n - 1);
       }
     },
-    [post, reload, sync],
+    [post, reload, props.notify],
   );
   const selected = agents.find(
     (a) => a.id === agentId && a.source === GeneratedApiAgentSource.managed,
@@ -318,9 +304,6 @@ export const Workspace = observer(function Workspace(props: Props) {
               aria-label="Refresh messages"
               onClick={() => {
                 reload();
-                void refreshRef
-                  .current()
-                  .catch((error) => notifyRef.current(errorText(error)));
               }}
             >
               <RefreshCw size={16} />

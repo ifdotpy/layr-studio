@@ -57,6 +57,7 @@ function parts(pages: Batch[], scope = "one", fragmentSize = 30000) {
       replyKind: "snapshot",
       transferId: scope,
       pageIndex,
+      payloadKind: "entity",
       partIndex,
       partCount,
       complete: pageIndex + 1 === pages.length && partIndex + 1 === partCount,
@@ -214,6 +215,38 @@ describe("complete bounded entity transfer", () => {
     expect((await pages(complete))[0]?.after).toBe(513);
     expect((await pages(complete))[0]?.documents).toHaveLength(1);
     await complete?.dispose();
+  });
+  it("rejects a transferred view without its matching resource receipt", async () => {
+    const entry = {
+      revision: 1,
+      cursor: { workspaceId: "a".repeat(32), seq: 1 },
+      replyKind: "snapshot",
+      viewSnapshot: { processes: { processes: [], activities: [] } },
+    };
+    await expect(
+      new EntityTransferAssembler().receive({
+        ...parts([batch(0, 1)])[0],
+        payloadKind: "view",
+        resource: { kind: "processes", agentId: "one" },
+        data: JSON.stringify(entry),
+      }),
+    ).rejects.toThrow("Resource transfer identity changed");
+  });
+  it("rejects a terminal generation change between fragments", async () => {
+    const assembler = new EntityTransferAssembler();
+    const frames = parts([batch(0, 1)], "one", 50).map((frame) => ({
+      ...frame,
+      payloadKind: "view",
+      resource: { kind: "terminal-output", terminalId: "one" },
+      cursor: { ...frame.cursor, terminalGeneration: 1 },
+    }));
+    await assembler.receive(frames[0]);
+    await expect(
+      assembler.receive({
+        ...frames[1],
+        cursor: { ...frames[1]!.cursor, terminalGeneration: 2 },
+      }),
+    ).rejects.toThrow("Entity transfer identity changed");
   });
   it("new epoch discards the interrupted transfer without publishing old pages", async () => {
     const storage = new MemoryStaging();

@@ -174,7 +174,7 @@ async fn ui_child_permissions_inherit_override_review_and_refuse_escalation() {
         ),
     ] {
         // fe1e1f249 moved Claude permissionMode to the agent record.
-        let parent = json!({"compactions":0,"id":LEAD,"rootId":LEAD,"epoch":0,"status":"idle","isLead":true,"name":"Lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"default","provider":"claude","model":"claude-haiku-4-5","autoWake":true,"permissionMode":mode,"workspaceMode":"worktree","workerDefaults":{"model":"claude-haiku-4-5"},"claudeOptions":{"thinking":false}});
+        let parent = json!({"compactions":0,"id":LEAD,"rootId":LEAD,"epoch":0,"status":"idle","isLead":true,"name":"Lead","cwd":cwd,"hostProjectPath":cwd,"accountKey":"default","provider":"claude","model":"claude-haiku-4-5","autoWake":true,"permissionMode":mode,"workspaceMode":"worktree","workerDefaults":{"model":"claude-haiku-4-5"},"reviewDefaults":{"model":"claude-haiku-4-5"},"claudeOptions":{"thinking":false}});
         let projected =
             studio_runtime_services::sync_views::project_persisted_record("agent", &parent)
                 .unwrap();

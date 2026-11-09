@@ -56,7 +56,6 @@ export function NativeError({
   refreshLimits,
   newChat,
   chooseChat,
-  refresh,
 }: {
   agent: Agent;
   detail?: AgentDetailEntityDto | Agent | undefined;
@@ -67,7 +66,6 @@ export function NativeError({
   refreshLimits?: () => void;
   newChat?: (() => void) | undefined;
   chooseChat?: (() => void) | undefined;
-  refresh?: () => Promise<void>;
 }) {
   const usageResume = detail.usageResume;
   const authResume =
@@ -135,7 +133,7 @@ export function NativeError({
           retry={retry}
         />
       )}
-      {refresh && detail.manualConnectionCheck?.available && (
+      {detail.manualConnectionCheck?.available && (
         <ConnectionRecovery
           key={JSON.stringify([
             agent.id,
@@ -146,7 +144,6 @@ export function NativeError({
             detail.error,
           ])}
           agentId={agent.id}
-          refresh={refresh}
         />
       )}
       {!!blocked && (

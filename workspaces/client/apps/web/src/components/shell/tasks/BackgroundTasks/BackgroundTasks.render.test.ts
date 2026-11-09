@@ -119,7 +119,6 @@ async function fixture(records = [process()]) {
             close() {},
             leadId,
             openAgent() {},
-            refresh: async () => {},
             notify,
           }),
         ),
@@ -597,6 +596,30 @@ it("releases switched detail and closed drawer interests while another store obs
     ).toHaveLength(3);
   } finally {
     keep();
+    await f.close();
+  }
+});
+
+it("shows a subscribed process failure with cached data instead of loading forever", async () => {
+  const f = await fixture();
+  try {
+    await act(async () => {
+      f.subscriptions.fail(
+        { kind: "processes", agentId: "lead" },
+        new Error(
+          "Live updates for this view are unavailable. Reconnect to retry.",
+        ),
+      );
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(f.host.textContent).toContain(
+      "Process list unavailable: Live updates for this view are unavailable.",
+    );
+    expect(f.host.textContent).not.toContain("Loading processes…");
+    expect(h.get).not.toHaveBeenCalled();
+    await f.publish([process()]);
+    expect(f.host.textContent).not.toContain("Process list unavailable:");
+  } finally {
     await f.close();
   }
 });

@@ -10,10 +10,8 @@ import * as resources from "../../src/sync/resourceEvents.ts";
 import {
   subscribeTranscriptProjection,
   watchResourceChanges,
-  prefetchTranscript,
 } from "../../src/sync/client.ts";
 import { durableSend } from "../../src/sync/send.ts";
-window.prefetchTranscript = prefetchTranscript;
 window.durableSend = durableSend;
 window.mount = (selected) =>
   createRoot(fixtureElement("app")).render(
@@ -54,7 +52,6 @@ window.mount = (selected) =>
 
 declare global {
   interface Window {
-    prefetchTranscript: typeof import("../../src/sync/client.ts").prefetchTranscript;
     durableSend: typeof import("../../src/sync/send.ts").durableSend;
     syncHttpConnectionBudgetBrowserFixtureSnapshot: import("./browser-helpers.ts").FixtureSnapshot;
     mount: (selected: string) => void;

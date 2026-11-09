@@ -52,6 +52,7 @@ test("questions and confirmations edit their original mounted card", async ({
       answers: { "0": { answers: ["Yes"] } },
     });
     release?.();
+    await page.evaluate(() => window.publishAnsweredRequest("question"));
     await expect(
       page.locator('.question-card[data-question-state="answered"]'),
     ).toHaveCount(1);
@@ -75,6 +76,7 @@ test("questions and confirmations edit their original mounted card", async ({
     ).toBeDisabled();
     expect(answers[1]).toEqual({ id: "approval", decision: "accept" });
     release?.();
+    await page.evaluate(() => window.publishAnsweredRequest("approval"));
     await expect(approval).toHaveCount(0);
     await expect(
       page.locator('.tool-card[data-message="lead:command-item"]'),

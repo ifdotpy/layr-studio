@@ -103,7 +103,8 @@
     "steps": [{}],
     "rustResults": [
       {
-        "error": "This account is disabled for this chat"
+        "id": "message",
+        "status": "queued"
       }
     ]
   },

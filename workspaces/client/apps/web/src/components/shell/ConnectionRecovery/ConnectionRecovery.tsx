@@ -4,13 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@mantine/core";
 import { errorText } from "../../../api.ts";
 
-export default function ConnectionRecovery({
-  agentId,
-  refresh,
-}: {
-  agentId: string;
-  refresh: () => Promise<void>;
-}) {
+export default function ConnectionRecovery({ agentId }: { agentId: string }) {
   const { post } = useServerApi();
 
   const [pending, setPending] = useState(false);
@@ -41,8 +35,7 @@ export default function ConnectionRecovery({
         result.status === GeneratedApiRecoveryStatus.reconciled &&
         ["completed", "failed", "interrupted"].includes(result.outcome || "")
       ) {
-        setMessage("Connection checked. Refreshing the conversation.");
-        await refresh();
+        setMessage("Connection checked.");
       } else if (result.status === GeneratedApiRecoveryStatus.superseded) {
         setMessage(
           "The conversation changed while the connection was checked. Review its current state.",
@@ -54,11 +47,6 @@ export default function ConnectionRecovery({
             ? "Could not confirm the previous outcome. Review the history before continuing."
             : "Connection checked. The previous outcome remains unconfirmed. Review the history before continuing.",
         );
-        if (
-          result.status === GeneratedApiRecoveryStatus.unconfirmed &&
-          result.checked === true
-        )
-          await refresh();
       }
     } catch (error) {
       if (mounted.current) {

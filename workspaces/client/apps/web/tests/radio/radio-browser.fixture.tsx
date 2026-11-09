@@ -19,7 +19,6 @@ declare global {
 const rootElement = document.getElementById("root")!;
 import { componentSnapshot as snapshotFixture } from "../../src/components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import type { Room, PeerTeam } from "../../src/types.ts";
-import { radioRoom } from "./radio-fixture.ts";
 
 import { messageModels } from "../messages/message-models.fixture";
 import { conversationActionsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
@@ -129,22 +128,10 @@ function Fixture() {
     if (text !== previous)
       listeners.current.get(session)?.forEach((listener) => listener());
   };
-  const [roomId, setRoomId] = useState<string | undefined>(undefined);
   window.setRoom = setRoom;
   window.currentRoom = value;
   window.radioOpened = null;
-  const refresh = async () => {
-    window.refreshCalls = (window.refreshCalls || 0) + 1;
-    if (window.holdRefresh)
-      await new Promise<void>((resolve, reject) => {
-        window.releaseRefresh = resolve;
-        window.rejectRefresh = reject;
-      });
-    if (window.failRefresh) throw Error("Refresh failed");
-    const response = await fetch("/snapshot");
-    setRoom(radioRoom(await response.json()));
-    setRoomId("radio:t");
-  };
+
   const [area] = useState(() => conversationActionsFixture());
   area.scope.services.drafts.getDraft = getDraft;
   area.scope.services.drafts.subscribeDraft = subscribeDraft;
@@ -158,7 +145,6 @@ function Fixture() {
       if (previous[session] !== next[session])
         setDraft(next[session] || "", session);
   };
-  area.refresh = refresh;
   area.notices.notify = (error) => {
     (window.notifications ??= []).push(error);
   };
@@ -179,8 +165,7 @@ function Fixture() {
             openRoom: (id) => {
               window.radioOpened = id;
             },
-            refresh,
-            room: () => roomId,
+            room: () => value.id,
             disabled: () => false,
             closeForm() {},
             edit() {},

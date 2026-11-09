@@ -35,6 +35,12 @@ export function agentSummaryFixture(
     model: null,
     status: AgentStatus.completed,
     autoWake: true,
+    accountDestinations: [
+      {
+        accountKey: overrides.accountKey ?? "default",
+        eligibility: { kind: "available" },
+      },
+    ],
     inFlight: false,
     operationalStatus: { reason: "ready" },
     markRead: null,

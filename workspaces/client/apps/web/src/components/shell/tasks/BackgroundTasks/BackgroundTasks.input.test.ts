@@ -169,7 +169,6 @@ async function fixture() {
       leadId: "owner",
       close() {},
       openAgent() {},
-      refresh: async () => {},
       notify,
     });
     return createElement(

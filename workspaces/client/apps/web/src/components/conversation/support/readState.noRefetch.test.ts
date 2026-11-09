@@ -43,7 +43,7 @@ afterEach(() => {
   h.recovery.mockReset();
 });
 it.each([false, true])(
-  "read receipt lostResponse=%s uses canonical success or one uncertainty read",
+  "read receipt lostResponse=%s never restarts the entity stream",
   async (lostResponse) => {
     vi.stubGlobal("document", {
       visibilityState: "visible",
@@ -76,7 +76,6 @@ it.each([false, true])(
       stateDir: "fixture",
       threads: [agent],
     };
-    const refresh = vi.fn(async () => {});
     h.recovery.mockResolvedValue(snapshot);
     if (lostResponse)
       h.post.mockRejectedValue(new Error("Response unavailable"));
@@ -109,7 +108,8 @@ it.each([false, true])(
     expect(h.post).toHaveBeenCalledTimes(1);
     await Promise.resolve();
     await Promise.resolve();
-    expect(refresh).not.toHaveBeenCalled();
-    expect(h.recovery).toHaveBeenCalledTimes(lostResponse ? 1 : 0);
+    expect(h.recovery).not.toHaveBeenCalled();
+    area.scope.services.close();
+    h.store.dispose();
   },
 );

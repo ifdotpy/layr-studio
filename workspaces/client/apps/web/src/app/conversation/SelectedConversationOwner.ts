@@ -419,7 +419,6 @@ export class SelectedConversationOwner {
   async run(command: () => Promise<unknown>) {
     try {
       await command();
-      await this.areas.refresh();
     } catch (error) {
       this.areas.notices.notify(errorText(error));
     }

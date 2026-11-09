@@ -100,7 +100,6 @@ const h = vi.hoisted(() => ({
   report: vi.fn(),
   read: vi.fn(),
   post: vi.fn(),
-  refresh: vi.fn(async () => {}),
   emptyCatalog: false,
 }));
 vi.mock("react", async (load) => ({
@@ -298,7 +297,6 @@ function render(
         error: "",
         retry: vi.fn(),
       },
-      refresh: h.refresh,
       ...(onDraftChange && { onDraftChange }),
       renderTrigger: (trigger) =>
         createElement(ExecutionSummaryTrigger, {
@@ -374,7 +372,6 @@ afterEach(() => {
   h.report.mockClear();
   h.read.mockReset();
   h.post.mockReset();
-  h.refresh.mockClear();
   h.emptyCatalog = false;
 });
 
@@ -411,7 +408,6 @@ test("transfer actions retry the same request and await streamed progress", asyn
   expect(transfer().transfer).toBe(
     settingsInput(agent).summary.accountTransferProgress,
   );
-  expect(h.refresh).not.toHaveBeenCalled();
 });
 
 test("the transfer modal shows an action failure", () => {
@@ -557,7 +553,6 @@ function chatSettings(agent: Agent) {
         startup: { workspaceId: "workspace" },
         creation: { isCreating: false },
         dialogs: { changeProjectFolder() {} },
-        refresh: h.refresh,
       }),
       accounts: createAccountsView(store, h.read, "fixture"),
       settings: {
@@ -718,7 +713,6 @@ test("the composer trigger uses the confirmed model before SSE and yields to rem
   expect(render().model).toBe("Luna 6");
   expect(render().label).toContain("Lead Luna 6");
   await new Promise<void>(queueMicrotask);
-  expect(h.refresh).not.toHaveBeenCalled();
   expect(render({ ...initial, status: "running" }).model).toBe("Luna 6");
   expect(render({ ...initial, model: "gpt-6-luna" }).model).toBe("Luna 6");
   expect(render({ ...initial, model: "remote-model" }).model).toBe(
@@ -1054,7 +1048,6 @@ test("review settings use their canonical response without a refresh", async () 
   await vi.waitFor(() => expect(h.post).toHaveBeenCalledOnce());
   expect(render().label).toContain("Review Luna 6 Medium");
   await new Promise<void>(queueMicrotask);
-  expect(h.refresh).not.toHaveBeenCalled();
 });
 
 test("null review Fast inherits the agent setting", () => {
@@ -1157,7 +1150,6 @@ for (const role of ["orchestrator", "worker", "review"] as const) {
           ? "Workers Astra 6 High (codex) Fast"
           : "Review Astra 6 High (codex) Fast",
     );
-    expect(h.refresh).not.toHaveBeenCalled();
     expect(render(canonical).picker.fast).toBe(false);
   });
 }

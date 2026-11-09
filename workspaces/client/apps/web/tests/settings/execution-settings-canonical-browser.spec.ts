@@ -1,13 +1,8 @@
+import { agentSseServer } from "../fixtures/agent-sse-server.ts";
 import type {} from "./execution-settings-canonical-browser.fixture.tsx";
-import type { components } from "../../src/generated/api.ts";
 import type { CanonicalReset } from "./execution-settings-canonical-browser.fixture.tsx";
 
 import { fixtureUrl } from "./fixture-helpers.ts";
-import {
-  API_SCHEMA_HASH_HEADER,
-  readApiSchemaHash,
-  apiSchemaHandshakeSse,
-} from "../playwright.ts";
 import { setupControl, chooseSetupValue } from "../fixtures/setup-controls.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -22,6 +17,7 @@ test("execution settings canonical browser", async ({ page }) => {
   const root = join(import.meta.dirname, "../../");
   const { createServer } = await import("vite");
   const cacheDir = await mkdtemp(join(tmpdir(), "studio-settings-canonical-"));
+  const stream = agentSseServer();
   const server = await createServer({
     configFile: false,
     root,
@@ -44,6 +40,9 @@ test("execution settings canonical browser", async ({ page }) => {
       {
         name: "settings-canonical-fixture",
         configureServer(server) {
+          server.middlewares.use((req, res, next) => {
+            if (!stream.handle(req, res)) next();
+          });
           server.middlewares.use("/check", (_req, res) => {
             res.setHeader("Content-Type", "text/html");
             res.end(
@@ -83,32 +82,12 @@ test("execution settings canonical browser", async ({ page }) => {
       errors.push(error.message);
       console.error(error.message);
     });
-    await page.route("**/api/sync/stream?**", (route) => {
-      const resources = JSON.parse(
-        new URL(route.request().url()).searchParams.get("resources") || "[]",
-      );
-      return route.fulfill({
-        contentType: "text/event-stream",
-        body: apiSchemaHandshakeSse(
-          `event: resources\ndata: ${JSON.stringify({ protocol: 3, workspaceId: "1234567890abcdef1234567890abcdef", epoch: "fixture", revision: 1, reason: "initial", resources })}\n\n`,
-        ),
-      });
-    });
-    await page.route("**/api/sync/identity", (route) =>
-      route.fulfill({
-        headers: { [API_SCHEMA_HASH_HEADER]: readApiSchemaHash() },
-        json: {
-          workspaceId: "1234567890abcdef1234567890abcdef",
-          syncProtocol: 2,
-        } satisfies components["schemas"]["SyncIdentityResponse"],
-      }),
-    );
     await page.goto(fixtureUrl(server, "check"));
     await page.waitForFunction(() => !!window.canonicalReset);
     const reset = async (options?: CanonicalReset) => {
       await page.evaluate((options) => {
         localStorage.clear();
-        window.canonicalReset!(options);
+        return window.canonicalReset!(options);
       }, options);
       await page
         .getByRole("button", {
@@ -192,29 +171,26 @@ test("execution settings canonical browser", async ({ page }) => {
       );
       await value("max");
     });
-    await check("confirmed-response-before-refresh", async () => {
+    await check("confirmed-response-before-publication", async () => {
       await reset();
       await page.evaluate(() => {
         window.reply = {
           ...window.agent,
           effort: "medium",
         };
-        window.refreshHold = true;
+        window.projectionHold = true;
       });
       await effort().selectOption("high");
-      await page.waitForFunction(() => !!window.canonicalRefreshRelease);
+      await page.waitForFunction(() => !!window.canonicalProjectionRelease);
       await value("medium");
       assert.equal(await effort().isDisabled(), false);
       assert.equal(await page.getByText("Saving…", { exact: true }).count(), 0);
-      assert.equal(await page.evaluate(() => window.refreshCount), 1);
+      assert.equal(await page.evaluate(() => window.refreshCount), 0);
       await page.evaluate(() => {
-        window.refreshFailure = true;
-        window.canonicalRefreshRelease!();
+        window.projectionUnavailable = true;
+        window.canonicalProjectionRelease!();
       });
-      await page
-        .getByRole("alert")
-        .filter({ hasText: "Settings saved. Snapshot unavailable" })
-        .waitFor();
+      await expect(page.getByRole("alert")).toHaveCount(0);
       await value("medium");
       assert.equal(await effort().isDisabled(), false);
     });
@@ -244,13 +220,13 @@ test("execution settings canonical browser", async ({ page }) => {
         await page.evaluate(
           ({ field, target }) => {
             window.hold = true;
-            window.refreshHold = true;
+            window.projectionHold = true;
             window.reply = {
               ...window.agent,
               [field]: target,
             };
             window.canonicalRelease = null;
-            window.canonicalRefreshRelease = null;
+            window.canonicalProjectionRelease = null;
           },
           { field, target },
         );
@@ -267,13 +243,13 @@ test("execution settings canonical browser", async ({ page }) => {
         else await expect(toggle).not.toBeChecked();
         assert.equal(await page.evaluate(() => window.refreshCount), 0);
         await page.evaluate(() => window.canonicalRelease!());
-        await page.waitForFunction(() => !!window.canonicalRefreshRelease);
+        await page.waitForFunction(() => !!window.canonicalProjectionRelease);
         if (field === "model")
           await expect.poll(() => modelValue(model)).toBe(target);
         else await expect(toggle).toBeChecked();
         await expect(model).not.toHaveAttribute("aria-disabled", "true");
         assert.equal(await effort().isDisabled(), false);
-        await page.evaluate(() => window.canonicalRefreshRelease!());
+        await page.evaluate(() => window.canonicalProjectionRelease!());
       }
     });
     await check("review-and-permissions-confirmation-required", async () => {
@@ -281,33 +257,33 @@ test("execution settings canonical browser", async ({ page }) => {
       await page.getByText("Review", { exact: true }).click();
       await page.evaluate(() => {
         window.hold = true;
-        window.refreshHold = true;
+        window.projectionHold = true;
         window.canonicalRelease = null;
-        window.canonicalRefreshRelease = null;
+        window.canonicalProjectionRelease = null;
         window.reply = {
           ...window.agent,
           reviewDefaults: { model: "gpt-5.6-sol", effort: "high" },
         };
       });
-      const reviewModel = page.getByLabel("Default review model", {
+      const reviewModel = page.getByLabel("Review model", {
         exact: true,
       });
       await selectModel(reviewModel, "gpt-5.6-luna");
       await page.waitForFunction(() => !!window.canonicalRelease);
-      assert.equal(await modelValue(reviewModel), "__model_default__");
+      assert.equal(await modelValue(reviewModel), "");
       await page.evaluate(() => window.canonicalRelease!());
-      await page.waitForFunction(() => !!window.canonicalRefreshRelease);
+      await page.waitForFunction(() => !!window.canonicalProjectionRelease);
       await expect.poll(() => modelValue(reviewModel)).toBe("gpt-5.6-sol");
       await expect(reviewModel).not.toHaveAttribute("aria-disabled", "true");
-      await page.evaluate(() => window.canonicalRefreshRelease!());
+      await page.evaluate(() => window.canonicalProjectionRelease!());
       await reset();
       await page.keyboard.press("Escape");
       await page.getByText("Permissions", { exact: true }).click();
       await page.evaluate(() => {
         window.hold = true;
-        window.refreshHold = true;
+        window.projectionHold = true;
         window.canonicalRelease = null;
-        window.canonicalRefreshRelease = null;
+        window.canonicalProjectionRelease = null;
         window.reply = {
           ...window.agent,
           permissionMode: "bypassPermissions",
@@ -322,10 +298,10 @@ test("execution settings canonical browser", async ({ page }) => {
       await expect(permission).not.toBeChecked();
       await expect(permission).toBeDisabled();
       await page.evaluate(() => window.canonicalRelease!());
-      await page.waitForFunction(() => !!window.canonicalRefreshRelease);
+      await page.waitForFunction(() => !!window.canonicalProjectionRelease);
       await expect(permission).toBeChecked();
       await expect(permission).toBeEnabled();
-      await page.evaluate(() => window.canonicalRefreshRelease!());
+      await page.evaluate(() => window.canonicalProjectionRelease!());
     });
     await check("transfer-response-before-old-summary", async () => {
       await reset({
@@ -343,7 +319,7 @@ test("execution settings canonical browser", async ({ page }) => {
       });
       await page.evaluate(() => {
         window.transferHold = true;
-        window.refreshHold = true;
+        window.projectionHold = true;
         window.transferReply = {
           id: "pending-transfer",
           leadId: "first",
@@ -359,7 +335,7 @@ test("execution settings canonical browser", async ({ page }) => {
       await page.waitForFunction(() => !!window.transferRelease);
       await expect(page.getByText("2 waiting", { exact: true })).toBeVisible();
       await page.evaluate(() => window.transferRelease!());
-      await page.waitForFunction(() => !!window.canonicalRefreshRelease);
+      await page.waitForFunction(() => !!window.canonicalProjectionRelease);
       await expect(
         page.getByRole("button", { name: "Cancel remaining", exact: true }),
       ).toHaveCount(0);
@@ -386,7 +362,7 @@ test("execution settings canonical browser", async ({ page }) => {
         });
       });
       await expect(page.getByText("1 waiting", { exact: true })).toBeVisible();
-      await page.evaluate(() => window.canonicalRefreshRelease!());
+      await page.evaluate(() => window.canonicalProjectionRelease!());
     });
     await check("replay", async () => {
       await reset({ agent: { status: "running" } });
@@ -494,7 +470,7 @@ test("execution settings canonical browser", async ({ page }) => {
       await page.waitForTimeout(50);
       assert.equal(await page.evaluate(() => window.refreshCount), 0);
     });
-    await check("defaults-and-refresh-failure", async () => {
+    await check("defaults-with-delayed-publication", async () => {
       await reset({ defaults: true });
       await page.evaluate(() => {
         window.reply = {
@@ -505,7 +481,7 @@ test("execution settings canonical browser", async ({ page }) => {
             fastMode: false,
           },
         };
-        window.refreshFailure = true;
+        window.projectionUnavailable = true;
       });
       await effort(true).selectOption("max");
       await value("medium", true);
@@ -515,10 +491,8 @@ test("execution settings canonical browser", async ({ page }) => {
         ),
         "default",
       );
-      await page
-        .getByRole("alert")
-        .filter({ hasText: "Settings saved." })
-        .waitFor();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      assert.equal(await page.evaluate(() => window.refreshCount), 0);
       await page.evaluate(() =>
         window.setAgent!({
           ...window.agent,
@@ -720,17 +694,15 @@ test("execution settings canonical browser", async ({ page }) => {
           ...window.agent,
           permissionMode: "bypassPermissions",
         };
-        window.refreshFailure = true;
+        window.projectionUnavailable = true;
       });
       const permission = page.getByRole("switch", {
         name: "Full access without approval",
         exact: true,
       });
       await permission.click();
-      await page
-        .getByRole("alert")
-        .filter({ hasText: "Settings saved." })
-        .waitFor();
+      await expect(page.getByRole("alert")).toHaveCount(0);
+      assert.equal(await page.evaluate(() => window.refreshCount), 0);
       assert.equal(await permission.isChecked(), true);
       assert.equal(
         await page.evaluate(
@@ -764,10 +736,11 @@ test("execution settings canonical browser", async ({ page }) => {
           ...window.agent,
           permissionMode: "default",
         };
-        window.refreshFailure = false;
+        window.projectionUnavailable = false;
       });
       await permission.click();
-      await page.waitForFunction(() => window.refreshCount === 2);
+      await page.waitForFunction(() => window.settingsCalls.length === 2);
+      assert.equal(await page.evaluate(() => window.refreshCount), 0);
       assert.equal(
         await page.evaluate(() => window.settingsCalls[1]!.yolo_mode),
         true,
