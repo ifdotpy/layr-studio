@@ -70,6 +70,7 @@ pub use schema::{
 mod state_check;
 pub use state_check::{
     StateCheckFailure, StateCheckReport, StateCheckTable, check_legacy_json, check_state_readonly,
+    count_legacy_rows,
 };
 
 pub use repositories::account_state;

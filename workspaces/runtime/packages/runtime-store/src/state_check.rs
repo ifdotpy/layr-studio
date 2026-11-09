@@ -81,6 +81,32 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
     Ok(StateCheckReport { tables })
 }
 
+/// Preserve the acceptance of legacy tables that previously had no state-check report.
+/// Raw SQL: count rows without decoding values or imposing new constraints.
+pub fn count_legacy_rows<R: studio_db_api::Table>(
+    connection: &Connection,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    let exists = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [R::NAME],
+        |row| row.get::<_, bool>(0),
+    )?;
+    let row_count = if exists {
+        connection.query_row(
+            &format!("SELECT COUNT(*) FROM \"{}\"", R::NAME.replace('"', "\"\"")),
+            [],
+            |row| row.get::<_, i64>(0),
+        )?
+    } else {
+        0
+    };
+    Ok(studio_db_api::StateCheck {
+        // SQLite COUNT(*) is a nonnegative signed integer.
+        row_count: row_count as u64,
+        ..Default::default()
+    })
+}
+
 /// Registry adapter for historical JSON reports, preserving acceptance and diagnostics.
 pub fn check_legacy_json<R: JsonRecord>(
     connection: &Connection,
@@ -381,6 +407,42 @@ mod tests {
     use studio_json::json;
 
     use super::check_sync_entities;
+
+    #[test]
+    fn system_count_legacy_rows_preserves_unvalidated_history_readonly() {
+        use studio_db_api::{DbTable, Table};
+        #[derive(DbTable)]
+        #[db(table = "count_legacy_witness", database = crate::peer_update_settings::Canvas,
+            legacy_ddl = "CREATE TABLE count_legacy_witness(id TEXT PRIMARY KEY,payload TEXT)")]
+        struct Witness {
+            #[db(key)]
+            id: String,
+            payload: String,
+        }
+        let db = Connection::open_in_memory().expect("db");
+        assert_eq!(
+            super::count_legacy_rows::<Witness>(&db)
+                .expect("missing")
+                .counts(),
+            (0, 0)
+        );
+        db.execute_batch(Witness::DDL).expect("legacy schema");
+        db.execute_batch("INSERT INTO count_legacy_witness VALUES('bad',NULL),(NULL,'ok')")
+            .expect("historical rows");
+        let changes = db.total_changes();
+        db.pragma_update(None, "query_only", true)
+            .expect("read only");
+        assert_eq!(
+            studio_db_api::check::<Witness>(&db)
+                .expect("strict comparison")
+                .counts(),
+            (2, 2)
+        );
+        let legacy = super::count_legacy_rows::<Witness>(&db).expect("legacy acceptance");
+        assert_eq!(legacy.counts(), (2, 0));
+        assert!(legacy.failures.is_empty());
+        assert_eq!(db.total_changes(), changes);
+    }
 
     #[test]
     fn system_state_check_checks_schema_once_and_preserves_diagnostics() {
