@@ -6,14 +6,14 @@ This is a source inventory at Git base `ff02c9d4ea4b40564c2008cb0cf6e8bd374ee804
 
 | Database   | Catalog application tables | Additional current application tables | Mapped | Unmapped |
 | ---------- | -------------------------: | ------------------------------------: | -----: | -------: |
-| Canvas     |                        109 |                                     9 |    118 |        0 |
+| Canvas     |                        110 |                                     8 |    118 |        0 |
 | Analytics  |                         17 |                                     1 |     18 |        0 |
 | Supervisor |              not cataloged |                                     8 |      8 |        0 |
-| Total      |                        126 |                                    18 |    144 |        0 |
+| Total      |                        127 |                                    17 |    144 |        0 |
 
-Canvas additions: `approvals`, `task_window_state`, `agent_publication_state`, `project_grants`, `runtime_work_results`, `runtime_work_decisions`, `runtime_work_releases`, `runtime_peer_update_settings`, `runtime_online_migration_dirty`. Analytics adds `analytics_publication_overflow_receipts`. Supervisor has seven tables in `supervisor_schema.sql` plus `operation_writes` in `supervisor_journal.rs:122`. FTS shadows, SQLite internals and six historical/staging names are classified separately; they do not add application destinations.
+Canvas additions: `approvals`, `task_window_state`, `agent_publication_state`, `project_grants`, `runtime_work_results`, `runtime_work_decisions`, `runtime_work_releases`, `runtime_online_migration_dirty` (`runtime_peer_update_settings` is cataloged since the db-api pilot, f9535770). Analytics adds `analytics_publication_overflow_receipts`. Supervisor has seven tables in `supervisor_schema.sql` plus `operation_writes` in `supervisor_journal.rs:122`. FTS shadows, SQLite internals and six historical/staging names are classified separately; they do not add application destinations.
 
-The coverage witness is `node --test workspaces/tooling/apps/repository-checks/tests/storage-map.test.ts`; `package.json` includes it in `test:tooling` and `test:tooling:js`, which the fast gate consumes. It checks dedicated per-table headings, not substring mentions, and includes a missing-table mutation witness. It guards all 126 catalog tables and an explicit inventory of 18 code-created tables (9 Canvas, 1 Analytics, 8 Supervisor), not semantic completeness or automatically discovered future lazy tables. The mutation witness omits each of those 18 tables in turn.
+The coverage witness is `node --test workspaces/tooling/apps/repository-checks/tests/storage-map.test.ts`; `package.json` includes it in `test:tooling` and `test:tooling:js`, which the fast gate consumes. It checks dedicated per-table headings, not substring mentions, and includes a missing-table mutation witness. It guards all 127 catalog tables and an explicit inventory of 17 code-created tables (8 Canvas, 1 Analytics, 8 Supervisor), not semantic completeness or automatically discovered future lazy tables. The mutation witness omits each of those 17 tables in turn.
 
 ## Value and owner rules
 
@@ -7015,7 +7015,7 @@ Preserve: source-change and publication cursor domains, floors and tombstones; o
 
 ### `Canvas.runtime_peer_update_settings` → `Canvas.metadata` (`PeerUpdateSettings`)
 
-Family: **F1 settings and migration metadata**. Not in cold catalog; runtime DDL: `workspaces/runtime/packages/runtime-store/src/schema.rs:11`.
+Family: **F1 settings and migration metadata**. Cataloged since f9535770; DDL owner: `workspaces/runtime/packages/runtime-store/src/peer_update_settings.rs` (db-api descriptor).
 
 Key: `id` INTEGER (rowid table; integer primary key aliases rowid). Online copy: Can address the INTEGER key directly **only after proving all source keys are >0**. No live-row positivity scan was performed.
 

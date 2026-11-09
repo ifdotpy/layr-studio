@@ -21,7 +21,6 @@ const codeCreatedTables = [
   "Canvas.runtime_work_results",
   "Canvas.runtime_work_decisions",
   "Canvas.runtime_work_releases",
-  "Canvas.runtime_peer_update_settings",
   "Canvas.runtime_online_migration_dirty",
   "Analytics.analytics_publication_overflow_receipts",
   "Supervisor.handles",
