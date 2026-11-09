@@ -1246,10 +1246,13 @@ async fn invalid_agent_record_is_held_without_stopping_other_agent_dispatch() {
                     good.native_effort = studio_runtime_schema::queue_command::Field::Null;
                     good.execution_settings_account_key = studio_runtime_schema::queue_command::Field::Value("default".into());
                     AgentRepository::put(tx, &good)?;
-                    tx.execute(
+                    studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                        tx.execute(
                         "UPDATE runtime_agents SET record=json_set(record,'$.rootId',json('23')) WHERE id=?1",
                         [&write_bad_id],
                     )?;
+                        Ok(())
+                    })?;
                     Ok::<_, StoreError>(())
                 }).await?;
                 Ok(store.test_reader()?.query_row(
@@ -1530,10 +1533,13 @@ async fn unresolved_receipt_for_held_invalid_agent_does_not_block_recovery() {
             move |store| async move {
                 let transaction_agent = agent_id.clone();
                 let (pointer, reason) = store.transaction(move |tx| {
-                    tx.execute(
+                    studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                        tx.execute(
                         "UPDATE runtime_agents SET record=json_set(record,'$.rootId',json('23')) WHERE id=?1",
                         [&transaction_agent],
                     )?;
+                        Ok(())
+                    })?;
                     let invalid = AgentRepository::get(tx, &AgentId::from(transaction_agent.as_str()))
                         .expect_err("corrupt root id is rejected");
                     match invalid {

@@ -104,6 +104,7 @@ mod m2026_11_07_auth_resume_proof;
 mod m2026_11_07_explicit_review_model;
 mod m2026_11_09_immutable_entity_scopes;
 pub(crate) mod m2026_11_09_online_keys;
+mod m2026_11_09_repair_invalid_entity_scopes;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1699,6 +1700,20 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_09_immutable_entity_scopes::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-09-repair-invalid-entity-scopes",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 9,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Immutable scope guards treating invalid non-text selectors as owners",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_09_repair_invalid_entity_scopes::apply(c.transaction),
     },
 ];
 

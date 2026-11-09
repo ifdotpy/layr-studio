@@ -1,7 +1,8 @@
 //! Team ownership is fixed when an entity is created.
 
 use rusqlite::Connection;
-use studio_runtime_schema::queue_command::Field;
+use std::collections::BTreeMap;
+use studio_json::value::RawValue;
 
 use crate::StoreResult;
 
@@ -13,6 +14,7 @@ pub(crate) const SCOPE_TOMBSTONE_FUNCTION: &str = "sync_scope_tombstone";
 
 /// Publications whose agent/account scope is fixed by the SQL key, using LIKE patterns.
 const KEY_SCOPED_PUBLICATIONS: &[&str] = &["transcript:%", "rateLimit", "model"];
+const PUBLICATION_SCOPES: &[&str] = &["rootId", "agent"];
 
 fn team_scoped_publication_sql(row: &str) -> String {
     KEY_SCOPED_PUBLICATIONS
@@ -22,24 +24,35 @@ fn team_scoped_publication_sql(row: &str) -> String {
         .join(" AND ")
 }
 
-#[derive(Default, serde::Deserialize)]
-struct PublishedScope {
-    #[serde(default)]
-    agent: Field<String>,
-    #[serde(default, rename = "rootId")]
-    root: Field<String>,
-}
-
 #[derive(serde::Deserialize)]
-struct PreviousPublication {
-    value: PublishedScope,
-}
+#[serde(transparent)]
+struct ScopeObject(BTreeMap<String, Box<RawValue>>);
 
 #[derive(serde::Serialize)]
 struct ScopeIdentity {
-    agent: Option<String>,
+    agent: ScopeSelector,
     #[serde(rename = "rootId")]
-    root: Option<String>,
+    root: ScopeSelector,
+}
+
+/// A non-text marker retains unknowability without retaining malformed content.
+const UNKNOWN_SCOPE_SELECTOR: u8 = 0;
+
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+enum ScopeSelector {
+    Known(Option<String>),
+    Unknown(u8),
+}
+
+fn tombstone_selector(raw: Option<Box<RawValue>>) -> ScopeSelector {
+    match raw {
+        None => ScopeSelector::Known(None),
+        Some(raw) => match studio_json::from_str::<Option<String>>(raw.get()) {
+            Ok(scope) => ScopeSelector::Known(scope),
+            Err(_) => ScopeSelector::Unknown(UNKNOWN_SCOPE_SELECTOR),
+        },
+    }
 }
 
 #[derive(serde::Serialize)]
@@ -66,16 +79,25 @@ pub(crate) fn tombstone_payload(
         id: &'a str,
         value: TombstoneScope,
     }
-    let scope = previous.and_then(|raw| studio_json::from_str::<PreviousPublication>(raw).ok());
+    // Map insertion follows the consumers' last-member-wins rule. Raw values
+    // retain invalid selector types without retaining any other deleted content.
+    let scope = previous
+        .and_then(|raw| studio_json::from_str::<ScopeObject>(raw).ok())
+        .and_then(|publication| {
+            publication
+                .0
+                .get("value")
+                .and_then(|raw| studio_json::from_str::<ScopeObject>(raw.get()).ok())
+        });
     let value = match scope {
-        Some(previous)
+        Some(mut previous)
             if previous_deleted == Some(false)
-                || !previous.value.agent.is_missing()
-                || !previous.value.root.is_missing() =>
+                || previous.0.contains_key("agent")
+                || previous.0.contains_key("rootId") =>
         {
             TombstoneScope::Known(ScopeIdentity {
-                agent: previous.value.agent.value().cloned(),
-                root: previous.value.root.value().cloned(),
+                agent: tombstone_selector(previous.0.remove("agent")),
+                root: tombstone_selector(previous.0.remove("rootId")),
             })
         }
         _ => TombstoneScope::Unknown(EmptyScope {}),
@@ -122,7 +144,16 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
     if let Some((_, fields)) = JSON_SCOPES.iter().find(|(name, _)| *name == table) {
         let fields = fields
             .iter()
-            .map(|field| format!("'{field}',json_extract({row}.record,'$.{field}')"))
+            .map(|field| {
+                format!(
+                    "'{field}',json({})",
+                    scope_selector_sql(
+                        &format!("{row}.record"),
+                        &format!("$.{field}"),
+                        "json_quote(value)"
+                    )
+                )
+            })
             .collect::<Vec<_>>()
             .join(",");
         Some(format!(
@@ -132,8 +163,22 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
         Some(format!("json_object('agent',{row}.agent)"))
     } else if table == "sync_entities" {
         let team_scoped = team_scoped_publication_sql(row);
+        let fields = PUBLICATION_SCOPES
+            .iter()
+            .map(|field| {
+                format!(
+                    "'{field}',json({})",
+                    scope_selector_sql(
+                        &format!("{row}.payload"),
+                        &format!("$.value.{field}"),
+                        "json_quote(value)"
+                    )
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(",");
         Some(format!(
-            "CASE WHEN {team_scoped} AND json_valid({row}.payload) THEN json_object('rootId',json_extract({row}.payload,'$.value.rootId'),'agent',json_extract({row}.payload,'$.value.agent')) END"
+            "CASE WHEN {team_scoped} AND json_valid({row}.payload) THEN json_object({fields}) END"
         ))
     } else {
         None
@@ -142,9 +187,11 @@ pub(crate) fn deleted_scope_sql(table: &str, row: &str) -> Option<String> {
 
 pub(crate) fn install(tx: &Connection) -> StoreResult<()> {
     for (table, fields) in JSON_SCOPES {
-        let changed = fields.iter().map(|field| {
-            format!("json_extract(OLD.record,'$.{field}') IS NOT json_extract(NEW.record,'$.{field}')")
-        }).collect::<Vec<_>>().join(" OR ");
+        let changed = fields
+            .iter()
+            .map(|field| scope_changed_sql("OLD.record", "NEW.record", &format!("$.{field}")))
+            .collect::<Vec<_>>()
+            .join(" OR ");
         install_guard(
             tx,
             table,
@@ -156,19 +203,106 @@ pub(crate) fn install(tx: &Connection) -> StoreResult<()> {
         install_guard(tx, table, "OLD.agent IS NOT NEW.agent")?;
     }
     let team_scoped = team_scoped_publication_sql("OLD");
+    let publication_changed = PUBLICATION_SCOPES
+        .iter()
+        .map(|field| scope_changed_sql("OLD.payload", "NEW.payload", &format!("$.value.{field}")))
+        .collect::<Vec<_>>()
+        .join(" OR ");
     install_guard(
         tx,
         "sync_entities",
         &format!(
-            "{team_scoped} AND json_valid(OLD.payload) AND (NEW.payload IS NULL OR (json_valid(NEW.payload) AND (json_extract(OLD.payload,'$.value.rootId') IS NOT json_extract(NEW.payload,'$.value.rootId') OR json_extract(OLD.payload,'$.value.agent') IS NOT json_extract(NEW.payload,'$.value.agent'))))"
+            "{team_scoped} AND json_valid(OLD.payload) AND (NEW.payload IS NULL OR (json_valid(NEW.payload) AND ({publication_changed})))"
         ),
     )?;
     install_json_guard(tx, "sync_entities", "payload", true)?;
     Ok(())
 }
 
+/// Missing/null means global scope and remains immutable. Only a present
+/// selector with an invalid non-text type has no known owner to constrain.
+fn scope_changed_sql(previous: &str, next: &str, path: &str) -> String {
+    let previous_type = scope_selector_sql(previous, path, "type");
+    let changed = selector_changed_sql(previous, next, path);
+    format!("(COALESCE({previous_type},'null') IN ('text','null') AND ({changed}))")
+}
+
+fn selector_changed_sql(previous: &str, next: &str, path: &str) -> String {
+    let previous_value = scope_selector_sql(previous, path, "json_array(type,value)");
+    let next_value = scope_selector_sql(next, path, "json_array(type,value)");
+    format!(
+        "COALESCE({previous_value},'[\"null\",null]') IS NOT COALESCE({next_value},'[\"null\",null]')"
+    )
+}
+
+fn scope_members_sql(record: &str, path: &str) -> String {
+    let object = if path.starts_with("$.value.") {
+        format!(
+            "(SELECT CASE WHEN type='object' THEN value END FROM json_each({record}) WHERE key='value' ORDER BY id DESC LIMIT 1)"
+        )
+    } else {
+        record.to_owned()
+    };
+    format!("json_each({object})")
+}
+
+fn scope_selector_sql(record: &str, path: &str, projection: &str) -> String {
+    let field = path.rsplit('.').next().expect("scope selector");
+    let members = scope_members_sql(record, path);
+    format!("(SELECT {projection} FROM {members} WHERE key='{field}' ORDER BY id DESC LIMIT 1)")
+}
+
+fn duplicate_scopes_sql(table: &str) -> String {
+    let (column, fields, prefix, scoped) = if table == "sync_entities" {
+        (
+            "payload",
+            PUBLICATION_SCOPES,
+            "$.value.",
+            team_scoped_publication_sql("NEW"),
+        )
+    } else if let Some((_, fields)) = JSON_SCOPES.iter().find(|(name, _)| *name == table) {
+        ("record", *fields, "$.", "1".to_owned())
+    } else if table == "runtime_items" {
+        ("record", &[][..], "$.", "1".to_owned())
+    } else {
+        return "0".to_owned();
+    };
+    let duplicates = fields
+        .iter()
+        .map(|field| {
+            let members = scope_members_sql(&format!("NEW.{column}"), &format!("{prefix}{field}"));
+            format!("(SELECT count(*) FROM {members} WHERE key='{field}')>1")
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+    let mut predicates = Vec::new();
+    if !duplicates.is_empty() {
+        predicates.push(format!("({scoped}) AND ({duplicates})"));
+    }
+    let mirrors: &[&str] = if table == "sync_entities" {
+        &["id", "collection", "value"]
+    } else {
+        &["id"]
+    };
+    for field in mirrors {
+        predicates.push(format!(
+            "(SELECT count(*) FROM json_each(NEW.{column}) WHERE key='{field}')>1"
+        ));
+    }
+    let duplicated = predicates.join(" OR ");
+    format!("CASE WHEN json_valid(NEW.{column}) THEN ({duplicated}) ELSE 0 END")
+}
+
 fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()> {
     if crate::schema::table_exists(tx, table)? {
+        let duplicated = duplicate_scopes_sql(table);
+        let updated_duplicate = if table == "sync_entities" {
+            format!("NEW.payload IS NOT OLD.payload AND ({duplicated})")
+        } else if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
+            format!("NEW.record IS NOT OLD.record AND ({duplicated})")
+        } else {
+            duplicated.clone()
+        };
         let identity = if table == "sync_entities" {
             "previous.id=NEW.id AND previous.collection=NEW.collection"
         } else {
@@ -181,11 +315,19 @@ fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()>
         };
         let mirror_changed = if table == "sync_entities" {
             let team_scoped = team_scoped_publication_sql("OLD");
+            let mirrors = ["id", "collection"]
+                .iter()
+                .map(|field| {
+                    selector_changed_sql("OLD.payload", "NEW.payload", &format!("$.{field}"))
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ");
             format!(
-                "{team_scoped} AND json_valid(OLD.payload) AND json_valid(NEW.payload) AND (json_extract(OLD.payload,'$.id') IS NOT json_extract(NEW.payload,'$.id') OR json_extract(OLD.payload,'$.collection') IS NOT json_extract(NEW.payload,'$.collection'))"
+                "{team_scoped} AND json_valid(OLD.payload) AND json_valid(NEW.payload) AND ({mirrors})"
             )
         } else if table == "runtime_items" || JSON_SCOPES.iter().any(|(name, _)| *name == table) {
-            "json_valid(OLD.record) AND json_valid(NEW.record) AND json_extract(OLD.record,'$.id') IS NOT json_extract(NEW.record,'$.id')".to_owned()
+            let mirror = selector_changed_sql("OLD.record", "NEW.record", "$.id");
+            format!("json_valid(OLD.record) AND json_valid(NEW.record) AND ({mirror})")
         } else {
             "0".to_owned()
         };
@@ -202,8 +344,28 @@ fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()>
             } else {
                 format!("'{table}'")
             };
+            let fields = JSON_SCOPES
+                .iter()
+                .find(|(name, _)| *name == table)
+                .map(|(_, fields)| *fields)
+                .unwrap_or(if table == "sync_entities" {
+                    PUBLICATION_SCOPES
+                } else {
+                    &["agent"]
+                });
+            let changed = fields
+                .iter()
+                .map(|field| {
+                    scope_changed_sql(
+                        "previous.scope",
+                        &format!("({scope})"),
+                        &format!("$.{field}"),
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" OR ");
             format!(
-                " OR ({team_scoped} AND EXISTS(SELECT 1 FROM durable_rows previous WHERE previous.tbl={evidence_table} AND previous.id=NEW.id AND previous.deleted=1 AND previous.scope IS NOT NULL AND previous.scope IS NOT ({scope})))"
+                " OR ({team_scoped} AND EXISTS(SELECT 1 FROM durable_rows previous WHERE previous.tbl={evidence_table} AND previous.id=NEW.id AND previous.deleted=1 AND previous.scope IS NOT NULL AND ({changed})))"
             )
         } else {
             String::new()
@@ -212,11 +374,11 @@ fn install_guard(tx: &Connection, table: &str, changed: &str) -> StoreResult<()>
             "DROP TRIGGER IF EXISTS immutable_scope_{table};
              DROP TRIGGER IF EXISTS immutable_scope_{table}_insert;
              CREATE TRIGGER immutable_scope_{table}
-             BEFORE UPDATE ON {table} WHEN ({key_changed}) OR ({mirror_changed}) OR ({changed})
+             BEFORE UPDATE ON {table} WHEN ({updated_duplicate}) OR ({key_changed}) OR ({mirror_changed}) OR ({changed})
              BEGIN SELECT RAISE(ABORT,'{IMMUTABLE_SCOPE_ERROR}'); END;
              CREATE TRIGGER IF NOT EXISTS immutable_scope_{table}_insert
              BEFORE INSERT ON {table}
-             WHEN EXISTS(SELECT 1 FROM {table} previous WHERE {identity} AND ({inserted_change})){deleted_guard}
+             WHEN ({duplicated}) OR EXISTS(SELECT 1 FROM {table} previous WHERE {identity} AND ({inserted_change})){deleted_guard}
              BEGIN SELECT RAISE(ABORT,'{IMMUTABLE_SCOPE_ERROR}'); END;"
         ))?;
         if table == "sync_entities" {
@@ -291,6 +453,292 @@ pub fn seed_legacy_reparented_rows<T>(
 #[cfg(test)]
 mod tests {
     use crate::{AgentId, AgentRepository};
+
+    #[test]
+    fn key_scoped_raw_payload_can_gain_tombstone_envelope_but_team_scoped_cannot() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        for collection in ["transcript:fixture", "model", "rateLimit", "fixture"] {
+            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES(?1,'row',1,'one','{\"id\":\"row\",\"unknown\":[1,2]}',0)", [collection]).unwrap();
+            let result = crate::SyncDocumentsRepository::put_entity_hash(
+                &tx, collection, "row", "two", true,
+            );
+            if collection == "fixture" {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains(super::IMMUTABLE_SCOPE_ERROR)
+                );
+            } else {
+                assert!(result.expect("raw key-scoped payload can gain a tombstone envelope"));
+            }
+        }
+    }
+
+    #[test]
+    fn duplicate_publication_container_cannot_disagree_with_scoped_readers() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        let payload = r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha"},"value":{"rootId":"beta"}}"#;
+        assert!(tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',?1,0)", [payload]).is_err());
+    }
+
+    #[test]
+    fn duplicate_identity_mirror_cannot_change_last_consumer_identity() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":\"alpha\"}')", []).unwrap();
+        assert!(tx.execute("UPDATE runtime_plans SET record='{\"id\":\"x\",\"id\":\"other\",\"rootId\":\"alpha\"}' WHERE id='x'", []).is_err());
+    }
+
+    #[test]
+    fn historical_duplicate_agent_can_be_held_without_rewriting_its_record() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        let record = r#"{"id":"x","rootId":"alpha","rootId":17,"provider":"codex","accountKey":"default","epoch":1,"compactions":0,"status":"idle"}"#;
+        super::seed_legacy_reparented_rows(&tx, || {
+            tx.execute(
+                "INSERT INTO runtime_agents(id,record) VALUES('x',?1)",
+                [record],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        AgentRepository::hold(
+            &tx,
+            "x",
+            studio_runtime_schema::persistence::HoldStatus::Invalid,
+            Some("invalid root"),
+        )
+        .expect("quarantine does not admit new duplicate JSON");
+        assert!(
+            tx.execute(
+                "UPDATE runtime_agents SET record=?1 WHERE id='x'",
+                [format!("{record} ")]
+            )
+            .is_err(),
+            "rewriting duplicate bytes is refused even when the final owner is unchanged"
+        );
+        let actual: String = tx
+            .query_row(
+                "SELECT record FROM runtime_agents WHERE id='x'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(actual, record);
+    }
+
+    #[test]
+    fn duplicate_publication_scope_keeps_last_owner_in_soft_tombstone() {
+        for previous in [
+            r#"{"value":{"agent":"known","rootId":1,"rootId":"alpha","content":"private"}}"#,
+            r#"{"value":{"rootId":"wrong"},"value":{"agent":"known","rootId":"alpha","content":"private"}}"#,
+        ] {
+            let tombstone =
+                super::tombstone_payload("fixture", "x", Some(previous), Some(false)).unwrap();
+            assert_eq!(
+                tombstone,
+                r#"{"collection":"fixture","id":"x","value":{"agent":"known","rootId":"alpha"}}"#
+            );
+        }
+        let tombstone = super::tombstone_payload(
+            "fixture",
+            "x",
+            Some(r#"{"value":{"agent":"known","rootId":{"private":"discard"}}}"#),
+            Some(false),
+        )
+        .unwrap();
+        assert_eq!(
+            tombstone,
+            r#"{"collection":"fixture","id":"x","value":{"agent":"known","rootId":0}}"#
+        );
+    }
+
+    #[test]
+    fn duplicate_scope_selectors_cannot_move_rows_or_publications() {
+        for route in ["insert", "update", "replace", "restore"] {
+            let mut db = crate::fresh_state::test_canvas();
+            let tx = db.transaction().unwrap();
+            if route != "insert" {
+                tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":\"alpha\"}')", []).unwrap();
+                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture','{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"alpha\"}}',0)", []).unwrap();
+            }
+            if route == "restore" {
+                tx.execute("DELETE FROM runtime_plans WHERE id='x'", [])
+                    .unwrap();
+                tx.execute("DELETE FROM sync_entities WHERE collection='fixture'", [])
+                    .unwrap();
+            }
+            let row_sql = if route == "update" {
+                "UPDATE runtime_plans SET record=?1 WHERE id='x'"
+            } else {
+                "INSERT OR REPLACE INTO runtime_plans(id,record) VALUES('x',?1)"
+            };
+            let publication_sql = if route == "update" {
+                "UPDATE sync_entities SET payload=?1 WHERE collection='fixture'"
+            } else {
+                "INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',?1,0)"
+            };
+            assert!(
+                tx.execute(row_sql, [r#"{"id":"x","rootId":"alpha","rootId":"beta"}"#])
+                    .is_err(),
+                "{route}: row"
+            );
+            assert!(tx.execute(publication_sql, [r#"{"collection":"fixture","id":"x","value":{"rootId":"alpha","rootId":"beta"}}"#]).is_err(), "{route}: publication");
+        }
+    }
+
+    #[test]
+    fn historical_duplicate_scope_uses_last_member_as_known_owner() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        super::seed_legacy_reparented_rows(&tx, || {
+            tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":1,\"rootId\":\"alpha\"}')", [])?;
+            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture','{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":1,\"rootId\":\"alpha\"}}',0)", [])?;
+            Ok(())
+        }).unwrap();
+        tx.execute(
+            "UPDATE sync_entities SET hash='unchanged-payload' WHERE collection='fixture'",
+            [],
+        )
+        .expect("metadata can change without admitting duplicate payload bytes");
+        assert!(
+            tx.execute(
+                "UPDATE sync_entities SET payload=payload||' ' WHERE collection='fixture'",
+                []
+            )
+            .is_err()
+        );
+        assert!(
+            tx.execute(
+                "UPDATE runtime_plans SET record='{\"id\":\"x\",\"rootId\":\"beta\"}' WHERE id='x'",
+                []
+            )
+            .is_err()
+        );
+        assert!(tx.execute("UPDATE sync_entities SET payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"beta\"}}' WHERE collection='fixture'", []).is_err());
+        tx.execute(
+            "UPDATE runtime_plans SET record='{\"id\":\"x\",\"rootId\":\"alpha\"}' WHERE id='x'",
+            [],
+        )
+        .expect("same last owner can be canonicalized");
+        tx.execute("UPDATE sync_entities SET payload='{\"collection\":\"fixture\",\"id\":\"x\",\"value\":{\"rootId\":\"alpha\"}}' WHERE collection='fixture'", []).expect("same published owner can be canonicalized");
+    }
+
+    #[test]
+    fn invalid_scope_selector_repair_keeps_known_selectors_and_identity_immutable() {
+        for invalid in ["17", "true", "false", "[]", "{}", "1.5"] {
+            let mut db = crate::fresh_state::test_canvas();
+            let tx = db.transaction().unwrap();
+            tx.execute("INSERT INTO runtime_agents(id,record) VALUES('legacy',json_object('id','legacy','rootId',json(?1),'parentId','parent','provider','codex','accountKey','default','epoch',1,'compactions',0,'status','idle'))", [invalid]).unwrap();
+            for sql in [
+                "UPDATE runtime_agents SET id='other' WHERE id='legacy'",
+                "UPDATE runtime_agents SET record=json_set(record,'$.parentId','other') WHERE id='legacy'",
+                "INSERT OR REPLACE INTO runtime_agents(id,record) SELECT id,json_set(record,'$.id','other','$.rootId','repaired') FROM runtime_agents WHERE id='legacy'",
+            ] {
+                assert!(
+                    tx.execute(sql, [])
+                        .unwrap_err()
+                        .to_string()
+                        .contains(super::IMMUTABLE_SCOPE_ERROR)
+                );
+            }
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','repaired') WHERE id='legacy'", []).expect("a non-text historical root has no known team to move");
+            assert!(tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','other') WHERE id='legacy'", []).is_err());
+        }
+    }
+
+    #[test]
+    fn known_scope_cannot_be_erased_to_enable_repair() {
+        for original in [
+            r#"{"id":"x"}"#,
+            r#"{"id":"x","rootId":null}"#,
+            r#"{"id":"x","rootId":""}"#,
+            r#"{"id":"x","rootId":"lead"}"#,
+            r#"{"id":"x","rootId":"{}"}"#,
+            r#"{"id":"x","rootId":"[]"}"#,
+            r#"{"id":"x","rootId":"{\"team\":[\"nested\"]}"}"#,
+            r#"{"id":"x","rootId":"[\"nested\",{}]"}"#,
+        ] {
+            let mut db = crate::fresh_state::test_canvas();
+            let tx = db.transaction().unwrap();
+            tx.execute(
+                "INSERT INTO runtime_plans(id,record) VALUES('x',?1)",
+                [original],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json(?1)),0)", [original]).unwrap();
+            for invalid in [
+                "17",
+                "true",
+                "false",
+                "[]",
+                "{}",
+                r#"{"team":["nested"]}"#,
+                r#"["nested",{}]"#,
+            ] {
+                assert!(tx.execute("UPDATE runtime_plans SET record=json_set(record,'$.rootId',json(?1)) WHERE id='x'", [invalid]).is_err());
+                assert!(tx.execute("INSERT OR REPLACE INTO runtime_plans(id,record) VALUES('x',json_set(?1,'$.rootId',json(?2)))", [original, invalid]).is_err());
+                assert!(tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId',json(?1)) WHERE collection='fixture'", [invalid]).is_err());
+                assert!(tx.execute("INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json_set(?1,'$.rootId',json(?2))),0)", [original, invalid]).is_err());
+            }
+            tx.execute("DELETE FROM runtime_plans WHERE id='x'", [])
+                .unwrap();
+            tx.execute("DELETE FROM sync_entities WHERE collection='fixture'", [])
+                .unwrap();
+            for invalid in [
+                "17",
+                "true",
+                "false",
+                "[]",
+                "{}",
+                r#"{"team":["nested"]}"#,
+                r#"["nested",{}]"#,
+            ] {
+                assert!(tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x',json_set(?1,'$.rootId',json(?2)))", [original, invalid]).is_err());
+                assert!(tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('fixture','x',1,'fixture',json_object('collection','fixture','id','x','value',json_set(?1,'$.rootId',json(?2))),0)", [original, invalid]).is_err());
+            }
+            assert!(tx.execute("INSERT INTO runtime_plans(id,record) VALUES('x','{\"id\":\"x\",\"rootId\":17}')", []).is_err());
+            tx.execute(
+                "INSERT INTO runtime_plans(id,record) VALUES('x',?1)",
+                [original],
+            )
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn invalid_publication_and_deleted_scope_selectors_can_be_repaired() {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().unwrap();
+        for collection in ["updated", "replaced", "deleted"] {
+            crate::SyncDocumentsRepository::put_entity(
+                &tx,
+                collection,
+                "x",
+                studio_json::json!({"agent":"known", "rootId":17}),
+                false,
+            )
+            .unwrap();
+            if collection == "deleted" {
+                tx.execute(
+                    "DELETE FROM sync_entities WHERE collection=?1",
+                    [collection],
+                )
+                .unwrap();
+            }
+            let sql = if collection == "updated" {
+                "UPDATE sync_entities SET payload=json_set(payload,'$.value.rootId','repaired') WHERE collection=?1"
+            } else {
+                "INSERT OR REPLACE INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES(?1,'x',1,'fixture',json_object('collection',?1,'id','x','value',json_object('rootId','repaired','agent','known')),0)"
+            };
+            tx.execute(sql, [collection])
+                .expect("repair does not move known agent selector");
+            assert!(tx.execute("UPDATE sync_entities SET payload=json_set(payload,'$.value.agent','other') WHERE collection=?1", [collection]).is_err());
+        }
+    }
 
     #[test]
     fn key_scoped_publications_ignore_payload_scope_but_keep_sql_identity() {

@@ -54,9 +54,7 @@ impl WorkspaceOperationsRepository {
         connection: &Connection,
         id: &str,
     ) -> StoreResult<Option<WorkspaceOperationRecord>> {
-        Ok(crate::peer_update_settings::canvas_read(connection)
-            .get::<crate::planning_work::WorkspaceOperationRow>(&(id.to_owned(),))?
-            .map(|row| row.record.record().clone()))
+        Table::<WorkspaceOperationRecord>::new(connection).get(&id.to_owned())
     }
     pub fn active_operations(
         connection: &Connection,

@@ -169,6 +169,7 @@ impl Fixture {
             "INSERT INTO \"runtime_agents\"(id,record) VALUES",
         );
         store.transaction(move |tx| {
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
             tx.execute_batch(&sql)?;
             // These legacy rows are inserted after the template was migrated.
             // Apply the permission migration to the records.
@@ -184,6 +185,7 @@ impl Fixture {
                 tx.execute(&format!("UPDATE runtime_agent_volatile SET \"{field}\"=NULL WHERE \"{field}\"='null'"), [])?;
             }
             Ok(())
+            })
         }).await.expect("configure ingress case");
     }
 }
@@ -815,6 +817,12 @@ async fn each_write_occurrence_and_commit_wake_crash_recovers_exactly_once() {
             let store = RuntimeStore::open(Some(&root)).await.expect("count store");
             let request_id = request_id();
             fixture.configure(&store, "capacity").await;
+            // Finish upgrading the historical rows before measuring rollback.
+            // Reinstalling guards invalidates the migrated template's catalog marker.
+            drop(store);
+            let store = RuntimeStore::open(Some(&root))
+                .await
+                .expect("migrated crash fixture");
             let count = arm_statement(&store, table, operation, point, usize::MAX).await;
             let prepared = PreparedAdmission::read(&store.test_reader().expect("read"), "agent")
                 .expect("SQL admission inputs")
@@ -1156,12 +1164,14 @@ async fn corrupt_replay_and_workspace_operation_errors_name_the_row() {
         Ok(())
     }).await.expect("corrupt operation");
     let before = snapshot(&store);
+    let error = send(&store, &json!({}), &request_id)
+        .await
+        .expect_err("invalid operation JSON");
     assert!(
-        send(&store, &json!({}), &request_id)
-            .await
-            .expect_err("invalid operation JSON")
+        error
             .to_string()
-            .contains("runtime_workspace_operations/operation")
+            .contains("runtime_workspace_operations/operation"),
+        "{error}"
     );
     assert_eq!(snapshot(&store), before);
 }

@@ -470,10 +470,13 @@ async fn malformed_monitor_row_is_skipped_while_other_rows_are_recovered() {
                 "DROP INDEX runtime_monitor_agent_status;
                  DROP INDEX runtime_monitor_status",
             )?;
-            tx.execute(
-                "INSERT INTO runtime_monitors(id,record) VALUES('unexpected-monitor','{')",
-                [],
-            )?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                tx.execute(
+                    "INSERT INTO runtime_monitors(id,record) VALUES('unexpected-monitor','{')",
+                    [],
+                )?;
+                Ok(())
+            })?;
             Ok(())
         })
         .await

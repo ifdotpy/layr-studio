@@ -725,7 +725,10 @@ async fn foreign_notification_fails_visibly_while_valid_current_input_is_sent() 
     mixed_inputs(&state).await;
     state.bridge.run(|store| async move {
         store.transaction_with(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+                Ok(())
+            })?;
             Ok::<_,WorkerError>(())
         }).await
     }).await.unwrap();
@@ -867,7 +870,10 @@ async fn changed_authority_releases_the_original_batch_and_only_sends_safe_input
     .expect("compiled steer reaches commit");
     state.bridge.run(|store| async move {
         store.transaction_with(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+                Ok(())
+            })?;
             Ok::<_,WorkerError>(())
         }).await
     }).await.unwrap();
@@ -962,7 +968,10 @@ async fn acknowledged_mixed_input_uses_frozen_authority_after_sender_moves() {
     peer.reply(&request, json!({"turnId":"turn"})).await;
     state.bridge.run(|store| async move {
         store.transaction_with(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+                Ok(())
+            })?;
             Ok::<_,WorkerError>(())
         }).await
     }).await.unwrap();
@@ -1121,7 +1130,10 @@ async fn idle_bad_notifications_are_isolated_without_failing_valid_user_input() 
     mixed_inputs(&state).await;
     state.bridge.run(|store|async move {
         store.transaction_with(|tx| {
-            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+                Ok(())
+            })?;
             tx.execute("UPDATE runtime_events SET text=json_set(text,'$.result.checks',7) WHERE id='review'",[])?;
             Ok::<_,WorkerError>(())
         }).await
@@ -1171,7 +1183,10 @@ async fn idle_authority_change_at_commit_reclaims_safe_input_with_a_fresh_identi
         .unwrap()
         .to_owned();
     state.bridge.run(|store|async move {store.transaction_with(|tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+        studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='mixed-child'",[])?;
+            Ok(())
+        })?;
         Ok::<_,WorkerError>(())
     }).await}).await.unwrap();
     *state.bridge.faults.pause_operation.lock().unwrap() = None;

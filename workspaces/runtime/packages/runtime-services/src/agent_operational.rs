@@ -849,12 +849,13 @@ mod owner_matrix_tests {
             for owner in ["root", "other"] {
                 db.execute("DELETE FROM runtime_monitors", [])
                     .expect("clear");
+                let id = format!("watch-{owner}");
                 let monitor = crate::monitor_policy::complete_test_monitor(
-                    json!({"id":"watch","agent":owner,"status":status,"epoch":999}),
+                    json!({"id":id,"agent":owner,"status":status,"epoch":999}),
                 );
                 db.execute(
-                    "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
-                    [monitor.to_string()],
+                    "INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)",
+                    [id, monitor.to_string()],
                 )
                 .expect("monitor");
                 let contexts = load(&db, &["root".into()]).expect("facts");
@@ -1080,7 +1081,7 @@ mod owner_matrix_tests {
             TaskType::CommandExecution,
             String::new(),
         );
-        put_task(&db, &task);
+        studio_runtime_store::TaskRepository::put(&db, &task).expect("task");
         let contexts = load(&db, &["root".into()]).expect("facts");
         assert!(contexts["root"].active);
         assert!(contexts["root"].wait.is_none());

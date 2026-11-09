@@ -96,7 +96,10 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
             store.transaction_with(move |tx| {
                 match mutation_name {
                     "owner_deleted" => { tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='asset-owner'", [])?; }
-                    "owner_moved" => { tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='asset-owner'", [])?; }
+                    "owner_moved" => { studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','foreign') WHERE id='asset-owner'", [])?;
+                        Ok(())
+                    })?; }
                     "asset_path" => { tx.execute("UPDATE runtime_assets SET record=json_set(record,'$.path','/changed') WHERE id='asset'", [])?; }
                     "plan" => { tx.execute("INSERT INTO runtime_plans(id,record) VALUES(?1,?2)", rusqlite::params![mutation_id,json!({"id":mutation_id,"rootId":mutation_id,"native":{"plan":[{"step":"new plan", "status":"pending"}]}}).to_string()])?; }
                     "complaint" => { tx.execute("INSERT INTO runtime_complaints(id,record) VALUES('new',?1)", [json!({"id":"new","leadId":mutation_id,"recipient":"lead","status":"open","responses":[],"author":mutation_id,"text":"new question","created":1,"readAt":null,"updated":null,"version":1}).to_string()])?; }
@@ -391,7 +394,7 @@ async fn missing_native_effort_uses_shared_catalog_published_after_construction(
 }
 
 pub(super) async fn scenario_sibling_completion_does_not_refuse_non_lead() {
-    let state = State::new().await;
+    let state = State::new_child("root").await;
     let id = state.agent.clone();
     let epoch = state.epoch;
     let prepared = state

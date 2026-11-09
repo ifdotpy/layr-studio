@@ -670,10 +670,13 @@ mod tests {
         assert_eq!(stored(&store, "done:gone")["status"], "running");
         store
             .transaction_with(|tx| {
-                tx.execute(
-                    "UPDATE runtime_tasks SET record='{}' WHERE id='done:gone'",
-                    [],
-                )?;
+                studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
+                    tx.execute(
+                        "UPDATE runtime_tasks SET record='{}' WHERE id='done:gone'",
+                        [],
+                    )?;
+                    Ok(())
+                })?;
                 Ok::<_, StoreError>(())
             })
             .await
