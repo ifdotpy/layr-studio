@@ -13,9 +13,9 @@ use std::{
     sync::{Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
-use studio_db_api::db_update;
+use studio_db_api::{db_query, db_update};
 use studio_runtime_store::json_record_codec::ExactJson;
-use studio_runtime_store::peer_update_settings::canvas_tx;
+use studio_runtime_store::peer_update_settings::{canvas_read, canvas_tx};
 use studio_runtime_store::voice_storage::{
     VoiceApprovalRow, VoiceSessionRow as SessionStorageRow, VoiceSpeechRequestRow,
 };
@@ -215,12 +215,13 @@ pub(super) fn saved_scope(
     connection: &Connection,
     session: &str,
 ) -> Result<studio_runtime_schema::persistence::CapturedScope, VoiceProviderError> {
-    let raw: Option<String> = connection.query_row(
-        // Scalar projection avoids decoding unrelated stored columns.
-        "SELECT provider_scope FROM voice_sessions WHERE id=?1",
-        [session],
-        |row| row.get(0),
-    )?;
+    let raw = db_query!(
+        canvas_read(connection),
+        SessionStorageRow,
+        scalar_raw(SessionStorageRow::PROVIDER_SCOPE),
+        filter(SessionStorageRow::ID.eq_ref(session))
+    )?
+    .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
     match raw {
         Some(raw) => Ok(studio_runtime_schema::persistence::CapturedScope::Known(
             studio_json::from_str(&raw).map_err(|_| VoiceProviderError::ContextChanged)?,
@@ -391,14 +392,17 @@ impl VoiceCallbackActor {
         let key = (account_key.to_owned(), connection_id.to_owned());
         let ids = store
             .read_async("runtime-services/voice/provider", move |connection| {
-                let mut statement = connection.prepare_cached(
-                    // Scalar projection avoids decoding unrelated stored columns.
-                    "SELECT id FROM voice_sessions WHERE account_key=?1 AND connection_id=?2 AND ended IS NULL",
-                )?;
-                statement
-                    .query_map(rusqlite::params![key.0, key.1], |row| row.get::<_, String>(0))?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(studio_runtime_store::StoreError::from)
+                db_query!(
+                    canvas_read(connection),
+                    SessionStorageRow,
+                    scalars(SessionStorageRow::ID),
+                    filter(
+                        SessionStorageRow::ACCOUNT_KEY.eq_ref(&Some(key.0.as_str())),
+                        SessionStorageRow::CONNECTION_ID.eq_ref(&Some(key.1.as_str())),
+                        SessionStorageRow::ENDED.is_null()
+                    )
+                )
+                .map_err(studio_runtime_store::StoreError::from)
             })
             .await?;
         for id in ids {
@@ -466,15 +470,19 @@ async fn active_session_id(
     );
     Ok(store
         .read_async("runtime-services/voice/provider", move |connection| {
-            connection
-                .query_row(
-                    // Scalar projection avoids decoding unrelated stored columns.
-                    "SELECT id FROM voice_sessions WHERE native_thread=?1 AND account_key=?2 AND connection_id=?3 AND ended IS NULL ORDER BY created DESC LIMIT 1",
-                    rusqlite::params![key.0, key.1, key.2],
-                    |row| row.get(0),
-                )
-                .optional()
-                .map_err(studio_runtime_store::StoreError::from)
+            db_query!(
+                canvas_read(connection),
+                SessionStorageRow,
+                scalar(SessionStorageRow::ID),
+                filter(
+                    SessionStorageRow::NATIVE_THREAD.eq_ref(&Some(key.0.as_str())),
+                    SessionStorageRow::ACCOUNT_KEY.eq_ref(&Some(key.1.as_str())),
+                    SessionStorageRow::CONNECTION_ID.eq_ref(&Some(key.2.as_str())),
+                    SessionStorageRow::ENDED.is_null()
+                ),
+                order_by(SessionStorageRow::CREATED.desc)
+            )
+            .map_err(studio_runtime_store::StoreError::from)
         })
         .await?)
 }
@@ -1193,12 +1201,8 @@ async fn reserve_approval(
             if !monitor_runtime_available {
                 return Ok(ApprovalDispatch::MonitorUnavailable);
             }
-            let has_native_session: bool = transaction.query_row(
-                // Aggregate lookup has no generated scalar query.
-                "SELECT EXISTS(SELECT 1 FROM voice_sessions WHERE id=?1 AND native_thread IS NOT NULL)",
-                [session_id],
-                |row| row.get(0),
-            )?;
+            let has_native_session = db_query!(canvas_read(transaction), SessionStorageRow, exists(),
+                filter(SessionStorageRow::ID.eq_ref(&session_id), SessionStorageRow::NATIVE_THREAD.is_not_null()))?;
             if has_native_session {
                 return Err(VoiceProviderError::ContextChanged);
             }
@@ -2953,9 +2957,9 @@ mod tests {
         )
         .expect("read recovered session")
         .expect("recovered session remains addressable");
-        assert_eq!(persisted["state"], "lost");
-        assert_eq!(persisted["ended"], 20.0);
-        assert_eq!(persisted["error"], RESTARTED_SESSION_ERROR);
+        assert_eq!(persisted.state.as_deref(), Some("lost"));
+        assert_eq!(persisted.ended, Some(20.0));
+        assert_eq!(persisted.error.as_deref(), Some(RESTARTED_SESSION_ERROR));
 
         let provider = Arc::new(ScriptedProvider {
             calls: Mutex::new(vec![]),

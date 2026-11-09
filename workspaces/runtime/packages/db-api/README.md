@@ -64,3 +64,59 @@ that table’s single state-check report;
 read/write admission still belongs to `check`. State-check results include counts
 and aggregated pointer/keyword diagnostics. Codecs can return a boxed
 `StateCheckFailure` through a rusqlite conversion error to preserve decode details.
+
+`DbProjection` selects named fields from one existing table owner:
+
+```rust,ignore
+#[derive(DbProjection)]
+#[db(of = SessionRow)]
+struct SessionId { id: String }
+let rows = db_query!(read, SessionRow, project(SessionId),
+    filter(SessionRow::AGENT.eq_ref(agent)), limit(1u32))?;
+```
+
+A projection decodes only its selected columns and does not run a full-row check.
+Its field types must match the owner. `#[db(field = owner_field)]` selects a
+renamed Rust field. `#[db(raw)]` explicitly reads the codec's exact `Stored` type
+instead of interpreting it; this preserves historical replay/refusal boundaries.
+`eq_ref`, `ne_ref`, `lt_ref`, `le_ref`, `gt_ref`, and `ge_ref` accept borrowed native
+`str` and `Option<&str>` bindings. Ordinary comparisons keep their original owned
+type inference, including `None` and `.into()`. Custom codecs keep their encoder.
+
+`tx.update_existing(&row) -> Result<bool>` validates and replaces only an existing
+key; generated columns are never assigned. `#[db(revision)]` on one writable
+native non-key field also generates `tx.update_existing_at(&row, &expected)`.
+The supplied row contains the new revision; the predicate compares the stored
+revision with `expected`. Receipt owners have neither operation.
+
+A physical owner declares `#[db(partitioned_by = Kind)]`, with a `DbEnum` kind
+field included in its composite key. Per-kind rows derive `DbPartition` with
+`#[db(of = PhysicalRow, kind = Kind::Variant)]`, declare the remaining key fields,
+and choose typed payload codecs and checks. The compiler checks key shape, kind
+type, column names and codec storage types against the physical owner. Kind is a
+fixed SQL literal supplied by its enum owner, never a field callers can mismatch.
+Physical owners have no generic write capability; callers write per-kind rows.
+`tx.partition::<PlanRow>().get/put/delete/list` delegates to the same table CRUD
+as ordinary rows. Query/update/delete macros and state checks include the kind
+predicate. Partition indexes are partial indexes for that kind; install the
+physical descriptor and each partition's indexes. Receipt partitions allow reads
+and explicit insertion, while omitting generic replacement and deletion.
+
+For a single result, `project_one(SessionId)` returns `Result<Option<SessionId>>`
+through `query_row(...).optional()`, with neither LIMIT nor a temporary vector.
+The same clause family has `scalar(Row::COLUMN)` for `Option<Column::Value>`,
+`scalar_raw(Row::COLUMN)` for exact codec storage, `scalars(Row::COLUMN)` for an
+ordered vector, and `exists()` for a Boolean presence check. All keep the owner’s
+typed filters and partition predicate. A nullable scalar keeps missing-row and
+SQL NULL distinct as `None` and `Some(None)`; scalar codec errors stay errors.
+Only one selection clause is allowed. Single-result clauses do not accept LIMIT.
+
+A partition cannot declare a field whose resolved SQL column is the physical
+kind column, including renamed fields. The generated eager assertion rejects it
+at compilation. Partition indexes use `index(...)`, never `legacy_index`; a
+supplied predicate is grouped as `kind = code AND (predicate)`.
+
+Codecs separate owned read storage (`Stored: DbValue`) from write bindings
+(`Encoded<'a>: ToSql`). `encode` can return `&'a str` or `&'a [u8]` borrowed from
+the admitted value. Generated inserts, full-row updates and column assignments
+bind that reference directly; JSON record codecs do not clone their raw text.

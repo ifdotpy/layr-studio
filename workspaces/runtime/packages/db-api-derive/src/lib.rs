@@ -12,6 +12,12 @@ pub fn table(input: TokenStream) -> TokenStream {
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
 }
+#[proc_macro_derive(DbPartition, attributes(db))]
+pub fn partition(input: TokenStream) -> TokenStream {
+    expand_table(&parse_macro_input!(input as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
 #[proc_macro_derive(DbEnum)]
 pub fn enumeration(input: TokenStream) -> TokenStream {
     expand_enum(&parse_macro_input!(input as DeriveInput))
@@ -94,6 +100,7 @@ fn expand_enum(input: &DeriveInput) -> syn::Result<Tokens> {
         .join(",");
     Ok(quote! {
         impl #name { #(#constants)* }
+        impl ::studio_db_api::EnumValue for #name {}
         impl ::studio_db_api::DbValue for #name {
             const SQL_TYPE: &'static str = "INTEGER";
             const CODES: &'static str = #codes;
@@ -163,6 +170,9 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             "DbTable requires a concrete row type",
         ));
     }
+    let mut partition_owner = None::<Path>;
+    let mut partition_kind = None::<Path>;
+    let mut partitioned_by = None::<Path>;
     let mut table = None::<LitStr>;
     let mut database = None::<Path>;
     let mut check = None::<Path>;
@@ -173,7 +183,13 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     let mut legacy_indexes = Vec::<LitStr>::new();
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("db")) {
         attr.parse_nested_meta(|meta| {
-            if meta.path.is_ident("table") {
+            if meta.path.is_ident("of") {
+                partition_owner = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("kind") {
+                partition_kind = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("partitioned_by") {
+                partitioned_by = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("table") {
                 table = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("database") {
                 database = Some(meta.value()?.parse()?);
@@ -217,6 +233,62 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             Ok(())
         })?;
     }
+    if partition_owner.is_some() && !legacy_indexes.is_empty() {
+        return Err(syn::Error::new_spanned(
+            name,
+            "partition indexes require scoped index declarations",
+        ));
+    }
+    if partition_owner.is_some() {
+        if table.is_some() || database.is_some() || legacy_ddl.is_some() || partitioned_by.is_some()
+        {
+            return Err(syn::Error::new_spanned(
+                name,
+                "partition inherits its physical table and database",
+            ));
+        }
+        table = Some(syn::parse_quote!("__db_partition_table"));
+        database = Some(syn::parse_quote!(__PartitionDatabase));
+    } else if partition_kind.is_some() {
+        return Err(syn::Error::new_spanned(
+            name,
+            "kind requires of = PhysicalTable",
+        ));
+    }
+    let partition_predicate = if let Some(owner) = &partition_owner {
+        let kind = partition_kind
+            .as_ref()
+            .ok_or_else(|| syn::Error::new_spanned(name, "missing kind = Kind::Variant"))?;
+        let mut enum_owner = kind.clone();
+        let variant = enum_owner
+            .segments
+            .pop()
+            .expect("kind variant")
+            .into_value()
+            .ident;
+        enum_owner.segments.pop_punct();
+        let code = format_ident!("DB_CODE_{}", variant.to_string().to_uppercase());
+        quote!(
+            ::studio_db_api::static_sql!("\"", <#owner as ::studio_db_api::PartitionedTable>::KIND_COLUMN, "\"=", #enum_owner::#code)
+        )
+    } else {
+        quote!("")
+    };
+    let sql = |text: &str| -> Tokens {
+        if let Some(owner) = &partition_owner {
+            let parts = text.split("__db_partition_table").collect::<Vec<_>>();
+            let mut pieces = Vec::new();
+            for (i, part) in parts.iter().enumerate() {
+                if i > 0 {
+                    pieces.push(quote!(<#owner as ::studio_db_api::Table>::NAME));
+                }
+                pieces.push(quote!(#part));
+            }
+            quote!(::studio_db_api::static_sql!(#(#pieces),*))
+        } else {
+            quote!(#text)
+        }
+    };
     let table =
         table.ok_or_else(|| syn::Error::new_spanned(name, "missing #[db(table = \"name\")]"))?;
     if legacy_ddl.is_some() {
@@ -226,6 +298,10 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     }
     let database = database
         .ok_or_else(|| syn::Error::new_spanned(name, "missing #[db(database = Marker)]"))?;
+    let database = partition_owner.as_ref().map_or_else(
+        || quote!(#database),
+        |owner| quote!(<#owner as ::studio_db_api::Table>::Database),
+    );
     let syn::Data::Struct(data) = &input.data else {
         return Err(syn::Error::new_spanned(name, "DbTable requires a struct"));
     };
@@ -236,6 +312,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         ));
     };
     let mut fields = Vec::new();
+    let mut revision_field = None::<Ident>;
     for field in &named.named {
         let field_name = field.ident.clone().expect("named field");
         let mut f = Field {
@@ -251,7 +328,11 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         };
         for attr in field.attrs.iter().filter(|a| a.path().is_ident("db")) {
             attr.parse_nested_meta(|meta| {
-                if meta.path.is_ident("key") {
+                if meta.path.is_ident("revision") {
+                    if revision_field.replace(f.name.clone()).is_some() {
+                        return Err(meta.error("only one revision field is allowed"));
+                    }
+                } else if meta.path.is_ident("key") {
                     f.key = true;
                 } else if meta.path.is_ident("generated") {
                     f.generated = true;
@@ -336,6 +417,36 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         .filter(|f| !f.key && !f.generated)
         .map(|f| format!("{}=excluded.{}", quoted(&f.column), quoted(&f.column)))
         .collect::<Vec<_>>();
+    let generated_keys = keys.iter().filter(|f| f.generated).collect::<Vec<_>>();
+    let update_columns = writable
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !f.key)
+        .map(|(i, f)| format!("{}=?{}", quoted(&f.column), i + 1))
+        .collect::<Vec<_>>();
+    let update_columns = if update_columns.is_empty() {
+        format!("{}={}", quoted(&keys[0].column), quoted(&keys[0].column))
+    } else {
+        update_columns.join(",")
+    };
+    let update_keys = keys
+        .iter()
+        .map(|f| {
+            let i = writable
+                .iter()
+                .position(|w| w.name == f.name)
+                .unwrap_or_else(|| {
+                    writable.len()
+                        + generated_keys
+                            .iter()
+                            .position(|w| w.name == f.name)
+                            .expect("generated key")
+                });
+            format!("{}=?{}", quoted(&f.column), i + 1)
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let update_existing = format!("UPDATE {sql_table} SET {update_columns} WHERE {update_keys}");
     let upsert = if updates.is_empty() {
         format!("{insert} ON CONFLICT({key_columns}) DO NOTHING")
     } else {
@@ -466,7 +577,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         constants.push(quote!(pub const #constant: #marker = #marker;));
         let (parameter, encode) = if let Some(codec) = codec {
             (
-                quote!(#stored),
+                quote!(<#codec as ::studio_db_api::Codec<#ty>>::Encoded<'a>),
                 quote!(<#codec as ::studio_db_api::Codec<#ty>>::encode(connection, value)),
             )
         } else {
@@ -481,11 +592,49 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         markers.push(quote!(impl ::studio_db_api::Column for #marker {
             type Row = #name;
             type Value = #ty;
+            type Stored = #stored;
             type Parameter<'a> = #parameter;
             const NAME: &'static str = #column;
             const QUOTED_NAME: &'static str = concat!("\"", #column, "\"");
             fn encode<'a>(connection: &::studio_db_api::rusqlite::Connection, value: &'a #ty) -> ::studio_db_api::rusqlite::Result<Self::Parameter<'a>> { #encode }
+            fn decode(connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>, index: usize) -> ::studio_db_api::rusqlite::Result<Self::Value> { Self::__db_decode(connection, row, index) }
         }));
+        let decode = if let Some(codec) = codec {
+            quote!(<#codec as ::studio_db_api::Codec<#ty>>::decode(connection, <#stored as ::studio_db_api::DbValue>::read(row, index)?))
+        } else {
+            quote!(<#ty as ::studio_db_api::DbValue>::read(row, index))
+        };
+        markers.push(quote!(impl ::studio_db_api::ColumnInput<#marker> for #ty {
+            type Parameter<'a> = <#marker as ::studio_db_api::Column>::Parameter<'a>;
+            fn encode_input<'a>(&'a self, connection: &::studio_db_api::rusqlite::Connection, _: #marker) -> ::studio_db_api::rusqlite::Result<Self::Parameter<'a>> {
+                <#marker as ::studio_db_api::Column>::encode(connection, self)
+            }
+        }));
+        if codec.is_none() {
+            let borrowed: Option<Type> = match quote!(#ty).to_string().replace(' ', "").as_str() {
+                "String" => Some(syn::parse_quote!(str)),
+                "Option<String>" => Some(syn::parse_quote!(Option<&str>)),
+                _ => None,
+            };
+            if let Some(borrowed) = borrowed {
+                markers.push(quote!(impl ::studio_db_api::ColumnInput<#marker> for #borrowed {
+                    type Parameter<'a> = &'a Self where Self: 'a;
+                    fn encode_input<'a>(&'a self, _: &::studio_db_api::rusqlite::Connection, _: #marker) -> ::studio_db_api::rusqlite::Result<Self::Parameter<'a>> { Ok(self) }
+                }));
+            }
+        }
+        markers.push(quote!(impl #marker {
+            fn __db_decode(connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>, index: usize) -> ::studio_db_api::rusqlite::Result<#ty> { let _ = connection; #decode }
+        }));
+        if let Some(owner) = &partition_owner {
+            markers.push(quote!(const _: () = {
+                assert!(!::studio_db_api::identifiers_equal(#column, <#owner as ::studio_db_api::PartitionedTable>::KIND_COLUMN), "partition fields cannot expose the physical discriminator");
+            };));
+            markers.push(quote!(const _: fn() = || {
+                fn same_storage<C: ::studio_db_api::Column<Stored = #stored>>(_: C) {}
+                same_storage(#owner::#constant);
+            };));
+        }
         descriptors.push(quote!(::studio_db_api::ColumnDescriptor { name: #column, storage: <#stored as ::studio_db_api::DbValue>::SQL_TYPE, nullable: <#stored as ::studio_db_api::DbValue>::NULLABLE, private: #private, codes: <#stored as ::studio_db_api::DbValue>::CODE_NAMES }));
     }
     if keys.len() > 1 {
@@ -550,18 +699,30 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             if index.unique { "UNIQUE " } else { "" },
             index_name.value()
         );
-        if let Some(predicate) = index.predicate {
-            let predicate = predicate_sql(&predicate, &fields)?;
-            index_sql.push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: ::studio_db_api::static_sql!(#base, " WHERE ", #predicate) }));
-        } else {
-            index_sql.push(
-                quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: concat!(#base) }),
-            );
-        }
+        let base = sql(&base);
+        let predicate = index
+            .predicate
+            .map(|p| predicate_sql(&p, &fields))
+            .transpose()?;
+        let index_text = match (partition_owner.is_some(), predicate) {
+            (true, Some(predicate)) => quote!(
+                ::studio_db_api::static_sql!(#base, " WHERE ", #partition_predicate, " AND (", #predicate, ")")
+            ),
+            (true, None) => {
+                quote!(::studio_db_api::static_sql!(#base, " WHERE ", #partition_predicate))
+            }
+            (false, Some(predicate)) => {
+                quote!(::studio_db_api::static_sql!(#base, " WHERE ", #predicate))
+            }
+            (false, None) => base,
+        };
+        index_sql
+            .push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #index_text }));
     }
     let key_types = keys.iter().map(|f| &f.ty).collect::<Vec<_>>();
     let key_assertions = key_types.iter().map(|ty| quote!(assert!(!<#ty as ::studio_db_api::DbValue>::NULLABLE, "primary keys cannot be nullable");));
-    let update = if check.is_none() && !receipt && !writable.is_empty() {
+    let update = if check.is_none() && !receipt && !writable.is_empty() && partitioned_by.is_none()
+    {
         quote!(impl ::studio_db_api::UpdateTable for #name {})
     } else {
         quote!()
@@ -573,28 +734,158 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         let i = syn::Index::from(i);
         quote!(&key.#i as &dyn ::studio_db_api::rusqlite::types::ToSql)
     });
-    let mutable = if receipt || writable.is_empty() {
+    let placeholders = vec!["?"; writable.len()].join(",");
+    let mut partition_impl = quote!();
+    if let Some(kind) = &partitioned_by {
+        let field = fields
+            .iter()
+            .find(|f| {
+                quote!(#kind).to_string() == {
+                    let ty = &f.ty;
+                    quote!(#ty).to_string()
+                }
+            })
+            .ok_or_else(|| {
+                syn::Error::new_spanned(kind, "partition kind requires a field of this enum type")
+            })?;
+        if !field.key {
+            return Err(syn::Error::new_spanned(
+                &field.name,
+                "kind must be part of the primary key",
+            ));
+        }
+        let column = &field.column;
+        let partition_key_types = keys
+            .iter()
+            .filter(|f| f.name != field.name)
+            .map(|f| &f.ty)
+            .collect::<Vec<_>>();
+        partition_impl = quote!(impl ::studio_db_api::PartitionedTable for #name { type Kind = #kind; const KIND_COLUMN: &'static str = #column; type PartitionKey = (#(#partition_key_types,)*); });
+    }
+    let table_name_expr = partition_owner.as_ref().map_or_else(
+        || quote!(#table),
+        |owner| quote!(<#owner as ::studio_db_api::Table>::NAME),
+    );
+    let select = sql(&select);
+    let table_select = if partition_owner.is_some() {
+        quote!(::studio_db_api::static_sql!(#select, " WHERE ", #partition_predicate))
+    } else {
+        select.clone()
+    };
+    let mut get = sql(&get);
+    let mut insert = sql(&insert);
+    let mut delete = sql(&delete);
+    let mut upsert = sql(&upsert);
+    let mut insert_new = sql(&insert_new);
+    let mut update_existing = sql(&update_existing);
+    let mut ddl = quote!(::studio_db_api::static_sql!(#(#ddl),*));
+
+    let mut columns = quote!(&[#(#descriptors),*]);
+    let constraints = quote!(::studio_db_api::static_sql!(#(#constraints),*));
+    let mut state_prefix = quote!("");
+    if let Some(owner) = &partition_owner {
+        let kind = partition_kind.as_ref().expect("partition kind");
+        let mut enum_owner = kind.clone();
+        let variant = enum_owner
+            .segments
+            .pop()
+            .expect("kind variant")
+            .into_value()
+            .ident;
+        enum_owner.segments.pop_punct();
+        let code = format_ident!("DB_CODE_{}", variant.to_string().to_uppercase());
+        let typed_kind = quote!(const _: fn() = || {
+            let _: <#owner as ::studio_db_api::PartitionedTable>::Kind = #kind;
+            let _: Option<<#owner as ::studio_db_api::PartitionedTable>::PartitionKey> = None::<(#(#key_types,)*)>;
+        };);
+        partition_impl = quote!(#typed_kind impl ::studio_db_api::PartitionTable for #name {
+            type Physical = #owner;
+            const LIST: &'static str = ::studio_db_api::static_sql!(#select, " WHERE ", #partition_predicate);
+        });
+        ddl = quote!(<#owner as ::studio_db_api::Table>::DDL);
+        columns = quote!(<#owner as ::studio_db_api::Table>::COLUMNS);
+        get = quote!(::studio_db_api::static_sql!(#get, " AND ", #partition_predicate));
+        delete = quote!(::studio_db_api::static_sql!(#delete, " AND ", #partition_predicate));
+        insert = quote!(
+            ::studio_db_api::static_sql!("INSERT INTO \"", <#owner as ::studio_db_api::Table>::NAME, "\"(\"", <#owner as ::studio_db_api::PartitionedTable>::KIND_COLUMN, "\",", #write_columns, ") VALUES(", #enum_owner::#code, ",", #placeholders, ")")
+        );
+        let conflict = quote!(
+            ::studio_db_api::static_sql!(" ON CONFLICT(\"", <#owner as ::studio_db_api::PartitionedTable>::KIND_COLUMN, "\",", #key_columns, ")")
+        );
+        let action = if updates.is_empty() {
+            " DO NOTHING".to_owned()
+        } else {
+            format!(" DO UPDATE SET {}", updates.join(","))
+        };
+        upsert = quote!(::studio_db_api::static_sql!(#insert, #conflict, #action));
+        insert_new = quote!(::studio_db_api::static_sql!(#insert, #conflict, " DO NOTHING"));
+        update_existing =
+            quote!(::studio_db_api::static_sql!(#update_existing, " AND ", #partition_predicate));
+        state_prefix = quote!(::studio_db_api::static_sql!(#partition_predicate, " AND "));
+    }
+    let generated_key_binds = generated_keys
+        .iter()
+        .map(|f| {
+            let field = &f.name;
+            quote!(&self.#field as &dyn ::studio_db_api::rusqlite::types::ToSql)
+        })
+        .collect::<Vec<_>>();
+    let mutable = if receipt || writable.is_empty() || partitioned_by.is_some() {
         quote!()
     } else {
-        quote!(impl ::studio_db_api::MutableTable for #name { const UPSERT: &'static str = concat!(#upsert); const INSERT_NEW: &'static str = #insert_new; })
+        quote!(impl ::studio_db_api::MutableTable for #name {
+            const UPSERT: &'static str = #upsert;
+            const INSERT_NEW: &'static str = #insert_new;
+            const UPDATE_EXISTING: &'static str = #update_existing;
+            fn bind_update<T>(&self, _connection: &::studio_db_api::rusqlite::Connection, f: impl FnOnce(&[&dyn ::studio_db_api::rusqlite::types::ToSql]) -> ::studio_db_api::rusqlite::Result<T>) -> ::studio_db_api::rusqlite::Result<T> {
+                #(#encoded)* f(&[#(#binds,)* #(#generated_key_binds),*])
+            }
+        })
     };
+    let revision = if let Some(field) = fields
+        .iter()
+        .find(|f| Some(&f.name) == revision_field.as_ref())
+    {
+        if receipt || field.generated || field.codec.is_some() || field.key {
+            return Err(syn::Error::new_spanned(
+                &field.name,
+                "revision must be a writable non-key native column",
+            ));
+        }
+        let ty = &field.ty;
+        let predicate = format!(" AND {}=?", quoted(&field.column));
+        Some(quote!(impl ::studio_db_api::RevisionTable for #name {
+            type Revision = #ty;
+            const UPDATE_AT_REVISION: &'static str = ::studio_db_api::static_sql!(#update_existing, #predicate);
+        }))
+    } else {
+        None
+    };
+    let insertable = partitioned_by
+        .is_none()
+        .then(|| quote!(impl ::studio_db_api::InsertTable for #name {}));
+    let sql_table = sql(&sql_table);
     Ok(quote! {
         const _: () = { #(#key_assertions)* };
+        #partition_impl
+        #insertable
+        #revision
         #(#markers)*
         impl #name { #(#constants)* }
         impl ::studio_db_api::Table for #name {
             type Database = #database;
             type Key = (#(#key_types,)*);
-            const NAME: &'static str = #table;
-            const DDL: &'static str = ::studio_db_api::static_sql!(#(#ddl),*);
+            const NAME: &'static str = #table_name_expr;
+            const DDL: &'static str = #ddl;
             const INDEXES: &'static [::studio_db_api::IndexDescriptor] = &[#(#index_sql),*];
-            const SELECT: &'static str = concat!(#select);
-            const STATE_CHECK: &'static str = ::studio_db_api::static_sql!("SELECT count(*) FROM ", #sql_table, " WHERE NOT (", #(#constraints),*, ")");
-            const VALID_ROWS: &'static str = ::studio_db_api::static_sql!(#select, " WHERE (", #(#constraints),*, ") IS NOT FALSE");
-            const GET: &'static str = concat!(#get);
-            const INSERT: &'static str = concat!(#insert);
-            const DELETE: &'static str = concat!(#delete);
-            const COLUMNS: &'static [::studio_db_api::ColumnDescriptor] = &[#(#descriptors),*];
+            const SELECT: &'static str = #table_select;
+            const PARTITION: &'static str = #partition_predicate;
+            const STATE_CHECK: &'static str = ::studio_db_api::static_sql!("SELECT count(*) FROM ", #sql_table, " WHERE ", #state_prefix, "NOT (", #constraints, ")");
+            const VALID_ROWS: &'static str = ::studio_db_api::static_sql!(#select, " WHERE ", #state_prefix, "(", #constraints, ") IS NOT FALSE");
+            const GET: &'static str = #get;
+            const INSERT: &'static str = #insert;
+            const DELETE: &'static str = #delete;
+            const COLUMNS: &'static [::studio_db_api::ColumnDescriptor] = #columns;
             fn read(_connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>) -> ::studio_db_api::rusqlite::Result<Self> { let value = Self { #(#reads),* }; ::studio_db_api::Table::validate(&value)?; Ok(value) }
             #validate
             #state_check
@@ -700,6 +991,13 @@ enum Statement {
     Update,
     Delete,
 }
+enum Selection {
+    Rows,
+    Project(Path, bool),
+    Scalar(Path, bool),
+    Scalars(Path),
+    Exists,
+}
 struct QueryInput {
     tx: Expr,
     row: Path,
@@ -707,6 +1005,7 @@ struct QueryInput {
     order: Vec<Expr>,
     limit: Option<Expr>,
     assignments: Vec<Expr>,
+    selection: Selection,
 }
 impl syn::parse::Parse for QueryInput {
     fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
@@ -720,6 +1019,7 @@ impl syn::parse::Parse for QueryInput {
             order: vec![],
             limit: None,
             assignments: vec![],
+            selection: Selection::Rows,
         };
         let mut seen = Vec::new();
         while !input.is_empty() {
@@ -734,6 +1034,28 @@ impl syn::parse::Parse for QueryInput {
             seen.push(clause.to_string());
             let content;
             syn::parenthesized!(content in input);
+            let selection = match clause.to_string().as_str() {
+                "project" | "project_one" => Some(Selection::Project(
+                    content.parse()?,
+                    clause == "project_one",
+                )),
+                "scalar" | "scalar_raw" => {
+                    Some(Selection::Scalar(content.parse()?, clause == "scalar_raw"))
+                }
+                "scalars" => Some(Selection::Scalars(content.parse()?)),
+                "exists" if content.is_empty() => Some(Selection::Exists),
+                _ => None,
+            };
+            if let Some(selection) = selection {
+                if !matches!(query.selection, Selection::Rows) {
+                    return Err(syn::Error::new_spanned(
+                        clause,
+                        "only one selection clause is allowed",
+                    ));
+                }
+                query.selection = selection;
+                continue;
+            }
             let args = content
                 .parse_terminated(Expr::parse, syn::Token![,])?
                 .into_iter()
@@ -769,6 +1091,7 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
         order,
         limit,
         assignments,
+        selection,
     } = query;
     if kind != Statement::Select && (!order.is_empty() || limit.is_some()) {
         return Err(syn::Error::new_spanned(
@@ -782,8 +1105,31 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             "set(...) is required only for updates",
         ));
     }
+    if !matches!(selection, Selection::Rows) && kind != Statement::Select {
+        return Err(syn::Error::new_spanned(&row, "selection is read-only"));
+    }
+    if matches!(
+        selection,
+        Selection::Project(_, true) | Selection::Scalar(..) | Selection::Exists
+    ) && limit.is_some()
+    {
+        return Err(syn::Error::new_spanned(
+            &row,
+            "single-row selection does not take a limit",
+        ));
+    }
+    let select = match &selection {
+        Selection::Rows => quote!(<#row as ::studio_db_api::Table>::SELECT),
+        Selection::Project(p, _) => quote!(<#p as ::studio_db_api::Projection>::SELECT),
+        Selection::Scalar(col, _) | Selection::Scalars(col) => quote!(
+            ::studio_db_api::static_sql!("SELECT ", ::studio_db_api::column_name::<#row,_>(#col), " FROM \"", <#row as ::studio_db_api::Table>::NAME, "\"", if <#row as ::studio_db_api::Table>::PARTITION.is_empty() { "" } else { " WHERE " }, <#row as ::studio_db_api::Table>::PARTITION)
+        ),
+        Selection::Exists => quote!(
+            ::studio_db_api::static_sql!("SELECT 1 FROM \"", <#row as ::studio_db_api::Table>::NAME, "\"", if <#row as ::studio_db_api::Table>::PARTITION.is_empty() { "" } else { " WHERE " }, <#row as ::studio_db_api::Table>::PARTITION)
+        ),
+    };
     let mut sql = match kind {
-        Statement::Select => vec![quote!(<#row as ::studio_db_api::Table>::SELECT)],
+        Statement::Select => vec![select],
         Statement::Update => vec![
             quote!("UPDATE \""),
             quote!(<#row as ::studio_db_api::Table>::NAME),
@@ -816,6 +1162,12 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
         values.push(quote!(let #input = #argument; let #value = __db_tx.read().parameter::<#row, _>(#col, #input)?;));
         bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
     }
+    if kind != Statement::Select {
+        sql.push(
+        quote!(if <#row as ::studio_db_api::Table>::PARTITION.is_empty() { "" } else { " WHERE " }),
+    );
+        sql.push(quote!(<#row as ::studio_db_api::Table>::PARTITION));
+    }
     for (i, expr) in filters.iter().enumerate() {
         let Expr::MethodCall(call) = expr else {
             return Err(syn::Error::new_spanned(
@@ -825,7 +1177,7 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
         };
         let col = query_column(&call.receiver)?;
         sql.push(if i == 0 {
-            quote!(" WHERE ")
+            quote!(if <#row as ::studio_db_api::Table>::PARTITION.is_empty() { " WHERE " } else { " AND " })
         } else {
             quote!(" AND ")
         });
@@ -861,7 +1213,14 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             );
             bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
         } else {
-            let operator = match method.as_str() {
+            let borrowed = method.ends_with("_ref");
+            let operation = method.strip_suffix("_ref").unwrap_or(&method);
+            let parameter = if borrowed {
+                format_ident!("borrowed_parameter")
+            } else {
+                format_ident!("parameter")
+            };
+            let operator = match operation {
                 "eq" => " = ?",
                 "ne" => " != ?",
                 "lt" => " < ?",
@@ -878,7 +1237,7 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             sql.push(quote!(#operator));
             let value = format_ident!("__db_parameter_{i}");
             let input = format_ident!("__db_input_{i}");
-            values.push(quote!(let #input = #argument; let #value = __db_tx.read().parameter::<#row, _>(#col, #input)?;));
+            values.push(quote!(let #input = #argument; let #value = __db_tx.read().#parameter::<#row, _>(#col, #input)?;));
             bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
         }
     }
@@ -913,32 +1272,134 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             &__db_limit as &dyn ::studio_db_api::rusqlite::types::ToSql
         ));
     }
-    let (result, borrow, execute) = if kind == Statement::Select {
-        (
-            quote!(::std::vec::Vec<#row>),
-            quote!(&(#tx)),
-            quote!(__db_tx.query::<#row>(SQL, &[#(#bindings),*])),
-        )
-    } else if kind == Statement::Update {
-        (
-            quote!(usize),
-            quote!(&mut (#tx)),
-            quote!(__db_tx.update::<#row>(SQL, &[#(#bindings),*])),
-        )
+    let borrow = if kind == Statement::Select {
+        quote!(&(#tx))
     } else {
-        (
-            quote!(usize),
-            quote!(&mut (#tx)),
-            quote!(__db_tx.execute::<#row>(SQL, &[#(#bindings),*])),
-        )
+        quote!(&mut (#tx))
+    };
+    let execute = match selection {
+        Selection::Project(p, one) => {
+            let method = if one {
+                format_ident!("project_one")
+            } else {
+                format_ident!("project")
+            };
+            quote!({
+                fn assert_owner<P: ::studio_db_api::Projection<Table = #row>>() {} assert_owner::<#p>();
+                __db_tx.read().#method::<#p>(SQL, &[#(#bindings),*])
+            })
+        }
+        Selection::Scalar(col, raw) => {
+            let method = if raw {
+                format_ident!("scalar_raw")
+            } else {
+                format_ident!("scalar")
+            };
+            quote!(__db_tx.read().#method::<#row,_>(#col, SQL, &[#(#bindings),*]))
+        }
+        Selection::Scalars(col) => {
+            quote!(__db_tx.read().scalars::<#row,_>(#col, SQL, &[#(#bindings),*]))
+        }
+        Selection::Exists => quote!(__db_tx.read().exists::<#row>(SQL, &[#(#bindings),*])),
+        Selection::Rows => match kind {
+            Statement::Select => quote!(__db_tx.query::<#row>(SQL, &[#(#bindings),*])),
+            Statement::Update => quote!(__db_tx.update::<#row>(SQL, &[#(#bindings),*])),
+            Statement::Delete => quote!(__db_tx.execute::<#row>(SQL, &[#(#bindings),*])),
+        },
     };
     // Input clause order never affects legal SQL clause order.
-    Ok(quote!((|| -> ::studio_db_api::rusqlite::Result<#result> {
+    Ok(quote!((|| -> ::studio_db_api::rusqlite::Result<_> {
         const SQL: &str = ::studio_db_api::static_sql!(#(#sql),*);
         let __db_tx = #borrow;
         #(#values)*
         #execute
     })()))
+}
+
+#[proc_macro_derive(DbProjection, attributes(db))]
+pub fn projection(input: TokenStream) -> TokenStream {
+    expand_projection(&parse_macro_input!(input as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+fn expand_projection(input: &DeriveInput) -> syn::Result<Tokens> {
+    let name = &input.ident;
+    let mut owner = None::<Path>;
+    for attr in input.attrs.iter().filter(|a| a.path().is_ident("db")) {
+        attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("of") {
+                owner = Some(meta.value()?.parse()?);
+                Ok(())
+            } else {
+                Err(meta.error("expected of = Row"))
+            }
+        })?;
+    }
+    if !input.generics.params.is_empty() {
+        return Err(syn::Error::new_spanned(
+            input,
+            "projection requires a concrete type",
+        ));
+    }
+    let owner = owner.ok_or_else(|| syn::Error::new_spanned(name, "missing of = Row"))?;
+    let syn::Data::Struct(data) = &input.data else {
+        return Err(syn::Error::new_spanned(
+            name,
+            "projection requires a struct",
+        ));
+    };
+    let Fields::Named(fields) = &data.fields else {
+        return Err(syn::Error::new_spanned(
+            name,
+            "projection requires named fields",
+        ));
+    };
+    if fields.named.is_empty() {
+        return Err(syn::Error::new_spanned(name, "projection requires a field"));
+    }
+    let mut sql = vec![quote!("SELECT ")];
+    let mut reads = Vec::new();
+    for (i, field) in fields.named.iter().enumerate() {
+        let field_name = field.ident.as_ref().expect("named field");
+        let mut column = format_ident!("{}", field_name.to_string().to_uppercase());
+        let mut raw = false;
+        for attr in field.attrs.iter().filter(|a| a.path().is_ident("db")) {
+            attr.parse_nested_meta(|meta| {
+                if meta.path.is_ident("field") {
+                    let name: Ident = meta.value()?.parse()?;
+                    column = format_ident!("{}", name.to_string().to_uppercase());
+                    Ok(())
+                } else if meta.path.is_ident("raw") {
+                    raw = true;
+                    Ok(())
+                } else {
+                    Err(meta.error("expected raw"))
+                }
+            })?;
+        }
+        if i > 0 {
+            sql.push(quote!(","));
+        }
+        sql.push(quote!(::studio_db_api::column_name::<#owner, _>(#owner::#column)));
+        let read = if raw {
+            quote!(::studio_db_api::projection_raw(row, #i, #owner::#column)?)
+        } else {
+            quote!(::studio_db_api::projection_value(connection, row, #i, #owner::#column)?)
+        };
+        reads.push(quote!(#field_name: #read));
+    }
+    sql.extend([
+        quote!(" FROM \""),
+        quote!(<#owner as ::studio_db_api::Table>::NAME),
+        quote!("\""),
+    ]);
+    sql.push(quote!(if <#owner as ::studio_db_api::Table>::PARTITION.is_empty() { "" } else { " WHERE " }));
+    sql.push(quote!(<#owner as ::studio_db_api::Table>::PARTITION));
+    Ok(quote!(impl ::studio_db_api::Projection for #name {
+        type Table = #owner;
+        const SELECT: &'static str = ::studio_db_api::static_sql!(#(#sql),*);
+        fn read(connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>) -> ::studio_db_api::rusqlite::Result<Self> { let _ = connection; Ok(Self { #(#reads),* }) }
+    }))
 }
 
 #[cfg(test)]

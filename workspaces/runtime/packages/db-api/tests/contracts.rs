@@ -368,6 +368,7 @@ struct Count(i64);
 struct CountCodec;
 impl studio_db_api::Codec<Count> for CountCodec {
     type Stored = i64;
+    type Encoded<'a> = i64;
     fn encode(_: &Connection, value: &Count) -> studio_db_api::rusqlite::Result<i64> {
         Ok(value.0)
     }
@@ -670,5 +671,474 @@ fn state_check_preserves_sqlite_null_check_semantics() {
             .expect("all three rows checked")
             .counts(),
         (3, 1)
+    );
+}
+
+#[derive(DbTable)]
+#[db(table="checked_updates", database=Canvas, check=check_update)]
+struct CheckedUpdate {
+    #[db(key)]
+    id: String,
+    count: i64,
+}
+fn check_update(row: &CheckedUpdate) -> std::io::Result<()> {
+    if row.count < 0 {
+        Err(std::io::Error::other("negative count"))
+    } else {
+        Ok(())
+    }
+}
+#[derive(studio_db_api::DbProjection)]
+#[db(of=CheckedUpdate)]
+struct JustId {
+    id: String,
+}
+#[test]
+fn projections_skip_unused_malformed_columns_and_borrow_string_inputs() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE checked_updates(id TEXT PRIMARY KEY, count); INSERT INTO checked_updates VALUES('a','invalid'),('b',3)").unwrap();
+    let transaction = db.transaction().unwrap();
+    let tx = Tx::from_adapter(&transaction, &Canvas);
+    assert!(tx.get::<CheckedUpdate>(&("a".into(),)).is_err());
+    let rows = db_query!(
+        tx,
+        CheckedUpdate,
+        project(JustId),
+        filter(CheckedUpdate::ID.eq_ref("a"))
+    )
+    .unwrap();
+    assert_eq!(rows[0].id, "a");
+}
+#[test]
+fn update_existing_validates_without_inserting() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(CheckedUpdate::DDL).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    let mut row = CheckedUpdate {
+        id: "a".into(),
+        count: 2,
+    };
+    assert!(!tx.update_existing(&row).unwrap());
+    tx.insert(&row).unwrap();
+    row.count = -1;
+    assert!(tx.update_existing(&row).is_err());
+    assert_eq!(
+        tx.get::<CheckedUpdate>(&("a".into(),))
+            .unwrap()
+            .unwrap()
+            .count,
+        2
+    );
+    row.count = 3;
+    assert!(tx.update_existing(&row).unwrap());
+    assert_eq!(
+        tx.get::<CheckedUpdate>(&("a".into(),))
+            .unwrap()
+            .unwrap()
+            .count,
+        3
+    );
+}
+
+#[derive(Clone, Copy, DbEnum)]
+enum EntityKind {
+    Plan = 4,
+    Task = 9,
+}
+#[derive(DbTable)]
+#[db(table="entities", database=Canvas, partitioned_by=EntityKind)]
+struct Entities {
+    #[db(key)]
+    kind: EntityKind,
+    #[db(key)]
+    id: String,
+    payload: i64,
+}
+#[derive(studio_db_api::DbPartition)]
+#[db(of=Entities, kind=EntityKind::Plan, check=check_plan,
+    index(name="plan_payload", columns(payload), unique))]
+struct PlanEntity {
+    #[db(key)]
+    id: String,
+    #[db(codec=CountCodec)]
+    payload: Count,
+}
+fn check_plan(row: &PlanEntity) -> std::io::Result<()> {
+    if row.id == "same" && row.payload.0 == 4 {
+        Ok(())
+    } else {
+        Err(std::io::Error::other("key mismatch"))
+    }
+}
+#[derive(studio_db_api::DbPartition)]
+#[db(of=Entities, kind=EntityKind::Task)]
+struct TaskEntity {
+    #[db(key)]
+    id: String,
+    payload: i64,
+}
+#[test]
+fn partition_crud_queries_checks_and_indexes_isolate_kinds() {
+    assert_eq!(
+        PlanEntity::GET,
+        "SELECT \"id\",\"payload\" FROM \"entities\" WHERE \"id\"=? AND \"kind\"=4"
+    );
+    assert_eq!(
+        PlanEntity::INSERT,
+        "INSERT INTO \"entities\"(\"kind\",\"id\",\"payload\") VALUES(4,?,?)"
+    );
+    assert_eq!(
+        PlanEntity::DELETE,
+        "DELETE FROM \"entities\" WHERE \"id\"=? AND \"kind\"=4"
+    );
+    assert_eq!(
+        PlanEntity::INDEXES[0].sql,
+        "CREATE UNIQUE INDEX plan_payload ON entities(payload) WHERE \"kind\"=4"
+    );
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(Entities::DDL).unwrap();
+    PlanEntity::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    let plan = PlanEntity {
+        id: "same".into(),
+        payload: Count(4),
+    };
+    tx.partition::<PlanEntity>().put(&plan).unwrap();
+    tx.partition::<TaskEntity>()
+        .put(&TaskEntity {
+            id: "same".into(),
+            payload: 4,
+        })
+        .unwrap();
+    assert_eq!(
+        tx.partition::<PlanEntity>()
+            .get(&("same".into(),))
+            .unwrap()
+            .unwrap()
+            .payload
+            .0,
+        4
+    );
+    assert_eq!(tx.partition::<TaskEntity>().list().unwrap()[0].payload, 4);
+    assert_eq!(
+        db_query!(tx, TaskEntity, filter(TaskEntity::ID.eq_ref("same")))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(tx.update_existing(&plan).unwrap());
+    studio_db_api::db_update!(
+        tx,
+        TaskEntity,
+        set(TaskEntity::PAYLOAD = &-1),
+        filter(TaskEntity::ID.eq_ref("same"))
+    )
+    .unwrap();
+    assert_eq!(tx.partition::<TaskEntity>().list().unwrap()[0].payload, -1);
+    assert_eq!(tx.partition::<PlanEntity>().list().unwrap()[0].payload.0, 4);
+    assert_eq!(
+        studio_db_api::check::<PlanEntity>(&transaction)
+            .unwrap()
+            .counts(),
+        (1, 0)
+    );
+    assert_eq!(
+        tx.partition::<PlanEntity>()
+            .delete(&("same".into(),))
+            .unwrap(),
+        1
+    );
+    assert!(tx.partition::<PlanEntity>().list().unwrap().is_empty());
+    assert_eq!(tx.partition::<TaskEntity>().list().unwrap().len(), 1);
+    assert!(
+        tx.partition::<PlanEntity>()
+            .put(&PlanEntity {
+                id: "bad".into(),
+                payload: Count(3)
+            })
+            .is_err()
+    );
+}
+
+#[derive(DbTable)]
+#[db(table="revisions", database=Canvas)]
+struct RevisionRow {
+    #[db(key)]
+    id: i64,
+    #[db(revision)]
+    revision: i64,
+    text: String,
+}
+#[test]
+fn update_existing_revision_and_generated_key_predicates_do_not_insert_or_overwrite_stale_rows() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(RevisionRow::DDL).unwrap();
+    db.execute_batch(Numbered::DDL).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    let mut row = RevisionRow {
+        id: 1,
+        revision: 2,
+        text: "new".into(),
+    };
+    assert!(!tx.update_existing_at(&row, &1).unwrap());
+    tx.insert(&row).unwrap();
+    row.revision = 3;
+    assert!(!tx.update_existing_at(&row, &1).unwrap());
+    assert_eq!(tx.get::<RevisionRow>(&(1,)).unwrap().unwrap().revision, 2);
+    assert!(tx.update_existing_at(&row, &2).unwrap());
+    let id = tx
+        .insert_rowid(&Numbered {
+            seq: 0,
+            text: "old".into(),
+        })
+        .unwrap();
+    assert!(
+        tx.update_existing(&Numbered {
+            seq: id,
+            text: "updated".into()
+        })
+        .unwrap()
+    );
+    assert!(
+        !tx.update_existing(&Numbered {
+            seq: id + 1,
+            text: "missing".into()
+        })
+        .unwrap()
+    );
+    assert_eq!(tx.get::<Numbered>(&(id,)).unwrap().unwrap().text, "updated");
+}
+
+#[test]
+fn borrowed_nullable_string_bindings_preserve_null_semantics() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(Witness::DDL).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&Witness {
+        owner: "a".into(),
+        ordinal: 1,
+        state: Status::Ended,
+        detail: Some("ok".into()),
+    })
+    .unwrap();
+    let detail = Some("ok");
+    assert_eq!(
+        db_query!(tx, Witness, filter(Witness::DETAIL.eq_ref(&detail)))
+            .unwrap()
+            .len(),
+        1
+    );
+    let absent: Option<&str> = None;
+    assert!(
+        db_query!(tx, Witness, filter(Witness::DETAIL.eq_ref(&absent)))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn single_row_projection_scalar_raw_and_exists_preserve_missing_null_and_codec_boundaries() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch("CREATE TABLE checked_updates(id TEXT PRIMARY KEY,count); INSERT INTO checked_updates VALUES('a','invalid'),('b',3)").unwrap();
+    db.execute_batch(Parent::DDL).unwrap();
+    db.execute_batch(Child::DDL).unwrap();
+    db.execute_batch("INSERT INTO parents VALUES(1); INSERT INTO children VALUES(1,1,-1)")
+        .unwrap();
+    let transaction = db.transaction().unwrap();
+    let tx = Tx::from_adapter(&transaction, &Canvas);
+    assert_eq!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            project_one(JustId),
+            order_by(CheckedUpdate::ID.asc)
+        )
+        .unwrap()
+        .unwrap()
+        .id,
+        "a"
+    );
+    assert_eq!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            scalar(CheckedUpdate::ID),
+            filter(CheckedUpdate::ID.eq_ref("a"))
+        )
+        .unwrap()
+        .as_deref(),
+        Some("a")
+    );
+    assert!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            scalar(CheckedUpdate::COUNT),
+            filter(CheckedUpdate::ID.eq_ref("a"))
+        )
+        .is_err()
+    );
+    assert!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            exists(),
+            filter(CheckedUpdate::ID.eq_ref("a"))
+        )
+        .unwrap()
+    );
+    assert!(
+        !db_query!(
+            tx,
+            CheckedUpdate,
+            exists(),
+            filter(CheckedUpdate::ID.eq_ref("missing"))
+        )
+        .unwrap()
+    );
+    assert!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            project_one(JustId),
+            filter(CheckedUpdate::ID.eq_ref("missing"))
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert_eq!(
+        db_query!(
+            tx,
+            CheckedUpdate,
+            scalars(CheckedUpdate::ID),
+            order_by(CheckedUpdate::ID.asc)
+        )
+        .unwrap(),
+        vec!["a", "b"]
+    );
+    transaction.execute_batch(Witness::DDL).unwrap();
+    transaction
+        .execute(
+            "INSERT INTO witness VALUES('nullable',1,?1,NULL)",
+            [Status::Ended],
+        )
+        .unwrap();
+    assert_eq!(
+        db_query!(tx, Witness, scalar(Witness::DETAIL)).unwrap(),
+        Some(None)
+    );
+    assert_eq!(
+        db_query!(
+            tx,
+            Witness,
+            scalar(Witness::DETAIL),
+            filter(Witness::OWNER.eq_ref("missing"))
+        )
+        .unwrap(),
+        None
+    );
+    assert!(db_query!(tx, Child, scalar(Child::COUNT)).is_err());
+    assert_eq!(
+        db_query!(tx, Child, scalar_raw(Child::COUNT)).unwrap(),
+        Some(-1)
+    );
+}
+
+#[derive(studio_db_api::DbPartition)]
+#[db(of=Entities,kind=EntityKind::Plan,
+    index(name="or_plan_payload",columns(payload),unique,predicate="payload=1 OR payload=2"))]
+struct OrPlan {
+    #[db(key)]
+    id: String,
+    payload: i64,
+}
+#[test]
+fn partition_or_predicate_never_indexes_another_kind() {
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(Entities::DDL).unwrap();
+    OrPlan::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&TaskEntity {
+        id: "task".into(),
+        payload: 2,
+    })
+    .unwrap();
+    tx.insert(&OrPlan {
+        id: "plan".into(),
+        payload: 2,
+    })
+    .unwrap();
+    assert_eq!(
+        OrPlan::INDEXES[0].sql,
+        "CREATE UNIQUE INDEX or_plan_payload ON entities(payload) WHERE \"kind\"=4 AND (payload=1 OR payload=2)"
+    );
+}
+
+struct BorrowedBlob;
+impl studio_db_api::Codec<Vec<u8>> for BorrowedBlob {
+    type Stored = Vec<u8>;
+    type Encoded<'a> = &'a [u8];
+    fn encode<'a>(
+        _: &Connection,
+        value: &'a Vec<u8>,
+    ) -> studio_db_api::rusqlite::Result<Self::Encoded<'a>> {
+        Ok(value.as_slice())
+    }
+    fn decode(_: &Connection, value: Vec<u8>) -> studio_db_api::rusqlite::Result<Vec<u8>> {
+        Ok(value)
+    }
+}
+#[derive(DbTable)]
+#[db(table="binary_rows",database=Canvas)]
+struct BinaryRow {
+    #[db(key)]
+    id: i64,
+    #[db(codec=BorrowedBlob)]
+    payload: Vec<u8>,
+}
+#[test]
+fn codecs_bind_original_blob_allocations_for_insert_update_and_column_assignments() {
+    use studio_db_api::MutableTable;
+    let mut db = Connection::open_in_memory().unwrap();
+    db.execute_batch(BinaryRow::DDL).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    let row = BinaryRow {
+        id: 1,
+        payload: vec![0, 255, 128],
+    };
+    let assert_borrowed = |params: &[&dyn studio_db_api::rusqlite::types::ToSql]| {
+        let studio_db_api::rusqlite::types::ToSqlOutput::Borrowed(
+            studio_db_api::rusqlite::types::ValueRef::Blob(bytes),
+        ) = params[1].to_sql()?
+        else {
+            panic!("expected borrowed BLOB")
+        };
+        assert_eq!(bytes.as_ptr(), row.payload.as_ptr());
+        Ok(())
+    };
+    row.bind(&transaction, assert_borrowed).unwrap();
+    row.bind_update(&transaction, assert_borrowed).unwrap();
+    let bound =
+        studio_db_api::parameter::<BinaryRow, _>(&transaction, BinaryRow::PAYLOAD, &row.payload)
+            .unwrap();
+    assert!(matches!(bound,bytes if bytes.as_ptr()==row.payload.as_ptr()));
+    tx.insert(&row).unwrap();
+    assert!(tx.update_existing(&row).unwrap());
+    studio_db_api::db_update!(
+        tx,
+        BinaryRow,
+        set(BinaryRow::PAYLOAD = &row.payload),
+        filter(BinaryRow::ID.eq(&1))
+    )
+    .unwrap();
+    assert_eq!(
+        tx.get::<BinaryRow>(&(1,)).unwrap().unwrap().payload,
+        row.payload
     );
 }

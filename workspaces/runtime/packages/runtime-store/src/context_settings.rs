@@ -426,12 +426,12 @@ pub fn model_status(
             }
         })?;
     row.map(|row| {
-        row.record
-            .map(|record| record.raw().to_owned())
-            .ok_or_else(|| crate::StoreError::InvalidStoredRecord {
+        row.record.map(|record| record.into_raw()).ok_or_else(|| {
+            crate::StoreError::InvalidStoredRecord {
                 object: "runtime_model_status",
                 id: agent.into(),
-            })
+            }
+        })
     })
     .transpose()
 }

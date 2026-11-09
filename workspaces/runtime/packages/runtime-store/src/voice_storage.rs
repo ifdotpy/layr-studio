@@ -83,6 +83,19 @@ pub struct VoiceSessionRow {
     pub provider_scope: Option<ExactJson<VoiceProviderScopePayload>>,
 }
 
+/// Narrow public session response; declaration order preserves the legacy JSON bytes.
+#[derive(studio_db_api::DbProjection, serde::Serialize, Debug, PartialEq)]
+#[db(of=VoiceSessionRow)]
+pub struct VoiceSessionView {
+    pub ended: Option<f64>,
+    pub error: Option<String>,
+    #[db(field=answer)]
+    pub sdp: Option<String>,
+    #[db(field=id)]
+    pub session_id: String,
+    pub state: Option<String>,
+}
+
 #[derive(DbTable)]
 #[db(table="voice_speech_requests", database=Canvas, legacy_ddl="CREATE TABLE voice_speech_requests (\n                id TEXT PRIMARY KEY, session TEXT NOT NULL, record_id TEXT NOT NULL,\n                state TEXT NOT NULL, error TEXT)")]
 #[db(state_check=crate::state_check::count_legacy_rows::<VoiceSpeechRequestRow>)]
@@ -110,6 +123,60 @@ mod tests {
     use super::*;
     use crate::peer_update_settings::{canvas_read, canvas_tx};
     use crate::{VoiceRecord, VoiceRepository};
+
+    #[test]
+    fn voice_repository_projections_preserve_historical_refusal_boundaries() {
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        prepare(&db).unwrap();
+        db.execute_batch("INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created) VALUES('old','a','s','user','','','','not JSON',1.125); INSERT INTO voice_deliveries VALUES('d','a','not JSON','text',NULL); INSERT INTO voice_sessions(id,agent,created,state,provider_scope) VALUES('s','a',1.5,'ready','not JSON')").unwrap();
+        assert!(
+            canvas_read(&db)
+                .get::<VoiceSessionRow>(&("s".into(),))
+                .is_err()
+        );
+        assert_eq!(
+            VoiceRepository::record(&db, "old")
+                .unwrap()
+                .unwrap()
+                .payload,
+            "not JSON"
+        );
+        assert_eq!(
+            VoiceRepository::records_page(&db, "a", 0, -1)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            VoiceRepository::delivery(&db, "d")
+                .unwrap()
+                .unwrap()
+                .records,
+            "not JSON"
+        );
+        let latest = VoiceRepository::latest_session(&db, "a").unwrap().unwrap();
+        assert_eq!(latest.session_id, "s");
+        assert_eq!(
+            studio_json::to_string(&latest).unwrap(),
+            r#"{"ended":null,"error":null,"sdp":null,"session_id":"s","state":"ready"}"#
+        );
+        assert_eq!(
+            VoiceRepository::session(&db, "s", "a").unwrap().unwrap(),
+            latest
+        );
+        let expected = studio_json::to_vec(&(
+            1,
+            Some((
+                "s",
+                Some("ready"),
+                None::<String>,
+                None::<String>,
+                None::<f64>,
+            )),
+        ))
+        .unwrap();
+        assert_eq!(VoiceRepository::fingerprint(&db, "a").unwrap(), expected);
+    }
 
     #[derive(Deserialize)]
     struct Catalog {

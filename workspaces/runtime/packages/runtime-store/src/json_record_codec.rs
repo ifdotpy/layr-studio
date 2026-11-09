@@ -48,6 +48,12 @@ impl<T: serde::de::DeserializeOwned> ExactJson<T> {
     pub fn raw(&self) -> &str {
         &self.raw
     }
+    pub fn into_raw(self) -> String {
+        self.raw.into_string()
+    }
+    pub fn into_parts(self) -> (T, String) {
+        (self.value, self.raw.into_string())
+    }
 }
 
 impl<T: serde::de::DeserializeOwned + serde::Serialize> ExactJson<T> {
@@ -61,9 +67,16 @@ pub struct ExactJsonCodec<T>(PhantomData<T>);
 
 impl<T: serde::de::DeserializeOwned> Codec<ExactJson<T>> for ExactJsonCodec<T> {
     type Stored = String;
+    type Encoded<'a>
+        = &'a str
+    where
+        T: 'a;
 
-    fn encode(_connection: &Connection, value: &ExactJson<T>) -> rusqlite::Result<String> {
-        Ok(value.raw().to_owned())
+    fn encode<'a>(
+        _connection: &Connection,
+        value: &'a ExactJson<T>,
+    ) -> rusqlite::Result<Self::Encoded<'a>> {
+        Ok(value.raw())
     }
 
     fn decode(_connection: &Connection, value: String) -> rusqlite::Result<ExactJson<T>> {
@@ -79,11 +92,15 @@ impl<T: serde::de::DeserializeOwned> Codec<ExactJson<T>> for ExactJsonCodec<T> {
 
 impl<T: serde::de::DeserializeOwned> Codec<Option<ExactJson<T>>> for ExactJsonCodec<T> {
     type Stored = Option<String>;
+    type Encoded<'a>
+        = Option<&'a str>
+    where
+        T: 'a;
 
-    fn encode(
+    fn encode<'a>(
         connection: &Connection,
-        value: &Option<ExactJson<T>>,
-    ) -> rusqlite::Result<Option<String>> {
+        value: &'a Option<ExactJson<T>>,
+    ) -> rusqlite::Result<Self::Encoded<'a>> {
         value
             .as_ref()
             .map(|value| <Self as Codec<ExactJson<T>>>::encode(connection, value))
@@ -144,13 +161,26 @@ impl<R: JsonRecord> RawJsonRecord<R> {
     pub fn raw(&self) -> &str {
         &self.raw
     }
+    pub fn into_raw(self) -> String {
+        self.raw.into_string()
+    }
+    pub fn into_parts(self) -> (R, String) {
+        (self.record, self.raw.into_string())
+    }
 }
 pub struct JsonRecordCodec<R>(PhantomData<R>);
 impl<R: JsonRecord> Codec<RawJsonRecord<R>> for JsonRecordCodec<R> {
     type Stored = String;
-    fn encode(_connection: &Connection, value: &RawJsonRecord<R>) -> rusqlite::Result<String> {
+    type Encoded<'a>
+        = &'a str
+    where
+        R: 'a;
+    fn encode<'a>(
+        _connection: &Connection,
+        value: &'a RawJsonRecord<R>,
+    ) -> rusqlite::Result<Self::Encoded<'a>> {
         // The immutable value was admitted by JsonRecord; retain its exact bytes.
-        Ok(value.raw().to_owned())
+        Ok(value.raw())
     }
     fn decode(connection: &Connection, value: String) -> rusqlite::Result<RawJsonRecord<R>> {
         struct PayloadKey {
@@ -217,6 +247,59 @@ mod tests {
         #[derive(Debug, PartialEq)]
         struct ExtensionEvidence { fields: ExtensionFields, extra }
     );
+    #[test]
+    fn codec_write_bindings_borrow_original_text() {
+        use studio_db_api::{MutableTable, Table};
+        let db = Connection::open_in_memory().unwrap();
+        let raw = r#"{"id":"row","title":"text","original":{"unknown":1.00}}"#;
+        let record = RawJsonRecord::<Evidence>::from_stored(&db, "row", raw.into()).unwrap();
+        let row = EvidenceRow {
+            id: "row".into(),
+            record,
+        };
+        let assert_borrowed = |params: &[&dyn rusqlite::types::ToSql]| {
+            let rusqlite::types::ToSqlOutput::Borrowed(rusqlite::types::ValueRef::Text(bytes)) =
+                params[1].to_sql()?
+            else {
+                panic!("expected borrowed TEXT")
+            };
+            assert_eq!(
+                bytes.as_ptr(),
+                row.record.raw().as_ptr(),
+                "generated writes must bind the admitted allocation"
+            );
+            Ok(())
+        };
+        row.bind(&db, assert_borrowed).unwrap();
+        row.bind_update(&db, assert_borrowed).unwrap();
+    }
+
+    #[test]
+    fn consuming_exact_json_and_record_accessors_move_original_allocations() {
+        let raw = " \n{\"id\":\"row\",\"title\":\"t\",\"original\":{\"unknown\":[1.00]}}\t";
+        let exact = ExactJson::<Evidence>::from_stored(raw.into()).unwrap();
+        let pointer = exact.raw().as_ptr();
+        let (value, moved) = exact.into_parts();
+        assert_eq!(value.id, "row");
+        assert_eq!(moved, raw);
+        assert_eq!(moved.as_ptr(), pointer);
+        let db = Connection::open_in_memory().unwrap();
+        let record = RawJsonRecord::<Evidence>::from_stored(&db, "row", raw.into()).unwrap();
+        let pointer = record.raw().as_ptr();
+        let (value, moved) = record.into_parts();
+        assert_eq!(value.id, "row");
+        assert_eq!(moved.as_ptr(), pointer);
+        assert_eq!(moved, raw);
+        let exact = ExactJson::<Evidence>::from_stored(raw.into()).unwrap();
+        let pointer = exact.raw().as_ptr();
+        let moved = exact.into_raw();
+        assert_eq!(moved.as_ptr(), pointer);
+        let record = RawJsonRecord::<Evidence>::from_stored(&db, "row", raw.into()).unwrap();
+        let pointer = record.raw().as_ptr();
+        let moved = record.into_raw();
+        assert_eq!(moved.as_ptr(), pointer);
+    }
+
     #[test]
     fn exact_json_raw_extensions_preserve_outer_whitespace() {
         let raw = " \n{\"id\":\"a\",\"future\": { \"x\": [1.00,2] }} \t";

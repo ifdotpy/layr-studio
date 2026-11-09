@@ -1,15 +1,16 @@
 //! Persisted native voice records, sessions, deliveries and approval inputs.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use studio_json::Value;
 
 use crate::json_record_codec::ExactJson;
 use crate::peer_update_settings::{canvas_read, canvas_tx};
 use crate::schema::{SchemaRequirements, TableRequirement};
+use crate::voice_storage::{VoiceApprovalRow, VoiceSessionRow, VoiceSessionView as SessionView};
 use crate::voice_storage::{VoiceDeliveryRow, VoiceRecordRow, VoiceSpeechRequestRow};
 use crate::{StoreError, StoreResult};
-use studio_db_api::db_delete;
+use studio_db_api::{DbProjection, db_delete, db_query};
 
 /// One durable provider stop effect for one captured voice session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -92,9 +93,11 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &[],
 };
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, DbProjection)]
+#[db(of=VoiceRecordRow)]
 pub struct VoiceRecord {
     #[serde(rename = "seq")]
+    #[db(field=seq)]
     pub sequence: i64,
     pub id: String,
     pub agent: String,
@@ -103,6 +106,7 @@ pub struct VoiceRecord {
     pub text: String,
     pub item_id: String,
     pub previous_item_id: String,
+    #[db(raw)]
     pub payload: String,
     pub created: f64,
 }
@@ -113,13 +117,28 @@ impl VoiceRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, DbProjection)]
+#[db(of=VoiceDeliveryRow)]
 pub struct VoiceDelivery {
     pub id: String,
     pub agent: String,
+    #[db(raw)]
     pub records: String,
     pub text: String,
     pub edited_text: Option<String>,
+}
+
+fn latest_session_view(connection: &Connection, agent: &str) -> StoreResult<Option<SessionView>> {
+    Ok(db_query!(
+        canvas_read(connection),
+        VoiceSessionRow,
+        project_one(SessionView),
+        filter(
+            VoiceSessionRow::AGENT.eq_ref(agent),
+            VoiceSessionRow::STATE.is_not_null()
+        ),
+        order_by(VoiceSessionRow::CREATED.desc)
+    )?)
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -128,39 +147,39 @@ pub struct VoiceRepository;
 impl VoiceRepository {
     /// Delete saved voice state in the same transaction as its owning agent.
     pub fn delete_agent(transaction: &rusqlite::Transaction<'_>, agent: &str) -> StoreResult<()> {
-        let agent = agent.to_owned();
         let mut tx = canvas_tx(transaction);
-        db_delete!(tx, VoiceRecordRow, filter(VoiceRecordRow::AGENT.eq(&agent)))?;
+        db_delete!(
+            tx,
+            VoiceRecordRow,
+            filter(VoiceRecordRow::AGENT.eq_ref(agent))
+        )?;
         db_delete!(
             tx,
             VoiceDeliveryRow,
-            filter(VoiceDeliveryRow::AGENT.eq(&agent))
+            filter(VoiceDeliveryRow::AGENT.eq_ref(agent))
         )?;
         // Session subquery preserves receipt deletion ordering.
         transaction.execute("DELETE FROM voice_speech_requests WHERE session IN (SELECT id FROM voice_sessions WHERE agent=?1)", [&agent])?;
         db_delete!(
             tx,
-            crate::voice_storage::VoiceSessionRow,
-            filter(crate::voice_storage::VoiceSessionRow::AGENT.eq(&agent))
+            VoiceSessionRow,
+            filter(VoiceSessionRow::AGENT.eq_ref(agent))
         )?;
         db_delete!(
             tx,
-            crate::voice_storage::VoiceApprovalRow,
-            filter(crate::voice_storage::VoiceApprovalRow::AGENT.eq(&agent))
+            VoiceApprovalRow,
+            filter(VoiceApprovalRow::AGENT.eq_ref(agent))
         )?;
         Ok(())
     }
 
     pub fn record(connection: &Connection, id: &str) -> StoreResult<Option<VoiceRecord>> {
-        Ok(connection
-            .query_row(
-                // Projection API follow-up: typed decoding would newly reject historical payloads.
-                "SELECT seq,id,agent,session,kind,text,item_id,previous_item_id,payload,created \
-                 FROM voice_records WHERE id=?1",
-                [id],
-                record_from_row,
-            )
-            .optional()?)
+        Ok(db_query!(
+            canvas_read(connection),
+            VoiceRecordRow,
+            project_one(VoiceRecord),
+            filter(VoiceRecordRow::ID.eq_ref(id))
+        )?)
     }
 
     pub fn records(
@@ -178,14 +197,17 @@ impl VoiceRepository {
         after: i64,
         limit: i64,
     ) -> StoreResult<Vec<VoiceRecord>> {
-        let mut statement = connection.prepare_cached(
-            // Projection API follow-up: typed decoding would newly reject historical payloads.
-            "SELECT seq,id,agent,session,kind,text,item_id,previous_item_id,payload,created \
-             FROM voice_records WHERE agent=?1 AND seq>?2 ORDER BY seq LIMIT ?3",
-        )?;
-        let rows = statement.query_map(params![agent, after, limit], record_from_row)?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        Ok(db_query!(
+            canvas_read(connection),
+            VoiceRecordRow,
+            project(VoiceRecord),
+            filter(
+                VoiceRecordRow::AGENT.eq_ref(agent),
+                VoiceRecordRow::SEQ.gt(&after)
+            ),
+            order_by(VoiceRecordRow::SEQ.asc),
+            limit(limit)
+        )?)
     }
 
     pub fn record_sequence(connection: &Connection, agent: &str) -> StoreResult<i64> {
@@ -200,50 +222,32 @@ impl VoiceRepository {
     /// Stored voice cursor and session columns for subscription change detection.
     pub fn fingerprint(connection: &Connection, agent: &str) -> StoreResult<Vec<u8>> {
         let sequence = Self::record_sequence(connection, agent)?;
-        // Scalar projection avoids decoding unrelated stored columns.
-        let session = connection.query_row("SELECT id,state,answer,error,ended FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL ORDER BY created DESC LIMIT 1", [agent], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, Option<String>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, Option<f64>>(4)?))).optional()?;
+        let session = latest_session_view(connection, agent)?
+            .map(|s| (s.session_id, s.state, s.sdp, s.error, s.ended));
         studio_json::to_vec(&(sequence, session)).map_err(StoreError::from)
     }
 
-    pub fn latest_session(connection: &Connection, agent: &str) -> StoreResult<Option<Value>> {
-        connection
-            .query_row(
-                // Scalar projection avoids decoding unrelated stored columns.
-                "SELECT id,state,answer,error,ended FROM voice_sessions \
-                 WHERE agent=?1 AND state IS NOT NULL ORDER BY created DESC LIMIT 1",
-                [agent],
-                |row| {
-                    Ok(studio_json::json!({
-                        "session_id": row.get::<_, String>(0)?,
-                        "state": row.get::<_, Option<String>>(1)?,
-                        "sdp": row.get::<_, Option<String>>(2)?,
-                        "error": row.get::<_, Option<String>>(3)?,
-                        "ended": row.get::<_, Option<f64>>(4)?,
-                    }))
-                },
-            )
-            .optional()
-            .map_err(StoreError::from)
+    pub fn latest_session(
+        connection: &Connection,
+        agent: &str,
+    ) -> StoreResult<Option<SessionView>> {
+        latest_session_view(connection, agent)
     }
 
-    pub fn session(connection: &Connection, id: &str, agent: &str) -> StoreResult<Option<Value>> {
-        connection
-            .query_row(
-                // Scalar projection avoids decoding unrelated stored columns.
-                "SELECT id,state,answer,error,ended FROM voice_sessions WHERE id=?1 AND agent=?2",
-                params![id, agent],
-                |row| {
-                    Ok(studio_json::json!({
-                        "session_id": row.get::<_, String>(0)?,
-                        "state": row.get::<_, Option<String>>(1)?,
-                        "sdp": row.get::<_, Option<String>>(2)?,
-                        "error": row.get::<_, Option<String>>(3)?,
-                        "ended": row.get::<_, Option<f64>>(4)?,
-                    }))
-                },
+    pub fn session(
+        connection: &Connection,
+        id: &str,
+        agent: &str,
+    ) -> StoreResult<Option<SessionView>> {
+        Ok(db_query!(
+            canvas_read(connection),
+            VoiceSessionRow,
+            project_one(SessionView),
+            filter(
+                VoiceSessionRow::ID.eq_ref(id),
+                VoiceSessionRow::AGENT.eq_ref(agent)
             )
-            .optional()
-            .map_err(StoreError::from)
+        )?)
     }
 
     pub fn speech_receipt(connection: &Connection, id: &str) -> StoreResult<Option<Value>> {
@@ -287,36 +291,24 @@ impl VoiceRepository {
         agent: &str,
         session: &str,
     ) -> StoreResult<bool> {
-        connection
-            .query_row(
-                // Scalar projection avoids decoding unrelated stored columns.
-                "SELECT 1 FROM voice_sessions WHERE id=?1 AND agent=?2",
-                params![session, agent],
-                |_| Ok(()),
+        Ok(db_query!(
+            canvas_read(connection),
+            VoiceSessionRow,
+            exists(),
+            filter(
+                VoiceSessionRow::ID.eq_ref(session),
+                VoiceSessionRow::AGENT.eq_ref(agent)
             )
-            .optional()
-            .map(|value| value.is_some())
-            .map_err(StoreError::from)
+        )?)
     }
 
     pub fn delivery(connection: &Connection, id: &str) -> StoreResult<Option<VoiceDelivery>> {
-        connection
-            .query_row(
-                // Projection API follow-up: typed decoding would newly reject historical record arrays.
-                "SELECT id,agent,records,text,edited_text FROM voice_deliveries WHERE id=?1",
-                [id],
-                |row| {
-                    Ok(VoiceDelivery {
-                        id: row.get(0)?,
-                        agent: row.get(1)?,
-                        records: row.get(2)?,
-                        text: row.get(3)?,
-                        edited_text: row.get(4)?,
-                    })
-                },
-            )
-            .optional()
-            .map_err(StoreError::from)
+        Ok(db_query!(
+            canvas_read(connection),
+            VoiceDeliveryRow,
+            project_one(VoiceDelivery),
+            filter(VoiceDeliveryRow::ID.eq_ref(id))
+        )?)
     }
 
     pub fn deliveries(connection: &Connection, agent: &str) -> StoreResult<Vec<(String, String)>> {
@@ -345,21 +337,6 @@ impl VoiceRepository {
         })?;
         Ok(())
     }
-}
-
-fn record_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<VoiceRecord> {
-    Ok(VoiceRecord {
-        sequence: row.get(0)?,
-        id: row.get(1)?,
-        agent: row.get(2)?,
-        session: row.get(3)?,
-        kind: row.get(4)?,
-        text: row.get(5)?,
-        item_id: row.get(6)?,
-        previous_item_id: row.get(7)?,
-        payload: row.get(8)?,
-        created: row.get(9)?,
-    })
 }
 
 inventory::submit! {

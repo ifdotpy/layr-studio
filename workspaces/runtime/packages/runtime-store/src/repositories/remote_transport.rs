@@ -97,7 +97,7 @@ impl RemoteTransportRepository {
     pub fn federation_identity(connection: &Connection) -> StoreResult<Option<String>> {
         Ok(crate::peer_update_settings::canvas_read(connection)
             .get::<crate::access_tables::FederationIdentityRow>(&("local".into(),))?
-            .map(|row| row.record.raw().to_owned()))
+            .map(|row| row.record.into_raw()))
     }
 
     /// Consume a federation nonce as part of the caller's immediate transaction.

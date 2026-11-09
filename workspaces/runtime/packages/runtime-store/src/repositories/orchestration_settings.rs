@@ -2,6 +2,7 @@
 //! workers read on every use.
 
 use crate::schema::{SchemaRequirements, TableRequirement};
+use crate::settings_schema::OrchestrationSettings;
 use crate::{StoreError, StoreResult};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Deserialize;
@@ -146,19 +147,23 @@ impl OrchestrationSettingsRepository {
                 setting.field
             ))
         };
-        let Some(row) = crate::peer_update_settings::canvas_read(connection)
-            .get::<crate::settings_schema::OrchestrationSettings>(&(ROW.to_owned(),))
-            .map_err(|error| {
-                if matches!(&error, rusqlite::Error::FromSqlConversionFailure(_, _, _)) {
-                    invalid()
-                } else {
-                    StoreError::from(error)
-                }
-            })?
+        let Some(row) = studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(connection),
+            OrchestrationSettings,
+            scalar(OrchestrationSettings::RECORD),
+            filter(OrchestrationSettings::ID.eq_ref(ROW))
+        )
+        .map_err(|error| {
+            if matches!(&error, rusqlite::Error::FromSqlConversionFailure(_, _, _)) {
+                invalid()
+            } else {
+                StoreError::from(error)
+            }
+        })?
         else {
             return Ok(setting.default);
         };
-        let JsonObject(record) = row.record.value();
+        let JsonObject(record) = row.value();
         let value = match setting.field {
             field if field == CHILD_RESULT_COALESCE_SETTING.field => {
                 record.child_result_coalesce_seconds

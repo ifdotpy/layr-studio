@@ -3,6 +3,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use studio_json::Value;
 
+use crate::peer_update_settings::{canvas_read, canvas_tx};
+use crate::planning_work::{PlanRow, WorkRow};
 use crate::records::{
     AgentRecord, EventMetadataRecord, JsonRecord, PlanRecord, QueueEventId, Table, WorkItemRecord,
 };
@@ -161,9 +163,8 @@ impl WorkItemsRepository {
         value: &Value,
     ) -> StoreResult<bool> {
         let record = checked_work(id, value)?;
-        let inserted = crate::peer_update_settings::canvas_tx(connection).insert_new(
-            &crate::planning_work::WorkRow::from_record(connection, &record)?,
-        )?;
+        let inserted =
+            canvas_tx(connection).insert_new(&WorkRow::from_record(connection, &record)?)?;
         if inserted {
             crate::work_history::reconcile(connection, id, &record.history_value())?;
         }
@@ -190,8 +191,7 @@ impl WorkItemsRepository {
                 id: id.to_owned(),
             });
         }
-        // Checked updates must not insert; generated validated updates are a follow-up.
-        Table::<WorkItemRecord>::new(connection).update(record)?;
+        canvas_tx(connection).update_existing(&WorkRow::from_record(connection, record)?)?;
         crate::work_history::reconcile(connection, id, &record.history_value())?;
         Ok(())
     }
@@ -335,8 +335,8 @@ impl WorkItemsRepository {
     }
 
     pub fn plan(connection: &Connection, id: &str) -> StoreResult<Option<PlanRecord>> {
-        Ok(crate::peer_update_settings::canvas_read(connection)
-            .get::<crate::planning_work::PlanRow>(&(id.to_owned(),))?
+        Ok(canvas_read(connection)
+            .get::<PlanRow>(&(id.to_owned(),))?
             .map(|row| row.record.value().clone()))
     }
 
@@ -346,14 +346,12 @@ impl WorkItemsRepository {
         record: &PlanRecord,
     ) -> StoreResult<()> {
         use crate::records::JsonRecord;
-        crate::peer_update_settings::canvas_tx(transaction).upsert(
-            &crate::planning_work::PlanRow {
-                id: id.to_owned(),
-                record: crate::json_record_codec::ExactJson::from_stored(
-                    record.encode_stored(transaction, id)?,
-                )?,
-            },
-        )?;
+        canvas_tx(transaction).upsert(&PlanRow {
+            id: id.to_owned(),
+            record: crate::json_record_codec::ExactJson::from_stored(
+                record.encode_stored(transaction, id)?,
+            )?,
+        })?;
         Ok(())
     }
 

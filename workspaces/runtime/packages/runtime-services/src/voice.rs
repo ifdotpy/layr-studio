@@ -683,31 +683,18 @@ fn validate_record_content(record: &VoiceRecord) -> Result<(), VoiceError> {
     Ok(())
 }
 
-fn validate_session(session: &Value) -> Result<(), VoiceError> {
-    let id = session
-        .get("session_id")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    if id.is_empty()
+fn validate_session(
+    session: &studio_runtime_store::voice_storage::VoiceSessionView,
+) -> Result<(), VoiceError> {
+    if session.session_id.is_empty()
         || !session
-            .get("state")
-            .and_then(Value::as_str)
+            .state
+            .as_deref()
             .is_some_and(|state| SESSION_STATES.contains(&state))
-        || !is_nullable_string(session.get("sdp"))
-        || !is_nullable_string(session.get("error"))
-        || !is_nullable_number(session.get("ended"))
     {
-        return Err(invalid("voice_sessions", id));
+        return Err(invalid("voice_sessions", &session.session_id));
     }
     Ok(())
-}
-
-fn is_nullable_string(value: Option<&Value>) -> bool {
-    value.is_some_and(|value| value.is_null() || value.is_string())
-}
-
-fn is_nullable_number(value: Option<&Value>) -> bool {
-    value.is_some_and(|value| value.is_null() || value.as_f64().is_some_and(f64::is_finite))
 }
 
 fn invalid(object: &'static str, id: &str) -> VoiceError {

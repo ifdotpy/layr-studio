@@ -152,13 +152,10 @@ impl AccessSettings {
         transaction: &rusqlite::Transaction<'_>,
         value: i64,
     ) -> rusqlite::Result<()> {
-        let mut tx = crate::peer_update_settings::canvas_tx(transaction);
-        studio_db_api::db_update!(
-            tx,
-            AccessSettings,
-            set(AccessSettings::AUTO_PAIR = &value),
-            filter(AccessSettings::ID.eq(&1))
-        )?;
+        crate::peer_update_settings::canvas_tx(transaction).update_existing(&Self {
+            id: 1,
+            auto_pair: value,
+        })?;
         Ok(())
     }
 }

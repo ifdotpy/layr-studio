@@ -33,13 +33,9 @@ impl WorkspaceOperationsRepository {
         tx: &Transaction<'_>,
         id: &str,
         record: &T,
-    ) -> StoreResult<usize> {
+    ) -> StoreResult<bool> {
         let row = Self::row(tx, id, record)?;
-        // Checked updates must not insert; generated validated updates are a follow-up.
-        Ok(tx.execute(
-            "UPDATE runtime_workspace_operations SET record=?1 WHERE id=?2",
-            params![row.record.raw(), row.id],
-        )?)
+        Ok(crate::peer_update_settings::canvas_tx(tx).update_existing(&row)?)
     }
 
     pub fn insert(tx: &Transaction<'_>, record: &WorkspaceOperationRecord) -> StoreResult<()> {
@@ -106,8 +102,7 @@ impl WorkspaceOperationsRepository {
         tx: &Transaction<'_>,
         operation: &WorkspaceOperationRecord,
     ) -> StoreResult<()> {
-        let changed = Self::update_record(tx, &operation.id, operation)?;
-        if changed == 0 {
+        if !Self::update_record(tx, &operation.id, operation)? {
             return Err(StoreError::InvalidStoredObject {
                 table: "runtime_workspace_operations",
                 id: operation.id.clone(),
