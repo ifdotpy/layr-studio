@@ -1,6 +1,6 @@
 //! Read and write persisted work-item, plan, and queue state.
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_json::Value;
 
 use crate::records::{
@@ -154,7 +154,7 @@ impl WorkItemsRepository {
             .collect()
     }
 
-    pub fn put_work(connection: &Connection, id: &str, value: &Value) -> StoreResult<bool> {
+    pub fn put_work(connection: &Transaction<'_>, id: &str, value: &Value) -> StoreResult<bool> {
         let record = WorkItemRecord::checked(value)?;
         if record.id().as_ref() != id {
             return Err(StoreError::InvalidStoredObject {
@@ -169,13 +169,13 @@ impl WorkItemsRepository {
         Ok(inserted)
     }
 
-    pub fn update_work(connection: &Connection, id: &str, value: &Value) -> StoreResult<()> {
+    pub fn update_work(connection: &Transaction<'_>, id: &str, value: &Value) -> StoreResult<()> {
         let record = WorkItemRecord::checked(value)?;
         Self::update_checked_work(connection, id, &record)
     }
 
     pub fn update_checked_work(
-        connection: &Connection,
+        connection: &Transaction<'_>,
         id: &str,
         record: &WorkItemRecord,
     ) -> StoreResult<()> {
@@ -192,7 +192,7 @@ impl WorkItemsRepository {
 
     /// Release unfinished work owned by a failed worker and return each updated record.
     pub fn release_failed_work(
-        connection: &Connection,
+        connection: &Transaction<'_>,
         owner_id: &str,
         reason: &str,
         now: f64,
@@ -488,7 +488,8 @@ mod tests {
             WorkItemsRepository::work_record;
         let _: fn(&Connection, &str, &str) -> crate::StoreResult<Vec<crate::WorkItemRecord>> =
             WorkItemsRepository::dependent_work;
-        let connection = Connection::open_in_memory().expect("database");
+        let mut connection = Connection::open_in_memory().expect("database");
+        let connection = connection.transaction().expect("fixture transaction");
         connection
             .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("table");
@@ -553,7 +554,8 @@ mod tests {
 
     #[test]
     fn release_preserves_historical_negative_version_repair() {
-        let connection = Connection::open_in_memory().unwrap();
+        let mut connection = Connection::open_in_memory().unwrap();
+        let connection = connection.transaction().expect("fixture transaction");
         connection
             .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .unwrap();
@@ -706,7 +708,8 @@ mod tests {
 
     #[test]
     fn release_failed_work_updates_only_unfinished_items_and_keeps_blocked_status() {
-        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = connection.transaction().expect("fixture transaction");
         connection
             .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
             .expect("work table creates");
@@ -754,7 +757,8 @@ mod tests {
 
     #[test]
     fn work_creation_refuses_an_existing_id_without_overwriting_it() {
-        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = connection.transaction().expect("fixture transaction");
         connection
             .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);")
             .expect("work family creates");

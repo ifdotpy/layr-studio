@@ -1048,6 +1048,7 @@ fn work_units(
             continue;
         }
         let table = work_history::table_of(kind);
+        // Raw SQL: history publication joins durable tombstones and the parent's JSON team selector.
         let entries: Vec<HistoryRow> =
             transaction
                 .prepare(&format!(

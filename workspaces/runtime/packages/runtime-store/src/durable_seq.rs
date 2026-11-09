@@ -99,9 +99,18 @@ pub const DURABLE_TABLES: &[DurableTable] = &[
     // The owner of conversation items; transcript pages are built from it at read time.
     DurableTable::online("runtime_items", "record"),
     // Work history entries, one row per entry (see work_history.rs).
-    DurableTable::new("runtime_work_results", "record"),
-    DurableTable::new("runtime_work_decisions", "record"),
-    DurableTable::new("runtime_work_releases", "record"),
+    DurableTable::new(
+        <crate::work_history::WorkResultsStorageRow as studio_db_api::Table>::NAME,
+        "record",
+    ),
+    DurableTable::new(
+        <crate::work_history::WorkDecisionsStorageRow as studio_db_api::Table>::NAME,
+        "record",
+    ),
+    DurableTable::new(
+        <crate::work_history::WorkReleasesStorageRow as studio_db_api::Table>::NAME,
+        "record",
+    ),
     // Execution runs: a failure refusal of a work document depends on the owner's run.
     DurableTable::new("runtime_execution_runs", "record"),
     // Sources of documents built at read time, one document per row.

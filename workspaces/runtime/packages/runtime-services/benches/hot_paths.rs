@@ -53,9 +53,11 @@ fn create(mut db: Connection) -> Connection {
 }
 
 fn submit_database() -> Connection {
-    let db = database();
+    let mut db = database();
     let work = json!({"id":"review","rootId":"lead","owner":"worker","status":"running","title":"review","description":"","created":1.0,"updated":1.0,"version":2,"dependencies":[],"results":[],"decisions":[],"createdBy":"worker"});
-    WorkItemsRepository::put_work(&db, "review", &work).expect("work");
+    let tx = db.transaction().expect("transaction");
+    WorkItemsRepository::put_work(&tx, "review", &work).expect("work");
+    tx.commit().expect("commit");
     db
 }
 
