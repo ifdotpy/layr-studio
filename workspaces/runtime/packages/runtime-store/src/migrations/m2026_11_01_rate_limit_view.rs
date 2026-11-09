@@ -80,6 +80,7 @@ mod tests {
     #[test]
     fn migration_isolates_unreadable_and_foreign_accounts() {
         let mut db = crate::fresh_state::test_canvas();
+        crate::seed_legacy_reparented_rows(&db, || {
         for (id, payload) in [
             ("bad", "not json"),
             (
@@ -89,6 +90,8 @@ mod tests {
         ] {
             db.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('rateLimit',?1,1,'old',?2,0)", [id, payload]).unwrap();
         }
+            Ok(())
+        }).unwrap();
         let tx = db.transaction().unwrap();
         super::super::m2026_11_01_normalize_limits::apply(&tx, 100.0).unwrap();
         for id in ["bad", "wrong"] {

@@ -102,6 +102,7 @@ mod m2026_11_06_role_account_exclusions;
 mod m2026_11_07_attention_lookups;
 mod m2026_11_07_auth_resume_proof;
 mod m2026_11_07_explicit_review_model;
+mod m2026_11_09_immutable_entity_scopes;
 pub(crate) mod m2026_11_09_online_keys;
 
 #[cfg(any(test, feature = "test-support"))]
@@ -1684,6 +1685,20 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_09_online_keys::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-09-immutable-entity-scopes",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 9,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Installations supporting agent and task re-parenting",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_09_immutable_entity_scopes::apply(c.transaction),
     },
 ];
 

@@ -359,7 +359,6 @@ class AgentDetailEntityDtoModel {
   connectionCheck: AgentDetailEntityDtoDto["connectionCheck"] | undefined;
   contextRepairWait: AgentDetailEntityDtoDto["contextRepairWait"] | undefined;
   contextUsage: AgentDetailEntityDtoDto["contextUsage"] | undefined;
-  convertedFromLead: AgentDetailEntityDtoDto["convertedFromLead"] | undefined;
   cyberAccessProgram:
     | NonNullable<AgentDetailEntityDtoDto["cyberAccessProgram"]>
     | null
@@ -604,10 +603,6 @@ class AgentDetailEntityDtoModel {
       dto.contextUsage === undefined
         ? undefined
         : freezePlain(structuredClone(dto.contextUsage));
-    this.convertedFromLead =
-      dto.convertedFromLead === undefined
-        ? undefined
-        : freezePlain(structuredClone(dto.convertedFromLead));
     this.cyberAccessProgram =
       dto.cyberAccessProgram === undefined
         ? undefined
@@ -946,7 +941,6 @@ class AgentDetailEntityDtoModel {
       connectionCheck: observableRef,
       contextRepairWait: observableRef,
       contextUsage: observableRef,
-      convertedFromLead: observableRef,
       cyberAccessProgram: observableRef,
       daybreakEnabled: observableRef,
       deletedAt: observableRef,
@@ -1251,17 +1245,6 @@ class AgentDetailEntityDtoModel {
               ? this.contextUsage
               : freezePlain(structuredClone(dto.contextUsage));
       if (this.contextUsage !== next) this.contextUsage = next;
-    }
-    {
-      const next =
-        dto.convertedFromLead === undefined
-          ? undefined
-          : this.convertedFromLead === undefined
-            ? freezePlain(structuredClone(dto.convertedFromLead))
-            : compareStructural(this.convertedFromLead, dto.convertedFromLead)
-              ? this.convertedFromLead
-              : freezePlain(structuredClone(dto.convertedFromLead));
-      if (this.convertedFromLead !== next) this.convertedFromLead = next;
     }
     {
       const next =

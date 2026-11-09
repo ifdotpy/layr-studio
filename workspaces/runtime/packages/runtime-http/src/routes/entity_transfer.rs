@@ -183,9 +183,11 @@ async fn prepare(
     let validators = state.validators.clone();
     state.store.as_ref().ok_or_else(|| ApiError::internal_with_cause(InternalErrorKind::StoreConfiguration))?.read_async("runtime-http/entity-transfer", move |tx| {
         let after = since.as_ref().map(|cursor| cursor.seq);
-        // Only actual ownership/team movement or expired cursors replace a scope.
+        // Team member insertion, deletion and restoration can replace a scope.
         // Ordinary writes and tombstones retain indexed sequence deltas.
-        let visibility = agent.as_deref().map(|agent| SyncDocumentsRepository::entity_scope_visibility_revision(tx, &collections, agent, scope.include_team_members)).transpose()?.unwrap_or(0);
+        let visibility = if scope.include_team_members {
+            agent.as_deref().map(|agent| SyncDocumentsRepository::team_membership_revision(tx, agent)).transpose()?.unwrap_or(0)
+        } else { 0 };
         let after = after.filter(|after| *after >= visibility);
         let mut page = studio_runtime_services::entity_scope::resume(tx, after, Some(&collections), id.as_deref(), agent.as_deref(), scope.include_team_members, SYNC_ENTITY_STREAM_MAX_DOCUMENTS)?;
         let through = page.max_sequence;
@@ -613,212 +615,179 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scoped_membership_swaps_and_reassignment_reset_but_unrelated_moves_and_appends_stay_delta()
-     {
+    async fn team_insertion_deletion_and_restore_replace_scopes_while_content_stays_delta() {
         let (_directory, state) = fixture().await;
-        let store = state.store.as_ref().expect("store");
+        let store = state.store.as_ref().unwrap();
+        studio_runtime_services::entity_publication::install(store)
+            .await
+            .unwrap();
         store
             .transaction(|tx| {
-                for (id, root) in [
-                    ("lead", "lead"),
-                    ("other", "other"),
-                    ("a", "lead"),
-                    ("b", "other"),
-                ] {
-                    put_member(tx, id, root)?;
-                }
-                for (id, agent) in [("a-task", "a"), ("b-task", "b"), ("latest", "lead")] {
-                    put_task(tx, id, agent, "running")?;
-                }
+                put_member(tx, "lead", "lead")?;
+                put_member(tx, "worker", "lead")?;
+                put_task(tx, "worker-task", "worker", "running")?;
+                put_task(tx, "latest", "lead", "running")?;
+                // The task predates membership, so a row-only delta cannot introduce it later.
+                put_task(tx, "waiting-task", "waiting", "running")?;
                 Ok(())
             })
             .await
-            .expect("scope source");
+            .unwrap();
         let resource: ResourceRef =
-            studio_json::from_value(json!({"kind":"tasks","agentId":"lead"})).expect("resource");
-        let (_, _, before) = prepare(&state, &event(&state), resource.clone(), None)
+            studio_json::from_value(json!({"kind":"tasks","agentId":"lead"})).unwrap();
+        let (_, _, mut cursor) = prepare(&state, &event(&state), resource.clone(), None)
             .await
-            .expect("baseline");
+            .unwrap();
         store
             .transaction(|tx| {
-                for (id, root) in [("a", "other"), ("b", "lead")] {
-                    put_member(tx, id, root)?;
+                assert!(
+                    put_member(tx, "worker", "other")
+                        .unwrap_err()
+                        .to_string()
+                        .contains("immutable")
+                );
+                assert!(put_task(tx, "worker-task", "lead", "running").is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+        for (operation, expected) in [
+            ("delete", vec!["latest"]),
+            ("restore", vec!["latest", "worker-task"]),
+            ("insert", vec!["latest", "waiting-task", "worker-task"]),
+        ] {
+            store.transaction(move |tx| {
+                match operation {
+                    "delete" => { tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.deletedAt',1) WHERE id='worker'", [])?; }
+                    "restore" => { tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.deletedAt') WHERE id='worker'", [])?; }
+                    "insert" => { put_member(tx, "waiting", "lead")?; }
+                    _ => unreachable!(),
                 }
                 Ok(())
-            })
-            .await
-            .expect("equal-size team swap");
-        let (entry, _, swapped) = prepare(&state, &event(&state), resource.clone(), Some(before))
-            .await
-            .expect("swapped scope");
-        let entry = entry.expect("small snapshot");
-        assert_eq!(
-            entry.reply_kind,
-            Some(crate::generated::SubscriptionReplyKind::Snapshot),
-            "membership movement must not advance an empty delta past old selected rows"
-        );
-        assert_eq!(
-            entry
-                .entity_changes
-                .as_ref()
-                .and_then(Option::as_ref)
-                .expect("rows")
-                .documents
-                .iter()
-                .map(|row| row.id.as_str())
-                .collect::<Vec<_>>(),
-            ["b-task", "latest"]
-        );
+            }).await.unwrap();
+            let (entry, reader, next) =
+                prepare(&state, &event(&state), resource.clone(), Some(cursor))
+                    .await
+                    .unwrap();
+            assert!(reader.is_none());
+            let entry = entry.unwrap();
+            assert_eq!(
+                entry.reply_kind,
+                Some(crate::generated::SubscriptionReplyKind::Snapshot),
+                "{operation}"
+            );
+            let mut ids = docs_of(Some(entry))
+                .into_iter()
+                .map(|row| row.id)
+                .collect::<Vec<_>>();
+            ids.sort();
+            assert_eq!(ids, expected, "{operation}");
+            cursor = next;
+        }
         store
             .transaction(|tx| {
-                put_task(tx, "b-task", "a", "running")?;
-                Ok(())
-            })
-            .await
-            .expect("existing task moved away");
-        let (entry, _, moved) = prepare(&state, &event(&state), resource.clone(), Some(swapped))
-            .await
-            .expect("moved scope");
-        let entry = entry.expect("replacement");
-        assert_eq!(
-            entry.reply_kind,
-            Some(crate::generated::SubscriptionReplyKind::Snapshot)
-        );
-        assert_eq!(
-            entry
-                .entity_changes
-                .as_ref()
-                .and_then(Option::as_ref)
-                .expect("rows")
-                .documents
-                .len(),
-            1
-        );
-        store
-            .transaction(|tx| {
-                SyncDocumentsRepository::put_entity(
-                    tx,
-                    "agentSummary",
-                    "unrelated",
-                    json!({"id":"unrelated","rootId":"other","status":"idle","source":"managed"}),
-                    false,
-                )?;
+                put_member(tx, "unrelated", "other")?;
                 put_task(tx, "latest", "lead", "completed")?;
                 Ok(())
             })
             .await
-            .expect("other team and local content");
-        let (entry, _, current) = prepare(&state, &event(&state), resource.clone(), Some(moved))
+            .unwrap();
+        let (entry, _, next) = prepare(&state, &event(&state), resource.clone(), Some(cursor))
             .await
-            .expect("content delta");
-        let entry = entry.expect("delta");
+            .unwrap();
+        let entry = entry.unwrap();
         assert_eq!(
             entry.reply_kind,
             Some(crate::generated::SubscriptionReplyKind::Delta)
         );
         assert_eq!(
-            entry
-                .entity_changes
-                .as_ref()
-                .and_then(Option::as_ref)
-                .expect("rows")
-                .documents
-                .len(),
-            1
+            docs_of(Some(entry))
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["latest"]
         );
         store
             .transaction(|tx| {
-                put_task(tx, "new", "lead", "running")?;
+                put_task(tx, "appended", "lead", "running")?;
                 Ok(())
             })
             .await
-            .expect("ordinary append");
-        let (entry, _, _) = prepare(&state, &event(&state), resource, Some(current))
+            .unwrap();
+        let (entry, _, _) = prepare(&state, &event(&state), resource, Some(next))
             .await
-            .expect("append delta");
-        let entry = entry.expect("delta");
+            .unwrap();
+        let entry = entry.unwrap();
         assert_eq!(
             entry.reply_kind,
             Some(crate::generated::SubscriptionReplyKind::Delta)
         );
         assert_eq!(
-            entry
-                .entity_changes
-                .as_ref()
-                .and_then(Option::as_ref)
-                .expect("rows")
-                .documents
-                .len(),
-            1
+            docs_of(Some(entry))
+                .iter()
+                .map(|row| row.id.as_str())
+                .collect::<Vec<_>>(),
+            ["appended"]
         );
     }
 
     #[tokio::test]
-    async fn restored_ownership_replaces_the_old_scope_and_delivers_the_new_scope() {
+    async fn same_owner_task_delete_and_restore_remain_incremental() {
         let (_directory, state) = fixture().await;
-        let store = state.store.as_ref().expect("fixture store");
+        let store = state.store.as_ref().unwrap();
         store
             .transaction(|tx| {
-                for owner in ["alpha", "beta"] {
-                    put_member(tx, owner, owner)?;
-                }
+                put_member(tx, "alpha", "alpha")?;
                 put_task(tx, "restored", "alpha", "running")?;
                 Ok(())
             })
             .await
-            .expect("publish initial task owner");
-        let alpha: ResourceRef = studio_json::from_value(json!({"kind":"tasks","agentId":"alpha"}))
-            .expect("alpha task resource");
-        let beta: ResourceRef = studio_json::from_value(json!({"kind":"tasks","agentId":"beta"}))
-            .expect("beta task resource");
-        let (_, _, baseline) = prepare(&state, &event(&state), alpha.clone(), None)
+            .unwrap();
+        let resource: ResourceRef =
+            studio_json::from_value(json!({"kind":"tasks","agentId":"alpha"})).unwrap();
+        let (_, _, baseline) = prepare(&state, &event(&state), resource.clone(), None)
             .await
-            .expect("initial owner baseline");
+            .unwrap();
         store
             .transaction(|tx| {
                 delete_task(tx, "restored")?;
-                put_task(tx, "restored", "beta", "running")?;
                 Ok(())
             })
             .await
-            .expect("delete and restore under new owner");
-        let (old, _, _) = prepare(&state, &event(&state), alpha, Some(baseline.clone()))
+            .unwrap();
+        let (entry, _, deleted) = prepare(&state, &event(&state), resource.clone(), Some(baseline))
             .await
-            .expect("old scope replacement");
-        let old = old.expect("inline old scope entry");
+            .unwrap();
+        let entry = entry.unwrap();
         assert_eq!(
-            old.reply_kind,
-            Some(crate::generated::SubscriptionReplyKind::Snapshot)
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Delta)
         );
-        assert!(
-            old.entity_changes
-                .as_ref()
-                .and_then(Option::as_ref)
-                .expect("old scope replacement documents")
-                .documents
-                .is_empty()
+        assert_eq!(
+            docs_of(Some(entry))[0].op,
+            crate::generated::SyncEntityOp::Delete
         );
-        let (new, _, _) = prepare(&state, &event(&state), beta, Some(baseline))
+        store
+            .transaction(|tx| {
+                put_task(tx, "restored", "alpha", "running")?;
+                Ok(())
+            })
             .await
-            .expect("new owner interval");
-        let new = new.expect("inline new owner entry");
-        let documents = &new
-            .entity_changes
-            .as_ref()
-            .and_then(Option::as_ref)
-            .expect("new scope documents")
-            .documents;
+            .unwrap();
+        let (entry, _, _) = prepare(&state, &event(&state), resource, Some(deleted))
+            .await
+            .unwrap();
+        let entry = entry.unwrap();
+        assert_eq!(
+            entry.reply_kind,
+            Some(crate::generated::SubscriptionReplyKind::Delta)
+        );
+        let documents = docs_of(Some(entry));
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].op, crate::generated::SyncEntityOp::Upsert);
         let projection: studio_runtime_schema::process_controls::TaskProjection =
-            studio_json::from_value(
-                documents
-                    .first()
-                    .expect("new owner document")
-                    .value
-                    .clone()
-                    .expect("task value"),
-            )
-            .expect("typed task projection");
-        assert_eq!(projection.agent, "beta");
+            studio_json::from_value(documents[0].value.clone().unwrap()).unwrap();
+        assert_eq!(projection.agent, "alpha");
     }
 
     #[tokio::test]

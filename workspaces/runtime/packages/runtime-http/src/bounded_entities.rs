@@ -1969,12 +1969,12 @@ mod tests {
                 Ok(())
             })
             .await
-            .expect("move");
+            .expect_err("root changes are refused");
         assert_eq!(
             changed_agent_roots(store, &mut roots, vec![rowid])
                 .await
                 .expect("roots"),
-            BTreeSet::from(["a".into(), "b".into()])
+            BTreeSet::new()
         );
     }
 

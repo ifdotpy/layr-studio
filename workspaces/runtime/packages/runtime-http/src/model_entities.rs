@@ -192,9 +192,12 @@ mod tests {
             ),
         ];
         store.transaction_with(move |tx| {
+            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
             for (id, payload) in rows {
                 tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('model',?1,1,'fixture',?2,0)", rusqlite::params![id,payload])?;
             }
+                Ok(())
+            })?;
             Ok::<_, StoreError>(())
         }).await.expect("seed");
         store

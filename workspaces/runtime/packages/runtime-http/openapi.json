@@ -4235,16 +4235,6 @@
               }
             ]
           },
-          "convertedFromLead": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConvertedFromLeadDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "cyberAccessProgram": {
             "anyOf": [
               {
@@ -5290,16 +5280,6 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ContextUsageDto"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "convertedFromLead": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConvertedFromLeadDto"
               },
               {
                 "type": "null"
@@ -7595,10 +7575,6 @@
             ],
             "default": null
           },
-          "convertedFromLead": {
-            "$ref": "#/components/schemas/ConvertedFromLeadRecordResponse",
-            "default": null
-          },
           "created": {
             "default": null,
             "title": "Created",
@@ -8993,17 +8969,6 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ContextUsageDto"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "convertedFromLead": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConvertedFromLeadDto"
               },
               {
                 "type": "null"
@@ -17846,17 +17811,6 @@
             ],
             "default": null
           },
-          "convertedFromLead": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ConvertedFromLeadDto"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
           "created": {
             "anyOf": [
               {
@@ -25499,42 +25453,6 @@
           "id"
         ],
         "title": "ConversationRequest",
-        "type": "object"
-      },
-      "ConvertedFromLeadDto": {
-        "additionalProperties": false,
-        "description": "User conversion provenance persisted when a peer lead becomes a worker.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "number"
-          },
-          "by": {
-            "const": "user",
-            "title": "By",
-            "type": "string"
-          },
-          "oldRootId": {
-            "title": "Oldrootid",
-            "type": "string"
-          },
-          "requestId": {
-            "title": "Requestid",
-            "type": "string"
-          },
-          "rootId": {
-            "title": "Rootid",
-            "type": "string"
-          }
-        },
-        "required": [
-          "requestId",
-          "by",
-          "at",
-          "oldRootId",
-          "rootId"
-        ],
-        "title": "ConvertedFromLeadDto",
         "type": "object"
       },
       "ConvertedFromLeadRecordResponse": {
@@ -36936,48 +36854,6 @@
           "members"
         ],
         "title": "PeerTeam",
-        "type": "object"
-      },
-      "PeerTeamConvertRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "const": "convert",
-            "title": "Action",
-            "type": "string"
-          },
-          "expected_revision": {
-            "maximum": 9007199254740991,
-            "minimum": 0,
-            "title": "Expected Revision",
-            "type": "integer"
-          },
-          "member": {
-            "title": "Member",
-            "type": "string"
-          },
-          "path": {
-            "title": "Path",
-            "type": "string"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          },
-          "target": {
-            "title": "Target",
-            "type": "string"
-          }
-        },
-        "required": [
-          "action",
-          "path",
-          "member",
-          "target",
-          "request_id",
-          "expected_revision"
-        ],
-        "title": "PeerTeamConvertRequest",
         "type": "object"
       },
       "PeerTeamDeleteRequest": {
@@ -76218,9 +76094,6 @@
             "application/json": {
               "schema": {
                 "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/PeerTeamConvertRequest"
-                  },
                   {
                     "$ref": "#/components/schemas/PeerTeamDeleteRequest"
                   },

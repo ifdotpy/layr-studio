@@ -502,22 +502,6 @@ pub fn publish_entity_changes(
     let mut room_agents = BTreeSet::new();
     let mut changed_roots = BTreeSet::new();
     for &(id, record) in &agents {
-        let previous: Option<(Option<String>, Option<bool>)> = transaction
-            .query_row(
-                "SELECT root_id,is_lead FROM agent_publication_state WHERE id=?1 AND live=1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
-            .optional()?;
-        if let Some((old_root, old_lead)) = previous {
-            let new_root = record.get("rootId").and_then(Value::as_str);
-            let new_lead = record.get("isLead").and_then(Value::as_bool);
-            if old_root.as_deref() != new_root || old_lead != new_lead {
-                room_agents.insert(id.to_owned());
-                changed_roots.extend(old_root);
-                changed_roots.extend(new_root.map(str::to_owned));
-            }
-        }
         let projected_live: bool = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_publication_state WHERE id=?1 AND live=1)",
             [id],
@@ -813,13 +797,11 @@ fn mark_agent_projection(
     // Raw SQL: the publication copies JSON selectors from the source agent in this transaction.
     transaction
         .prepare_cached(
-            "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
-           SELECT ?1,json_extract(record,'$.rootId'),json_extract(record,'$.isLead'),
-                  json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
+            "INSERT INTO agent_publication_state(id,live,in_flight,team_counts)
+           SELECT ?1,json_extract(record,'$.deletedAt') IS NULL AND NOT ?2,
                   COALESCE(json_extract(record,'$.inFlight'),0),?3
            FROM runtime_agents WHERE id=?1
-         ON CONFLICT(id) DO UPDATE SET root_id=excluded.root_id,is_lead=excluded.is_lead,
-           live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
+         ON CONFLICT(id) DO UPDATE SET live=excluded.live,in_flight=excluded.in_flight,team_counts=excluded.team_counts",
         )?
         .execute(rusqlite::params![id, deleted, team_counts])?;
     if deleted {
@@ -1379,18 +1361,6 @@ fn join_task_window(
         studio_runtime_store::durable_seq::TASK_WINDOW,
         id,
     )?;
-    // The state of a task that left is kept, so a return under another owner is seen.
-    // Raw SQL: projection API follow-up; refresh must overwrite unrelated legacy fields.
-    let previous: Option<String> = transaction
-        .prepare_cached("SELECT agent FROM task_window_state WHERE id=?1")?
-        .query_row([id], |row| row.get(0))
-        .optional()?;
-    if let Some(previous) = previous.filter(|previous| previous != task.agent()) {
-        // The task moved: the scoped readers of both owners start from a snapshot.
-        for owner in [previous.as_str(), task.agent()] {
-            SyncDocumentsRepository::move_scope_visibility(transaction, "task", owner)?;
-        }
-    }
     studio_runtime_store::clock_schema::TaskWindowState {
         id: task.id().as_ref().to_owned(),
         agent: task.agent().to_owned(),
@@ -1516,14 +1486,13 @@ pub(crate) fn maintain_task_window_after_write(
             |row| row.get::<_, bool>(0),
         )?
     {
-        let unmoved_finished = previous_finished
+        let unchanged_finished_position = previous_finished
             && !task_running
             && previous.is_some_and(|previous| {
-                previous.get("agent").and_then(Value::as_str) == Some(agent_id)
-                    && previous.get("created").and_then(Value::as_f64)
-                        == task.created_number().number().as_f64()
+                previous.get("created").and_then(Value::as_f64)
+                    == task.created_number().number().as_f64()
             });
-        if unmoved_finished
+        if unchanged_finished_position
             && !studio_runtime_store::durable_seq::in_window(
                 transaction,
                 studio_runtime_store::durable_seq::TASK_WINDOW,
@@ -3710,23 +3679,19 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn task_window_refresh_repairs_legacy_state_and_fences_both_owners() {
+    async fn task_window_refresh_repairs_legacy_position() {
         let (_root, store) = task_window_store().await;
         store.transaction(|tx| {
             tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('legacy-task',?1)", [r#"{"id":"legacy-task","agent":"b","status":"running","created":12,"itemId":"legacy-task","turnId":"turn","type":"commandExecution","kind":"command","name":"commandExecution"}"#])?;
             studio_runtime_store::durable_seq::join_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?;
-            tx.execute("INSERT INTO task_window_state VALUES('legacy-task','a','legacy-date',1)", [])?;
+            tx.execute("INSERT INTO task_window_state VALUES('legacy-task','b','legacy-date',1)", [])?;
             assert_eq!(studio_runtime_store::count_legacy_rows::<studio_runtime_store::clock_schema::TaskWindowState>(tx)?.counts(), (1, 0));
-            let revision = |owner| SyncDocumentsRepository::entity_scope_visibility_revision(tx, r#"["task"]"#, owner, false);
-            let before = (revision("a")?, revision("b")?);
             maintain_task_window(tx, &|_, _, _, _| true)?;
             let row = tx.query_row("SELECT agent,created,running FROM task_window_state WHERE id='legacy-task'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, i64>(2)?)))?;
             assert_eq!(row, ("b".to_owned(), 12.0, 1));
-            assert!(revision("a")? > before.0, "old owner gets a snapshot fence");
-            assert!(revision("b")? > before.1, "new owner gets a snapshot fence");
             assert!(studio_runtime_store::durable_seq::in_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?);
             Ok(())
-        }).await.expect("refresh repairs unrelated legacy values while moving the owner");
+        }).await.expect("refresh repairs legacy window position");
     }
 
     #[tokio::test]
@@ -3826,7 +3791,7 @@ mod tests {
                         .entry(index)
                         .or_insert_with(|| TASK_WINDOW_HISTORY_ROWS as u64 + step * 7 + 1);
                     let status = ["running", "completed", "failed", "completed"][next(4) as usize];
-                    let agent = ["a", "b"][next(2) as usize];
+                    let agent = ["a", "b"][(index % 2) as usize];
                     let task = json!({
                         "id": format!("t{index}"), "agent": agent,
                         "status": status, "created": created, "itemId":format!("t{index}"), "turnId":"turn", "type":"commandExecution", "kind":"command", "name":"commandExecution"

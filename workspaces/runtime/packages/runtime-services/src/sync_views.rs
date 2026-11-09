@@ -1122,8 +1122,6 @@ pub(crate) fn agent_entity_from_record(
             .remove("contextRepairWait")
             .map(|v| Some(project_agent_property(&v, "contextRepairWait"))),
         context_usage: filtered_option(record.context_usage.as_ref(), "contextUsage").ok()?,
-        converted_from_lead: filtered_field(&record.converted_from_lead, "convertedFromLead")
-            .ok()?,
         created: nullable_field(record.created.clone()),
         cwd: record
             .cwd

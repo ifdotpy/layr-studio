@@ -110,7 +110,7 @@ async fn assert_finished_across_restarts(state: &State, parent: &str, answer: &V
 /// Agent 50f9a796: the receipt names a turn that completed, and later turns
 /// completed after it, so the attempt is not that of the last completed turn.
 async fn ordinary_turn_older_than_the_last_completed_turn(shape: Shape) {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -152,7 +152,7 @@ async fn an_agent_interrupted_for_an_older_completed_turn_returns_to_completed()
 /// The live reviewers: the review attempt was saved before its acceptance
 /// bound `startAttempt.turnId`, so only its execution receipt proves its end.
 async fn native_review_attempt_without_a_turn(shape: Shape) {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let epoch = state.epoch;
     let attempt = json!({"id":"review-attempt","epoch":epoch,"events":[],"action":"review",
@@ -244,7 +244,7 @@ async fn a_reviewer_interrupted_for_its_completed_review_returns_to_completed() 
 /// restores its attempt, and the replayed completion settles it once.
 #[tokio::test]
 async fn a_turn_cut_off_by_a_disconnect_still_recovers_after_a_restart() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;

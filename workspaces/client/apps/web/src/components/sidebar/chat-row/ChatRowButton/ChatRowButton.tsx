@@ -15,7 +15,6 @@ export const ChatRowButton = observer(function ChatRowButton({
     <UnstyledButton
       {...state.bindings}
       data-drop-edge={state.dropEdge}
-      data-folder-drop={state.folderDrop}
       title={row.agent.name ?? undefined}
       aria-label={
         [row.agent.name, server.show ? `Server ${server.alias}` : undefined]
@@ -23,7 +22,7 @@ export const ChatRowButton = observer(function ChatRowButton({
           .join(" ") || undefined
       }
       aria-description={[
-        "Drag onto a team to join it, or onto the project name to leave. Drop a team chat in the center of another lead chat to make it a subagent. Drag to an edge to reorder. Alt + Up or Down also works.",
+        "Drag onto a team to join it, or onto the project name to leave. Drag to an edge to reorder. Alt + Up or Down also works.",
         server.offline ? offlineServerDescription(server.alias) : undefined,
         displayedIndicator(row, state.pendingRead).label,
       ]

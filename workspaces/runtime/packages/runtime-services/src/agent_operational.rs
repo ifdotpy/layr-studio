@@ -693,18 +693,6 @@ mod owner_matrix_tests {
                 );
             }
         }
-        let db = studio_runtime_store::test_canvas();
-        put(&db, "root", None, "waiting", &json!({}));
-        put(&db, "middle", Some("root"), "waiting", &json!({}));
-        put(&db, "child", Some("middle"), "waiting", &json!({}));
-        let monitor = crate::monitor_policy::complete_test_monitor(
-            json!({"id":"watch","agent":"child","status":"running","epoch":1}),
-        );
-        db.execute(
-            "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
-            [monitor.to_string()],
-        )
-        .expect("monitor");
         for (parent, status, extra, live) in [
             ("root", "waiting", json!({}), true),
             ("root", "paused", json!({"autoWake":false}), false),
@@ -714,7 +702,18 @@ mod owner_matrix_tests {
             ("root", "waiting", json!({"source":"local"}), false),
             ("other-root", "waiting", json!({}), false),
         ] {
+            let db = studio_runtime_store::test_canvas();
+            put(&db, "root", None, "waiting", &json!({}));
             put(&db, "middle", Some(parent), status, &extra);
+            put(&db, "child", Some("middle"), "waiting", &json!({}));
+            let monitor = crate::monitor_policy::complete_test_monitor(
+                json!({"id":"watch","agent":"child","status":"running","epoch":1}),
+            );
+            db.execute(
+                "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
+                [monitor.to_string()],
+            )
+            .expect("monitor");
             let contexts = load(&db, &["root".into()]).expect("facts");
             assert_eq!(
                 count(&contexts["root"]),
@@ -722,15 +721,27 @@ mod owner_matrix_tests {
                 "{parent} {status} {extra}"
             );
         }
+        let db = studio_runtime_store::test_canvas();
+        put(&db, "root", None, "waiting", &json!({}));
         put(&db, "middle", Some("child"), "waiting", &json!({}));
+        put(&db, "child", Some("middle"), "waiting", &json!({}));
+        let monitor = crate::monitor_policy::complete_test_monitor(
+            json!({"id":"watch","agent":"child","status":"running","epoch":1}),
+        );
+        db.execute(
+            "INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
+            [monitor.to_string()],
+        )
+        .expect("monitor");
+
         let contexts = load(&db, &["middle".into()]).expect("cycle terminates");
         assert_eq!(
             count(&contexts["middle"]),
             1,
             "a parent cycle never counts the requesting agent itself"
         );
-        db.execute("DELETE FROM runtime_monitors", [])
-            .expect("clear");
+        let db = studio_runtime_store::test_canvas();
+        put(&db, "root", None, "waiting", &json!({}));
         put(&db, "middle", Some("root"), "waiting", &json!({}));
         put(&db, "sibling", Some("root"), "waiting", &json!({}));
         let monitor = crate::monitor_policy::complete_test_monitor(

@@ -873,7 +873,10 @@ mod tests {
         assert_eq!(body["checkpoints"][0]["future"]["kept"], true);
         assert!(body["checkpoints"][0].get("items").is_none());
         store.transaction_with(|tx| {
+            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
             tx.execute("UPDATE runtime_checkpoints SET record=json_set(record,'$.id','wrong') WHERE id='good'", [])?;
+                Ok(())
+            })?;
             Ok::<_, StoreError>(())
         }).await.unwrap();
         assert_eq!(
@@ -881,7 +884,10 @@ mod tests {
             StatusCode::SERVICE_UNAVAILABLE
         );
         store.transaction_with(|tx| {
+            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
             tx.execute("UPDATE runtime_checkpoints SET record=json_set(record,'$.id','good') WHERE id='good'", [])?;
+                Ok(())
+            })?;
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.firedEvents',3) WHERE id='lead'", [])?;
             Ok::<_, StoreError>(())
         }).await.unwrap();

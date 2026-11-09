@@ -14,7 +14,6 @@ import {
   runInAction,
 } from "mobx";
 import { errorText } from "../../api.ts";
-import { outboxRequests } from "../../browserPersistence.ts";
 import type { paths } from "../../generated/api.ts";
 import { createStateMirror } from "../../generated/observableResources.ts";
 import type {
@@ -171,11 +170,6 @@ export type SidebarAreas = Pick<
   | "notices"
   | "run"
 >;
-type Conversion = {
-  source: SidebarChatView;
-  target: SidebarChatView;
-  project: NavigableProject;
-};
 export class SidebarListOwner {
   readonly visibility;
   readonly selection;
@@ -349,35 +343,6 @@ export class SidebarListOwner {
   }
   sorting: SidebarOrderOwner;
   model: ReturnType<typeof createSidebarViewModel>;
-  conversion: Conversion | null = null;
-  setConversion = (value: Conversion | null) => {
-    this.conversion = value;
-  };
-  closeConversion = () => {
-    try {
-      if (
-        this.conversion &&
-        outboxRequests(
-          this.services.owner({ kind: "chat", id: this.conversion.source.id })
-            .storage,
-        ).get(
-          "projectSave",
-          `${this.stateDir}:${this.conversion.source.id}:${this.conversion.target.id}`,
-        )
-      ) {
-        this.notify(
-          "Retry the saved request to confirm its result before closing.",
-        );
-        return;
-      }
-    } catch {
-      this.notify(
-        "Load the chat server to check the saved request before closing.",
-      );
-      return;
-    }
-    this.setConversion(null);
-  };
   get compactKey() {
     return `codex-project-compact:${this.stateDir}`;
   }
@@ -775,46 +740,17 @@ export class SidebarListOwner {
       );
   }
   rowBindings = (row: SidebarChatView) => ({
-    ...this.sorting.dropBindings(
-      `convert:${row.id}`,
-      (source, event) => {
-        const chat = this.findRow(source.id);
-        const box = event.currentTarget.getBoundingClientRect();
-        return !!(
-          chat &&
-          this.canEdit({ kind: "chat", id: chat.id }) &&
-          this.canEdit({ kind: "chat", id: row.id }) &&
-          this.services.serverForChat(chat.id) ===
-            this.services.serverForChat(row.id) &&
-          chat.id !== row.id &&
-          this.teamFor(chat.id) &&
-          chat.projectPath === row.projectPath &&
-          source.group === chat.groupKey &&
-          !this.conversion &&
-          this.organizing === null &&
-          !this.teamMove.blocked() &&
-          event.clientY > box.top + box.height * 0.25 &&
-          event.clientY < box.top + box.height * 0.75
-        );
-      },
-      ({ id }) =>
-        this.setConversion({
-          source: this.findRow(id)!,
-          target: row,
-          project: this.groupMap.get(row.projectPath || "")!,
-        }),
-      this.sorting.bindings(
-        row.groupKey,
-        row.id,
-        this.teamFor(row.id) || row.agent.pinned
-          ? this.model.orderedRows
-              .filter((a) => a.groupKey === row.groupKey)
-              .map((a) => a.id)
-          : this.itemIds(
-              this.groupMap.get(row.projectPath || "")!,
-              row.projectFolder || null,
-            ),
-      ),
+    ...this.sorting.bindings(
+      row.groupKey,
+      row.id,
+      this.teamFor(row.id) || row.agent.pinned
+        ? this.model.orderedRows
+            .filter((a) => a.groupKey === row.groupKey)
+            .map((a) => a.id)
+        : this.itemIds(
+            this.groupMap.get(row.projectPath || "")!,
+            row.projectFolder || null,
+          ),
     ),
     draggable: this.canEdit({ kind: "chat", id: row.id }),
   });

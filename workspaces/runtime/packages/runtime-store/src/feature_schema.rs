@@ -74,12 +74,7 @@ pub(crate) const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_workspace_operation_agent_phase ON runtime_workspace_operations(json_extract(record,'$.agent'),json_extract(record,'$.phase'));
             CREATE INDEX IF NOT EXISTS runtime_request_agent_status ON runtime_requests(json_extract(record,'$.agent'),json_extract(record,'$.status'));
             CREATE INDEX IF NOT EXISTS runtime_rule_agent_inflight ON runtime_rules(json_extract(record,'$.agent'),json_extract(record,'$.inFlight'));
-            CREATE INDEX IF NOT EXISTS runtime_conversion_rules_rootId ON runtime_rules(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS runtime_conversion_plans_rootId ON runtime_plans(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS runtime_conversion_annotations_rootId ON runtime_annotations(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL;
             CREATE INDEX IF NOT EXISTS runtime_conversion_complaints_leadId ON runtime_complaints(json_extract(record,'$.leadId')) WHERE json_extract(record,'$.leadId') IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS runtime_conversion_event_meta_rootId ON runtime_event_meta(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS runtime_conversion_event_meta_leadId ON runtime_event_meta(json_extract(record,'$.leadId')) WHERE json_extract(record,'$.leadId') IS NOT NULL;
             CREATE INDEX IF NOT EXISTS runtime_room_root ON runtime_rooms(json_extract(record,'$.rootId'));
             CREATE INDEX IF NOT EXISTS runtime_room_member_first ON runtime_rooms(json_extract(record,'$.members[0]'));
             CREATE INDEX IF NOT EXISTS runtime_room_member_second ON runtime_rooms(json_extract(record,'$.members[1]'));
@@ -170,8 +165,10 @@ pub(crate) fn install_summary_delete_triggers(
         ("runtime_events", "messageReceipt"),
         ("runtime_tasks", "task"),
     ] {
-        let tombstone =
-            format!("json_object('collection','{collection}','id',OLD.id,'value',json('{{}}'))");
+        let function = crate::entity_scopes::SCOPE_TOMBSTONE_FUNCTION;
+        let tombstone = format!(
+            "{function}('{collection}',OLD.id,(SELECT payload FROM sync_entities WHERE collection='{collection}' AND id=OLD.id),(SELECT deleted FROM sync_entities WHERE collection='{collection}' AND id=OLD.id))"
+        );
         connection.execute_batch(&format!(
             "CREATE TRIGGER IF NOT EXISTS summary_{collection}_delete AFTER DELETE ON {table} BEGIN
              INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)

@@ -207,6 +207,15 @@ fn expected_catalog(
                     continue;
                 }
                 let actual = table_layout(connection, &name)?;
+                // The immutable-scope migration adds this nullable tombstone identity.
+                // Accept precisely the supported prior layout during read-only preflight.
+                if name == "durable_rows" {
+                    let mut prior = wanted.clone();
+                    prior.0.retain(|column| column.0 != "scope");
+                    if actual.as_ref() == Some(&prior) {
+                        continue;
+                    }
+                }
                 if actual.as_ref() == Some(&wanted) {
                     continue;
                 }

@@ -71,7 +71,7 @@ async fn close(peer: &mut Peer, worker: &AccountHandle, status_notice: bool) {
 #[tokio::test]
 async fn completed_worker_records_exact_manual_release_closure_without_a_turn() {
     for status_notice in [false, true] {
-        let state = State::new().await;
+        let state = State::new_child("lead").await;
         let mut peer = Peer::new();
         let mut worker = completed_worker(&state, &peer).await;
         save_release(&state, &worker, json!({})).await;
@@ -111,7 +111,7 @@ async fn completed_worker_rejects_stale_manual_release_closure_scope() {
         json!({"submittedAt":null}),
         json!({"phase":"checking"}),
     ] {
-        let state = State::new().await;
+        let state = State::new_child("lead").await;
         let mut peer = Peer::new();
         let mut worker = completed_worker(&state, &peer).await;
         save_release(&state, &worker, changes.clone()).await;
@@ -126,7 +126,7 @@ async fn completed_worker_rejects_stale_manual_release_closure_scope() {
 
 #[tokio::test]
 async fn exact_closure_does_not_replace_an_unknown_unsubscribe_receipt() {
-    let state = State::new().await;
+    let state = State::new_child("lead").await;
     let mut peer = Peer::new();
     let mut worker = completed_worker(&state, &peer).await;
     save_release(&state, &worker, json!({"phase":"unknown"})).await;

@@ -307,19 +307,31 @@ pub(crate) mod tests {
         let tx = db.transaction().expect("publication transaction");
         let raw = r#"{ "unknown": [1,2], "id": "row" }"#;
         assert!(
-            crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "one", false)
-                .expect("first publication")
+            crate::SyncDocumentsRepository::put_entity_hash(
+                &tx,
+                "transcript:fixture",
+                "row",
+                "one",
+                false
+            )
+            .expect("first publication")
         );
         let first = crate::durable_seq::high(&tx).expect("first counter");
         assert!(first > before);
         assert!(
-            !crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "one", false)
-                .expect("no-op")
+            !crate::SyncDocumentsRepository::put_entity_hash(
+                &tx,
+                "transcript:fixture",
+                "row",
+                "one",
+                false
+            )
+            .expect("no-op")
         );
         assert_eq!(crate::durable_seq::high(&tx).expect("no-op counter"), first);
         crate::peer_update_settings::canvas_tx(&tx)
             .upsert(&SyncEntities {
-                collection: "fixture".into(),
+                collection: "transcript:fixture".into(),
                 id: "row".into(),
                 seq: first,
                 hash: "one".into(),
@@ -328,13 +340,19 @@ pub(crate) mod tests {
             })
             .expect("exact raw evidence");
         let stored = crate::peer_update_settings::canvas_tx(&tx)
-            .get::<SyncEntities>(&("fixture".into(), "row".into()))
+            .get::<SyncEntities>(&("transcript:fixture".into(), "row".into()))
             .expect("read")
             .expect("row");
         assert_eq!(stored.payload.as_deref(), Some(raw));
         assert!(
-            crate::SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "two", true)
-                .expect("tombstone")
+            crate::SyncDocumentsRepository::put_entity_hash(
+                &tx,
+                "transcript:fixture",
+                "row",
+                "two",
+                true
+            )
+            .expect("tombstone")
         );
         assert!(crate::durable_seq::high(&tx).expect("tombstone counter") > first);
         tx.rollback().expect("outer rollback");
@@ -344,7 +362,7 @@ pub(crate) mod tests {
         );
         assert_eq!(
             db.query_row(
-                "SELECT count(*) FROM sync_entities WHERE collection='fixture'",
+                "SELECT count(*) FROM sync_entities WHERE collection='transcript:fixture'",
                 [],
                 |row| row.get::<_, i64>(0)
             )

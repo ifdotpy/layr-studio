@@ -611,6 +611,19 @@ fn normalize(value: &mut Value) {
                         // Compare the decoded canonical DTO payload. Hashes are
                         // computed from each runtime's JSON byte encoding.
                         row.as_object_mut().expect("sync row object").remove("hash");
+                        // Scope identity now survives deletion in storage only.
+                        // The immutable-scope witnesses check it separately;
+                        // retain every other field in this frozen content comparison.
+                        if row["deleted"] == 1 {
+                            if let Some(raw) = row["payload"].as_str() {
+                                row["payload"] =
+                                    studio_json::from_str(raw).expect("tombstone payload");
+                            }
+                            if let Some(scope) = row["payload"]["value"].as_object_mut() {
+                                scope.remove("agent");
+                                scope.remove("rootId");
+                            }
+                        }
                     }
                 }
                 if ["record", "result", "payload"].contains(&key.as_str())
@@ -682,7 +695,6 @@ async fn run(store: std::sync::Arc<RuntimeStore>, case: &Value) -> Result<Value,
     // Binding callers resolve the client path to a project key before SQL.
     let project_key = host_key(case["body"]["path"].as_str().expect("project path"));
     match mode.as_str() {
-        "convert" => studio_runtime_services::peer_conversion::convert(std::sync::Arc::clone(&store), &serde::Deserialize::deserialize(case["body"].clone()).map_err(|_| ProjectsError::Invalid("invalid conversion"))?).await.map(|reply| studio_json::from_slice(&studio_json::to_vec(&reply).expect("serialize reply")).expect("reply")),
         "project" => {
             let mut body = case["body"].clone();
             if body["action"] == "reorder" {
@@ -919,9 +931,7 @@ async fn python_written_radio_corpus_and_restart_replay() {
                 original_case["name"]
             );
             let mut changed = original_case.clone();
-            if changed["mode"] == "convert" {
-                changed["body"]["target"] = json!("b");
-            } else if changed["mode"] == "project" {
+            if changed["mode"] == "project" {
                 match changed["body"]["action"].as_str().expect("project action") {
                     "set_accounts" => changed["body"]["account_keys"] = json!(["other"]),
                     "set_worker_base" => changed["body"]["base_ref"] = json!("other"),
@@ -1035,7 +1045,6 @@ macro_rules! radio_failpoints {
 }
 radio_failpoints! {
     create_rollback_and_restart: "create" => ["runtime_agents", "runtime_rooms", "sync_entities", "request_results"],
-    convert_rollback_and_restart: "convert" => ["runtime_projects", "runtime_agents", "sync_entities", "request_results"],
     stop_rollback_and_restart: "stop-pending" => ["runtime_events", "runtime_rooms", "sync_entities", "request_results"],
     interrupt_rollback_and_restart: "interrupt" => ["runtime_rooms", "sync_entities"],
     floor_rollback_and_restart: "floor" => ["runtime_events", "runtime_rooms", "sync_entities"],

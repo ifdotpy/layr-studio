@@ -157,12 +157,19 @@ previous projection and cursor intact. A write failure retains the old cursor so
 can finish idempotently. Closing the page discards incomplete staging. The normal small event path stays direct,
 and per-scope cursors send only changed records after a baseline. Internal pages
 retain the initial SQLite snapshot's recovery decision even when their checkpoints
-predate the tombstone floor. Source-owned visibility fences in the existing
-[store bootstrap](../workspaces/runtime/packages/runtime-store/src/sync_schema.sql)
-record predicate-field movements for affected direct selectors and team roots.
-Only a relevant movement requests a replacement; status updates, ordinary history
-appends and tombstones retain row deltas. The indexed fence lookup does not scan
-selected histories.
+predate the tombstone floor. An entity's team scope and an agent's parent are
+immutable after creation. Identity keys and their JSON mirrors cannot change on
+UPDATE; changing a key requires DELETE plus INSERT, including the tombstone scope
+check. SQLite guards enforce this for typed and raw writers.
+Tombstones retain only their last root/agent scope identity, so deletion followed
+by restoration cannot change scope. Deletes sent to the client contain no value.
+Guarded writers reject malformed new JSON, including replacement inserts.
+Historical malformed JSON remains readable as stored evidence; a valid repair is
+allowed because the old scope cannot be determined. Once repaired, scope is fixed.
+Durable agent triggers keep one indexed membership revision per team for member
+insertion, deletion and restoration. A relevant membership revision requests a
+replacement; status updates, ordinary history appends and tombstones retain row
+deltas. The lookup does not scan selected histories.
 
 One queue per server, workspace, and schema orders interval application and cache
 hydration. Typed row batches compare source sequences synchronously and publish
@@ -177,8 +184,8 @@ Entity subscriptions read only rows after their last delivered sequence through
 the `(collection, seq)` index, including sequence-bearing deletion tombstones.
 Empty live intervals stay suppressed without advancing the delivered cursor;
 reconnect still acknowledges the client's durable cursor with an empty delta.
-No selected collection is rehashed. The explicit exception is an ownership or
-team-membership movement detected by the indexed visibility fence: it replaces
+No selected collection is rehashed. The explicit exception is a
+team member insertion, deletion or restoration detected by its indexed revision: it replaces
 that affected scope so entities that left it are removed from the client.
 Missing or expired cursors likewise require a replacement baseline.
 
@@ -253,6 +260,11 @@ tombstones above it, or a snapshot when the cursor is absent, in the future, or 
 `durable_floor.floor`. The floor is the highest `seq` of a pruned tombstone.
 Tombstones live `TOMBSTONE_RETENTION_SECONDS` (90 days); a delete prunes older ones.
 
+Physical source deletions retain only their immutable scope selectors in the existing
+`durable_rows` tombstone. Reinserting the same table/id under another scope is refused
+while that tombstone remains. After `TOMBSTONE_RETENTION_SECONDS` prunes it, an old
+cursor receives a full baseline, so that identity no longer needs a scope check.
+
 Status: every entity reader (stream, scoped subscription, REST pull, mutation reply)
 reads through [`entity_scope`](../workspaces/runtime/packages/runtime-services/src/entity_scope.rs).
 It builds the work documents (`WORK_COLLECTIONS`: work, workDetail, workResult,
@@ -271,8 +283,7 @@ numbered these rows, marked every chat and deleted the copies. The task and moni
 member's document is built from `runtime_tasks` or `runtime_monitors` at read time. A
 change of a member row or of its membership is sent at the later number; a member that
 left is a delete. `task_window_state` keeps the owner, created time and running state the
-task window compares. A task that moves to another agent resets the scoped readers of
-both owners. Migration `2026-11-04-window-read-time` moved the members of the copies. They are built
+task window compares. An existing task's owning agent is immutable. Migration `2026-11-04-window-read-time` moved the members of the copies. They are built
 at read time too; migration `2026-11-04-direct-read-time` numbered their rows and deleted
 their copies. The agent views (`AGENT_VIEW_COLLECTIONS`: agent, agentSummary,
 agentDetail, retainedWorktree) are built at read time from `runtime_agents`. A write that
@@ -288,7 +299,8 @@ bottom-up request-local pass; projects, peer teams and saved order remain their
 own entities. There is no sidebar resource, stored projection, extra logical mark
 namespace or transaction mark-proof cache. Team
 visibility of agent-scoped documents reads `root_id` of `runtime_agents`; the agent row
-triggers move the team fence. Migration `2026-11-04-agent-views-read-time` deleted the
+triggers advance its membership revision on insertion, deletion or restoration.
+Existing entity team scope and agent parent links are immutable. Migration `2026-11-04-agent-views-read-time` deleted the
 copies and the view log. An approval that is not open (or not a question) is a delete in a delta and
 absent from a snapshot. An update that leaves a record-only row unchanged takes no new
 number. A document built from one main-table change carries that row's number, so

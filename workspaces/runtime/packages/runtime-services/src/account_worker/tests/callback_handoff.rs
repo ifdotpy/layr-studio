@@ -1090,10 +1090,8 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
         "account",
         "deleted",
         "provider",
-        "root",
         "lead",
         "role",
-        "parent",
         "execution",
         "move",
         "move-before",
@@ -1156,12 +1154,8 @@ async fn managed_saved_callback_cannot_resume_a_stopped_changed_or_deleted_actor
                         "account" => "record=json_set(record,'$.accountKey','other')".to_owned(),
                         "deleted" => "record=json_set(record,'$.deletedAt',1)".to_owned(),
                         "provider" => "record=json_set(record,'$.provider','codex')".to_owned(),
-                        "root" => "record=json_set(record,'$.rootId','another-root')".to_owned(),
                         "lead" => "record=json_set(record,'$.isLead',json('false'))".to_owned(),
                         "role" => "record=json_set(record,'$.role','reviewer')".to_owned(),
-                        "parent" => {
-                            "record=json_set(record,'$.parentId','another-parent')".to_owned()
-                        }
                         "execution" => "record=json_set(record,'$.executionMode','vm')".to_owned(),
                         "move" | "move-before" => {
                             "record=json_set(record,'$.executionMove',json('true'))".to_owned()

@@ -25,6 +25,7 @@ async fn child_of_lead(state: &State) {
                 let mut lead = row.clone();
                 lead.id = AgentId::from(LEAD);
                 lead.root_id = AgentId::from(LEAD);
+                lead.parent_id = None;
                 lead.status = studio_runtime_store::AgentStatus::Completed;
                 lead.in_flight = Some(false);
                 lead.thread_id = Some("lead-thread".to_string());
@@ -193,7 +194,7 @@ async fn open(state: &State, account: &Account) -> (Peer, AccountHandle) {
 }
 
 async fn fixture(kind: ProviderKind) -> (State, Account) {
-    let state = State::new().await;
+    let state = State::new_child(LEAD).await;
     agents(&state, kind, 0).await;
     child_of_lead(&state).await;
     let account = Account::new(&state, kind);

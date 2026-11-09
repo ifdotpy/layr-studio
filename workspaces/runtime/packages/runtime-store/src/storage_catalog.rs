@@ -47,6 +47,7 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
             table.team_fence,
         ))?;
     }
+    crate::entity_scopes::install(connection)?;
     Ok(())
 }
 

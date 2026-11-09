@@ -312,6 +312,9 @@ inventory::submit! {
 inventory::submit! {
     ConnectionFunctionRegistration("sync_entity_payload")
 }
+inventory::submit! {
+    ConnectionFunctionRegistration(crate::entity_scopes::SCOPE_TOMBSTONE_FUNCTION)
+}
 
 /// Functions of the retired work journal triggers. Migration `2026-11-04-work-read-time`
 /// drops the triggers; until it runs on an old database, they call these no-ops.
@@ -329,6 +332,19 @@ fn has_registered_connection_function(name: &str) -> bool {
 }
 
 pub(crate) fn register_python_trigger_functions(connection: &Connection) -> StoreResult<()> {
+    connection.create_scalar_function(
+        crate::entity_scopes::SCOPE_TOMBSTONE_FUNCTION,
+        4,
+        FunctionFlags::SQLITE_DETERMINISTIC,
+        |context| {
+            let collection: String = context.get(0)?;
+            let id: String = context.get(1)?;
+            let previous: Option<String> = context.get(2)?;
+            let deleted: Option<bool> = context.get(3)?;
+            crate::entity_scopes::tombstone_payload(&collection, &id, previous.as_deref(), deleted)
+                .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))
+        },
+    )?;
     for (name, arguments) in RETIRED_WORK_JOURNAL_FUNCTIONS {
         connection.create_scalar_function(name, arguments, FunctionFlags::empty(), |_| Ok(0))?;
     }

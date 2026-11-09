@@ -151,23 +151,6 @@ pub struct AgentStartAttempt {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "lowercase")]
-#[schemars(inline)]
-pub enum ConversionActor {
-    User,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ConvertedFromLeadDto {
-    pub request_id: String,
-    pub by: ConversionActor,
-    pub at: f64,
-    pub old_root_id: String,
-    pub root_id: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AgentEntityCapacityRetryDto {
     pub id: String,
@@ -206,7 +189,7 @@ pub struct AgentEntityUsageResumeDto {
     pub due_at: Option<f64>,
 }
 
-pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 11], String> {
+pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 10], String> {
     use crate::agent_entity_nested::{nullable as normalize_nullable, object, property, title};
     let mut generator = schemars::generate::SchemaSettings::openapi3()
         .for_serialize()
@@ -382,39 +365,6 @@ pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 11], Stri
     *kind = "array".into();
     *prop =
         studio_json::json!({"anyOf":[list,{"type":"null"}],"default":null,"title":"Retiredevents"});
-    let mut converted = ConvertedFromLeadDto::json_schema(&mut generator).to_value();
-    title(&mut converted, "ConvertedFromLeadDto")?;
-    object(&mut converted)?.insert(
-        "description".into(),
-        "User conversion provenance persisted when a peer lead becomes a worker.".into(),
-    );
-    for (name, label) in [
-        ("requestId", "Requestid"),
-        ("by", "By"),
-        ("at", "At"),
-        ("oldRootId", "Oldrootid"),
-        ("rootId", "Rootid"),
-    ] {
-        let prop = property(&mut converted, name)?;
-        let obj = object(prop)?;
-        if name == "at" && obj.remove("format") != Some(studio_json::json!("double")) {
-            return Err("conversion at must use double format".into());
-        }
-        if name == "by" {
-            let variants = obj
-                .remove("enum")
-                .and_then(|v| v.as_array().cloned())
-                .ok_or("conversion actor must be an enum")?;
-            if variants.len() != 1 {
-                return Err("conversion actor must have one variant".into());
-            }
-            obj.insert(
-                "const".into(),
-                variants.into_iter().next().ok_or("missing actor")?,
-            );
-        }
-        title(prop, label)?;
-    }
     Ok([
         ("AgentEntityCapacityRetryDto", retry),
         ("CapacityRetryCause", retry_cause),
@@ -426,7 +376,6 @@ pub(crate) fn schemas() -> Result<[(&'static str, studio_json::Value); 11], Stri
         ("NativeReleasePhase", release_phase),
         ("NativeSafetyBufferingRecord", buffering),
         ("AgentStartAttempt", attempt),
-        ("ConvertedFromLeadDto", converted),
     ])
 }
 
@@ -531,12 +480,6 @@ mod tests {
         assert_eq!(
             studio_json::to_value(attempt).unwrap(),
             json!({"retiredEvents": null})
-        );
-        assert!(
-            studio_json::from_value::<ConvertedFromLeadDto>(
-                json!({"requestId":"r","by":"agent","at":1,"oldRootId":"old","rootId":"new"})
-            )
-            .is_err()
         );
     }
 }

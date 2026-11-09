@@ -224,7 +224,7 @@ describe("owner sidebar services", () => {
     });
   });
 
-  it("decodes chat, folder, team, shared and conversion requests without cross-owner IDs", () => {
+  it("decodes chat, folder, team and shared requests without cross-owner IDs", () => {
     const { model } = fixture();
     const path = model.projectKey("remote", "/remote");
     const id = model.chatKey("remote", "same");
@@ -244,7 +244,7 @@ describe("owner sidebar services", () => {
       expected_folder: "folder",
       expected_revision: 4,
     });
-    for (const action of ["save", "delete", "radio", "move", "convert"]) {
+    for (const action of ["save", "delete", "radio", "move"]) {
       const wire = sidebarWireRequest(model, "remote", "/api/peer-teams", {
         action,
         path,

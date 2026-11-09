@@ -2036,7 +2036,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn status_membership_change_after_snapshot_refuses_the_revision_write() {
+    async fn status_epoch_change_after_snapshot_refuses_the_revision_write() {
         let (_directory, store) = fixture().await;
         let inputs = store
             .read_async("status-race-inputs", |connection| {
@@ -2060,18 +2060,14 @@ mod tests {
             .expect("snapshot authorized for the original team");
         store
             .transaction_with(|tx| {
-                let mut destination = AgentRepository::get(tx, &"lead".into())?.expect("lead");
-                destination.id = "other-team".into();
-                destination.root_id = "other-team".into();
-                AgentRepository::put(tx, &destination)?;
                 let mut actor = AgentRepository::get(tx, &"queued".into())?.expect("actor");
                 assert_eq!(actor.epoch, 4);
-                actor.root_id = "other-team".into();
+                actor.epoch = 5;
                 AgentRepository::put(tx, &actor)?;
                 Ok::<_, StoreError>(())
             })
             .await
-            .expect("move the descendant without changing its epoch");
+            .expect("advance the descendant epoch");
         let result = store
             .transaction_with(move |tx| {
                 super::record_status_revision(tx, "queued", 4, &snapshot, 100.0)
@@ -2088,7 +2084,7 @@ mod tests {
             .expect("count retained revisions");
         assert!(
             matches!(result, Err(StatusError::Stale)),
-            "a snapshot cannot cross team membership"
+            "a snapshot cannot cross actor epochs"
         );
         assert_eq!(revisions, 0, "a stale snapshot cannot retain a revision");
     }

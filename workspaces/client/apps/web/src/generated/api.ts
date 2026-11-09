@@ -3638,10 +3638,6 @@ export interface components {
         | components["schemas"]["ContextUsageDto"]
         | null
         | undefined;
-      convertedFromLead?:
-        | components["schemas"]["ConvertedFromLeadDto"]
-        | null
-        | undefined;
       /** Cyberaccessprogram */
       cyberAccessProgram?: null | string | undefined;
       /** Daybreakenabled */
@@ -3925,10 +3921,6 @@ export interface components {
         | undefined;
       contextUsage?:
         | components["schemas"]["ContextUsageDto"]
-        | null
-        | undefined;
-      convertedFromLead?:
-        | components["schemas"]["ConvertedFromLeadDto"]
         | null
         | undefined;
       /** Created */
@@ -4716,10 +4708,6 @@ export interface components {
       contextUsage?:
         | components["schemas"]["ContextUsageRecordResponse"]
         | null
-        | undefined;
-      /** @default null */
-      convertedFromLead?:
-        | components["schemas"]["ConvertedFromLeadRecordResponse"]
         | undefined;
       /**
        * Created
@@ -5648,11 +5636,6 @@ export interface components {
       /** @default null */
       contextUsage?:
         | components["schemas"]["ContextUsageDto"]
-        | null
-        | undefined;
-      /** @default null */
-      convertedFromLead?:
-        | components["schemas"]["ConvertedFromLeadDto"]
         | null
         | undefined;
       /**
@@ -8783,11 +8766,6 @@ export interface components {
       /** @default null */
       contextUsage?:
         | components["schemas"]["ContextUsageDto"]
-        | null
-        | undefined;
-      /** @default null */
-      convertedFromLead?:
-        | components["schemas"]["ConvertedFromLeadDto"]
         | null
         | undefined;
       /**
@@ -12113,25 +12091,6 @@ export interface components {
        * @default true
        */
       yolo_mode?: boolean | undefined;
-    };
-    /**
-     * ConvertedFromLeadDto
-     * @description User conversion provenance persisted when a peer lead becomes a worker.
-     */
-    ConvertedFromLeadDto: {
-      /** At */
-      at: number;
-      /**
-       * By
-       * @constant
-       */
-      by: "user";
-      /** Oldrootid */
-      oldRootId: string;
-      /** Requestid */
-      requestId: string;
-      /** Rootid */
-      rootId: string;
     };
     /** ConvertedFromLeadRecordResponse */
     ConvertedFromLeadRecordResponse: {
@@ -16918,24 +16877,6 @@ export interface components {
       name: string;
     } & {
       [key: string]: components["schemas"]["JsonValue"] | undefined;
-    };
-    /** PeerTeamConvertRequest */
-    PeerTeamConvertRequest: {
-      /**
-       * Action
-       * @constant
-       */
-      action: "convert";
-      /** Expected Revision */
-      expected_revision: number;
-      /** Member */
-      member: string;
-      /** Path */
-      path: string;
-      /** Request Id */
-      request_id: string;
-      /** Target */
-      target: string;
     };
     /** PeerTeamDeleteRequest */
     PeerTeamDeleteRequest: {
@@ -33820,7 +33761,6 @@ export interface operations {
     requestBody: {
       content: {
         "application/json":
-          | components["schemas"]["PeerTeamConvertRequest"]
           | components["schemas"]["PeerTeamDeleteRequest"]
           | components["schemas"]["PeerTeamMoveRequest"]
           | components["schemas"]["PeerTeamSaveRequest"]

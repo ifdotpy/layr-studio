@@ -398,19 +398,22 @@ async fn retry_metadata_admission_and_frozen_assets_keep_legacy_evidence() {
             .transaction(move |tx| {
                 if name == "malformed" {
                     // The production expression indexes reject malformed writes; model an already-corrupt row.
-                    tx.execute_batch("DROP INDEX runtime_conversion_event_meta_rootId; DROP INDEX runtime_conversion_event_meta_leadId; DROP INDEX runtime_receipt_transcript_item;")?;
+                    tx.execute_batch("DROP INDEX runtime_receipt_transcript_item;")?;
                 }
-                match raw {
-                    Some(raw) => {
-                        tx.execute(
-                            "UPDATE runtime_event_meta SET record=?1 WHERE id='one'",
-                            [raw],
-                        )?;
+                studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+                    match raw {
+                        Some(raw) => {
+                            tx.execute(
+                                "UPDATE runtime_event_meta SET record=?1 WHERE id='one'",
+                                [raw],
+                            )?;
+                        }
+                        None => {
+                            tx.execute("DELETE FROM runtime_event_meta WHERE id='one'", [])?;
+                        }
                     }
-                    None => {
-                        tx.execute("DELETE FROM runtime_event_meta WHERE id='one'", [])?;
-                    }
-                }
+                    Ok(())
+                })?;
                 match (name, ClaudeRetryRepository::load(tx, "agent", "attempt")) {
                     (
                         "null" | "assets-null" | "duplicate" | "malformed",

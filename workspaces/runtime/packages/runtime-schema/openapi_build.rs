@@ -335,10 +335,6 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
             "studio_runtime_schema::agent_entity_nested_extra::AgentStartAttempt",
         ),
         (
-            "ConvertedFromLeadDto",
-            "studio_runtime_schema::agent_entity_nested_extra::ConvertedFromLeadDto",
-        ),
-        (
             "AgentNativeRelease",
             "studio_runtime_schema::agent_entity_nested_extra::AgentNativeRelease",
         ),
@@ -531,18 +527,17 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
     }
     // These union branches are owned by agent_progress, not generated DTOs.
     analysis.schemas.retain(|name, _| {
-        name != "ConvertedFromLeadDtoBy"
-            && ![
-                "AgentEntityStartWaitDtoVariant",
-                "AgentNativeStatusError",
-                "AgentNativeStatusPhase",
-                "AccountChangeVariant",
-                "AccountChangeKind",
-                "AccountTransferProgressVariant",
-                "AccountTransferProgressKind",
-            ]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
+        ![
+            "AgentEntityStartWaitDtoVariant",
+            "AgentNativeStatusError",
+            "AgentNativeStatusPhase",
+            "AccountChangeVariant",
+            "AccountChangeKind",
+            "AccountTransferProgressVariant",
+            "AccountTransferProgressKind",
+        ]
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
     });
     analysis
         .schemas

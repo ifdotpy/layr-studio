@@ -9,6 +9,7 @@ mod cached_sql;
 pub mod domain;
 pub mod durable_seq;
 pub mod entity_publication;
+pub mod entity_scopes;
 pub mod error_incidents;
 pub mod interaction_tables;
 pub mod item_seq_backfill;
@@ -19,6 +20,8 @@ pub use cached_sql::{CachedSql, STATEMENT_CACHE_CAPACITY};
 pub use entity_publication::{EntityPublisher, PendingEntities, StudioErrorSources};
 mod feature_schema;
 mod fresh_state;
+#[cfg(any(test, feature = "test-support"))]
+pub use entity_scopes::seed_legacy_reparented_rows;
 #[cfg(any(test, feature = "test-support"))]
 pub use fresh_state::{TestStoreTemplate, test_canvas};
 

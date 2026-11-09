@@ -42,7 +42,7 @@ pub struct DurableTable {
     /// True for a table whose only data is `id` and the payload column: an update that
     /// leaves both unchanged takes no new number.
     pub record_only: bool,
-    /// True for `runtime_agents`: a change of an agent's team (root or liveness) moves
+    /// True for `runtime_agents`: a change of an agent's team (liveness) moves
     /// the scope visibility fence of the team, with this change's number.
     pub team_fence: bool,
 }
@@ -137,25 +137,29 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
 
 /// The generator: SQL for the three triggers of one table.
 pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> String {
+    let membership_prefix = crate::repositories::sync_documents::TEAM_MEMBERSHIP_KEY_PREFIX;
     let now = "CAST(strftime('%s','now') AS INTEGER)";
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
+    let scope =
+        crate::entity_scopes::deleted_scope_sql(table, "OLD").unwrap_or_else(|| "NULL".to_owned());
     let put = |id: &str, deleted: u8, at: &str| {
+        let scope = if deleted == 1 { scope.as_str() } else { "NULL" };
         format!(
-            "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES('{table}',{id},{NEXT},{deleted},{at})
-             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at;"
+            "INSERT INTO durable_rows(tbl,id,seq,deleted,at,scope) VALUES('{table}',{id},{NEXT},{deleted},{at},{scope})
+             ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=excluded.deleted,at=excluded.at,scope=excluded.scope;"
         )
     };
     let live = put("NEW.id", 0, "0");
     let tombstone = put("OLD.id", 1, now);
     // The scope visibility fence of a team (owner: sync_documents
-    // ENTITY_SCOPE_VISIBILITY_KEY_PREFIX) at the number this change just took.
+    // TEAM_MEMBERSHIP_KEY_PREFIX) at the number this change just took.
     let fence = |roots: &str, id: &str| {
         if !team_fence {
             return String::new();
         }
         format!(
             "INSERT INTO sync_entity_meta(key,value)
-               SELECT 'entity_scope_visibility:' || json_array('*',root),
+               SELECT '{membership_prefix}' || json_quote(root),
                       CAST((SELECT seq FROM durable_rows WHERE tbl='{table}' AND id={id}) AS TEXT)
                FROM ({roots}) WHERE root IS NOT NULL
              ON CONFLICT(key) DO UPDATE SET value=CAST(MAX(CAST(sync_entity_meta.value AS INTEGER),CAST(excluded.value AS INTEGER)) AS TEXT);"
@@ -169,8 +173,7 @@ pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> S
     let insert_fence = fence(&live_root("NEW"), "NEW.id");
     let update_fence = fence(
         &format!(
-            "SELECT root FROM ({} UNION {}) WHERE json_extract(OLD.record,'$.rootId') IS NOT json_extract(NEW.record,'$.rootId')
-               OR (json_extract(OLD.record,'$.deletedAt') IS NULL) IS NOT (json_extract(NEW.record,'$.deletedAt') IS NULL)",
+            "SELECT root FROM ({} UNION {}) WHERE (json_extract(OLD.record,'$.deletedAt') IS NULL) IS NOT (json_extract(NEW.record,'$.deletedAt') IS NULL)",
             live_root("OLD"),
             live_root("NEW")
         ),
@@ -190,9 +193,9 @@ CREATE TRIGGER IF NOT EXISTS durable_{table}_insert AFTER INSERT ON {table} BEGI
 END;
 CREATE TRIGGER IF NOT EXISTS durable_{table}_update AFTER UPDATE ON {table}{changed} BEGIN
   {live}
-  INSERT INTO durable_rows(tbl,id,seq,deleted,at)
-    SELECT '{table}',OLD.id,{NEXT},1,{now} WHERE OLD.id IS NOT NEW.id
-    ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=1,at=excluded.at;
+  INSERT INTO durable_rows(tbl,id,seq,deleted,at,scope)
+    SELECT '{table}',OLD.id,{NEXT},1,{now},{scope} WHERE OLD.id IS NOT NEW.id
+    ON CONFLICT(tbl,id) DO UPDATE SET seq=excluded.seq,deleted=1,at=excluded.at,scope=excluded.scope;
   {update_fence}
 END;
 CREATE TRIGGER IF NOT EXISTS durable_{table}_delete AFTER DELETE ON {table} BEGIN
@@ -210,6 +213,7 @@ END;
 /// Number the rows of every opted-in table that have no entry yet (rows that predate
 /// the source) and install the triggers. Runs as a migration and on a fresh state.
 pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
+    crate::clock_schema::prepare_durable_scope(tx)?;
     for table in DURABLE_TABLES {
         let name = table.name;
         // A table created later by its own migration is numbered when it exists.

@@ -365,10 +365,12 @@ async fn noncanonical_tombstone_triggers_are_replaced() {
                 tx.execute(
                     "UPDATE sync_entities SET collection='event' WHERE collection='transcript:test' AND id=?1",
                     [insert_id.as_str()],
-                )?;
+                ).expect_err("collection identity cannot change on update");
+                tx.execute("DELETE FROM sync_entities WHERE collection='transcript:test' AND id=?1", [insert_id.as_str()])?;
+                tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) VALUES('event',?1,1,'h','{}',1)", [insert_id.as_str()])?;
                 Ok(())
             }).await
-            .expect("repaired trigger handles collection-only update");
+            .expect("repaired trigger handles explicit delete and insert");
         assert_eq!(
             store
                 .test_reader()

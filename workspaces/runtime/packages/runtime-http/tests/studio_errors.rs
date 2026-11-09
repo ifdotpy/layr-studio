@@ -937,7 +937,10 @@ async fn malformed_receipts_agents_and_owners_do_not_poison_startup_or_following
         for (id,status) in [("bad-agent","failed"),("bad-owner","waiting")] {
             tx.execute("INSERT INTO chats(id,state,status) VALUES(?1,'active',?2)",rusqlite::params![id,status])?;
         }
+        studio_runtime_store::seed_legacy_reparented_rows(tx, || {
         tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.agent','bad-owner') WHERE id='one'",[])?;
+            Ok(())
+        })?;
         for (id,encoded) in [("http:bad-json","{"),("http:bad-shape","{\"private\":\"receipt-private-canary\"}"),("http:bad-identity","{\"id\":\"wrong-id\",\"kind\":\"http_failure\",\"reason\":\"private\",\"action\":\"details\",\"detail\":\"\",\"subject\":\"\",\"at\":1,\"diagnostics\":{\"context\":{\"source\":\"http\",\"route\":\"GET /api/example\",\"requestId\":null,\"status\":500,\"class\":\"store_data\"},\"certainty\":\"unknown\",\"causes\":[]}}") ] {
             let now = (studio_runtime_services::event_write::unix_time().expect("time") * 1000.0) as i64;
             tx.execute("INSERT INTO runtime_error_incidents(id,kind,owner_kind,owner_id,created,last_seen,payload) VALUES(?1,'http_failure','request',?1,?2,?2,?3)",rusqlite::params![id,now,encoded])?;

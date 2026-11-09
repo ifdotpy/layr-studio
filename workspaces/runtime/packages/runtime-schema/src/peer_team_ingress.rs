@@ -46,12 +46,6 @@ pub enum DeleteAction {
 pub enum MoveAction {
     Move,
 }
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum ConvertAction {
-    Convert,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Save {
@@ -84,17 +78,6 @@ pub struct Move {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub team_id: Field<String>,
 }
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
-pub struct Convert {
-    pub action: ConvertAction,
-    pub path: String,
-    pub expected_revision: SafeInteger,
-    pub request_id: String,
-    pub member: String,
-    pub target: String,
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Participant {
@@ -220,7 +203,6 @@ pub enum PeerTeamRequest {
     Save(Save),
     Delete(Delete),
     Move(Move),
-    Convert(Convert),
     RadioCreate(RadioCreate),
     RadioOpen(RadioOpen),
     RadioSend(RadioSend),

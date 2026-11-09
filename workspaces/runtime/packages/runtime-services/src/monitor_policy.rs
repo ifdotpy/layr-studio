@@ -341,7 +341,6 @@ impl MonitorSnapshot {
     /// Only these fields can change selection in the canonical monitor window.
     pub(crate) fn same_window_position(&self, other: &Self) -> bool {
         self.record.id == other.record.id
-            && self.record.agent == other.record.agent
             && self.record.status == other.record.status
             && self.record.created == other.record.created
     }

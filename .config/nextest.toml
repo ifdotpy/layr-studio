@@ -84,6 +84,8 @@ default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scopes)) |
+    (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
@@ -97,7 +99,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
-    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_state_and_fences_both_owners)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
@@ -143,7 +145,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding) | test(spawned_reviewer_prefers_eligible_caller) | test(spawned_git_reviewer_uses_worktree_workspace) | test(spawned_git_reviewer_receives_pinned_brief) | test(review_selects_an_account_that_offers_the_model))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
     (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
-    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_stay_fixed_when_agent_root_change_is_refused) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
     (package(=studio-runtime-services) & test(production_stop_cancels_usage_and_capacity_continuations_in_store)) |
     (package(=studio-runtime-store) & kind(lib) & test(/public_summary_projects_typed_transfer|updated_at_is_not_an_extension|pending_settings_are_not_extensions|cancellation_normalizes_null_waiting_for_auth_on_both_copies|usage_resume_is_not_an_extension|yolo_mode_is_not_an_extension|native_failure_hold_is_not_an_extension|native_failure_hold_preserves_legacy_values_and_truthiness|prepare_attempt_is_not_an_extension|prepare_attempt_preserves_unreadable_historical_value|portable_history_is_not_an_extension|account_history_is_not_an_extension|enrollment_settings_are_not_extensions|worker_defaults_are_not_an_extension|worker_defaults_distinguish_known_and_legacy_values|portable_history_source_preserves_missing_and_null|transfer_objects_preserve_positional_arrays|transfer_snapshot_preserves_legacy_portable_history_array|transfer_defaults_enforce_shared_delegation_depth|invalid_delegation_depth_inherits_without_dropping_records|partial_worker_defaults_are_typed/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/settings_request_replays_exact_snapshot_without_catalog_or_credentials|agent_entity_publishes_transfer_actions_from_progress|a_worker_wake_runs_the_pending_native_review_before_queued_input|a_claude_limit_named_only_by_its_notice_waits_and_delivers_held_events|empty_transfer_default_inherits_automatic_account|enrollment_reads_typed_pending_settings_and_captures_source|enrollment_reads_typed_worker_defaults_without_projecting_agent|enrollment_preserves_known_and_legacy_worker_defaults|enrollment_provider_change_writes_typed_settings/)) |
@@ -464,7 +466,7 @@ default-filter = '''
     | (package(=studio-runtime-process) & kind(lib) & (test(prepared_diagnostic_requests_preserve_valid_and_malformed_ids) | test(failed_stdin_write_does_not_sample_or_emit_timing)))
     | (package(=studio-runtime-process) & kind(lib) & test(/^provider_stdio::tests::shutdown_delivers_frames_written_on_stdin_eof_before_the_kill$/))
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(/^provider_session_task::shutdown_keeps_the_stdout_tail_beyond_full_lanes_in_order$/) | test(/^provider_session_task::shutdown_tail_reply_resolves_its_request_instead_of_unknown$/)))
-    | (package(=studio-runtime-services) & kind(lib) & (test(/^managed_status_watch::tests::status_reads_only_team_monitors_and_keeps_its_response$/) | test(/^managed_status_watch::tests::rejected_status_arguments_never_enter_the_writer_lane$/) | test(/^managed_status_watch::tests::status_membership_change_after_snapshot_refuses_the_revision_write$/)))
+    | (package(=studio-runtime-services) & kind(lib) & (test(/^managed_status_watch::tests::status_reads_only_team_monitors_and_keeps_its_response$/) | test(/^managed_status_watch::tests::rejected_status_arguments_never_enter_the_writer_lane$/) | test(/^managed_status_watch::tests::status_epoch_change_after_snapshot_refuses_the_revision_write$/)))
     | (package(=studio-client-core) & kind(lib) & (test(/^sign_in::tests::/) | test(/^desktop::tests::/)))
     | (package(=studio-client-core) & kind(lib) & (test(/^events::tests::/) | test(/^views::flow_tests::/)))
     | (package(=studio-runtime-store) & kind(lib) & test(/^repositories::claude_records::tests::claude_attempt_owner_preserves_nullable_receipt_fields_and_extensions$/))
@@ -568,6 +570,8 @@ default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(entity_scopes)) |
+    (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
@@ -581,7 +585,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
-    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_state_and_fences_both_owners)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
@@ -627,7 +631,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & (test(native_reviewer_submission_needs_no_revision_evidence) | test(managed_spawn_native_layr_lead_uses_project_binding) | test(spawned_reviewer_prefers_eligible_caller) | test(spawned_git_reviewer_uses_worktree_workspace) | test(spawned_git_reviewer_receives_pinned_brief) | test(review_selects_an_account_that_offers_the_model))) |
     (package(=studio-runtime-http) & kind(lib) & (test(chat_read_accepts_projected_room_roots) | test(account_response_includes_server_eligibility))) |
     (package(=studio-runtime-schema) & kind(lib) & test(controls_cover_radio_states_and_active_block)) |
-    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_follow_live_agent_root_change) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
+    (package(=studio-runtime-services) & kind(lib) & (test(operational_status_preserves_precedence_and_live_waits) | test(operational_status_covers_deferral_stops_and_active_work) | test(room_roots_stay_fixed_when_agent_root_change_is_refused) | test(startup_reprojects_legacy_room_once) | test(room_leads_are_stable_across_publication_order) | test(room_projection_matches_existing_view) | test(public_account_projection_preserves_presence_and_nested_numbers))) |
     (package(=studio-runtime-services) & test(production_stop_cancels_usage_and_capacity_continuations_in_store)) |
     (package(=studio-runtime-store) & kind(lib) & test(/public_summary_projects_typed_transfer|updated_at_is_not_an_extension|pending_settings_are_not_extensions|cancellation_normalizes_null_waiting_for_auth_on_both_copies|usage_resume_is_not_an_extension|yolo_mode_is_not_an_extension|native_failure_hold_is_not_an_extension|native_failure_hold_preserves_legacy_values_and_truthiness|prepare_attempt_is_not_an_extension|prepare_attempt_preserves_unreadable_historical_value|portable_history_is_not_an_extension|account_history_is_not_an_extension|enrollment_settings_are_not_extensions|worker_defaults_are_not_an_extension|worker_defaults_distinguish_known_and_legacy_values|portable_history_source_preserves_missing_and_null|transfer_objects_preserve_positional_arrays|transfer_snapshot_preserves_legacy_portable_history_array|transfer_defaults_enforce_shared_delegation_depth|invalid_delegation_depth_inherits_without_dropping_records|partial_worker_defaults_are_typed/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/settings_request_replays_exact_snapshot_without_catalog_or_credentials|agent_entity_publishes_transfer_actions_from_progress|a_worker_wake_runs_the_pending_native_review_before_queued_input|a_claude_limit_named_only_by_its_notice_waits_and_delivers_held_events|empty_transfer_default_inherits_automatic_account|enrollment_reads_typed_pending_settings_and_captures_source|enrollment_reads_typed_worker_defaults_without_projecting_agent|enrollment_preserves_known_and_legacy_worker_defaults|enrollment_provider_change_writes_typed_settings/)) |
@@ -948,7 +952,7 @@ default-filter = '''
     | (package(=studio-runtime-process) & kind(lib) & (test(prepared_diagnostic_requests_preserve_valid_and_malformed_ids) | test(failed_stdin_write_does_not_sample_or_emit_timing)))
     | (package(=studio-runtime-process) & kind(lib) & test(/^provider_stdio::tests::shutdown_delivers_frames_written_on_stdin_eof_before_the_kill$/))
     | (package(=studio-runtime-services) & kind(test) & binary(=integration) & (test(/^provider_session_task::shutdown_keeps_the_stdout_tail_beyond_full_lanes_in_order$/) | test(/^provider_session_task::shutdown_tail_reply_resolves_its_request_instead_of_unknown$/)))
-    | (package(=studio-runtime-services) & kind(lib) & (test(/^managed_status_watch::tests::status_reads_only_team_monitors_and_keeps_its_response$/) | test(/^managed_status_watch::tests::rejected_status_arguments_never_enter_the_writer_lane$/) | test(/^managed_status_watch::tests::status_membership_change_after_snapshot_refuses_the_revision_write$/)))
+    | (package(=studio-runtime-services) & kind(lib) & (test(/^managed_status_watch::tests::status_reads_only_team_monitors_and_keeps_its_response$/) | test(/^managed_status_watch::tests::rejected_status_arguments_never_enter_the_writer_lane$/) | test(/^managed_status_watch::tests::status_epoch_change_after_snapshot_refuses_the_revision_write$/)))
     | (package(=studio-client-core) & kind(lib) & (test(/^sign_in::tests::/) | test(/^desktop::tests::/)))
     | (package(=studio-client-core) & kind(lib) & (test(/^events::tests::/) | test(/^views::flow_tests::/)))
     | (package(=studio-runtime-store) & kind(lib) & test(/^repositories::claude_records::tests::claude_attempt_owner_preserves_nullable_receipt_fields_and_extensions$/))

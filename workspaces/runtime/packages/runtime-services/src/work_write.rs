@@ -4720,7 +4720,7 @@ mod actor_tests {
     fn receipt_domain_refusal_reads_current_owner_without_receipt_history() {
         let connection = database();
         let owner = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default",
-            "id":"worker", "rootId":"worker", "provider":"codex", "epoch":3,
+            "id":"worker", "rootId":"lead", "provider":"codex", "epoch":3,
             "status":"idle"
         }))
         .expect("owner");

@@ -330,6 +330,14 @@ async fn seed_fixture_root(root: &std::path::Path) -> RuntimeStore {
 }
 
 async fn seed_fixture_store(root: &std::path::Path, store: RuntimeStore) -> RuntimeStore {
+    seed_fixture_store_with_parent(root, store, None).await
+}
+
+async fn seed_fixture_store_with_parent(
+    root: &std::path::Path,
+    store: RuntimeStore,
+    parent: Option<&str>,
+) -> RuntimeStore {
     let mut record = json!({"compactions":0,
         "id":FIXTURE_AGENT_ID,"rootId":FIXTURE_AGENT_ID,"epoch":FIXTURE_AGENT_EPOCH,
         "status":"queued","name":"Rust turn fixture","cwd":root,"autoWake":true,
@@ -351,6 +359,11 @@ async fn seed_fixture_store(root: &std::path::Path, store: RuntimeStore) -> Runt
         "workerBaseRef":null,"workerBaseCommit":null,"workerBaseBehindMain":null,"workerBaseMainRef":null,
         "cyberAccessProgram":null,"subagentConcurrencyVersion":2,"maxAgentsExplicit":false,"concurrency":1
     }).as_object().unwrap().clone());
+    if let Some(parent) = parent {
+        record["rootId"] = json!(parent);
+        record["parentId"] = json!(parent);
+        record["isLead"] = json!(false);
+    }
     let record = AgentRecord::from_value(record).unwrap();
     store
         .transaction(move |tx| {
@@ -869,6 +882,13 @@ async fn test_bridge(store: Arc<RuntimeStore>) -> StoreBridge {
 }
 
 impl State {
+    async fn new_child(parent: &str) -> Self {
+        let root = test_root().join(format!("worker-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let store = RuntimeStore::open(Some(&root)).await.unwrap();
+        let store = seed_fixture_store_with_parent(&root, store, Some(parent)).await;
+        Self::new_with_store(root, store).await
+    }
     async fn new() -> Self {
         Self::new_at(test_root()).await
     }
@@ -5047,16 +5067,16 @@ async fn adopt_parent(state: &State) -> String {
         .run(move |store| async move {
             store
                 .transaction(move |tx| {
-                    let mut row = AgentRepository::get(tx, &AgentId::from(child.as_str()))?
+                    let row = AgentRepository::get(tx, &AgentId::from(child.as_str()))?
                         .expect("fixture agent exists");
                     let mut lead = row.clone();
                     lead.id = AgentId::from(parent_id.as_str());
                     lead.is_lead = Some(true);
+                    lead.parent_id = None;
                     lead.thread_id = Some("fake-parent-thread".to_string());
                     AgentRepository::put(tx, &lead)?;
-                    row.parent_id = Some(parent_id);
-                    row.is_lead = Some(false);
-                    AgentRepository::put(tx, &row)
+                    assert_eq!(row.parent_id.as_deref(), Some(parent_id.as_str()));
+                    Ok(())
                 })
                 .await?;
             Ok(())
@@ -5089,7 +5109,7 @@ async fn provider_exits(peer: &Peer, worker: &mut AccountHandle) {
 
 #[tokio::test]
 async fn provider_exit_while_the_server_runs_is_a_disconnect_reported_once() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -5134,7 +5154,7 @@ async fn provider_exit_while_the_server_runs_is_a_disconnect_reported_once() {
 /// notices in 21 and 22 October 2026, each with the provider process alive.
 #[tokio::test]
 async fn a_replaced_worker_keeps_the_live_turn_of_its_retained_provider() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::supervised();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -5170,7 +5190,7 @@ async fn a_replaced_worker_keeps_the_live_turn_of_its_retained_provider() {
 /// The exit of a supervised provider process is still a disconnect.
 #[tokio::test]
 async fn a_supervised_provider_exit_is_still_a_disconnect() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::supervised();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -5188,7 +5208,7 @@ async fn a_supervised_provider_exit_is_still_a_disconnect() {
 
 #[tokio::test]
 async fn disconnect_parent_event_local_enqueue_failure_is_propagated() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -5278,7 +5298,7 @@ async fn a_new_backend_process_still_classifies_the_old_generation_as_a_restart(
 
 #[tokio::test]
 async fn thread_request_lost_with_its_provider_remains_held() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -5309,7 +5329,7 @@ async fn thread_request_lost_with_its_provider_remains_held() {
 
 #[tokio::test]
 async fn thread_start_lost_before_turn_submission_remains_held() {
-    let state = State::new().await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
     let agent_id = state.agent.clone();
     state

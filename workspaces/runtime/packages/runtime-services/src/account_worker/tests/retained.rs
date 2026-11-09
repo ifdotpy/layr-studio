@@ -274,7 +274,7 @@ async fn manual_start_authorization(
 
 #[tokio::test]
 async fn manual_recovery_absence_never_makes_the_original_input_schedulable() {
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -319,7 +319,7 @@ async fn manual_recovery_absence_never_makes_the_original_input_schedulable() {
 }
 
 async fn manual_active_start_case(restart: bool) {
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -380,7 +380,7 @@ async fn manual_active_start_case(restart: bool) {
 
 #[tokio::test]
 async fn manual_recovery_reads_new_native_history_for_a_new_request_identity() {
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -420,7 +420,7 @@ async fn manual_recovery_reads_new_native_history_for_a_new_request_identity() {
 
 #[tokio::test]
 async fn manual_unclean_start_settles_exact_history_without_replay() {
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -476,7 +476,7 @@ async fn manual_recovery_accepts_a_live_exact_start_and_tracks_its_terminal_noti
 
 #[tokio::test]
 async fn manual_recovery_accepts_a_restart_exact_start_and_tracks_its_terminal_notice() {
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;
@@ -2333,7 +2333,11 @@ async fn restart_turn_text_compatibility(text: Option<&str>) {
 /// Exercise the production disconnect writer and account first-pass caller,
 /// with the same saved turn for a lead and an authorized child.
 async fn automatic_recovery_case(restart: bool, child: bool, stopped: bool) {
-    let mut state = State::new().await;
+    let mut state = if child {
+        State::new_child("parent").await
+    } else {
+        State::new().await
+    };
     state.bridge.disk_gate = Some(Arc::new(crate::disk_space::DiskGate::with_sampler(
         state.root.clone(),
         Arc::new(|_| Some(crate::disk_space::WORKER_STORAGE_MIN_FREE_BYTES)),
@@ -2348,6 +2352,7 @@ async fn automatic_recovery_case(restart: bool, child: bool, stopped: bool) {
                 parent.root_id = AgentId::from("parent");
                 parent.status = studio_runtime_store::AgentStatus::Completed;
                 parent.thread_id = None;
+                parent.parent_id = None;
                 AgentRepository::put(tx, &parent)?;
                 agent.root_id = AgentId::from("parent");
                 agent.parent_id = Some(("parent").to_string());
@@ -4438,7 +4443,7 @@ async fn manual_recovery_owner_to_callback_keeps_unknown_and_exact_replay() {
         CallbackContext, CallbackDecision, ManagedToolPortsConfig, ManagedToolRuntimePorts,
     };
     use studio_runtime_providers::{Frame, Method, RequestFrame, RequestId};
-    let state = State::new().await;
+    let state = State::new_child("lead-00000000").await;
     retained_schema(&state).await;
     let mut peer = Peer::new();
     let mut worker = peer.worker(state.bridge.clone()).await;

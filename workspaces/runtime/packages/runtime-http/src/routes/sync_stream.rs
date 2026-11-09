@@ -6290,12 +6290,13 @@ mod tests {
                     tx.execute("INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor','1')", [])?;
                 }
                 if scenario == "payload" || scenario == "envelope" {
-                    // Movement triggers reject a malformed agentSummary UPDATE.
-                    // Model an already corrupt/imported non-membership record
-                    // instead, with all production triggers still installed.
+                    // Model corrupt imported evidence; reinstall guards before the reader runs.
                     tx.execute("UPDATE sync_generation SET value=value+1 WHERE id=1", [])?;
                     let payload=if scenario=="payload" {"broken"} else {"{}"};
+                    studio_runtime_store::seed_legacy_reparented_rows(tx, || {
                     tx.execute("INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) SELECT 'workspace','corrupt-import',value,'corrupt-fixture',?1,0 FROM sync_generation WHERE id=1", [payload])?;
+                        Ok(())
+                    })?;
                 }
                 Ok(())
             }).await.expect("interval");

@@ -14,7 +14,7 @@ pub struct DurableFloor {
 
 #[derive(DbTable)]
 #[db(state_check = crate::state_check::count_legacy_rows::<DurableRows>)]
-#[db(table = "durable_rows", database = Canvas, legacy_ddl = "CREATE TABLE durable_rows (\n        tbl TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,\n        deleted INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0,\n        PRIMARY KEY(tbl, id))")]
+#[db(table = "durable_rows", database = Canvas, legacy_ddl = "CREATE TABLE durable_rows (\n        tbl TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,\n        deleted INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0, scope TEXT,\n        PRIMARY KEY(tbl, id))")]
 #[db(legacy_index = "CREATE INDEX durable_rows_seq ON durable_rows(seq)")]
 #[db(legacy_index = "CREATE INDEX durable_rows_tombstone_at ON durable_rows(at) WHERE deleted=1")]
 #[db(
@@ -28,6 +28,8 @@ pub struct DurableRows {
     pub seq: i64,
     pub deleted: i64,
     pub at: i64,
+    #[db(codec = ExactJsonCodec<crate::entity_scopes::DeletedScope>)]
+    pub scope: Option<ExactJson<crate::entity_scopes::DeletedScope>>,
 }
 
 #[derive(DbTable)]
@@ -145,12 +147,10 @@ pub struct TaskWindowState {
 
 #[derive(DbTable)]
 #[db(state_check = crate::state_check::count_legacy_rows::<AgentPublicationState>)]
-#[db(table = "agent_publication_state", database = Canvas, legacy_ddl = "CREATE TABLE agent_publication_state (id TEXT PRIMARY KEY,\n                root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,\n                team_counts TEXT)")]
+#[db(table = "agent_publication_state", database = Canvas, legacy_ddl = "CREATE TABLE agent_publication_state (id TEXT PRIMARY KEY,\n                live INTEGER NOT NULL, in_flight INTEGER NOT NULL,\n                team_counts TEXT)")]
 pub struct AgentPublicationState {
     #[db(key)]
     pub id: String,
-    pub root_id: Option<String>,
-    pub is_lead: Option<i64>,
     pub live: i64,
     pub in_flight: i64,
     #[db(codec = ExactJsonCodec<studio_runtime_schema::agent_progress::TeamCounts>)]
@@ -169,7 +169,20 @@ pub(crate) fn prepare_sync_tables(connection: &rusqlite::Connection) -> rusqlite
             SyncGeneration::descriptor(),
             SyncIdentity::descriptor(),
         ],
-    )
+    )?;
+    prepare_durable_scope(connection)
+}
+
+pub(crate) fn prepare_durable_scope(connection: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let exists: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('durable_rows') WHERE name='scope')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        connection.execute_batch("ALTER TABLE durable_rows ADD COLUMN scope TEXT")?;
+    }
+    Ok(())
 }
 
 pub(crate) fn prepare_features(connection: &rusqlite::Connection) -> rusqlite::Result<()> {

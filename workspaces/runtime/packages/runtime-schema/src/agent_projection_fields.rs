@@ -7,7 +7,6 @@ pub const SCHEMA_FILTERED_AGENT_FIELDS: &[&str] = &[
     "contextRepairWait",
     "contextUsage",
     "connectionCheck",
-    "convertedFromLead",
     "cyberAccessProgram",
     "environment",
     "empty",

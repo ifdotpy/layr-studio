@@ -1,6 +1,5 @@
 import { Modal } from "@mantine/core";
 import { observer } from "mobx-react-lite";
-import { ConvertChatForm } from "../../projects/ConvertChatForm/ConvertChatForm.tsx";
 import { MoveChatForm } from "../../projects/MoveChatForm/MoveChatForm.tsx";
 import { ProjectNameForm } from "../../projects/ProjectNameForm/ProjectNameForm.tsx";
 
@@ -12,7 +11,7 @@ import { useSidebarState } from "../support/SidebarState.tsx";
 export const SidebarOrganizationDialogs = observer(
   function SidebarOrganizationDialogs() {
     const sidebar = useSidebarState();
-    const { dialog, conversion } = sidebar;
+    const { dialog } = sidebar;
     sidebarRender("SidebarOrganizationDialogs");
     const dialogProject = dialog
       ? sidebar.groupMap.get(dialog.path)
@@ -35,41 +34,6 @@ export const SidebarOrganizationDialogs = observer(
       (!dialog?.folder || dialog.folder === "new" || dialogFolder);
     return (
       <>
-        <Modal
-          opened={!!conversion}
-          onClose={sidebar.closeConversion}
-          title="Make chat a subagent"
-          closeOnClickOutside={false}
-        >
-          {conversion &&
-            (sidebar.model.rows.some(
-              (row) => row.id === conversion.source.id,
-            ) &&
-            sidebar.model.rows.some(
-              (row) => row.id === conversion.target.id,
-            ) ? (
-              <SidebarBackendProvider
-                value={sidebar.services.owner({
-                  kind: "chat",
-                  id: conversion.source.id,
-                })}
-              >
-                <ConvertChatForm
-                  key={`${conversion.source.id}:${conversion.target.id}`}
-                  project={conversion.project.project}
-                  source={conversion.source}
-                  target={conversion.target}
-                  scope={sidebar.stateDir}
-                  saved={async () => {
-                    sidebar.openChat(conversion.target.id);
-                    sidebar.setConversion(null);
-                  }}
-                />
-              </SidebarBackendProvider>
-            ) : (
-              <p>Load the chat server to retry the saved request.</p>
-            ))}
-        </Modal>
         <Modal
           opened={!!dialog}
           onClose={() => sidebar.setDialog(null)}

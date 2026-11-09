@@ -31,8 +31,7 @@ pub fn fixture_sql(batch: &str) -> String {
     state_check = crate::state_check::check_legacy_json::<AnnotationRecord>,
     database = Canvas,
     legacy_ddl = "CREATE TABLE runtime_annotations (id TEXT PRIMARY KEY, record TEXT NOT NULL, rev INTEGER NOT NULL DEFAULT 1)",
-    check = check_runtime_annotations,
-    legacy_index = "CREATE INDEX runtime_conversion_annotations_rootId ON runtime_annotations(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL")]
+    check = check_runtime_annotations)]
 pub struct AnnotationRow {
     #[db(key)]
     pub id: String,
@@ -65,8 +64,7 @@ fn check_runtime_checkpoints(row: &CheckpointRow) -> StoreResult<()> {
 #[db(table = "runtime_plans",
     state_check = crate::state_check::check_legacy_json::<PlanRecord>,
     database = Canvas,
-    legacy_ddl = "CREATE TABLE runtime_plans (id TEXT PRIMARY KEY, record TEXT NOT NULL)",
-    legacy_index = "CREATE INDEX runtime_conversion_plans_rootId ON runtime_plans(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL")]
+    legacy_ddl = "CREATE TABLE runtime_plans (id TEXT PRIMARY KEY, record TEXT NOT NULL)")]
 pub struct PlanRow {
     #[db(key)]
     pub id: String,
@@ -95,7 +93,6 @@ pub struct ProjectRow {
     database = Canvas,
     legacy_ddl = "CREATE TABLE runtime_rules (id TEXT PRIMARY KEY, record TEXT NOT NULL)",
     check = check_runtime_rules,
-    legacy_index = "CREATE INDEX runtime_conversion_rules_rootId ON runtime_rules(json_extract(record,'$.rootId')) WHERE json_extract(record,'$.rootId') IS NOT NULL",
     legacy_index = "CREATE INDEX runtime_rule_agent_inflight ON runtime_rules(json_extract(record,'$.agent'),json_extract(record,'$.inFlight'))",
     legacy_index = "CREATE INDEX runtime_rule_ready_tick ON runtime_rules(json_extract(record,'$.status')) WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0)")]
 pub struct RuleRow {

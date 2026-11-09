@@ -744,7 +744,7 @@ export async function sidebarParityFixture(
           snapshot.runtime.peerTeams = teams.filter(
             (team) => team.id !== body.team_id,
           );
-        if (body.action === "move" || body.action === "convert") {
+        if (body.action === "move") {
           row(body.member);
           for (const team of teams) {
             assert.ok(team.members);
@@ -758,16 +758,6 @@ export async function sidebarParityFixture(
           snapshot.runtime.peerTeams = teams.filter(
             (team) => (team.members?.length ?? 0) >= 2,
           );
-          if (body.action === "convert") {
-            row(body.target);
-            Object.assign(row(body.member), {
-              isLead: false,
-              rootId: body.target,
-              parentId: body.target,
-              status: "paused",
-              autoWake: false,
-            } satisfies Partial<TestAgent>);
-          }
         }
         if (body.action === "radio") {
           const room: components["schemas"]["RoomEntityDto"] = {

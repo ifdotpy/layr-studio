@@ -8,6 +8,9 @@ use studio_runtime_store::{ContinuationTable, RuntimeStore};
 /// A fresh state holding agent `a` with a scheduled usage resume; `capacity`
 /// adds a scheduled capacity retry.
 async fn seeded(kind: &str) -> (tempfile::TempDir, RuntimeStore) {
+    seeded_with_parent(kind, None).await
+}
+async fn seeded_with_parent(kind: &str, parent: Option<&str>) -> (tempfile::TempDir, RuntimeStore) {
     let dir = tempfile::tempdir().expect("isolated state");
     let store = RuntimeStore::open(Some(dir.path()))
         .await
@@ -15,6 +18,11 @@ async fn seeded(kind: &str) -> (tempfile::TempDir, RuntimeStore) {
     let mut agent = json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,"id":"a","rootId":"a","epoch":1,"status":"failed","accountKey":"default",
         "threadId":"thread","lastCompletedTurn":"turn","autoWake":true,"nativeFailureHold":true,
         "cwd":"/fixture","isLead":true});
+    if let Some(parent) = parent {
+        agent["rootId"] = json!(parent);
+        agent["parentId"] = json!(parent);
+        agent["isLead"] = json!(false);
+    }
     let resume = json!({"id":"resume","accountKey":"default","threadId":"thread","epoch":1,
         "turnId":"turn","cause":"usage_limit","status":"scheduled","failedAt":900.0,"authAttempt":0,
         "authRefreshMarker":null,"dueAt":990.0,"resetAt":null,"plannedAt":null,"reason":null,
@@ -335,7 +343,7 @@ async fn every_store_boundary_rolls_back_or_replays_the_one_committed_followup()
 }
 #[tokio::test]
 async fn changed_task_cancels_resume_and_notifies_parent_atomically() {
-    let (_root, store) = seeded("usage").await;
+    let (_root, store) = seeded_with_parent("usage", Some("parent")).await;
     store.transaction(|tx|{
         let mut a:Value=studio_json::from_str(&tx.query_row("SELECT record FROM runtime_agents WHERE id='a'",[],|r|r.get::<_,String>(0))?)?;
         a["isLead"]=json!(false);a["parentId"]=json!("parent");a["rootId"]=json!("parent");
@@ -602,7 +610,7 @@ async fn automatic_capacity_retry_allows_the_excluded_lead_account() {
 
 #[tokio::test]
 async fn automatic_capacity_retry_stops_an_excluded_worker() {
-    let (_root, store) = seeded("capacity").await;
+    let (_root, store) = seeded_with_parent("capacity", Some("root")).await;
     store.transaction_with(|tx| {
         let raw: String = tx.query_row("SELECT record FROM runtime_agents WHERE id='a'", [], |row| row.get(0))?;
         let mut agent: Value = studio_json::from_str(&raw)?;

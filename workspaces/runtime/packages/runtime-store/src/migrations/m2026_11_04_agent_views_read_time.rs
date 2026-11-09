@@ -44,11 +44,10 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     // from the copies before they go, so the first publication sees no false change.
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
-             root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
+             live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
              team_counts TEXT);
-         INSERT OR IGNORE INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
-           SELECT id,json_extract(payload,'$.value.rootId'),json_extract(payload,'$.value.isLead'),
-                  deleted=0,COALESCE(json_extract(payload,'$.value.inFlight'),0),
+         INSERT OR IGNORE INTO agent_publication_state(id,live,in_flight,team_counts)
+           SELECT id,deleted=0,COALESCE(json_extract(payload,'$.value.inFlight'),0),
                   (SELECT json_extract(summary.payload,'$.value.teamCounts') FROM sync_entities AS summary
                     WHERE summary.collection='agentSummary' AND summary.id=sync_entities.id)
            FROM sync_entities WHERE collection='agent';",
@@ -91,14 +90,6 @@ mod tests {
             count("SELECT COUNT(*) FROM sqlite_master WHERE name='durable_view_log'"),
             0
         );
-        let trigger: String = tx
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='sync_entity_scope_visibility_update'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("recreated trigger");
-        assert!(trigger.contains("runtime_agents") && !trigger.contains("agentSummary"));
         // A new agent of a team moves the team fence at its own number.
         tx.execute(
             "INSERT INTO runtime_agents(id,record) VALUES('m','{\"id\":\"m\",\"rootId\":\"lead\",\"provider\":\"codex\",\"accountKey\":\"default\",\"epoch\":0,\"compactions\":0,\"status\":\"idle\"}')",
@@ -109,7 +100,7 @@ mod tests {
         assert!(seq > 999_999);
         let fence: String = tx
             .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key='entity_scope_visibility:' || json_array('*','lead')",
+                "SELECT value FROM sync_entity_meta WHERE key='team_membership:' || json_quote('lead')",
                 [],
                 |row| row.get(0),
             )

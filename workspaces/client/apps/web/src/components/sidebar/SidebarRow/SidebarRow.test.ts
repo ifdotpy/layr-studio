@@ -197,9 +197,6 @@ it.each([false, true])(
       () => ui.offline.add("a"),
       () => ui.aliases.set("a", "Changed server"),
       () => {
-        sorting.setDestination("convert:a");
-      },
-      () => {
         sorting.setTarget({
           group: f.model.rows[0]!.groupKey,
           id: "a",
@@ -218,10 +215,6 @@ it.each([false, true])(
       expect(renders.get("b:false") || 0).toBe(0);
       expect(renders.get("b:true") || 0).toBe(0);
     }
-    expect(
-      document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset
-        .folderDrop,
-    ).toBe("true");
     expect(
       document.querySelector<HTMLElement>('[data-chat="a"]')?.dataset.dropEdge,
     ).toBe("after");

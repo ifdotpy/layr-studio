@@ -141,7 +141,7 @@ async fn message_delivers_between_user_grouped_leads() {
     let lead = oracle["agents"][0]["id"].as_str().unwrap().to_owned();
     let context = CallbackContext {
         stream_id: "default".into(),
-        agent: worker["id"].as_str().unwrap().into(),
+        agent: "peer-lead".into(),
         account: "default".into(),
         connection: "connection".into(),
         generation: 7,
@@ -150,7 +150,13 @@ async fn message_delivers_between_user_grouped_leads() {
         turn: worker["turnId"].as_str().unwrap().into(),
     };
     store.transaction_with(move |tx| {
-        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId',id,'$.parentId',NULL,'$.isLead',json('true'),'$.cwd','/peer-project') WHERE id=?1", [&context.agent])?;
+        let mut peer = worker.clone();
+        peer["id"] = json!(context.agent);
+        peer["rootId"] = json!(context.agent);
+        peer["parentId"] = Value::Null;
+        peer["isLead"] = json!(true);
+        peer["cwd"] = json!("/peer-project");
+        tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", rusqlite::params![context.agent, peer.to_string()])?;
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.cwd','/peer-project') WHERE id=?1", [&lead])?;
         tx.execute("INSERT INTO runtime_projects(id,record) VALUES('peer-project',?1)", [json!({"id":"peer-project","path":"/peer-project","peerTeams":[{"id":"peers","name":"Peers","members":[context.agent,lead]}]}).to_string()])?;
         let snapshot = super::super::super::storage::snapshot(tx, &context)?;

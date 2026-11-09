@@ -4729,26 +4729,34 @@ async fn ancestry_reads_only_the_checked_parent_chain() {
     drop(tx);
     drop(reader);
     store.transaction_with::<_, Error>(move |tx| {
-    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.parentId','missing') WHERE id='chain-middle'", []).unwrap();
+    studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.parentId','missing') WHERE id='chain-middle'", [])?;
+        Ok(())
+    }).unwrap();
     assert_eq!(
         agent_ancestry(tx, &sender, "chain-leaf").unwrap(),
         AgentAncestry::Unrelated
     );
-    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.parentId','chain-leaf') WHERE id='chain-middle'", []).unwrap();
+    studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.parentId','chain-leaf') WHERE id='chain-middle'", [])?;
+        Ok(())
+    }).unwrap();
     assert_eq!(
         agent_ancestry(tx, &sender, "chain-leaf").unwrap(),
         AgentAncestry::Cycle
     );
-    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','other-root') WHERE id='chain-middle'", []).unwrap();
+    studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','other-root') WHERE id='chain-middle'", [])?;
+        Ok(())
+    }).unwrap();
     assert_eq!(
         agent_ancestry(tx, &sender, "chain-leaf").unwrap(),
         AgentAncestry::Unrelated
     );
-    tx.execute(
-        "UPDATE runtime_agents SET record=json_set(record,'$.parentId',42) WHERE id='chain-leaf'",
-        [],
-    )
-    .unwrap();
+    studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.parentId',42) WHERE id='chain-leaf'", [])?;
+        Ok(())
+    }).unwrap();
     assert!(matches!(
         agent_ancestry(tx, &sender, "chain-leaf"),
         Err(Error::Store(_))

@@ -84,7 +84,7 @@ async fn monitor_start_survives_actor_progress_and_submits_once() {
     change_actor(
         &store,
         json!({
-            "updated":2001.0,"status":"waiting","inFlight":true,"turnId":null,"rootId":"other-root",
+            "updated":2001.0,"status":"waiting","inFlight":true,"turnId":null,
             "startAttempt":{"id":"new-progress","epoch":2},"timing":{"fastTokens":10},
             "profile":{"label":"Renamed profile"},
         }),

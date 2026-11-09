@@ -130,14 +130,20 @@ async fn narrow_agent_reads_validate_consumed_fields() {
     .unwrap();
     assert!(page().is_ok());
     assert!(limits().is_ok());
-    tx.execute(
-        "UPDATE runtime_agents SET record=json_set(record,'$.id','wrong') WHERE id=?1",
-        [CHAT],
-    )
+    studio_runtime_store::seed_legacy_reparented_rows(&tx, || {
+        tx.execute(
+            "UPDATE runtime_agents SET record=json_set(record,'$.id','wrong') WHERE id=?1",
+            [CHAT],
+        )?;
+        Ok(())
+    })
     .unwrap();
     assert!(page().is_err());
     assert!(limits().is_err());
-    tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.id',?1,'$.status',42,'$.model',42) WHERE id=?1", [CHAT]).unwrap();
+    studio_runtime_store::seed_legacy_reparented_rows(&tx, || {
+        tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.id',?1,'$.status',42,'$.model',42) WHERE id=?1", [CHAT])?;
+        Ok(())
+    }).unwrap();
     assert!(page().is_err());
     assert!(limits().is_err());
     tx.rollback().unwrap();
@@ -203,6 +209,49 @@ async fn unreadable_limits_do_not_block_publication_or_startup() {
         })
         .await
         .unwrap();
+}
+
+async fn repair_account_with_scope_shaped_unknown_fields(startup: bool) {
+    let (_dir, store) = store().await;
+    store
+        .transaction(move |tx| {
+            studio_runtime_store::SyncDocumentsRepository::put_entity(
+                tx,
+                "rateLimit",
+                "acct",
+                json!({"agent":"alpha"}),
+                false,
+            )?;
+            if startup {
+                crate::account_session_runtime::limits::seed_agents(tx)?;
+            } else {
+                crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, true)?;
+            }
+            let payload: String = tx.query_row(
+                "SELECT payload FROM sync_entities WHERE collection='rateLimit' AND id='acct'",
+                [],
+                |row| row.get(0),
+            )?;
+            let (_, unreadable) = studio_runtime_store::account_state::normalized_limits_view(
+                "acct",
+                payload.as_bytes(),
+                0.0,
+            );
+            assert!(!unreadable, "repair replaces the unreadable account view");
+            Ok(())
+        })
+        .await
+        .expect("scope-shaped unknown fields cannot block account repair");
+}
+
+#[tokio::test]
+async fn account_publication_repairs_scope_shaped_unknown_fields() {
+    repair_account_with_scope_shaped_unknown_fields(false).await;
+}
+
+#[tokio::test]
+async fn account_startup_repairs_scope_shaped_unknown_fields() {
+    repair_account_with_scope_shaped_unknown_fields(true).await;
 }
 
 #[tokio::test]
@@ -277,7 +326,7 @@ async fn agent_limit_failure_republishes_account_recovery() {
 }
 
 #[tokio::test]
-async fn room_roots_follow_live_agent_root_change() {
+async fn room_roots_stay_fixed_when_agent_root_change_is_refused() {
     let (_dir, store) = store().await;
     seed_chat(
         &store,
@@ -292,10 +341,10 @@ async fn room_roots_follow_live_agent_root_change() {
     store.transaction(|tx| {
         tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.rootId','new') WHERE id='child'", [])?;
         Ok(())
-    }).await.unwrap();
+    }).await.expect_err("root changes are refused");
     assert_eq!(
         client_entity(&store, "room", "room").unwrap().1["leadIds"],
-        json!(["new"])
+        json!(["old"])
     );
 }
 
@@ -865,7 +914,10 @@ async fn agent_projections_repair_unreadable_accounts_once_per_batch() {
         for null_payload in [false, true] {
         studio_runtime_store::SyncDocumentsRepository::put_entity(tx, "rateLimit", "default", json!({}), false)?;
         if null_payload {
+            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
             tx.execute("UPDATE sync_entities SET payload=NULL WHERE collection='rateLimit' AND id='default'", [])?;
+                Ok(())
+            })?;
         }
         tx.execute_batch("SAVEPOINT repair_reference")?;
         for id in [CHAT, "second"] {
@@ -912,10 +964,16 @@ async fn agent_projections_validate_borrowed_limit_fields() {
             ("$.lastCompletedTurn", json!(42)),
             ("$.deletedAt", json!("invalid")),
         ] {
-            tx.execute("UPDATE runtime_agents SET record=json_set(?1,?2,json(?3)) WHERE id=?4", rusqlite::params![raw, path, value.to_string(), CHAT])?;
+            studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+                tx.execute("UPDATE runtime_agents SET record=json_set(?1,?2,json(?3)) WHERE id=?4", rusqlite::params![raw, path, value.to_string(), CHAT])?;
+                Ok(())
+            })?;
             assert!(matches!(crate::account_session_runtime::limits::publish_agent_change(tx, CHAT, false), Err(StoreError::InvalidSyncObject { .. })), "invalid consumed field {path}");
         }
-        tx.execute("UPDATE runtime_agents SET record=?1 WHERE id=?2", [&raw, CHAT])?;
+        studio_runtime_store::seed_legacy_reparented_rows(tx, || {
+            tx.execute("UPDATE runtime_agents SET record=?1 WHERE id=?2", [&raw, CHAT])?;
+            Ok(())
+        })?;
         Ok::<_, StoreError>(())
     }).await.unwrap();
 }
@@ -948,7 +1006,7 @@ async fn agent_projections_do_not_decode_unused_owned_work() {
 }
 
 #[tokio::test]
-async fn work_history_documents_follow_edits_reorder_root_move_and_rollback() {
+async fn work_history_documents_follow_edits_reorder_and_rollback_with_fixed_root() {
     let (_dir, store) = store().await;
     seed_chat(&store, chat(json!({}))).await;
     let id = "history-delta-cost";
@@ -993,17 +1051,20 @@ async fn work_history_documents_follow_edits_reorder_root_move_and_rollback() {
             .1["value"],
         json!(1)
     );
-    write(
-        &store,
-        "UPDATE runtime_work SET record=json_set(record,'$.rootId','moved-root') WHERE id=?1",
-        vec![id.into()],
-    )
-    .await;
+    let error = store.transaction(move |tx| {
+        tx.execute("UPDATE runtime_work SET record=json_set(record,'$.rootId','moved-root') WHERE id=?1", [id])?;
+        Ok(())
+    }).await.expect_err("work history remains in its original team");
+    assert!(
+        error
+            .to_string()
+            .contains(studio_runtime_store::entity_scopes::IMMUTABLE_SCOPE_ERROR)
+    );
     assert_eq!(
         client_entity(&store, "workResult", &format!("{id}:0"))
-            .expect("moved result")
+            .expect("unchanged result")
             .1["rootId"],
-        "moved-root"
+        CHAT
     );
     write(
         &store,

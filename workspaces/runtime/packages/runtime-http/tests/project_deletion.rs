@@ -1017,10 +1017,13 @@ async fn deletion_ignores_unrelated_legacy_records() {
         |_| Ok(0),
     )
     .unwrap();
-    db.execute(
-        "UPDATE runtime_agents SET record=json_set(record,'$.rootId',42) WHERE id='unrelated'",
-        [],
-    )
+    studio_runtime_store::seed_legacy_reparented_rows(&db, || {
+        db.execute(
+            "UPDATE runtime_agents SET record=json_set(record,'$.rootId',42) WHERE id='unrelated'",
+            [],
+        )?;
+        Ok(())
+    })
     .unwrap();
     drop(db);
     let (status, body) = f.call(f.body.clone()).await;

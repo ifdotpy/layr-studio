@@ -45,11 +45,6 @@ export function useSidebarRowState(row: SidebarChatView, priority = false) {
                 : "before"
               : undefined;
           },
-          get folderDrop() {
-            return area.ui.sorting.destination === `convert:${row.id}`
-              ? "true"
-              : undefined;
-          },
           get server() {
             return area.server(row);
           },

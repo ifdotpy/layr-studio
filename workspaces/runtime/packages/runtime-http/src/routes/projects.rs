@@ -1398,12 +1398,6 @@ async fn peer_teams(
         PeerTeamRequest::RadioStop(body) => {
             radio_manage(&state, store, RadioManage::Stop(body)).await
         }
-        PeerTeamRequest::Convert(body) => {
-            let reply = studio_runtime_services::peer_conversion::convert(store, &body)
-                .await
-                .map_err(projects_error)?;
-            Ok(Json(PeerTeamWriteResponse::Conversion(reply)))
-        }
         PeerTeamRequest::Save(body) => {
             peer_team_mutation(store, TeamMutation::Save(body), default_account, known).await
         }
@@ -1444,7 +1438,6 @@ async fn peer_team_mutation(
 #[serde(untagged)]
 enum PeerTeamWriteResponse {
     Radio(studio_runtime_services::radio_runtime::RadioReply),
-    Conversion(studio_runtime_services::peer_conversion::ConversionReply),
     Project(Box<crate::generated::PeerProjectResponse>),
 }
 
@@ -1511,6 +1504,9 @@ mod local_registration_tests {
         let document = crate::schema::openapi_document();
         let schema = json!({"$ref":"#/paths/~1api~1peer-teams/post/requestBody/content/application~1json/schema", "paths":document["paths"], "components":document["components"]});
         let validator = jsonschema::validator_for(&schema).expect("peer team schema");
+        let conversion = json!({"action":"convert","path":"p","expected_revision":0,"request_id":"r","member":"a","target":"b"});
+        assert!(!validator.is_valid(&conversion));
+        assert!(studio_json::from_value::<super::PeerTeamRequest>(conversion).is_err());
         let create = json!({"action":"radio","radio_action":"create","path":"/p","request_id":"r","name":"Pair","participants":[{"account_key":"a","model":"m"},{"account_key":"b","model":"m"}]});
         let send = json!({"action":"radio","radio_action":"send","path":"p","team_id":"t","request_id":"r","expected_revision":1,"text":"hello"});
         let mut bad_participant = create.clone();
@@ -1566,11 +1562,6 @@ mod local_registration_tests {
                 "peer",
                 "PeerTeamMoveRequest",
                 json!({"action":"move","path":"p","request_id":"r","expected_revision":0,"member":"a"}),
-            ),
-            (
-                "peer",
-                "PeerTeamConvertRequest",
-                json!({"action":"convert","path":"p","request_id":"r","expected_revision":0,"member":"a","target":"b"}),
             ),
             (
                 "peer",

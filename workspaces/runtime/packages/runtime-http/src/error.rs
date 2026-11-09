@@ -210,6 +210,16 @@ impl ApiError {
             StoreError::InvalidSyncObjectField { scope, id, .. } => {
                 Self::invalid_stored(&scope, &id)
             }
+            StoreError::Sqlite(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message == studio_runtime_store::entity_scopes::IMMUTABLE_SCOPE_ERROR =>
+            {
+                Self::new(StatusCode::CONFLICT, message)
+            }
+            StoreError::Sqlite(rusqlite::Error::SqliteFailure(_, Some(message)))
+                if message == studio_runtime_store::entity_scopes::INVALID_RECORD_JSON_ERROR =>
+            {
+                Self::new(StatusCode::BAD_REQUEST, message)
+            }
             StoreError::StateDirectory(_)
             | StoreError::AlreadyOwned
             | StoreError::IntermediateReleaseRequired

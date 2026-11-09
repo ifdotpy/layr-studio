@@ -771,12 +771,6 @@ pub struct AgentRecord {
         default,
         skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
     )]
-    pub converted_from_lead:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
     pub project_folder_revision:
         studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
     #[serde(
@@ -1460,7 +1454,6 @@ impl AgentRecord {
             account_transfer_id: studio_runtime_schema::queue_command::Field::Missing,
             lazy_account_transfer: studio_runtime_schema::queue_command::Field::Missing,
             shared_room_id: studio_runtime_schema::queue_command::Field::Missing,
-            converted_from_lead: studio_runtime_schema::queue_command::Field::Missing,
             project_folder_revision: studio_runtime_schema::queue_command::Field::Missing,
             task_default_gate: studio_runtime_schema::queue_command::Field::Missing,
             moved_from: studio_runtime_schema::queue_command::Field::Missing,
@@ -3454,26 +3447,6 @@ mod tests {
     }
 
     #[test]
-    fn agent_conversion_receipt_preserves_stored_shape_without_duplicate_key() {
-        use studio_runtime_schema::queue_command::Field;
-        // Receipt from the wave7_p19 stored-record oracle.
-        let raw = r#"{"id":"a","rootId":"c","epoch":2,"status":"paused","accountKey":"default","compactions":0,"convertedFromLead":{"requestId":"p19-convert","by":"user","at":1000.0,"oldRootId":"a","rootId":"c"}}"#;
-        let agent: super::AgentRecord = studio_json::from_str(raw).unwrap();
-        assert!(matches!(agent.converted_from_lead, Field::Value(_)));
-        assert!(!agent.extra.contains_key("convertedFromLead"));
-        let encoded = studio_json::to_string(&agent).unwrap();
-        assert_eq!(encoded.matches("\"convertedFromLead\"").count(), 1);
-        let round_trip: super::AgentRecord = studio_json::from_str(&encoded).unwrap();
-        assert_eq!(agent.converted_from_lead, round_trip.converted_from_lead);
-        let value: studio_json::Value = studio_json::from_str(raw).unwrap();
-        let from_value = super::AgentRecord::from_value(value.clone()).unwrap();
-        assert_eq!(
-            from_value.value()["convertedFromLead"],
-            value["convertedFromLead"]
-        );
-    }
-
-    #[test]
     fn agent_folder_revision_retains_stored_shapes_without_duplicate_key() {
         for revision in ["1", "null", r#""invalid""#] {
             let raw = format!(
@@ -3590,7 +3563,6 @@ mod tests {
             ("capacity", studio_json::json!(null)),
             ("naming", studio_json::json!(null)),
             ("sharedRoomId", studio_json::json!(null)),
-            ("convertedFromLead", studio_json::json!(null)),
             ("projectFolderRevision", studio_json::json!(null)),
             ("taskDefaultGate", studio_json::json!(null)),
             ("movedFrom", studio_json::json!(null)),

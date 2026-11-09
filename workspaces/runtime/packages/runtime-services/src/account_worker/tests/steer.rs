@@ -39,9 +39,16 @@ async fn running_turn(provider: &'static str) -> (State, Peer, AccountHandle) {
 
 async fn running_turn_with_peer(
     provider: &'static str,
-    mut peer: Peer,
+    peer: Peer,
 ) -> (State, Peer, AccountHandle) {
-    let state = State::new().await;
+    running_turn_in_state(provider, peer, State::new().await).await
+}
+
+async fn running_turn_in_state(
+    provider: &'static str,
+    mut peer: Peer,
+    state: State,
+) -> (State, Peer, AccountHandle) {
     let worker = peer.worker(state.bridge.clone()).await;
     let start = state.start(&mut peer, &worker).await;
     peer.accepted(&start).await;
@@ -1421,8 +1428,9 @@ async fn stop_receipt_settles_cancellation_when_background_stop_fails() {
 /// provider-started background turn reports its own completion to the parent once.
 #[tokio::test]
 async fn claude_late_ack_and_background_turn_report_each_turn_to_parent_once() {
-    let (state, mut peer, mut worker) = running_turn("claude").await;
+    let state = State::new_child(&format!("{FIXTURE_AGENT_ID}-parent")).await;
     let parent = adopt_parent(&state).await;
+    let (state, mut peer, mut worker) = running_turn_in_state("claude", Peer::new(), state).await;
     let request = steer(&state, &mut peer, &worker).await;
     peer.reply(&request, json!({"turnId":"turn"})).await;
     frame(&mut peer, finished(&[])).await;

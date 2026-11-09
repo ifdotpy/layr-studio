@@ -343,8 +343,7 @@
   color: var(--muted);
   overflow-wrap: anywhere;
 }
-.project-tree-heading[data-folder-drop="true"],
-.chat-row[data-folder-drop="true"] {
+.project-tree-heading[data-folder-drop="true"] {
   background: var(--mantine-primary-color-light);
   outline: var(--studio-rail-size) solid var(--mantine-primary-color-filled);
   outline-offset: calc(-1 * var(--studio-rail-size));
