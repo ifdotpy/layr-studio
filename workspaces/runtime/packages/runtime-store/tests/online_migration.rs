@@ -11,24 +11,27 @@ use studio_runtime_store::{RuntimeStore, StoreError, StoreResult};
 struct Copy;
 
 impl OnlineMigration for Copy {
+    type Key = i64;
     type Row = i64;
     type Out = i64;
     const NAME: &'static str = "copy_test";
     const SOURCE_TABLE: &'static str = "online_test_src";
-    const SOURCE_KEY: &'static str = "id";
+    const SOURCE_KEYS: &'static [&'static str] = &["id"];
 
     fn read_after(
         &self,
         db: &Connection,
-        after: i64,
+        after: Option<&i64>,
         limit: usize,
     ) -> StoreResult<Vec<(i64, i64)>> {
         Ok(db
-            .prepare("SELECT id,v FROM online_test_src WHERE id>?1 ORDER BY id LIMIT ?2")?
+            .prepare(
+                "SELECT id,v FROM online_test_src WHERE (?1 IS NULL OR id>?1) ORDER BY id LIMIT ?2",
+            )?
             .query_map(params![after, limit as i64], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?)
     }
-    fn read_one(&self, db: &Connection, key: i64) -> StoreResult<Option<i64>> {
+    fn read_one(&self, db: &Connection, key: &i64) -> StoreResult<Option<i64>> {
         Ok(db
             .query_row("SELECT v FROM online_test_src WHERE id=?1", [key], |r| {
                 r.get(0)
@@ -38,14 +41,14 @@ impl OnlineMigration for Copy {
     fn transform(&self, row: i64) -> StoreResult<i64> {
         Ok(row + 1)
     }
-    fn write(&self, db: &Connection, key: i64, out: i64) -> StoreResult<()> {
+    fn write(&self, db: &Connection, key: &i64, out: i64) -> StoreResult<()> {
         db.execute(
             "INSERT OR REPLACE INTO online_test_dst VALUES(?1,?2)",
             params![key, out],
         )?;
         Ok(())
     }
-    fn remove(&self, db: &Connection, key: i64) -> StoreResult<()> {
+    fn remove(&self, db: &Connection, key: &i64) -> StoreResult<()> {
         db.execute("DELETE FROM online_test_dst WHERE id=?1", [key])?;
         Ok(())
     }

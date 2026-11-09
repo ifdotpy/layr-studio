@@ -102,6 +102,7 @@ mod m2026_11_06_role_account_exclusions;
 mod m2026_11_07_attention_lookups;
 mod m2026_11_07_auth_resume_proof;
 mod m2026_11_07_explicit_review_model;
+pub(crate) mod m2026_11_09_online_keys;
 
 #[cfg(any(test, feature = "test-support"))]
 pub use m2026_10_20_agents::migrate_2026_10_20;
@@ -1669,6 +1670,20 @@ static CATALOG: &[&dyn Migration] = &[
             remove_when: REMOVE_AFTER_SOURCE_RETIRED,
         },
         apply: |c| m2026_11_07_explicit_review_model::apply(c.transaction),
+    },
+    &SqlMigration {
+        definition: MigrationDefinition {
+            id: "2026-11-09-online-keys",
+            introduced: MigrationDate {
+                year: 2026,
+                month: 11,
+                day: 9,
+            },
+            target: MigrationTarget::Canvas,
+            supported_source: "Integer-only online migration progress",
+            remove_when: REMOVE_AFTER_SOURCE_RETIRED,
+        },
+        apply: |c| m2026_11_09_online_keys::apply(c.transaction),
     },
 ];
 

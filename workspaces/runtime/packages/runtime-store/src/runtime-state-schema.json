@@ -1722,7 +1722,7 @@
       {
         "create_order": 73,
         "name": "runtime_payload_migrations",
-        "sql": "CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',updated REAL,error TEXT, cutover_ms INTEGER, receipt_enum_guard INTEGER GENERATED ALWAYS AS (NULL) VIRTUAL CHECK(\"status\" IN ('pending','running','waitingForSpace','error','complete')))",
+        "sql": "CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',updated REAL,error TEXT, cutover_ms INTEGER, receipt_enum_guard INTEGER GENERATED ALWAYS AS (NULL) VIRTUAL CHECK(\"status\" IN ('pending','running','waitingForSpace','error','complete')), cursor_key BLOB, copy_source_rows INTEGER, copy_target_rows INTEGER)",
         "table": "runtime_payload_migrations",
         "type": "table"
       },

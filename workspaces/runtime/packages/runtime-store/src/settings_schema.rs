@@ -68,7 +68,7 @@ pub(crate) struct OrchestrationSettings {
 
 #[derive(DbTable)]
 #[db(state_check = crate::state_check::count_legacy_rows::<PayloadMigrations>)]
-#[db(table = "runtime_payload_migrations", database = Canvas, legacy_ddl = "CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',updated REAL,error TEXT, cutover_ms INTEGER, receipt_enum_guard INTEGER GENERATED ALWAYS AS (NULL) VIRTUAL CHECK(\"status\" IN ('pending','running','waitingForSpace','error','complete')))")]
+#[db(table = "runtime_payload_migrations", database = Canvas, legacy_ddl = "CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',updated REAL,error TEXT, cutover_ms INTEGER, receipt_enum_guard INTEGER GENERATED ALWAYS AS (NULL) VIRTUAL CHECK(\"status\" IN ('pending','running','waitingForSpace','error','complete')), cursor_key BLOB, copy_source_rows INTEGER, copy_target_rows INTEGER)")]
 pub struct PayloadMigrations {
     #[db(key)]
     pub name: String,
@@ -80,6 +80,10 @@ pub struct PayloadMigrations {
     pub cutover_ms: Option<i64>,
     #[db(generated)]
     pub receipt_enum_guard: Option<i64>,
+    pub cursor_key: Option<Vec<u8>>,
+    /// Row counts: both present record durable empty-target admission.
+    pub copy_source_rows: Option<i64>,
+    pub copy_target_rows: Option<i64>,
 }
 
 #[derive(DbTable)]
@@ -127,7 +131,7 @@ pub struct OnlineMigrationDirty {
     #[db(key)]
     pub migration: String,
     #[db(key)]
-    pub key: i64,
+    pub key: studio_db_api::migration::DirtyKey,
 }
 
 pub(crate) fn prepare_features(connection: &rusqlite::Connection) -> rusqlite::Result<()> {

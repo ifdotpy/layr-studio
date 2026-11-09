@@ -284,34 +284,37 @@ pub fn apply_window(
     );
     let mut batch = CompactionBatch::default();
     let mut originals = Sha256::new();
-    let mut decoded = Sha256::new();
     let mut first = None;
     let mut last = None;
     for candidate in &window.candidates {
-        let changed = transaction.execute_cached(
-            &replace,
-            params![candidate.to, candidate.rowid, candidate.key, candidate.from],
+        let copied = studio_db_api::migration::copy_verified(
+            || {
+                Ok(transaction.execute_cached(
+                    &replace,
+                    params![candidate.to, candidate.rowid, candidate.key, candidate.from],
+                )? != 0)
+            },
+            || {
+                let stored: SqlValue = transaction
+                    .query_row_cached(&read_back, [candidate.rowid], |row| row.get(0))
+                    .map_err(|_| round_trip_failure(column, &candidate.key))?;
+                let text = match &stored {
+                    SqlValue::Text(text) => text.clone(),
+                    SqlValue::Blob(bytes) => stored_text::decode_blob(bytes)
+                        .map_err(|_| round_trip_failure(column, &candidate.key))?,
+                    SqlValue::Null | SqlValue::Integer(_) | SqlValue::Real(_) => {
+                        return Err(round_trip_failure(column, &candidate.key));
+                    }
+                };
+                Ok(stored == candidate.to && text == candidate.text)
+            },
+            || round_trip_failure(column, &candidate.key),
         )?;
-        if changed == 0 {
+        if !copied {
             batch.skipped += 1;
             continue;
         }
-        let stored: SqlValue = transaction
-            .query_row_cached(&read_back, [candidate.rowid], |row| row.get(0))
-            .map_err(|_| round_trip_failure(column, &candidate.key))?;
-        let text = match &stored {
-            SqlValue::Text(text) => text.clone(),
-            SqlValue::Blob(bytes) => stored_text::decode_blob(bytes)
-                .map_err(|_| round_trip_failure(column, &candidate.key))?,
-            SqlValue::Null | SqlValue::Integer(_) | SqlValue::Real(_) => {
-                return Err(round_trip_failure(column, &candidate.key));
-            }
-        };
-        if stored != candidate.to || text != candidate.text {
-            return Err(round_trip_failure(column, &candidate.key));
-        }
         hash_value(&mut originals, candidate.rowid, candidate.text.as_bytes());
-        hash_value(&mut decoded, candidate.rowid, text.as_bytes());
         first.get_or_insert(candidate.rowid);
         last = Some(candidate.rowid);
         batch.converted += 1;
@@ -323,9 +326,6 @@ pub fn apply_window(
     }
     if let (Some(first), Some(last)) = (first, last) {
         let originals = data_encoding::HEXLOWER.encode(&originals.finalize());
-        if originals != data_encoding::HEXLOWER.encode(&decoded.finalize()) {
-            return Err(round_trip_failure(column, "batch"));
-        }
         transaction.execute_cached(
             "INSERT INTO runtime_stored_text_batches\
              (name,batch,first_rowid,last_rowid,rows,plain_bytes,stored_bytes,sha256,created) \

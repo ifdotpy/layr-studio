@@ -11,24 +11,33 @@ use crate::online_migration::OnlineMigration;
 pub struct ItemSeqBackfill;
 
 impl OnlineMigration for ItemSeqBackfill {
+    type Key = i64;
     type Row = ();
     type Out = ();
     const NAME: &'static str = "runtime_items_seq";
     const SOURCE_TABLE: &'static str = "runtime_items";
-    const SOURCE_KEY: &'static str = "rowid";
+    const SOURCE_KEYS: &'static [&'static str] = &["rowid"];
 
-    fn read_after(&self, db: &Connection, after: i64, limit: usize) -> StoreResult<Vec<(i64, ())>> {
+    fn read_after(
+        &self,
+        db: &Connection,
+        after: Option<&i64>,
+        limit: usize,
+    ) -> StoreResult<Vec<(i64, ())>> {
+        let sql = if after.is_some() {
+            "SELECT rowid FROM runtime_items WHERE rowid>?1 ORDER BY rowid LIMIT ?2"
+        } else {
+            "SELECT rowid FROM runtime_items ORDER BY rowid LIMIT ?2"
+        };
         Ok(db
-            .prepare_cached(
-                "SELECT rowid FROM runtime_items WHERE rowid>?1 ORDER BY rowid LIMIT ?2",
-            )?
+            .prepare_cached(sql)?
             .query_map(rusqlite::params![after, limit as i64], |row| {
                 Ok((row.get(0)?, ()))
             })?
             .collect::<Result<_, _>>()?)
     }
 
-    fn read_one(&self, db: &Connection, key: i64) -> StoreResult<Option<()>> {
+    fn read_one(&self, db: &Connection, key: &i64) -> StoreResult<Option<()>> {
         Ok(db
             .query_row("SELECT 1 FROM runtime_items WHERE rowid=?1", [key], |_| {
                 Ok(())
@@ -42,11 +51,11 @@ impl OnlineMigration for ItemSeqBackfill {
 
     /// A row that already has a number is left alone, so a re-copy of a changed key does
     /// not touch the source table again.
-    fn write(&self, db: &Connection, key: i64, _: ()) -> StoreResult<()> {
-        number_row(db, Self::SOURCE_TABLE, key)
+    fn write(&self, db: &Connection, key: &i64, _: ()) -> StoreResult<()> {
+        number_row(db, Self::SOURCE_TABLE, *key)
     }
 
-    fn remove(&self, _: &Connection, _: i64) -> StoreResult<()> {
+    fn remove(&self, _: &Connection, _: &i64) -> StoreResult<()> {
         Ok(())
     }
 }
@@ -55,6 +64,46 @@ impl OnlineMigration for ItemSeqBackfill {
 mod tests {
     use super::*;
     use crate::online_migration::{Step, SystemClock, begin, step};
+
+    #[test]
+    fn resumed_backfill_uses_a_rowid_search() {
+        thread_local! { static SQL: std::cell::RefCell<String> = const { std::cell::RefCell::new(String::new()) }; }
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_items(id TEXT); INSERT INTO runtime_items(rowid,id) VALUES(-1,'negative'),(0,'zero'),(20,'later')").unwrap();
+        db.trace_v2(
+            rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
+            Some(|event| {
+                if let rusqlite::trace::TraceEvent::Stmt(statement, sql) = event
+                    && sql.starts_with("SELECT rowid FROM runtime_items")
+                {
+                    SQL.with(|saved| *saved.borrow_mut() = statement.expanded_sql().unwrap());
+                }
+            }),
+        );
+        assert_eq!(
+            ItemSeqBackfill.read_after(&db, Some(&0), 1).unwrap(),
+            vec![(20, ())]
+        );
+        db.trace_v2(rusqlite::trace::TraceEventCodes::empty(), None);
+        let sql = SQL.with(|saved| saved.borrow().clone());
+        let details = db
+            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .unwrap();
+        assert!(
+            details
+                .iter()
+                .any(|detail| detail.contains("SEARCH") && detail.contains("rowid>")),
+            "{details:?}"
+        );
+        assert_eq!(
+            ItemSeqBackfill.read_after(&db, None, 1).unwrap(),
+            vec![(-1, ())]
+        );
+    }
 
     #[test]
     fn old_items_get_increasing_entries_and_numbered_ones_keep_theirs() {
@@ -75,7 +124,7 @@ mod tests {
         };
         assert!(seqs(&db).is_empty());
         let tx = db.transaction().expect("transaction");
-        begin::<ItemSeqBackfill>(&tx).expect("begin");
+        begin(&tx, &ItemSeqBackfill).expect("begin");
         while step(&tx, &ItemSeqBackfill, &SystemClock::new()).expect("step") == Step::Progress {}
         tx.commit().expect("commit");
         let numbered = seqs(&db);

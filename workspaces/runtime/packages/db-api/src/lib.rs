@@ -2,6 +2,7 @@
 pub mod catalog;
 pub use rusqlite;
 mod codec;
+pub mod migration;
 mod query;
 mod table;
 pub use codec::*;

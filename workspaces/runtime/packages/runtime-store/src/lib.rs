@@ -4312,8 +4312,22 @@ mod commit_notification_tests {
     async fn fresh_receipt_columns_match_migrated_store() {
         // Captured from a finished pre-retirement store; target was added later.
         type Column = (String, String, i64, i64, i64);
-        let expected: std::collections::BTreeMap<String, Vec<Column>> =
+        let mut expected: std::collections::BTreeMap<String, Vec<Column>> =
             studio_json::from_str(include_str!("receipt_migrated_columns.fixture.json")).unwrap();
+        // Preserve the captured historical fixture; extend its expected layout
+        // with the later cursor migration, using the migration's actual DDL.
+        let mut legacy = rusqlite::Connection::open_in_memory().unwrap();
+        legacy
+            .execute_batch(crate::feature_schema::PAYLOAD_MIGRATIONS_SCHEMA)
+            .unwrap();
+        let tx = legacy.transaction().unwrap();
+        crate::migrations::m2026_11_09_online_keys::apply(&tx).unwrap();
+        let added=tx.prepare(
+            "SELECT name,type,[notnull],pk,hidden FROM pragma_table_xinfo('runtime_payload_migrations') WHERE name IN ('cursor_key','copy_source_rows','copy_target_rows') ORDER BY cid").unwrap().query_map([], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?))).unwrap().collect::<rusqlite::Result<Vec<Column>>>().unwrap();
+        expected
+            .get_mut("runtime_payload_migrations")
+            .unwrap()
+            .extend(added);
         let directory = tempfile::tempdir().unwrap();
         let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
         drop(store);
