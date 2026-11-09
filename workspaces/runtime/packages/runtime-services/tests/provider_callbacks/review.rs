@@ -28,7 +28,7 @@ async fn try_put_record(
                 rusqlite::params![id, encoded],
             )?;
             if table == "runtime_agents" {
-                studio_runtime_store::migrations::normalize_agent_creation_fixtures(tx)?;
+                studio_runtime_store::test_fixtures::normalize_creation(tx)?;
             }
             Ok(())
         })

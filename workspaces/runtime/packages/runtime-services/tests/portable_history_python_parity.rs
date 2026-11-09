@@ -195,16 +195,13 @@ async fn rust_writer_reads_frozen_state_and_refusal_publishes_nothing() {
             include_str!("portable_history/fixtures/analytics.sql"),
         ),
     ] {
-        rusqlite::Connection::open(root.path().join(name))
-            .expect("fixture database opens")
-            .execute_batch(&format!(
+        crate::recovery_fixtures::database(root.path(), name, &format!(
                 "PRAGMA journal_mode=WAL; {}",
                 sql.replace("<fixture-root>", &root.path().to_string_lossy()).replace(
                     r#"{"id": "fixture-restored-empty-1", "role": "assistant", "text": "empty afterRestore fixture 1", "afterRestore": []}"#,
                     concat!("{\r\n", r#"  "id":"fixture-restored-empty-1", "role":"assistant", "text":"empty afterRestore fixture 1", "afterRestore":[],"#, "\r\n", r#"  "provider":{"decimal": 1e400, "text": "line\nnext"}"#, "\r\n}"),
                 )
-            ))
-            .expect("frozen Python state loads");
+            ));
     }
     let agent_id = state.agent;
     let epoch = state.epoch;

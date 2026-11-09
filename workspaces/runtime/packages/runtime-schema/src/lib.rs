@@ -335,15 +335,6 @@ const CLAUDE_CONTROL_URI: &str =
 const CLAUDE_LOGIN_URI: &str = "https://codex-studio.invalid/persisted-claude-login.schema.json";
 
 const PERSISTED_SCHEMAS: &[(&str, &[u8])] = &[
-    // Retained state of the removed team token budget, including replay diagnostics.
-    (
-        "https://codex-studio.invalid/persisted-budget-state.schema.json",
-        include_bytes!("schemas/persisted-budget-state.schema.json"),
-    ),
-    (
-        "https://codex-studio.invalid/persisted-budget-state-write.schema.json",
-        include_bytes!("schemas/persisted-budget-state-write.schema.json"),
-    ),
     (ACCESS_CLIENT_URI, ACCESS_CLIENT),
     (ACCESS_INVITE_URI, ACCESS_INVITE),
     (ACCESS_RECEIPT_URI, ACCESS_RECEIPT),
@@ -549,7 +540,6 @@ pub fn table_schema(table: &str) -> Option<&'static str> {
         "runtime_agents" => "PersistedAgentRecord",
         "runtime_annotations" => "PersistedAnnotationRecord",
         "runtime_assets" => "PersistedTranscriptAsset",
-        "runtime_budget" => "PersistedBudgetState",
         "runtime_capacity_retries" => "continuation/CapacityContinuation",
         "runtime_chat_messages" => "PersistedChatMessage",
         "runtime_checkpoints" => "PersistedCheckpointRecord",
@@ -988,14 +978,6 @@ fn prepare_schemas() -> SchemaResult<CompiledSchemas> {
         ("PersistedAccountTransferRecord", ACCOUNT_TRANSFER_URI),
         ("PersistedAgentRecord", AGENT_RECORD_URI),
         ("PersistedAnnotationRecord", ANNOTATION_RECORD_URI),
-        (
-            "PersistedBudgetState",
-            "https://codex-studio.invalid/persisted-budget-state.schema.json",
-        ),
-        (
-            "PersistedBudgetStateWrite",
-            "https://codex-studio.invalid/persisted-budget-state-write.schema.json",
-        ),
         ("PersistedChatMessage", CHAT_MESSAGE_URI),
         ("PersistedCheckpointRecord", CHECKPOINT_RECORD_URI),
         ("PersistedClaudeAttemptRecord", CLAUDE_ATTEMPT_URI),

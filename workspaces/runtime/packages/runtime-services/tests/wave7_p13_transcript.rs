@@ -627,10 +627,7 @@ fn restore_snapshot(fixture: &Path, state: &Path, root: &Path) {
                 "@FIXTURE_ROOT@",
                 &root.to_string_lossy().replace('\'', "''"),
             );
-        let db = rusqlite::Connection::open(state.join(name)).expect("snapshot database");
-        studio_runtime_store::sqlite_durability::configure_writer(&db)
-            .expect("snapshot durability");
-        db.execute_batch(&sql).expect("restore frozen SQLite seed");
+        crate::recovery_fixtures::database(state, name, &sql);
     }
     let blobs: BTreeMap<String, String> = studio_json::from_str(
         &std::fs::read_to_string(fixture.join("blobs.json")).expect("frozen blobs"),

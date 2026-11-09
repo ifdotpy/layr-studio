@@ -1,8 +1,8 @@
 //! Work history entries (results, decisions, releases) as child rows of `runtime_work`.
 //!
 //! The work record keeps its three arrays. The child rows follow them: every write of a
-//! work record reconciles the rows in the writer's transaction, and a migration copies the
-//! arrays of old records and verifies the copy. A row id is `{work}:{index}`, the key the
+//! work record reconciles the rows in the writer's transaction. A row id is `{work}:{index}`,
+//! the key the
 //! published entry already used. A delete of the work row deletes its entries, and the
 //! durable triggers of each child table write the tombstones.
 
@@ -136,7 +136,8 @@ history_table!(
 );
 
 // Raw SQL: this cross-table delete cascade is not expressible as a single-table query.
-const CASCADE: &str =
+#[cfg(test)]
+pub(crate) const CASCADE: &str =
     "CREATE TRIGGER IF NOT EXISTS runtime_work_history_cascade AFTER DELETE ON runtime_work BEGIN
            DELETE FROM runtime_work_results WHERE work=OLD.id;
            DELETE FROM runtime_work_decisions WHERE work=OLD.id;
@@ -158,6 +159,7 @@ pub fn entry_id(work: &str, index: usize) -> String {
 }
 
 /// Create the child tables, the cascade and their durable entries. Safe to repeat.
+#[cfg(test)]
 pub(crate) fn prepare_schema(tx: &Transaction<'_>) -> StoreResult<()> {
     for descriptor in [
         WorkResultsStorageRow::descriptor(),
@@ -270,6 +272,7 @@ fn read_entry<R: HistoryRow>(connection: &Connection, key: String) -> StoreResul
 }
 
 /// Check that the rows of one work record equal its arrays, in order.
+#[cfg(test)]
 pub(crate) fn verify(connection: &Connection, id: &str, record: &Value) -> StoreResult<()> {
     for kind in WorkHistoryKind::ALL {
         let expected: &[Value] = record
@@ -292,6 +295,7 @@ pub(crate) fn verify(connection: &Connection, id: &str, record: &Value) -> Store
 
 /// Migration step: copy the arrays of every work record into the child rows, then verify
 /// each record. Nothing is deleted from `runtime_work`.
+#[cfg(test)]
 pub(crate) fn migrate(tx: &Transaction<'_>) -> StoreResult<()> {
     prepare_schema(tx)?;
     if !crate::schema::table_exists(tx, "runtime_work")? {

@@ -3758,7 +3758,7 @@ fn accept(
     let mut event_inserted = false;
     if let Some(owner_id) = work.owner()
         && owner_id != actor_id.unwrap_or("")
-        && (actor_id.is_some() || owner_id == agent.root_id.0)
+        && owner_id == agent.root_id.0
     {
         event_inserted |= event_write::enqueue_recovery_event(
             tx,
@@ -6019,45 +6019,47 @@ mod actor_tests {
     }
 
     #[test]
-    fn lead_actor_accepting_its_own_result_does_not_self_notify() {
-        let mut connection = database();
-        insert_work(
-            &connection,
-            &work(
-                "accept",
-                Some("lead"),
-                "review",
-                json!([
-                    {"id":"result-1","agent":"lead","text":"done","checks":"checked","revision":"abc1234","files":[]}
-                ]),
-            ),
-        );
-        let tx = connection.transaction().expect("transaction starts");
-        let result = write_action_as_agent(
-            &tx,
-            "lead",
-            "lead",
-            None,
-            "accept-as-lead",
-            WorkWrite::Accept(AcceptWork {
-                override_reason: None,
-                task_id: "accept".to_owned(),
-                version: Some(2),
-                reason: "verified".to_owned(),
-                merged_result_id: None,
-            }),
-        )
-        .expect("lead acceptance succeeds");
-        assert_eq!(result.record["status"], "accepted");
-        let count: i64 = tx
+    fn root_owned_acceptance_notifies_the_lead_except_for_its_own_action() {
+        for (actor, expected) in [(Some("lead"), 0), (None, 1)] {
+            let mut connection = database();
+            insert_work(
+                &connection,
+                &work(
+                    "accept",
+                    Some("lead"),
+                    "review",
+                    json!([
+                        {"id":"result-1","agent":"lead","text":"done","checks":"checked","revision":"abc1234","files":[]}
+                    ]),
+                ),
+            );
+            let tx = connection.transaction().expect("transaction starts");
+            let result = super::write_internal(
+                &tx,
+                "lead",
+                actor,
+                None,
+                "accept-as-lead",
+                WorkWrite::Accept(AcceptWork {
+                    override_reason: None,
+                    task_id: "accept".to_owned(),
+                    version: Some(2),
+                    reason: "verified".to_owned(),
+                    merged_result_id: None,
+                }),
+            )
+            .expect("lead acceptance succeeds");
+            assert_eq!(result.record["status"], "accepted");
+            let count: i64 = tx
             .query_row(
-                "SELECT count(*) FROM runtime_events WHERE kind='work_decision'",
+                "SELECT count(*) FROM runtime_events WHERE kind='work_decision' AND agent='lead'",
                 [],
                 |row| row.get(0),
             )
             .expect("decision event count reads");
-        assert_eq!(count, 0);
-        tx.commit().expect("transaction commits");
+            assert_eq!(count, expected);
+            tx.commit().expect("transaction commits");
+        }
     }
 
     #[test]

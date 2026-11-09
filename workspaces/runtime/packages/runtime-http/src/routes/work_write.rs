@@ -767,6 +767,7 @@ mod managed_work_port_tests {
         (state, store, directory)
     }
 
+    #[track_caller]
     fn written(outcome: WorkActionOutcome) -> Value {
         match outcome {
             WorkActionOutcome::Written(record) => record,
@@ -1619,6 +1620,14 @@ mod managed_work_port_tests {
         assert_eq!(
             accepted["decisions"][0]["gateOverrideReason"],
             "Manual evidence checked"
+        );
+        let notices: (i64,i64) = store.read_async("task/accepted-notices", |tx| -> studio_runtime_store::StoreResult<_> {
+            Ok(tx.query_row("SELECT count(*) FILTER(WHERE agent='worker'), count(*) FILTER(WHERE agent='lead') FROM runtime_events WHERE kind='work_decision'", [], |row| Ok((row.get(0)?,row.get(1)?)))?)
+        }).await.expect("notice query succeeds");
+        assert_eq!(
+            notices,
+            (1, 0),
+            "worker-owned work notifies its worker exactly once"
         );
     }
 

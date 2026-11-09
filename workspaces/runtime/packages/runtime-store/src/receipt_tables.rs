@@ -130,6 +130,7 @@ pub struct RequestResultsRow {
     legacy_index = "CREATE INDEX runtime_outbox_request ON runtime_outbox(request_id,id) WHERE request_id IS NOT NULL"
 )]
 #[db(state_check = crate::state_check::count_legacy_rows::<OutboxStorageRow>)]
+#[db(legacy_index = "CREATE INDEX runtime_outbox_kind_next_at ON runtime_outbox(kind,next_at)")]
 pub struct OutboxStorageRow {
     #[db(key)]
     pub id: String,
@@ -412,6 +413,7 @@ mod tests {
                     "runtime_outbox_stream",
                     "runtime_outbox_stream_ordered",
                     "runtime_outbox_request",
+                    "runtime_outbox_kind_next_at",
                 ][..],
             ),
             (

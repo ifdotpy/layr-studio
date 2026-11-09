@@ -403,32 +403,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn supervisor_fresh_and_upgraded_indexes_match_the_catalog() {
+    async fn supervisor_fresh_indexes_match_the_current_catalog() {
         let fresh = tempfile::tempdir().unwrap();
         drop(crate::RuntimeStore::open(Some(fresh.path())).await.unwrap());
-        let upgraded = tempfile::tempdir().unwrap();
-        let legacy =
-            rusqlite::Connection::open(upgraded.path().join("supervisor.sqlite3")).unwrap();
-        // Frozen Python journal predates operation_writes and file-migration markers.
-        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/supervisor-before-written.sql");
-        legacy
-            .execute_batch(&std::fs::read_to_string(fixture).unwrap())
-            .unwrap();
-        let written_exists: bool = legacy
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='operation_writes')",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(!written_exists);
-        // Also exercise the existing schema migration's deferred index installation.
-        legacy
-            .execute_batch("DROP INDEX operations_monitor_native")
-            .unwrap();
-        drop(legacy);
-        drop(crate::supervisor_journal::SupervisorJournal::open(upgraded.path()).unwrap());
         let catalog: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
             studio_json::from_str(crate::fresh_state::SNAPSHOT).unwrap();
         let expected: CatalogDatabase =
@@ -440,7 +417,8 @@ mod tests {
             .map(|entry| (entry.name, entry.table, entry.sql))
             .collect();
         assert_eq!(expected.len(), 1);
-        for root in [fresh.path(), upgraded.path()] {
+        {
+            let root = fresh.path();
             let db = rusqlite::Connection::open(root.join("supervisor.sqlite3")).unwrap();
             let actual: Vec<_> = studio_db_api::catalog::export(&db)
                 .unwrap()
@@ -450,16 +428,6 @@ mod tests {
                 .collect();
             assert_eq!(actual, expected);
             assert_eq!(db.query_row("SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN ('handles','child_identities','degraded_handles','operations','operation_writes','events','recovery_events','supervisor_state')", [], |row| row.get::<_, i64>(0)).unwrap(), 8);
-            if root == upgraded.path() {
-                let signature: String = db
-                    .query_row(
-                        "SELECT signature FROM handles WHERE id='fixture'",
-                        [],
-                        |row| row.get(0),
-                    )
-                    .unwrap();
-                assert_eq!(signature, "signature");
-            }
         }
     }
 

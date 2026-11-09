@@ -61045,12 +61045,6 @@
             },
             "type": "array"
           },
-          "replayConflicts": {
-            "items": {
-              "$ref": "#/components/schemas/UsageReplayConflict"
-            },
-            "type": "array"
-          },
           "responses": {
             "items": {
               "$ref": "#/components/schemas/UsageReconciliationRow"

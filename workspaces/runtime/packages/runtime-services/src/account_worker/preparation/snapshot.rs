@@ -1947,29 +1947,7 @@ mod resource_tests {
     /// submission never scans the complaints of other leads.
     #[test]
     fn lead_complaints_use_the_lead_index() {
-        let fixture: Value = studio_json::from_str(include_str!(
-            "../../../../runtime-store/tests/fixtures/live-state-schema.json"
-        ))
-        .expect("live-state schema fixture");
-        let connection = rusqlite::Connection::open_in_memory().expect("memory SQLite opens");
-        connection
-            .execute_batch(
-                "CREATE TABLE runtime_complaints(id TEXT PRIMARY KEY, record TEXT NOT NULL)",
-            )
-            .expect("complaints table creates");
-        for object in fixture["canvas.sqlite3"]["sqlite_master"]
-            .as_array()
-            .expect("fixture lists schema objects")
-        {
-            if object["table"] == "runtime_complaints"
-                && object["type"] == "index"
-                && let Some(sql) = object["sql"].as_str()
-            {
-                connection
-                    .execute_batch(sql)
-                    .expect("fixture index creates");
-            }
-        }
+        let connection = studio_runtime_store::test_canvas();
         for (id, lead) in [("b", "lead"), ("a", "lead"), ("c", "other")] {
             connection
                 .execute(

@@ -1,4 +1,3 @@
-use std::path::Path;
 use studio_json::{Value, json};
 use studio_runtime_services::{
     agent_lifecycle_runtime::{self, LifecycleEffect, LifecyclePorts},
@@ -45,63 +44,6 @@ fn unassign_records() -> Value {
     let mut records = seed();
     records["tables"]["runtime_work"] = json!([{"id":"work","owner":"worker","rootId":"lead","version":2,"status":"review","title":"Assignment","results":[{"id":"result","text":"Keep this result"}],"decisions":[]}]);
     records
-}
-
-fn template(root: &Path) {
-    let schema: Value = studio_json::from_str(include_str!(
-        "../../runtime-store/tests/fixtures/live-state-schema.json"
-    ))
-    .expect("runtime schema fixture");
-    for database in ["canvas.sqlite3", "analytics.sqlite3"] {
-        let connection = rusqlite::Connection::open(root.join(database)).expect("fixture database");
-        studio_runtime_store::sqlite_durability::configure_writer(&connection)
-            .expect("fixture durability");
-        connection
-            .execute_batch("BEGIN;")
-            .expect("fixture durability");
-        let mut objects = schema[database]["sqlite_master"]
-            .as_array()
-            .expect("schema objects")
-            .iter()
-            .filter(|object| {
-                ![
-                    "runtime_search_next_config",
-                    "runtime_search_next_data",
-                    "runtime_search_next_docsize",
-                    "runtime_search_next_idx",
-                ]
-                .contains(&object["name"].as_str().expect("schema object name"))
-            })
-            .filter_map(|object| {
-                Some((
-                    object["type"].as_str()?,
-                    object["name"].as_str()?,
-                    object["sql"].as_str()?,
-                ))
-            })
-            .collect::<Vec<_>>();
-        objects.sort_by_key(|(kind, _, _)| match *kind {
-            "table" => 0,
-            "index" => 1,
-            "view" => 2,
-            _ => 3,
-        });
-        for (_, _, sql) in objects {
-            connection
-                .execute_batch(sql)
-                .expect("fixture schema object");
-        }
-        if database == "canvas.sqlite3" {
-            connection
-                .execute_batch(include_str!(
-                    "../../runtime-store/tests/fixtures/receipt-finish-markers.sql"
-                ))
-                .expect("completed receipt markers");
-        }
-        connection
-            .execute_batch("COMMIT")
-            .expect("fixture schema commit");
-    }
 }
 
 async fn seed_store(store: &RuntimeStore, records: &Records) {
@@ -222,7 +164,7 @@ impl LifecyclePorts for PostCommitCleanup {
 
 async fn run_lifecycle_end_state(case: &Value) -> (Value, Value) {
     let root = tempfile::tempdir().expect("tmpfs test root");
-    template(root.path());
+
     let store = std::sync::Arc::new(
         RuntimeStore::open(Some(root.path()))
             .await
@@ -267,7 +209,7 @@ impl LifecyclePorts for CrashBeforeCleanup {
 async fn archive_cleanup_wake_loss_keeps_queued_intent_for_restart() {
     let case = case(seed(), archive_action());
     let root = tempfile::tempdir().expect("tmpfs test root");
-    template(root.path());
+
     let store = std::sync::Arc::new(
         RuntimeStore::open(Some(root.path()))
             .await

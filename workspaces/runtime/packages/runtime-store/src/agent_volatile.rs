@@ -588,8 +588,6 @@ pub fn update(connection: &Connection, id: &str, agent: &Value) -> StoreResult<b
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::migrations::m2026_10_20_agents::MIGRATION_PRESERVED_TABLES;
-    use crate::{AgentId, AgentRepository, RuntimeStore, system_reads};
     use studio_json::json;
 
     fn agents() -> Vec<Value> {
@@ -622,103 +620,6 @@ mod tests {
             studio_json::from_str(&record).expect("record JSON"),
             volatile,
         )
-    }
-
-    /// The current volatile migration moves legacy fields from otherwise
-    /// current agent rows, preserving readers and the change journal.
-    #[tokio::test]
-    async fn migration_2026_10_30_moves_legacy_volatile_fields_once() {
-        let root = tempfile::tempdir().expect("state directory");
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("store opens");
-        store
-            .transaction(|tx| {
-                for agent in agents() {
-                    tx.execute(
-                        "INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                        params![agent["id"].as_str(), agent.to_string()],
-                    )?;
-                }
-                tx.execute(
-                    "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("old-format state");
-        let journal = |connection: &Connection| -> Vec<String> {
-            MIGRATION_PRESERVED_TABLES
-                .iter()
-                .flat_map(|table| {
-                    let mut statement = connection
-                        .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
-                        .expect("journal table");
-                    let count = statement.column_count();
-                    statement
-                        .query_map([], |row| {
-                            (0..count)
-                                .map(|index| row.get::<_, rusqlite::types::Value>(index))
-                                .collect::<rusqlite::Result<Vec<_>>>()
-                        })
-                        .expect("journal rows")
-                        .map(|row| format!("{table}: {:?}", row.expect("journal row")))
-                        .collect::<Vec<_>>()
-                })
-                .collect()
-        };
-        let journal_before = journal(&store.test_reader().expect("reader"));
-        drop(store);
-
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("store migrates");
-        let connection = store.test_reader().expect("reader");
-        assert_eq!(
-            journal(&connection),
-            journal_before,
-            "the move journals no change"
-        );
-        let migrated = agents()
-            .iter()
-            .map(|agent| stored(&connection, agent["id"].as_str().expect("id")))
-            .collect::<Vec<_>>();
-        for (agent, (record, volatile)) in agents().iter().zip(&migrated) {
-            let id = agent["id"].as_str().expect("id");
-            assert!(
-                AGENT_VOLATILE_FIELDS
-                    .iter()
-                    .all(|field| record.get(field).is_none())
-            );
-            assert!(volatile.is_some(), "{id} volatile row");
-            let typed = AgentRepository::get(&connection, &AgentId::from(id))
-                .expect("typed read")
-                .expect("agent exists");
-            let mut normalized = agent.clone();
-            for field in AGENT_VOLATILE_FIELDS {
-                if normalized.get(field).is_some_and(Value::is_null) {
-                    normalized.as_object_mut().unwrap().remove(field);
-                }
-            }
-            assert_eq!(typed.value(), normalized);
-            assert_eq!(
-                system_reads::get(&connection, "runtime_agents", id).expect("checked read"),
-                Some(normalized)
-            );
-        }
-        drop(connection);
-        drop(store);
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("store reopens");
-        let connection = store.test_reader().expect("reader");
-        for (agent, before) in agents().iter().zip(&migrated) {
-            assert_eq!(
-                &stored(&connection, agent["id"].as_str().expect("id")),
-                before
-            );
-        }
     }
 
     /// A write that changes only volatile fields leaves `runtime_agents`

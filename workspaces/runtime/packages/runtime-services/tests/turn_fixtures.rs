@@ -1,4 +1,4 @@
-//! Captured legacy expectations; fixture readers never execute backend code.
+//! Captured legacy expectations and imports into disposable current schemas.
 use std::{collections::BTreeMap, path::Path};
 
 use serde::Deserialize;
@@ -145,7 +145,8 @@ impl DatabaseSeed {
 }
 
 pub(crate) fn write_database(path: &Path, schema: &[String], data: &[String]) {
-    let mut connection = rusqlite::Connection::open(path).expect("fixture database");
+    let source = tempfile::NamedTempFile::new().expect("captured database source");
+    let mut connection = rusqlite::Connection::open(source.path()).expect("fixture database");
     connection
         .pragma_update(None, "journal_mode", "WAL")
         .expect("fixture WAL mode");
@@ -194,6 +195,14 @@ pub(crate) fn write_database(path: &Path, schema: &[String], data: &[String]) {
         tx.execute_batch(sql).expect("captured trigger");
     }
     tx.commit().expect("fixture commit");
+    drop(connection);
+    crate::recovery_fixtures::import(
+        path.parent().expect("fixture directory"),
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .expect("fixture database name"),
+        source.path(),
+    );
 }
 
 pub(crate) fn write_state(bytes: &[u8], root: &Path) {

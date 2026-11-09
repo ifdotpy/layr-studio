@@ -24,10 +24,6 @@ pub const ROOT_INDEX: &str = "runtime_agent_root_v2";
 pub const LIVE_ROOT_INDEX: &str = "runtime_agent_live_root_v2";
 /// Agents by account key, live agents (`deleted_at IS NULL`) first.
 pub const ACCOUNT_INDEX: &str = "runtime_agent_account";
-/// Agents by provider thread within an account.
-/// Retired agent index on the `status` column, replaced by
-/// [`ACTIVE_STATUS_INDEX`]. The 2026-10-31 migration still drops it by this name.
-pub const ACTIVE_INDEX: &str = "runtime_agent_active";
 /// SQL listing `(id, root_id)` of the agents that hold a running or reserved
 /// turn: an active chat status, an unfinished turn of the chat, or a start
 /// reservation whose input events are still reserved. It reads

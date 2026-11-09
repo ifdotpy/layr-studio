@@ -5,7 +5,37 @@ use crate::peer_update_settings::Canvas;
 use studio_db_api::DbTable;
 
 #[derive(DbTable)]
-#[db(table = "runtime_agents", database = Canvas, legacy_ddl = "CREATE TABLE \"runtime_agents\"(id TEXT PRIMARY KEY,\"root_id\" TEXT GENERATED ALWAYS AS (record->>'$.rootId') STORED ,\"parent_id\" TEXT GENERATED ALWAYS AS (record->>'$.parentId') STORED ,\"status\" TEXT GENERATED ALWAYS AS (record->>'$.status') STORED ,\"account_key\" TEXT GENERATED ALWAYS AS (COALESCE(record->>'$.accountKey','default')) STORED NOT NULL,\"provider\" TEXT GENERATED ALWAYS AS (record->>'$.provider') STORED NOT NULL,\"role\" TEXT GENERATED ALWAYS AS (record->>'$.role') STORED ,\"deleted_at\"  GENERATED ALWAYS AS (record->>'$.deletedAt') STORED ,\"thread_id\" TEXT GENERATED ALWAYS AS (record->>'$.threadId') STORED ,\"turn_id\" TEXT GENERATED ALWAYS AS (record->>'$.turnId') STORED ,\"cwd\" TEXT GENERATED ALWAYS AS (record->>'$.cwd') STORED ,\"workspace_operation\"  GENERATED ALWAYS AS (record->>'$.workspaceOperation') STORED ,\"in_flight\" INTEGER GENERATED ALWAYS AS (record->>'$.inFlight') STORED ,\"auto_wake\" INTEGER GENERATED ALWAYS AS (record->>'$.autoWake') STORED ,\"remote_worker\"  GENERATED ALWAYS AS (record->>'$.remoteWorker') STORED ,\"remote_anchor\"  GENERATED ALWAYS AS (record->>'$.remoteAnchor') STORED ,\"native_failure_hold\"  GENERATED ALWAYS AS (record->>'$.nativeFailureHold') STORED ,\"steer_rejected_turn_id\" TEXT GENERATED ALWAYS AS (record->>'$.steerRejectedTurnId') STORED ,\"execution_mode\" TEXT GENERATED ALWAYS AS (record->>'$.executionMode') STORED ,\"native_tool_refresh_id\" TEXT GENERATED ALWAYS AS (record->>'$.nativeToolRefreshId') STORED ,\"context_repair_phase\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.phase') STORED ,\"source_cleanup_phase\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.phase') STORED ,\"source_cleanup_account_key\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.accountKey') STORED ,\"source_cleanup_thread_id\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.threadId') STORED ,\"has_disconnect_recovery\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.disconnectRecovery')='object',0)) STORED NOT NULL,\"disconnect_recovery_stage\" TEXT GENERATED ALWAYS AS (record->>'$.disconnectRecovery.stage') STORED ,\"has_restart_recovery\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.restartRecovery')='object',0)) STORED NOT NULL,\"restart_recovery_stage\" TEXT GENERATED ALWAYS AS (record->>'$.restartRecovery.stage') STORED ,\"has_workspace_cleanup_intent\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.workspaceCleanupIntent')='object',0)) STORED NOT NULL,\"agent_archived\" INTEGER GENERATED ALWAYS AS (NOT (json_type(record,'$.agentArchive') IS NULL OR json_type(record,'$.agentArchive') IN ('null','false') OR (json_type(record,'$.agentArchive') IN ('integer','real') AND record->>'$.agentArchive'=0) OR (json_type(record,'$.agentArchive')='text' AND record->>'$.agentArchive'='') OR (json_type(record,'$.agentArchive')='array' AND json_array_length(record,'$.agentArchive')=0) OR (json_type(record,'$.agentArchive')='object' AND record->>'$.agentArchive'='{}'))) STORED NOT NULL,\"review_archive_failed\" INTEGER GENERATED ALWAYS AS (NOT (json_type(record,'$.reviewArchiveError') IS NULL OR json_type(record,'$.reviewArchiveError') IN ('null','false') OR (json_type(record,'$.reviewArchiveError') IN ('integer','real') AND record->>'$.reviewArchiveError'=0) OR (json_type(record,'$.reviewArchiveError')='text' AND record->>'$.reviewArchiveError'='') OR (json_type(record,'$.reviewArchiveError')='array' AND json_array_length(record,'$.reviewArchiveError')=0) OR (json_type(record,'$.reviewArchiveError')='object' AND record->>'$.reviewArchiveError'='{}'))) STORED NOT NULL,\"review_archive_marked\" INTEGER GENERATED ALWAYS AS (record->>'$.reviewArchiveScheduled' IS NOT NULL) STORED NOT NULL,\"review_archive_scheduled\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.reviewArchiveScheduled')='text' AND record->>'$.reviewArchiveScheduled'<>'',0)) STORED NOT NULL,\"review_archive_next_at\"  GENERATED ALWAYS AS (record->>'$.reviewArchiveNextAt') STORED ,\"idle_episode_type\" TEXT GENERATED ALWAYS AS (json_type(record,'$.idleCompactionEpisode')) STORED ,\"idle_episode_fire_at\"  GENERATED ALWAYS AS (record->>'$.idleCompactionEpisode.fireAt') STORED ,\"idle_episode_id\"  GENERATED ALWAYS AS (record->>'$.idleCompactionEpisode.id') STORED ,\"legacy_unsettled\" INTEGER GENERATED ALWAYS AS (COALESCE(record->>'$.workspaceMode'='image' OR record->>'$.imageWorkspace'=1,0) AND COALESCE(record->>'$.legacyWorkspaceSettled',0)=0) STORED NOT NULL,record TEXT NOT NULL,hold_status TEXT NOT NULL DEFAULT 'clear' CHECK(\"hold_status\" IN ('clear','invalid','unrecognized')),hold_incident TEXT,title_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.titleJob.status' END) VIRTUAL CHECK(\"title_status\" IN ('scheduled','written','invalid','discarded','pending','submitted','unknown','not_sent','applied','failed')),vm_launch_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.vmLaunch.status' END) VIRTUAL CHECK(\"vm_launch_status\" IN ('completed','terminal','pending','retryable','submitted','unknown','not_sent','complete','applied','failed','cancelled')),idle_episode_outcome TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.idleCompactionEpisode.outcome' END) VIRTUAL CHECK(\"idle_episode_outcome\" IN ('compacted','disabled','compaction_off','idle_compaction_off','prefix_changed','started','dispatched','failed','ttl_changed','lapsed','small','newer_request','near_limit','active','queued_input','stopped','no_host','would_compact')),provider_stream_generation INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.providerStream.generation' END) VIRTUAL,provider_stream_ack INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.providerStream.ack' END) VIRTUAL,\"account_transfer_id\" GENERATED ALWAYS AS (record->>'$.accountTransferId') VIRTUAL,\"native_release_reset_pending\" GENERATED ALWAYS AS (record->>'$.nativeRelease.resetPending') VIRTUAL,\"is_lead\" GENERATED ALWAYS AS (record->>'$.isLead') VIRTUAL)", check = check_runtime_agents)]
+#[db(table = "runtime_agents", database = Canvas, legacy_ddl = "CREATE TABLE \"runtime_agents\"(id TEXT PRIMARY KEY,\"root_id\" TEXT GENERATED ALWAYS AS (record->>'$.rootId') STORED ,\"parent_id\" TEXT GENERATED ALWAYS AS (record->>'$.parentId') STORED ,\"account_key\" TEXT GENERATED ALWAYS AS (COALESCE(record->>'$.accountKey','default')) STORED NOT NULL,\"provider\" TEXT GENERATED ALWAYS AS (record->>'$.provider') STORED NOT NULL,\"role\" TEXT GENERATED ALWAYS AS (record->>'$.role') STORED ,\"deleted_at\"  GENERATED ALWAYS AS (record->>'$.deletedAt') STORED ,\"cwd\" TEXT GENERATED ALWAYS AS (record->>'$.cwd') STORED ,\"workspace_operation\"  GENERATED ALWAYS AS (record->>'$.workspaceOperation') STORED ,\"remote_worker\"  GENERATED ALWAYS AS (record->>'$.remoteWorker') STORED ,\"remote_anchor\"  GENERATED ALWAYS AS (record->>'$.remoteAnchor') STORED ,\"native_failure_hold\"  GENERATED ALWAYS AS (record->>'$.nativeFailureHold') STORED ,\"steer_rejected_turn_id\" TEXT GENERATED ALWAYS AS (record->>'$.steerRejectedTurnId') STORED ,\"native_tool_refresh_id\" TEXT GENERATED ALWAYS AS (record->>'$.nativeToolRefreshId') STORED ,\"context_repair_phase\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.phase') STORED ,\"source_cleanup_phase\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.phase') STORED ,\"source_cleanup_account_key\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.accountKey') STORED ,\"source_cleanup_thread_id\" TEXT GENERATED ALWAYS AS (record->>'$.contextRepair.sourceCleanup.threadId') STORED ,\"has_disconnect_recovery\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.disconnectRecovery')='object',0)) STORED NOT NULL,\"disconnect_recovery_stage\" TEXT GENERATED ALWAYS AS (record->>'$.disconnectRecovery.stage') STORED ,\"has_restart_recovery\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.restartRecovery')='object',0)) STORED NOT NULL,\"restart_recovery_stage\" TEXT GENERATED ALWAYS AS (record->>'$.restartRecovery.stage') STORED ,\"has_workspace_cleanup_intent\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.workspaceCleanupIntent')='object',0)) STORED NOT NULL,\"agent_archived\" INTEGER GENERATED ALWAYS AS (NOT (json_type(record,'$.agentArchive') IS NULL OR json_type(record,'$.agentArchive') IN ('null','false') OR (json_type(record,'$.agentArchive') IN ('integer','real') AND record->>'$.agentArchive'=0) OR (json_type(record,'$.agentArchive')='text' AND record->>'$.agentArchive'='') OR (json_type(record,'$.agentArchive')='array' AND json_array_length(record,'$.agentArchive')=0) OR (json_type(record,'$.agentArchive')='object' AND record->>'$.agentArchive'='{}'))) STORED NOT NULL,\"review_archive_failed\" INTEGER GENERATED ALWAYS AS (NOT (json_type(record,'$.reviewArchiveError') IS NULL OR json_type(record,'$.reviewArchiveError') IN ('null','false') OR (json_type(record,'$.reviewArchiveError') IN ('integer','real') AND record->>'$.reviewArchiveError'=0) OR (json_type(record,'$.reviewArchiveError')='text' AND record->>'$.reviewArchiveError'='') OR (json_type(record,'$.reviewArchiveError')='array' AND json_array_length(record,'$.reviewArchiveError')=0) OR (json_type(record,'$.reviewArchiveError')='object' AND record->>'$.reviewArchiveError'='{}'))) STORED NOT NULL,\"review_archive_marked\" INTEGER GENERATED ALWAYS AS (record->>'$.reviewArchiveScheduled' IS NOT NULL) STORED NOT NULL,\"review_archive_scheduled\" INTEGER GENERATED ALWAYS AS (COALESCE(json_type(record,'$.reviewArchiveScheduled')='text' AND record->>'$.reviewArchiveScheduled'<>'',0)) STORED NOT NULL,\"review_archive_next_at\"  GENERATED ALWAYS AS (record->>'$.reviewArchiveNextAt') STORED ,\"idle_episode_type\" TEXT GENERATED ALWAYS AS (json_type(record,'$.idleCompactionEpisode')) STORED ,\"idle_episode_fire_at\"  GENERATED ALWAYS AS (record->>'$.idleCompactionEpisode.fireAt') STORED ,\"idle_episode_id\"  GENERATED ALWAYS AS (record->>'$.idleCompactionEpisode.id') STORED ,\"legacy_unsettled\" INTEGER GENERATED ALWAYS AS (COALESCE(record->>'$.workspaceMode'='image' OR record->>'$.imageWorkspace'=1,0) AND COALESCE(record->>'$.legacyWorkspaceSettled',0)=0) STORED NOT NULL,record TEXT NOT NULL,hold_status TEXT NOT NULL DEFAULT 'clear' CHECK(\"hold_status\" IN ('clear','invalid','unrecognized')),hold_incident TEXT,title_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.titleJob.status' END) VIRTUAL CHECK(\"title_status\" IN ('scheduled','written','invalid','discarded','pending','submitted','unknown','not_sent','applied','failed')),vm_launch_status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.vmLaunch.status' END) VIRTUAL CHECK(\"vm_launch_status\" IN ('completed','terminal','pending','retryable','submitted','unknown','not_sent','complete','applied','failed','cancelled')),idle_episode_outcome TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.idleCompactionEpisode.outcome' END) VIRTUAL CHECK(\"idle_episode_outcome\" IN ('compacted','disabled','compaction_off','idle_compaction_off','prefix_changed','started','dispatched','failed','ttl_changed','lapsed','small','newer_request','near_limit','active','queued_input','stopped','no_host','would_compact')),provider_stream_generation INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.providerStream.generation' END) VIRTUAL,provider_stream_ack INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN record->>'$.providerStream.ack' END) VIRTUAL,\"account_transfer_id\" GENERATED ALWAYS AS (record->>'$.accountTransferId') VIRTUAL,\"native_release_reset_pending\" GENERATED ALWAYS AS (record->>'$.nativeRelease.resetPending') VIRTUAL,\"is_lead\" GENERATED ALWAYS AS (record->>'$.isLead') VIRTUAL, \"auth_resume_proof_pending\"  GENERATED ALWAYS AS (CASE WHEN json_valid(record) THEN CASE WHEN json_type(record,'$.authResumeProofPending')='object' AND json(json_extract(record,'$.authResumeProofPending')) <> '{}' THEN 1 ELSE 0 END ELSE 0 END) VIRTUAL)", check = check_runtime_agents)]
+#[db(legacy_index = "CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at)")]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_account_wake_candidates_v7 ON runtime_agents(account_key,hold_status,id) WHERE deleted_at IS NULL AND COALESCE(remote_worker,0)=0 AND COALESCE(remote_anchor,0)=0"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_auth_resume_proof ON runtime_agents(id) WHERE auth_resume_proof_pending=1"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_cleanup_intent_v2 ON runtime_agents(id) WHERE has_workspace_cleanup_intent=1"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_deleted_unsettled_v2 ON runtime_agents(id) WHERE COALESCE(deleted_at,0)!=0"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_holds ON runtime_agents(id) WHERE hold_status!='clear'"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_idle_unload ON runtime_agents(account_key,deleted_at,id,account_transfer_id,native_release_reset_pending,is_lead)"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_live_root_v2 ON runtime_agents(root_id,id) WHERE deleted_at IS NULL"
+)]
+#[db(legacy_index = "CREATE INDEX runtime_agent_parent_v2 ON runtime_agents(parent_id)")]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_reviewer_archive_pending_v2 ON runtime_agents(parent_id,id) WHERE role='reviewer' AND NOT agent_archived AND NOT review_archive_failed AND NOT review_archive_scheduled"
+)]
+#[db(
+    legacy_index = "CREATE INDEX runtime_agent_reviewer_archive_retry_due_v2 ON runtime_agents(COALESCE(review_archive_next_at,0),id) WHERE role='reviewer' AND NOT agent_archived AND review_archive_marked"
+)]
+#[db(legacy_index = "CREATE INDEX runtime_agent_root_v2 ON runtime_agents(root_id)")]
 #[db(
     legacy_index = "CREATE INDEX runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='')"
 )]
@@ -16,50 +46,10 @@ use studio_db_api::DbTable;
     legacy_index = "CREATE INDEX runtime_agent_unsettled_legacy ON runtime_agents(id) WHERE legacy_unsettled=1"
 )]
 #[db(
-    legacy_index = "CREATE INDEX runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object'"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_holds ON runtime_agents(id) WHERE hold_status!='clear'"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_account_wake_candidates_v6 ON runtime_agents(account_key,id) WHERE deleted_at IS NULL AND COALESCE(remote_worker,0)=0 AND COALESCE(remote_anchor,0)=0 AND ((status='queued' AND auto_wake=1 AND COALESCE(in_flight,0)=0 AND COALESCE(native_failure_hold,0)=0) OR (status='running' AND auto_wake=1 AND in_flight=1 AND turn_id IS NOT NULL AND COALESCE(steer_rejected_turn_id,'')<>turn_id AND COALESCE(native_failure_hold,0)=0 AND COALESCE(execution_mode,'')<>'vm') OR ((provider='codex' AND status IN ('starting','running','waiting','paused','interrupted')) OR (has_disconnect_recovery=1 AND ( COALESCE(status,'') NOT IN ('completed','waiting','paused','parked') OR disconnect_recovery_stage IS NOT NULL)) OR (has_restart_recovery=1 AND ( COALESCE(status,'') NOT IN ('completed','waiting','paused','parked') OR COALESCE(restart_recovery_stage,'') NOT IN ('finished','continued','reattached','input_restored')))))"
-)]
-#[db(legacy_index = "CREATE INDEX runtime_agent_parent_v2 ON runtime_agents(parent_id)")]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_reviewer_archive_pending_v2 ON runtime_agents(parent_id,id) WHERE role='reviewer' AND status='completed' AND NOT agent_archived AND NOT review_archive_failed AND NOT review_archive_scheduled"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_reviewer_archive_retry_due_v2 ON runtime_agents(COALESCE(review_archive_next_at,0),id) WHERE role='reviewer' AND status='completed' AND NOT agent_archived AND review_archive_marked"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_vm_stream_owner ON runtime_agents(account_key,id) WHERE execution_mode='vm' AND hold_status='clear'"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_callback_context_v3 ON runtime_agents(account_key,thread_id,turn_id) WHERE status='running' AND auto_wake=1"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_capacity_slots_v3 ON runtime_agents(COALESCE(remote_worker,0),id) WHERE status IN ('starting','running','waiting','paused','approval') AND deleted_at IS NULL"
-)]
-#[db(legacy_index = "CREATE INDEX runtime_agent_root_v2 ON runtime_agents(root_id)")]
-#[db(legacy_index = "CREATE INDEX runtime_agent_account ON runtime_agents(account_key,deleted_at)")]
-#[db(legacy_index = "CREATE INDEX runtime_agent_thread ON runtime_agents(thread_id,account_key)")]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_active ON runtime_agents(root_id) WHERE (in_flight=1 OR status IN ('running','starting','approval'))"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_live_root_v2 ON runtime_agents(root_id,id) WHERE deleted_at IS NULL"
-)]
-#[db(
     legacy_index = "CREATE INDEX runtime_agent_workspace_operation ON runtime_agents(cwd) WHERE typeof(workspace_operation)='text' AND workspace_operation<>''"
 )]
 #[db(
-    legacy_index = "CREATE INDEX runtime_agent_cleanup_intent_v2 ON runtime_agents(id) WHERE has_workspace_cleanup_intent=1"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_deleted_unsettled_v2 ON runtime_agents(id) WHERE COALESCE(deleted_at,0)!=0 AND (COALESCE(in_flight,0)!=0 OR COALESCE(turn_id,0)!=0 OR status IN ('running','starting','approval') OR 0)"
-)]
-#[db(
-    legacy_index = "CREATE INDEX runtime_agent_idle_unload ON runtime_agents(account_key,deleted_at,id,account_transfer_id,native_release_reset_pending,is_lead)"
+    legacy_index = "CREATE INDEX runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object'"
 )]
 #[db(state_check = crate::state_check::check_legacy_json::<crate::AgentRecord>)]
 pub struct AgentsStorageRow {
@@ -115,6 +105,9 @@ fn check_runtime_agent_moves(row: &AgentMovesStorageRow) -> crate::StoreResult<(
 
 #[derive(DbTable)]
 #[db(table = "sessions", database = Canvas, legacy_ddl = "CREATE TABLE sessions(\n            id TEXT PRIMARY KEY, chat TEXT NOT NULL, thread_id TEXT NOT NULL,\n            account_key TEXT NOT NULL, state TEXT NOT NULL) STRICT")]
+#[db(
+    legacy_index = "CREATE INDEX sessions_thread ON sessions(thread_id,account_key) WHERE state<>'ended'"
+)]
 #[db(legacy_index = "CREATE INDEX sessions_chat ON sessions(chat)")]
 #[db(state_check = crate::state_check::count_legacy_rows::<SessionsStorageRow>)]
 pub struct SessionsStorageRow {
@@ -155,6 +148,13 @@ pub struct TurnsStorageRow {
 
 #[derive(DbTable)]
 #[db(table = "chats", database = Canvas, legacy_ddl = "CREATE TABLE chats(\n            id TEXT PRIMARY KEY, state TEXT NOT NULL, status TEXT NOT NULL,\n            auto_wake INTEGER, usage_resume_enabled INTEGER, execution_mode TEXT, turn_epoch INTEGER) STRICT")]
+#[db(
+    legacy_index = "CREATE INDEX chats_active_status ON chats(status) WHERE status IN ('running','starting','approval')"
+)]
+#[db(
+    legacy_index = "CREATE INDEX chats_capacity_status ON chats(status) WHERE status IN ('starting','running','waiting','paused','approval')"
+)]
+#[db(legacy_index = "CREATE INDEX chats_vm ON chats(id) WHERE execution_mode='vm'")]
 #[db(state_check = crate::state_check::count_legacy_rows::<ChatsStorageRow>)]
 pub struct ChatsStorageRow {
     #[db(key)]
@@ -405,7 +405,7 @@ mod tests {
         );
     }
     #[test]
-    fn domain_delayed_indexes_are_the_documented_catalog_gap() {
+    fn current_domain_descriptors_have_all_fresh_indexes() {
         let cold_db = rusqlite::Connection::open_in_memory().unwrap();
         for entry in crate::canvas_schema::registry()
             .into_iter()
@@ -420,84 +420,33 @@ mod tests {
         let cold = indexes(&cold_db);
         let db = crate::fresh_state::test_canvas();
         let real = indexes(&db);
-        let delayed: std::collections::BTreeSet<String> = [
-            "chats_vm",
-            "chats_capacity_status",
-            "chats_active_status",
-            "sessions_thread",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect();
         assert_eq!(
-            real.difference(&cold)
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>(),
-            delayed
-        );
-        assert_eq!(
-            real.difference(&delayed)
-                .cloned()
-                .collect::<std::collections::BTreeSet<_>>(),
-            cold
+            real, cold,
+            "fresh domain indexes are owned directly by descriptors"
         );
     }
 
     #[test]
     fn agent_family_keeps_baseline_index_creation_order() {
-        // Independent pre-wave ordering witness; SQLite uses order to break equal-cost plans.
-        for (table, expected) in [
-            (
-                "runtime_agents",
-                &[
-                    "runtime_agent_sweep_busy_v2",
-                    "runtime_agent_sweep_cleanup_v2",
-                    "runtime_agent_unsettled_legacy",
-                    "runtime_idle_compaction_deadline",
-                    "runtime_agent_holds",
-                    "runtime_agent_account_wake_candidates_v6",
-                    "runtime_agent_parent_v2",
-                    "runtime_agent_reviewer_archive_pending_v2",
-                    "runtime_agent_reviewer_archive_retry_due_v2",
-                    "runtime_agent_vm_stream_owner",
-                    "runtime_agent_callback_context_v3",
-                    "runtime_agent_capacity_slots_v3",
-                    "runtime_agent_root_v2",
-                    "runtime_agent_account",
-                    "runtime_agent_thread",
-                    "runtime_agent_active",
-                    "runtime_agent_live_root_v2",
-                    "runtime_agent_workspace_operation",
-                    "runtime_agent_cleanup_intent_v2",
-                    "runtime_agent_deleted_unsettled_v2",
-                    "runtime_agent_idle_unload",
-                ][..],
-            ),
-            (
-                "turns",
-                &[
-                    "turns_one_attempt",
-                    "turns_callback_context",
-                    "turns_one_unfinished",
-                    "turns_provider_turn",
-                ][..],
-            ),
-        ] {
-            let entry = crate::canvas_schema::registry()
-                .into_iter()
-                .find(|entry| entry.descriptor.name == table)
-                .unwrap();
-            assert_eq!(
-                entry
-                    .descriptor
-                    .indexes
-                    .iter()
-                    .map(|index| index.name)
-                    .collect::<Vec<_>>(),
-                expected,
-                "{table}"
-            );
-        }
+        // SQLite uses index order to break equal-cost plans.
+        let entry = crate::canvas_schema::registry()
+            .into_iter()
+            .find(|entry| entry.descriptor.name == "turns")
+            .expect("turns descriptor");
+        assert_eq!(
+            entry
+                .descriptor
+                .indexes
+                .iter()
+                .map(|index| index.name)
+                .collect::<Vec<_>>(),
+            [
+                "turns_one_attempt",
+                "turns_callback_context",
+                "turns_one_unfinished",
+                "turns_provider_turn"
+            ]
+        );
     }
 
     #[test]

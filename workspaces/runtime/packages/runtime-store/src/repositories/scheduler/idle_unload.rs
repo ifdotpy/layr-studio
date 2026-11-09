@@ -416,15 +416,25 @@ mod tests {
         connection
             .execute_batch(crate::agent_columns::agent_table_sql())
             .expect("agents table creates");
+        use studio_db_api::Table;
+        crate::item_monitor_terminal::MonitorsRow::descriptor()
+            .install_if_absent(&connection)
+            .unwrap();
+        crate::receipt_tables::AccountTransferRow::descriptor()
+            .install_if_absent(&connection)
+            .unwrap();
         connection
             .execute_batch(
                 "CREATE TABLE runtime_events(id TEXT PRIMARY KEY, agent TEXT, kind TEXT, text TEXT,
                    status TEXT, created REAL, epoch INTEGER, turn_id TEXT, error TEXT);
-                 CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, monitor_status TEXT); CREATE INDEX runtime_monitor_agent_status ON runtime_monitors(json_extract(record,'$.agent'),json_extract(record,'$.status'));
-                 CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
-                 CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL, kind TEXT, status TEXT);",
+                 
+                 CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);
+                 CREATE TABLE runtime_tool_requests(id TEXT PRIMARY KEY, record TEXT NOT NULL, kind TEXT, status TEXT);",
             )
             .expect("schema creates");
+        connection
+            .execute_batch(crate::planning_work::WorkRow::DDL)
+            .unwrap();
         crate::approvals::create_schema(&connection).expect("approvals table creates");
         connection
             .execute_batch(crate::agent_volatile::agent_volatile_table_sql())
@@ -443,7 +453,21 @@ mod tests {
             .unwrap();
         {
             let tx = connection.transaction().expect("migration transaction");
-            crate::migrations::m2026_11_06_idle_unload::apply(&tx).expect("idle indexes");
+            for registration in crate::canvas_schema::registry() {
+                for index in registration
+                    .descriptor
+                    .indexes
+                    .iter()
+                    .filter(|index| index.name.contains("idle"))
+                {
+                    tx.execute_batch(&index.sql.replacen(
+                        "CREATE INDEX ",
+                        "CREATE INDEX IF NOT EXISTS ",
+                        1,
+                    ))
+                    .unwrap();
+                }
+            }
             tx.commit().expect("migration commit");
         }
         connection
@@ -554,7 +578,7 @@ mod tests {
             "{plan}"
         );
         agent(&connection, "a", json!({"accountKey":"target"}));
-        connection.execute("INSERT INTO runtime_monitors(id,record,monitor_status) VALUES('watch',?1,'running')",
+        connection.execute("INSERT INTO runtime_monitors(id,record) VALUES('watch',?1)",
             [json!({"id":"watch","agent":"a","epoch":1,"status":"running","operation":{"agent":"a","epoch":1,"accountKey":"acct","connectionId":"original"}}).to_string()]).expect("running source command");
         assert!(
             account_in_use(&connection),
@@ -571,7 +595,7 @@ mod tests {
         )
         .expect("batched source ownership");
         assert!(busy, "the batched idle decision uses the same source owner");
-        connection.execute("UPDATE runtime_monitors SET record=json_set(record,'$.status','completed'),monitor_status='completed' WHERE id='watch'",[]).expect("actual command exit");
+        connection.execute("UPDATE runtime_monitors SET record=json_set(record,'$.status','completed') WHERE id='watch'",[]).expect("actual command exit");
         assert!(
             !account_in_use(&connection),
             "the real exit releases its source"
@@ -682,7 +706,7 @@ mod tests {
         assert!(!thread_in_use(&connection), "settled input holds nothing");
         connection
             .execute(
-                "INSERT INTO runtime_monitors(id,record,monitor_status) VALUES('m',?1,'running')",
+                "INSERT INTO runtime_monitors(id,record) VALUES('m',?1)",
                 [json!({"id":"m","agent":"a","status":"running"}).to_string()],
             )
             .expect("monitor writes");

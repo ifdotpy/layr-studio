@@ -6,7 +6,6 @@ use crate::StoreResult;
 
 // These tables are installed by Runtime and feature constructors, or on first
 // feature use, in canvas.sqlite3. The Rust feature schema owns their current DDL.
-// `runtime_budget` retains historical state and replay diagnostics.
 const FEATURE_SCHEMA_BEFORE_AGENT_INDEXES: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_work (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_work_root_status
@@ -16,9 +15,6 @@ const FEATURE_SCHEMA_BEFORE_AGENT_INDEXES: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_work_owner_root_status_id ON runtime_work(
                 json_extract(record,'$.owner'),json_extract(record,'$.rootId'),
                 json_extract(record,'$.status'),id);
-            CREATE INDEX IF NOT EXISTS runtime_work_archive_due ON runtime_work(
-                COALESCE(json_extract(record,'$.archiveIntent.nextAttemptAt'),0),id)
-                WHERE json_extract(record,'$.archiveIntent.status')='pending';
             CREATE TABLE IF NOT EXISTS runtime_plans (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_annotations (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_search_next_meta (
@@ -44,7 +40,6 @@ const FEATURE_SCHEMA_BEFORE_AGENT_INDEXES: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_rule_ready_tick
                 ON runtime_rules(json_extract(record,'$.status'))
                 WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0);
-            CREATE TABLE IF NOT EXISTS runtime_budget (id TEXT PRIMARY KEY, record TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runtime_federation_inbox (
           peer_id TEXT NOT NULL, message_id TEXT NOT NULL, record TEXT NOT NULL,
           PRIMARY KEY(peer_id,message_id));

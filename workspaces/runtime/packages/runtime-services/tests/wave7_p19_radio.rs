@@ -410,10 +410,10 @@ async fn seed(store: &RuntimeStore, snapshot: &Value) {
             let legacy_naming: i64 = db.query_row("SELECT count(*) FROM runtime_agents WHERE json_type(record, '$.needsTitle') IS NOT NULL OR json_type(record, '$.manualName') IS NOT NULL", [], |row| row.get(0))?;
             assert_eq!(legacy_naming, 0, "radio fixture agents must use canonical naming");
             db.execute("INSERT OR IGNORE INTO runtime_agent_volatile(id) SELECT id FROM runtime_agents", [])?;
-            studio_runtime_store::migrations::migrate_radio_room(db)?;
-            studio_runtime_store::migrations::migrate_room_record(db)?;
-            studio_runtime_store::migrations::migrate_project_teams(db)?;
-            studio_runtime_store::migrations::migrate_project_record_kind(db)?;
+            studio_runtime_store::test_fixtures::radio_room(db)?;
+            studio_runtime_store::test_fixtures::room_record(db)?;
+            studio_runtime_store::test_fixtures::project_teams(db)?;
+            studio_runtime_store::test_fixtures::project_record_kind(db)?;
             for id in completed_turns {
                 let (chat, turn) = id.split_once(':').expect("completed turn id");
                 studio_runtime_store::domain::complete_turn(db, chat, turn)?;

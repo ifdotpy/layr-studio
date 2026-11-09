@@ -22,6 +22,8 @@ pub use entity_publication::{EntityPublisher, PendingEntities, StudioErrorSource
 mod feature_schema;
 mod fresh_state;
 #[cfg(any(test, feature = "test-support"))]
+pub mod test_fixtures;
+#[cfg(any(test, feature = "test-support"))]
 pub use entity_scopes::seed_legacy_reparented_rows;
 #[cfg(any(test, feature = "test-support"))]
 pub use fresh_state::{TestStoreTemplate, test_canvas};
@@ -38,6 +40,7 @@ pub mod approvals;
 mod multi_server_state_check;
 mod path;
 pub mod path_identity;
+#[cfg(any(test, feature = "test-support"))]
 pub mod receipt_migration_contract;
 pub mod receipt_schema;
 pub mod receipt_tables;
@@ -1446,7 +1449,7 @@ impl RuntimeStore {
         let analytics_path = root.join("analytics.sqlite3");
         let runtime_lock = Arc::new(RuntimeLock::acquire(&root)?);
         if canvas_path.is_file() {
-            migrations::verify_receipt_finish(&canvas_path, &analytics_path)?;
+            migrations::verify_baseline(&root)?;
         }
         if let Some(owner) = owner {
             state_owner::claim(&root, owner)?;
@@ -4420,7 +4423,7 @@ mod commit_notification_tests {
         drop(db);
         assert!(matches!(
             RuntimeStore::open(Some(directory.path())).await,
-            Err(StoreError::IntermediateReleaseRequired)
+            Err(StoreError::SchemaMismatch(ref message)) if message.contains("state too old:")
         ));
         let db = rusqlite::Connection::open(directory.path().join("canvas.sqlite3")).unwrap();
         assert_eq!(
@@ -4459,12 +4462,8 @@ mod commit_notification_tests {
             Ok(_) => panic!("unfinished receipt migration opened"),
             Err(error) => error,
         };
-        assert!(matches!(error, StoreError::IntermediateReleaseRequired));
-        assert!(
-            error
-                .to_string()
-                .contains("upgrade through an intermediate release first")
-        );
+        assert!(matches!(error, StoreError::SchemaMismatch(_)));
+        assert!(error.to_string().contains("state too old:"));
         let db = rusqlite::Connection::open(&path).unwrap();
         let status: String = db
             .query_row(

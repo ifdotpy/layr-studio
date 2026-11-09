@@ -1010,13 +1010,6 @@ async fn deletion_ignores_unrelated_legacy_records() {
         ],
     )
     .unwrap();
-    db.create_scalar_function(
-        "sync_work_identity_change",
-        2,
-        rusqlite::functions::FunctionFlags::SQLITE_UTF8,
-        |_| Ok(0),
-    )
-    .unwrap();
     studio_runtime_store::seed_legacy_reparented_rows(&db, || {
         db.execute(
             "UPDATE runtime_agents SET record=json_set(record,'$.rootId',42) WHERE id='unrelated'",

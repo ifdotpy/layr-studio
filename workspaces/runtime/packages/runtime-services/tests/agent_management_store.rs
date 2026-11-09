@@ -36,54 +36,6 @@ fn monitor_fixture(fields: &Value) -> Value {
     monitor
 }
 
-fn template(root: &Path) {
-    let schema: Value = studio_json::from_str(include_str!(
-        "../../runtime-store/tests/fixtures/live-state-schema.json"
-    ))
-    .expect("schema fixture");
-    for database in ["canvas.sqlite3", "analytics.sqlite3"] {
-        let db = Connection::open(root.join(database)).expect("fixture db");
-        studio_runtime_store::sqlite_durability::configure_writer(&db).expect("fixture durability");
-        db.execute_batch("BEGIN;").expect("fixture durability");
-        let mut objects = schema[database]["sqlite_master"]
-            .as_array()
-            .expect("objects")
-            .iter()
-            .filter(|o| {
-                ![
-                    "runtime_search_next_config",
-                    "runtime_search_next_data",
-                    "runtime_search_next_docsize",
-                    "runtime_search_next_idx",
-                ]
-                .contains(&o["name"].as_str().expect("name"))
-            })
-            .collect::<Vec<_>>();
-        objects.sort_by_key(|o| {
-            (
-                match o["type"].as_str() {
-                    Some("table") => 0,
-                    Some("index") => 1,
-                    Some("view") => 2,
-                    _ => 3,
-                },
-                o["name"].as_str(),
-            )
-        });
-        for object in objects {
-            db.execute_batch(object["sql"].as_str().expect("ddl"))
-                .expect("fixture ddl");
-        }
-        if database == "canvas.sqlite3" {
-            db.execute_batch(include_str!(
-                "../../runtime-store/tests/fixtures/receipt-finish-markers.sql"
-            ))
-            .expect("completed receipt markers");
-        }
-        db.execute_batch("COMMIT")
-            .expect("fixture schema commits once");
-    }
-}
 const NOW: f64 = 1_234_567.5;
 
 fn seed_records() -> Value {
@@ -192,7 +144,7 @@ impl LifecyclePorts for AcceptLifecycleEffects {
 async fn stop_clears_the_matching_unsubmitted_capacity_retry_attempt() {
     let case = case("stop-capacity-retry-unsubmitted");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -225,7 +177,7 @@ async fn stop_clears_the_matching_unsubmitted_capacity_retry_attempt() {
 async fn lifecycle_failure_case(case_name: &str, tables: &[&str]) {
     let case = case(case_name);
     let root = tempfile::tempdir().expect("case");
-    template(root.path());
+
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -306,7 +258,7 @@ async fn stop_failures_roll_back_rows_and_projections_after_restart() {
 async fn committed_archive_response_loss_replays_after_restart_without_duplicate_release() {
     let case = case("unassign");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -343,7 +295,7 @@ async fn committed_archive_response_loss_replays_after_restart_without_duplicate
 async fn deleted_team_broadcast_projection_survives_repeated_delete() {
     let case = case("delete");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -513,7 +465,7 @@ fn diagnostic_count_excludes_deleted_agents() {
 async fn lifecycle_effect_refusals_preserve_rows_and_projections() {
     let case = case("stop-True");
     let base = tempfile::tempdir().expect("base");
-    template(base.path());
+
     let store = std::sync::Arc::new(
         RuntimeStore::open(Some(base.path()))
             .await
@@ -626,7 +578,7 @@ async fn lifecycle_effect_refusals_preserve_rows_and_projections() {
 async fn ended_voice_allows_stop_and_delete_clears_saved_voice_in_transaction() {
     let case = case("stop-ended-voice");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root.path())).await.expect("store"));
     let mut records: Records = studio_json::from_value(case["records"].clone()).expect("records");
     records.tables.remove("voice_sessions");
@@ -715,9 +667,6 @@ const SYNTHETIC_NOW_SECS: f64 = 1234567.5;
 /// Projections are seeded by one full rebuild so lifecycle actions start
 /// from current views.
 async fn synthetic_store(root: &Path, leads: usize, tasks: usize) -> std::sync::Arc<RuntimeStore> {
-    if !root.join("canvas.sqlite3").exists() {
-        template(root);
-    }
     let store = std::sync::Arc::new(RuntimeStore::open(Some(root)).await.expect("open"));
     studio_runtime_services::entity_publication::install(&store)
         .await
@@ -960,7 +909,6 @@ async fn lifecycle_projection_benchmark_on_large_state() {
     for drop_unowned_task_indexes in [false, true] {
         let root = tempfile::tempdir_in(&scratch).expect("root");
         if drop_unowned_task_indexes {
-            template(root.path());
             Connection::open(root.path().join("canvas.sqlite3"))
                 .expect("fixture db")
                 .execute_batch("DROP INDEX runtime_task_status; DROP INDEX runtime_task_history;")

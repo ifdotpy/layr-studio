@@ -315,7 +315,6 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         crate::bootstrap::prepare_runtime_event_indexes(&transaction)?;
         crate::AgentRepository::prepare_change_journal(&transaction)?;
         crate::MonitorsRepository::prepare_indexes(&transaction)?;
-        crate::migrations::seed_receipt_finish_markers(&transaction)?;
     } else {
         crate::schema::prepare_publication_overflow_receipts(&transaction)?;
         crate::schema::ensure_analytics_limits_index(&transaction)?;
@@ -335,6 +334,14 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
             ],
         )?;
     }
+    crate::migrations::seed_baseline(
+        &transaction,
+        if schema_name == "canvas.sqlite3" {
+            studio_runtime_schema::studio_errors::MigrationTarget::Canvas
+        } else {
+            studio_runtime_schema::studio_errors::MigrationTarget::Analytics
+        },
+    )?;
     transaction.commit()?;
     Ok(connection)
 }
@@ -355,7 +362,7 @@ pub fn test_canvas() -> Connection {
     crate::schema::register_python_trigger_functions(&connection).expect("projection functions");
     let tx = connection.transaction().expect("fixture transaction");
     crate::bootstrap::prepare_sync_schema(&tx).expect("sync schema");
-    crate::migrations::prepare_canvas_fixture(&tx).expect("current canvas format");
+    crate::migrations::prepare_current_canvas(&tx).expect("current canvas format");
     // Migrations drop old indexes; startup recreates the retained ones from their owners.
     crate::bootstrap::prepare_runtime_event_indexes(&tx).expect("owned indexes");
     tx.commit().expect("fixture commits");

@@ -50,7 +50,7 @@ pub(crate) async fn seed(store: &RuntimeStore, root: &Path, kind: FixtureKind) -
                 )?;
             }
             // The frozen records predate the project record kind.
-            studio_runtime_store::migrations::migrate_project_record_kind(tx)?;
+            studio_runtime_store::test_fixtures::project_record_kind(tx)?;
             for row in fixture.tables.runtime_agents {
                 let record: Value = studio_json::from_str(&row.record)?;
                 studio_runtime_store::agent_volatile::put(tx, &row.id, &record, true)?;

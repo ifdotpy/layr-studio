@@ -469,6 +469,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
     let case = case.clone();
     store
         .transaction_with::<_, studio_runtime_store::StoreError>(move |tx| {
+            studio_runtime_store::entity_scopes::seed_legacy_reparented_rows(tx, || {
             if let Some(writes) = case["writes"].as_object() {
                 for (table, change) in writes {
                     if change.get("increment").is_some() {
@@ -508,7 +509,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                     }
                 }
             }
-            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             for (table, rows) in case["counters"].as_object().unwrap() {
                 tx.execute(&format!("DELETE FROM {table}"), [])?;
                 for row in rows.as_array().unwrap() {
@@ -516,6 +517,7 @@ pub async fn seed_case(store: &RuntimeStore, case: &Value) {
                 }
             }
             Ok(())
+            })
         })
         .await
         .unwrap();

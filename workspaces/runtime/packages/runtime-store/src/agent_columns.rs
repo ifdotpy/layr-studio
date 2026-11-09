@@ -26,8 +26,6 @@
 
 use std::sync::LazyLock;
 
-use rusqlite::{Connection, Transaction};
-
 use crate::StoreResult;
 
 /// The agents table.
@@ -297,14 +295,6 @@ pub(crate) fn column_sql(column: &AgentColumn) -> String {
     )
 }
 
-pub(crate) fn has_explicit_provider_column(connection: &Connection) -> StoreResult<bool> {
-    Ok(connection.query_row(
-        "SELECT instr(sql,?1)>0 FROM sqlite_master WHERE type='table' AND name='runtime_agents'",
-        [column_sql(&PROVIDER_COLUMN)],
-        |row| row.get(0),
-    )?)
-}
-
 pub(crate) fn table_sql(name: &str) -> String {
     let columns = AGENT_COLUMNS
         .iter()
@@ -326,37 +316,6 @@ pub(crate) fn table_sql(name: &str) -> String {
 pub fn agent_table_sql() -> &'static str {
     static SQL: LazyLock<String> = LazyLock::new(|| table_sql(AGENT_TABLE));
     &SQL
-}
-
-/// Whether `table` has exactly the columns of this format, in order.
-pub(crate) fn has_columns(transaction: &Transaction<'_>) -> StoreResult<bool> {
-    let mut statement = transaction.prepare(&format!("PRAGMA table_xinfo({AGENT_TABLE})"))?;
-    let names = statement
-        .query_map([], |row| row.get::<_, String>(1))?
-        .collect::<Result<Vec<_>, _>>()?;
-    let expected = std::iter::once("id")
-        .chain(
-            AGENT_COLUMNS
-                .iter()
-                .filter(|column| column.stored)
-                .map(|column| column.name),
-        )
-        .chain(std::iter::once("record"));
-    let receipt_names: Vec<_> = crate::schema::receipt_owner_columns()
-        .into_iter()
-        .filter(|(table, _, _)| *table == AGENT_TABLE)
-        .map(|(_, name, _)| name)
-        .collect();
-    Ok(names
-        .iter()
-        .map(String::as_str)
-        .filter(|name| {
-            !receipt_names.contains(name)
-                && !AGENT_COLUMNS
-                    .iter()
-                    .any(|column| !column.stored && column.name == *name)
-        })
-        .eq(expected))
 }
 
 /// `batch` with its `CREATE TABLE runtime_agents(...)` statement replaced by
@@ -395,71 +354,7 @@ pub fn select_declared_sql(connection: &rusqlite::Connection, table: &str) -> St
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RuntimeStore;
     use rusqlite::Connection;
-    use studio_json::{Value, json};
-
-    fn agents() -> Vec<Value> {
-        vec![
-            json!({"compactions":0,"id":"lead","rootId":"lead","epoch":2,"status":"running","accountKey":"acct",
-                "provider":"claude","threadId":"t1","turnId":"u1","inFlight":true,"autoWake":true,
-                "cwd":"/w","workspaceOperation":"branch","startAttempt":{"submitted":true,
-                "connectionGeneration":4,"activeAtReservation":false},"prompt":"keep"}),
-            json!({"compactions":0,"id":"child","provider":"codex","rootId":"lead","parentId":"lead","epoch":0,"status":"completed","accountKey":"default",
-                "role":"reviewer","reviewArchiveScheduled":"",
-                "restartRecovery":{"stage":"held"},"deletedAt":5.5}),
-            json!({"compactions":0,"id":"bare","provider":"codex","rootId":"bare","epoch":0,"status":"idle","accountKey":"default"}),
-        ]
-    }
-
-    fn rows(connection: &Connection) -> Vec<(i64, String, String)> {
-        connection
-            .prepare("SELECT rowid,id,record FROM runtime_agents ORDER BY rowid")
-            .expect("rows prepare")
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
-            .expect("rows read")
-            .collect::<Result<_, _>>()
-            .expect("rows decode")
-    }
-
-    fn catalog(connection: &Connection, kind: &str) -> Vec<String> {
-        connection
-            .prepare(
-                "SELECT name FROM sqlite_master WHERE tbl_name='runtime_agents' AND type=?1 \
-                 AND sql IS NOT NULL ORDER BY name",
-            )
-            .expect("catalog prepares")
-            .query_map([kind], |row| row.get(0))
-            .expect("catalog reads")
-            .collect::<Result<_, _>>()
-            .expect("catalog decodes")
-    }
-
-    fn journal(connection: &Connection) -> Vec<String> {
-        [
-            "runtime_agent_record_generation",
-            "runtime_scheduler_agent_change_state",
-            "runtime_scheduler_agent_changes",
-            "runtime_transcript_revisions",
-        ]
-        .iter()
-        .flat_map(|table| {
-            let mut statement = connection
-                .prepare(&format!("SELECT * FROM {table} ORDER BY 1"))
-                .expect("journal table");
-            let count = statement.column_count();
-            statement
-                .query_map([], |row| {
-                    (0..count)
-                        .map(|index| row.get::<_, rusqlite::types::Value>(index))
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .expect("journal rows")
-                .map(|row| format!("{table}: {:?}", row.expect("journal row")))
-                .collect::<Vec<_>>()
-        })
-        .collect()
-    }
 
     #[test]
     fn unused_agent_columns_are_not_computed_on_write() {
@@ -488,92 +383,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn retired_start_columns_migrate_with_all_legacy_dependent_indexes() {
-        let root = tempfile::tempdir().expect("state directory");
-        let store = RuntimeStore::open(Some(root.path()))
-            .await
-            .expect("store opens");
-        store.transaction(|tx| {
-            for agent in agents() {
-                let agent = crate::AgentRecord::from_value(agent)?.into_value();
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)",
-                    rusqlite::params![agent.get("id").and_then(Value::as_str), agent.to_string()])?;
-            }
-            let triggers = tx.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND tbl_name='runtime_agents'")?
-                .query_map([], |row| row.get::<_, String>(0))?.collect::<Result<Vec<_>, _>>()?;
-            let old_table = table_sql("runtime_agents_legacy_start_fixture").replace(
-                "record TEXT NOT NULL",
-                "status AS (record->>'$.status') STORED,\
-                 turn_id AS (record->>'$.turnId') STORED,\
-                 in_flight AS (record->>'$.inFlight') STORED,\
-                 auto_wake AS (record->>'$.autoWake') STORED,\
-                 thread_id AS (record->>'$.threadId') STORED,\
-                 start_attempt_submitted AS (record->>'$.startAttempt.submitted') STORED,\
-                 start_attempt_connection_generation AS (record->>'$.startAttempt.connectionGeneration') STORED,\
-                 start_attempt_active_at_reservation AS (record->>'$.startAttempt.activeAtReservation') STORED,record TEXT NOT NULL",
-            );
-            tx.execute_batch(&old_table)?;
-            tx.execute_batch(
-                "INSERT INTO runtime_agents_legacy_start_fixture(rowid,id,record) SELECT rowid,id,record FROM runtime_agents;\
-                 PRAGMA legacy_alter_table=ON;\
-                 ALTER TABLE runtime_agents RENAME TO runtime_agents_before_start_fixture;\
-                 DROP TABLE runtime_agents_before_start_fixture;\
-                 ALTER TABLE runtime_agents_legacy_start_fixture RENAME TO runtime_agents;\
-                 PRAGMA legacy_alter_table=OFF;\
-                 CREATE INDEX runtime_agent_account_wake_candidates_v5 ON runtime_agents(account_key,id) WHERE start_attempt_submitted=1 AND start_attempt_connection_generation IS NOT NULL;\
-                 CREATE INDEX runtime_agent_callback_context_v2 ON runtime_agents(account_key,start_attempt_connection_generation,thread_id,turn_id) WHERE status='running' AND auto_wake=1;\
-                 CREATE INDEX runtime_agent_deleted_unsettled_v2 ON runtime_agents(id) WHERE COALESCE(deleted_at,0)!=0 AND COALESCE(start_attempt_active_at_reservation,0)!=0;\
-                 CREATE INDEX runtime_agent_active ON runtime_agents(root_id) WHERE in_flight=1 OR start_attempt_active_at_reservation=1;",
-            )?;
-            for sql in triggers { tx.execute_batch(&sql)?; }
-            Ok(())
-        }).await.expect("legacy start columns and indexes");
-        let before = {
-            let db = store.test_reader().expect("reader");
-            (rows(&db), journal(&db), catalog(&db, "trigger"))
-        };
-        drop(store);
-        let migrated_rows = before.0;
-        let mut previous_indexes = None;
-        for _ in 0..2 {
-            let store = RuntimeStore::open(Some(root.path()))
-                .await
-                .expect("legacy state migrates");
-            let db = store.test_reader().expect("reader");
-            assert_eq!(rows(&db), migrated_rows);
-            assert_eq!(journal(&db), before.1);
-            assert_eq!(catalog(&db, "trigger"), before.2);
-            let dependent: i64 = db.query_row("SELECT count(*) FROM sqlite_master WHERE type='index' AND tbl_name='runtime_agents' AND sql LIKE '%start_attempt_%'", [], |row| row.get(0)).expect("index definitions");
-            assert_eq!(dependent, 0);
-            let indexes = catalog(&db, "index");
-            assert!(
-                indexes.contains(
-                    &crate::SchedulerRepository::account_wake_index_definition()
-                        .name
-                        .to_owned()
-                )
-            );
-            for definition in crate::StartupRecoveryRepository::index_definitions()
-                .into_iter()
-                .filter(|definition| definition.table == AGENT_TABLE)
-            {
-                let sql: String = db
-                    .query_row(
-                        "SELECT sql FROM sqlite_master WHERE type='index' AND name=?1",
-                        [definition.name],
-                        |row| row.get(0),
-                    )
-                    .expect("current startup index exists");
-                assert_eq!(sql, definition.create_sql.replace("IF NOT EXISTS ", ""));
-            }
-            if let Some(previous) = &previous_indexes {
-                assert_eq!(&indexes, previous);
-            }
-            previous_indexes = Some(indexes);
-        }
-    }
-
     /// A record write updates the columns; malformed JSON is refused.
     #[test]
     fn columns_follow_the_record_and_refuse_malformed_json() {
@@ -584,7 +393,7 @@ mod tests {
         connection
             .execute(
                 "INSERT INTO runtime_agents(id,record) VALUES('a',?1)",
-                [agents()[2].to_string()],
+                [r#"{"compactions":0,"id":"a","provider":"codex","rootId":"a","epoch":0,"status":"idle","accountKey":"default"}"#],
             )
             .expect("agent inserts");
         connection

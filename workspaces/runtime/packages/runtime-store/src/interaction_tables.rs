@@ -190,6 +190,7 @@ use studio_runtime_schema::approvals::{Answer, Delivery, Detail, Principal, Requ
     legacy_index = "CREATE INDEX approvals_fire_at ON approvals(fire_at) WHERE fire_at IS NOT NULL"
 )]
 #[db(state_check = crate::state_check::count_legacy_rows::<ApprovalsRow>)]
+#[db(legacy_index = "CREATE INDEX approvals_agent_state ON approvals(agent,state)")]
 pub struct ApprovalsRow {
     #[db(key)]
     pub id: String,

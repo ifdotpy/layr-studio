@@ -476,7 +476,7 @@ const PROVIDER_NATIVE_DISCRIMINATORS: &[(&str, crate::ProviderKind)] = &[
 const PROVIDER_SQL_CONSUMERS: &[(&str, usize)] = &[
     (
         "workspaces/runtime/packages/runtime-store/src/agent_tables.rs",
-        2,
+        1,
     ),
     (
         "workspaces/runtime/packages/runtime-store/src/repositories/scheduler/selection.rs",
@@ -1667,7 +1667,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
             .ok_or("SyncIdentityResponse.syncProtocol must be a schema object")?;
     identity_version.remove("minimum");
     identity_version.remove("maximum");
-    openapi["components"]["schemas"]["UsageReconciliationResponse"]["properties"]["replayConflicts"] = studio_json::json!({"type":"array","items":{"$ref":"#/components/schemas/UsageReplayConflict"}});
     openapi["components"]["schemas"]["ClaudeFailure"] = crate::claude_failure::schema();
     openapi["components"]["schemas"]["NativeProviderError"] =
         crate::provider_errors::native_provider_error_schema();
@@ -2100,15 +2099,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         path: "workspaces/runtime/packages/runtime-http/draft-payload.schema.json".into(),
         text: studio_json::to_string_pretty(&draft_schema).map_err(|error| error.to_string())?
             + "\n",
-    });
-    rendered.push(Rendered {
-        path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state.schema.json".into(),
-        text: studio_json::to_string_pretty(&crate::usage::ledger::budget_state_schema()).map_err(|error| error.to_string())? + "\n",
-    });
-    rendered.push(Rendered {
-        path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-budget-state-write.schema.json".into(),
-        text: studio_json::to_string_pretty(&crate::usage::ledger::budget_state_write_schema())
-            .map_err(|error| error.to_string())? + "\n",
     });
     let usage_schema = schemars::schema_for!(crate::usage::UsageObservation).to_value();
     rendered.push(Rendered {

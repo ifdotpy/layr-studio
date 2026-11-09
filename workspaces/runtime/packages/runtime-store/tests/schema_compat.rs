@@ -2,14 +2,9 @@ use std::path::Path;
 
 use rusqlite::Connection;
 use studio_json::{Value, json};
-use studio_runtime_schema::studio_errors::{
-    MigrationPhase, MigrationRollbackOutcome, MigrationTarget,
-};
 use studio_runtime_store::{
     AgentId, QueueEvent, QueueEventId, QueueEventRepository, RuntimeStore, StoreError,
 };
-
-const LIVE_SCHEMA: &str = include_str!("fixtures/live-state-schema.json");
 
 #[tokio::test]
 async fn agent_repository_rejects_typed_extra_collision() {
@@ -260,15 +255,8 @@ async fn missing_automatic_unique_index_is_named_and_left_untouched() {
         Err(error) => error,
     };
     assert!(
-        matches!(&error, StoreError::Migration {
-            id: "2026-10-20-agent-storage",
-            target: MigrationTarget::Canvas,
-            phase: MigrationPhase::Validate,
-            rollback: MigrationRollbackOutcome::NotRequired,
-            source,
-            rollback_error: None,
-        } if matches!(source.as_ref(), StoreError::SchemaObjectMismatch { database, object, reason }
-            if database == "canvas.sqlite3" && object == "sync_documents" && reason.contains("UNIQUE/PRIMARY KEY"))),
+        matches!(&error, StoreError::SchemaObjectMismatch { database, object, reason }
+            if database == "canvas.sqlite3" && object == "sync_documents" && reason.contains("UNIQUE/PRIMARY KEY")),
         "constraint error should identify sync_documents, got {error:?}"
     );
     assert_eq!(catalog(&canvas), before);
@@ -295,15 +283,8 @@ async fn unicode_altered_table_column_is_named_and_left_untouched() {
         Err(error) => error,
     };
     assert!(
-        matches!(&error, StoreError::Migration {
-            id: "2026-10-20-agent-storage",
-            target: MigrationTarget::Canvas,
-            phase: MigrationPhase::Validate,
-            rollback: MigrationRollbackOutcome::NotRequired,
-            source,
-            rollback_error: None,
-        } if matches!(source.as_ref(), StoreError::SchemaObjectMismatch { database, object, reason }
-            if database == "canvas.sqlite3" && object == "sync_identity" && reason.contains("column id"))),
+        matches!(&error, StoreError::SchemaObjectMismatch { database, object, reason }
+            if database == "canvas.sqlite3" && object == "sync_identity" && reason.contains("column id")),
         "table error should name sync_identity.id, got {error:?}"
     );
     assert_eq!(catalog(&canvas), before);
@@ -537,15 +518,8 @@ async fn incompatible_sync_table_is_named_and_left_untouched() {
         Err(error) => error,
     };
     assert!(
-        matches!(&error, StoreError::Migration {
-            id: "2026-10-20-agent-storage",
-            target: MigrationTarget::Canvas,
-            phase: MigrationPhase::Validate,
-            rollback: MigrationRollbackOutcome::NotRequired,
-            source,
-            rollback_error: None,
-        } if matches!(source.as_ref(), StoreError::SchemaObjectMismatch { database, object, .. }
-            if database == "canvas.sqlite3" && object == "sync_entities")),
+        matches!(&error, StoreError::SchemaObjectMismatch { database, object, .. }
+            if database == "canvas.sqlite3" && object == "sync_entities"),
         "bootstrap should name sync_entities, got {error:?}"
     );
     assert_eq!(catalog(&canvas), before);
@@ -574,67 +548,7 @@ async fn sync_bootstrap_failure_rolls_back_earlier_ddl_and_seed_rows() {
 }
 
 fn create_from_live_schema(root: &Path) {
-    let schema: Value = studio_json::from_str(LIVE_SCHEMA).expect("schema-only fixture parses");
-    for database in ["canvas.sqlite3", "analytics.sqlite3"] {
-        let mut connection = Connection::open(root.join(database)).expect("database file opens");
-        studio_runtime_store::sqlite_durability::configure_writer(&connection)
-            .expect("WAL and NORMAL are enabled");
-        let mut objects = schema[database]["sqlite_master"]
-            .as_array()
-            .expect("fixture contains SQLite objects")
-            .iter()
-            .filter_map(|object| {
-                let name = object["name"].as_str()?;
-                let sql = object["sql"].as_str()?;
-                // FTS5 creates these shadow tables as part of CREATE VIRTUAL TABLE.
-                if [
-                    "runtime_search_next_config",
-                    "runtime_search_next_data",
-                    "runtime_search_next_docsize",
-                    "runtime_search_next_idx",
-                ]
-                .contains(&name)
-                {
-                    return None;
-                }
-                Some((
-                    object["type"].as_str().unwrap_or_default().to_owned(),
-                    name.to_owned(),
-                    sql.to_owned(),
-                ))
-            })
-            .collect::<Vec<_>>();
-        objects.sort_by(|left, right| {
-            object_order(&left.0)
-                .cmp(&object_order(&right.0))
-                .then(left.1.cmp(&right.1))
-        });
-        let transaction = connection.transaction().expect("fixture DDL transaction");
-        for (_, _, sql) in objects {
-            transaction.execute_batch(&sql).unwrap_or_else(|error| {
-                panic!("live fixture DDL failed for {database}: {error}; SQL={sql}")
-            });
-        }
-        if database == "canvas.sqlite3" {
-            transaction
-                .execute_batch(include_str!("fixtures/receipt-finish-markers.sql"))
-                .expect("completed receipt markers");
-        }
-        transaction
-            .pragma_update(None, "user_version", 0)
-            .expect("version matches supplied state");
-        transaction.commit().expect("fixture catalog commits");
-    }
-}
-
-fn object_order(kind: &str) -> u8 {
-    match kind {
-        "table" => 0,
-        "index" => 1,
-        "trigger" => 2,
-        "view" => 3,
-        _ => 4,
-    }
+    super::migration_baseline::write_supported_fixture(root);
 }
 
 fn catalog(path: &Path) -> Vec<(String, String, Option<String>)> {

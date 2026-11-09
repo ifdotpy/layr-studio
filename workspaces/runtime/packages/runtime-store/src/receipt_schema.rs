@@ -18,18 +18,6 @@ pub fn create(connection: &Connection) -> rusqlite::Result<()> {
     )
 }
 
-pub(crate) fn install_dismissed_index(connection: &Connection) -> rusqlite::Result<()> {
-    let index = ErrorIncidentRow::INDEXES
-        .iter()
-        .find(|index| index.name == "runtime_error_incidents_dismissed")
-        .expect("descriptor owns dismissal index");
-    connection.execute_batch(
-        &index
-            .sql
-            .replacen("CREATE INDEX", "CREATE INDEX IF NOT EXISTS", 1),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

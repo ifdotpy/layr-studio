@@ -2,7 +2,7 @@
 //! the shared durability policy of [`crate::sqlite_durability`].
 //! Raw DML stays here: joins, aggregates, fenced updates and narrow projections are
 //! shorter than generated equivalents and preserve each existing decode boundary.
-use crate::supervisor_schema::{OperationWritesRow, OperationsRow, SupervisorInitResult};
+use crate::supervisor_schema::SupervisorInitResult;
 use crate::{python_json, python_json_with_separators, sha256_hex};
 use rusqlite::{
     Connection, OptionalExtension, Transaction, params,
@@ -14,7 +14,6 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
-use studio_db_api::Table;
 use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     EVENT_KIND_EXIT, EVENT_KIND_STDERR, EVENT_KIND_STDOUT, EventKind, HANDLE_LIMIT, HandleSnapshot,
@@ -156,26 +155,12 @@ pub enum JournalError {
 }
 pub type Result<T> = std::result::Result<T, JournalError>;
 
-#[derive(Clone, Copy)]
-pub(crate) enum SchemaPresence {
-    Existing,
-    Complete,
-}
-
-pub(crate) fn validate_schema(db: &Connection, presence: SchemaPresence) -> crate::StoreResult<()> {
+pub(crate) fn validate_schema(db: &Connection) -> crate::StoreResult<()> {
     let expected = Connection::open_in_memory()?;
     crate::supervisor_schema::install(&expected)?;
     let mut tables = expected.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?;
     for name in tables.query_map([], |row| row.get::<_, String>(0))? {
         let name = name?;
-        let exists: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name=?1)",
-            [&name],
-            |row| row.get(0),
-        )?;
-        if !exists && matches!(presence, SchemaPresence::Existing) {
-            continue;
-        }
         if !crate::bootstrap::same_table_layout(&expected, db, &name)? {
             return Err(crate::StoreError::SchemaObjectMismatch {
                 database: "supervisor.sqlite3".into(),
@@ -883,24 +868,6 @@ impl JournalError {
 
 fn sql(value: u64) -> Result<i64> {
     i64::try_from(value).map_err(|_| Refusal("Supervisor integer exceeds SQLite range").into())
-}
-
-pub(crate) fn prepare_schema(db: &Transaction<'_>) -> crate::StoreResult<()> {
-    for registration in crate::supervisor_schema::registry().iter().take(7) {
-        // Preserve the original stage: install all seven tables before the monitor index.
-        studio_db_api::Descriptor {
-            indexes: &[],
-            ..registration.descriptor
-        }
-        .install_if_absent(db)?;
-    }
-    OperationsRow::descriptor().install_if_absent(db)?;
-    Ok(())
-}
-
-pub(crate) fn prepare_written_schema(db: &Transaction<'_>) -> crate::StoreResult<()> {
-    OperationWritesRow::descriptor().install_if_absent(db)?;
-    Ok(())
 }
 
 #[cfg(test)]

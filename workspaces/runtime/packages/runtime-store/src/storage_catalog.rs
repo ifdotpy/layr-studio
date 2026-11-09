@@ -34,6 +34,11 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
         connection.execute_batch(sql)?;
     }
     crate::receipt_schema::create(connection)?;
+    crate::approvals::create_schema(connection)?;
+    connection.execute_batch(&crate::project_grants::check_triggers_sql())?;
+    connection.execute_batch(crate::work_history::CASCADE)?;
+    connection.execute_batch(&crate::domain::check_triggers_sql())?;
+    connection.execute_batch(&crate::domain::owner_delete_trigger_sql())?;
     connection.execute_batch(include_str!("catalog-canvas-objects.sql"))?;
     crate::feature_schema::install_summary_delete_triggers(connection)?;
     connection.execute_batch(crate::bootstrap::SYNC_SCHEMA)?;

@@ -505,16 +505,6 @@ async fn real_submission_transaction_matches_python_complete_rows_and_crash_boun
                 .await
                 .expect("clear fault");
         }
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "DELETE FROM sync_entity_meta WHERE key='migration_catalog'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .expect("force catalog replay after submission");
         let original: String = store
             .test_reader()
             .expect("reader")

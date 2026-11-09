@@ -132,10 +132,7 @@ async fn migration_startup_unfinished_receipts_prevent_all_recovery() {
     assert!(!result.status.success());
     let stderr = String::from_utf8_lossy(&result.stderr);
     assert!(stderr.contains("store-open-started"), "{stderr}");
-    assert!(
-        stderr.contains("upgrade through an intermediate release first"),
-        "{stderr}"
-    );
+    assert!(stderr.contains("state too old:"), "{stderr}");
     assert!(
         !stderr.contains("account-registry-open-started"),
         "provider recovery must not start: {stderr}"

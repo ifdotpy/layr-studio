@@ -48,7 +48,7 @@ fn decode_records(value: &Value) -> RadioAuthorizationRecords {
         )
         .expect("migrate radio fixture");
     }
-    studio_runtime_store::migrations::migrate_radio_room(&tx).expect("migrate radio fixture");
+    studio_runtime_store::test_fixtures::radio_room(&tx).expect("migrate radio fixture");
     for (id, raw) in &records.projects {
         tx.execute(
             "INSERT INTO runtime_projects VALUES(?1,?2)",
@@ -56,8 +56,8 @@ fn decode_records(value: &Value) -> RadioAuthorizationRecords {
         )
         .expect("project fixture");
     }
-    studio_runtime_store::migrations::migrate_project_teams(&tx).expect("migrate project fixture");
-    studio_runtime_store::migrations::migrate_project_record_kind(&tx)
+    studio_runtime_store::test_fixtures::project_teams(&tx).expect("migrate project fixture");
+    studio_runtime_store::test_fixtures::project_record_kind(&tx)
         .expect("migrate project fixture kinds");
     for (id, raw) in &mut records.rooms {
         *raw = tx

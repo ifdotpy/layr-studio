@@ -60,13 +60,9 @@ fn context_settings_descriptors_match_catalog_and_keep_existing_rows_exact() {
             assert_eq!(entry.sql, index.sql);
         }
     }
-    install_budget_history(&db);
-    let budget = " \n{\"unrelated\": { \"n\": 1.00 }, \"replayConflicts\": []}\t ";
     let manifest =
         " {\"epoch\":[\"t\",2],\"versions\":{\"worktreeReminder\":\"v1\"},\"sequence\":4} ";
     let status = " [ {\"kind\":\"agent\",\"id\":\"a\",\"name\":null,\"status\":\"idle\",\"inFlight\":null,\"parentId\":null,\"error\":\"\",\"future\": { \"n\": 1.00 }} ] ";
-    db.execute("INSERT INTO runtime_budget VALUES('a',?1)", [budget])
-        .unwrap();
     db.execute(
         "INSERT INTO runtime_context_manifests VALUES('a','t',2,4,'e',?1)",
         [manifest],
@@ -84,11 +80,6 @@ fn context_settings_descriptors_match_catalog_and_keep_existing_rows_exact() {
     .unwrap();
     let tx = db.transaction().unwrap();
     let mut typed = canvas_tx(&tx);
-    let budget_raw: String = tx
-        .query_row("SELECT record FROM runtime_budget", [], |row| row.get(0))
-        .unwrap();
-    let record = ExactJson::<BudgetRecordPayload>::from_stored(budget_raw).unwrap();
-    assert_eq!(record.raw(), budget);
     let row = typed
         .get::<ContextManifestsStorageRow>(&("a".into(), "t".into(), 2))
         .unwrap()
@@ -115,12 +106,6 @@ fn context_settings_descriptors_match_catalog_and_keep_existing_rows_exact() {
         0
     );
     tx.commit().unwrap();
-    assert_eq!(
-        db.query_row("SELECT record FROM runtime_budget", [], |r| r
-            .get::<_, String>(0))
-            .unwrap(),
-        budget
-    );
     assert_eq!(
         db.query_row("SELECT record FROM runtime_context_manifests", [], |r| {
             r.get::<_, String>(0)
@@ -203,30 +188,7 @@ fn context_settings_manifest_order_and_reminder_retry_keep_receipt_boundaries() 
 }
 
 #[test]
-fn context_settings_payload_owners_preserve_legacy_budget_and_status_admission() {
-    for raw in [
-        "null",
-        "[]",
-        "true",
-        "42",
-        "\"legacy\"",
-        "{}",
-        r#"{"replayConflicts":null,"replayConflicts":[],"unknown":{"raw":1.00}}"#,
-    ] {
-        let record = ExactJson::<BudgetRecordPayload>::from_stored(raw.into()).unwrap();
-        assert_eq!(record.raw(), raw);
-        assert!(record.value().replay_conflicts().is_empty());
-    }
-    for raw in [
-        r#"{"replayConflicts":null}"#,
-        r#"{"replayConflicts":false}"#,
-        r#"{"replayConflicts":[{}]}"#,
-    ] {
-        assert!(
-            ExactJson::<BudgetRecordPayload>::from_stored(raw.into()).is_err(),
-            "{raw}"
-        );
-    }
+fn context_settings_payload_owners_preserve_status_admission() {
     for raw in [
         r#"[{"kind":"agent","id":"a","status":"idle","inFlight":false,"parentId":null,"error":""}]"#,
         r#"[{"kind":"agent","id":"a","name":null,"status":"idle","inFlight":false,"parentId":null,"error":"","waitsForEvent":null}]"#,
@@ -254,15 +216,13 @@ fn context_settings_new_reports_only_count_legacy_rows() {
     for descriptor in descriptors() {
         descriptor.install_if_absent(&db).unwrap();
     }
-    install_budget_history(&db);
     assert!(
         !crate::canvas_schema::registry()
             .iter()
             .any(|entry| entry.descriptor.name == "runtime_budget")
     );
     db.execute_batch(
-        "INSERT INTO runtime_budget VALUES('a','{\"replayConflicts\":null}');
-        INSERT INTO runtime_model_status VALUES(NULL,NULL,NULL,'[]');
+        "INSERT INTO runtime_model_status VALUES(NULL,NULL,NULL,'[]');
         INSERT INTO runtime_compactions VALUES(NULL,'a');
         INSERT INTO runtime_context_manifests VALUES('a','t',-1,-1,'e','[]');
         INSERT INTO runtime_context_reminders VALUES('a','v','e');
@@ -286,33 +246,4 @@ fn context_settings_new_reports_only_count_legacy_rows() {
         );
         assert!(report.failures.is_empty());
     }
-}
-
-#[test]
-fn context_settings_budget_nested_members_keep_last_value_and_original_evidence() {
-    let raw = r#"{"replayConflicts":[{"identity":{"kind":"response","agent":"old","agent":"a","responseId":"r"},"retainedTotalTokens":1,"retainedTotalTokens":2,"incomingTotalTokens":3}]}"#;
-    let record = ExactJson::<BudgetRecordPayload>::from_stored(raw.into()).unwrap();
-    let [conflict] = record.value().replay_conflicts() else {
-        panic!("one conflict")
-    };
-    assert_eq!(conflict.retained_total_tokens, 2);
-    assert_eq!(record.raw(), raw);
-    assert_eq!(
-        conflict.identity,
-        studio_runtime_schema::usage::ledger::UsageIdentity::Response {
-            agent: "a".into(),
-            response_id: "r".into(),
-        }
-    );
-}
-
-fn install_budget_history(db: &rusqlite::Connection) {
-    let catalog: Catalog = studio_json::from_str(crate::fresh_state::SNAPSHOT).unwrap();
-    let table = catalog
-        .canvas
-        .sqlite_master
-        .iter()
-        .find(|entry| entry.name == "runtime_budget")
-        .unwrap();
-    db.execute_batch(&table.sql).unwrap();
 }

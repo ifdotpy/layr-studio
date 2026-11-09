@@ -3333,60 +3333,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn migration_2026_10_26_registry_precedes_strict_policy_and_driver() {
-        let fixture = TestDir::new();
-        let store = studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
-            .await
-            .expect("fresh state");
-        drop(store);
-        fs::create_dir(fixture.path.join("accounts")).expect("accounts");
-        let path = fixture.path.join("accounts/registry.json");
-        let bytes = br#"{"version":1,"defaultAccountKey":"default","accounts":{"z":{"id":"z","provider":"claude","home":"/fixture/z","label":"Z","source":"fixture","status":"ready"},"default":{"id":"default","provider":null,"home":"/fixture/default","label":"Default","source":"fixture","status":"signedOut"}},"logins":{},"deleteReceipts":{}}"#.to_vec();
-        fs::write(&path, &bytes).expect("legacy registry");
-        assert!(
-            decode_registry(&bytes).is_err(),
-            "ordinary policy has no legacy fallback"
-        );
-        let store = studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
-            .await
-            .expect("dated migration");
-        drop(store);
-        let migrated = fs::read(&path).expect("migrated registry");
-        assert_eq!(
-            studio_json::from_slice::<Value>(&migrated).expect("current registry")["version"],
-            studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION
-        );
-        let (_, order) = decode_registry(&migrated).expect("strict policy");
-        assert_eq!(order.accounts, ["z", "default"], "account order preserved");
-        let driver = AccountDriver::open_with_reader(
-            &path,
-            FakeReader(metadata(AuthStatus::SignedOut, None, None)),
-        )
-        .expect("strict driver");
-        assert_eq!(
-            driver.internal_record("default").expect("default")["provider"],
-            "codex"
-        );
-        assert_eq!(
-            driver.internal_record("z").expect("z")["provider"],
-            "claude"
-        );
-        assert_eq!(fs::read(&path).expect("persisted"), migrated);
-        assert_eq!(
-            {
-                drop(
-                    studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
-                        .await
-                        .expect("repeat"),
-                );
-                fs::read(&path).expect("registry")
-            },
-            migrated
-        );
-    }
-
-    #[tokio::test]
-    async fn migration_2026_10_26_registry_failure_preserves_original_bytes() {
+    async fn baseline_registry_refusal_preserves_original_bytes() {
         let fixture = TestDir::new();
         let store = studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
             .await
@@ -3437,16 +3384,13 @@ mod tests {
         explicit_legacy["version"] = Value::from(1);
         fs::write(&path, studio_json::to_vec(&explicit_legacy).expect("bytes"))
             .expect("old source");
-        drop(
-            studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
-                .await
-                .expect("explicit legacy still crosses version cutoff"),
-        );
-        let upgraded = fs::read(&path).expect("registry");
-        assert_eq!(
-            studio_json::from_slice::<Value>(&upgraded).expect("current")["version"],
-            studio_runtime_schema::shared_values::ACCOUNT_REGISTRY_FORMAT_VERSION
-        );
+        let before = fs::read(&path).expect("old registry bytes");
+        let error = studio_runtime_store::RuntimeStore::open(Some(&fixture.path))
+            .await
+            .err()
+            .expect("old registry refuses");
+        assert!(error.to_string().contains("state too old:"));
+        assert_eq!(fs::read(&path).expect("unchanged registry"), before);
     }
 
     #[cfg(unix)]

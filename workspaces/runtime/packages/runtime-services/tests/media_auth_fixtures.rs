@@ -1,4 +1,4 @@
-//! Closed historical state fixtures shared by the media and authentication witnesses.
+//! Preserved corpus rows shared by the media and authentication witnesses.
 use std::{fs, path::Path};
 
 use serde::Deserialize;
@@ -24,12 +24,7 @@ pub(crate) fn write_state(root: &Path, fixture: &str) {
         if path.exists() {
             fs::remove_file(&path).expect("replace closed fixture database");
         }
-        let database = rusqlite::Connection::open(path).expect("fixture database");
-        studio_runtime_store::sqlite_durability::configure_writer(&database)
-            .expect("fixture database durability");
-        database
-            .execute_batch(&sql)
-            .expect("restore frozen database");
+        crate::recovery_fixtures::database(root, name, &sql);
     }
 }
 

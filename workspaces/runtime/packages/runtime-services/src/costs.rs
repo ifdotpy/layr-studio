@@ -599,31 +599,6 @@ fn usage_reconciliation_on_reader(
             UsageObservation::Response { .. } | UsageObservation::Cumulative { .. } => {}
         }
     }
-    let budget_record: Option<String> = tx
-        .query_row(
-            // Attached Canvas database is outside the generated single-database query grammar.
-            "SELECT record FROM canvas.runtime_budget WHERE id=?1",
-            [agent_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let budget_record = budget_record
-        .map(|raw| {
-            // Preserve the existing distinction between malformed JSON and an invalid budget object.
-            let raw = studio_json::OwnedRawJson::from_string(raw).map_err(StoreError::from)?;
-            studio_json::from_str::<studio_runtime_store::context_settings::BudgetRecordPayload>(
-                raw.as_str(),
-            )
-            .map_err(|_| CostsError::InvalidSessionState)
-        })
-        .transpose()?;
-    let mut replay_conflicts = budget_record
-        .map(|record| record.replay_conflicts().to_vec())
-        .unwrap_or_default();
-    if replay_conflicts.len() > MAX_RECONCILIATION_RESPONSES {
-        budget.truncated = true;
-        replay_conflicts.truncate(MAX_RECONCILIATION_RESPONSES);
-    }
     tx.commit()?;
 
     let mut native = BTreeMap::<String, NativeResponse>::new();
@@ -736,9 +711,9 @@ fn usage_reconciliation_on_reader(
     Ok(
         json!({"agentId":agent_id,"counts":{"responses":responses.len(),"missingRecorded":missing_recorded,
         "missingEvidence":missing_evidence,"mismatched":mismatched,"unknownRecorded":unknown_recorded,"rejectedEntries":budget.rejected},"responses":responses,
-        "files":budget.files,"replayConflicts":replay_conflicts,"gaps":gaps.into_values().collect::<Vec<_>>(),"providerCosts":provider_costs.into_iter().map(|(model,cost)|json!({"model":model,"providerCostUsd":cost})).collect::<Vec<_>>(),
+        "files":budget.files,"gaps":gaps.into_values().collect::<Vec<_>>(),"providerCosts":provider_costs.into_iter().map(|(model,cost)|json!({"model":model,"providerCostUsd":cost})).collect::<Vec<_>>(),
         "totals":{"recordedCostUsd":recorded_total,"evidenceCostUsd":evidence_total,"recordedTokens":recorded_token_total,"evidenceTokens":evidence_token_total},
-        "incomplete":budget.incomplete || budget.truncated || missing_evidence > 0 || unresolved_gaps || !replay_conflicts.is_empty(),"truncated":budget.truncated}),
+        "incomplete":budget.incomplete || budget.truncated || missing_evidence > 0 || unresolved_gaps,"truncated":budget.truncated}),
     )
 }
 
@@ -2007,116 +1982,6 @@ mod tests {
             studio_json::from_slice(&studio_json::to_vec(&cost).expect("serialize cost"))
                 .expect("cost JSON")
         })
-    }
-
-    #[tokio::test]
-    async fn reconciliation_budget_conflicts_preserve_partial_and_duplicate_inputs() {
-        let root = tempdir().unwrap();
-        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
-        store
-            .analytics_transaction::<_, StoreError>(|tx, _| {
-                AnalyticsCaptureRepository::write(
-                    tx,
-                    CaptureTable::Agents,
-                    &json!({"id":"agent","rootId":"agent","provider":"codex"}),
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        for raw in [
-            None,
-            Some("{}"),
-            Some("null"),
-            Some("[]"),
-            Some(r#""scalar""#),
-        ] {
-            let raw = raw.map(str::to_owned);
-            store
-                .transaction(move |tx| {
-                    tx.execute("DELETE FROM runtime_budget WHERE id='agent'", [])?;
-                    if let Some(raw) = raw {
-                        tx.execute(
-                            "INSERT INTO runtime_budget(id,record) VALUES('agent',?1)",
-                            [raw],
-                        )?;
-                    }
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            let result = super::usage_reconciliation(&store, "agent", &Default::default()).unwrap();
-            assert_eq!(result["replayConflicts"], json!([]));
-        }
-        for raw in [
-            r#"{"replayConflicts":null}"#,
-            r#"{"replayConflicts":false}"#,
-            r#"{"replayConflicts":[{}]}"#,
-        ] {
-            let raw = raw.to_owned();
-            store
-                .transaction(move |tx| {
-                    tx.execute(
-                        "UPDATE runtime_budget SET record=?1 WHERE id='agent'",
-                        [raw],
-                    )?;
-                    Ok(())
-                })
-                .await
-                .unwrap();
-            assert!(matches!(
-                super::usage_reconciliation(&store, "agent", &Default::default()),
-                Err(CostsError::InvalidSessionState)
-            ));
-        }
-        let conflict = json!({"identity":{"kind":"response","agent":"agent","responseId":"r"},"retainedTotalTokens":1,"incomingTotalTokens":2});
-        let raw = format!(
-            r#"{{"replayConflicts":null,"replayConflicts":[{conflict}],"unrelated":{{"bad":true}}}}"#
-        );
-        store
-            .transaction(move |tx| {
-                tx.execute(
-                    "UPDATE runtime_budget SET record=?1 WHERE id='agent'",
-                    [raw],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let result = super::usage_reconciliation(&store, "agent", &Default::default()).unwrap();
-        assert_eq!(result["replayConflicts"], json!([conflict]));
-        let many = vec![conflict; super::MAX_RECONCILIATION_RESPONSES + 1];
-        let raw = json!({"replayConflicts":many}).to_string();
-        store
-            .transaction(move |tx| {
-                tx.execute(
-                    "UPDATE runtime_budget SET record=?1 WHERE id='agent'",
-                    [raw],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        let result = super::usage_reconciliation(&store, "agent", &Default::default()).unwrap();
-        assert_eq!(
-            result["replayConflicts"].as_array().unwrap().len(),
-            super::MAX_RECONCILIATION_RESPONSES
-        );
-        assert_eq!(result["truncated"], true);
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "UPDATE runtime_budget SET record='{bad' WHERE id='agent'",
-                    [],
-                )?;
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert!(matches!(
-            super::usage_reconciliation(&store, "agent", &Default::default()),
-            Err(CostsError::Store(_))
-        ));
     }
 
     fn member(record: Value) -> CostMember {

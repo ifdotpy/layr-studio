@@ -17,7 +17,9 @@
 //!   [`turn_completed`] are the only writer and reader. The legacy
 //!   `runtime_completed_turns` table was copied here and dropped.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+#[cfg(test)]
+use rusqlite::Transaction;
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use strum::VariantNames;
 use studio_json::Value;
@@ -199,17 +201,14 @@ fn in_list(values: &[&str]) -> String {
 /// Tables and indexes. Column lists are the contract of the row types above.
 pub fn tables_sql() -> String {
     use studio_db_api::Table;
-    let mut sql: String = [
+    [
         crate::agent_tables::ChatsStorageRow::descriptor(),
         crate::agent_tables::SessionsStorageRow::descriptor(),
         crate::agent_tables::TurnsStorageRow::descriptor(),
     ]
     .into_iter()
     .flat_map(|descriptor| {
-        // Upgrades create the thread index before the chat index, preserving planner tie-breaking.
-        std::iter::once(descriptor.ddl)
-            .chain((descriptor.name == SESSION_TABLE).then_some("CREATE INDEX sessions_thread ON sessions(thread_id,account_key) WHERE state<>'ended'"))
-            .chain(descriptor.indexes.iter().map(|index| index.sql))
+        std::iter::once(descriptor.ddl).chain(descriptor.indexes.iter().map(|index| index.sql))
     })
     .map(|sql| {
         format!(
@@ -221,13 +220,7 @@ pub fn tables_sql() -> String {
             )
         )
     })
-    .collect();
-    // Raw SQL: these delayed indexes are absent from the legacy cold-state catalog.
-    sql.push_str(&format!(
-        "CREATE INDEX IF NOT EXISTS chats_vm ON {CHAT_TABLE}(id) WHERE execution_mode='vm'; {}",
-        status_indexes_sql()
-    ));
-    sql
+    .collect()
 }
 
 /// Names of the generated check triggers, in creation order.
@@ -292,55 +285,9 @@ pub fn owner_delete_trigger_sql() -> String {
     )
 }
 
-fn words(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Create the trigger of each `DROP ...; CREATE ...;` pair in `sql` when it is
-/// missing or differs from the stored one. A trigger that is current is not written.
-fn ensure_triggers(transaction: &Transaction<'_>, sql: &str) -> StoreResult<()> {
-    for pair in sql.split("DROP TRIGGER IF EXISTS ").skip(1) {
-        let name = pair.split(';').next().unwrap_or_default().trim();
-        let create = pair
-            .find("CREATE TRIGGER")
-            .map(|start| pair[start..].trim_end_matches([';', '\n', ' ']))
-            .ok_or(StoreError::RecordContract("generated trigger has no body"))?;
-        let stored: Option<String> = transaction
-            .query_row(
-                "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
-                [name],
-                |row| row.get(0),
-            )
-            .optional()?;
-        if stored.as_deref().map(words) != Some(words(create)) {
-            transaction.execute_batch(&format!("DROP TRIGGER IF EXISTS {name}; {create};"))?;
-        }
-    }
-    Ok(())
-}
-
-/// Everything the migration installs. It runs at every start, so it writes only
-/// what is missing or changed. Returns whether the tables were new.
-pub(crate) fn install(transaction: &Transaction<'_>) -> StoreResult<bool> {
-    let fresh = !crate::schema::table_exists(transaction, CHAT_TABLE)?;
-    transaction.execute_batch(&tables_sql())?;
-    ensure_triggers(transaction, &check_triggers_sql())?;
-    ensure_triggers(transaction, &owner_delete_trigger_sql())?;
-    // Slice 1 mirrored `runtime_completed_turns` into turns with a trigger; the
-    // table is dropped by its migration and its rows are copied by `backfill`.
-    let mirror: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='trigger' AND name='turns_from_completed_turns')",
-        [],
-        |row| row.get(0),
-    )?;
-    if mirror {
-        transaction.execute_batch("DROP TRIGGER turns_from_completed_turns;")?;
-    }
-    Ok(fresh)
-}
-
 /// Copy every completed turn and project every agent, in the caller's transaction.
 /// A row that cannot be projected fails the migration; nothing is skipped.
+#[cfg(test)]
 pub(crate) fn backfill(transaction: &Transaction<'_>) -> StoreResult<()> {
     if crate::schema::table_exists(transaction, "runtime_completed_turns")? {
         let malformed: i64 = transaction.query_row(
@@ -691,15 +638,6 @@ pub fn chat_busy_sql(chat: &str) -> String {
     format!(
         "EXISTS(SELECT 1 FROM {TURN_TABLE} WHERE chat={chat} AND {})",
         unfinished_turn_sql("")
-    )
-}
-
-/// The chat status indexes. [`tables_sql`] includes them; the migration that
-/// drops the agent status indexes creates them on existing state.
-pub fn status_indexes_sql() -> String {
-    format!(
-        "CREATE INDEX IF NOT EXISTS {CAPACITY_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_CAPACITY_STATUSES};
-         CREATE INDEX IF NOT EXISTS {ACTIVE_STATUS_INDEX} ON {CHAT_TABLE}(status) WHERE status IN {CHAT_ACTIVE_STATUSES};"
     )
 }
 
@@ -1103,7 +1041,7 @@ mod tests {
         )
         .unwrap();
         let tx = Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate).unwrap();
-        crate::migrations::m2026_10_30_domain_model_for_tests(&tx).unwrap();
+        crate::domain::backfill(&tx).unwrap();
         tx.commit().unwrap();
 
         let states: Vec<_> = rows
@@ -1172,7 +1110,7 @@ mod tests {
         };
         assert_eq!(turns(&db), 5);
         let tx = Transaction::new_unchecked(&db, rusqlite::TransactionBehavior::Immediate).unwrap();
-        crate::migrations::m2026_10_30_domain_model_for_tests(&tx).unwrap();
+        crate::domain::backfill(&tx).unwrap();
         tx.commit().unwrap();
         assert_eq!(turns(&db), 5);
     }

@@ -1,5 +1,5 @@
 use crate::projection_fixtures as projections;
-use rusqlite::{Connection, params};
+use rusqlite::params;
 use std::{
     collections::BTreeMap,
     fs,
@@ -40,54 +40,6 @@ async fn fixture_store(
     Ok(store)
 }
 
-fn template(root: &Path) {
-    let schema: Value = studio_json::from_str(include_str!(
-        "../../runtime-store/tests/fixtures/live-state-schema.json"
-    ))
-    .expect("schema fixture");
-    for database in ["canvas.sqlite3", "analytics.sqlite3"] {
-        let db = Connection::open(root.join(database)).expect("fixture db");
-        studio_runtime_store::sqlite_durability::configure_writer(&db).expect("fixture durability");
-        db.execute_batch("BEGIN;").expect("fixture durability");
-        let mut objects = schema[database]["sqlite_master"]
-            .as_array()
-            .expect("objects")
-            .iter()
-            .filter(|o| {
-                ![
-                    "runtime_search_next_config",
-                    "runtime_search_next_data",
-                    "runtime_search_next_docsize",
-                    "runtime_search_next_idx",
-                ]
-                .contains(&o["name"].as_str().expect("name"))
-            })
-            .collect::<Vec<_>>();
-        objects.sort_by_key(|o| {
-            (
-                match o["type"].as_str() {
-                    Some("table") => 0,
-                    Some("index") => 1,
-                    Some("view") => 2,
-                    _ => 3,
-                },
-                o["name"].as_str(),
-            )
-        });
-        for object in objects {
-            db.execute_batch(object["sql"].as_str().expect("ddl"))
-                .expect("fixture ddl");
-        }
-        if database == "canvas.sqlite3" {
-            db.execute_batch(include_str!(
-                "../../runtime-store/tests/fixtures/receipt-finish-markers.sql"
-            ))
-            .expect("completed receipt markers");
-        }
-        db.execute_batch("COMMIT")
-            .expect("fixture schema commits once");
-    }
-}
 fn cases() -> Vec<Value> {
     let mut cases: Vec<Value> =
         studio_json::from_str(include_str!("wave7_p10_lifecycle/cases.json"))
@@ -306,7 +258,7 @@ async fn stale_voice_stop_handoff(unknown: bool) {
         .find(|case| case["name"] == "running-False")
         .expect("Python stop case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -457,7 +409,7 @@ async fn production_stop_cancels_usage_and_capacity_continuations_in_store() {
     lead["capacityRetry"] = json!({"id":"retry-stop","status":"scheduled","dueAt":200.0});
 
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(&store, records).await;
     store
@@ -570,7 +522,7 @@ async fn committed_delete_succeeds_when_post_commit_delivery_fails() {
         .find(|case| case["name"] == "delete")
         .expect("delete case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -619,7 +571,7 @@ async fn committed_delete_drains_its_intent_despite_unrelated_cleanup_failure() 
         "cwd":root.path(), "worktreeReady":true, "agentArchive":{"at":1,"epoch":1,"cleanupPending":true},
         "workspaceCleanupIntent":studio_runtime_services::workspace_cleanup_runtime::queued_cleanup_intent("a-broken-cleanup", 1, studio_runtime_services::workspace_cleanup_runtime::CleanupAction::Archive)
     }));
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(&store, records).await;
     let ports = ProductionLifecyclePorts::new(
@@ -683,7 +635,7 @@ async fn production_delete_releases_deleted_worker_work_item() {
     );
 
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(&store, records).await;
     let ports = ProductionLifecyclePorts::new(
@@ -1299,7 +1251,12 @@ async fn python_stop_corpus_complete_records_and_exact_descendants() {
     let cases = cases();
     assert_eq!(cases.len(), 21);
     let base = tempfile::tempdir().expect("template");
-    template(base.path());
+    drop(
+        fixture_store(Some(base.path()))
+            .await
+            .expect("current template"),
+    );
+
     for case in cases {
         let root = tempfile::tempdir().expect("case");
         let store = Arc::new(clone_store(base.path(), root.path()).await);
@@ -1378,7 +1335,12 @@ async fn lifecycle_store_failpoints_and_missing_consumer_leave_no_writes() {
         .find(|c| c["name"] == "unknown-True")
         .expect("unknown corpus");
     let base = tempfile::tempdir().expect("template");
-    template(base.path());
+    drop(
+        fixture_store(Some(base.path()))
+            .await
+            .expect("current template"),
+    );
+
     let store = fixture_store(Some(base.path())).await.expect("open");
     seed(
         &store,
@@ -1524,7 +1486,7 @@ async fn production_interrupt_is_durable_post_commit_and_retry_coalesces_after_r
             .expect("Python active stop/delete corpus case");
         for boundary in ["BEFORE", "AFTER"] {
             let root = tempfile::tempdir().expect("root");
-            template(root.path());
+
             let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
             seed(
                 &store,
@@ -1659,7 +1621,7 @@ async fn production_child_notification_matches_python_corpus() {
         .find(|case| case["name"] == "stop-worker-notification")
         .expect("Python child-stop corpus case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -1797,7 +1759,7 @@ async fn production_restart_scan_settles_durable_deleted_agent_state() {
     deleted["startAttempt"]["activeAtReservation"] = json!(true);
 
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(&store, records).await;
 
@@ -1912,7 +1874,7 @@ async fn composed_delete_stages_voice_sessions_before_rows_are_removed_and_stops
         .find(|case| case["name"] == "delete")
         .expect("delete case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("store"));
     seed(
         &store,
@@ -2030,7 +1992,7 @@ async fn production_interrupt_requires_in_flight_active_turn() {
     lead["turnId"] = json!("turn-stale");
 
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(&store, records).await;
     let ports = ProductionLifecyclePorts::new(
@@ -2104,7 +2066,7 @@ async fn production_unknown_interrupt_is_never_resent_on_repeated_stop() {
         .find(|case| case["name"] == "running-True")
         .expect("Python running stop case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -2179,7 +2141,7 @@ async fn deletion_requires_release_only_for_releasable_deleted_owner_work() {
         .expect("review work corpus case");
     case["records"]["tables"]["runtime_work"][0]["status"] = json!("ready");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -2224,7 +2186,7 @@ async fn effect_adapter_failure_rolls_back_its_own_writes() {
         .find(|c| c["name"] == "unknown-True")
         .expect("case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -2268,7 +2230,7 @@ async fn successful_adapter_cannot_resurrect_stopped_agent() {
         .find(|c| c["name"] == "unknown-True")
         .expect("case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,
@@ -2326,7 +2288,7 @@ async fn successful_adapter_cannot_replace_attempt_or_provider_identity() {
         .expect("case");
     for field in ["startAttempt", "threadId", "accountKey", "provider"] {
         let root = tempfile::tempdir().expect("root");
-        template(root.path());
+
         let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
         seed(
             &store,
@@ -2373,7 +2335,7 @@ async fn lost_wake_preserves_committed_stop_for_restart() {
         .find(|c| c["name"] == "unknown-True")
         .expect("case");
     let root = tempfile::tempdir().expect("root");
-    template(root.path());
+
     let store = Arc::new(fixture_store(Some(root.path())).await.expect("open"));
     seed(
         &store,

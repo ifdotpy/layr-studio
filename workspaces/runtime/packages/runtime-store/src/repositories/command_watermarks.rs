@@ -6,12 +6,6 @@
 
 use rusqlite::{Connection, Transaction, params};
 
-/// Install the watermark owner without changing existing rows or physical DDL.
-pub(crate) fn prepare(connection: &Connection) -> rusqlite::Result<()> {
-    use studio_db_api::Table;
-    crate::settings_schema::ClientCommandWatermarks::descriptor().install_if_absent(connection)
-}
-
 pub struct CommandWatermarks;
 
 /// Durable admission for a send, saved before its asset upload.
@@ -99,7 +93,10 @@ mod tests {
     #[test]
     fn watermark_starts_at_zero_and_never_moves_down() {
         let mut db = Connection::open_in_memory().expect("database");
-        prepare(&db).expect("schema");
+        use studio_db_api::Table;
+        crate::settings_schema::ClientCommandWatermarks::descriptor()
+            .install_if_absent(&db)
+            .expect("schema");
         assert_eq!(CommandWatermarks::applied(&db, "a").unwrap(), 0);
         let tx = db.transaction().unwrap();
         CommandWatermarks::advance(&tx, "a", 5).unwrap();

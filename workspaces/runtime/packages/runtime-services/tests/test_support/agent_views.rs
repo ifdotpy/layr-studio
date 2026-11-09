@@ -40,17 +40,14 @@ pub(crate) fn materialize_agent_defaults(value: &mut Value) {
 }
 
 pub(crate) fn normalize_legacy_agent(value: &mut Value) {
-    normalize_agent(
-        value,
-        studio_runtime_store::migrations::normalize_agent_fixtures,
-    );
+    normalize_agent(value, studio_runtime_store::test_fixtures::normalize_agent);
 }
 
 #[allow(dead_code)]
 pub(crate) fn normalize_creation_agent(value: &mut Value) {
     normalize_agent(
         value,
-        studio_runtime_store::migrations::normalize_agent_creation_fixtures,
+        studio_runtime_store::test_fixtures::normalize_creation,
     );
 }
 

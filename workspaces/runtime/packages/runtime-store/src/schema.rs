@@ -68,25 +68,6 @@ pub(crate) fn receipt_owner_columns() -> Vec<(&'static str, &'static str, String
     ]
 }
 
-pub(crate) fn prepare_receipt_holds(connection: &Connection) -> StoreResult<()> {
-    for (table, name, definition) in receipt_owner_columns()
-        .into_iter()
-        .filter(|(_, name, _)| matches!(*name, "hold_status" | "hold_incident"))
-    {
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_xinfo(?1) WHERE name=?2)",
-            params![table, name],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            connection.execute_batch(&format!(
-                "ALTER TABLE {table} ADD COLUMN {name} {definition}"
-            ))?;
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn prepare_callback_origin(connection: &Connection) -> rusqlite::Result<()> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE type='table' AND name='runtime_tool_requests')",
@@ -334,15 +315,6 @@ inventory::submit! {
     ConnectionFunctionRegistration(crate::entity_scopes::SCOPE_TOMBSTONE_FUNCTION)
 }
 
-/// Functions of the retired work journal triggers. Migration `2026-11-04-work-read-time`
-/// drops the triggers; until it runs on an old database, they call these no-ops.
-const RETIRED_WORK_JOURNAL_FUNCTIONS: [(&str, i32); 2] = [
-    ("sync_work_history_change", 3),
-    ("sync_work_identity_change", 2),
-];
-inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[0].0) }
-inventory::submit! { ConnectionFunctionRegistration(RETIRED_WORK_JOURNAL_FUNCTIONS[1].0) }
-
 fn has_registered_connection_function(name: &str) -> bool {
     inventory::iter::<ConnectionFunctionRegistration>
         .into_iter()
@@ -363,9 +335,6 @@ pub(crate) fn register_python_trigger_functions(connection: &Connection) -> Stor
                 .map_err(|error| rusqlite::Error::UserFunctionError(Box::new(error)))
         },
     )?;
-    for (name, arguments) in RETIRED_WORK_JOURNAL_FUNCTIONS {
-        connection.create_scalar_function(name, arguments, FunctionFlags::empty(), |_| Ok(0))?;
-    }
     connection.create_scalar_function(
         "sync_entity_payload",
         4,

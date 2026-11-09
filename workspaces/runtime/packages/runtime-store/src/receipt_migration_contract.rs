@@ -2,7 +2,7 @@
 use crate::request_results::{AdmittedRequest, ResultEnvelope};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::Serialize;
-use studio_runtime_schema::persistence::{MigrationStatus, enum_check};
+use studio_db_api::Table;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ReceiptMigrationError {
@@ -71,11 +71,7 @@ pub fn seed_expired_before_ms(tx: &Transaction<'_>, cutover_ms: i64) -> Result<(
 
 pub fn prepare_schema(tx: &Transaction<'_>) -> Result<()> {
     crate::receipt_schema::create(tx)?;
-    tx.execute_batch("CREATE TABLE IF NOT EXISTS runtime_orchestration_settings(id TEXT PRIMARY KEY,record TEXT NOT NULL)")?;
-    tx.execute_batch(&format!("CREATE TABLE IF NOT EXISTS runtime_payload_migrations(name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT '{}' {},updated REAL,error TEXT,cutover_ms INTEGER)",MigrationStatus::Pending.as_str(), enum_check::<MigrationStatus>("status")))?;
-    let has_cutover: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM pragma_table_info('runtime_payload_migrations') WHERE name='cutover_ms')",[],|row|row.get(0))?;
-    if !has_cutover {
-        tx.execute_batch("ALTER TABLE runtime_payload_migrations ADD COLUMN cutover_ms INTEGER")?;
-    }
+    crate::settings_schema::OrchestrationSettings::descriptor().install_if_absent(tx)?;
+    crate::settings_schema::PayloadMigrations::descriptor().install_if_absent(tx)?;
     Ok(())
 }

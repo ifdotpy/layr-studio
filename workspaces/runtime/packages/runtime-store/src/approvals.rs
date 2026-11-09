@@ -393,7 +393,7 @@ pub fn from_legacy_record(id: &str, record: &studio_json::Value) -> crate::Store
     if provider_turn && record.get("turnId").is_none() && record["params"].get("turnId").is_none() {
         record["turnId"] = studio_json::json!("turn-0");
     }
-    crate::migrations::approval_from_record(id, &record.to_string())
+    crate::test_fixtures::approval_from_record(id, &record.to_string())
 }
 
 /// Insert or replace a whole row. Writers change a row read with `get`.

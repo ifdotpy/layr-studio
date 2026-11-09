@@ -3374,30 +3374,4 @@ mod startup_registry_tests {
         drop(store);
         drop(supervisor);
     }
-
-    #[tokio::test]
-    async fn startup_registry_migrates_version_one_before_policy_reads() {
-        let state = tempfile::tempdir().expect("state directory");
-        let codex = tempfile::tempdir().expect("profile directory");
-        let store = RuntimeStore::open(Some(state.path())).await.expect("store");
-        let state_root = studio_runtime_store::path_identity::CanonicalPath::existing(store.root())
-            .expect("state root");
-        fs::create_dir_all(state_root.join("accounts")).expect("accounts directory");
-        let path = state_root.join("accounts/registry.json");
-        fs::write(&path, br#"{"version":1,"defaultAccountKey":"default","accounts":{"default":{"id":"default","home":"/fixture","label":"Default","source":"fixture","status":"signedOut"}},"logins":{}}"#).expect("legacy registry");
-        drop(store);
-        let store = RuntimeStore::open(Some(state.path()))
-            .await
-            .expect("locked dated migration");
-        let registry = startup_registry(&state_root, codex.path()).expect("strict startup loading");
-        let bytes = registry.bytes.expect("migrated bytes");
-        let policy =
-            AccountPolicyState::from_startup(Some(&bytes), []).expect("strict startup policy");
-        assert_eq!(
-            policy.accounts().accounts[0].provider.as_str(),
-            Some("codex")
-        );
-        assert_eq!(fs::read(path).expect("durable registry"), bytes);
-        drop(store);
-    }
 }

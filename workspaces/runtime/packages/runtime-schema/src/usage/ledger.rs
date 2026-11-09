@@ -15,10 +15,6 @@ pub const RESPONSE_REPLAY_CONFLICT: &str = "responseReplayConflict";
 /// Maximum analytics source rows examined to establish old gap identities; rows.
 pub const LEGACY_GAP_COVERAGE_ROWS: usize = 256;
 
-/// Maximum retained diagnostic entries per kind in one budget ledger; entries.
-pub const LEDGER_DIAGNOSTIC_ITEMS: usize = 64;
-/// Maximum serialized JSON storage per diagnostic kind; UTF-8 bytes.
-pub const LEDGER_DIAGNOSTIC_BYTES: usize = 16_384;
 /// Maximum native thread identifier length at capture ingress; Unicode characters.
 pub const MAX_NATIVE_THREAD_ID_CHARS: usize = 128;
 /// A durable replay receipt with no known debit; dimensionless row kind.
@@ -59,91 +55,6 @@ impl<'de> Deserialize<'de> for LedgerEpoch {
             Some(_) => Err(serde::de::Error::custom("invalid ledger epoch")),
         }
     }
-}
-
-/// Sticky loss of complete diagnostic coverage, independently for each list.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
-pub struct LedgerDiagnosticOverflow {
-    pub ambiguous_notices: bool,
-    pub faults: bool,
-    pub unresolved_gaps: bool,
-    pub replay_conflicts: bool,
-}
-
-/// Retain a bounded prefix without losing whether evidence was dropped.
-pub fn bound_diagnostics<T: Serialize>(values: &mut Vec<T>) -> bool {
-    let mut bytes = 2;
-    let mut keep = 0;
-    for value in values.iter().take(LEDGER_DIAGNOSTIC_ITEMS) {
-        let Ok(encoded) = studio_json::to_vec(value) else {
-            break;
-        };
-        let next = bytes + encoded.len() + usize::from(keep != 0);
-        if next > LEDGER_DIAGNOSTIC_BYTES {
-            break;
-        }
-        bytes = next;
-        keep += 1;
-    }
-    let overflow = values.len() > keep;
-    values.truncate(keep);
-    overflow
-}
-
-/// Generated persisted-budget constraints share the retention owner's item bound.
-/// Older rows lack the bounds version and remain readable for lazy normalization.
-pub fn budget_state_schema() -> Value {
-    let mut schema: Value = studio_json::from_str(include_str!(
-        "../schemas/persisted-budget-state.schema.json"
-    ))
-    .expect("budget schema");
-    schema["properties"]
-        .as_object_mut()
-        .expect("properties")
-        .remove("diagnosticBoundsVersion");
-    schema["properties"]
-        .as_object_mut()
-        .expect("properties")
-        .remove("unknownReceipts");
-    schema["properties"]["unknownUsage"] = json!({"type":"boolean"});
-    schema.as_object_mut().expect("schema").remove("allOf");
-    schema["properties"]["diagnosticOverflow"] =
-        schemars::schema_for!(LedgerDiagnosticOverflow).to_value();
-    for key in ["ambiguousNotices", "faults", "unresolvedGaps"] {
-        schema["properties"][key] = json!({"type":"array","items":{"type":"string"}});
-    }
-    let mut conflict = schemars::schema_for!(UsageReplayConflict).to_value();
-    if let Some(Value::Object(definitions)) = conflict
-        .as_object_mut()
-        .expect("schema object")
-        .remove("$defs")
-    {
-        schema["$defs"]
-            .as_object_mut()
-            .expect("schema definitions")
-            .extend(definitions);
-    }
-    conflict
-        .as_object_mut()
-        .expect("schema object")
-        .remove("$schema");
-    schema["properties"]["replayConflicts"] = json!({"type":"array", "items":conflict});
-    schema
-}
-
-/// Strict output constraints; legacy reads remain available for bounded normalization.
-pub fn budget_state_write_schema() -> Value {
-    let mut schema = budget_state_schema();
-    for key in [
-        "ambiguousNotices",
-        "faults",
-        "unresolvedGaps",
-        "replayConflicts",
-    ] {
-        schema["properties"][key]["maxItems"] = json!(LEDGER_DIAGNOSTIC_ITEMS);
-    }
-    schema
 }
 
 /// An unknown receipt is immutable because its primary key is the accounting facts.

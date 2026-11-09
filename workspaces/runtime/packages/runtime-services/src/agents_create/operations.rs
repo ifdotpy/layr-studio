@@ -3814,7 +3814,7 @@ mod tests {
             tx.execute("INSERT INTO runtime_agents(id,record) VALUES('lead',?1)", [
                 r#"{"id":"lead","rootId":"lead","epoch":0,"status":"idle","accountKey":"default","provider":"codex","compactions":0,"isLead":true,"concurrency":1,"maxAgents":8,"subagentConcurrencyVersion":2,"agentModeRevision":0}"#,
             ])?;
-            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             Ok::<_, StoreError>(())
         }).await.expect("migrate legacy agent");
         let context = Context {

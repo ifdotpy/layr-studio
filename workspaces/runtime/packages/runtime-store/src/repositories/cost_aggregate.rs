@@ -817,8 +817,6 @@ fn contributions(
 fn ensure_cost_aggregate(path: &Path) -> StoreResult<()> {
     let mut db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_WRITE)?;
     let tx = db.transaction()?;
-    crate::migrations::m2026_10_22_analytics::migrate_2026_10_22_drop_python_cost_projection(&tx)?;
-    crate::migrations::m2026_10_22_analytics::aggregate_columns(&tx)?;
     install(&tx)?;
     tx.commit()?;
     Ok(())
@@ -838,11 +836,11 @@ pub fn install(db: &Connection) -> StoreResult<()> {
     }
     db.execute_batch(&SCOPE_INDEXES.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS "))?;
     db.execute_batch("DROP INDEX IF EXISTS analytics_cost_rows_unmodeled;")?;
-    db.execute_batch(&crate::migrations::m2026_10_27_cost_index::INDEX.replacen(
-        "CREATE INDEX ",
-        "CREATE INDEX IF NOT EXISTS ",
-        1,
-    ))?;
+    db.execute_batch(
+        &crate::analytics_schema::AnalyticsCostGroupsRow::INDEXES[0]
+            .sql
+            .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1),
+    )?;
     Ok(())
 }
 
@@ -2322,61 +2320,6 @@ mod tests {
             })
             .await
             .expect("query plan");
-    }
-
-    #[test]
-    // AuthAction is non-exhaustive; only reads of the guarded table are denied.
-    #[allow(clippy::wildcard_enum_match_arm)]
-    fn typed_usage_legacy_migration_keeps_totals_without_reading_usage_rows() {
-        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
-        let db = Connection::open_in_memory().expect("database");
-        db.execute_batch("CREATE TABLE analytics_usage(seq INTEGER PRIMARY KEY,id TEXT UNIQUE,agent TEXT,root TEXT,thread TEXT,turn TEXT,at REAL,record TEXT);
-            CREATE TABLE analytics_cost_rows(id TEXT PRIMARY KEY,root TEXT NOT NULL,agent TEXT NOT NULL,thread TEXT,turn TEXT,seq INTEGER NOT NULL,at REAL NOT NULL,model TEXT,account_key TEXT,response TEXT,input REAL,cached REAL,cache_write REAL,output REAL,uncached INTEGER NOT NULL,counted INTEGER NOT NULL,counted_model TEXT);
-            CREATE TABLE analytics_cost_groups(root TEXT NOT NULL,model TEXT,account TEXT NOT NULL,input REAL,cached REAL,cache_write REAL,output REAL,uncached INTEGER NOT NULL,count INTEGER NOT NULL);
-            CREATE INDEX analytics_cost_rows_unmodeled ON analytics_cost_rows(root,agent) WHERE model IS NULL;
-            WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<512)
-            INSERT INTO analytics_usage SELECT x,CAST(x AS TEXT),'agent',NULL,'thread','turn',1,'{}' FROM n;
-            INSERT INTO analytics_cost_rows VALUES('legacy','root','agent','thread','turn',1,1,'m','acct',NULL,10,0,0,2,0,1,'m');
-            INSERT INTO analytics_cost_groups VALUES('root','m','acct',10,0,0,2,0,1);").expect("pre-upgrade fixture");
-        db.authorizer(Some(|context: AuthContext<'_>| match context.action {
-            AuthAction::Read {
-                table_name: "analytics_usage",
-                ..
-            } => Authorization::Deny,
-            _ => Authorization::Allow,
-        }))
-        .expect("usage-read guard");
-        crate::migrations::m2026_10_22_analytics::aggregate_columns(&db)
-            .expect("bounded additive migration does not inspect usage records");
-        super::install(&db).expect("current aggregate");
-        let scope_indexes: Vec<String> = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name IN ('analytics_cost_rows_unmodeled','analytics_cost_rows_eligible_unmodeled') ORDER BY name")
-            .expect("index migration").query_map([], |row| row.get(0)).expect("index names")
-            .collect::<Result<_, _>>().expect("indexes");
-        assert_eq!(
-            scope_indexes,
-            vec!["analytics_cost_rows_eligible_unmodeled"]
-        );
-        let groups = super::cost_groups(&db, "root", &Default::default()).expect("legacy groups");
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].tokens.input_tokens, Some(10.0));
-        assert_eq!(groups[0].tokens.output_tokens, Some(2.0));
-        assert_eq!(groups[0].count, 1);
-        assert_eq!(groups[0].tokens.cache_write_input_1h_tokens, None);
-        crate::migrations::m2026_10_22_analytics::aggregate_columns(&db)
-            .expect("migration is idempotent");
-        super::install(&db).expect("current aggregate");
-        assert_eq!(
-            super::cost_groups(&db, "root", &Default::default()).expect("groups"),
-            groups
-        );
-        let split: Option<f64> = db
-            .query_row(
-                "SELECT cache_write_1h FROM analytics_cost_rows WHERE id='legacy'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("legacy fact");
-        assert_eq!(split, None, "migration never invents a legacy lifetime");
     }
 
     #[tokio::test]

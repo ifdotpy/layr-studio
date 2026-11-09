@@ -177,8 +177,7 @@ impl Fixture {
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.threadId') WHERE json_type(record,'$.threadId')='null'", [])?;
             tx.execute("UPDATE runtime_agents SET record=json_remove(record,'$.turnId') WHERE json_type(record,'$.turnId')='null'", [])?;
             tx.execute("UPDATE sync_entities SET hash=sync_entity_hash(payload) WHERE payload IS NOT NULL", [])?;
-            studio_runtime_store::migrations::migrate_2026_10_20(tx)?;
-            studio_runtime_store::migrations::normalize_agent_fixtures(tx)?;
+            studio_runtime_store::test_fixtures::normalize_agent(tx)?;
             // Seed current roots with the explicit review choice assigned on creation.
             tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.reviewDefaults.model',?1) WHERE (json_extract(record,'$.isLead')=1 OR json_extract(record,'$.rootId')=id) AND json_extract(record,'$.reviewDefaults.model') IS NULL", [studio_runtime_schema::provider_kind::initial_review_model()])?;
             for field in studio_runtime_store::agent_volatile::AGENT_VOLATILE_FIELDS {

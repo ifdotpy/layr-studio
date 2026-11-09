@@ -93,6 +93,7 @@ pub struct SyncDocuments {
 #[db(
     legacy_index = "CREATE INDEX sync_entities_tombstone_order\n        ON sync_entities(seq,collection,id)\n        WHERE deleted=1 AND collection NOT LIKE 'transcript:%'"
 )]
+#[db(legacy_index = "CREATE INDEX sync_entities_id ON sync_entities(id)")]
 pub struct SyncEntities {
     #[db(key)]
     pub collection: String,

@@ -49,25 +49,6 @@ const STUDIO_ERROR_INDEX: &str = "runtime_monitor_studio_error_v2";
 /// Retired derived index; its predicate excluded malformed and unclassified failed records.
 const LEGACY_STUDIO_ERROR_INDEX: &str = "runtime_monitor_studio_error";
 
-/// SQL predicate of `STUDIO_ERROR_INDEX` and of the read that must use it.
-/// It mirrors `studio_errors::monitor_kind` in `studio-runtime-services`, which
-/// stays the exact classifier: a `lost` monitor, or a `failed` monitor with no
-/// (or a null) `exitCode`. The owner-stop test is
-/// left to the classifier, so this is a superset of its accepted rows. A
-/// malformed record is selected as a diagnostic, without parsing it in SQL.
-pub(crate) fn legacy_studio_error_predicate() -> String {
-    let statuses = studio_runtime_schema::studio_errors::MonitorStatus::ALL
-        .iter()
-        .map(|status| format!("'{}'", status.as_str()))
-        .collect::<Vec<_>>()
-        .join(",");
-    format!(
-        "CASE WHEN json_valid(record) THEN json_type(record,'$.status') IS NOT 'text' OR json_extract(record,'$.status') NOT IN ({statuses}) OR json_extract(record,'$.status')='lost' OR (json_extract(record,'$.status')='failed' AND json_type(record,'$.exitCode') IS NOT 'integer') ELSE 1 END"
-    )
-}
-
-/// Creation time of a monitor, in Unix seconds; the key of `STUDIO_ERROR_INDEX`.
-pub(crate) const LEGACY_CREATED_EXPRESSION: &str = "CASE WHEN json_valid(record) THEN CASE WHEN json_type(record,'$.created') IN ('integer','real') AND json_extract(record,'$.created')>=0 AND json_extract(record,'$.created')<=1.7976931348623157e308 THEN json_extract(record,'$.created') ELSE 0 END ELSE 0 END";
 const CREATED_EXPRESSION: &str = "monitor_created";
 const STUDIO_ERROR_PREDICATE: &str = "monitor_error_candidate=1";
 
@@ -212,8 +193,8 @@ mod tests {
     #[test]
     fn single_studio_error_candidate_does_not_parse_json_in_sql() {
         thread_local! { static JSON_SQL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
-        let connection = Connection::open_in_memory().expect("database");
-        connection.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL); INSERT INTO runtime_monitors(id,record) VALUES('m','{\"status\":\"lost\",\"created\":100}');").expect("monitor");
+        let connection = crate::fresh_state::test_canvas();
+        connection.execute_batch(" INSERT INTO runtime_monitors(id,record) VALUES('m','{\"status\":\"lost\",\"created\":100}');").expect("monitor");
         connection.trace_v2(
             rusqlite::trace::TraceEventCodes::SQLITE_TRACE_STMT,
             Some(|event| {
@@ -310,10 +291,14 @@ mod tests {
     /// repeated, and serve the stream read without refusing the valid rows.
     #[test]
     fn queued_stream_index_builds_over_malformed_rows_and_serves_the_stream_read() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = Connection::open_in_memory().unwrap();
+        use studio_db_api::Table;
+        connection
+            .execute_batch(crate::item_monitor_terminal::MonitorsRow::DDL)
+            .unwrap();
         connection
             .execute_batch(
-                "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                "
                  INSERT INTO runtime_monitors(id,record) VALUES
                    ('a-malformed','{'),
                    ('b-done','{\"status\":\"completed\",\"streamQueue\":[]}'),
@@ -321,13 +306,6 @@ mod tests {
                    ('d-queued','{\"status\":\"completed\",\"streamQueue\":[{\"cursor\":\"result:d\"}]}');",
             )
             .expect("monitor rows");
-        let tx = connection.transaction().expect("migration");
-        crate::migrations::m2026_10_30_monitor_queue::apply(&tx).expect("queue migration");
-        crate::migrations::m2026_10_30_monitor_errors::apply(&tx).expect("error migration");
-        tx.commit().expect("commit migration");
-        let tx = connection.transaction().expect("retry migration");
-        crate::migrations::m2026_10_30_monitor_queue::apply(&tx).expect("retry queue migration");
-        tx.commit().expect("commit retry");
         MonitorsRepository::prepare_indexes(&connection).expect("index builds");
         MonitorsRepository::prepare_indexes(&connection).expect("repeated build is a no-op");
         let indexes: i64 = connection
@@ -353,7 +331,7 @@ mod tests {
         assert_eq!(head.map(|(id, _)| id).as_deref(), Some("d-queued"));
         connection
             .execute(
-                "UPDATE runtime_monitors SET record='{\"streamQueue\":[]}',stream_pending=0 WHERE id='d-queued'",
+                "UPDATE runtime_monitors SET record='{\"streamQueue\":[]}' WHERE id='d-queued'",
                 [],
             )
             .expect("acknowledge");
@@ -371,10 +349,14 @@ mod tests {
     /// a narrow index search, and a malformed row must not refuse it.
     #[test]
     fn studio_error_candidates_skip_own_exits_and_use_their_index() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = Connection::open_in_memory().unwrap();
+        use studio_db_api::Table;
+        connection
+            .execute_batch(crate::item_monitor_terminal::MonitorsRow::DDL)
+            .unwrap();
         connection
             .execute_batch(
-                r#"CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL);
+                r#"
                  INSERT INTO runtime_monitors(id,record) VALUES
                    ('a-malformed','{'),
                    ('b-lost','{"status":"lost","created":100,"exitCode":null}'),
@@ -390,10 +372,6 @@ mod tests {
                    ('l-running','{"status":"running","created":100}');"#,
             )
             .expect("monitor rows");
-        let tx = connection.transaction().expect("migration");
-        crate::migrations::m2026_10_30_monitor_queue::apply(&tx).expect("queue migration");
-        crate::migrations::m2026_10_30_monitor_errors::apply(&tx).expect("error migration");
-        tx.commit().expect("commit migration");
         MonitorsRepository::prepare_indexes(&connection).expect("index builds");
         MonitorsRepository::prepare_indexes(&connection).expect("repeated build is a no-op");
         let mut ids = MonitorsRepository::studio_error_candidates(&connection, 50.0)

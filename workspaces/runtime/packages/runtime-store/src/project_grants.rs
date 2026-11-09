@@ -134,6 +134,7 @@ pub fn check_triggers_sql() -> String {
 }
 
 /// Create the table, its index and its triggers. The migration runs it once.
+#[cfg(test)]
 pub(crate) fn install(transaction: &Transaction<'_>) -> StoreResult<()> {
     transaction.execute_batch(&tables_sql())?;
     transaction.execute_batch(&check_triggers_sql())?;
@@ -260,8 +261,6 @@ mod tests {
         let mut db = rusqlite::Connection::open_in_memory().expect("database");
         let tx = db.transaction().expect("transaction");
         install(&tx).expect("grant table installs");
-        crate::migrations::m2026_11_02_project_grant_peer_label::apply(&tx)
-            .expect("peer label column");
         tx.commit().expect("commit");
         db
     }
