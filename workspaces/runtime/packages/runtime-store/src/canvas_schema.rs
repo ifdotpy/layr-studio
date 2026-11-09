@@ -14,7 +14,7 @@ pub(crate) fn install(
     Ok(())
 }
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 40] {
+pub(crate) fn registry() -> [studio_db_api::Registration; 47] {
     db_schema![Canvas;
         crate::interaction_tables::ApprovalsRow,
         crate::interaction_tables::GraphEdgesRow,
@@ -56,5 +56,12 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 40] {
         crate::access_tables::ServerLinksRow,
         crate::access_tables::ServerOutputToolsRow,
         crate::access_tables::ServerRetiredRow,
+        crate::context_settings::AssetsStorageRow,
+        crate::context_settings::CompactionsStorageRow,
+        crate::context_settings::ContextManifestsStorageRow,
+        crate::context_settings::ContextRemindersStorageRow,
+        crate::context_settings::ModelStatusStorageRow,
+        crate::context_settings::ProfilesStorageRow,
+        crate::context_settings::TranscriptRevisionsStorageRow,
     ]
 }

@@ -41,15 +41,7 @@ const SUMMARY_RESERVE: usize = 100;
 const CLEANUP_COUNT: usize = 3;
 
 type Versions = BTreeMap<String, String>;
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct Epoch(pub Option<String>, pub u64);
-
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
-pub struct ContextManifest {
-    pub epoch: Epoch,
-    pub versions: Versions,
-    pub sequence: u64,
-}
+pub use studio_runtime_store::context_settings::{ContextEpoch as Epoch, ContextManifest};
 #[derive(Clone, Serialize, Deserialize)]
 pub struct DeveloperContext {
     pub epoch: Epoch,

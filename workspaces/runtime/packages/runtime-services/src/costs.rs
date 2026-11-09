@@ -551,15 +551,6 @@ pub fn usage_reconciliation(
         .with_cost_reader(move |db| usage_reconciliation_on_reader(db, &root, &agent_id, &accounts))
 }
 
-// This reader historically admits partial budget objects and only owns this
-// field. An omitted field is empty; explicit null remains invalid.
-#[derive(Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BudgetReplayConflicts {
-    #[serde(default)]
-    replay_conflicts: Vec<studio_runtime_schema::usage::ledger::UsageReplayConflict>,
-}
-
 fn usage_reconciliation_on_reader(
     db: &mut rusqlite::Connection,
     root: &Path,
@@ -610,23 +601,25 @@ fn usage_reconciliation_on_reader(
     }
     let budget_record: Option<String> = tx
         .query_row(
+            // Attached Canvas database is outside the generated single-database query grammar.
             "SELECT record FROM canvas.runtime_budget WHERE id=?1",
             [agent_id],
             |row| row.get(0),
         )
         .optional()?;
     let budget_record = budget_record
-        .map(|raw| studio_json::from_str::<Value>(&raw))
-        .transpose()
-        .map_err(StoreError::from)?;
-    let mut replay_conflicts = match budget_record {
-        Some(record @ Value::Object(_)) => {
-            BudgetReplayConflicts::deserialize(record)
-                .map_err(|_| CostsError::InvalidSessionState)?
-                .replay_conflicts
-        }
-        _ => Vec::new(),
-    };
+        .map(|raw| {
+            // Preserve the existing distinction between malformed JSON and an invalid budget object.
+            let raw = studio_json::OwnedRawJson::from_string(raw).map_err(StoreError::from)?;
+            studio_json::from_str::<studio_runtime_store::context_settings::BudgetRecordPayload>(
+                raw.as_str(),
+            )
+            .map_err(|_| CostsError::InvalidSessionState)
+        })
+        .transpose()?;
+    let mut replay_conflicts = budget_record
+        .map(|record| record.replay_conflicts().to_vec())
+        .unwrap_or_default();
     if replay_conflicts.len() > MAX_RECONCILIATION_RESPONSES {
         budget.truncated = true;
         replay_conflicts.truncate(MAX_RECONCILIATION_RESPONSES);

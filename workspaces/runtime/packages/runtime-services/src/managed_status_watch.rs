@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE;
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use studio_json::{Map, Value, json};
@@ -311,10 +311,14 @@ fn record_status_revision(
     if actor.root_id.0 != snapshot.root_id {
         return Err(StatusError::Stale);
     }
-    tx.execute(
-        "INSERT OR REPLACE INTO runtime_model_status(agent,revision,at,record) VALUES(?1,?2,?3,?4)",
-        params![actor_id, snapshot.revision, now, snapshot.records],
+    studio_runtime_store::context_settings::put_model_status(
+        tx,
+        actor_id,
+        &snapshot.revision,
+        now,
+        snapshot.records.clone(),
     )?;
+    // Bounded history pruning uses a subquery, outside the generated query grammar.
     tx.execute(
         "DELETE FROM runtime_model_status WHERE agent=?1 AND revision NOT IN \
          (SELECT revision FROM runtime_model_status WHERE agent=?1 ORDER BY at DESC LIMIT ?2)",
@@ -410,35 +414,42 @@ fn status_snapshot(
 
     let since_revision = args.get("since_revision").and_then(Value::as_str);
     let previous = if let Some(since_revision) = since_revision {
-        tx.query_row(
-            "SELECT record FROM runtime_model_status WHERE agent=?1 AND revision=?2",
-            params![actor_id, since_revision],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
+        studio_runtime_store::context_settings::model_status(tx, actor_id, since_revision)?
     } else {
         None
     };
-    let old_records = previous
-        .as_deref()
-        .map(studio_json::from_str::<Vec<Value>>)
-        .transpose()
-        .map_err(|_| {
-            StatusError::Store(StoreError::InvalidStoredRecord {
-                object: "runtime_model_status",
-                id: actor_id.to_owned(),
-            })
-        })?
-        .unwrap_or_default();
+    let old_records =
+        previous
+            .as_deref()
+            .map(
+                studio_json::from_str::<
+                    studio_runtime_store::context_settings::ModelStatusRecordPayload,
+                >,
+            )
+            .transpose()
+            .map_err(|_| {
+                StatusError::Store(StoreError::InvalidStoredRecord {
+                    object: "runtime_model_status",
+                    id: actor_id.to_owned(),
+                })
+            })?
+            .map(|payload| payload.0)
+            .unwrap_or_default();
     let mut old = BTreeMap::<String, Value>::new();
     for record in old_records {
-        let Some(key) = valid_status_key(&record) else {
+        let Some(key) = record.key() else {
             return Err(StatusError::Store(StoreError::InvalidStoredRecord {
                 object: "runtime_model_status",
                 id: actor_id.to_owned(),
             }));
         };
-        if old.insert(key, record).is_some() {
+        if old
+            .insert(
+                key,
+                studio_json::from_str(record.raw()).map_err(StoreError::from)?,
+            )
+            .is_some()
+        {
             return Err(StatusError::Store(StoreError::InvalidStoredRecord {
                 object: "runtime_model_status",
                 id: actor_id.to_owned(),
@@ -757,42 +768,6 @@ fn status_key(record: &Value) -> Option<String> {
         record.get("kind")?.as_str()?,
         record.get("id")?.as_str()?
     ))
-}
-
-fn valid_status_key(record: &Value) -> Option<String> {
-    let key = status_key(record)?;
-    let nullable_string = |field: &str| {
-        record
-            .get(field)
-            .is_some_and(|value| value.is_null() || value.is_string())
-    };
-    let valid = match record.get("kind")?.as_str()? {
-        "agent" => {
-            nullable_string("name")
-                && record.get("status")?.is_string()
-                && record
-                    .get("inFlight")
-                    .is_some_and(|value| value.is_null() || value.is_boolean())
-                && nullable_string("parentId")
-                && record.get("error")?.is_string()
-                && record
-                    .get("waitsForEvent")
-                    .is_none_or(|value| value.is_string())
-        }
-        "monitor" => {
-            nullable_string("agent")
-                && record.get("status")?.is_string()
-                && record
-                    .get("exitCode")
-                    .is_some_and(|value| value.is_null() || value.is_i64() || value.is_u64())
-                && record.get("error")?.is_string()
-        }
-        _ => false,
-    };
-    if !valid || record.get("id")?.as_str()?.is_empty() {
-        return None;
-    }
-    Some(key)
 }
 
 fn is_terminal_agent(status: &AgentStatus) -> bool {

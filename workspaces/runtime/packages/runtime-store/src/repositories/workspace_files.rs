@@ -1,9 +1,12 @@
 //! Read workspace upload records written by the Python runtime.
 
-use crate::records::{Table, TranscriptAssetId, TranscriptAssetRecord};
+use crate::context_settings::AssetsStorageRow;
+use crate::json_record_codec::RawJsonRecord;
+use crate::peer_update_settings::{canvas_read, canvas_tx};
+use crate::records::TranscriptAssetRecord;
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, Transaction};
 
 /// Compatibility name for callers that used the pre-typed asset wrapper.
 pub type StoredWorkspaceAsset = TranscriptAssetRecord;
@@ -35,10 +38,14 @@ pub struct WorkspaceFilesRepository;
 
 impl WorkspaceFilesRepository {
     pub fn asset(connection: &Connection, id: &str) -> StoreResult<Option<TranscriptAssetRecord>> {
-        Table::<TranscriptAssetRecord>::new(connection).get(&TranscriptAssetId::from(id))
+        Ok(canvas_read(connection)
+            .get::<AssetsStorageRow>(&(id.to_owned(),))?
+            // clone: consuming accessor pending
+            .map(|row| row.record.record().clone()))
     }
 
     pub fn asset_ids(connection: &Connection) -> StoreResult<Vec<String>> {
+        // Scalar projection deliberately does not decode possibly damaged asset records.
         let mut statement = connection.prepare_cached("SELECT id FROM runtime_assets")?;
         let rows = statement.query_map([], |row| row.get(0))?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -46,7 +53,7 @@ impl WorkspaceFilesRepository {
     }
 
     pub fn insert_asset(
-        connection: &Connection,
+        connection: &Transaction<'_>,
         id: &str,
         record: &TranscriptAssetRecord,
     ) -> StoreResult<()> {
@@ -56,10 +63,10 @@ impl WorkspaceFilesRepository {
                 id: id.to_owned(),
             });
         }
-        connection.execute(
-            "INSERT INTO runtime_assets(id,record) VALUES (?1,?2)",
-            params![id, studio_json::to_string(record)?],
-        )?;
+        canvas_tx(connection).insert(&AssetsStorageRow {
+            id: id.to_owned(),
+            record: RawJsonRecord::from_record(connection, record)?,
+        })?;
         Ok(())
     }
 }
@@ -78,7 +85,14 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         let record = studio_json::json!({"id":"asset","agent":"a","name":"file","path":root.path().join("file"),"mime":"text/plain","image":false,"size":1.0,"hash":"h","created":0.0,"future":{"keep":true}});
         let typed = crate::TranscriptAssetRecord::from_value(record.clone()).unwrap();
-        assert!(WorkspaceFilesRepository::insert_asset(&db, "other", &typed).is_err());
+        assert!(
+            WorkspaceFilesRepository::insert_asset(
+                &db.unchecked_transaction().unwrap(),
+                "other",
+                &typed
+            )
+            .is_err()
+        );
         let mut invalid = record.clone();
         invalid["image"] = studio_json::json!("bad");
         assert!(crate::TranscriptAssetRecord::from_value(invalid).is_err());
@@ -88,7 +102,9 @@ mod tests {
                 .unwrap(),
             0
         );
-        WorkspaceFilesRepository::insert_asset(&db, "asset", &typed).unwrap();
+        let tx = db.unchecked_transaction().unwrap();
+        WorkspaceFilesRepository::insert_asset(&tx, "asset", &typed).unwrap();
+        tx.commit().unwrap();
         assert_eq!(
             WorkspaceFilesRepository::asset(&db, "asset")
                 .unwrap()

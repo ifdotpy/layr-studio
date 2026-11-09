@@ -5,12 +5,11 @@ use rusqlite::{Connection, OpenFlags, types::ValueRef};
 use serde::Serialize;
 use studio_json::Value;
 
-use crate::ProfileRecord;
 use crate::StoreResult;
 use crate::records::{
     AgentRecord, AnnotationRecord, CheckpointRecord, EventMetadataRecord, JsonRecord,
-    MonitorRecord, PlanRecord, RuleRecord, TaskRecord, TerminalRecord, TranscriptAssetRecord,
-    TranscriptItemRecord, UsageResumeRecord, WorkItemRecord, WorkspaceOperationRecord,
+    MonitorRecord, PlanRecord, RuleRecord, TaskRecord, TerminalRecord, TranscriptItemRecord,
+    UsageResumeRecord, WorkItemRecord, WorkspaceOperationRecord,
 };
 
 pub use studio_db_api::StateCheckFailure;
@@ -54,9 +53,7 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
         check_table::<WorkspaceOperationRecord>(&connection)?,
         check_table::<RuleRecord>(&connection)?,
         check_table::<TranscriptItemRecord>(&connection)?,
-        check_table::<TranscriptAssetRecord>(&connection)?,
         check_table::<EventMetadataRecord>(&connection)?,
-        check_table::<ProfileRecord>(&connection)?,
         check_table::<crate::MoveRecord>(&connection)?,
         check_table::<crate::ProjectLocationRecord>(&connection)?,
     ];

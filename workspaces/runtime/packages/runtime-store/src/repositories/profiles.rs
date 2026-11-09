@@ -3,9 +3,13 @@
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::records::{JsonRecord, RecordKeyMode, RecordQueryShape, Table};
+use crate::context_settings::ProfilesStorageRow;
+use crate::json_record_codec::RawJsonRecord;
+use crate::peer_update_settings::{canvas_read, canvas_tx};
+use crate::records::{JsonRecord, RecordKeyMode, RecordQueryShape};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
+use studio_db_api::{Table as _, static_sql};
 
 const PROFILE_TABLE: TableRequirement = TableRequirement {
     name: "runtime_profiles",
@@ -93,21 +97,30 @@ pub struct ProfileRepository;
 
 impl ProfileRepository {
     pub fn list(connection: &Connection) -> StoreResult<Vec<ProfileRecord>> {
-        Table::<ProfileRecord>::new(connection).list()
+        // Legacy listing order is the implicit rowid, not a declared column.
+        Ok(canvas_read(connection)
+            .query::<ProfilesStorageRow>(
+                static_sql!(ProfilesStorageRow::SELECT, " ORDER BY rowid"),
+                &[],
+            )?
+            .into_iter()
+            // clone: consuming accessor pending
+            .map(|row| row.record.record().clone())
+            .collect())
     }
 
     pub fn save(transaction: &Transaction<'_>, profile: &ProfileRecord) -> StoreResult<()> {
-        let table = Table::<ProfileRecord>::new(transaction);
-        if table.get(&profile.id)?.is_some() {
-            table.update(profile)?;
-        } else {
-            table.put(profile)?;
-        }
+        // Preserve the existing refusal to overwrite a malformed stored profile.
+        canvas_tx(transaction).get::<ProfilesStorageRow>(&(profile.id.clone(),))?;
+        canvas_tx(transaction).upsert(&ProfilesStorageRow {
+            id: profile.id.clone(),
+            record: RawJsonRecord::from_record(transaction, profile)?,
+        })?;
         Ok(())
     }
 
     pub fn delete(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        Table::<ProfileRecord>::new(transaction).delete(&id.to_owned())?;
+        canvas_tx(transaction).delete::<ProfilesStorageRow>(&(id.to_owned(),))?;
         Ok(())
     }
 
@@ -143,8 +156,10 @@ mod tests {
                 [],
             )
             .unwrap();
-        let table = Table::<ProfileRecord>::new(&connection);
         let id = "profile".to_owned();
+        let replacement: ProfileRecord = studio_json::from_str(
+            r#"{"id":"profile","name":"Replacement","role":"reviewer","model":"m","effort":null,"instructions":""}"#,
+        ).unwrap();
         for (raw, valid) in [
             (
                 r#"{"id":"profile","name":"Reviewer","role":"reviewer","model":"m","effort":null,"instructions":""}"#,
@@ -169,7 +184,13 @@ mod tests {
                     (&id, raw),
                 )
                 .unwrap();
-            assert_eq!(table.get(&id).is_ok(), valid);
+            assert_eq!(ProfileRepository::list(&connection).is_ok(), valid);
+            let transaction = connection.unchecked_transaction().unwrap();
+            assert_eq!(
+                ProfileRepository::save(&transaction, &replacement).is_ok(),
+                valid
+            );
+            transaction.rollback().unwrap();
         }
     }
 }

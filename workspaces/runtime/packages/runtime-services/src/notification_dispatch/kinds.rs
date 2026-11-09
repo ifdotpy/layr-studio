@@ -6,7 +6,7 @@ use super::{
     update_common_agent_fields,
 };
 use super::{items, notices, questions};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::OptionalExtension;
 use studio_json::{Value, json};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
@@ -244,13 +244,8 @@ pub(super) fn apply(
                     reason: "stale-turn-item".into(),
                 }));
             }
-            let already_compacted = tx
-                .query_row_cached(
-                    "SELECT EXISTS(SELECT 1 FROM runtime_compactions WHERE id=?1)",
-                    [&task_key],
-                    |r| r.get(0),
-                )
-                .map_err(StoreError::from)?;
+            let already_compacted =
+                studio_runtime_store::context_settings::was_compacted(tx, &task_key)?;
             let decision =
                 items::non_text(agent, method, p, snapshot.task(), already_compacted, at)?;
             if let Some(mut task) = decision.task {
@@ -319,11 +314,7 @@ pub(super) fn apply(
                         at,
                     )?;
                 }
-                tx.execute_cached(
-                    "INSERT OR IGNORE INTO runtime_compactions VALUES (?1,?2)",
-                    params![task_key, id],
-                )
-                .map_err(StoreError::from)?;
+                studio_runtime_store::context_settings::remember_compaction(tx, &task_key, &id)?;
             }
             if let Some(item) = decision.item {
                 let key = p["item"]["id"]

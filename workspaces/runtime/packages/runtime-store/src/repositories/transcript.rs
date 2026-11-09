@@ -123,14 +123,9 @@ pub struct TranscriptRepository;
 impl TranscriptRepository {
     /// Durable conversation content revision, independent of other agents.
     pub fn revision(connection: &Connection, agent: &str) -> crate::StoreResult<i64> {
-        Ok(connection
-            .query_row_cached(
-                "SELECT revision FROM runtime_transcript_revisions WHERE agent=?1",
-                [agent],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(0))
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::context_settings::TranscriptRevisionsStorageRow>(&(agent.to_owned(),))?
+            .map_or(0, |row| row.revision))
     }
 
     /// Project an already checked transcript snapshot using the existing durable sync cursor.

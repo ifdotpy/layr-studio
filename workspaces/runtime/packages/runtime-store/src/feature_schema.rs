@@ -32,9 +32,7 @@ const FEATURE_SCHEMA: &str = r#"
                 id INTEGER PRIMARY KEY CHECK(id=1), phase TEXT NOT NULL,
                 cursor INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL);
             CREATE VIRTUAL TABLE IF NOT EXISTS runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');
-            CREATE TABLE IF NOT EXISTS runtime_assets (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_checkpoints (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_profiles (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_lead_requests (id TEXT PRIMARY KEY, agent TEXT NOT NULL, signature TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_sidebar_order (id TEXT PRIMARY KEY, record TEXT NOT NULL);
@@ -106,7 +104,6 @@ const FEATURE_SCHEMA: &str = r#"
             INSERT OR IGNORE INTO runtime_access_settings VALUES(1,1);
             CREATE TABLE IF NOT EXISTS runtime_access_local_alias (
           id INTEGER PRIMARY KEY CHECK(id=1), alias TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_model_status (agent TEXT, revision TEXT, at REAL, record TEXT, PRIMARY KEY(agent,revision));
             CREATE TABLE IF NOT EXISTS runtime_native_notices (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='');
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_cleanup_v2 ON runtime_agents(source_cleanup_account_key,source_cleanup_thread_id) WHERE source_cleanup_phase IN ('planned','submitted');
@@ -151,6 +148,13 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     }
     crate::voice_storage::prepare(transaction)?;
     crate::access_tables::prepare_features(transaction)?;
+    for descriptor in [
+        crate::context_settings::AssetsStorageRow::descriptor(),
+        crate::context_settings::ProfilesStorageRow::descriptor(),
+        crate::context_settings::ModelStatusStorageRow::descriptor(),
+    ] {
+        descriptor.install_if_absent(transaction)?;
+    }
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }

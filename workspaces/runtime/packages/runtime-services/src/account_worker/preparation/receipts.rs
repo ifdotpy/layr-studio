@@ -167,7 +167,13 @@ pub(crate) fn accept_turn(
         return Ok(());
     }
     ensure_context_tables(tx)?;
-    let current=tx.query_row("SELECT record FROM runtime_context_manifests WHERE agent=?1 AND thread_id=?2 AND compactions=?3",rusqlite::params![context.intent.agent_id,prepared.epoch.0.as_deref().unwrap_or(""),i64::try_from(prepared.epoch.1).map_err(|_|invalid("manifest compactions"))?],|r|r.get::<_,String>(0)).optional()?.map(|s|studio_json::from_str::<turn::ContextManifest>(&s).map_err(|_|invalid("manifest"))).transpose()?;
+    let current = studio_runtime_store::context_settings::manifest(
+        tx,
+        &context.intent.agent_id,
+        prepared.epoch.0.as_deref().unwrap_or(""),
+        i64::try_from(prepared.epoch.1).map_err(|_| invalid("manifest compactions"))?,
+    )
+    .map_err(|_| invalid("manifest"))?;
     let transition = turn::accept(
         prepared,
         &turn::NativeReceipt {
@@ -193,10 +199,19 @@ fn write_manifest(
     manifest: &turn::ContextManifest,
 ) -> Result<(), WorkerError> {
     ensure_context_tables(tx)?;
-    tx.execute("INSERT INTO runtime_context_manifests(agent,thread_id,compactions,sequence,event_id,record) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(agent,thread_id,compactions) DO UPDATE SET sequence=excluded.sequence,event_id=excluded.event_id,record=excluded.record WHERE excluded.sequence>=runtime_context_manifests.sequence",rusqlite::params![agent,manifest.epoch.0.as_deref().unwrap_or(""),i64::try_from(manifest.epoch.1).map_err(|_|invalid("manifest compactions"))?,i64::try_from(manifest.sequence).map_err(|_|invalid("manifest sequence"))?,event,json!(manifest).to_string()])?;
-    if let Some(version) = manifest.versions.get("worktreeReminder") {
-        tx.execute("INSERT OR IGNORE INTO runtime_context_reminders(agent,version,event_id) VALUES(?1,?2,?3)",rusqlite::params![agent,version,event])?;
-    }
+    studio_runtime_store::context_settings::write_manifest(
+        tx,
+        &studio_runtime_store::context_settings::ContextManifestsStorageRow {
+            agent: agent.into(),
+            thread_id: manifest.epoch.0.clone().unwrap_or_default(),
+            compactions: i64::try_from(manifest.epoch.1)
+                .map_err(|_| invalid("manifest compactions"))?,
+            sequence: i64::try_from(manifest.sequence).map_err(|_| invalid("manifest sequence"))?,
+            event_id: event.into(),
+            record: studio_runtime_store::json_record_codec::ExactJson::from_value(manifest)
+                .map_err(|_| invalid("manifest"))?,
+        },
+    )?;
     Ok(())
 }
 /// Call after exact positive event delivery has been authenticated by the repair owner.
@@ -223,6 +238,29 @@ pub fn remember_delivered_manifests(
 #[cfg(test)]
 mod tests {
     use super::ThreadRejection;
+
+    #[test]
+    fn manifest_receipt_retries_keep_historical_serializer_bytes() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        let tx = db.transaction().unwrap();
+        let manifest = super::turn::ContextManifest {
+            epoch: super::turn::Epoch(Some("thread".into()), 1),
+            versions: std::collections::BTreeMap::from([("worktreeReminder".into(), "v".into())]),
+            sequence: 7,
+        };
+        let historical = studio_json::json!(&manifest).to_string();
+        for event in ["accepted", "retried"] {
+            super::write_manifest(&tx, "agent", event, &manifest).unwrap();
+            let stored: String = tx
+                .query_row(
+                    "SELECT record FROM runtime_context_manifests WHERE agent='agent'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, historical);
+        }
+    }
 
     /// The stored error names the failed check of each rejection.
     #[test]

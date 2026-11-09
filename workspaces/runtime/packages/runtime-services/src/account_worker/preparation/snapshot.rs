@@ -1417,16 +1417,9 @@ pub(super) fn submission_snapshot(
         });
     }
     ensure_context_tables(tx)?;
-    let mut stmt = tx.prepare(
-        "SELECT record FROM runtime_context_manifests WHERE agent=?1 ORDER BY sequence DESC",
-    )?;
-    let delivered_manifests: Vec<turn::ContextManifest> = stmt
-        .query_map([&intent.agent_id], |r| r.get::<_, String>(0))?
-        .map(|r| {
-            let r = r?;
-            studio_json::from_str(&r).map_err(|_| invalid("manifest"))
-        })
-        .collect::<Result<Vec<_>, WorkerError>>()?;
+    let delivered_manifests =
+        studio_runtime_store::context_settings::manifests(tx, &intent.agent_id)
+            .map_err(|_| invalid("manifest"))?;
     let epoch = turn::Epoch(
         text(record, "threadId")?,
         optional(record, "compactions")?.unwrap_or(0),
@@ -1486,6 +1479,7 @@ pub(super) fn submission_snapshot(
         .collect::<BTreeSet<_>>();
     for id in ids {
         use rusqlite::OptionalExtension;
+        // Legacy attachment projection admits partial records; the complete row decoder is stricter.
         let raw: String = tx
             .query_row(
                 "SELECT record FROM runtime_assets WHERE id=?1",
@@ -1512,10 +1506,8 @@ pub(super) fn submission_snapshot(
             view: v.as_object().ok_or_else(|| invalid("asset"))?.clone(),
         });
     }
-    let mut stmt = tx.prepare("SELECT version FROM runtime_context_reminders WHERE agent=?1")?;
-    let delivered_reminders = stmt
-        .query_map([&intent.agent_id], |r| r.get(0))?
-        .collect::<Result<BTreeSet<String>, _>>()?;
+    let delivered_reminders =
+        studio_runtime_store::context_settings::reminders(tx, &intent.agent_id)?;
     let events = intent
         .events
         .iter()
@@ -1576,7 +1568,7 @@ pub(super) fn submission_snapshot(
     ))
 }
 pub(crate) fn ensure_context_tables(tx: &Transaction<'_>) -> Result<(), WorkerError> {
-    tx.execute_batch("CREATE TABLE IF NOT EXISTS runtime_context_manifests(agent TEXT NOT NULL,thread_id TEXT NOT NULL,compactions INTEGER NOT NULL,sequence INTEGER NOT NULL,event_id TEXT NOT NULL,record TEXT NOT NULL,PRIMARY KEY(agent,thread_id,compactions)); CREATE TABLE IF NOT EXISTS runtime_context_reminders(agent TEXT NOT NULL,version TEXT NOT NULL,event_id TEXT NOT NULL,PRIMARY KEY(agent,version));")?;
+    studio_runtime_store::context_settings::ensure_context_tables(tx)?;
     Ok(())
 }
 

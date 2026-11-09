@@ -47,6 +47,7 @@ pub use repositories::process_actions::{
 pub use repositories::terminals;
 pub use repositories::{command_watermarks, outbox, remote_outbox, request_results};
 mod canvas_schema;
+pub mod context_settings;
 pub mod json_record_codec;
 pub mod peer_update_settings;
 mod schema;
