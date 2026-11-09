@@ -1,0 +1,15 @@
+[package]
+name = "studio-db-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+serde.workspace = true
+studio-json = { path = "../json" }
+studio-db-api-derive = { path = "../db-api-derive" }
+
+[lints]
+workspace = true

@@ -68,6 +68,23 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
         check_table::<crate::MoveRecord>(&connection)?,
         check_table::<crate::ProjectLocationRecord>(&connection)?,
     ];
+    for registration in crate::peer_update_settings::registry() {
+        let (row_count, rejected_count) = (registration.check)(&connection)?;
+        tables.push(StateCheckTable {
+            table: registration.descriptor.name,
+            row_count,
+            rejected_count,
+            failures: if rejected_count == 0 {
+                Vec::new()
+            } else {
+                vec![StateCheckFailure {
+                    pointer: String::new(),
+                    keyword: "storageType".into(),
+                    count: rejected_count,
+                }]
+            },
+        });
+    }
     tables.extend(check_system_tables(&connection)?);
     tables.extend(crate::repositories::federation_messaging::check_state(
         &connection,

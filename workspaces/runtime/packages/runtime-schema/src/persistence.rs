@@ -74,6 +74,24 @@ pub enum CapturedScope {
 }
 
 macro_rules! domain {
+    ($(#[$meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident = $code:literal => $wire:literal),+ $(,)? }) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::VariantNames)]
+        #[cfg_attr(feature = "sqlite", derive(studio_db_api::DbEnum))]
+        #[repr(i64)]
+        $(#[$meta])*
+        pub enum $name {
+            $($(#[$variant_meta])* #[serde(rename = $wire)] #[strum(serialize = $wire)] $variant = $code),+
+        }
+        impl $name {
+            pub const fn as_str(self) -> &'static str { match self { $(Self::$variant => $wire),+ } }
+        }
+        impl std::str::FromStr for $name {
+            type Err = ();
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                match value { $($wire => Ok(Self::$variant),)+ _ => Err(()) }
+            }
+        }
+    };
     ($(#[$meta:meta])* $name:ident { $($(#[$variant_meta:meta])* $variant:ident => $wire:literal),+ $(,)? }) => {
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, strum::VariantNames)]
         $(#[$meta])*
@@ -490,6 +508,38 @@ impl RequestIdentity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "sqlite")]
+    domain!(IntegerCodecWitness { Pending = 7 => "pendingWire", Complete = 23 => "completeWire" });
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn integer_enum_preserves_wire_spelling_and_permanent_codes() {
+        use studio_db_api::DbValue;
+        assert_eq!(
+            studio_json::to_string(&IntegerCodecWitness::Pending).expect("wire"),
+            "\"pendingWire\""
+        );
+        assert_eq!(
+            IntegerCodecWitness::CODE_NAMES,
+            &[(7, "Pending"), (23, "Complete")]
+        );
+        assert_eq!(IntegerCodecWitness::Pending.as_str(), "pendingWire");
+        assert_eq!(
+            "completeWire".parse::<IntegerCodecWitness>(),
+            Ok(IntegerCodecWitness::Complete)
+        );
+        let db = rusqlite::Connection::open_in_memory().expect("db");
+        let decoded: IntegerCodecWitness = db
+            .query_row("SELECT ?1", [IntegerCodecWitness::Complete], |row| {
+                row.get(0)
+            })
+            .expect("codec");
+        assert_eq!(decoded, IntegerCodecWitness::Complete);
+        assert!(
+            db.query_row("SELECT 99", [], |row| row.get::<_, IntegerCodecWitness>(0))
+                .is_err()
+        );
+    }
 
     #[test]
     fn reset_credit_outcome_wire_values_round_trip() {

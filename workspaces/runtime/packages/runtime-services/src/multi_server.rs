@@ -201,14 +201,10 @@ fn server_list(
 /// The peer auto-update setting (docs/peer-updates.md). The Python backend creates its table;
 /// without the table the setting has its contract default, on.
 pub fn peer_auto_update(tx: &rusqlite::Transaction<'_>) -> Result<bool, StoreError> {
-    Ok(tx
-        .query_row(
-            "SELECT auto_update FROM runtime_peer_update_settings WHERE id=1",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .optional()?
-        .is_none_or(|value| value != 0))
+    Ok(
+        studio_runtime_store::peer_update_settings::PeerUpdateSettings::get(tx)?
+            .is_none_or(|row| row.auto_update != 0),
+    )
 }
 
 fn table_exists(tx: &rusqlite::Transaction<'_>, table: &str) -> Result<bool, StoreError> {
@@ -348,7 +344,7 @@ pub async fn manage(
                     tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1", [i64::from(*value)])?;
                 }
                 if let Some(value) = auto_update.value() {
-                    tx.execute("INSERT INTO runtime_peer_update_settings(id,auto_update) VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET auto_update=excluded.auto_update", [i64::from(*value)])?;
+                    studio_runtime_store::peer_update_settings::PeerUpdateSettings { id: 1, auto_update: i64::from(*value) }.upsert(tx)?;
                 }
                 audit_write(tx,"local",&actor,"settings")?;
             }

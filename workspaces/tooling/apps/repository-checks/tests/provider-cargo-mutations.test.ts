@@ -64,6 +64,8 @@ test(
         "pnpm-lock.yaml",
         ".oxfmtrc.json",
         "workspaces/runtime/packages/runtime-schema",
+        "workspaces/runtime/packages/db-api",
+        "workspaces/runtime/packages/db-api-derive",
         "workspaces/runtime/packages/observable-codegen",
         "workspaces/runtime/packages/json",
         "workspaces/runtime/packages/request-signing",
@@ -92,7 +94,7 @@ test(
         "utf8",
       ).replace(
         /members = \[[\s\S]*?\]/,
-        'members = ["workspaces/runtime/packages/runtime-schema", "workspaces/runtime/packages/observable-codegen", "workspaces/runtime/packages/json", "workspaces/runtime/packages/request-signing", "workspaces/client/packages/client-domain"]',
+        'members = ["workspaces/runtime/packages/runtime-schema", "workspaces/runtime/packages/db-api", "workspaces/runtime/packages/db-api-derive", "workspaces/runtime/packages/observable-codegen", "workspaces/runtime/packages/json", "workspaces/runtime/packages/request-signing", "workspaces/client/packages/client-domain"]',
       );
       writeFileSync(path.join(copy, "Cargo.toml"), manifest);
       const env = {

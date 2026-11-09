@@ -33,7 +33,7 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     let report: studio_json::Value =
         studio_json::from_str(&output).expect("state-check prints JSON");
     let tables = report["tables"].as_array().expect("table reports exist");
-    assert_eq!(tables.len(), 38);
+    assert_eq!(tables.len(), 39);
     let names: std::collections::BTreeSet<_> = tables
         .iter()
         .map(|table| table["table"].as_str().expect("table name is a string"))
@@ -58,6 +58,12 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         assert_eq!(table["row_count"], 0);
         assert_eq!(table["rejected_count"], 0);
     }
+    let peer_settings = tables
+        .iter()
+        .find(|table| table["table"] == "runtime_peer_update_settings")
+        .expect("registered pilot is checked");
+    assert_eq!(peer_settings["row_count"], 1);
+    assert_eq!(peer_settings["rejected_count"], 0);
     let agents = tables
         .iter()
         .find(|table| table["table"] == "runtime_agents")

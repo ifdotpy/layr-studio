@@ -79,6 +79,13 @@ inherits = "ci"
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    package(=studio-db-api) |
+    package(=studio-db-api-derive) |
+    (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -540,6 +547,13 @@ platform = 'cfg(target_os = "linux")'
 # Sidebar pilot covers strict nullable contracts, pure policy, and source-commit SSE deltas.
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 default-filter = '''
+    (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
+    (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
+    (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
+    (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    package(=studio-db-api) |
+    package(=studio-db-api-derive) |
+    (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |

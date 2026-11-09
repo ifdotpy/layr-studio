@@ -8,7 +8,11 @@ use studio_json::{Map, Value};
 use crate::{StoreError, StoreResult};
 
 pub(crate) fn prepare_peer_update_settings(connection: &Connection) -> StoreResult<()> {
-    connection.execute_batch("CREATE TABLE IF NOT EXISTS runtime_peer_update_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_update INTEGER NOT NULL)")?;
+    for registration in crate::peer_update_settings::registry() {
+        if !table_exists(connection, registration.descriptor.name)? {
+            connection.execute_batch(registration.descriptor.ddl)?;
+        }
+    }
     Ok(())
 }
 

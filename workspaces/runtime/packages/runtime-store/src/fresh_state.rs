@@ -302,7 +302,15 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         let sql = entry["sql"]
             .as_str()
             .ok_or(StoreError::RecordContract("fresh schema object has no DDL"))?;
-        transaction.execute_batch(sql)?;
+        let generated = if schema_name == "canvas.sqlite3" {
+            crate::peer_update_settings::registry()
+                .into_iter()
+                .find(|registration| entry["name"].as_str() == Some(registration.descriptor.name))
+        } else {
+            None
+        };
+        transaction
+            .execute_batch(generated.map_or(sql, |registration| registration.descriptor.ddl))?;
     }
     let version = snapshot[schema_name]["pragma_user_version"]
         .as_i64()
@@ -311,7 +319,6 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         ))?;
     transaction.pragma_update(None, "user_version", version)?;
     if schema_name == "canvas.sqlite3" {
-        crate::schema::prepare_peer_update_settings(&transaction)?;
         crate::schema::prepare_item_turn_scope(&transaction)?;
         crate::bootstrap::prepare_runtime_event_indexes(&transaction)?;
         crate::AgentRepository::prepare_change_journal(&transaction)?;

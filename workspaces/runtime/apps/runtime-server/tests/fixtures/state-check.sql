@@ -8,3 +8,6 @@ CREATE TABLE runtime_execution_attempts(id TEXT PRIMARY KEY, record TEXT NOT NUL
 INSERT INTO runtime_execution_attempts VALUES
 ('attempt-good', '{"id":"attempt-good","epoch":2}'),
 ('attempt-bad', '{"id":"attempt-bad","epoch":"wrong"}');
+
+CREATE TABLE runtime_peer_update_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_update INTEGER NOT NULL);
+INSERT INTO runtime_peer_update_settings VALUES(1, 0);

@@ -52,3 +52,12 @@ by the Rust build. Such a file starts with `// @ts-check`, takes its types from
 their TypeScript owners, and belongs to a checked project.
 
 The [JavaScript exception list](../workspaces/tooling/apps/repository-checks/javascript-exceptions.json) owns the permitted files and their purposes; tracked generated JavaScript follows the same rule, while untracked build output is outside the check.
+
+## Rust persistence exception
+
+[Issue #1002, question 2](https://github.com/ifdotpy/codex-studio/issues/1002)
+approves Rust for `workspaces/runtime/packages/db-api` and `db-api-derive`.
+These crates generate positional rusqlite bindings and static SQL for Rust row
+owners. Application codecs, transaction adapters and their Rust contract tests
+stay with the existing runtime persistence owners. TypeScript remains the owner
+of Node, Electron and browser code.

@@ -8,6 +8,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+studio-db-api = { path = "../db-api" }
 data-encoding = { workspace = true }
 inventory = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }

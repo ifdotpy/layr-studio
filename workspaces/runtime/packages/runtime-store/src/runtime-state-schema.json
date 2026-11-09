@@ -2299,6 +2299,13 @@
         "sql": "CREATE INDEX runtime_work_idle_owner ON runtime_work(owner,json_extract(record,'$.status'))",
         "table": "runtime_work",
         "type": "index"
+      },
+      {
+        "create_order": 319,
+        "name": "runtime_peer_update_settings",
+        "sql": "CREATE TABLE runtime_peer_update_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_update INTEGER NOT NULL)",
+        "table": "runtime_peer_update_settings",
+        "type": "table"
       }
     ]
   },

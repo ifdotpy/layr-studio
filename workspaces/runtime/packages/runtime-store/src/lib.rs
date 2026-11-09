@@ -43,6 +43,8 @@ pub use repositories::process_actions::{
 };
 pub use repositories::terminals;
 pub use repositories::{command_watermarks, outbox, remote_outbox, request_results};
+pub mod json_record_codec;
+pub mod peer_update_settings;
 mod schema;
 mod sqlite_actor;
 pub mod sqlite_durability;
@@ -1451,6 +1453,7 @@ impl RuntimeStore {
                     .map_err(StoreError::from)?;
                 install_profile(connection, StoreDatabaseKind::Canvas);
                 connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
+                rusqlite::vtab::array::load_module(connection)?;
                 sqlite_durability::configure_synchronous(connection).map_err(StoreError::from)?;
                 schema::verify_serving_pragmas(connection, "canvas.sqlite3")?;
                 schema::register_python_trigger_functions(connection)?;
@@ -2566,6 +2569,7 @@ fn open_database(path: &Path, flags: OpenFlags) -> StoreResult<Connection> {
     configure_read_pages(&connection, "main")?;
     install_profile(&connection, database);
     connection.set_prepared_statement_cache_capacity(STATEMENT_CACHE_CAPACITY);
+    rusqlite::vtab::array::load_module(&connection)?;
     connection.busy_timeout(std::time::Duration::from_millis(u64::from(
         DATABASE_BUSY_TIMEOUT_MS,
     )))?;

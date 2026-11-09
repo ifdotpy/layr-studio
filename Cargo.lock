@@ -6754,6 +6754,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio-db-api"
+version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "studio-db-api-derive",
+ "studio-json",
+]
+
+[[package]]
+name = "studio-db-api-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "studio-diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -6961,6 +6980,7 @@ dependencies = [
  "sha2 0.11.1",
  "strum",
  "studio-client-domain",
+ "studio-db-api",
  "studio-json",
  "studio-observable-codegen",
  "studio-request-signing",
@@ -7076,6 +7096,7 @@ dependencies = [
  "serde_path_to_error",
  "sha2 0.11.1",
  "strum",
+ "studio-db-api",
  "studio-json",
  "studio-runtime-providers",
  "studio-runtime-schema",

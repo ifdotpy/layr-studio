@@ -11,6 +11,8 @@ members = [
     "workspaces/runtime/apps/process-supervisor",
     "workspaces/runtime/apps/runtime-server",
     "workspaces/runtime/packages/operations",
+    "workspaces/runtime/packages/db-api",
+    "workspaces/runtime/packages/db-api-derive",
     "workspaces/runtime/packages/observable-codegen",
     "workspaces/runtime/packages/read-models",
     "workspaces/runtime/packages/json",
@@ -80,7 +82,7 @@ process-wrap = { version = "=10.0.1", default-features = false, features = ["pro
 tempfile = "=3.27.0"
 futures-executor = "=0.3.34"
 futures-util = "=0.3.34"
-rusqlite = { version = "=0.40.2", features = ["bundled", "functions", "hooks", "trace"] }
+rusqlite = { version = "=0.40.2", features = ["bundled", "functions", "hooks", "trace", "array"] }
 tokio-rusqlite = "=0.8.0"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 sha2 = "=0.11.1"
