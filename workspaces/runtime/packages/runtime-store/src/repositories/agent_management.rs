@@ -1,8 +1,11 @@
 //! Bounded snapshot reads for lifecycle decisions; no independent connection.
-use crate::schema::{SchemaRequirements, TableRequirement};
+use crate::peer_update_settings::canvas_read;
+use crate::schema::{SchemaRequirements, TableRequirement, table_exists};
+use crate::voice_storage::{VoiceApprovalRow, VoiceDeliveryRow, VoiceRecordRow, VoiceSessionRow};
 use crate::{AgentRecord, AgentRepository, StoreError, StoreResult, Table, WorkItemRecord};
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
+use studio_db_api::{DbProjection, Table as _, db_query};
 use studio_json::{Value, json};
 
 const RECORD_TABLES: &[&str] = &[
@@ -21,12 +24,7 @@ pub fn read(connection: &Connection) -> StoreResult<BTreeMap<String, Vec<Value>>
 /// whole records. It reads the `parent_id` column (`runtime_agent_parent_v2` index).
 /// A malformed record has no parent; its own read fails later if it is in scope.
 pub fn read_agent_topology(connection: &Connection) -> StoreResult<Vec<(String, Option<String>)>> {
-    let exists: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_agents')",
-        [],
-        |row| row.get(0),
-    )?;
-    if !exists {
+    if !table_exists(connection, "runtime_agents")? {
         return Ok(Vec::new());
     }
     let mut statement = connection.prepare_cached(
@@ -74,12 +72,7 @@ pub fn read_for_agents(
 ) -> StoreResult<BTreeMap<String, Vec<Value>>> {
     let mut tables = BTreeMap::new();
     for table in RECORD_TABLES {
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |r| r.get(0),
-        )?;
-        if !exists {
+        if !table_exists(connection, table)? {
             continue;
         }
         let mut records = Vec::new();
@@ -121,12 +114,7 @@ pub fn read_for_agents(
         tables.insert((*table).to_owned(), records);
     }
     // Approvals are typed rows, read as their JSON form under the table name.
-    let approvals_exist: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='approvals')",
-        [],
-        |r| r.get(0),
-    )?;
-    if approvals_exist {
+    if table_exists(connection, "approvals")? {
         let mut rows = Vec::new();
         if let Some(owners) = owners {
             for owner in owners {
@@ -177,46 +165,32 @@ pub fn read_for_agents(
     tables.insert("runtime_events".to_owned(), events);
     // These lazy tables use columns rather than JSON records. Session liveness
     // distinguishes stop from deletion, which also removes saved voice data.
-    for table in [
-        "voice_sessions",
-        "voice_records",
-        "voice_deliveries",
-        "voice_approvals",
-    ] {
-        let exists: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |r| r.get(0),
-        )?;
-        if !exists {
-            continue;
-        }
-        let columns = if table == "voice_sessions" {
-            "id,agent,state,ended"
-        } else {
-            "id,agent"
-        };
-        let rows = if let Some(owners) = owners {
-            let mut statement = connection
-                .prepare_cached(&format!("SELECT {columns} FROM {table} WHERE agent=?1"))?;
-            let mut rows = Vec::new();
-            for owner in owners {
-                rows.extend(
-                    statement
-                        .query_map([owner], |r| voice_row(table, r))?
-                        .collect::<Result<Vec<_>, _>>()?,
-                );
+    macro_rules! voice_snapshot {
+        ($row:ident $(, $field:ident: $ty:ty)*) => {{
+            #[derive(DbProjection, serde::Serialize)]
+            #[db(of = $row)]
+            struct Snapshot { id: String, agent: String, $($field: $ty,)* }
+            if table_exists(connection, $row::NAME)? {
+                let rows = if let Some(owners) = owners {
+                    let mut rows = Vec::new();
+                    for owner in owners {
+                        rows.extend(db_query!(canvas_read(connection), $row, project(Snapshot),
+                            filter($row::AGENT.eq_ref(owner.as_str())))?);
+                    }
+                    rows
+                } else {
+                    db_query!(canvas_read(connection), $row, project(Snapshot))?
+                };
+                tables.insert($row::NAME.to_owned(), rows.iter()
+                    .map(|row| serde::Serialize::serialize(row, studio_json::value::Serializer))
+                    .collect::<Result<Vec<_>, _>>()?);
             }
-            rows
-        } else {
-            let mut statement =
-                connection.prepare_cached(&format!("SELECT {columns} FROM {table}"))?;
-            statement
-                .query_map([], |r| voice_row(table, r))?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        tables.insert(table.to_owned(), rows);
+        }};
     }
+    voice_snapshot!(VoiceSessionRow, state: Option<String>, ended: Option<f64>);
+    voice_snapshot!(VoiceRecordRow);
+    voice_snapshot!(VoiceDeliveryRow);
+    voice_snapshot!(VoiceApprovalRow);
     Ok(tables)
 }
 
@@ -236,15 +210,6 @@ fn parse_record(
     }
     crate::agent_volatile::merge_if_agent(connection, table, &id, &mut record)?;
     Ok(record)
-}
-
-fn voice_row(table: &str, row: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
-    let mut value = json!({"id":row.get::<_,String>(0)?,"agent":row.get::<_,String>(1)?});
-    if table == "voice_sessions" {
-        value["state"] = json!(row.get::<_, Option<String>>(2)?);
-        value["ended"] = json!(row.get::<_, Option<f64>>(3)?);
-    }
-    Ok(value)
 }
 
 pub fn write(transaction: &Transaction<'_>, table: &str, record: &Value) -> StoreResult<()> {
@@ -338,13 +303,7 @@ pub fn read_reserved_operations(
         .iter()
         .filter_map(|agent| agent.get("workspaceReservationId").and_then(Value::as_str))
         .collect::<BTreeSet<_>>();
-    let exists: bool = connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' \
-         AND name='runtime_workspace_operations')",
-        [],
-        |row| row.get(0),
-    )?;
-    if ids.is_empty() || !exists {
+    if ids.is_empty() || !table_exists(connection, "runtime_workspace_operations")? {
         return Ok(Vec::new());
     }
     let mut statement =
@@ -432,6 +391,73 @@ mod tests {
     use super::{read, read_for_agents};
     use rusqlite::Connection;
     use std::collections::BTreeSet;
+
+    #[test]
+    fn voice_snapshot_preserves_lazy_scope_nulls_and_owner_order() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_events(id TEXT,agent TEXT,status TEXT,epoch INTEGER)",
+        )
+        .unwrap();
+        assert!(super::read_agent_topology(&db).unwrap().is_empty());
+        assert!(
+            super::read_reserved_operations(&db, &[])
+                .unwrap()
+                .is_empty()
+        );
+        let absent = read(&db).unwrap();
+        assert!(!absent.contains_key("voice_sessions"));
+        crate::voice_storage::prepare(&db).unwrap();
+        db.execute_batch("INSERT INTO voice_sessions(id,agent,created,state,ended,provider_scope) VALUES
+            ('z-first','z',1,NULL,NULL,'bad JSON'),
+            ('a-second','a',2,'ready',3.25,'bad JSON'),
+            ('z-third','z',3,'ended',4.5,'bad JSON'),
+            ('other','other',4,'ready',NULL,'bad JSON');
+            INSERT INTO voice_records(id,agent,session,kind,text,item_id,previous_item_id,payload,created)
+            VALUES('r','z','','','','','','bad JSON',1);
+            INSERT INTO voice_deliveries VALUES('d','a','bad JSON','',NULL);
+            INSERT INTO voice_approvals VALUES('v','z','','','','bad JSON');").unwrap();
+        let all = read(&db).unwrap();
+        assert_eq!(
+            all["voice_sessions"]
+                .iter()
+                .map(|r| r["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["z-first", "a-second", "z-third", "other"]
+        );
+        assert_eq!(
+            all["voice_sessions"][0],
+            studio_json::json!({"id":"z-first","agent":"z","state":null,"ended":null})
+        );
+        let scoped = read_for_agents(&db, Some(&BTreeSet::from(["z".into(), "a".into()]))).unwrap();
+        assert_eq!(
+            scoped["voice_sessions"]
+                .iter()
+                .map(|r| r["id"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            ["a-second", "z-first", "z-third"]
+        );
+        assert_eq!(scoped["voice_sessions"][0]["ended"], 3.25);
+        for (table, id) in [
+            ("voice_records", "r"),
+            ("voice_deliveries", "d"),
+            ("voice_approvals", "v"),
+        ] {
+            assert_eq!(
+                scoped[table],
+                vec![studio_json::json!({"id":id,"agent": if id == "d" { "a" } else { "z" }})]
+            );
+        }
+        let empty = read_for_agents(&db, Some(&BTreeSet::new())).unwrap();
+        for table in [
+            "voice_sessions",
+            "voice_records",
+            "voice_deliveries",
+            "voice_approvals",
+        ] {
+            assert!(empty[table].is_empty());
+        }
+    }
 
     #[test]
     fn malformed_approval_write_preserves_the_stored_row() {

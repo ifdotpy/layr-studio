@@ -85,6 +85,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(access_tables::tests::)) |
@@ -568,6 +569,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(access_tables::tests::)) |
