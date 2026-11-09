@@ -7060,6 +7060,7 @@ dependencies = [
  "socket2",
  "spki",
  "strum",
+ "studio-db-api",
  "studio-json",
  "studio-operations",
  "studio-read-models",

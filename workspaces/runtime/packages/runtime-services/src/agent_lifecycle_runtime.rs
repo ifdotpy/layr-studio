@@ -104,6 +104,7 @@ pub trait LifecyclePorts: Send + Sync {
     ) -> Result<(), ManagementError> {
         let has_sessions = tx
             .query_row(
+                // Aggregate lookup has no generated scalar query.
                 "SELECT EXISTS(SELECT 1 FROM voice_sessions \
              WHERE agent=?1 AND ended IS NULL AND native_thread IS NOT NULL \
              AND native_thread != '' AND connection_id IS NOT NULL AND connection_id != '')",

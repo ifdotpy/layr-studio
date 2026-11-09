@@ -105,22 +105,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_room_member_first ON runtime_rooms(json_extract(record,'$.members[0]'));
             CREATE INDEX IF NOT EXISTS runtime_room_member_second ON runtime_rooms(json_extract(record,'$.members[1]'));
             CREATE INDEX IF NOT EXISTS runtime_room_many_members ON runtime_rooms(json_array_length(record,'$.members')) WHERE json_array_length(record,'$.members')>2;
-            CREATE TABLE IF NOT EXISTS voice_sessions (
-                  id TEXT PRIMARY KEY, agent TEXT NOT NULL, created REAL NOT NULL,
-                  ended REAL, sdp TEXT, answer TEXT, native_thread TEXT,
-                  account_key TEXT, connection_id TEXT, state TEXT, error TEXT);
-            CREATE TABLE IF NOT EXISTS voice_records (
-                  seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL,
-                  agent TEXT NOT NULL, session TEXT NOT NULL, kind TEXT NOT NULL,
-                  text TEXT NOT NULL, item_id TEXT NOT NULL, previous_item_id TEXT NOT NULL,
-                  payload TEXT NOT NULL, created REAL NOT NULL);
-            CREATE INDEX IF NOT EXISTS voice_records_agent ON voice_records(agent,seq);
-            CREATE TABLE IF NOT EXISTS voice_approvals (id TEXT PRIMARY KEY, agent TEXT NOT NULL, speech TEXT NOT NULL, transcript TEXT NOT NULL, status TEXT NOT NULL, result TEXT);
-            CREATE TABLE IF NOT EXISTS voice_deliveries (
-                  id TEXT PRIMARY KEY, agent TEXT NOT NULL, records TEXT NOT NULL, text TEXT NOT NULL, edited_text TEXT);
-            CREATE TABLE IF NOT EXISTS voice_speech_requests (
-                id TEXT PRIMARY KEY, session TEXT NOT NULL, record_id TEXT NOT NULL,
-                state TEXT NOT NULL, error TEXT);
             CREATE TABLE IF NOT EXISTS user_terminals (id TEXT PRIMARY KEY, record TEXT NOT NULL, output TEXT NOT NULL, offset INTEGER NOT NULL, output_generation INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS user_terminal_output (terminal TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (terminal,start));
             CREATE INDEX IF NOT EXISTS user_terminal_output_end ON user_terminal_output (terminal,end);
@@ -214,6 +198,7 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     ] {
         descriptor.install_if_absent(transaction)?;
     }
+    crate::voice_storage::prepare(transaction)?;
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }

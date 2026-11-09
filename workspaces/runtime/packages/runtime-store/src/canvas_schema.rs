@@ -3,7 +3,7 @@ use crate::peer_update_settings::{Canvas, PeerUpdateSettings};
 use crate::work_history::{WorkDecisionsStorageRow, WorkReleasesStorageRow, WorkResultsStorageRow};
 use studio_db_api::db_schema;
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 12] {
+pub(crate) fn registry() -> [studio_db_api::Registration; 17] {
     db_schema![Canvas;
         crate::interaction_tables::ApprovalsRow,
         crate::interaction_tables::GraphEdgesRow,
@@ -14,6 +14,11 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 12] {
         PeerUpdateSettings,
         crate::interaction_tables::RequestRow,
         crate::interaction_tables::RoomRow,
+        crate::voice_storage::VoiceApprovalRow,
+        crate::voice_storage::VoiceDeliveryRow,
+        crate::voice_storage::VoiceRecordRow,
+        crate::voice_storage::VoiceSessionRow,
+        crate::voice_storage::VoiceSpeechRequestRow,
         WorkDecisionsStorageRow,
         WorkReleasesStorageRow,
         WorkResultsStorageRow,

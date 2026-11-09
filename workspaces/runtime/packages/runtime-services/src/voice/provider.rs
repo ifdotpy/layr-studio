@@ -13,6 +13,12 @@ use std::{
     sync::{Mutex, OnceLock, Weak},
     time::{Duration, Instant},
 };
+use studio_db_api::db_update;
+use studio_runtime_store::json_record_codec::ExactJson;
+use studio_runtime_store::peer_update_settings::canvas_tx;
+use studio_runtime_store::voice_storage::{
+    VoiceApprovalRow, VoiceSessionRow as SessionStorageRow, VoiceSpeechRequestRow,
+};
 
 use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
@@ -55,10 +61,18 @@ pub async fn recover_after_restart(
 ) -> Result<usize, VoiceProviderError> {
     let changed = store
         .transaction(move |transaction| {
-            Ok(transaction.execute(
-                "UPDATE voice_sessions SET state='lost',ended=?1,error=?2 \
-             WHERE state IS NOT NULL AND ended IS NULL",
-                rusqlite::params![now, RESTARTED_SESSION_ERROR],
+            Ok(db_update!(
+                canvas_tx(transaction),
+                SessionStorageRow,
+                set(
+                    SessionStorageRow::STATE = &Some("lost".into()),
+                    SessionStorageRow::ENDED = &Some(now),
+                    SessionStorageRow::ERROR = &Some(RESTARTED_SESSION_ERROR.to_owned())
+                ),
+                filter(
+                    SessionStorageRow::STATE.is_not_null(),
+                    SessionStorageRow::ENDED.is_null()
+                )
             )?)
         })
         .await?;
@@ -202,6 +216,7 @@ pub(super) fn saved_scope(
     session: &str,
 ) -> Result<studio_runtime_schema::persistence::CapturedScope, VoiceProviderError> {
     let raw: Option<String> = connection.query_row(
+        // Scalar projection avoids decoding unrelated stored columns.
         "SELECT provider_scope FROM voice_sessions WHERE id=?1",
         [session],
         |row| row.get(0),
@@ -377,6 +392,7 @@ impl VoiceCallbackActor {
         let ids = store
             .read_async("runtime-services/voice/provider", move |connection| {
                 let mut statement = connection.prepare_cached(
+                    // Scalar projection avoids decoding unrelated stored columns.
                     "SELECT id FROM voice_sessions WHERE account_key=?1 AND connection_id=?2 AND ended IS NULL",
                 )?;
                 statement
@@ -452,6 +468,7 @@ async fn active_session_id(
         .read_async("runtime-services/voice/provider", move |connection| {
             connection
                 .query_row(
+                    // Scalar projection avoids decoding unrelated stored columns.
                     "SELECT id FROM voice_sessions WHERE native_thread=?1 AND account_key=?2 AND connection_id=?3 AND ended IS NULL ORDER BY created DESC LIMIT 1",
                     rusqlite::params![key.0, key.1, key.2],
                     |row| row.get(0),
@@ -679,10 +696,7 @@ async fn prepare_end(
         let agent = super::checked_agent(transaction, &agent_id)
             .map_err(|_| VoiceProviderError::ContextUnavailable)?;
         let Some(row) = load_row(transaction, id.as_str(), &agent_id)? else {
-            transaction.execute(
-                "INSERT INTO voice_sessions(id,agent,created,ended,state) VALUES(?1,?2,?3,?3,'ended')",
-                rusqlite::params![id.as_str(),&agent_id,now],
-            )?;
+            canvas_tx(transaction).insert(&SessionStorageRow {id:id.as_str().to_owned(),agent:agent_id.clone(),created:now,ended:Some(now),state:Some("ended".into()),..Default::default()})?;
             return Ok((json!({"session_id":id.as_str(),"state":"ended","sdp":null,"error":null,"ended":now}), None));
         };
         let session = VoiceSession::from_row(row)?;
@@ -911,15 +925,26 @@ pub async fn approve_monitor(
             let saved =
                 studio_json::to_string(&result).map_err(|_| VoiceProviderError::Operation)?;
             let update_id = request_id.clone();
-            let update_saved = saved;
-            store.transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
-                    transaction.execute(
-                        "UPDATE voice_approvals SET status='accepted',result=?1 WHERE id=?2 AND status='uncertain'",
-                        rusqlite::params![update_saved, update_id],
+            let update_saved = Some(
+                ExactJson::from_stored(saved).map_err(studio_runtime_store::StoreError::from)?,
+            );
+            store
+                .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
+                    db_update!(
+                        canvas_tx(transaction),
+                        VoiceApprovalRow,
+                        set(
+                            VoiceApprovalRow::STATUS = &"accepted".to_owned(),
+                            VoiceApprovalRow::RESULT = &update_saved
+                        ),
+                        filter(
+                            VoiceApprovalRow::ID.eq(&update_id),
+                            VoiceApprovalRow::STATUS.eq(&"uncertain".to_owned())
+                        )
                     )?;
                     Ok(())
                 })
-            .await?;
+                .await?;
             Ok(result)
         }
         Ok(_) => {
@@ -942,9 +967,14 @@ async fn release_monitor_approval(
     let id = request_id.to_owned();
     store
         .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
-            transaction.execute(
-                "UPDATE voice_approvals SET status='not_sent' WHERE id=?1 AND status='uncertain'",
-                [id],
+            db_update!(
+                canvas_tx(transaction),
+                VoiceApprovalRow,
+                set(VoiceApprovalRow::STATUS = &"not_sent".to_owned()),
+                filter(
+                    VoiceApprovalRow::ID.eq(&id),
+                    VoiceApprovalRow::STATUS.eq(&"uncertain".to_owned())
+                )
             )?;
             Ok(())
         })
@@ -1015,11 +1045,20 @@ pub async fn approve(
         .then(|| studio_json::to_string(&result))
         .transpose()
         .map_err(|_| VoiceProviderError::Operation)?;
+    let result_json = result_json
+        .map(ExactJson::from_stored)
+        .transpose()
+        .map_err(studio_runtime_store::StoreError::from)?;
     store
         .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
-            transaction.execute(
-                "UPDATE voice_approvals SET status=?1,result=?2 WHERE id=?3",
-                rusqlite::params![state_value, result_json, id],
+            db_update!(
+                canvas_tx(transaction),
+                VoiceApprovalRow,
+                set(
+                    VoiceApprovalRow::STATUS = &state_value,
+                    VoiceApprovalRow::RESULT = &result_json
+                ),
+                filter(VoiceApprovalRow::ID.eq(&id))
             )?;
             Ok(())
         })
@@ -1061,6 +1100,7 @@ async fn reserve_approval(
             return Err(VoiceProviderError::ContextChanged);
         }
         let played = transaction.query_row(
+            // Scalar projection avoids decoding unrelated stored columns.
             "SELECT seq,payload FROM voice_records WHERE agent=?1 AND session=?2 AND kind='playback' AND text='played' ORDER BY seq DESC LIMIT 1",
             rusqlite::params![&agent_id, &session_id],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
@@ -1117,10 +1157,8 @@ async fn reserve_approval(
                     }
                 ) {
                     let replay = json!({"status":"answered","replayed":true});
-                    transaction.execute(
-                        "UPDATE voice_approvals SET status='accepted',result=?1 WHERE id=?2",
-                        rusqlite::params![studio_json::to_string(&replay).map_err(|_| VoiceProviderError::Operation)?, request_id.as_str()],
-                    )?;
+                    let result_json = Some(ExactJson::from_stored(studio_json::to_string(&replay).map_err(|_| VoiceProviderError::Operation)?).map_err(studio_runtime_store::StoreError::from)?);
+                    db_update!(canvas_tx(transaction), VoiceApprovalRow, set(VoiceApprovalRow::STATUS = &"accepted".to_owned(), VoiceApprovalRow::RESULT = &result_json), filter(VoiceApprovalRow::ID.eq(&request_id)))?;
                     return Ok(ApprovalDispatch::Replay(replay));
                 }
                 if !matches!(current.state, typed::ApprovalState::Pending) {
@@ -1156,6 +1194,7 @@ async fn reserve_approval(
                 return Ok(ApprovalDispatch::MonitorUnavailable);
             }
             let has_native_session: bool = transaction.query_row(
+                // Aggregate lookup has no generated scalar query.
                 "SELECT EXISTS(SELECT 1 FROM voice_sessions WHERE id=?1 AND native_thread IS NOT NULL)",
                 [session_id],
                 |row| row.get(0),
@@ -1164,12 +1203,9 @@ async fn reserve_approval(
                 return Err(VoiceProviderError::ContextChanged);
             }
             if previous.is_some() {
-                transaction.execute("UPDATE voice_approvals SET status='uncertain' WHERE id=?1", [&request_id])?;
+                db_update!(canvas_tx(transaction), VoiceApprovalRow, set(VoiceApprovalRow::STATUS = &"uncertain".to_owned()), filter(VoiceApprovalRow::ID.eq(&request_id)))?;
             } else {
-                transaction.execute(
-                    "INSERT INTO voice_approvals(id,agent,speech,transcript,status,result) VALUES(?1,?2,?3,?4,'uncertain',NULL)",
-                    rusqlite::params![request_id, agent_id, speech_id, transcript_id],
-                )?;
+                canvas_tx(transaction).insert(&VoiceApprovalRow { id:request_id.to_owned(),agent:agent_id.to_owned(),speech:speech_id.to_owned(),transcript:transcript_id,status:"uncertain".into(),result:None })?;
             }
             return Ok(ApprovalDispatch::Monitor { request_id });
         }
@@ -1216,12 +1252,9 @@ async fn reserve_approval(
             return Err(VoiceProviderError::ContextChanged);
         }
         if previous.is_some() {
-            transaction.execute("UPDATE voice_approvals SET status='uncertain' WHERE id=?1", [&request_id])?;
+            db_update!(canvas_tx(transaction), VoiceApprovalRow, set(VoiceApprovalRow::STATUS = &"uncertain".to_owned()), filter(VoiceApprovalRow::ID.eq(&request_id)))?;
         } else {
-            transaction.execute(
-                "INSERT INTO voice_approvals(id,agent,speech,transcript,status,result) VALUES(?1,?2,?3,?4,'uncertain',NULL)",
-                rusqlite::params![request_id, agent_id, speech_id, transcript_id],
-            )?;
+            canvas_tx(transaction).insert(&VoiceApprovalRow { id:request_id.to_owned(),agent:agent_id.to_owned(),speech:speech_id.to_owned(),transcript:transcript_id,status:"uncertain".into(),result:None })?;
         }
         Ok(ApprovalDispatch::Send {
             request_id,
@@ -1239,6 +1272,7 @@ fn approval_receipt(
 ) -> Result<Option<ApprovalReceiptRow>, VoiceProviderError> {
     Ok(connection
         .query_row(
+            // Projection API follow-up: typed decoding would newly reject historical result JSON.
             "SELECT agent,speech,transcript,status,result FROM voice_approvals WHERE id=?1",
             [request_id],
             |row| {
@@ -1265,94 +1299,141 @@ async fn reserve_speech(
     let session_id = session_id.to_owned();
     let record_id = record_id.to_owned();
     let request_id = request_id.to_owned();
-    store.transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
-        let agent = super::checked_agent(transaction, &agent_id)
-            .map_err(|_| VoiceProviderError::ContextUnavailable)?;
-        let session = load_row(transaction, &session_id, &agent_id)?
-            .ok_or(policy::VoiceError::UnknownSession)?;
-        let session = VoiceSession::from_row(session)?;
-        if let Some(old) = lookup_speech_receipt_raw(transaction, &session_id, &record_id, &request_id)? {
-            if old["session"] != session_id || old["record_id"] != record_id {
-                return Err(VoiceProviderError::Policy(policy::VoiceError::SessionIdentityConflict));
-            }
-            if let Some(marker) = old["error"].as_str().and_then(|error| error.strip_prefix("voice-content-sha256:")) {
-                let stored = marker.split('|').next().unwrap_or_default();
-                let record = VoiceRepository::record(transaction, &record_id)?
-                    .ok_or(policy::VoiceError::UnknownSession)?;
-                super::validate_record(&record)?;
-                if record.agent != agent_id
-                    || record.kind != "orchestrator"
-                    || stored != studio_runtime_store::sha256_hex(record.text.as_bytes())
-                {
-                    return Err(policy::VoiceError::SessionIdentityConflict.into());
+    store
+        .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
+            let agent = super::checked_agent(transaction, &agent_id)
+                .map_err(|_| VoiceProviderError::ContextUnavailable)?;
+            let session = load_row(transaction, &session_id, &agent_id)?
+                .ok_or(policy::VoiceError::UnknownSession)?;
+            let session = VoiceSession::from_row(session)?;
+            if let Some(old) =
+                lookup_speech_receipt_raw(transaction, &session_id, &record_id, &request_id)?
+            {
+                if old["session"] != session_id || old["record_id"] != record_id {
+                    return Err(VoiceProviderError::Policy(
+                        policy::VoiceError::SessionIdentityConflict,
+                    ));
                 }
+                if let Some(marker) = old["error"]
+                    .as_str()
+                    .and_then(|error| error.strip_prefix("voice-content-sha256:"))
+                {
+                    let stored = marker.split('|').next().unwrap_or_default();
+                    let record = VoiceRepository::record(transaction, &record_id)?
+                        .ok_or(policy::VoiceError::UnknownSession)?;
+                    super::validate_record(&record)?;
+                    if record.agent != agent_id
+                        || record.kind != "orchestrator"
+                        || stored != studio_runtime_store::sha256_hex(record.text.as_bytes())
+                    {
+                        return Err(policy::VoiceError::SessionIdentityConflict.into());
+                    }
+                }
+                return Ok(None);
             }
-            return Ok(None);
-        }
-        let record = VoiceRepository::record(transaction, &record_id)?
-            .ok_or(policy::VoiceError::UnknownSession)?;
-        super::validate_record(&record)?;
-        if record.agent != agent_id || record.kind != "orchestrator" {
-            return Err(policy::VoiceError::UnknownSession.into());
-        }
-        if session.ended().is_some() || session.state() != Some(policy::VoiceSessionState::Ready) {
-            return Err(VoiceProviderError::Policy(policy::VoiceError::UnknownSession));
-        }
-        let account_key = session.account_key().ok_or(VoiceProviderError::ContextUnavailable)?;
-        let thread_id = session.native_thread().ok_or(VoiceProviderError::ContextUnavailable)?;
-        if agent.account_key.as_str() != account_key
-            || agent.thread_id.as_deref() != Some(thread_id)
-        {
-            return Err(VoiceProviderError::ContextChanged);
-        }
-        let scope = required_scope(transaction, &session_id)?;
-        if session.connection_id() != Some(scope.connection.as_str()) { return Err(VoiceProviderError::ContextChanged); }
-        let context = VoiceProviderContext {
-            agent_id: agent_id.to_owned(), epoch: agent.epoch,
-            account_key: account_key.to_owned(),
-            thread_id: thread_id.to_owned(),
-            connection_id: session.connection_id().ok_or(VoiceProviderError::ContextUnavailable)?.to_owned(),
-            generation: scope.generation,
-        };
-        let root = RequestIdentity::issue_root();
-        let identity = RequestIdentity::new("voice-speech", &[&agent_id], &root, &[&request_id])
-            .map_err(|_| VoiceProviderError::ContextChanged)?;
-        let owner = match RequestResults::admit(transaction, &identity, "voice-speech", identity.issued_ms())? {
-            Admission::Fresh(owner) => owner,
-            Admission::Replay(_) => return Err(VoiceProviderError::ContextChanged),
-        };
-        let intent = crate::account_worker::retained::ProviderCallIntent {
-            root_request_id: root.clone(), admitted_request: None,
-            scope: crate::account_session_runtime::ConnectionScope { account: context.account_key.clone(), connection: context.connection_id.clone(), generation: context.generation },
-            operation: format!("voice:speech:{request_id}"),
-            actor: Some(crate::account_worker::retained::RequestActor { agent: context.agent_id.clone(), epoch: context.epoch }),
-            transfer: None, deleted_actor_session: None, method: Method::ThreadRealtimeAppendSpeech,
-            params: json!({"threadId": context.thread_id, "text": record.text}),
-        };
-        let admitted = crate::account_worker::retained::reserve_provider_call(transaction, &owner, intent)
-            .map_err(|error| VoiceProviderError::Provider(Box::new(error)))?;
-        let marker = format!("voice-content-sha256:{}|", studio_runtime_store::sha256_hex(record.text.as_bytes()));
-        transaction.execute(
-            "INSERT INTO voice_speech_requests(id,session,record_id,state,error) VALUES(?1,?2,?3,'pending',?4)",
-            rusqlite::params![&request_id,&session_id,&record_id,marker],
-        )?;
-        Ok(Some((context, record.text, root, admitted)))
-    }).await
+            let record = VoiceRepository::record(transaction, &record_id)?
+                .ok_or(policy::VoiceError::UnknownSession)?;
+            super::validate_record(&record)?;
+            if record.agent != agent_id || record.kind != "orchestrator" {
+                return Err(policy::VoiceError::UnknownSession.into());
+            }
+            if session.ended().is_some()
+                || session.state() != Some(policy::VoiceSessionState::Ready)
+            {
+                return Err(VoiceProviderError::Policy(
+                    policy::VoiceError::UnknownSession,
+                ));
+            }
+            let account_key = session
+                .account_key()
+                .ok_or(VoiceProviderError::ContextUnavailable)?;
+            let thread_id = session
+                .native_thread()
+                .ok_or(VoiceProviderError::ContextUnavailable)?;
+            if agent.account_key.as_str() != account_key
+                || agent.thread_id.as_deref() != Some(thread_id)
+            {
+                return Err(VoiceProviderError::ContextChanged);
+            }
+            let scope = required_scope(transaction, &session_id)?;
+            if session.connection_id() != Some(scope.connection.as_str()) {
+                return Err(VoiceProviderError::ContextChanged);
+            }
+            let context = VoiceProviderContext {
+                agent_id: agent_id.to_owned(),
+                epoch: agent.epoch,
+                account_key: account_key.to_owned(),
+                thread_id: thread_id.to_owned(),
+                connection_id: session
+                    .connection_id()
+                    .ok_or(VoiceProviderError::ContextUnavailable)?
+                    .to_owned(),
+                generation: scope.generation,
+            };
+            let root = RequestIdentity::issue_root();
+            let identity =
+                RequestIdentity::new("voice-speech", &[&agent_id], &root, &[&request_id])
+                    .map_err(|_| VoiceProviderError::ContextChanged)?;
+            let owner = match RequestResults::admit(
+                transaction,
+                &identity,
+                "voice-speech",
+                identity.issued_ms(),
+            )? {
+                Admission::Fresh(owner) => owner,
+                Admission::Replay(_) => return Err(VoiceProviderError::ContextChanged),
+            };
+            let intent = crate::account_worker::retained::ProviderCallIntent {
+                root_request_id: root.clone(),
+                admitted_request: None,
+                scope: crate::account_session_runtime::ConnectionScope {
+                    account: context.account_key.clone(),
+                    connection: context.connection_id.clone(),
+                    generation: context.generation,
+                },
+                operation: format!("voice:speech:{request_id}"),
+                actor: Some(crate::account_worker::retained::RequestActor {
+                    agent: context.agent_id.clone(),
+                    epoch: context.epoch,
+                }),
+                transfer: None,
+                deleted_actor_session: None,
+                method: Method::ThreadRealtimeAppendSpeech,
+                params: json!({"threadId": context.thread_id, "text": record.text}),
+            };
+            let admitted =
+                crate::account_worker::retained::reserve_provider_call(transaction, &owner, intent)
+                    .map_err(|error| VoiceProviderError::Provider(Box::new(error)))?;
+            let marker = format!(
+                "voice-content-sha256:{}|",
+                studio_runtime_store::sha256_hex(record.text.as_bytes())
+            );
+            canvas_tx(transaction).insert(&VoiceSpeechRequestRow {
+                id: request_id,
+                session: session_id,
+                record_id,
+                state: "pending".into(),
+                error: Some(marker),
+            })?;
+            Ok(Some((context, record.text, root, admitted)))
+        })
+        .await
 }
 
 fn update_session(
-    connection: &Connection,
+    transaction: &rusqlite::Transaction<'_>,
     session: &VoiceSession,
 ) -> Result<(), VoiceProviderError> {
-    connection.execute(
-        "UPDATE voice_sessions SET state=?1,error=?2,ended=?3,answer=?4 WHERE id=?5",
-        rusqlite::params![
-            session.state().map(policy::VoiceSessionState::as_str),
-            session.error(),
-            session.ended(),
-            session.answer(),
-            session.id().as_str()
-        ],
+    db_update!(
+        canvas_tx(transaction),
+        SessionStorageRow,
+        set(
+            SessionStorageRow::STATE = &session.state().map(|state| state.as_str().to_owned()),
+            SessionStorageRow::ERROR = &session.error().map(str::to_owned),
+            SessionStorageRow::ENDED = &session.ended(),
+            SessionStorageRow::ANSWER = &session.answer().map(str::to_owned)
+        ),
+        filter(SessionStorageRow::ID.eq(&session.id().as_str().to_owned()))
     )?;
     Ok(())
 }
@@ -1370,6 +1451,7 @@ async fn update_speech(
         .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
             let current: Option<String> = transaction
                 .query_row(
+                    // Scalar projection avoids decoding unrelated stored columns.
                     "SELECT error FROM voice_speech_requests WHERE id=?1",
                     [request_id.as_str()],
                     |row| row.get(0),
@@ -1387,9 +1469,14 @@ async fn update_speech(
             } else {
                 Some(format!("{marker}|{detail}"))
             };
-            transaction.execute(
-                "UPDATE voice_speech_requests SET state=?1,error=?2 WHERE id=?3",
-                rusqlite::params![state, stored_error, request_id.as_str()],
+            db_update!(
+                canvas_tx(transaction),
+                VoiceSpeechRequestRow,
+                set(
+                    VoiceSpeechRequestRow::STATE = &state,
+                    VoiceSpeechRequestRow::ERROR = &stored_error
+                ),
+                filter(VoiceSpeechRequestRow::ID.eq(&request_id))
             )?;
             Ok(())
         })
@@ -1428,7 +1515,8 @@ pub async fn handle_notification(
         .read_async("runtime-services/voice/provider", move |connection| {
             let (thread_id, account_key, connection_id) = &key;
             Ok::<_, VoiceProviderError>(connection.query_row(
-                "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+                // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
                  FROM voice_sessions WHERE native_thread=?1 AND account_key=?2 AND connection_id=?3 \
                  AND ended IS NULL ORDER BY created DESC LIMIT 1",
                 rusqlite::params![thread_id,account_key,connection_id], session_from_row,
@@ -1572,7 +1660,8 @@ pub async fn handle_disconnect(
     let sessions = store
         .read_async("runtime-services/voice/provider", move |connection| {
             let mut statement = connection.prepare_cached(
-                "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+                // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
                  FROM voice_sessions WHERE account_key=?1 AND connection_id=?2 AND ended IS NULL",
             )?;
             let rows = statement.query_map(rusqlite::params![key.0, key.1], session_from_row)?;
@@ -1818,7 +1907,8 @@ fn read_start_rows(
         .map(VoiceSession::from_row)
         .transpose()?;
     let active_row = connection.query_row(
-        "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+        // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
          FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL AND ended IS NULL \
          ORDER BY created DESC LIMIT 1",
         [agent_id], session_from_row,
@@ -1857,50 +1947,59 @@ async fn create_session(
         session_id.clone(),
         offer.clone(),
     )?;
-    store.transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
-        let agent = super::checked_agent(transaction, &agent_id)
-            .map_err(|_| VoiceProviderError::ContextUnavailable)?;
-        let current_thread = agent.thread_id.as_deref().unwrap_or_default();
-        let current_account = agent.account_key.as_str();
-        if agent.epoch != epoch || current_thread != thread_id
-            || current_account != account_key {
-            return Err(VoiceProviderError::ContextChanged);
-        }
-        crate::context_repair::assert_available(&agent.value())
-            .map_err(|_| VoiceProviderError::ContextChanged)?;
-        let old = load_row_any(transaction, &session_id)?
-            .map(VoiceSession::from_row).transpose()?;
-        let active_row = transaction.query_row(
-            "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+    store
+        .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
+            let agent = super::checked_agent(transaction, &agent_id)
+                .map_err(|_| VoiceProviderError::ContextUnavailable)?;
+            let current_thread = agent.thread_id.as_deref().unwrap_or_default();
+            let current_account = agent.account_key.as_str();
+            if agent.epoch != epoch || current_thread != thread_id || current_account != account_key
+            {
+                return Err(VoiceProviderError::ContextChanged);
+            }
+            crate::context_repair::assert_available(&agent.value())
+                .map_err(|_| VoiceProviderError::ContextChanged)?;
+            let old = load_row_any(transaction, &session_id)?
+                .map(VoiceSession::from_row)
+                .transpose()?;
+            let active_row = transaction.query_row(
+            // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
              FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL AND ended IS NULL \
              ORDER BY created DESC LIMIT 1",
             [&agent_id], session_from_row,
         ).optional()?;
-        let active = active_row.map(VoiceSession::from_row).transpose()?;
-        match policy::decide_start(Some(now), request, old.as_ref(), active.as_ref())? {
-            decision @ StartDecision::Replay(_) => Ok(decision),
-            StartDecision::Create { created, .. } => {
-                let mut agent = agent;
-                agent.auto_wake = Some(true);
-                agent.turn_epoch = Some(agent.epoch);
-                AgentRepository::put(transaction, &agent)?;
-                transaction.execute(
-                    "INSERT INTO voice_sessions(id,agent,created,sdp,native_thread,account_key,connection_id,state) \
-                     VALUES(?1,?2,?3,?4,?5,?6,?7,'connecting')",
-                    rusqlite::params![session_id,agent_id,created,offer,(!thread_id.is_empty()).then_some(thread_id.as_str()),account_key,None::<String>],
-                )?;
-                let row = load_row(transaction, &session_id, &agent_id)?
-                    .ok_or(policy::VoiceError::InvalidStoredSession)?;
-                VoiceSession::from_row(row)?;
-                Ok(StartDecision::Create {
-                    agent: AgentId::from(agent_id.as_str()),
-                    session_id: policy::SessionId::parse(session_id.clone())?,
-                    offer: offer.clone(),
-                    created,
-                })
+            let active = active_row.map(VoiceSession::from_row).transpose()?;
+            match policy::decide_start(Some(now), request, old.as_ref(), active.as_ref())? {
+                decision @ StartDecision::Replay(_) => Ok(decision),
+                StartDecision::Create { created, .. } => {
+                    let mut agent = agent;
+                    agent.auto_wake = Some(true);
+                    agent.turn_epoch = Some(agent.epoch);
+                    AgentRepository::put(transaction, &agent)?;
+                    canvas_tx(transaction).insert(&SessionStorageRow {
+                        id: session_id.clone(),
+                        agent: agent_id.clone(),
+                        created,
+                        sdp: Some(offer.clone()),
+                        native_thread: (!thread_id.is_empty()).then_some(thread_id.clone()),
+                        account_key: Some(account_key.clone()),
+                        state: Some("connecting".into()),
+                        ..Default::default()
+                    })?;
+                    let row = load_row(transaction, &session_id, &agent_id)?
+                        .ok_or(policy::VoiceError::InvalidStoredSession)?;
+                    VoiceSession::from_row(row)?;
+                    Ok(StartDecision::Create {
+                        agent: AgentId::from(agent_id.as_str()),
+                        session_id: policy::SessionId::parse(session_id.clone())?,
+                        offer: offer.clone(),
+                        created,
+                    })
+                }
             }
-        }
-    }).await
+        })
+        .await
 }
 
 async fn attach_start_context(
@@ -1939,18 +2038,24 @@ async fn attach_start_context(
             }
             let scope =
                 studio_json::to_string(&scope).map_err(|_| VoiceProviderError::Operation)?;
-            let updated = transaction.execute(
-                "UPDATE voice_sessions SET connection_id=?1,provider_scope=?6 \
-             WHERE id=?2 AND agent=?3 AND native_thread=?4 AND account_key=?5 \
-             AND state='connecting' AND ended IS NULL",
-                rusqlite::params![
-                    context.connection_id,
-                    session_id,
-                    agent_id,
-                    context.thread_id,
-                    context.account_key,
-                    scope
-                ],
+            let scope = Some(
+                ExactJson::from_stored(scope).map_err(studio_runtime_store::StoreError::from)?,
+            );
+            let updated = db_update!(
+                canvas_tx(transaction),
+                SessionStorageRow,
+                set(
+                    SessionStorageRow::CONNECTION_ID = &Some(context.connection_id),
+                    SessionStorageRow::PROVIDER_SCOPE = &scope
+                ),
+                filter(
+                    SessionStorageRow::ID.eq(&session_id),
+                    SessionStorageRow::AGENT.eq(&agent_id),
+                    SessionStorageRow::NATIVE_THREAD.eq(&Some(context.thread_id)),
+                    SessionStorageRow::ACCOUNT_KEY.eq(&Some(context.account_key)),
+                    SessionStorageRow::STATE.eq(&Some("connecting".into())),
+                    SessionStorageRow::ENDED.is_null()
+                )
             )?;
             if updated != 1 {
                 return Err(VoiceProviderError::ContextChanged);
@@ -1981,6 +2086,7 @@ async fn set_start_failure(
     store
         .transaction_with_error(move |transaction| -> Result<_, VoiceProviderError> {
             transaction.execute(
+                // COALESCE update retains the original terminal timestamp.
                 "UPDATE voice_sessions SET state=?1,error=?2,ended=COALESCE(ended,?3) WHERE id=?4",
                 rusqlite::params![state, detail, now, session_id],
             )?;
@@ -2023,7 +2129,8 @@ fn load_row(
     agent: &str,
 ) -> Result<Option<VoiceSessionRow>, VoiceProviderError> {
     Ok(connection.query_row(
-        "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+        // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
          FROM voice_sessions WHERE id=?1 AND agent=?2",
         rusqlite::params![session,agent], session_from_row,
     ).optional()?)
@@ -2034,7 +2141,8 @@ fn load_row_any(
     session: &str,
 ) -> Result<Option<VoiceSessionRow>, VoiceProviderError> {
     Ok(connection.query_row(
-        "SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
+        // Projection API follow-up: full-row decode would newly reject malformed provider_scope.
+"SELECT id,agent,created,ended,sdp,answer,native_thread,account_key,connection_id,state,error \
          FROM voice_sessions WHERE id=?1",
         [session], session_from_row,
     ).optional()?)
@@ -2081,6 +2189,42 @@ mod tests {
     use super::*;
     use crate::voice::runtime::VoiceFuture;
     use std::sync::{Arc, Mutex};
+
+    #[tokio::test]
+    async fn voice_outbox_descriptor_status_update_keeps_original_result_bytes() {
+        let (_directory, store) = voice_outbox_fixture().await;
+        let raw = " \n{\"status\":\"answered\", \"future\":{\"z\":  1}}\t";
+        store.transaction(move |tx| {
+            tx.execute("INSERT INTO voice_approvals VALUES('receipt','agent','speech','transcript','uncertain',?1)",[raw])?;
+            Ok(())
+        }).await.expect("legacy receipt");
+        release_monitor_approval(&store, "receipt")
+            .await
+            .expect("same-transaction typed update");
+        let receipt = store
+            .read_async("voice descriptor witness", |connection| {
+                approval_receipt(connection, "receipt")
+            })
+            .await
+            .expect("generated receipt read")
+            .expect("receipt");
+        assert_eq!(receipt.3, "not_sent");
+        assert_eq!(receipt.4.as_deref(), Some(raw));
+    }
+
+    #[tokio::test]
+    async fn voice_outbox_descriptor_terminal_replay_keeps_scope_projection_boundary() {
+        let (_directory, store) = voice_outbox_fixture().await;
+        store.transaction(|tx| {
+            tx.execute("UPDATE voice_sessions SET state='ended',ended=2.125,provider_scope='malformed historical scope' WHERE id='session'",[])?;
+            Ok(())
+        }).await.expect("historical ended session");
+        let (session, effect) = prepare_end(&store, "agent", "session", 10.0)
+            .await
+            .expect("replay does not interpret scope");
+        assert_eq!(session["ended"], 2.125);
+        assert!(effect.is_none());
+    }
 
     #[tokio::test]
     async fn monitor_approval_rejects_invalid_stored_request() {

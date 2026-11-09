@@ -294,6 +294,7 @@ fn ready_session(connection: &Connection, agent_id: &str) -> Result<Option<Strin
     use rusqlite::OptionalExtension;
     Ok(connection
         .query_row(
+            // Scalar projection avoids decoding unrelated stored columns.
             "SELECT id FROM voice_sessions WHERE agent=?1 AND state='ready' AND ended IS NULL",
             [agent_id],
             |row| row.get(0),

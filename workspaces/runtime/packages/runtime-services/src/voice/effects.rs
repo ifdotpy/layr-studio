@@ -1,5 +1,8 @@
 //! One durable stop effect per voice session.
 use std::sync::Arc;
+use studio_db_api::db_update;
+use studio_runtime_store::peer_update_settings::canvas_tx;
+use studio_runtime_store::voice_storage::VoiceSessionRow as SessionStorageRow;
 
 use studio_json::{Value, json};
 use studio_runtime_providers::Method;
@@ -119,6 +122,7 @@ pub fn capture_delete_sessions(
     let Some(thread) = agent.thread_id.as_deref() else {
         return Ok(Vec::new());
     };
+    // Scalar projection avoids decoding unrelated stored columns.
     let mut query = connection.prepare("SELECT id,account_key,native_thread,connection_id FROM voice_sessions WHERE agent=?1 AND ended IS NULL AND state IS NOT NULL AND account_key=?2 AND native_thread=?3 ORDER BY created,id")?;
     let rows = query
         .query_map(rusqlite::params![agent_id, account, thread], |row| {
@@ -284,7 +288,18 @@ pub(crate) fn stage_ordinary_stop(
     if !current(tx, &agent, &captured(&effect))? {
         let row = held_row(effect, OutboxKind::VoiceStop)?;
         Outbox::put(tx, &row)?;
-        tx.execute("UPDATE voice_sessions SET state='unknown',error='Voice stop outcome is unresolved' WHERE id=?1 AND agent=?2", rusqlite::params![session_id,agent_id])?;
+        db_update!(
+            canvas_tx(tx),
+            SessionStorageRow,
+            set(
+                SessionStorageRow::STATE = &Some("unknown".into()),
+                SessionStorageRow::ERROR = &Some("Voice stop outcome is unresolved".into())
+            ),
+            filter(
+                SessionStorageRow::ID.eq(&session_id.to_owned()),
+                SessionStorageRow::AGENT.eq(&agent_id.to_owned())
+            )
+        )?;
         return Ok(None);
     }
     let row = new_row(tx, effect, OutboxKind::VoiceStop)?;
@@ -549,13 +564,42 @@ fn settle_outcome(
         if kind == OutboxKind::VoiceStop {
             match next {
                 VoiceStopOutcome::Written => {
+                    // COALESCE update retains the original terminal timestamp.
                     tx.execute("UPDATE voice_sessions SET state='ended',ended=COALESCE(ended,?3) WHERE id=?1 AND agent=?2 AND account_key=?4 AND native_thread=?5 AND connection_id=?6", rusqlite::params![row.payload.session_id,row.payload.agent,now,row.payload.account,row.payload.thread,scope.connection])?;
                 }
                 VoiceStopOutcome::Unknown | VoiceStopOutcome::Rejected => {
-                    tx.execute("UPDATE voice_sessions SET state='unknown',error='Voice stop outcome is unresolved' WHERE id=?1 AND agent=?2 AND account_key=?3 AND native_thread=?4 AND connection_id=?5", rusqlite::params![row.payload.session_id,row.payload.agent,row.payload.account,row.payload.thread,scope.connection])?;
+                    db_update!(
+                        canvas_tx(tx),
+                        SessionStorageRow,
+                        set(
+                            SessionStorageRow::ERROR =
+                                &Some("Voice stop outcome is unresolved".into()),
+                            SessionStorageRow::STATE = &Some("unknown".into())
+                        ),
+                        filter(
+                            SessionStorageRow::ID.eq(&row.payload.session_id.to_owned()),
+                            SessionStorageRow::AGENT.eq(&row.payload.agent.to_owned()),
+                            SessionStorageRow::ACCOUNT_KEY
+                                .eq(&Some(row.payload.account.to_owned())),
+                            SessionStorageRow::NATIVE_THREAD
+                                .eq(&Some(row.payload.thread.to_owned())),
+                            SessionStorageRow::CONNECTION_ID.eq(&Some(scope.connection.to_owned()))
+                        )
+                    )?;
                 }
                 VoiceStopOutcome::Expired => {
-                    tx.execute("UPDATE voice_sessions SET state='failed',error='Request id expired' WHERE id=?1 AND agent=?2", rusqlite::params![row.payload.session_id,row.payload.agent])?;
+                    db_update!(
+                        canvas_tx(tx),
+                        SessionStorageRow,
+                        set(
+                            SessionStorageRow::STATE = &Some("failed".into()),
+                            SessionStorageRow::ERROR = &Some("Request id expired".into())
+                        ),
+                        filter(
+                            SessionStorageRow::ID.eq(&row.payload.session_id.to_owned()),
+                            SessionStorageRow::AGENT.eq(&row.payload.agent.to_owned())
+                        )
+                    )?;
                 }
                 VoiceStopOutcome::NotSent | VoiceStopOutcome::Submitted => {}
             }

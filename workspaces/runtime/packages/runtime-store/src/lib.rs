@@ -50,6 +50,7 @@ pub mod peer_update_settings;
 mod schema;
 mod sqlite_actor;
 pub mod sqlite_durability;
+pub mod voice_storage;
 pub use sqlite_durability::WAL_FLUSH_INTERVAL;
 pub mod state_owner;
 pub mod stored_text;

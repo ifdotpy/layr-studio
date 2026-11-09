@@ -13,6 +13,7 @@ test-support = []
 bench-support = ["rustix/use-libc-auxv"]
 
 [dependencies]
+studio-db-api = { path = "../db-api" }
 studio-read-models = { path = "../read-models" }
 base64 = { workspace = true }
 bytes.workspace = true

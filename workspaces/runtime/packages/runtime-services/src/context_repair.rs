@@ -2168,6 +2168,7 @@ fn ensure_local_idle(tx: &Transaction<'_>, agent: &Value) -> Result<(), RepairEr
         return Err(RepairError::ReceiptHold);
     }
     if crate::sync_policy::table_exists(tx, "voice_sessions")? {
+        // Aggregate lookup has no generated scalar query.
         let active:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM voice_sessions WHERE agent=?1 AND state IS NOT NULL AND ended IS NULL)",[agent["id"].as_str()],|r|r.get(0))?;
         if active {
             return Err(RepairError::ReceiptHold);

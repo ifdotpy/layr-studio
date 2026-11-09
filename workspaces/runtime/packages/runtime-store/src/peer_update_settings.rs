@@ -18,7 +18,7 @@ pub fn canvas_read(connection: &rusqlite::Connection) -> studio_db_api::Read<'_,
     studio_db_api::Read::from_adapter(connection, &Canvas { _private: () })
 }
 
-pub(crate) fn canvas_tx<'c>(transaction: &'c rusqlite::Transaction<'c>) -> Tx<'c, Canvas> {
+pub fn canvas_tx<'c>(transaction: &'c rusqlite::Transaction<'c>) -> Tx<'c, Canvas> {
     Tx::from_adapter(transaction, &Canvas { _private: () })
 }
 
