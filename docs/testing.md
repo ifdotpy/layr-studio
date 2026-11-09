@@ -140,6 +140,66 @@ a declared duration and resource budget, and no simultaneous ordinary checks or
 user work on the same machine. The run owner stops every generator on exit.
 Ordinary check evidence collected during a load run is invalid.
 
+`just bench-storage --label <revision>` is a **manual heavy benchmark**, outside
+ordinary tests, `test-fast`, both test tiers and hosted CI. Announce it and reserve
+an otherwise idle machine before running it; never overlap ordinary checks or
+user work. The default budget is 60 seconds of measured work, one sequential
+producer (the store retains its normal SQLite actor/read threads), at most 10,000
+samples per family, and 2 GiB combined database/WAL growth checked every 100 rounds.
+It starts no model providers or child commands. Allow 4 GiB temporary disk space
+for copy creation and measurement, and 1 GiB process memory; compilation uses four
+Cargo jobs and is outside the measurement. The defaults and limits are owned by
+[`storage_benchmark.rs`](../workspaces/runtime/packages/runtime-services/examples/storage_benchmark.rs).
+The temporary directory is removed when the process exits normally or returns an
+error; after a forced kill, remove only that run's temporary directory.
+
+Develop with `just bench-storage --smoke --label smoke`: eight seed rows, at most
+eight rounds and a one-second measurement budget (keep the whole executable run
+under 30 seconds), with the same single producer. Build before reserving the
+measurement window. The lead schedules the announced 60-second old/new baselines;
+a development smoke is not baseline evidence. `--seconds` accepts 1–600 and
+`--rows` accepts 1–10,000. The default command uses the development Cargo profile;
+compare the same profile, toolchain, fixture settings and machine on both revisions.
+For optimized baselines, build/run the same example with `cargo run --release -j 4
+-p studio-runtime-services --example storage_benchmark -- --label <revision>` on
+both revisions and record that profile with the evidence.
+
+JSON goes to stdout and a short p50/p99 table to stderr. Save each revision's JSON
+outside the checkout, for example `just bench-storage --label old > /tmp/storage-old.json`.
+Compare each named family's `transaction_wall` and `busy_wait` distributions,
+checkpoint times, sizes before/after checkpoint, and read query plans. The harness
+calls production APIs for agent activity/tokens, transcript append including search,
+callback tool request plus immutable receipt in one transaction, queue enqueue and
+consume as separate transactions, monitor output append including file sync, usage
+observation including cost aggregates, and SSE publications/change reads by revision.
+Wall time includes admission, serialization, triggers and commit; a monitor append
+contains two transactions and a log sync, while SSE is a read transaction. Seed
+creation, copy/migration startup and `EXPLAIN QUERY PLAN` are outside those samples.
+Busy wait measures time in an instrumented SQLite busy handler (1 ms sleeps, at most
+15,000 retries), rather than guessing from total transaction time. The same handler
+replaces SQLite's opaque backoff for both versions; the JSON includes callback and
+terminal lock-error counts. SSE reader busy wait is explicitly `unavailable`, because
+the pooled reader uses its normal busy policy. With one producer on isolated fixtures, zero busy wait
+is expected and does not prove performance under contention. Plans use captured,
+unexpanded production SELECT SQL with NULL bindings; parameter-sensitive plans can
+differ from an actual bound read. No copied payloads or tokens are printed.
+
+Synthetic state is the default and contains no real user data. To measure an
+existing copy, use `just bench-storage --state /absolute/copy --server
+http://127.0.0.1:<port> --label <revision>`. Live-state discovery must succeed through
+that running server's `/api/desktop`; unavailable discovery refuses the run.
+Resolved paths equal to, inside, or containing the live state directory are refused.
+Both database files and every existing WAL/SHM sidecar are resolved and checked
+before either source database opens, including file symlinks.
+The supplied directory must be an operator-created, consistent copy: path separation
+cannot prove its provenance. It is opened read-only and each database is copied
+again with `VACUUM INTO`; **only the fresh temporary copy receives benchmark writes**.
+Copies over 1 GiB per database are refused. No backend starts against either source.
+After building the example, run `node workspaces/tooling/apps/storage-benchmark/guard.ts`
+for the manual refusal fixture (directory overlap, unavailable discovery, database
+and sidecar symlinks). Its loopback API serves only synthetic state paths; all
+cases must refuse before SQLite can read the deliberately invalid source files.
+
 `just bench-gungraun` is a manual profiling run, outside both test tiers and
 hosted CI. Install Valgrind and the runner matching the pinned crate with
 `cargo install gungraun-runner --version 0.17.2 --locked`. It runs Callgrind

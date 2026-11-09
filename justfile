@@ -179,6 +179,10 @@ test-provider-reap-timing:
 test-rust-many-agents:
     @cargo nextest run -p studio-runtime-services --lib --run-ignored only -E 'test(two_hundred_agents_complete_two_exchanges)'
 
+[doc("Manual heavy storage benchmark: announce an isolated 60s run, one producer, 2 GiB DB budget. JSON stdout; table stderr. Use --smoke for <=30s development validation.")]
+bench-storage *args:
+    @cargo run -j 4 -p studio-runtime-services --example storage_benchmark -- {{args}}
+
 [doc("Run manual Callgrind and DHAT backend benchmarks (requires Valgrind and gungraun-runner).")]
 bench-gungraun *args:
     @PATH="${CARGO_HOME:-$HOME/.cargo}/bin:$PATH" cargo bench -j 4 -p studio-runtime-store --bench hot_paths -- {{args}}
