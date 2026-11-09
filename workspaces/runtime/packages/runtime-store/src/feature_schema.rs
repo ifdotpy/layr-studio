@@ -28,14 +28,12 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_search_next_meta (
                 id TEXT PRIMARY KEY, agent TEXT NOT NULL, kind TEXT NOT NULL,
                 search_rowid INTEGER NOT NULL UNIQUE);
-            CREATE TABLE IF NOT EXISTS runtime_search_rollout (
-                id INTEGER PRIMARY KEY CHECK(id=1), phase TEXT NOT NULL,
-                cursor INTEGER NOT NULL DEFAULT 0, updated REAL NOT NULL);
+
             CREATE VIRTUAL TABLE IF NOT EXISTS runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');
             CREATE TABLE IF NOT EXISTS runtime_checkpoints (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_lead_requests (id TEXT PRIMARY KEY, agent TEXT NOT NULL, signature TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_sidebar_order (id TEXT PRIMARY KEY, record TEXT NOT NULL);
+
             CREATE TABLE IF NOT EXISTS runtime_workspace_operations (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_workspace_operation_phase ON runtime_workspace_operations(
                 json_extract(record,'$.phase'), json_extract(record,'$.agent'));
@@ -49,16 +47,11 @@ const FEATURE_SCHEMA: &str = r#"
             -- change. The views themselves are built at read time.
             -- Owner, created time and running state of each task in the client task
             -- window, so a task write can place it without its document.
-            CREATE TABLE IF NOT EXISTS task_window_state (id TEXT PRIMARY KEY,
-                agent TEXT NOT NULL, created REAL, running INTEGER NOT NULL);
-            CREATE INDEX IF NOT EXISTS task_window_state_history
-                ON task_window_state(created DESC) WHERE NOT running;
+
+
             -- sync_policy::TASK_WINDOW_EVICT_SQL scans live members, excluding retained tombstones.
-            CREATE INDEX IF NOT EXISTS durable_rows_task_window_live
-                ON durable_rows(id) WHERE tbl='task_window' AND deleted=0;
-            CREATE TABLE IF NOT EXISTS agent_publication_state (id TEXT PRIMARY KEY,
-                root_id TEXT, is_lead INTEGER, live INTEGER NOT NULL, in_flight INTEGER NOT NULL,
-                team_counts TEXT);
+
+
             CREATE INDEX IF NOT EXISTS runtime_rule_ready_tick
                 ON runtime_rules(json_extract(record,'$.status'))
                 WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0);
@@ -76,9 +69,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_execution_effect_run ON runtime_execution_effects(run);
             CREATE TABLE IF NOT EXISTS runtime_execution_nodes (id TEXT PRIMARY KEY, run TEXT NOT NULL, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_execution_node_run ON runtime_execution_nodes(run);
-        CREATE TABLE IF NOT EXISTS runtime_orchestration_settings (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_settings (
-          id TEXT PRIMARY KEY, record TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runtime_federation_inbox (
           peer_id TEXT NOT NULL, message_id TEXT NOT NULL, record TEXT NOT NULL,
           PRIMARY KEY(peer_id,message_id));
@@ -100,10 +90,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS user_terminal_output_end ON user_terminal_output (terminal,end);
             CREATE TABLE IF NOT EXISTS user_terminal_event_cursor (terminal TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS user_terminal_decoder_state (terminal TEXT PRIMARY KEY, pending BLOB NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_pair INTEGER NOT NULL);
-            INSERT OR IGNORE INTO runtime_access_settings VALUES(1,1);
-            CREATE TABLE IF NOT EXISTS runtime_access_local_alias (
-          id INTEGER PRIMARY KEY CHECK(id=1), alias TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_native_notices (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='');
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_cleanup_v2 ON runtime_agents(source_cleanup_account_key,source_cleanup_thread_id) WHERE source_cleanup_phase IN ('planned','submitted');
@@ -130,15 +116,13 @@ pub(crate) const PAYLOAD_MIGRATIONS_SCHEMA: &str = "
 ";
 
 /// Every statement that [`prepare`] runs, in order.
-fn feature_statements() -> [&'static str; 3] {
-    [
-        FEATURE_SCHEMA,
-        PAYLOAD_MIGRATIONS_SCHEMA,
-        crate::stored_text_compaction::BATCHES_SCHEMA,
-    ]
+fn feature_statements() -> [&'static str; 2] {
+    [FEATURE_SCHEMA, PAYLOAD_MIGRATIONS_SCHEMA]
 }
 
 pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
+    crate::clock_schema::prepare_features(transaction)?;
+    crate::settings_schema::prepare_features(transaction)?;
     for descriptor in [
         GroupsRow::descriptor(),
         MessagesRow::descriptor(),
@@ -158,6 +142,13 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }
+    crate::peer_update_settings::canvas_tx(transaction).insert_new(
+        &crate::settings_schema::AccessSettings {
+            id: 1,
+            auto_pair: 1,
+        },
+    )?;
+    crate::stored_text_compaction::prepare_batches(transaction)?;
     transaction.execute_batch("CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))")?;
     // A deleted row is no longer readable by the writer journal. Its source
     // trigger owns the corresponding summary tombstone in the same transaction.
@@ -239,6 +230,9 @@ mod tests {
     #[test]
     fn feature_tables_are_not_core_repository_requirements() {
         let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        crate::clock_schema::prepare_features(&connection).expect("clock feature owners");
+        crate::settings_schema::prepare_features(&connection).expect("settings feature owners");
+        crate::stored_text_compaction::prepare_batches(&connection).expect("batch owner");
         crate::access_tables::prepare_features(&connection).expect("access feature owners");
         let mut table_statements = 0;
         for statement in feature_statements()

@@ -53,7 +53,7 @@ pub const IDLE_SESSION_UNLOAD_SETTING: Setting = Setting {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct StoredSettings {
+pub(crate) struct StoredSettings {
     #[serde(default = "default_child_result_coalesce")]
     child_result_coalesce_seconds: u64,
     #[serde(default = "default_idle_session_unload")]
@@ -140,24 +140,25 @@ impl OrchestrationSettingsRepository {
 
     /// A missing row or field uses the default; an out-of-range value is refused.
     pub fn value(connection: &Connection, setting: Setting) -> StoreResult<u64> {
-        let raw: Option<String> = connection
-            .query_row(
-                &format!("SELECT record FROM {TABLE} WHERE id=?1"),
-                [ROW],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let Some(raw) = raw else {
-            return Ok(setting.default);
-        };
         let invalid = || {
             StoreError::SchemaMismatch(format!(
                 "invalid stored object {TABLE}/{ROW}: {}",
                 setting.field
             ))
         };
-        let JsonObject(record): JsonObject<StoredSettings> =
-            studio_json::from_str(&raw).map_err(|_| invalid())?;
+        let Some(row) = crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::settings_schema::OrchestrationSettings>(&(ROW.to_owned(),))
+            .map_err(|error| {
+                if matches!(&error, rusqlite::Error::FromSqlConversionFailure(_, _, _)) {
+                    invalid()
+                } else {
+                    StoreError::from(error)
+                }
+            })?
+        else {
+            return Ok(setting.default);
+        };
+        let JsonObject(record) = row.record.value();
         let value = match setting.field {
             field if field == CHILD_RESULT_COALESCE_SETTING.field => {
                 record.child_result_coalesce_seconds

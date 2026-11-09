@@ -133,6 +133,7 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>) -> StoreResult<()> {
          VALUES(?1,0,0,?2,?3)",
         params![name, MigrationStatus::Running.as_str(), now_seconds()],
     )?;
+    // Raw SQL: progress schema is upgraded in stages and cannot require final descriptor columns here.
     let complete: bool = tx.query_row(
         "SELECT complete FROM runtime_payload_migrations WHERE name=?1",
         [&name],
@@ -141,10 +142,8 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>) -> StoreResult<()> {
     if complete {
         return Ok(());
     }
-    tx.execute_batch(&format!(
-        "CREATE TABLE IF NOT EXISTS {DIRTY_TABLE}(\
-            migration TEXT NOT NULL, key INTEGER NOT NULL, PRIMARY KEY(migration,key)) WITHOUT ROWID"
-    ))?;
+    use studio_db_api::Table;
+    crate::settings_schema::OnlineMigrationDirty::descriptor().install_if_absent(tx)?;
     let [ins, upd, del] = trigger_names::<M>();
     let (table, key) = (M::SOURCE_TABLE, M::SOURCE_KEY);
     let mark = format!("(SELECT cursor FROM runtime_payload_migrations WHERE name='{name}')");
@@ -196,6 +195,7 @@ pub fn step<M: OnlineMigration>(
     clock: &dyn Clock,
 ) -> StoreResult<Step> {
     let name = progress_name::<M>();
+    // Raw SQL: progress schema is upgraded in stages and cannot require final descriptor columns here.
     let complete: bool = tx.query_row(
         "SELECT complete FROM runtime_payload_migrations WHERE name=?1",
         [&name],
@@ -212,12 +212,17 @@ pub fn step<M: OnlineMigration>(
     };
 
     // 1. Re-copy keys that changed at or below the mark.
-    let dirty: Vec<i64> = tx
-        .prepare_cached(&format!(
-            "SELECT key FROM {DIRTY_TABLE} WHERE migration=?1 ORDER BY key LIMIT ?2"
-        ))?
-        .query_map(params![name, BATCH_MAX_ROWS as i64], |row| row.get(0))?
-        .collect::<Result<_, _>>()?;
+    let typed = crate::peer_update_settings::canvas_tx(tx);
+    let dirty: Vec<i64> = studio_db_api::db_query!(
+        typed,
+        crate::settings_schema::OnlineMigrationDirty,
+        filter(crate::settings_schema::OnlineMigrationDirty::MIGRATION.eq(&name)),
+        order_by(crate::settings_schema::OnlineMigrationDirty::KEY.asc),
+        limit(BATCH_MAX_ROWS as u32)
+    )?
+    .into_iter()
+    .map(|row| row.key)
+    .collect();
     let mut dirty_left = dirty.len() == BATCH_MAX_ROWS;
     for key in &dirty {
         if !budget.allows_next() {
@@ -228,10 +233,8 @@ pub fn step<M: OnlineMigration>(
             Some(row) => migration.write(tx, *key, migration.transform(row)?),
             None => migration.remove(tx, *key),
         })?;
-        tx.execute(
-            &format!("DELETE FROM {DIRTY_TABLE} WHERE migration=?1 AND key=?2"),
-            params![name, key],
-        )?;
+        crate::peer_update_settings::canvas_tx(tx)
+            .delete::<crate::settings_schema::OnlineMigrationDirty>(&(name.clone(), *key))?;
     }
 
     // 2. Copy rows above the mark, unless dirty keys still wait.

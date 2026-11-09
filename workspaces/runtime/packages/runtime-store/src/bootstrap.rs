@@ -56,6 +56,7 @@ pub(crate) fn prepare_sync_schema(transaction: &Transaction<'_>) -> StoreResult<
     }
 
     reconcile_derived_objects(transaction, &expected)?;
+    crate::clock_schema::prepare_sync_tables(transaction)?;
     transaction.execute_batch(sections[0])?;
     transaction.execute_batch(sections[1])?;
     transaction.execute_batch(sections[2])?;
@@ -159,6 +160,7 @@ fn expected_catalog(
             .execute_batch(&sql)
             .map_err(|error| schema_object_mismatch(parent, &error.to_string()))?;
     }
+    crate::clock_schema::prepare_sync_tables(&expected)?;
     expected.execute_batch(sections[0])?;
     expected.execute_batch(sections[1])?;
     expected.execute_batch(sections[2])?;

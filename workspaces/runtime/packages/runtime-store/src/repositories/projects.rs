@@ -521,13 +521,8 @@ impl ProjectsRepository {
     }
 
     pub fn sidebar_order(connection: &Connection) -> StoreResult<Value> {
-        connection
-            .query_row(
-                "SELECT record FROM runtime_sidebar_order WHERE id='current'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?
+        crate::settings_schema::SidebarOrder::get(connection)?
+            .map(|row| row.record)
             .map(|raw| {
                 studio_json::from_str(&raw).map_err(|_| StoreError::InvalidStoredRecord {
                     object: "runtime_sidebar_order",
@@ -539,10 +534,11 @@ impl ProjectsRepository {
     }
 
     pub fn put_sidebar_order(transaction: &Transaction<'_>, value: &Value) -> StoreResult<()> {
-        transaction.execute(
-            "INSERT INTO runtime_sidebar_order(id,record) VALUES ('current',?1) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            [studio_json::to_string(value)?],
+        crate::peer_update_settings::canvas_tx(transaction).upsert(
+            &crate::settings_schema::SidebarOrder {
+                id: "current".to_owned(),
+                record: studio_json::to_string(value)?,
+            },
         )?;
         let workspace_exists = transaction.query_row(
             "SELECT EXISTS(SELECT 1 FROM sync_entities \

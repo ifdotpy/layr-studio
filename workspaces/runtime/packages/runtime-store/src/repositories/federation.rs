@@ -70,6 +70,7 @@ struct OutboxRecord {
 
 impl FederationRepository {
     pub fn snapshot(connection: &Connection) -> StoreResult<Value> {
+        // Raw SQL: the legacy reader uses last-key-wins JSON admission for historical settings.
         let settings = record(connection, "runtime_federation_settings", "global")?
             .unwrap_or_else(|| json!({"enabled":false}));
         let enabled = settings
@@ -125,7 +126,18 @@ impl FederationRepository {
 
     pub fn set_enabled(tx: &Transaction<'_>, enabled: bool) -> StoreResult<()> {
         let updated = now()?;
-        tx.execute("INSERT INTO runtime_federation_settings(id,record) VALUES('global',?1) ON CONFLICT(id) DO UPDATE SET record=excluded.record", [json!({"enabled":enabled,"updated":updated}).to_string()])?;
+        #[derive(serde::Serialize)]
+        struct SettingsWrite {
+            enabled: bool,
+            updated: f64,
+        }
+        let raw = studio_json::to_string(&SettingsWrite { enabled, updated })?;
+        crate::peer_update_settings::canvas_tx(tx).upsert(
+            &crate::settings_schema::FederationSettings {
+                id: "global".to_owned(),
+                record: crate::json_record_codec::ExactJson::from_stored(raw)?,
+            },
+        )?;
         Ok(())
     }
 

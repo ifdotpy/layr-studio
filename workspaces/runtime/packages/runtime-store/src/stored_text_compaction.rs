@@ -59,13 +59,10 @@ pub const ANALYTICS_ITEMS_RECORD: CompactedColumn = CompactedColumn {
 
 /// Batch records of the compaction and inflate passes, in each database that
 /// holds a compacted column.
-pub(crate) const BATCHES_SCHEMA: &str = "
-    CREATE TABLE IF NOT EXISTS runtime_stored_text_batches (
-        name TEXT NOT NULL, batch INTEGER NOT NULL, first_rowid INTEGER NOT NULL,
-        last_rowid INTEGER NOT NULL, rows INTEGER NOT NULL, plain_bytes INTEGER NOT NULL,
-        stored_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, created REAL NOT NULL,
-        PRIMARY KEY(name, batch));
-";
+pub(crate) fn prepare_batches(connection: &Connection) -> rusqlite::Result<()> {
+    use studio_db_api::Table;
+    crate::settings_schema::StoredTextBatches::descriptor().install_if_absent(connection)
+}
 
 /// Rowids that one reader window inspects. Unit: rows.
 pub const COMPACTION_WINDOW_ROWS: i64 = 512;
@@ -468,9 +465,7 @@ mod tests {
                      status TEXT NOT NULL DEFAULT 'pending', updated REAL, error TEXT);",
             )
             .expect("column and progress tables");
-        connection
-            .execute_batch(BATCHES_SCHEMA)
-            .expect("batch table");
+        prepare_batches(&connection).expect("batch table");
         connection
     }
 

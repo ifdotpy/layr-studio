@@ -45,23 +45,7 @@ mod tests {
     use studio_db_api::Table;
     #[test]
     fn pilot_ddl_matches_catalog_and_existing_state() {
-        #[derive(serde::Deserialize)]
-        struct Catalog {
-            #[serde(rename = "canvas.sqlite3")]
-            canvas: Objects,
-        }
-        #[derive(serde::Deserialize)]
-        struct Objects {
-            sqlite_master: Vec<Entry>,
-        }
-        #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-        struct Entry {
-            create_order: usize,
-            name: String,
-            sql: String,
-            table: String,
-            r#type: String,
-        }
+        use crate::canvas_schema::tests::{Catalog, Entry};
         let snapshot: Catalog =
             studio_json::from_str(crate::fresh_state::SNAPSHOT).expect("catalog");
         let entry = snapshot

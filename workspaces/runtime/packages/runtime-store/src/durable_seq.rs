@@ -22,7 +22,7 @@
 //! The DDL of `durable_rows` and `durable_floor` is in `sync_schema.sql` (section
 //! `common`), where the allocators that read `durable_rows` are.
 
-use rusqlite::{Connection, OptionalExtension, Transaction};
+use rusqlite::{Connection, Transaction};
 
 use crate::{StoreError, StoreResult};
 
@@ -235,6 +235,7 @@ pub(crate) fn install(tx: &Transaction<'_>) -> StoreResult<()> {
 /// because `NEXT` reads the highest `sync_entities.seq`. Without it, deleting the row that
 /// holds the highest number lets `NEXT` repeat that number.
 pub fn keep_counter(tx: &Transaction<'_>) -> StoreResult<()> {
+    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
     tx.execute(
         &format!("UPDATE sync_generation SET value=MAX(value,{NEXT}-1) WHERE id=1"),
         [],
@@ -259,6 +260,7 @@ pub const MONITOR_WINDOW: &str = "monitor_window";
 
 /// Put `id` in window `tbl`. An id already in it keeps its number.
 pub fn join_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
+    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
     let changed = connection.execute(
         &format!(
             "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
@@ -273,6 +275,7 @@ pub fn join_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<
 /// Take `id` out of window `tbl`: a tombstone at a new number. An id not in it is
 /// left alone.
 pub fn leave_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bool> {
+    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
     let changed = connection.execute(
         &format!(
             "UPDATE durable_rows SET seq={NEXT},deleted=1,at=CAST(strftime('%s','now') AS INTEGER)
@@ -303,6 +306,7 @@ pub fn in_window(connection: &Connection, tbl: &str, id: &str) -> StoreResult<bo
 /// Give `(tbl, id)` a new number without a row write: a derived document of `id`
 /// changed. A mark is never a tombstone.
 pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
+    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
     connection.execute(
         &format!(
             "INSERT INTO durable_rows(tbl,id,seq,deleted,at) VALUES(?1,?2,{NEXT},0,0)
@@ -317,6 +321,7 @@ pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
 /// after the triggers exist have an entry from them, so this only reaches old rows. Safe
 /// to repeat: a row that has an entry keeps its number.
 pub fn number_row(connection: &Connection, table: &str, rowid: i64) -> StoreResult<()> {
+    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
     connection.execute(
         &format!(
             "INSERT INTO durable_rows(tbl,id,seq,deleted,at)
@@ -364,10 +369,10 @@ pub fn high(connection: &Connection) -> StoreResult<i64> {
 /// The highest change number of any sync table, and the durable tombstone floor.
 pub fn high_and_floor(connection: &Connection) -> StoreResult<(i64, i64)> {
     let high = high(connection)?;
-    let floor: i64 =
-        connection.query_row("SELECT floor FROM durable_floor WHERE id=1", [], |row| {
-            row.get(0)
-        })?;
+    let floor = crate::peer_update_settings::canvas_read(connection)
+        .get::<crate::clock_schema::DurableFloor>(&(1,))?
+        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+        .floor;
     Ok((high, floor))
 }
 
@@ -387,11 +392,7 @@ pub fn changes_since(
         .iter()
         .find(|candidate| candidate.name == table)
         .ok_or_else(|| StoreError::SchemaMismatch(format!("{table} is not a durable table")))?;
-    let high: i64 = connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?;
-    let floor: i64 =
-        connection.query_row("SELECT floor FROM durable_floor WHERE id=1", [], |row| {
-            row.get(0)
-        })?;
+    let (high, floor) = high_and_floor(connection)?;
     let after = cursor.filter(|cursor| (floor..=high).contains(cursor));
     let rows = |after: i64| -> StoreResult<Vec<DurableRow>> {
         let sql = format!(
@@ -462,13 +463,9 @@ const COPIES_RETIRED: &str = "retired";
 /// True once transcript pages are built at read time and the writer keeps no transcript
 /// copy in `sync_entities`.
 pub fn transcript_copies_retired(connection: &Connection) -> StoreResult<bool> {
-    let value: Option<String> = connection
-        .query_row(
-            "SELECT value FROM sync_entity_meta WHERE key=?1",
-            [COPIES_KEY],
-            |row| row.get(0),
-        )
-        .optional()?;
+    let value = crate::peer_update_settings::canvas_read(connection)
+        .get::<crate::clock_schema::SyncEntityMeta>(&(COPIES_KEY.to_owned(),))?
+        .map(|row| row.value);
     Ok(value.as_deref() == Some(COPIES_RETIRED))
 }
 
@@ -478,10 +475,11 @@ pub fn transcript_copies_retired(connection: &Connection) -> StoreResult<bool> {
 pub fn retire_transcript_copies(tx: &Transaction<'_>) -> StoreResult<Vec<(String, String)>> {
     let missing = transcript_copy_missing_from_owner(tx)?;
     if missing.is_empty() {
-        tx.execute(
-            "INSERT INTO sync_entity_meta(key,value) VALUES(?1,?2)
-             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [COPIES_KEY, COPIES_RETIRED],
+        crate::peer_update_settings::canvas_tx(tx).upsert(
+            &crate::clock_schema::SyncEntityMeta {
+                key: COPIES_KEY.to_owned(),
+                value: COPIES_RETIRED.to_owned(),
+            },
         )?;
     }
     Ok(missing)

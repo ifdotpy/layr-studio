@@ -97,13 +97,8 @@ fn snapshot_in_transaction(
             })
         })
         .collect::<Result<Vec<_>, StoreError>>()?;
-    let auto_pair = tx
-        .query_row(
-            "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-            [],
-            |r| r.get::<_, i64>(0),
-        )
-        .optional()?
+    let auto_pair = studio_runtime_store::settings_schema::AccessSettings::get(tx)?
+        .map(|row| row.auto_pair)
         .unwrap_or(1)
         != 0;
     let auto_update = peer_auto_update(tx)?;
@@ -338,68 +333,168 @@ pub async fn manage(
         AccessIdentity::deserialize(identity).map_err(StoreError::from)?;
     let body = body.clone();
     let actor = actor.to_owned();
-    store.transaction_with(move |tx| -> Result<AccessSnapshot, MultiServerError> {
-        match &body {
-            ManagementRequest::Settings { auto_pair, auto_update, .. } => {
-                // A request changes only the settings that it names.
-                if let Some(value) = auto_pair.value() {
-                    tx.execute("UPDATE runtime_access_settings SET auto_pair=?1 WHERE id=1", [i64::from(*value)])?;
-                }
-                if let Some(value) = auto_update.value() {
-                    studio_runtime_store::peer_update_settings::PeerUpdateSettings { id: 1, auto_update: i64::from(*value) }.upsert(tx)?;
-                }
-                audit_write(tx,"local",&actor,"settings")?;
-            }
-            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(studio_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); studio_runtime_store::access_tables::AccessClientsRow::update(tx, id, studio_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?)?; audit_write(tx,id,&actor,"revoke")?; } }
-            ManagementRequest::Alias { server_id, request_id, alias } => {
-                let server = server_id.as_str();
-                let request = request_id.as_str();
-                let alias_value = alias.clone();
-                let alias = alias.as_str();
-                if !valid_identifier(server) || !valid_identifier(request) {
-                    return Err(MultiServerError::Refused("invalid server alias request".into()));
-                }
-                let local = server == "local" || server == identity.server_id;
-                let target = if local { "local" } else { server };
-                let prior=studio_runtime_store::access_tables::AccessAliasRequestsRow::get(tx, request)?.map(|row| (row.server, row.alias));
-                if let Some((saved_target,saved_alias)) = prior {
-                    if saved_target != target || saved_alias != alias {
-                        return Err(MultiServerError::Conflict("request ID has different content".into()));
+    store
+        .transaction_with(move |tx| -> Result<AccessSnapshot, MultiServerError> {
+            match &body {
+                ManagementRequest::Settings {
+                    auto_pair,
+                    auto_update,
+                    ..
+                } => {
+                    // A request changes only the settings that it names.
+                    if let Some(value) = auto_pair.value() {
+                        studio_runtime_store::settings_schema::AccessSettings::set_auto_pair(
+                            tx,
+                            i64::from(*value),
+                        )?;
                     }
-                } else {
-                    let aliases = ensure_server_aliases(tx, &identity)?;
-                    let local_id = identity.server_id.as_str();
-                    if !local && !aliases.contains_key(server) {
-                        return Err(MultiServerError::Refused("server does not exist".into()));
+                    if let Some(value) = auto_update.value() {
+                        studio_runtime_store::peer_update_settings::PeerUpdateSettings {
+                            id: 1,
+                            auto_update: i64::from(*value),
+                        }
+                        .upsert(tx)?;
                     }
-                    let collision = aliases.iter().any(|(id, existing)| {
-                        existing == alias && id != target && !(local && id == local_id)
-                    });
-                    if collision {
-                        return Err(MultiServerError::Conflict("server alias is already in use".into()));
+                    audit_write(tx, "local", &actor, "settings")?;
+                }
+                ManagementRequest::Revoke { client_id, .. } => {
+                    let id = client_id.as_str();
+                    let mut client = stored(tx, "runtime_access_clients", id)?
+                        .ok_or_else(|| MultiServerError::Refused("client does not exist".into()))?;
+                    if client.status != AccessClientStatus::Revoked {
+                        client.status = AccessClientStatus::Revoked;
+                        client.revoked = Field::Value(
+                            studio_json::Number::from_f64(unix_time()?)
+                                .ok_or_else(|| invalid("runtime_access_clients", id, "revoked"))?,
+                        );
+                        studio_runtime_store::access_tables::AccessClientsRow::update(
+                            tx,
+                            id,
+                            studio_json::to_string(&client)
+                                .map_err(|_| invalid("runtime_access_clients", id, "record"))?,
+                        )?;
+                        audit_write(tx, id, &actor, "revoke")?;
                     }
-                    if local {
-                        tx.execute("INSERT INTO runtime_access_local_alias VALUES(1,?) ON CONFLICT(id) DO UPDATE SET alias=excluded.alias", [&alias])?;
+                }
+                ManagementRequest::Alias {
+                    server_id,
+                    request_id,
+                    alias,
+                } => {
+                    let server = server_id.as_str();
+                    let request = request_id.as_str();
+                    let alias_value = alias.clone();
+                    let alias = alias.as_str();
+                    if !valid_identifier(server) || !valid_identifier(request) {
+                        return Err(MultiServerError::Refused(
+                            "invalid server alias request".into(),
+                        ));
+                    }
+                    let local = server == "local" || server == identity.server_id;
+                    let target = if local { "local" } else { server };
+                    let prior = studio_runtime_store::access_tables::AccessAliasRequestsRow::get(
+                        tx, request,
+                    )?
+                    .map(|row| (row.server, row.alias));
+                    if let Some((saved_target, saved_alias)) = prior {
+                        if saved_target != target || saved_alias != alias {
+                            return Err(MultiServerError::Conflict(
+                                "request ID has different content".into(),
+                            ));
+                        }
                     } else {
-                        let mut peer = stored(tx, "runtime_access_clients", server)?
-                            .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
-                        peer.alias = Field::Value(alias_value);
-                        studio_runtime_store::access_tables::AccessClientsRow::update(tx, server, studio_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?)?;
+                        let aliases = ensure_server_aliases(tx, &identity)?;
+                        let local_id = identity.server_id.as_str();
+                        if !local && !aliases.contains_key(server) {
+                            return Err(MultiServerError::Refused("server does not exist".into()));
+                        }
+                        let collision = aliases.iter().any(|(id, existing)| {
+                            existing == alias && id != target && !(local && id == local_id)
+                        });
+                        if collision {
+                            return Err(MultiServerError::Conflict(
+                                "server alias is already in use".into(),
+                            ));
+                        }
+                        if local {
+                            studio_runtime_store::settings_schema::AccessLocalAlias {
+                                id: 1,
+                                alias: alias.to_owned(),
+                            }
+                            .upsert(tx)?;
+                        } else {
+                            let mut peer = stored(tx, "runtime_access_clients", server)?
+                                .ok_or_else(|| {
+                                    MultiServerError::Refused("server does not exist".into())
+                                })?;
+                            peer.alias = Field::Value(alias_value);
+                            studio_runtime_store::access_tables::AccessClientsRow::update(
+                                tx,
+                                server,
+                                studio_json::to_string(&peer).map_err(|_| {
+                                    invalid("runtime_access_clients", server, "record")
+                                })?,
+                            )?;
+                        }
+                        studio_runtime_store::access_tables::AccessAliasRequestsRow::insert(
+                            tx, request, target, alias,
+                        )?;
+                        audit_write(tx, target, &actor, "alias")?;
                     }
-                    studio_runtime_store::access_tables::AccessAliasRequestsRow::insert(tx, request, target, alias)?;
-                    audit_write(tx,target,&actor,"alias")?;
+                }
+                ManagementRequest::Unrevoke {
+                    request_id,
+                    client_id,
+                } => {
+                    let request = request_id.as_str();
+                    let target = client_id.as_str();
+                    let prior =
+                        studio_runtime_store::access_tables::AccessUnrevokesRow::get(tx, request)?
+                            .map(|row| row.client);
+                    if let Some(saved) = prior {
+                        if saved != target {
+                            return Err(MultiServerError::Conflict(
+                                "request ID selected another server".into(),
+                            ));
+                        }
+                    } else {
+                        let v = stored(tx, "runtime_access_clients", target)?.ok_or_else(|| {
+                            MultiServerError::Refused("select a revoked server".into())
+                        })?;
+                        if v.status != AccessClientStatus::Revoked
+                            || v.kind != AccessClientKind::Server
+                        {
+                            return Err(MultiServerError::Refused(
+                                "select a revoked server".into(),
+                            ));
+                        }
+                        studio_runtime_store::access_tables::AccessClientsRow::delete(tx, target)?;
+                        studio_runtime_store::access_tables::AccessAutoAttemptsRow::delete(
+                            tx, target,
+                        )?;
+                        studio_runtime_store::access_tables::AccessUnrevokesRow::insert(
+                            tx, request, target,
+                        )?;
+                        audit_write(tx, target, &actor, "unrevoke")?;
+                    }
+                }
+                ManagementRequest::AcceptInvite { .. }
+                | ManagementRequest::CreateInvite { .. }
+                | ManagementRequest::Discover { .. }
+                | ManagementRequest::Name { .. }
+                | ManagementRequest::UiInvite { .. } => {
+                    return Err(MultiServerError::Refused(format!(
+                        "unsupported local multi-server action: {}",
+                        body.action()
+                    )));
                 }
             }
-            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=studio_runtime_store::access_tables::AccessUnrevokesRow::get(tx, request)?.map(|row| row.client); if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}studio_runtime_store::access_tables::AccessClientsRow::delete(tx, target)?;studio_runtime_store::access_tables::AccessAutoAttemptsRow::delete(tx, target)?;studio_runtime_store::access_tables::AccessUnrevokesRow::insert(tx, request, target)?;audit_write(tx,target,&actor,"unrevoke")?;} }
-            ManagementRequest::AcceptInvite { .. } | ManagementRequest::CreateInvite { .. }
-            | ManagementRequest::Discover { .. } | ManagementRequest::Name { .. }
-            | ManagementRequest::UiInvite { .. } => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
-        }
-        let clients=project_records(tx,"runtime_access_clients")?;
-        let records=MultiServerRepository::audit(tx)?;
-        let _=(clients,records);
-        snapshot_in_transaction(tx, &identity, true).map_err(MultiServerError::from)
-    }).await
+            let clients = project_records(tx, "runtime_access_clients")?;
+            let records = MultiServerRepository::audit(tx)?;
+            let _ = (clients, records);
+            snapshot_in_transaction(tx, &identity, true).map_err(MultiServerError::from)
+        })
+        .await
 }
 
 /// Create a single-use signed pairing invitation. The token is deterministically
@@ -623,13 +718,8 @@ fn server_aliases(
     identity: &AccessIdentity,
     persist_default_aliases: bool,
 ) -> Result<BTreeMap<String, String>, StoreError> {
-    let local_alias = tx
-        .query_row(
-            "SELECT alias FROM runtime_access_local_alias WHERE id=1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
+    let local_alias = studio_runtime_store::settings_schema::AccessLocalAlias::get(tx)?
+        .map(|row| row.alias)
         .unwrap_or_else(|| "LOC".to_owned());
     let clients = project_records(tx, "runtime_access_clients")?;
     let mut aliases = BTreeMap::from([

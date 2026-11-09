@@ -87,10 +87,15 @@ impl AgentRepository {
         if crate::schema::table_exists(transaction, "runtime_agent_record_generation")?
             && crate::schema::table_exists(transaction, "runtime_scheduler_agent_change_state")?
         {
-            transaction.execute_batch(
-                "INSERT OR IGNORE INTO runtime_agent_record_generation(id,value) VALUES(1,0);
-                 INSERT OR IGNORE INTO runtime_scheduler_agent_change_state(id,floor,generation,entries,total) VALUES(1,0,0,0,0);",
-            )?;
+            let mut typed = crate::peer_update_settings::canvas_tx(transaction);
+            typed.insert_new(&crate::clock_schema::AgentRecordGeneration { id: 1, value: 0 })?;
+            typed.insert_new(&crate::clock_schema::SchedulerAgentChangeState {
+                id: 1,
+                floor: 0,
+                generation: 0,
+                entries: 0,
+                total: 0,
+            })?;
         }
         Ok(())
     }

@@ -362,7 +362,7 @@ inventory::submit! { crate::repositories::SchemaRegistration { repository:"feder
 
 /// Read-only coverage for every federation record consumed by this subsystem.
 pub fn check_state(db: &Connection) -> StoreResult<Vec<crate::StateCheckTable>> {
-    [FederationTable::Settings, FederationTable::Outbox]
+    [FederationTable::Outbox]
         .into_iter()
         .map(|table| check_table_state(db, table))
         .collect()

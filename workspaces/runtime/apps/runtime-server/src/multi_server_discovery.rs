@@ -496,13 +496,8 @@ async fn save_auto_pair(
     let owner = owner.to_owned();
     store
         .transaction_with(move |tx| {
-            let auto_pair_enabled = tx
-                .query_row(
-                    "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-                    [],
-                    |row| row.get::<_, i64>(0),
-                )
-                .optional()?
+            let auto_pair_enabled = studio_runtime_store::settings_schema::AccessSettings::get(tx)?
+                .map(|row| row.auto_pair)
                 .unwrap_or(1)
                 != 0;
             if !auto_pair_enabled {
@@ -778,10 +773,7 @@ mod tests {
         }
         store
             .transaction(|tx| {
-                tx.execute(
-                    "UPDATE runtime_access_settings SET auto_pair=0 WHERE id=1",
-                    [],
-                )?;
+                studio_runtime_store::settings_schema::AccessSettings::set_auto_pair(tx, 0)?;
                 Ok(())
             })
             .await
@@ -795,7 +787,7 @@ mod tests {
             })
         ));
         store.transaction(|tx| {
-            tx.execute("UPDATE runtime_access_settings SET auto_pair=1 WHERE id=1", [])?;
+            studio_runtime_store::settings_schema::AccessSettings::set_auto_pair(tx, 1)?;
             tx.execute("DELETE FROM runtime_access_clients WHERE id='peer'", [])?;
             tx.execute_batch("CREATE TRIGGER reject_auto_audit BEFORE INSERT ON runtime_access_audit BEGIN SELECT RAISE(ABORT,'fixture'); END;")?;
             Ok(())
@@ -1100,10 +1092,7 @@ mod tests {
 
         store
             .transaction(|tx| {
-                tx.execute(
-                    "UPDATE runtime_access_settings SET auto_pair=0 WHERE id=1",
-                    [],
-                )?;
+                studio_runtime_store::settings_schema::AccessSettings::set_auto_pair(tx, 0)?;
                 Ok(())
             })
             .await
@@ -1137,10 +1126,7 @@ mod tests {
 
         store
             .transaction(|tx| {
-                tx.execute(
-                    "UPDATE runtime_access_settings SET auto_pair=1 WHERE id=1",
-                    [],
-                )?;
+                studio_runtime_store::settings_schema::AccessSettings::set_auto_pair(tx, 1)?;
                 Ok(())
             })
             .await

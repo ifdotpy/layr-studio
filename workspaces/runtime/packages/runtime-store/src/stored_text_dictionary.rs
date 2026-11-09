@@ -196,7 +196,7 @@ pub fn train(samples: &[Vec<u8>]) -> Option<Vec<u8>> {
 pub fn ensure_analytics_schema(connection: &Connection) -> StoreResult<()> {
     connection.execute_batch(DICTIONARY_SCHEMA)?;
     connection.execute_batch(crate::feature_schema::PAYLOAD_MIGRATIONS_SCHEMA)?;
-    connection.execute_batch(crate::stored_text_compaction::BATCHES_SCHEMA)?;
+    crate::stored_text_compaction::prepare_batches(connection)?;
     Ok(())
 }
 

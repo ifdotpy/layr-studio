@@ -1,7 +1,10 @@
 //! Synchronous access to the durable sync document and entity tables.
 
 use crate::CachedSql;
+use crate::clock_schema::{SyncDocuments, SyncEntities, SyncEntityMeta, SyncIdentity};
+use crate::peer_update_settings::{canvas_read, canvas_tx};
 use rusqlite::{Connection, OptionalExtension, Transaction, named_params, params};
+use studio_db_api::db_query;
 use studio_json::{Value, json};
 use studio_runtime_schema::shared_values::{
     SYNC_BATCH_LIMIT, SYNC_ENTITY_PAGE_LIMIT, SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
@@ -634,13 +637,9 @@ impl SyncDocumentsRepository {
     /// Whether entity tombstones exceed the retained limit by the prune slack,
     /// so a pruning run removes a full batch instead of one row per delete.
     pub fn entity_tombstone_prune_due(connection: &Connection) -> StoreResult<bool> {
-        let count = connection
-            .query_row_cached(
-                "SELECT value FROM sync_entity_meta WHERE key='entity_tombstone_count'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let count = canvas_read(connection)
+            .get::<SyncEntityMeta>(&("entity_tombstone_count".to_owned(),))?
+            .map(|row| row.value);
         let Some(count) = count else {
             // A missing counter is rebuilt by the first pruning transaction.
             return Ok(true);
@@ -658,18 +657,17 @@ impl SyncDocumentsRepository {
     /// removed sequence, so clients behind the floor reset instead of missing a
     /// deletion. Returns the number of removed rows; zero means nothing is due.
     pub fn prune_entity_tombstones(transaction: &Transaction<'_>) -> StoreResult<usize> {
+        // Raw SQL: aggregate initialization must observe tombstone triggers in this transaction.
         transaction.execute_cached(
             "INSERT OR IGNORE INTO sync_entity_meta(key,value) \
              SELECT 'entity_tombstone_count',CAST(COUNT(*) AS TEXT) FROM sync_entities \
              WHERE deleted=1 AND collection NOT LIKE 'transcript:%'",
             [],
         )?;
-        let count = transaction
-            .query_row_cached(
-                "SELECT value FROM sync_entity_meta WHERE key='entity_tombstone_count'",
-                [],
-                |row| row.get::<_, String>(0),
-            )?
+        let count = canvas_tx(transaction)
+            .get::<SyncEntityMeta>(&("entity_tombstone_count".to_owned(),))?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+            .value
             .parse::<i64>()
             .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
         let excess = count - ENTITY_TOMBSTONE_LIMIT;
@@ -696,28 +694,29 @@ impl SyncDocumentsRepository {
             return Ok(0);
         };
         let floor = Self::entity_tombstone_floor(transaction)?.max(highest);
-        let mut delete = transaction.prepare_cached(
-            "DELETE FROM sync_entities WHERE collection=?1 AND id=?2 AND deleted=1",
-        )?;
+        let mut typed = canvas_tx(transaction);
         for (collection, id, _) in &rows {
-            delete.execute(params![collection, id])?;
+            studio_db_api::db_delete!(
+                typed,
+                SyncEntities,
+                filter(
+                    SyncEntities::COLLECTION.eq(collection),
+                    SyncEntities::ID.eq(id),
+                    SyncEntities::DELETED.eq(&1)
+                )
+            )?;
         }
-        transaction.execute_cached(
-            "INSERT INTO sync_entity_meta(key,value) VALUES('entity_tombstone_floor',?1) \
-             ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            [floor.to_string()],
-        )?;
+        canvas_tx(transaction).upsert(&SyncEntityMeta {
+            key: "entity_tombstone_floor".to_owned(),
+            value: floor.to_string(),
+        })?;
         Ok(rows.len())
     }
 
     pub fn entity_tombstone_floor(connection: &Connection) -> StoreResult<i64> {
-        let value = connection
-            .query_row_cached(
-                "SELECT value FROM sync_entity_meta WHERE key='entity_tombstone_floor'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let value = canvas_read(connection)
+            .get::<SyncEntityMeta>(&("entity_tombstone_floor".to_owned(),))?
+            .map(|row| row.value);
         value.map_or(Ok(0), |text| {
             text.parse::<i64>()
                 .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
@@ -725,9 +724,12 @@ impl SyncDocumentsRepository {
     }
 
     pub fn workspace_id(connection: &Connection) -> StoreResult<String> {
-        connection
-            .query_row_cached("SELECT id FROM sync_identity LIMIT 1", [], |row| row.get(0))
-            .map_err(StoreError::from)
+        let read = canvas_read(connection);
+        db_query!(read, SyncIdentity, limit(1))?
+            .into_iter()
+            .next()
+            .map(|row| row.id)
+            .ok_or(rusqlite::Error::QueryReturnedNoRows.into())
     }
 
     /// Latest draft row sequence, including retained tombstones. Unrelated sync
@@ -753,20 +755,19 @@ impl SyncDocumentsRepository {
     /// Read up to `limit` live drafts in sequence order, for an initial snapshot. Deletion marks
     /// stay for change replay, but a snapshot is the whole current set and does not need them.
     pub fn live_drafts(connection: &Connection, limit: i64) -> StoreResult<Vec<SyncDocument>> {
-        let mut statement = connection.prepare_cached(
-            "SELECT seq,id,payload,deleted FROM sync_documents \
-             WHERE scope='drafts' AND deleted=0 ORDER BY seq LIMIT ?1",
+        let read = canvas_read(connection);
+        let scope = "drafts".to_owned();
+        let rows = db_query!(
+            read,
+            SyncDocuments,
+            filter(
+                SyncDocuments::SCOPE.eq(&scope),
+                SyncDocuments::DELETED.eq(&0)
+            ),
+            order_by(SyncDocuments::SEQ.asc),
+            limit(limit)
         )?;
-        let rows = statement.query_map(params![limit], |row| {
-            Ok(SyncDocument {
-                sequence: row.get(0)?,
-                id: row.get(1)?,
-                payload: row.get(2)?,
-                deleted: row.get::<_, i64>(3)? != 0,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        Ok(rows.into_iter().map(sync_document).collect())
     }
 
     /// Read a caller-bounded draft interval, shared by pull pages and stream batches.
@@ -775,20 +776,20 @@ impl SyncDocumentsRepository {
         after: i64,
         limit: i64,
     ) -> StoreResult<Vec<SyncDocument>> {
-        let mut statement = connection.prepare_cached(
-            "SELECT seq,id,payload,deleted FROM sync_documents \
-             WHERE scope='drafts' AND seq>?1 ORDER BY seq LIMIT ?2",
+        let read = canvas_read(connection);
+        let scope = "drafts".to_owned();
+        let after = after.max(0);
+        let rows = db_query!(
+            read,
+            SyncDocuments,
+            filter(
+                SyncDocuments::SCOPE.eq(&scope),
+                SyncDocuments::SEQ.gt(&after)
+            ),
+            order_by(SyncDocuments::SEQ.asc),
+            limit(limit)
         )?;
-        let rows = statement.query_map(params![after.max(0), limit], |row| {
-            Ok(SyncDocument {
-                sequence: row.get(0)?,
-                id: row.get(1)?,
-                payload: row.get(2)?,
-                deleted: row.get::<_, i64>(3)? != 0,
-            })
-        })?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(StoreError::from)
+        Ok(rows.into_iter().map(sync_document).collect())
     }
 
     pub fn preference_payload(connection: &Connection, scope: &str) -> StoreResult<Option<String>> {
@@ -871,6 +872,7 @@ impl SyncDocumentsRepository {
         sequence: Option<i64>,
     ) -> StoreResult<bool> {
         crate::entity_publication::mark_published(collection, id);
+        // Raw SQL: projection API follow-up; publication no-ops must not read or allocate payloads.
         let current = transaction
             .query_row_cached(
                 "SELECT hash,deleted FROM sync_entities WHERE collection=?1 AND id=?2",
@@ -884,23 +886,17 @@ impl SyncDocumentsRepository {
         {
             return Ok(false);
         }
-        transaction.execute_cached(
-            "INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted) \
-             VALUES (?1,?2,?3,?4,?5,?6) \
-             ON CONFLICT(collection,id) DO UPDATE SET seq=excluded.seq,hash=excluded.hash, \
-             payload=excluded.payload,deleted=excluded.deleted",
-            params![
-                collection,
-                id,
-                match sequence {
-                    Some(sequence) => sequence,
-                    None => next_sequence(transaction)?,
-                },
-                hash,
-                payload,
-                i64::from(deleted)
-            ],
-        )?;
+        canvas_tx(transaction).upsert(&SyncEntities {
+            collection: collection.to_owned(),
+            id: id.to_owned(),
+            seq: match sequence {
+                Some(sequence) => sequence,
+                None => next_sequence(transaction)?,
+            },
+            hash: hash.to_owned(),
+            payload: payload.map(str::to_owned),
+            deleted: i64::from(deleted),
+        })?;
         Ok(true)
     }
 }
@@ -1012,10 +1008,54 @@ inventory::submit! {
     }
 }
 
+fn sync_document(row: SyncDocuments) -> SyncDocument {
+    SyncDocument {
+        id: row.id,
+        payload: row.payload,
+        sequence: row.seq,
+        deleted: row.deleted != 0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::SyncDocumentsRepository;
     use rusqlite::Connection;
+
+    #[test]
+    fn publication_noop_uses_only_hash_and_deleted() {
+        use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().expect("db");
+        db.execute_batch(crate::clock_schema::SyncEntities::DDL)
+            .expect("entity table");
+        db.execute(
+            "INSERT INTO sync_entities VALUES('fixture','row',7,'same',x'00',0)",
+            [],
+        )
+        .expect("legacy payload");
+        db.authorizer(Some(|context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Read {
+                    table_name: "sync_entities",
+                    column_name: "payload" | "seq",
+                    ..
+                }
+            ) {
+                Authorization::Deny
+            } else {
+                Authorization::Allow
+            }
+        }))
+        .expect("narrow projection guard");
+        let tx = db.transaction().expect("transaction");
+        assert!(
+            !SyncDocumentsRepository::put_entity_hash(&tx, "fixture", "row", "same", false)
+                .expect("no-op does not read payload or sequence")
+        );
+        tx.rollback().expect("caller owns rollback");
+    }
 
     #[test]
     fn payload_hash_preserves_lowercase_sha256_bytes() {

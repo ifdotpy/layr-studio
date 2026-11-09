@@ -1,49 +1,17 @@
 -- section: common
-CREATE TABLE IF NOT EXISTS sync_identity (id TEXT PRIMARY KEY);
-CREATE TABLE IF NOT EXISTS sync_generation (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);
+-- Table and index DDL is owned by clock_schema descriptors.
+-- Raw SQL below owns seed rows and trigger expressions in the same transaction.
+
 INSERT OR IGNORE INTO sync_generation VALUES (1, 0);
-CREATE TABLE IF NOT EXISTS sync_documents (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    scope TEXT NOT NULL,
-    id TEXT NOT NULL,
-    payload TEXT NOT NULL,
-    deleted INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(scope, id)
-);
-CREATE INDEX IF NOT EXISTS sync_scope_seq ON sync_documents(scope,seq);
-CREATE TABLE IF NOT EXISTS sync_entities (
-    collection TEXT NOT NULL,
-    id TEXT NOT NULL,
-    seq INTEGER NOT NULL,
-    hash TEXT NOT NULL,
-    payload TEXT,
-    deleted INTEGER NOT NULL DEFAULT 0,
-    PRIMARY KEY(collection, id)
-);
-CREATE INDEX IF NOT EXISTS sync_entities_seq ON sync_entities(seq);
-CREATE INDEX IF NOT EXISTS sync_entities_collection_seq ON sync_entities(collection,seq);
-CREATE INDEX IF NOT EXISTS sync_entities_non_transcript_seq ON sync_entities(seq)
-        WHERE collection NOT LIKE 'transcript:%';
+
 -- Retired subscription fingerprints must not keep maintaining their private indexes.
 DROP INDEX IF EXISTS sync_entities_live_root_scope;
 DROP INDEX IF EXISTS sync_entities_live_agent_scope;
 DROP INDEX IF EXISTS sync_entities_invalid_payload;
-CREATE INDEX IF NOT EXISTS sync_entities_collection_deleted
-        ON sync_entities(collection,deleted);
-CREATE INDEX IF NOT EXISTS sync_entities_tombstone_order
-        ON sync_entities(seq,collection,id)
-        WHERE deleted=1 AND collection NOT LIKE 'transcript:%';
-CREATE TABLE IF NOT EXISTS sync_entity_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+
 -- Change numbers of the main tables (durable_seq.rs). Its numbers share the counter of
 -- sync_entities, sync_documents and sync_generation, so every allocator below reads it.
-CREATE TABLE IF NOT EXISTS durable_rows (
-        tbl TEXT NOT NULL, id TEXT NOT NULL, seq INTEGER NOT NULL,
-        deleted INTEGER NOT NULL DEFAULT 0, at INTEGER NOT NULL DEFAULT 0,
-        PRIMARY KEY(tbl, id));
-CREATE INDEX IF NOT EXISTS durable_rows_seq ON durable_rows(seq);
-CREATE INDEX IF NOT EXISTS durable_rows_tombstone_at ON durable_rows(at) WHERE deleted=1;
-CREATE TABLE IF NOT EXISTS durable_floor (
-        id INTEGER PRIMARY KEY, floor INTEGER NOT NULL);
+
 INSERT OR IGNORE INTO durable_floor(id, floor) VALUES (1, 0);
 CREATE TRIGGER IF NOT EXISTS sync_entity_tombstone_count_insert
       AFTER INSERT ON sync_entities

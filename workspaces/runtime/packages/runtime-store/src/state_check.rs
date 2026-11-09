@@ -219,7 +219,7 @@ fn record_failure(
 }
 
 fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTable>> {
-    let mut reports = check_system_records(
+    check_system_records(
         connection,
         &[
             ("runtime_events", "status"),
@@ -227,9 +227,7 @@ fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTab
             ("runtime_execution_runs", "record"),
             ("runtime_tool_requests", "record"),
         ],
-    )?;
-    reports.push(check_sync_entities(connection)?);
-    Ok(reports)
+    )
 }
 
 fn check_system_records(
@@ -309,7 +307,7 @@ fn check_system_records(
     Ok(reports)
 }
 
-fn check_sync_entities(connection: &Connection) -> StoreResult<StateCheckTable> {
+pub(crate) fn check_sync_entities(connection: &Connection) -> StoreResult<StateCheckTable> {
     let table = "sync_entities";
     let mut report = StateCheckTable {
         table,

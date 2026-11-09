@@ -187,11 +187,10 @@ impl MultiServerBoundary {
                         |r| r.get::<_, String>(0),
                     )
                     .optional()?;
-                let auto_pair = tx.query_row(
-                    "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-                    [],
-                    |r| r.get::<_, bool>(0),
-                )?;
+                let auto_pair = studio_runtime_store::settings_schema::AccessSettings::get(tx)?
+                    .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+                    .auto_pair
+                    != 0;
                 Ok::<_, StoreError>((client, invite, auto_pair))
             })
             .await?;
@@ -549,11 +548,12 @@ impl MultiServerBoundary {
             })?;
         let enabled = store
             .read_async("runtime-services/multi_server_pairing", move |tx| {
-                Ok::<_, StoreError>(tx.query_row(
-                    "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-                    [],
-                    |r| r.get::<_, bool>(0),
-                )?)
+                Ok::<_, StoreError>(
+                    studio_runtime_store::settings_schema::AccessSettings::get(tx)?
+                        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+                        .auto_pair
+                        != 0,
+                )
             })
             .await?;
         identity.tailscale_user = Some(owner.login().to_owned());
@@ -629,11 +629,11 @@ impl MultiServerBoundary {
                 } else {
                     None
                 };
-                let auto_pair: bool = tx.query_row(
-                    "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-                    [],
-                    |r| r.get(0),
-                )?;
+                let auto_pair: bool =
+                    studio_runtime_store::settings_schema::AccessSettings::get(tx)?
+                        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+                        .auto_pair
+                        != 0;
                 let snapshot = AccessSnapshot::from_records(
                     request.client_id(),
                     client.as_deref(),

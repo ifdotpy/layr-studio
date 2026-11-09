@@ -1,5 +1,6 @@
 //! Pure sync document, cursor and preference decisions.
 use studio_runtime_schema::shared_values::MODEL_CHOICES_PREFERENCE_KEY;
+use studio_runtime_store::clock_schema::SyncEntityMeta;
 
 use crate::event_write::truthy;
 pub use crate::sync_views::{
@@ -57,20 +58,8 @@ use studio_runtime_store::{
 /// Whether Python's durable seed and entity-view upgrade markers prove the
 /// persisted sync projection is complete. Legacy behavior: codex_sync_entities.seed.
 pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
-    let seeded = connection
-        .query_row(
-            "SELECT value FROM sync_entity_meta WHERE key=?1",
-            [SYNC_SEEDED_MARKER],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
-    let version = connection
-        .query_row(
-            "SELECT value FROM sync_entity_meta WHERE key=?1",
-            [AGENT_ORGANIZATION_FIELDS_MARKER],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
+    let seeded = SyncEntityMeta::value(connection, SYNC_SEEDED_MARKER)?;
+    let version = SyncEntityMeta::value(connection, AGENT_ORGANIZATION_FIELDS_MARKER)?;
     let mut complete = seeded.as_deref() == Some("1")
         && version
             .and_then(|value| value.parse::<i64>().ok())
@@ -78,26 +67,10 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
     if !complete {
         return Ok(false);
     }
-    complete &= connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [SUMMARY_ENTITIES_SEED_MARKER],
-        |row| row.get::<_, bool>(0),
-    )?;
-    complete &= connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [CONVERSATION_DETAILS_SEED_MARKER],
-        |row| row.get::<_, bool>(0),
-    )?;
-    complete &= connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [AGENT_PROJECTIONS_SEED_MARKER],
-        |row| row.get::<_, bool>(0),
-    )?;
-    complete &= connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [WORK_DETAILS_SEED_MARKER],
-        |row| row.get::<_, bool>(0),
-    )?;
+    complete &= SyncEntityMeta::matches(connection, SUMMARY_ENTITIES_SEED_MARKER, "1")?;
+    complete &= SyncEntityMeta::matches(connection, CONVERSATION_DETAILS_SEED_MARKER, "1")?;
+    complete &= SyncEntityMeta::matches(connection, AGENT_PROJECTIONS_SEED_MARKER, "1")?;
+    complete &= SyncEntityMeta::matches(connection, WORK_DETAILS_SEED_MARKER, "1")?;
     let table_exists = |name: &str| {
         connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
@@ -106,13 +79,7 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
         )
     };
     if table_exists("runtime_tasks")? && table_exists("runtime_agents")? {
-        let task_window = connection
-            .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key='task_window_migrated'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let task_window = SyncEntityMeta::value(connection, "task_window_migrated")?;
         complete &= task_window.as_deref() == Some("1");
     }
     if table_exists("runtime_events")? {
@@ -121,13 +88,7 @@ pub fn has_complete_entity_seed(connection: &Connection) -> StoreResult<bool> {
                 "SELECT EXISTS(SELECT 1 FROM runtime_agents a WHERE a.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM sync_entities q WHERE q.collection='queue' AND q.id=a.id AND q.deleted=0))", [], |row| row.get::<_, bool>(0),
             )?;
         }
-        let event_window = connection
-            .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key='event_window_seq'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let event_window = SyncEntityMeta::value(connection, "event_window_seq")?;
         let projected_sequence = connection.query_row(
             "SELECT COALESCE(MAX(seq),0) FROM sync_entities WHERE collection='event'",
             [],
@@ -355,15 +316,18 @@ pub fn maintain_entity_projections_with_server_id(
     crate::diagnostics::measure_runtime_stage("projection.event_window", || {
         maintain_event_window(transaction, &validate_projection)
     })?;
+    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
     transaction.execute(
         "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
         [AGENT_PROJECTIONS_SEED_MARKER],
     )?;
     seed_summary_entities(transaction)?;
+    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
     transaction.execute(
         "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
         [CONVERSATION_DETAILS_SEED_MARKER],
     )?;
+    // Raw SQL: REPLACE preserves the existing metadata rowid replacement semantics.
     transaction.execute(
         "INSERT OR REPLACE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
         [WORK_DETAILS_SEED_MARKER],
@@ -687,11 +651,7 @@ pub(crate) fn publish_summary_changes(
 /// Seed pre-existing rows once after the summary contract is installed. Normal
 /// pulls and unrelated writes never reconstruct these collections.
 fn seed_summary_entities(transaction: &Transaction<'_>) -> StoreResult<()> {
-    if transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [SUMMARY_ENTITIES_SEED_MARKER],
-        |r| r.get::<_, bool>(0),
-    )? {
+    if SyncEntityMeta::matches(transaction, SUMMARY_ENTITIES_SEED_MARKER, "1")? {
         return Ok(());
     }
     let mut pending = studio_runtime_store::PendingEntities::default();
@@ -703,20 +663,17 @@ fn seed_summary_entities(transaction: &Transaction<'_>) -> StoreResult<()> {
         }
     }
     publish_summary_changes(transaction, &pending)?;
-    transaction.execute(
-        "INSERT INTO sync_entity_meta(key,value) VALUES(?1,'1')",
-        [SUMMARY_ENTITIES_SEED_MARKER],
-    )?;
+    SyncEntityMeta::insert(transaction, SUMMARY_ENTITIES_SEED_MARKER, "1")?;
     Ok(())
 }
 
 /// The writer-local agent record generation, advanced by runtime_agents triggers.
 pub(crate) fn agent_record_generation(transaction: &Transaction<'_>) -> StoreResult<i64> {
-    Ok(transaction.query_row(
-        "SELECT value FROM runtime_agent_record_generation WHERE id=1",
-        [],
-        |row| row.get(0),
-    )?)
+    Ok(
+        studio_runtime_store::clock_schema::AgentRecordGeneration::get(transaction)?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?
+            .value,
+    )
 }
 
 /// Existing agent rows the trigger journal records as changed after
@@ -794,6 +751,7 @@ fn publish_team_roots(
 ) -> StoreResult<()> {
     for root in roots.difference(skip) {
         let current = crate::sync_entity_context::team_counts_text(transaction, root)?;
+        // Raw SQL: compare exact prior JSON text, including malformed historical evidence.
         let published: Option<Option<String>> = transaction
             .prepare_cached("SELECT team_counts FROM agent_publication_state WHERE id=?1")?
             .query_row([root], |row| row.get(0))
@@ -852,6 +810,7 @@ fn mark_agent_projection(
         id,
     )?;
     let team_counts = crate::sync_entity_context::team_counts_text(transaction, id)?;
+    // Raw SQL: the publication copies JSON selectors from the source agent in this transaction.
     transaction
         .prepare_cached(
             "INSERT INTO agent_publication_state(id,root_id,is_lead,live,in_flight,team_counts)
@@ -1127,11 +1086,7 @@ pub(crate) fn rule_view(id: &str, raw: &str) -> StoreResult<RawValue> {
 /// Seed root agent views and the task and monitor windows once, before the first SSE
 /// or runtime write. Work documents need no seed: they are built at read time.
 pub(crate) fn seed_work_details(transaction: &Transaction<'_>) -> StoreResult<()> {
-    if transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta WHERE key=?1 AND value='1')",
-        [WORK_DETAILS_SEED_MARKER],
-        |row| row.get::<_, bool>(0),
-    )? {
+    if SyncEntityMeta::matches(transaction, WORK_DETAILS_SEED_MARKER, "1")? {
         return Ok(());
     }
     let work = transaction
@@ -1152,7 +1107,7 @@ pub(crate) fn seed_work_details(transaction: &Transaction<'_>) -> StoreResult<()
     )?;
     maintain_task_window(transaction, &|_, _, _, _| true)?;
     maintain_monitor_window(transaction, &|_, _, _, _| true)?;
-    transaction.execute("INSERT INTO sync_entity_meta(key,value) VALUES(?1,'1') ON CONFLICT(key) DO UPDATE SET value='1'", [WORK_DETAILS_SEED_MARKER])?;
+    SyncEntityMeta::put(transaction, WORK_DETAILS_SEED_MARKER, "1")?;
     Ok(())
 }
 
@@ -1425,6 +1380,7 @@ fn join_task_window(
         id,
     )?;
     // The state of a task that left is kept, so a return under another owner is seen.
+    // Raw SQL: projection API follow-up; refresh must overwrite unrelated legacy fields.
     let previous: Option<String> = transaction
         .prepare_cached("SELECT agent FROM task_window_state WHERE id=?1")?
         .query_row([id], |row| row.get(0))
@@ -1435,18 +1391,15 @@ fn join_task_window(
             SyncDocumentsRepository::move_scope_visibility(transaction, "task", owner)?;
         }
     }
-    transaction
-        .prepare_cached(
-            "INSERT INTO task_window_state(id,agent,created,running) VALUES(?1,?2,?3,?4)
-             ON CONFLICT(id) DO UPDATE SET agent=excluded.agent,created=excluded.created,
-               running=excluded.running",
-        )?
-        .execute(rusqlite::params![
-            task.id().as_ref(),
-            task.agent(),
-            task.created_number().number().as_f64(),
-            task.status() == studio_runtime_schema::task_record::TaskStatus::Running
-        ])?;
+    studio_runtime_store::clock_schema::TaskWindowState {
+        id: task.id().as_ref().to_owned(),
+        agent: task.agent().to_owned(),
+        created: task.created_number().number().as_f64(),
+        running: i64::from(
+            task.status() == studio_runtime_schema::task_record::TaskStatus::Running,
+        ),
+    }
+    .upsert(transaction)?;
     Ok(())
 }
 
@@ -1525,19 +1478,9 @@ pub(crate) fn maintain_task_window(
         leave_task_window(transaction, id)?;
     }
     if stale.is_empty() {
-        let migrated = transaction
-            .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key='task_window_migrated'",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let migrated = SyncEntityMeta::value(transaction, "task_window_migrated")?;
         if migrated.as_deref() != Some("1") {
-            transaction.execute(
-                "INSERT INTO sync_entity_meta(key,value) VALUES('task_window_migrated','1') \
-                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                [],
-            )?;
+            SyncEntityMeta::put(transaction, "task_window_migrated", "1")?;
         }
     }
     Ok(())
@@ -1555,12 +1498,8 @@ pub(crate) fn maintain_task_window_after_write(
     task: &studio_runtime_store::TaskRecord,
     validate: &impl Fn(&str, &str, &Value, bool) -> bool,
 ) -> StoreResult<()> {
-    let migration_complete: bool = transaction.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sync_entity_meta \
-         WHERE key='task_window_migrated' AND value='1')",
-        [],
-        |row| row.get(0),
-    )?;
+    let migration_complete: bool =
+        SyncEntityMeta::matches(transaction, "task_window_migrated", "1")?;
     let running = |value: &Value| value.get("status").and_then(Value::as_str) == Some("running");
     let task_running = task.status() == studio_runtime_schema::task_record::TaskStatus::Running;
     let task_id = task.id().as_ref();
@@ -1924,13 +1863,7 @@ fn maintain_event_window(
         [],
         |row| row.get::<_, i64>(0),
     )?;
-    let marker = transaction
-        .query_row(
-            "SELECT value FROM sync_entity_meta WHERE key='event_window_seq'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?;
+    let marker = SyncEntityMeta::value(transaction, "event_window_seq")?;
     if marker
         .as_deref()
         .and_then(|value| value.parse::<i64>().ok())
@@ -2149,19 +2082,9 @@ fn retire_unkept(
             |row| row.get::<_, i64>(0),
         )?;
         let sequence = sequence.to_string();
-        let current = transaction
-            .query_row(
-                "SELECT value FROM sync_entity_meta WHERE key=?1",
-                [marker],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
+        let current = SyncEntityMeta::value(transaction, marker)?;
         if current.as_deref() != Some(sequence.as_str()) {
-            transaction.execute(
-                "INSERT INTO sync_entity_meta(key,value) VALUES(?1,?2) \
-                 ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                rusqlite::params![marker, sequence],
-            )?;
+            SyncEntityMeta::put(transaction, marker, &sequence)?;
         }
     }
     Ok(())
@@ -3784,6 +3707,26 @@ mod tests {
             .await
             .expect("seed agents and mark the window migrated");
         (root, store)
+    }
+
+    #[tokio::test]
+    async fn task_window_refresh_repairs_legacy_state_and_fences_both_owners() {
+        let (_root, store) = task_window_store().await;
+        store.transaction(|tx| {
+            tx.execute("INSERT INTO runtime_tasks(id,record) VALUES('legacy-task',?1)", [r#"{"id":"legacy-task","agent":"b","status":"running","created":12,"itemId":"legacy-task","turnId":"turn","type":"commandExecution","kind":"command","name":"commandExecution"}"#])?;
+            studio_runtime_store::durable_seq::join_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?;
+            tx.execute("INSERT INTO task_window_state VALUES('legacy-task','a','legacy-date',1)", [])?;
+            assert_eq!(studio_runtime_store::count_legacy_rows::<studio_runtime_store::clock_schema::TaskWindowState>(tx)?.counts(), (1, 0));
+            let revision = |owner| SyncDocumentsRepository::entity_scope_visibility_revision(tx, r#"["task"]"#, owner, false);
+            let before = (revision("a")?, revision("b")?);
+            maintain_task_window(tx, &|_, _, _, _| true)?;
+            let row = tx.query_row("SELECT agent,created,running FROM task_window_state WHERE id='legacy-task'", [], |row| Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?, row.get::<_, i64>(2)?)))?;
+            assert_eq!(row, ("b".to_owned(), 12.0, 1));
+            assert!(revision("a")? > before.0, "old owner gets a snapshot fence");
+            assert!(revision("b")? > before.1, "new owner gets a snapshot fence");
+            assert!(studio_runtime_store::durable_seq::in_window(tx, studio_runtime_store::durable_seq::TASK_WINDOW, "legacy-task")?);
+            Ok(())
+        }).await.expect("refresh repairs unrelated legacy values while moving the owner");
     }
 
     #[tokio::test]

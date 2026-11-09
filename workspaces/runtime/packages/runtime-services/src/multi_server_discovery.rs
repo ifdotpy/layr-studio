@@ -356,7 +356,7 @@ pub async fn record_probe(
         let id=text(&peer,"serverId");
         let previous=read_record(tx,"runtime_access_discovered",id)?;
         let client=read_record(tx,"runtime_access_clients",id)?;
-        let enabled:bool=tx.query_row("SELECT auto_pair FROM runtime_access_settings WHERE id=1",[],|r|r.get(0))?;
+        let enabled:bool=studio_runtime_store::settings_schema::AccessSettings::get(tx)?.ok_or(rusqlite::Error::QueryReturnedNoRows)?.auto_pair != 0;
         let decision=decide_probe(&snapshot,&origin,&peer,previous.as_deref(),client.as_deref(),enabled,now)?;
         if let Some(record)=&decision.record {
             let raw=studio_json::to_string(record).map_err(|_| refused(500,"invalid_peer","The peer identity is invalid"))?;

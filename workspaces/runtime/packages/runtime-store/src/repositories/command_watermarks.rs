@@ -4,13 +4,13 @@
 //! older than the `request_results` window whose number is at or below the watermark was
 //! applied once and must never run again as a new command.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction, params};
 
-/// Schema owner. The migration `2026-10-30-command-path` runs it on every database.
-pub(crate) const SCHEMA_SQL: &str = "CREATE TABLE IF NOT EXISTS client_command_watermarks (
-    client  TEXT PRIMARY KEY,
-    applied INTEGER NOT NULL CHECK (applied >= 0)
-) WITHOUT ROWID;";
+/// Install the watermark owner without changing existing rows or physical DDL.
+pub(crate) fn prepare(connection: &Connection) -> rusqlite::Result<()> {
+    use studio_db_api::Table;
+    crate::settings_schema::ClientCommandWatermarks::descriptor().install_if_absent(connection)
+}
 
 pub struct CommandWatermarks;
 
@@ -49,14 +49,9 @@ impl CommandWatermarks {
     }
     /// The highest applied number of `client`, or 0 when it never applied a command.
     pub fn applied(conn: &Connection, client: &str) -> rusqlite::Result<i64> {
-        Ok(conn
-            .query_row(
-                "SELECT applied FROM client_command_watermarks WHERE client=?1",
-                [client],
-                |row| row.get(0),
-            )
-            .optional()?
-            .unwrap_or(0))
+        Ok(crate::peer_update_settings::canvas_read(conn)
+            .get::<crate::settings_schema::ClientCommandWatermarks>(&(client.to_owned(),))?
+            .map_or(0, |row| row.applied))
     }
 
     /// Revision of an event: 1 until the first change, then one more for each change of its
@@ -71,6 +66,7 @@ impl CommandWatermarks {
 
     /// Raise the watermark to `number`. It never moves down.
     pub fn advance(tx: &Transaction<'_>, client: &str, number: i64) -> rusqlite::Result<()> {
+        // Raw SQL: raise the existing watermark with an atomic MAX expression.
         tx.execute(
             "INSERT INTO client_command_watermarks(client,applied) VALUES(?1,?2)
              ON CONFLICT(client) DO UPDATE SET applied=max(applied,excluded.applied)",
@@ -100,7 +96,7 @@ mod tests {
     #[test]
     fn watermark_starts_at_zero_and_never_moves_down() {
         let mut db = Connection::open_in_memory().expect("database");
-        db.execute_batch(SCHEMA_SQL).expect("schema");
+        prepare(&db).expect("schema");
         assert_eq!(CommandWatermarks::applied(&db, "a").unwrap(), 0);
         let tx = db.transaction().unwrap();
         CommandWatermarks::advance(&tx, "a", 5).unwrap();

@@ -5,7 +5,7 @@ use rusqlite::Transaction;
 /// The side table keeps the `runtime_events` columns unchanged. Read it with
 /// `CommandWatermarks::event_revision`.
 pub(super) fn apply(tx: &Transaction<'_>) -> crate::StoreResult<()> {
-    tx.execute_batch(crate::repositories::command_watermarks::SCHEMA_SQL)?;
+    crate::repositories::command_watermarks::prepare(tx)?;
     tx.execute_batch(
         "CREATE TABLE IF NOT EXISTS runtime_event_revisions(id TEXT PRIMARY KEY, rev INTEGER NOT NULL) WITHOUT ROWID;
          CREATE TRIGGER IF NOT EXISTS runtime_event_revision AFTER UPDATE OF status,text ON runtime_events

@@ -305,12 +305,23 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         let generated = if schema_name == "canvas.sqlite3" {
             crate::canvas_schema::registry()
                 .into_iter()
-                .find(|registration| entry["name"].as_str() == Some(registration.descriptor.name))
+                .find_map(|registration| {
+                    let descriptor = registration.descriptor;
+                    let name = entry["name"].as_str()?;
+                    if name == descriptor.name {
+                        Some(descriptor.ddl)
+                    } else {
+                        descriptor
+                            .indexes
+                            .iter()
+                            .find(|index| index.name == name)
+                            .map(|index| index.sql)
+                    }
+                })
         } else {
             None
         };
-        transaction
-            .execute_batch(generated.map_or(sql, |registration| registration.descriptor.ddl))?;
+        transaction.execute_batch(generated.unwrap_or(sql))?;
     }
     let version = snapshot[schema_name]["pragma_user_version"]
         .as_i64()
@@ -475,21 +486,17 @@ fn seed_workspace(transaction: &rusqlite::Transaction<'_>, state_dir: &Path) -> 
         value,
         false,
     )?;
-    transaction.execute(
-        "INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('seeded','1')",
-        [],
+    crate::clock_schema::SyncEntityMeta::insert_if_absent(transaction, "seeded", "1")?;
+    crate::clock_schema::SyncEntityMeta::insert_if_absent(
+        transaction,
+        "agent_organization_fields",
+        "3",
     )?;
-    transaction.execute(
-        "INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('agent_organization_fields','3')",
-        [],
-    )?;
-    transaction.execute(
-        "INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('event_window_seq','0')",
-        [],
-    )?;
-    transaction.execute(
-        "INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES('task_window_migrated','1')",
-        [],
+    crate::clock_schema::SyncEntityMeta::insert_if_absent(transaction, "event_window_seq", "0")?;
+    crate::clock_schema::SyncEntityMeta::insert_if_absent(
+        transaction,
+        "task_window_migrated",
+        "1",
     )?;
     // New stores have no summary or conversation-detail source rows; their empty projections are complete.
     for marker in [
@@ -498,10 +505,7 @@ fn seed_workspace(transaction: &rusqlite::Transaction<'_>, state_dir: &Path) -> 
         crate::CONVERSATION_DETAILS_SEED_MARKER,
         crate::WORK_DETAILS_SEED_MARKER,
     ] {
-        transaction.execute(
-            "INSERT OR IGNORE INTO sync_entity_meta(key,value) VALUES(?1,'1')",
-            [marker],
-        )?;
+        crate::clock_schema::SyncEntityMeta::insert_if_absent(transaction, marker, "1")?;
     }
     Ok(())
 }
