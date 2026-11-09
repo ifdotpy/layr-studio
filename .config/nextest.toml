@@ -92,7 +92,6 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
-    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_state_and_fences_both_owners)) |
@@ -100,6 +99,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
     (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -574,7 +574,6 @@ default-filter = '''
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
-    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_state_and_fences_both_owners)) |
@@ -582,6 +581,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
     (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |

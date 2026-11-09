@@ -73,6 +73,132 @@ function missingTables(markdown: string): string[] {
   );
 }
 
+type ManifestRow = [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+];
+
+function manifestRows(markdown: string): ManifestRow[] {
+  const section = markdown.split("## Wave-3 source-to-target manifest\n")[1];
+  assert.ok(section, "missing wave-3 manifest");
+  return section
+    .split("\n")
+    .filter((line) => /^\| `(Canvas|Analytics|Supervisor)\./.test(line))
+    .map((line): ManifestRow => {
+      const cells = line
+        .split("|")
+        .slice(1, -1)
+        .map((cell) => cell.trim());
+      assert.equal(cells.length, 9, line);
+      const cell = (index: number): string => {
+        const value = cells[index];
+        assert.ok(value !== undefined);
+        return value;
+      };
+      return [
+        cell(0),
+        cell(1),
+        cell(2),
+        cell(3),
+        cell(4),
+        cell(5),
+        cell(6),
+        cell(7),
+        cell(8),
+      ];
+    });
+}
+
+function assertManifest(markdown: string): void {
+  const expected = [...catalogTables(), ...codeCreatedTables].sort();
+  const headings = [
+    ...markdown.matchAll(
+      /^### `((?:Canvas|Analytics|Supervisor)\.[a-z_][a-z0-9_]*)` → /gm,
+    ),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(headings, expected, "exactly one contract per source");
+  const rows = manifestRows(markdown);
+  assert.deepEqual(
+    rows.map((row) => row[0].replaceAll("`", "")).sort(),
+    expected,
+    "exactly one manifest row per source",
+  );
+  const targets = new Set<string>();
+  for (const row of rows) {
+    assert.equal(row.length, 9, row[0]);
+    assert.ok(
+      row.every((cell) => cell.length > 0),
+      row[0],
+    );
+    const routes = [
+      ...row[1].matchAll(/`((?:Canvas|Analytics|Supervisor)\.[a-z_]+)`/g),
+    ];
+    assert.ok(routes.length > 0, `missing target: ${row[0]}`);
+    for (const route of routes) {
+      assert.ok(route[1] !== undefined);
+      targets.add(route[1]);
+    }
+    assert.match(
+      row[2],
+      /(?:[A-Z][A-Za-z]+Kind::[A-Z][A-Za-z]+|unpartitioned)/,
+      row[0],
+    );
+    assert.match(row[8], /^(?:none|E\d+(?:, E\d+)*)$/, row[0]);
+  }
+  assert.deepEqual(
+    [...targets].sort(),
+    [
+      ..."entities agents agent_live sessions turns queue_events attempts tasks items contents tool_requests request_results outbox streams changes publications metadata relations history terminal_chunks search monitors terminals incidents servers limit_resets"
+        .split(" ")
+        .map((name) => `Canvas.${name}`),
+      ..."facts usage cost_rows cost_groups changes metadata dictionaries"
+        .split(" ")
+        .map((name) => `Analytics.${name}`),
+      ..."handles operations events recovery state"
+        .split(" ")
+        .map((name) => `Supervisor.${name}`),
+    ].sort(),
+    "all 38 targets, no extra destination",
+  );
+}
+
+test("wave-3 manifest maps every source exactly once to the 38 targets", () => {
+  assertManifest(readFileSync(path.join(root, "docs/storage/map.md"), "utf8"));
+});
+
+test("wave-3 coverage rejects duplicate and omitted rows and contracts", () => {
+  const markdown = readFileSync(path.join(root, "docs/storage/map.md"), "utf8");
+  assertManifest(markdown);
+  const rows = markdown
+    .split("\n")
+    .filter((line) => /^\| `(Canvas|Analytics|Supervisor)\./.test(line));
+  for (const row of rows) {
+    assert.throws(() => assertManifest(markdown.replace(row, "")), row);
+    assert.throws(
+      () => assertManifest(markdown.replace(row, `${row}\n${row}`)),
+      row,
+    );
+  }
+  for (const heading of markdown.matchAll(
+    /^### `((?:Canvas|Analytics|Supervisor)\.[a-z_][a-z0-9_]*)` → .*$/gm,
+  )) {
+    assert.throws(() =>
+      assertManifest(
+        markdown.replace(heading[0], `${heading[0]}\n${heading[0]}`),
+      ),
+    );
+  }
+});
+
 test("storage map covers every catalog and code-created table with a dedicated mapping", () => {
   const markdown = readFileSync(path.join(root, "docs/storage/map.md"), "utf8");
   assert.deepEqual(missingTables(markdown), [], "unmapped catalog tables");
