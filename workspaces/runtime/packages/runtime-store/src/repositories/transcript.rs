@@ -144,16 +144,9 @@ impl TranscriptRepository {
         connection: &Connection,
         match_query: &str,
     ) -> TranscriptStoreResult<Vec<(String, String, String)>> {
-        let next_phase = connection
-            .query_row_cached(
-                "SELECT phase FROM runtime_search_rollout WHERE id=1",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
         if matches!(
-            next_phase.as_deref(),
-            Some("active" | "dropping" | "complete")
+            search_phase(connection)?.as_str(),
+            "active" | "dropping" | "complete"
         ) {
             let mut statement = connection.prepare_cached(
                 "SELECT m.id,m.agent,m.kind FROM runtime_search_next \
@@ -215,19 +208,7 @@ impl TranscriptRepository {
         let Some(agent) = agent else {
             return Ok(None);
         };
-        Table::<TranscriptItemRecord>::new(connection)
-            .get(&TranscriptItemId::from(id))
-            .map(|item| {
-                item.map(|item| {
-                    let id = item.id().as_ref().to_owned();
-                    TranscriptItem {
-                        id,
-                        agent: agent.clone(),
-                        record: item,
-                    }
-                })
-            })
-            .map_err(map_store_error)
+        Self::item(connection, &agent, id)
     }
 
     pub fn items_for_agent(
@@ -1001,14 +982,15 @@ pub(crate) fn hash_only_sync_entity_storage_error(
 }
 
 fn search_phase(connection: &Connection) -> TranscriptStoreResult<String> {
-    Ok(connection
-        .query_row_cached(
-            "SELECT phase FROM runtime_search_rollout WHERE id=1",
-            [],
-            |row| row.get(0),
-        )
-        .optional()?
-        .unwrap_or_default())
+    use crate::settings_schema::SearchRollout;
+    let read = crate::peer_update_settings::canvas_read(connection);
+    Ok(studio_db_api::db_query!(
+        read,
+        SearchRollout,
+        scalar(SearchRollout::PHASE),
+        filter(SearchRollout::ID.eq(&1))
+    )?
+    .unwrap_or_default())
 }
 
 #[cfg(test)]

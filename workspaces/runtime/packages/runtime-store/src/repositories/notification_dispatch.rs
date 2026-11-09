@@ -63,32 +63,10 @@ impl NotificationDispatchRepository {
         if Self::user_event(tx, agent, event)?.is_none() {
             return Err(invalid_record("runtime_events", event));
         }
-        // Preserve the existing missing-table and malformed-object validation.
-        let has_table: bool = tx.query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_event_meta')",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_table {
-            return Err(invalid_record("runtime_event_meta", event));
-        }
-        let raw: Option<String> = tx
-            .query_row_cached(
-                "SELECT record FROM runtime_event_meta WHERE id=?1",
-                [event],
-                |row| row.get(0),
-            )
-            .optional()?;
-        raw.map(|raw| {
-            let metadata: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
-                studio_json::from_str(&raw)
-                    .map_err(|_| invalid_record("runtime_event_meta", event))?;
-            Ok(metadata
-                .into_iter()
-                .find_map(|(key, owner)| (key == "providerSubmission").then_some(owner)))
-        })
-        .transpose()
-        .map(Option::flatten)
+        Ok(Self::read_event_metadata::<
+            std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
+        >(tx, event)?
+        .and_then(|mut metadata| metadata.remove("providerSubmission")))
     }
 
     pub fn put_submission_owner<T: Serialize>(
@@ -130,12 +108,7 @@ impl NotificationDispatchRepository {
         table: &'static str,
         id: &str,
     ) -> StoreResult<Option<Value>> {
-        let exists: bool = transaction.query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table],
-            |row| row.get(0),
-        )?;
-        if !exists {
+        if !crate::schema::table_exists(transaction, table)? {
             return Ok(None);
         }
         let raw: Option<String> = transaction
@@ -340,12 +313,14 @@ impl NotificationDispatchRepository {
         transaction: &Transaction<'_>,
         event_id: &str,
     ) -> StoreResult<Option<Value>> {
-        let has_table: bool = transaction.query_row_cached(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_event_meta')",
-            [],
-            |row| row.get(0),
-        )?;
-        if !has_table {
+        Self::read_event_metadata(transaction, event_id)
+    }
+
+    fn read_event_metadata<T: serde::de::DeserializeOwned>(
+        transaction: &Transaction<'_>,
+        event_id: &str,
+    ) -> StoreResult<Option<T>> {
+        if !crate::schema::table_exists(transaction, "runtime_event_meta")? {
             return Err(invalid_record("runtime_event_meta", event_id));
         }
         let raw: Option<String> = transaction
@@ -355,15 +330,12 @@ impl NotificationDispatchRepository {
                 |row| row.get(0),
             )
             .optional()?;
-        let Some(raw) = raw else {
-            return Ok(None);
-        };
-        let value: Value = studio_json::from_str(&raw)
-            .map_err(|_| invalid_record("runtime_event_meta", event_id))?;
-        if !value.is_object() {
-            return Err(invalid_record("runtime_event_meta", event_id));
-        }
-        Ok(Some(value))
+        raw.map(|raw| {
+            studio_json::from_str::<studio_runtime_schema::json_object::JsonObject<T>>(&raw)
+                .map(|value| value.0)
+                .map_err(|_| invalid_record("runtime_event_meta", event_id))
+        })
+        .transpose()
     }
 }
 
@@ -421,3 +393,165 @@ fn invalid_record(table: &str, id: &str) -> StoreError {
 }
 
 inventory::submit! { crate::repositories::SchemaRegistration { repository: "notification_dispatch", requirements: &REQUIREMENTS } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_invalid<T: std::fmt::Debug>(result: StoreResult<T>, table: &str, id: &str) {
+        assert!(
+            matches!(result, Err(StoreError::InvalidSyncObject { scope, id: actual }) if scope == table && actual == id)
+        );
+    }
+
+    #[test]
+    fn transcript_metadata_reads_preserve_absence_errors_and_raw_owner() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE runtime_events(id TEXT,agent TEXT,kind TEXT,text TEXT,created REAL); INSERT INTO runtime_events VALUES('event','agent','user','input',1)").unwrap();
+        let tx = db.transaction().unwrap();
+        assert_invalid(
+            NotificationDispatchRepository::event_metadata(&tx, "event"),
+            "runtime_event_meta",
+            "event",
+        );
+        assert_invalid(
+            NotificationDispatchRepository::submission_owner(&tx, "agent", "event"),
+            "runtime_event_meta",
+            "event",
+        );
+        tx.execute_batch(
+            "CREATE TABLE runtime_event_meta(id TEXT PRIMARY KEY,record TEXT NOT NULL)",
+        )
+        .unwrap();
+        assert!(
+            NotificationDispatchRepository::event_metadata(&tx, "event")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            NotificationDispatchRepository::submission_owner(&tx, "agent", "event")
+                .unwrap()
+                .is_none()
+        );
+        for raw in ["[1]", "null", "{broken"] {
+            tx.execute(
+                "INSERT OR REPLACE INTO runtime_event_meta VALUES('event',?1)",
+                [raw],
+            )
+            .unwrap();
+            assert_invalid(
+                NotificationDispatchRepository::event_metadata(&tx, "event"),
+                "runtime_event_meta",
+                "event",
+            );
+            assert_invalid(
+                NotificationDispatchRepository::submission_owner(&tx, "agent", "event"),
+                "runtime_event_meta",
+                "event",
+            );
+        }
+        let owner = r#"{ "opaque":9007199254740993, "duplicate":1,"duplicate":2 }"#;
+        tx.execute(
+            "UPDATE runtime_event_meta SET record=?1",
+            [format!(r#"{{"providerSubmission":{owner},"future":true}}"#)],
+        )
+        .unwrap();
+        assert_eq!(
+            NotificationDispatchRepository::submission_owner(&tx, "agent", "event")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            owner
+        );
+        assert_invalid(
+            NotificationDispatchRepository::submission_owner(&tx, "other", "event"),
+            "runtime_events",
+            "event",
+        );
+        tx.execute("UPDATE runtime_event_meta SET record='{}'", [])
+            .unwrap();
+        assert!(
+            NotificationDispatchRepository::submission_owner(&tx, "agent", "event")
+                .unwrap()
+                .is_none()
+        );
+        tx.execute(
+            r#"UPDATE runtime_event_meta SET record='{"providerSubmission":null}'"#,
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            NotificationDispatchRepository::submission_owner(&tx, "agent", "event")
+                .unwrap()
+                .unwrap()
+                .as_str(),
+            "null"
+        );
+    }
+
+    #[test]
+    fn transcript_notification_reads_keep_physical_owner_and_notice_eligibility() {
+        let mut db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE runtime_items(id TEXT PRIMARY KEY,agent TEXT,record TEXT,created REAL)",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        for role in ["assistant", "user", "system", "output"] {
+            let raw = format!(
+                r#"{{"id":"agent:x","role":"{role}","text":"notice","afterRestore":"restored"}}"#
+            );
+            tx.execute(
+                "INSERT OR REPLACE INTO runtime_items VALUES('agent:x','agent',?1,7.5)",
+                [&raw],
+            )
+            .unwrap();
+            assert!(
+                NotificationDispatchRepository::notification_item(&tx, "other", "agent:x")
+                    .unwrap()
+                    .is_none()
+            );
+            let (_, created) =
+                NotificationDispatchRepository::notification_item(&tx, "agent", "agent:x")
+                    .unwrap()
+                    .unwrap();
+            assert_eq!(created, 7.5);
+            let ordinary = NotificationDispatchRepository::transcript_item(&tx, "agent", "agent:x");
+            if matches!(role, "system" | "output") {
+                assert_invalid(ordinary, "runtime_items", "agent:x");
+            } else {
+                assert!(ordinary.unwrap().is_some());
+            }
+            assert!(
+                TranscriptRepository::items_for_agent(&tx, "agent")
+                    .unwrap()
+                    .is_empty()
+            );
+            assert_eq!(
+                TranscriptRepository::items_for_agent_including_restored(&tx, "agent")
+                    .unwrap()
+                    .len(),
+                1
+            );
+            assert_eq!(
+                TranscriptRepository::item_any_agent(&tx, "agent:x")
+                    .unwrap()
+                    .unwrap()
+                    .agent,
+                "agent"
+            );
+        }
+        assert!(
+            TranscriptRepository::item_any_agent(&tx, "missing")
+                .unwrap()
+                .is_none()
+        );
+        tx.execute("UPDATE runtime_items SET record='{broken'", [])
+            .unwrap();
+        assert_invalid(
+            NotificationDispatchRepository::notification_item(&tx, "agent", "agent:x"),
+            "runtime_items",
+            "agent:x",
+        );
+    }
+}
