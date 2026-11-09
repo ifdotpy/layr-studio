@@ -3,6 +3,9 @@
 use rusqlite::{Connection, Transaction};
 
 use crate::StoreResult;
+use crate::json_record_codec::RawJsonRecord;
+use crate::peer_update_settings::{canvas_read, canvas_tx};
+use crate::planning_work::RuleRow;
 use crate::records::{AgentId, AgentRecord, RuleRecord, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
 
@@ -37,13 +40,16 @@ pub struct RulesRepository;
 impl RulesRepository {
     pub fn list(connection: &Connection) -> StoreResult<(Vec<RuleRecord>, Vec<AgentRecord>)> {
         Ok((
+            // The existing physical rowid order has no db_query ordering clause.
             Table::<RuleRecord>::new(connection).list()?,
             Table::<AgentRecord>::new(connection).list()?,
         ))
     }
 
     pub fn get(connection: &Connection, id: &str) -> StoreResult<Option<RuleRecord>> {
-        Table::<RuleRecord>::new(connection).get(&id.to_owned())
+        Ok(canvas_read(connection)
+            .get::<RuleRow>(&(id.to_owned(),))?
+            .map(|row| row.record.record().clone()))
     }
 
     pub fn agent(connection: &Connection, id: &str) -> StoreResult<Option<AgentRecord>> {
@@ -52,11 +58,15 @@ impl RulesRepository {
 
     /// Store a rule. Its client view is built at read time (`entity_scope`).
     pub fn put(transaction: &Transaction<'_>, record: &RuleRecord) -> StoreResult<()> {
-        Table::<RuleRecord>::new(transaction).put(record)
+        canvas_tx(transaction).upsert(&RuleRow {
+            id: record.id().clone(),
+            record: RawJsonRecord::from_record(transaction, record)?,
+        })?;
+        Ok(())
     }
 
     pub fn delete(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        Table::<RuleRecord>::new(transaction).delete(&id.to_owned())?;
+        canvas_tx(transaction).delete::<RuleRow>(&(id.to_owned(),))?;
         Ok(())
     }
 

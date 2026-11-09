@@ -88,6 +88,27 @@ fn decode_branch_operation(raw: &str) -> Result<BranchOperation, studio_json::Er
         .map(|object| object.0)
 }
 
+fn branch_record(connection: &rusqlite::Connection, id: &str) -> rusqlite::Result<String> {
+    // BranchOperation admits incomplete historical journals before its legacy checks.
+    connection.query_row(
+        "SELECT record FROM runtime_workspace_operations WHERE id=?1",
+        [id],
+        |row| row.get(0),
+    )
+}
+
+fn write_branch_record(
+    tx: &rusqlite::Transaction<'_>,
+    id: &str,
+    record: &BranchOperation,
+) -> studio_runtime_store::StoreResult<usize> {
+    // Legacy settlement preserves incomplete journals rejected by the strict owner.
+    Ok(tx.execute(
+        "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
+        params![id, studio_json::to_string(record)?],
+    )?)
+}
+
 impl BranchOperation {
     fn set_phase(&mut self, phase: OperationPhase) {
         self.phase = phase;
@@ -245,14 +266,7 @@ async fn branch(
                         "branch workspace changed".into(),
                     ));
                 }
-                if let Some(prior) = tx
-                    .query_row(
-                        "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                        [&operation_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
-                {
+                if let Some(prior) = branch_record(tx, &operation_id).optional()? {
                     let mut prior = decode_branch_operation(&prior)?;
                     if prior.signature != signature {
                         return Err(studio_runtime_store::StoreError::SchemaMismatch(
@@ -269,10 +283,7 @@ async fn branch(
                             prior.provider = Field::Missing;
                             prior.result = None;
                             prior.other.remove("error");
-                            tx.execute(
-                                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                                params![operation_id, studio_json::to_string(&prior)?],
-                            )?;
+                            write_branch_record(tx, &operation_id, &prior)?;
                         }
                         OperationPhase::ProviderPending | OperationPhase::RecoveryRequired => {
                             // Re-submit the same broker operation identity
@@ -309,10 +320,7 @@ async fn branch(
                                 );
                             AgentRepository::put(tx, &actor)?;
                             prior.other.insert("reserved".into(), json!(true));
-                            tx.execute(
-                                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                                params![operation_id, studio_json::to_string(&prior)?],
-                            )?;
+                            write_branch_record(tx, &operation_id, &prior)?;
                             return Ok(Some(prior));
                         }
                         OperationPhase::CapturePending
@@ -344,13 +352,8 @@ async fn branch(
                     ));
                 }
                 let source_stamp = CheckpointsRepository::workspace_source(&source);
-                let mut record = if let Some(existing) = tx
-                    .query_row(
-                        "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                        [&operation_id],
-                        |row| row.get::<_, String>(0),
-                    )
-                    .optional()?
+                let mut record = if let Some(existing) =
+                    branch_record(tx, &operation_id).optional()?
                 {
                     decode_branch_operation(&existing)?
                 } else {
@@ -387,6 +390,7 @@ async fn branch(
                         other,
                     };
                     tx.execute(
+                        // Branch retries retain their legacy codec when creating the journal.
                         "INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)",
                         params![operation_id, studio_json::to_string(&record)?],
                     )?;
@@ -400,10 +404,7 @@ async fn branch(
                     studio_runtime_schema::queue_command::Field::Value(operation_id.clone());
                 AgentRepository::put(tx, &actor)?;
                 record.other.insert("reserved".into(), json!(true));
-                tx.execute(
-                    "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                    params![operation_id, studio_json::to_string(&record)?],
-                )?;
+                write_branch_record(tx, &operation_id, &record)?;
                 Ok(Some(record))
             })
             .await
@@ -632,11 +633,7 @@ async fn branch(
     let persist_provider = provider.clone();
     let persisted = store
         .transaction_with(move |tx| {
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                [&persist_operation_id],
-                |row| row.get(0),
-            )?;
+            let raw: String = branch_record(tx, &persist_operation_id)?;
             let mut op = decode_branch_operation(&raw)?;
             let current = AgentRepository::get(tx, &AgentId::from(persist_agent_id.as_str()))?
                 .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
@@ -651,10 +648,7 @@ async fn branch(
             }
             op.provider = Field::Value(persist_provider);
             op.set_phase(OperationPhase::ProviderReady);
-            tx.execute(
-                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![persist_operation_id, studio_json::to_string(&op)?],
-            )?;
+            write_branch_record(tx, &persist_operation_id, &op)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })
         .await;
@@ -788,11 +782,7 @@ async fn settle_failure(
     let error = error.to_owned();
     store
         .transaction_with(move |tx| {
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                [operation_id.as_str()],
-                |row| row.get(0),
-            )?;
+            let raw: String = branch_record(tx, operation_id.as_str())?;
             let mut operation = decode_branch_operation(&raw)?;
             operation.set_phase(if unknown {
                 OperationPhase::RecoveryRequired
@@ -800,10 +790,7 @@ async fn settle_failure(
                 OperationPhase::Failed
             });
             operation.other.insert("error".into(), json!(error.clone()));
-            tx.execute(
-                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), studio_json::to_string(&operation)?],
-            )?;
+            write_branch_record(tx, operation_id.as_str(), &operation)?;
             if let Some(mut actor) = AgentRepository::get(
                 tx,
                 &AgentId::from(
@@ -842,11 +829,7 @@ async fn release_provider_ready_reservation(
     let agent_id = agent_id.to_owned();
     store
         .transaction_with(move |tx| {
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                [operation_id.as_str()],
-                |row| row.get(0),
-            )?;
+            let raw: String = branch_record(tx, operation_id.as_str())?;
             let mut operation = decode_branch_operation(&raw)?;
             if operation.phase != OperationPhase::ProviderReady
                 || BranchOperation::value(&operation.provider).is_none()
@@ -856,10 +839,7 @@ async fn release_provider_ready_reservation(
                 ));
             }
             operation.other.insert("reserved".into(), json!(false));
-            tx.execute(
-                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), studio_json::to_string(&operation)?],
-            )?;
+            write_branch_record(tx, operation_id.as_str(), &operation)?;
             if let Some(mut actor) = AgentRepository::get(tx, &AgentId::from(agent_id))?
                 && actor.workspace_reservation_id.value().map(String::as_str)
                     == Some(operation_id.as_str())
@@ -884,17 +864,10 @@ async fn persist_fork_turn(
     let fork_turn = fork_turn.map(str::to_owned);
     store
         .transaction_with(move |tx| {
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                [operation_id.as_str()],
-                |row| row.get(0),
-            )?;
+            let raw: String = branch_record(tx, operation_id.as_str())?;
             let mut operation = decode_branch_operation(&raw)?;
             operation.fork_turn_id = fork_turn;
-            tx.execute(
-                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![operation_id.as_str(), studio_json::to_string(&operation)?],
-            )?;
+            write_branch_record(tx, operation_id.as_str(), &operation)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })
         .await
@@ -964,12 +937,7 @@ async fn branch_needs_catalog(
     let signature = signature.to_owned();
     store
         .read_async("runtime-http/routes/branches", move |db| {
-            let Some(raw) = db
-                .query_row(
-                    "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                    [&operation_id],
-                    |row| row.get::<_, String>(0),
-                )
+            let Some(raw) = branch_record(db, &operation_id)
                 .optional()
                 .map_err(|_| ApiError::internal())?
             else {
@@ -1024,7 +992,8 @@ async fn copy_branch_history(
     let provider = provider.clone();
     let operation_id = operation_id.to_owned();
     let (result, _) = store.transaction_with_post_commit(move |tx|{
-        let raw:String=tx.query_row("SELECT record FROM runtime_workspace_operations WHERE id=?1",[operation_id.as_str()],|r|r.get(0))?;
+
+        let raw = branch_record(tx, &operation_id)?;
         let mut operation=decode_branch_operation(&raw)?;
         let current=AgentRepository::get(tx,&AgentId::from(source.as_str()))?.ok_or(studio_runtime_store::StoreError::SchemaMismatch("missing branch source".into()))?;
         if CheckpointsRepository::workspace_source(&current.value()) != *operation.other.get("source").unwrap_or(&Value::Null)
@@ -1141,7 +1110,8 @@ async fn copy_branch_history(
         operation.set_phase(OperationPhase::Completed);
         operation.result = Some(studio_json::to_raw_value(&result)?);
         operation.other.insert("updated".into(), json!(unix_time()));
-        tx.execute("UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",params![operation_id.as_str(),studio_json::to_string(&operation)?])?;
+
+        write_branch_record(tx, operation_id.as_str(), &operation)?;
         if let Some(mut actor)=AgentRepository::get(tx,&AgentId::from(source))? {
             actor.workspace_reservation_id = studio_runtime_schema::queue_command::Field::Missing;
             actor.workspace_operation = studio_runtime_schema::queue_command::Field::Null;
@@ -1163,11 +1133,7 @@ async fn ensure_branch_source(
     let agent_id = agent_id.to_owned();
     store
         .transaction_with(move |tx| {
-            let raw: String = tx.query_row(
-                "SELECT record FROM runtime_workspace_operations WHERE id=?1",
-                [operation_id.as_str()],
-                |row| row.get(0),
-            )?;
+            let raw: String = branch_record(tx, operation_id.as_str())?;
             let operation = decode_branch_operation(&raw)?;
             let current = AgentRepository::get(tx, &AgentId::from(agent_id))?
                 .ok_or(rusqlite::Error::QueryReturnedNoRows)?;

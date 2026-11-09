@@ -1,11 +1,10 @@
 //! Read and write persisted work-item, plan, and queue state.
 
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use studio_json::Value;
 
 use crate::records::{
-    AgentId, AgentRecord, EventMetadataRecord, JsonRecord, PlanRecord, QueueEventId, Table, TaskId,
-    TranscriptAssetId, TranscriptAssetRecord, WorkItemRecord,
+    AgentRecord, EventMetadataRecord, JsonRecord, PlanRecord, QueueEventId, Table, WorkItemRecord,
 };
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
@@ -129,7 +128,8 @@ impl WorkItemsRepository {
     }
 
     pub fn work_record(connection: &Connection, id: &str) -> StoreResult<Option<WorkItemRecord>> {
-        Table::<WorkItemRecord>::new(connection).get(&TaskId::from(id))
+        // Generated archive_next_at can hold TEXT; retain record-only historical admission.
+        Table::<WorkItemRecord>::new(connection).get(&crate::TaskId::from(id))
     }
 
     /// Select only current-team items that depend on the accepted task.
@@ -139,6 +139,7 @@ impl WorkItemsRepository {
         task_id: &str,
     ) -> StoreResult<Vec<WorkItemRecord>> {
         let mut statement = connection.prepare_cached(
+            // Recovery reads retain their historical admission semantics.
             "SELECT id, record FROM runtime_work \
              WHERE json_extract(record,'$.rootId')=?1 \
              AND EXISTS (SELECT 1 FROM json_each(record,'$.dependencies') AS dependency \
@@ -154,28 +155,32 @@ impl WorkItemsRepository {
             .collect()
     }
 
-    pub fn put_work(connection: &Transaction<'_>, id: &str, value: &Value) -> StoreResult<bool> {
-        let record = WorkItemRecord::checked(value)?;
-        if record.id().as_ref() != id {
-            return Err(StoreError::InvalidStoredObject {
-                table: WorkItemRecord::TABLE,
-                id: id.to_owned(),
-            });
-        }
-        let inserted = Table::<WorkItemRecord>::new(connection).insert_new(&record)?;
+    pub fn put_work(
+        connection: &rusqlite::Transaction<'_>,
+        id: &str,
+        value: &Value,
+    ) -> StoreResult<bool> {
+        let record = checked_work(id, value)?;
+        let inserted = crate::peer_update_settings::canvas_tx(connection).insert_new(
+            &crate::planning_work::WorkRow::from_record(connection, &record)?,
+        )?;
         if inserted {
             crate::work_history::reconcile(connection, id, &record.history_value())?;
         }
         Ok(inserted)
     }
 
-    pub fn update_work(connection: &Transaction<'_>, id: &str, value: &Value) -> StoreResult<()> {
+    pub fn update_work(
+        connection: &rusqlite::Transaction<'_>,
+        id: &str,
+        value: &Value,
+    ) -> StoreResult<()> {
         let record = WorkItemRecord::checked(value)?;
         Self::update_checked_work(connection, id, &record)
     }
 
     pub fn update_checked_work(
-        connection: &Transaction<'_>,
+        connection: &rusqlite::Transaction<'_>,
         id: &str,
         record: &WorkItemRecord,
     ) -> StoreResult<()> {
@@ -185,6 +190,7 @@ impl WorkItemsRepository {
                 id: id.to_owned(),
             });
         }
+        // Checked updates must not insert; generated validated updates are a follow-up.
         Table::<WorkItemRecord>::new(connection).update(record)?;
         crate::work_history::reconcile(connection, id, &record.history_value())?;
         Ok(())
@@ -192,12 +198,13 @@ impl WorkItemsRepository {
 
     /// Release unfinished work owned by a failed worker and return each updated record.
     pub fn release_failed_work(
-        connection: &Transaction<'_>,
+        connection: &rusqlite::Transaction<'_>,
         owner_id: &str,
         reason: &str,
         now: f64,
     ) -> StoreResult<Vec<Value>> {
         let mut statement = connection.prepare_cached(
+            // Recovery reads retain their historical admission semantics.
             "SELECT id, record FROM runtime_work \
              WHERE json_extract(record,'$.owner')=?1 \
              AND json_extract(record,'$.status') IN ('ready','running','blocked')",
@@ -286,13 +293,7 @@ impl WorkItemsRepository {
     }
 
     pub fn validate_work(_connection: &Connection, id: &str, value: &Value) -> StoreResult<()> {
-        let record = WorkItemRecord::checked(value)?;
-        if record.id().as_ref() != id {
-            return Err(StoreError::InvalidStoredObject {
-                table: WorkItemRecord::TABLE,
-                id: id.to_owned(),
-            });
-        }
+        checked_work(id, value)?;
         Ok(())
     }
 
@@ -329,11 +330,31 @@ impl WorkItemsRepository {
     }
 
     pub fn work(connection: &Connection) -> StoreResult<Vec<WorkItemRecord>> {
+        // Physical rowid order is required; db_query has no rowid ordering clause.
         Table::<WorkItemRecord>::new(connection).list()
     }
 
     pub fn plan(connection: &Connection, id: &str) -> StoreResult<Option<PlanRecord>> {
-        Table::<PlanRecord>::new(connection).get(&AgentId::from(id))
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::planning_work::PlanRow>(&(id.to_owned(),))?
+            .map(|row| row.record.value().clone()))
+    }
+
+    pub fn put_plan(
+        transaction: &rusqlite::Transaction<'_>,
+        id: &str,
+        record: &PlanRecord,
+    ) -> StoreResult<()> {
+        use crate::records::JsonRecord;
+        crate::peer_update_settings::canvas_tx(transaction).upsert(
+            &crate::planning_work::PlanRow {
+                id: id.to_owned(),
+                record: crate::json_record_codec::ExactJson::from_stored(
+                    record.encode_stored(transaction, id)?,
+                )?,
+            },
+        )?;
+        Ok(())
     }
 
     pub fn queue(
@@ -392,16 +413,26 @@ impl WorkItemsRepository {
     }
 
     pub fn assets(connection: &Connection, ids: &[String]) -> StoreResult<Vec<Value>> {
-        let table = Table::<TranscriptAssetRecord>::new(connection);
         let mut result = Vec::with_capacity(ids.len());
         let mut seen = std::collections::BTreeSet::new();
         for id in ids.iter().filter(|id| seen.insert(id.as_str())) {
-            if let Some(record) = table.get(&TranscriptAssetId::from(id.as_str()))? {
+            if let Some(record) = crate::WorkspaceFilesRepository::asset(connection, id)? {
                 result.push(record.into_value());
             }
         }
         Ok(result)
     }
+}
+
+fn checked_work(id: &str, value: &Value) -> StoreResult<WorkItemRecord> {
+    let record = WorkItemRecord::checked(value)?;
+    if record.id().as_ref() != id {
+        return Err(StoreError::InvalidStoredObject {
+            table: WorkItemRecord::TABLE,
+            id: id.to_owned(),
+        });
+    }
+    Ok(record)
 }
 
 fn optional_text(value: rusqlite::types::ValueRef<'_>) -> (Option<String>, bool) {
@@ -424,10 +455,20 @@ mod tests {
     use rusqlite::Connection;
     use studio_json::json;
 
+    fn work_database() -> Connection {
+        use studio_db_api::Table as _;
+        let db = Connection::open_in_memory().expect("database");
+        db.execute_batch(crate::planning_work::WorkRow::DDL)
+            .unwrap();
+        db.execute_batch("CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)").unwrap();
+        db
+    }
+
     #[test]
     fn validation_only_checks_once_without_encoding() {
         use crate::records::validation_counts::{CHECKS, ENCODINGS};
-        let connection = Connection::open_in_memory().expect("database");
+        let mut connection = Connection::open_in_memory().expect("database");
+        let connection = connection.transaction().expect("fixture transaction");
         let work =
             json!({"id":"task","rootId":"lead","status":"ready","owner":null,"dependencies":[]});
         CHECKS.with(|count| count.set(0));
@@ -450,7 +491,8 @@ mod tests {
 
     #[test]
     fn plan_returns_checked_value_without_a_text_round_trip() {
-        let connection = Connection::open_in_memory().expect("database");
+        let mut connection = Connection::open_in_memory().expect("database");
+        let connection = connection.transaction().expect("fixture transaction");
         connection
             .execute_batch("CREATE TABLE runtime_plans(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .expect("table");
@@ -488,11 +530,8 @@ mod tests {
             WorkItemsRepository::work_record;
         let _: fn(&Connection, &str, &str) -> crate::StoreResult<Vec<crate::WorkItemRecord>> =
             WorkItemsRepository::dependent_work;
-        let mut connection = Connection::open_in_memory().expect("database");
+        let mut connection = work_database();
         let connection = connection.transaction().expect("fixture transaction");
-        connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
-            .expect("table");
         let raw = json!({"id":"task","rootId":"lead","status":"ready","owner":null,"dependencies":["parent"],"future":{"nested":[null,42]}});
         WorkItemsRepository::put_work(&connection, "task", &raw).expect("insert");
         assert_eq!(
@@ -512,7 +551,13 @@ mod tests {
             .value(),
             raw
         );
+        connection
+            .pragma_update(None, "ignore_check_constraints", true)
+            .unwrap();
         connection.execute("UPDATE runtime_work SET record=json_set(record,'$.status','future') WHERE id='task'",[]).expect("corrupt status");
+        connection
+            .pragma_update(None, "ignore_check_constraints", false)
+            .unwrap();
         assert!(WorkItemsRepository::work(&connection).is_err());
         assert!(WorkItemsRepository::work_record(&connection, "task").is_err());
         assert!(WorkItemsRepository::dependent_work(&connection, "lead", "parent").is_err());
@@ -520,10 +565,7 @@ mod tests {
 
     #[test]
     fn work_record_preserves_last_duplicate_and_checks_physical_identity() {
-        let connection = Connection::open_in_memory().unwrap();
-        connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
-            .unwrap();
+        let connection = work_database();
         connection.execute("INSERT INTO runtime_work VALUES('task',?1)", [r#"{"id":"wrong","id":"task","status":"ready","owner":null,"version":1.0,"future":{"x":[9007199254740993]}}"#]).unwrap();
         let record = WorkItemsRepository::work_record(&connection, "task")
             .unwrap()
@@ -554,11 +596,8 @@ mod tests {
 
     #[test]
     fn release_preserves_historical_negative_version_repair() {
-        let mut connection = Connection::open_in_memory().unwrap();
+        let mut connection = work_database();
         let connection = connection.transaction().expect("fixture transaction");
-        connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
-            .unwrap();
         let value = json!({"id":"task", "owner":"worker", "status":"running", "version":-1, "future":{"proof":true}});
         connection
             .execute(
@@ -583,7 +622,8 @@ mod tests {
 
     #[test]
     fn bootstrapped_tables_are_required_and_empty_reads_succeed() {
-        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = connection.transaction().expect("fixture transaction");
         for table in REQUIREMENTS
             .tables
             .iter()
@@ -630,7 +670,8 @@ mod tests {
 
     #[test]
     fn submission_identity_locates_invalid_execution_run_records() {
-        let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let connection = connection.transaction().expect("fixture transaction");
         connection.execute_batch(
             "CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,epoch INTEGER,thread TEXT,turn TEXT,created REAL,record TEXT);",
         ).expect("execution table creates");
@@ -683,7 +724,8 @@ mod tests {
 
     #[test]
     fn submission_identity_uses_last_duplicate_record_values() {
-        let db = Connection::open_in_memory().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
+        let db = db.transaction().expect("fixture transaction");
         db.execute_batch("CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,record TEXT);")
             .unwrap();
         let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"worker","provider":"codex","rootId":"lead","epoch":4,"status":"paused","activeExecution":{"runId":"run","attemptId":null}})).unwrap();
@@ -708,11 +750,8 @@ mod tests {
 
     #[test]
     fn release_failed_work_updates_only_unfinished_items_and_keeps_blocked_status() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = work_database();
         let connection = connection.transaction().expect("fixture transaction");
-        connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY, record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL)")
-            .expect("work table creates");
         for (id, status) in [
             ("running-work", "running"),
             ("blocked-work", "blocked"),
@@ -757,11 +796,8 @@ mod tests {
 
     #[test]
     fn work_creation_refuses_an_existing_id_without_overwriting_it() {
-        let mut connection = Connection::open_in_memory().expect("memory SQLite opens");
+        let mut connection = work_database();
         let connection = connection.transaction().expect("fixture transaction");
-        connection
-            .execute_batch("CREATE TABLE runtime_work(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_work_results(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_decisions(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL); CREATE TABLE runtime_work_releases(id TEXT PRIMARY KEY, work TEXT NOT NULL, idx INTEGER NOT NULL, record TEXT NOT NULL);")
-            .expect("work family creates");
         let first = studio_json::json!({"id":"work-1","status":"ready","title":"original"});
         let replacement =
             studio_json::json!({"id":"work-1","status":"blocked","title":"replacement"});
@@ -796,7 +832,8 @@ mod receipt_domain_tests {
 
     #[test]
     fn submission_identity_never_selects_history_without_current_owner() {
-        let db = Connection::open_in_memory().expect("database");
+        let mut db = Connection::open_in_memory().expect("database");
+        let db = db.transaction().expect("fixture transaction");
         db.execute_batch("CREATE TABLE runtime_execution_runs(id TEXT PRIMARY KEY,agent TEXT,account TEXT,epoch INTEGER,thread TEXT,turn TEXT,created REAL,record TEXT)").expect("history");
         let record = json!({"id":"old","agent":"agent","accountKey":"default","epoch":1,"threadId":null,"turnId":null,"created":1.0,"status":"pending","latestAttemptId":"old-attempt"});
         db.execute(

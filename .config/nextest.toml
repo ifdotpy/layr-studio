@@ -99,6 +99,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -580,6 +581,7 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
+    (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |

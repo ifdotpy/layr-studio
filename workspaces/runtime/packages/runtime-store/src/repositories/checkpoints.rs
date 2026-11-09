@@ -1,4 +1,5 @@
 //! Persisted checkpoint records and their capture reservations.
+use crate::workspace_operations::WorkspaceOperationsRepository;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_json::{Value, json};
@@ -111,6 +112,19 @@ impl CaptureKind {
 pub struct CheckpointsRepository;
 
 impl CheckpointsRepository {
+    pub fn insert(
+        transaction: &Transaction<'_>,
+        record: crate::json_record_codec::RawJsonRecord<CheckpointRecord>,
+    ) -> StoreResult<()> {
+        crate::peer_update_settings::canvas_tx(transaction).insert(
+            &crate::planning_work::CheckpointRow {
+                id: record.record().id().clone(),
+                record,
+            },
+        )?;
+        Ok(())
+    }
+
     pub fn tables_available(connection: &Connection) -> StoreResult<bool> {
         for table in REQUIRED_TABLES {
             if !table_exists(connection, table)? {
@@ -307,9 +321,8 @@ impl CheckpointsRepository {
         if kind == CaptureKind::Turn {
             operation["completionSource"] = completion_source(&record);
         }
-        transaction.execute(
-            "INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)",
-            params![operation_id, studio_json::to_string(&operation)?],
+        crate::peer_update_settings::canvas_tx(transaction).insert(
+            &WorkspaceOperationsRepository::row(transaction, operation_id, &operation)?,
         )?;
         let object = record
             .as_object_mut()
@@ -941,12 +954,13 @@ fn read_object(
     id: &str,
 ) -> StoreResult<Option<StoredCheckpointObject>> {
     if table == "runtime_checkpoints" {
-        return Table::<CheckpointRecord>::new(connection)
-            .get(&id.to_owned())
+        return crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::planning_work::CheckpointRow>(&(id.to_owned(),))
+            .map_err(StoreError::from)
             .map(|record| {
                 record.map(|record| StoredCheckpointObject {
                     id: id.to_owned(),
-                    record: record.into_value(),
+                    record: record.record.record().clone().into_value(),
                 })
             });
     }
@@ -1022,6 +1036,10 @@ fn update_object(
         Table::<AgentRecord>::new(transaction).update(&agent)?;
         return Ok(());
     }
+    if table == "runtime_workspace_operations" {
+        WorkspaceOperationsRepository::update_record(transaction, id, record)?;
+        return Ok(());
+    }
     transaction.execute(
         &format!("UPDATE {table} SET record=?1 WHERE id=?2"),
         params![studio_json::to_string(record)?, id],
@@ -1041,9 +1059,9 @@ fn insert_object(
     if table == "runtime_checkpoints" {
         let typed =
             CheckpointRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
-        transaction.execute(
-            "INSERT INTO runtime_checkpoints(id,record) VALUES(?1,?2)",
-            params![id, studio_json::to_string(&typed)?],
+        CheckpointsRepository::insert(
+            transaction,
+            crate::json_record_codec::RawJsonRecord::from_record(transaction, &typed)?,
         )?;
         return Ok(());
     }
@@ -1051,6 +1069,12 @@ fn insert_object(
         let agent =
             AgentRecord::from_value(record.clone()).map_err(|_| invalid_record(table, id))?;
         Table::<AgentRecord>::new(transaction).insert_new(&agent)?;
+        return Ok(());
+    }
+    if table == "runtime_workspace_operations" {
+        crate::peer_update_settings::canvas_tx(transaction).insert(
+            &WorkspaceOperationsRepository::row(transaction, id, record)?,
+        )?;
         return Ok(());
     }
     transaction.execute(

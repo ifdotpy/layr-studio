@@ -448,6 +448,7 @@ pub(crate) fn affected_owners(
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use rusqlite::trace::{TraceEvent, TraceEventCodes};
     use std::cell::Cell;
@@ -521,6 +522,12 @@ mod tests {
 
 #[cfg(test)]
 mod owner_matrix_tests {
+    fn put_task(db: &rusqlite::Connection, task: &studio_runtime_schema::task_record::TaskRecord) {
+        let tx = db.unchecked_transaction().expect("fixture transaction");
+        studio_runtime_store::TaskRepository::put(&tx, task).expect("task");
+        tx.commit().expect("fixture commit");
+    }
+
     use super::*;
     use studio_json::json;
     fn put(db: &Connection, id: &str, parent: Option<&str>, status: &str, extra: &Value) {
@@ -626,7 +633,7 @@ mod owner_matrix_tests {
                             studio_json::from_str(&format!("\"{process_status}\""))
                                 .expect("status"),
                         );
-                        studio_runtime_store::TaskRepository::put(&db, &task).expect("task");
+                        put_task(&db, &task);
                     }
                     let contexts = load(&db, &["root".into()]).expect("facts");
                     assert_eq!(
@@ -873,7 +880,7 @@ mod owner_matrix_tests {
                 String::new(),
             );
             task.set_status(status);
-            studio_runtime_store::TaskRepository::put(&db, &task).expect("task");
+            put_task(&db, &task);
             let contexts = load(&db, &["root".into()]).expect("facts");
             assert_eq!(
                 contexts["root"]
@@ -907,7 +914,7 @@ mod owner_matrix_tests {
                 kind,
                 String::new(),
             );
-            studio_runtime_store::TaskRepository::put(&db, &task).expect("task");
+            put_task(&db, &task);
             let contexts = load(&db, &["root".into()]).expect("facts");
             assert_eq!(
                 contexts["root"]
@@ -1062,7 +1069,7 @@ mod owner_matrix_tests {
             TaskType::CommandExecution,
             String::new(),
         );
-        studio_runtime_store::TaskRepository::put(&db, &task).expect("command");
+        put_task(&db, &task);
         let contexts = load(&db, &["root".into()]).expect("facts");
         assert!(contexts["root"].active);
         assert!(contexts["root"].wait.is_none());

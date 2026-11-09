@@ -1,6 +1,9 @@
 use rusqlite::Connection;
 
 use crate::StoreResult;
+use crate::json_record_codec::RawJsonRecord;
+use crate::peer_update_settings::{canvas_read, canvas_tx};
+use crate::planning_work::TaskRow;
 use crate::records::{Table, TaskId, TaskRecord, TaskRepository};
 use crate::schema::{SchemaRequirements, TableRequirement};
 
@@ -32,40 +35,24 @@ impl TaskRepository {
     /// Canonical DDL for the task repository's owned indexes.
     #[doc(hidden)]
     pub fn index_definitions() -> Vec<crate::OwnedRuntimeIndexDefinition> {
-        vec![
-            crate::OwnedRuntimeIndexDefinition {
-                name: "runtime_task_agent_created_id",
-                table: "runtime_tasks",
-                create_sql: "CREATE INDEX IF NOT EXISTS runtime_task_agent_created_id \
-                    ON runtime_tasks(json_extract(record,'$.agent'), \
-                    json_extract(record,'$.created') DESC, id DESC)"
-                    .to_owned(),
-            },
-            // Running tasks and status reads of the renderer task window.
-            crate::OwnedRuntimeIndexDefinition {
-                name: "runtime_task_status",
-                table: "runtime_tasks",
-                create_sql: "CREATE INDEX IF NOT EXISTS runtime_task_status \
-                    ON runtime_tasks(json_extract(record,'$.status'), \
-                    json_extract(record,'$.created'))"
-                    .to_owned(),
-            },
-            // Newest finished tasks of the renderer task window and history reads.
-            crate::OwnedRuntimeIndexDefinition {
-                name: "runtime_task_history",
-                table: "runtime_tasks",
-                create_sql: "CREATE INDEX IF NOT EXISTS runtime_task_history \
-                    ON runtime_tasks(json_extract(record,'$.created') DESC, \
-                    json_extract(record,'$.agent')) \
-                    WHERE json_extract(record,'$.status')!='running'"
-                    .to_owned(),
-            },
-        ]
+        use studio_db_api::Table as _;
+        TaskRow::INDEXES
+            .iter()
+            .filter(|index| index.name != "runtime_task_agent_updated_id")
+            .map(|index| crate::OwnedRuntimeIndexDefinition {
+                name: index.name,
+                table: TaskRow::NAME,
+                create_sql: index
+                    .sql
+                    .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1),
+            })
+            .collect()
     }
 
     /// Schema-checked running tasks for one agent, in stable row order.
     pub fn running_for_agent(connection: &Connection, agent: &str) -> StoreResult<Vec<TaskRecord>> {
         let mut statement = connection.prepare_cached(
+            // JSON expression selectors retain the existing SQL semantics.
             "SELECT id,record FROM runtime_tasks WHERE json_extract(record,'$.agent')=?1 \
              AND json_extract(record,'$.status')='running' ORDER BY id",
         )?;
@@ -81,11 +68,17 @@ impl TaskRepository {
     }
 
     pub fn get(connection: &Connection, id: &TaskId) -> StoreResult<Option<TaskRecord>> {
-        Table::<TaskRecord>::new(connection).get(id)
+        Ok(canvas_read(connection)
+            .get::<TaskRow>(&(id.as_ref().to_owned(),))?
+            .map(|row| row.record.record().clone()))
     }
 
-    pub fn put(connection: &Connection, record: &TaskRecord) -> StoreResult<()> {
-        Table::<TaskRecord>::new(connection).put(record)
+    pub fn put(connection: &rusqlite::Transaction<'_>, record: &TaskRecord) -> StoreResult<()> {
+        canvas_tx(connection).upsert(&TaskRow {
+            id: record.id().as_ref().to_owned(),
+            record: RawJsonRecord::from_record(connection, record)?,
+        })?;
+        Ok(())
     }
 }
 inventory::submit! {
@@ -102,7 +95,8 @@ mod typed_tests {
 
     #[test]
     fn task_rows_preserve_presence_extensions_and_check_identity() {
-        let db = Connection::open_in_memory().unwrap();
+        let mut db = Connection::open_in_memory().unwrap();
+        let db = db.transaction().unwrap();
         db.execute_batch("CREATE TABLE runtime_tasks(id TEXT PRIMARY KEY,record TEXT NOT NULL)")
             .unwrap();
         for index in TaskRepository::index_definitions() {

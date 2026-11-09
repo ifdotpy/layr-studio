@@ -14,6 +14,39 @@ pub struct HistoryRows {
 
 pub struct WorkspaceOperationsRepository;
 impl WorkspaceOperationsRepository {
+    pub(crate) fn row<T: serde::Serialize>(
+        tx: &Transaction<'_>,
+        id: &str,
+        record: &T,
+    ) -> StoreResult<crate::planning_work::WorkspaceOperationRow> {
+        Ok(crate::planning_work::WorkspaceOperationRow {
+            id: id.to_owned(),
+            record: crate::json_record_codec::RawJsonRecord::from_stored(
+                tx,
+                id,
+                studio_json::to_string(record)?,
+            )?,
+        })
+    }
+
+    pub(crate) fn update_record<T: serde::Serialize>(
+        tx: &Transaction<'_>,
+        id: &str,
+        record: &T,
+    ) -> StoreResult<usize> {
+        let row = Self::row(tx, id, record)?;
+        // Checked updates must not insert; generated validated updates are a follow-up.
+        Ok(tx.execute(
+            "UPDATE runtime_workspace_operations SET record=?1 WHERE id=?2",
+            params![row.record.raw(), row.id],
+        )?)
+    }
+
+    pub fn insert(tx: &Transaction<'_>, record: &WorkspaceOperationRecord) -> StoreResult<()> {
+        crate::peer_update_settings::canvas_tx(tx).insert(&Self::row(tx, &record.id, record)?)?;
+        Ok(())
+    }
+
     pub fn completed(
         connection: &Connection,
         agent: &str,
@@ -25,12 +58,15 @@ impl WorkspaceOperationsRepository {
         connection: &Connection,
         id: &str,
     ) -> StoreResult<Option<WorkspaceOperationRecord>> {
-        Table::<WorkspaceOperationRecord>::new(connection).get(&id.to_owned())
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::planning_work::WorkspaceOperationRow>(&(id.to_owned(),))?
+            .map(|row| row.record.record().clone()))
     }
     pub fn active_operations(
         connection: &Connection,
     ) -> StoreResult<Vec<WorkspaceOperationRecord>> {
         let table = Table::<WorkspaceOperationRecord>::new(connection);
+        // JSON expression selectors retain the existing SQL semantics.
         let mut query = connection.prepare_cached("SELECT id,record FROM runtime_workspace_operations WHERE json_extract(record,'$.phase') IS NULL OR json_extract(record,'$.phase') NOT IN ('completed','failed') ORDER BY id")?;
         query
             .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -70,10 +106,7 @@ impl WorkspaceOperationsRepository {
         tx: &Transaction<'_>,
         operation: &WorkspaceOperationRecord,
     ) -> StoreResult<()> {
-        let changed = tx.execute(
-            "UPDATE runtime_workspace_operations SET record=?1 WHERE id=?2",
-            params![studio_json::to_string(operation)?, operation.id],
-        )?;
+        let changed = Self::update_record(tx, &operation.id, operation)?;
         if changed == 0 {
             return Err(StoreError::InvalidStoredObject {
                 table: "runtime_workspace_operations",

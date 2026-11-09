@@ -16,7 +16,7 @@ pub(crate) fn install(
     Ok(())
 }
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 69] {
+pub(crate) fn registry() -> [studio_db_api::Registration; 77] {
     db_schema![Canvas;
         crate::access_tables::AccessAliasRequestsRow,
         crate::access_tables::AccessAuditRow,
@@ -84,9 +84,17 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 69] {
         crate::voice_storage::VoiceRecordRow,
         crate::voice_storage::VoiceSessionRow,
         crate::voice_storage::VoiceSpeechRequestRow,
+        crate::planning_work::AnnotationRow,
+        crate::planning_work::CheckpointRow,
+        crate::planning_work::PlanRow,
+        crate::planning_work::ProjectRow,
+        crate::planning_work::RuleRow,
+        crate::planning_work::TaskRow,
+        crate::planning_work::WorkRow,
         WorkDecisionsStorageRow,
         WorkReleasesStorageRow,
         WorkResultsStorageRow,
+        crate::planning_work::WorkspaceOperationRow,
     ]
 }
 

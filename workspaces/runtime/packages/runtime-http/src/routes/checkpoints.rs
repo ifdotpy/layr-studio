@@ -241,7 +241,7 @@ async fn restore_owned(
                     "phase":"provider_pending","created":now_seconds(),
                     "rootRequestId":studio_runtime_schema::persistence::RequestIdentity::issue_root()
                 })).map_err(|error| ApiError::json(error.into()))?;
-                tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2)", rusqlite::params![operation_id, studio_json::to_string(&operation).map_err(ApiError::json)?]).map_err(|error| ApiError::stored(error.into()))?;
+                WorkspaceOperationsRepository::insert(tx, &operation).map_err(ApiError::stored)?;
                 let mut actor = AgentRepository::get(tx, &snapshot.agent.id).map_err(ApiError::stored)?
                     .ok_or_else(|| ApiError::new(StatusCode::BAD_REQUEST, "Unknown managed agent"))?.value();
                 actor["workspaceOperation"] = json!("restore");

@@ -1,6 +1,7 @@
 //! Durable identity and compare-before-publication for host worktree provisioning.
 use crate::path_identity::{CanonicalPath, LexicalPath};
-use rusqlite::{OptionalExtension, Transaction, params};
+use crate::workspace_operations::WorkspaceOperationsRepository;
+use rusqlite::{OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -8,7 +9,7 @@ use studio_json::{Value, json};
 
 use crate::{
     AgentRecord, AgentRepository, CheckpointRecord, CheckpointsRepository, EventWriteRepository,
-    StoreError, StoreResult, Table, WorkspaceSnapshot,
+    StoreError, StoreResult, WorkspaceSnapshot,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -309,6 +310,7 @@ pub(super) struct CheckpointDiagnostic<'a> {
 
 pub struct WorkspaceReadyRepository;
 impl WorkspaceReadyRepository {
+    // Recovery reads accept incomplete historical journals before their operation-specific checks.
     pub fn journal(connection: &rusqlite::Connection, id: &str) -> StoreResult<Option<Value>> {
         connection
             .query_row(
@@ -350,8 +352,9 @@ impl WorkspaceReadyRepository {
         };
         operation["phase"] = json!("local_mutation");
         operation["updated"] = json!(now);
-        tx.execute("INSERT INTO runtime_workspace_operations(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![plan.id, operation.to_string()])?;
+        crate::peer_update_settings::canvas_tx(tx).upsert(&WorkspaceOperationsRepository::row(
+            tx, &plan.id, &operation,
+        )?)?;
         let mut actor = current.agent.value();
         actor["workspaceOperation"] = json!("provision");
         actor["workspaceReservationId"] = json!(plan.id);
@@ -384,10 +387,7 @@ impl WorkspaceReadyRepository {
             operation["phase"] = json!("recovery_required");
             operation["error"] = json!(reason);
             operation["updated"] = json!(now);
-            tx.execute(
-                "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-                params![plan.id, operation.to_string()],
-            )?;
+            WorkspaceOperationsRepository::update_record(tx, &plan.id, &operation)?;
         }
         Ok(())
     }
@@ -419,10 +419,7 @@ impl WorkspaceReadyRepository {
         operation["phase"] = json!("failed");
         operation["updated"] = json!(now);
         operation["release"] = json!({"reason":ARCHIVED_PROVISION_RELEASE,"at":now});
-        tx.execute(
-            "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-            params![id, operation.to_string()],
-        )?;
+        WorkspaceOperationsRepository::update_record(tx, id, &operation)?;
         Ok(())
     }
 
@@ -495,7 +492,12 @@ impl WorkspaceReadyRepository {
                 .cloned()
                 .unwrap_or(Value::Null);
             let record = CheckpointRecord::from_value(value.clone())?;
-            Table::<CheckpointRecord>::new(tx).put(&record)?;
+            crate::peer_update_settings::canvas_tx(tx).upsert(
+                &crate::planning_work::CheckpointRow {
+                    id: record.id().clone(),
+                    record: crate::json_record_codec::RawJsonRecord::from_record(tx, &record)?,
+                },
+            )?;
             actor["checkpointHistoryHead"] = value["id"].clone();
         }
         write_agent(
@@ -524,10 +526,7 @@ impl WorkspaceReadyRepository {
                 studio_json::value::Serializer,
             )?;
         }
-        tx.execute(
-            "UPDATE runtime_workspace_operations SET record=?2 WHERE id=?1",
-            params![plan.id, operation.to_string()],
-        )?;
+        WorkspaceOperationsRepository::update_record(tx, &plan.id, &operation)?;
         Ok(true)
     }
 }

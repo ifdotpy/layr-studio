@@ -334,8 +334,7 @@ async fn capture_before_restore_inner(
             "threadId":thread_id,
             "turnId":turn_id,"created":now_seconds(),"cwd":transaction_cwd
         });
-        tx.execute("INSERT INTO runtime_checkpoints(id,record) VALUES(?1,?2)", rusqlite::params![&transaction_checkpoint_id, record.to_string()])
-            .map_err(StoreError::from)?;
+        studio_runtime_store::CheckpointsRepository::insert(tx, studio_runtime_store::json_record_codec::RawJsonRecord::from_stored(tx, &transaction_checkpoint_id, record.to_string())?)?;
         let Some(mut agent) = studio_runtime_store::CheckpointsRepository::agent(tx, &transaction_agent_id)? else {
             return Err(CheckpointsError::UnknownAgent);
         };

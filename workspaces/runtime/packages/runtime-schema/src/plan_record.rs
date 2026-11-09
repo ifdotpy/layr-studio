@@ -80,7 +80,7 @@ pub struct PlanRecord {
         skip_serializing_if = "Option::is_none"
     )]
     #[schemars(schema_with = "steps_schema")]
-    steps: Option<Vec<Value>>,
+    steps: Option<Vec<crate::raw_json::RawJson>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -100,7 +100,8 @@ struct NativePlan {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    plan: Option<Vec<Value>>,
+    #[schemars(with = "Option<Vec<Value>>")]
+    plan: Option<Vec<crate::raw_json::RawJson>>,
 }
 
 impl PlanRecord {
@@ -131,7 +132,9 @@ impl PlanRecord {
         if let Some(steps) = &mut view.steps {
             steps.truncate(max_items);
             for step in steps {
-                bound_json(step, 2);
+                let mut value = studio_json::from_str(step.0.as_str()).expect("valid plan step");
+                bound_json(&mut value, 2);
+                *step = studio_json::from_value(value).expect("bounded JSON");
             }
         }
         if let Field::Value(native) = &mut view.native {
@@ -147,7 +150,10 @@ impl PlanRecord {
             if let Some(plan) = &mut native.plan {
                 plan.truncate(max_items);
                 for step in plan {
-                    bound_json(step, 3);
+                    let mut value =
+                        studio_json::from_str(step.0.as_str()).expect("valid native plan step");
+                    bound_json(&mut value, 3);
+                    *step = studio_json::from_value(value).expect("bounded JSON");
                 }
             }
         }

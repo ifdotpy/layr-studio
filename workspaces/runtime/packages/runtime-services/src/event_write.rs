@@ -253,23 +253,13 @@ pub fn annotate(
             .map(|turn| format!(" (reported turn {turn})"))
             .unwrap_or_default(),
     );
-    connection
-        .execute(
-            "INSERT INTO runtime_annotations(id,record) VALUES(?1,?2)",
-            rusqlite::params![
-                id,
-                studio_json::to_string(&record).map_err(studio_runtime_store::StoreError::from)?
-            ],
-        )
-        .map_err(studio_runtime_store::StoreError::from)?;
+    let stored = studio_runtime_store::json_record_codec::RawJsonRecord::from_stored(
+        connection,
+        &id,
+        studio_json::to_string(&record).map_err(studio_runtime_store::StoreError::from)?,
+    )?;
+    let revision = EventWriteRepository::create_annotation(connection, stored)?;
     let event_inserted = enqueue_event(connection, &agent, event_id, "user", event_text, created)?;
-    let revision = connection
-        .query_row(
-            "SELECT rev FROM runtime_annotations WHERE id=?1",
-            [&id],
-            |row| row.get(0),
-        )
-        .map_err(studio_runtime_store::StoreError::from)?;
     let reference = RequestReference {
         kind: RequestReferenceKind::Annotation,
         id,

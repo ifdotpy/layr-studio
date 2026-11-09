@@ -986,9 +986,9 @@ pub fn recover_task_in_transaction(
         {
             return Err(NotificationDispatchError::invalid());
         }
-        use studio_runtime_store::{Table, TaskId, TaskRecord};
+        use studio_runtime_store::{TaskId, TaskRecord};
         let task_id = previous.id().as_ref();
-        let current = Table::<TaskRecord>::new(tx).get(&TaskId::from(task_id))?;
+        let current = studio_runtime_store::TaskRepository::get(tx, &TaskId::from(task_id))?;
         let stored_agent = NotificationDispatchRepository::agent_record(tx, agent.id.as_ref())?;
         if current.as_ref() != Some(previous) || stored_agent.as_ref() != Some(agent) {
             return Err(NotificationDispatchError::invalid());

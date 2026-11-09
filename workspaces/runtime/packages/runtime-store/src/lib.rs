@@ -51,6 +51,7 @@ pub mod clock_schema;
 pub mod context_settings;
 pub mod json_record_codec;
 pub mod peer_update_settings;
+pub mod planning_work;
 mod schema;
 pub mod settings_schema;
 mod sqlite_actor;

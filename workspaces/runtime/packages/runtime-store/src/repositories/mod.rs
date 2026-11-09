@@ -210,7 +210,11 @@ mod tests {
             "created":0, "itemId":"i", "turnId":"turn", "type":"commandExecution", "name":"commandExecution", "interactive":false, "exitCode":0
         }).to_string())
         .expect("task JSON has a string id");
-        TaskRepository::put(&db, &task).expect("task write uses declared objects");
+        {
+            let tx = db.unchecked_transaction().expect("fixture transaction");
+            TaskRepository::put(&tx, &task).expect("task write uses declared objects");
+            tx.commit().expect("fixture commit");
+        }
         TaskRepository::get(&db, task.id()).expect("task read uses declared objects");
 
         let db = database_with(&events::REQUIREMENTS);

@@ -6,8 +6,8 @@ use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_store::{
-    AgentId, ComplaintRecord, PlanRecord, RuntimeStore, StoreError, Table, TaskId, TranscriptItem,
-    TranscriptRepository, TranscriptStoreError, WorkItemRecord, WorkspaceViewsRepository,
+    ComplaintRecord, RuntimeStore, StoreError, Table, TranscriptItem, TranscriptRepository,
+    TranscriptStoreError, WorkspaceViewsRepository,
 };
 use thiserror::Error;
 
@@ -737,13 +737,12 @@ fn search_item_in(
             "agent":sender,"kind":"room"}));
     }
 
-    let result = if let Some(row) = Table::<WorkItemRecord>::new(connection)
-        .get(&TaskId::from(identity))
-        .map_err(|_| TranscriptError::Store)?
+    let result = if let Some(row) =
+        studio_runtime_store::WorkItemsRepository::work_record(connection, identity)
+            .map_err(|_| TranscriptError::Store)?
     {
         Some((row.into_value(), "work"))
-    } else if let Some(row) = Table::<PlanRecord>::new(connection)
-        .get(&AgentId::from(identity))
+    } else if let Some(row) = studio_runtime_store::WorkItemsRepository::plan(connection, identity)
         .map_err(|_| TranscriptError::Store)?
     {
         Some((row.value(), "plan"))

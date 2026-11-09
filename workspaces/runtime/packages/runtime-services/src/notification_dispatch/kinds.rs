@@ -10,8 +10,8 @@ use rusqlite::OptionalExtension;
 use studio_json::{Value, json};
 use studio_runtime_store::CachedSql;
 use studio_runtime_store::{
-    AgentId, AgentRecord, NotificationDispatchRepository, PlanRecord, StoreError, Table, TaskId,
-    TaskRecord, Transaction,
+    AgentRecord, NotificationDispatchRepository, PlanRecord, StoreError, TaskId, TaskRecord,
+    Transaction,
 };
 
 pub(super) fn apply(
@@ -172,7 +172,7 @@ pub(super) fn apply(
         method,
         "item/started" | "item/completed" | "item/commandExecution/outputDelta"
     ) {
-        Table::<TaskRecord>::new(tx).get(&TaskId::from(task_key.as_str()))?
+        studio_runtime_store::TaskRepository::get(tx, &TaskId::from(task_key.as_str()))?
     } else {
         None
     };
@@ -365,13 +365,11 @@ pub(super) fn apply(
         }
         "turn/plan/updated" | "turn/diff/updated" => {
             if method == "turn/plan/updated" {
-                let key = AgentId::from(id.as_str());
-                let mut plan = Table::<PlanRecord>::new(tx)
-                    .get(&key)?
+                let mut plan = studio_runtime_store::WorkItemsRepository::plan(tx, id.as_str())?
                     .map(Ok)
                     .unwrap_or_else(|| PlanRecord::from_value(json!({"id":id,"rootId":agent.root_id,"text":"","version":0,"updated":null})))?;
                 plan.update_native(p.clone(), at)?;
-                Table::<PlanRecord>::new(tx).put_at(&key, &plan)?;
+                studio_runtime_store::WorkItemsRepository::put_plan(tx, id.as_str(), &plan)?;
             }
             let turn = turn(agent, p);
             let key = format!(
@@ -454,7 +452,7 @@ pub(super) fn put_checked_task(
     } else {
         None
     };
-    Table::<TaskRecord>::new(tx).put(task_record)?;
+    studio_runtime_store::TaskRepository::put(tx, task_record)?;
     if migrated {
         crate::sync_policy::maintain_task_window_after_write(
             tx,
@@ -510,7 +508,7 @@ pub(super) fn flush_command(
         }
         return Ok(());
     };
-    let mut task = Table::<TaskRecord>::new(tx).get(&TaskId::from(id.as_str()))?;
+    let mut task = studio_runtime_store::TaskRepository::get(tx, &TaskId::from(id.as_str()))?;
     let stale = key
         .turn
         .as_deref()
@@ -594,7 +592,7 @@ pub(super) fn preserve_command_base(
         })
         .filter(Value::is_object);
     let task = if saved.is_none() {
-        Table::<TaskRecord>::new(tx).get(&TaskId::from(id.as_str()))?
+        studio_runtime_store::TaskRepository::get(tx, &TaskId::from(id.as_str()))?
     } else {
         None
     };

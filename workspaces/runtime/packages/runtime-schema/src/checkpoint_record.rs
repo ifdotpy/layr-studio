@@ -5,8 +5,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use studio_json::{Number, Value};
 
+crate::raw_json_payload!(
+    #[derive(Clone, Debug, PartialEq, schemars::JsonSchema)]
+    pub struct CheckpointRecord {
+        fields: CheckpointFields,
+        #[schemars(with = "BTreeMap<String, Value>")]
+        extra
+    }
+);
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct CheckpointRecord {
+struct CheckpointFields {
     id: String,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<String>")]
@@ -14,8 +23,6 @@ pub struct CheckpointRecord {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     #[schemars(with = "Option<Number>")]
     created: Field<Number>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, Value>,
 }
 
 impl CheckpointRecord {
@@ -23,10 +30,10 @@ impl CheckpointRecord {
         studio_json::from_value(value)
     }
     pub fn id(&self) -> &String {
-        &self.id
+        &self.fields.id
     }
     pub fn agent(&self) -> Option<&str> {
-        self.agent.value().map(String::as_str)
+        self.fields.agent.value().map(String::as_str)
     }
     pub fn into_value(self) -> Value {
         // All fields are already serializable JSON values or scalars.

@@ -363,6 +363,8 @@ pub(crate) fn has_columns(transaction: &Transaction<'_>) -> StoreResult<bool> {
 /// this format's table, for test fixtures that declare their own schema.
 #[doc(hidden)]
 pub fn fixture_sql(batch: &str) -> String {
+    let batch = crate::planning_work::fixture_sql(batch);
+    let batch = batch.as_str();
     let Some(start) = batch.find("CREATE TABLE runtime_agents") else {
         return batch.to_owned();
     };

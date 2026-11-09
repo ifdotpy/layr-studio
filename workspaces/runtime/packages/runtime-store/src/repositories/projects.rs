@@ -72,8 +72,14 @@ impl ProjectsRepository {
             request_id: request_id.to_owned(),
             deleted_at,
         };
-        tx.execute("INSERT INTO runtime_projects(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![id, json!({"recordKind":"removal","id":id,"removal":removal,"peerTeams":[]}).to_string()])?;
+        crate::peer_update_settings::canvas_tx(tx).upsert(&crate::planning_work::ProjectRow {
+            id: id.to_owned(),
+            record: crate::json_record_codec::ExactJson::from_stored(
+                json!({"recordKind":"removal","id":id,"removal":removal,"peerTeams":[]})
+                    .to_string(),
+            )?,
+            removal_reason: None,
+        })?;
         Ok(())
     }
     pub fn is_destructive_removal(
@@ -83,6 +89,7 @@ impl ProjectsRepository {
     ) -> StoreResult<bool> {
         let raw: Option<String> = connection
             .query_row(
+                // JSON expression selectors retain the existing SQL semantics.
                 "SELECT json_extract(record,'$.removal') FROM runtime_projects WHERE id=?1",
                 [id],
                 |row| row.get(0),
@@ -108,6 +115,7 @@ impl ProjectsRepository {
     /// Active project owners, including projects hidden from navigation.
     pub fn owned(connection: &Connection) -> StoreResult<Vec<(String, Value)>> {
         let mut statement = connection.prepare_cached(
+            // JSON expression selectors retain the existing SQL semantics.
             "SELECT id,record FROM runtime_projects WHERE json_extract(record,'$.removal') IS NULL ORDER BY json_extract(record,'$.created'),id",
         )?;
         statement
@@ -129,6 +137,7 @@ impl ProjectsRepository {
     pub fn get(connection: &Connection, id: &str) -> StoreResult<Option<(String, Value)>> {
         let raw = connection
             .query_row(
+                // JSON expression selectors retain the existing SQL semantics.
                 "SELECT record FROM runtime_projects WHERE id=?1 AND json_extract(record,'$.removal') IS NULL",
                 [id],
                 |row| row.get::<_, String>(0),
@@ -149,6 +158,7 @@ impl ProjectsRepository {
     pub fn get_record(connection: &Connection, id: &str) -> StoreResult<Option<ProjectLive>> {
         let raw: Option<String> = connection
             .query_row(
+                // JSON expression selectors retain the existing SQL semantics.
                 "SELECT record FROM runtime_projects WHERE id=?1 AND json_extract(record,'$.removal') IS NULL",
                 [id],
                 |row| row.get(0),
@@ -175,6 +185,7 @@ impl ProjectsRepository {
 
     pub fn list_records(connection: &Connection) -> StoreResult<Vec<(String, ProjectLive)>> {
         let mut statement = connection.prepare_cached(
+            // JSON expression selectors retain the existing SQL semantics.
             "SELECT id,record FROM runtime_projects WHERE json_extract(record,'$.removal') IS NULL AND COALESCE(json_type(record,'$.sidebarHidden'),'')!='true' ORDER BY json_extract(record,'$.created'),id",
         )?;
         statement
@@ -207,6 +218,7 @@ impl ProjectsRepository {
         operation: &str,
     ) -> StoreResult<Option<AdmittedRequest>> {
         let raw: Option<String> = connection.query_row(
+            // JSON expression selectors retain the existing SQL semantics.
             "SELECT json_extract(intent.value,'$.request') FROM runtime_projects,json_each(record,'$.locationIntents') AS intent WHERE runtime_projects.id=?1 AND intent.key=?2",
             params![project,operation], |row|row.get(0),
         ).optional()?;
@@ -230,6 +242,7 @@ impl ProjectsRepository {
             .into());
         }
         let changed=tx.execute(
+            // JSON expression selectors retain the existing SQL semantics.
             "UPDATE runtime_projects SET record=json_patch(record,json_object('locationIntents',json_object(?2,json_object('request',json(?3))))) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL",
             params![project,operation,studio_json::to_string(request)?],
         )?;
@@ -248,6 +261,7 @@ impl ProjectsRepository {
         operation: &str,
     ) -> StoreResult<()> {
         tx.execute(
+            // JSON expression selectors retain the existing SQL semantics.
             "UPDATE runtime_projects SET record=json_patch(record,json_object('locationIntents',json_object(?2,NULL))) WHERE id=?1",
             params![project,operation],
         )?;
@@ -322,6 +336,7 @@ impl ProjectsRepository {
         }
         let record = studio_json::to_string(&project)?;
         let stored: String = transaction.query_row(
+            // SQLite JSON tagging and RETURNING preserve the existing stored/sync encoding.
             "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record RETURNING record",
             params![project.id, record],
@@ -345,6 +360,7 @@ impl ProjectsRepository {
             .ok_or_else(|| StoreError::SchemaMismatch("project id is invalid".to_owned()))?;
         let record = studio_json::to_string(project)?;
         transaction.execute(
+            // SQLite JSON tagging preserves the existing stored encoding.
             "INSERT INTO runtime_projects(id,record) VALUES (?1,json_set(?2,'$.recordKind','live')) \
              ON CONFLICT(id) DO UPDATE SET record=excluded.record",
             params![id, record],
@@ -367,6 +383,7 @@ impl ProjectsRepository {
     ) -> StoreResult<()> {
         let patch = studio_json::to_string(patch)?;
         let (record, hidden): (String, bool) = transaction.query_row(
+            // JSON expression selectors retain the existing SQL semantics.
             "UPDATE runtime_projects SET record=json_patch(record,json(?2)) WHERE id=?1 AND json_extract(record,'$.removal') IS NULL RETURNING record,json_type(record,'$.sidebarHidden')='true'",
             params![id, patch],
             |row| Ok((row.get(0)?, row.get::<_, Option<bool>>(1)?.unwrap_or(false))),
@@ -385,6 +402,7 @@ impl ProjectsRepository {
         }
         existing["sidebarHidden"] = json!(true);
         let removed = transaction.execute(
+            // Recovery reads retain their historical admission semantics.
             "UPDATE runtime_projects SET record=?2 WHERE id=?1",
             params![id, existing.to_string()],
         )? > 0;

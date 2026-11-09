@@ -99,7 +99,28 @@ impl EventWriteRepository {
         Ok(Some(true))
     }
 
-    pub fn put_annotation(connection: &Connection, id: &str, value: &Value) -> StoreResult<()> {
+    pub fn create_annotation(
+        transaction: &Transaction<'_>,
+        record: crate::json_record_codec::RawJsonRecord<AnnotationRecord>,
+    ) -> StoreResult<i64> {
+        let row = crate::planning_work::AnnotationRow {
+            id: record.record().id().clone(),
+            record,
+            rev: 1,
+        };
+        let mut tx = crate::peer_update_settings::canvas_tx(transaction);
+        tx.insert(&row)?;
+        Ok(tx
+            .get::<crate::planning_work::AnnotationRow>(&(row.id,))?
+            .ok_or(StoreError::RecordContract("Inserted annotation is missing"))?
+            .rev)
+    }
+
+    pub fn put_annotation(
+        connection: &Transaction<'_>,
+        id: &str,
+        value: &Value,
+    ) -> StoreResult<()> {
         let record = AnnotationRecord::from_value(value.clone())?;
         if record.id() != id {
             return Err(crate::StoreError::InvalidStoredObject {
@@ -107,7 +128,13 @@ impl EventWriteRepository {
                 id: id.to_owned(),
             });
         }
-        if !Table::<AnnotationRecord>::new(connection).insert_new(&record)? {
+        if !crate::peer_update_settings::canvas_tx(connection).insert_new(
+            &crate::planning_work::AnnotationRow {
+                id: id.to_owned(),
+                record: crate::json_record_codec::RawJsonRecord::from_record(connection, &record)?,
+                rev: 1,
+            },
+        )? {
             return Err(crate::StoreError::RecordContract(
                 "annotation record identity already exists",
             ));
