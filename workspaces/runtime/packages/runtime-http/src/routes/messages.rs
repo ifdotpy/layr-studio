@@ -134,6 +134,7 @@ pub(super) async fn send_message_with<T: Send + 'static>(
         .read_async("runtime-http/routes/messages", move |connection| {
                 let federated_room = connection
                     .query_row(
+                        // Raw SQL: partial projections preserve the existing identity/permission boundary.
                         "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1)",
                         [&admission_room],
                         |row| row.get::<_, bool>(0),

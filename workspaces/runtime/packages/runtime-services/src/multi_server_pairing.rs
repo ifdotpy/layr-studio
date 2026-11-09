@@ -173,6 +173,7 @@ impl MultiServerBoundary {
             .read_async("runtime-services/multi_server_pairing", move |tx| {
                 let client = tx
                     .query_row(
+                        // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                         "SELECT record FROM runtime_access_clients WHERE id=?1",
                         [&client_id],
                         |r| r.get::<_, String>(0),
@@ -180,6 +181,7 @@ impl MultiServerBoundary {
                     .optional()?;
                 let invite = tx
                     .query_row(
+                        // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                         "SELECT record FROM runtime_access_invites WHERE id=?1",
                         [&invite_id_for_read],
                         |r| r.get::<_, String>(0),
@@ -444,6 +446,7 @@ impl MultiServerBoundary {
                 }
                 if let Some(client) = &decision.client_write {
                     tx.execute(
+                        // Raw SQL: legacy partial-record mutation keeps its existing admission.
                         "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                         params![
                             studio_json::to_string(client).map_err(StoreError::from)?,
@@ -796,6 +799,7 @@ fn apply_pair(
             )
         })?;
         tx.execute(
+            // Raw SQL: legacy partial-record mutation keeps its existing admission.
             "UPDATE runtime_access_invites SET record=?1 WHERE id=?2",
             params![invite, request.invite_id()],
         )?;
@@ -824,20 +828,23 @@ fn apply_pair(
             studio_runtime_schema::queue_command::Field::Value(request.request_id().to_owned());
         client.pairing_hash = studio_runtime_schema::queue_command::Field::Value(fingerprint);
     }
-    tx.execute("INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![request.client_id(),studio_json::to_string(&client).map_err(StoreError::from)?])?;
+    studio_runtime_store::access_tables::AccessClientsRow::put(
+        tx,
+        request.client_id(),
+        studio_json::to_string(&client).map_err(StoreError::from)?,
+    )?;
     save_receipt(tx, &admitted, &result, now)?;
     if snapshot.client().is_none() {
-        tx.execute(
-            "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,?1,?2,?3)",
-            params![
-                request.client_id(),
-                if request.is_pairing() {
-                    "pair"
-                } else {
-                    "auto_pair"
-                },
-                now
-            ],
+        studio_runtime_store::access_tables::AccessAuditRow::append(
+            tx,
+            request.client_id(),
+            request.client_id(),
+            if request.is_pairing() {
+                "pair"
+            } else {
+                "auto_pair"
+            },
+            now,
         )?;
     }
     Ok(result)
@@ -907,57 +914,48 @@ fn new_client(
     };
     let server = kind == AccessClientKind::Server;
     let timestamp = studio_json::Number::from_f64(now).ok_or_else(invalid)?;
-    Ok(PersistedAccessClient {
-        id: request
+    let mut record = PersistedAccessClient::with_identity(
+        request
             .client_id()
             .to_owned()
             .try_into()
             .map_err(|_| invalid())?,
-        client_id: request
+        request
             .client_id()
             .to_owned()
             .try_into()
             .map_err(|_| invalid())?,
-        server_id: if server {
-            Field::Value(request.client_id().to_owned())
-        } else {
-            Field::Null
-        },
         kind,
-        label: request
+        request
             .label()
             .to_owned()
             .try_into()
             .map_err(|_| invalid())?,
-        origin: if server {
-            Field::Value(request.origin().to_owned())
-        } else {
-            Field::Null
-        },
-        public_key: request
+        timestamp.clone().try_into().map_err(|_| invalid())?,
+        request
             .public_key()
             .to_owned()
             .try_into()
             .map_err(|_| invalid())?,
-        tailscale_user: Field::Value(principal.tailscale_user().to_owned()),
-        status: AccessClientStatus::Paired,
-        created: timestamp.clone().try_into().map_err(|_| invalid())?,
-        last_access: if request.is_pairing() {
-            Field::Value(timestamp)
-        } else {
-            Field::Null
-        },
-        revoked: Field::Null,
-        last_seen: Field::Missing,
-        auto_pair: Field::Missing,
-        reachability: Field::Missing,
-        alias: Field::Missing,
-        replaced_by: Field::Missing,
-        grant: Field::Missing,
-        pairing_request_id: Field::Missing,
-        pairing_hash: Field::Missing,
-        pairing_receipt: Field::Missing,
-    })
+        AccessClientStatus::Paired,
+    );
+    record.server_id = if server {
+        Field::Value(request.client_id().to_owned())
+    } else {
+        Field::Null
+    };
+    record.origin = if server {
+        Field::Value(request.origin().to_owned())
+    } else {
+        Field::Null
+    };
+    record.tailscale_user = Field::Value(principal.tailscale_user().to_owned());
+    record.last_access = if request.is_pairing() {
+        Field::Value(timestamp)
+    } else {
+        Field::Null
+    };
+    Ok(record)
 }
 pub(crate) fn read_record(
     tx: &Transaction<'_>,

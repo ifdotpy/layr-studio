@@ -13,6 +13,7 @@ pub fn peer_owns_link(
     parent: &str,
 ) -> rusqlite::Result<bool> {
     connection.query_row(
+        // Raw SQL: JSON selectors/projections are outside db_query.
         "SELECT EXISTS(SELECT 1 FROM runtime_server_links \
          WHERE json_extract(record,'$.parent')=?2 \
          AND json_extract(record,'$.side')='home' \

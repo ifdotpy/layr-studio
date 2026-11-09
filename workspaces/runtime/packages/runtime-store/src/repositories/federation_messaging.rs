@@ -66,6 +66,7 @@ impl FederationMessagingRepository {
     ) -> StoreResult<Option<Value>> {
         let sql = match table {
             FederationTable::Inbox => {
+                // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                 "SELECT record FROM runtime_federation_inbox WHERE message_id=?1 AND peer_id=?2"
                     .to_owned()
             }
@@ -143,10 +144,44 @@ impl FederationMessagingRepository {
         }
         match table {
             FederationTable::Inbox => {
-                tx.execute("INSERT INTO runtime_federation_inbox(peer_id,message_id,record) VALUES(?1,?2,?3) ON CONFLICT(peer_id,message_id) DO UPDATE SET record=excluded.record",params![peer,id,raw])?;
+                use crate::access_tables::FederationInboxRow;
+                let record = crate::json_record_codec::ExactJson::<
+                    crate::access_payloads::FederationInboxPayload,
+                >::from_stored(raw)?;
+                let receipt_ack = record.value().fields.ack.as_str().to_owned();
+                let receipt_kind = record
+                    .value()
+                    .fields
+                    .kind
+                    .value()
+                    .map(|kind| kind.as_str().to_owned());
+                crate::peer_update_settings::canvas_tx(tx).upsert(&FederationInboxRow {
+                    peer_id: peer.into(),
+                    message_id: id.into(),
+                    record,
+                    receipt_ack,
+                    receipt_kind,
+                })?;
             }
             FederationTable::Outbox => put_outbox(tx, id, peer, value)?,
-            FederationTable::Settings | FederationTable::Peer | FederationTable::Room => {
+            FederationTable::Peer => {
+                crate::peer_update_settings::canvas_tx(tx).upsert(
+                    &crate::access_tables::FederationPeersRow {
+                        id: id.into(),
+                        record: crate::json_record_codec::ExactJson::from_stored(raw)?,
+                    },
+                )?;
+            }
+            FederationTable::Room => {
+                crate::peer_update_settings::canvas_tx(tx).upsert(
+                    &crate::access_tables::FederationRoomsRow {
+                        id: id.into(),
+                        record: crate::json_record_codec::ExactJson::from_stored(raw)?,
+                    },
+                )?;
+            }
+            FederationTable::Settings => {
+                // Raw SQL: the settings descriptor belongs to the separate settings family.
                 tx.execute(&format!("INSERT INTO {}(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",table.name()),params![id,raw])?;
             }
         }
@@ -163,6 +198,7 @@ impl FederationMessagingRepository {
                 "SELECT request_id,CASE WHEN length(CAST(json_extract(payload,'$.record') AS BLOB))<=?3 THEN json_extract(payload,'$.record') END FROM runtime_outbox WHERE kind='remote_delivery' AND json_extract(payload,'$.effect')='federation_message' AND target=?1 AND json_extract(payload,'$.record.status')='queued' AND json_extract(payload,'$.record.nextAt')<=?2 ORDER BY json_extract(payload,'$.record.created'),request_id LIMIT 50"
             }
             FederationTable::Inbox => {
+                // Raw SQL: JSON selectors/projections are outside db_query.
                 "SELECT message_id,CASE WHEN length(CAST(record AS BLOB))<=?3 THEN record END FROM runtime_federation_inbox WHERE peer_id=?1 AND json_extract(record,'$.ack') IN ('pending','sent') AND ?2=?2 ORDER BY json_extract(record,'$.created'),message_id LIMIT 50"
             }
             FederationTable::Settings | FederationTable::Peer | FederationTable::Room => {
@@ -186,6 +222,7 @@ impl FederationMessagingRepository {
             .collect()
     }
     pub fn room_rate(db: &Connection, peer: &str, room: &str, now: f64) -> StoreResult<u64> {
+        // Raw SQL: JSON selectors/projections are outside db_query.
         Ok(db.query_row("SELECT count(*) FROM runtime_federation_inbox WHERE peer_id=?1 AND json_extract(record,'$.room')=?2 AND json_extract(record,'$.kind')='chat-message' AND json_extract(record,'$.created')>=?3",params![peer,room,now-60.0],|r|r.get::<_,u32>(0))? as u64)
     }
     pub fn queue_size(db: &Connection, peer: &str) -> StoreResult<(u64, u64)> {
@@ -325,52 +362,53 @@ inventory::submit! { crate::repositories::SchemaRegistration { repository:"feder
 
 /// Read-only coverage for every federation record consumed by this subsystem.
 pub fn check_state(db: &Connection) -> StoreResult<Vec<crate::StateCheckTable>> {
-    let mut result = Vec::new();
-    for table in [
-        FederationTable::Settings,
-        FederationTable::Peer,
-        FederationTable::Room,
-        FederationTable::Outbox,
-        FederationTable::Inbox,
-    ] {
-        let exists: bool = db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
-            [table.name()],
-            |r| r.get(0),
-        )?;
-        let mut row_count = 0;
-        let mut rejected_count = 0;
-        if exists {
-            let key = if matches!(table, FederationTable::Inbox) {
-                "message_id"
-            } else {
-                "id"
-            };
-            let mut stmt = db.prepare(&format!("SELECT {key},record FROM {}", table.name()))?;
-            let mut rows = stmt.query([])?;
-            while let Some(row) = rows.next()? {
-                row_count += 1;
-                let id: String = row.get(0)?;
-                let raw: String = row.get(1)?;
-                if FederationMessagingRepository::parse(table, &id, &raw).is_err() {
-                    rejected_count += 1;
-                }
+    [FederationTable::Settings, FederationTable::Outbox]
+        .into_iter()
+        .map(|table| check_table_state(db, table))
+        .collect()
+}
+
+/// Preserve the legacy parser and diagnostics for a single table's registry report.
+pub(crate) fn check_table_state(
+    db: &Connection,
+    table: FederationTable,
+) -> StoreResult<crate::StateCheckTable> {
+    let exists: bool = db.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+        [table.name()],
+        |r| r.get(0),
+    )?;
+    let mut row_count = 0;
+    let mut rejected_count = 0;
+    if exists {
+        let key = if matches!(table, FederationTable::Inbox) {
+            "message_id"
+        } else {
+            "id"
+        };
+        let mut stmt = db.prepare(&format!("SELECT {key},record FROM {}", table.name()))?;
+        let mut rows = stmt.query([])?;
+        while let Some(row) = rows.next()? {
+            row_count += 1;
+            let id: String = row.get(0)?;
+            let raw: String = row.get(1)?;
+            if FederationMessagingRepository::parse(table, &id, &raw).is_err() {
+                rejected_count += 1;
             }
         }
-        result.push(crate::StateCheckTable {
-            table: table.name(),
-            row_count,
-            rejected_count,
-            failures: if rejected_count == 0 {
-                vec![]
-            } else {
-                vec![crate::StateCheckFailure {
-                    pointer: "/".into(),
-                    keyword: "schema".into(),
-                    count: rejected_count,
-                }]
-            },
-        });
     }
-    Ok(result)
+    Ok(crate::StateCheckTable {
+        table: table.name(),
+        row_count,
+        rejected_count,
+        failures: if rejected_count == 0 {
+            vec![]
+        } else {
+            vec![crate::StateCheckFailure {
+                pointer: "/".into(),
+                keyword: "schema".into(),
+                count: rejected_count,
+            }]
+        },
+    })
 }

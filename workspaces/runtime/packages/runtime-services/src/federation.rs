@@ -220,13 +220,11 @@ async fn create_invitation(
     let tailscale_status_for_write = tailscale_status.to_owned();
     store.transaction_with(move |tx| {
         tx.execute(
+            // Raw SQL: JSON selectors/projections are outside db_query.
             "UPDATE runtime_federation_identity SET record=json_set(record,'$.label',?1,'$.leadName',?2,'$.tailscaleUser',?3,'$.tailscaleStatus',?4) WHERE id='local'",
             rusqlite::params![label_for_write, lead_name_for_write, tailscale_user_for_write, tailscale_status_for_write],
         )?;
-        tx.execute(
-            "INSERT INTO runtime_federation_invites(id,record) VALUES(?1,?2)",
-            rusqlite::params![invite_id_for_write, record_for_write.to_string()],
-        )?;
+        studio_runtime_store::access_tables::FederationInvitesRow::insert(tx, &invite_id_for_write, record_for_write.to_string())?;
         Ok::<_, StoreError>(())
     }).await?;
     let invitation = json!({
@@ -346,6 +344,7 @@ async fn accept_peer(
         .transaction_with(move |tx| {
             let existing: Option<String> = tx
                 .query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                     "SELECT record FROM runtime_federation_peers WHERE id=?1",
                     [&state_id_for_write],
                     |row| row.get(0),
@@ -367,6 +366,7 @@ async fn accept_peer(
                 }
             } else {
                 tx.execute(
+                    // Raw SQL: legacy partial-record mutation keeps its existing admission.
                     "INSERT INTO runtime_federation_peers(id,record) VALUES(?1,?2)",
                     rusqlite::params![state_id_for_write, record_for_write.to_string()],
                 )
@@ -391,6 +391,7 @@ async fn accept_peer(
         let state_id = state_id.to_owned();
         store.transaction_with(move |tx| {
             tx.execute(
+                // Raw SQL: JSON selectors/projections are outside db_query.
                 "UPDATE runtime_federation_peers SET record=json_set(record,'$.lastError',?1) WHERE id=?2",
                 rusqlite::params!["Connection unavailable; the pairing attempt will retry", state_id],
             )
@@ -437,11 +438,11 @@ async fn create_project_invitation(
     let invite_id_for_write = invite_id.clone();
     store
         .transaction_with(move |tx| {
-            tx.execute(
-                "INSERT INTO runtime_federation_invites(id,record) VALUES(?1,?2)",
-                rusqlite::params![invite_id_for_write, record.to_string()],
-            )
-            .map_err(StoreError::from)?;
+            studio_runtime_store::access_tables::FederationInvitesRow::insert(
+                tx,
+                &invite_id_for_write,
+                record.to_string(),
+            )?;
             Ok::<_, StoreError>(())
         })
         .await?;
@@ -631,6 +632,7 @@ async fn revoke_project_grant(
         .transaction_with(move |tx| {
             let project: Option<String> = tx
                 .query_row(
+                    // Raw SQL: partial projections preserve the existing identity/permission boundary.
                     "SELECT local_project FROM project_grants WHERE grant_id=?1 LIMIT 1",
                     [&grant_id_for_write],
                     |row| row.get(0),

@@ -109,6 +109,7 @@ impl FederationRepository {
         }
         // Select public identity fields directly; never materialize `record` / privateKey.
         let identity = connection.query_row(
+            // Raw SQL: JSON selectors/projections are outside db_query.
             "SELECT json_extract(record,'$.stateId'),json_extract(record,'$.label'),json_extract(record,'$.publicKey') FROM runtime_federation_identity WHERE id='local'",
             [], |row| Ok((row.get::<_, Option<String>>(0)?,row.get::<_, Option<String>>(1)?,row.get::<_, Option<String>>(2)?)),
         ).optional()?.map(|(state,label,key)| {
@@ -155,6 +156,7 @@ impl FederationRepository {
         );
         obj.insert("updated".into(), json!(now()?));
         tx.execute(
+            // Raw SQL: legacy partial-record mutation keeps its existing admission.
             "UPDATE runtime_federation_peers SET record=?1 WHERE id=?2",
             params![peer.to_string(), id],
         )?;
@@ -200,6 +202,7 @@ impl FederationRepository {
                 tx.execute("UPDATE runtime_chat_messages SET deliveries=json_set(deliveries,?1,json(?3)) WHERE id=?2",params![format!("$.remote:{id}"),out_id,studio_json::to_string(&delivery)?])?;
             }
         }
+        // Raw SQL: JSON selectors/projections are outside db_query.
         let mut stmt=tx.prepare_cached("SELECT id,record FROM runtime_federation_rooms WHERE json_extract(record,'$.peerId')=?1")?;
         let rooms = stmt
             .query_map([id], |r| {
@@ -211,6 +214,7 @@ impl FederationRepository {
             let mut room = parse_record("runtime_federation_rooms", &room_id, &raw)?;
             room["status"] = json!("revoked");
             tx.execute(
+                // Raw SQL: legacy partial-record mutation keeps its existing admission.
                 "UPDATE runtime_federation_rooms SET record=?1 WHERE id=?2",
                 params![room.to_string(), room_id],
             )?;
@@ -452,6 +456,7 @@ impl FederationRepository {
         }
         let room_id = room["id"].as_str().unwrap_or_default().to_owned();
         let peer_label = room["peerLabel"].as_str().unwrap_or_default();
+        // Raw SQL: legacy partial-record mutation keeps its existing admission.
         tx.execute("INSERT INTO runtime_federation_rooms(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![room_id,room.to_string()])?;
         let mut local_room = studio_runtime_schema::room_record::RoomRecord::new(
             room_id.clone(),

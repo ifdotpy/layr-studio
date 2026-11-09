@@ -790,6 +790,7 @@ async fn remote_project_write(
         let paired = paired_store.read_async("runtime-http/routes/projects/paired-server-read", move |connection| {
                 connection
                     .query_row(
+                        // Raw SQL: JSON selectors/projections are outside db_query.
                         "SELECT EXISTS(SELECT 1 FROM runtime_access_clients WHERE id=?1 AND json_extract(record,'$.kind')='server' AND json_extract(record,'$.status')='paired')",
                         [server_id],
                         |row| row.get::<_, bool>(0),

@@ -261,6 +261,7 @@ pub async fn load_federation_identity(
     };
     let identity: StoredFederationIdentity =
         studio_json::from_str(&record).map_err(|_| invalid())?;
+    let identity = identity.fields;
     RemoteIdentity::from_key_fields(
         identity.state_id,
         identity.label,
@@ -294,14 +295,7 @@ impl StoredMultiServerIdentity {
     }
 }
 
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct StoredFederationIdentity {
-    state_id: String,
-    label: String,
-    private_key: String,
-    public_key: String,
-}
+type StoredFederationIdentity = studio_runtime_store::access_payloads::FederationIdentityPayload;
 
 /// The multi-server signature bytes and the struct they take are owned by `studio-request-signing`.
 pub use studio_request_signing::{

@@ -74,7 +74,6 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
         &connection,
     )?);
     tables.extend(crate::analytics_capture::check_state_readonly(state_dir)?);
-    tables.extend(crate::multi_server_state_check::check(&connection)?);
     Ok(StateCheckReport { tables })
 }
 
@@ -108,7 +107,14 @@ pub fn count_legacy_rows<R: studio_db_api::Table>(
 pub fn check_legacy_json<R: JsonRecord>(
     connection: &Connection,
 ) -> rusqlite::Result<studio_db_api::StateCheck> {
-    let report = check_table::<R>(connection).map_err(|error| {
+    storage_report(check_table::<R>(connection))
+}
+
+/// Adapt a legacy per-table report without changing acceptance or failure detail.
+pub(crate) fn storage_report(
+    report: StoreResult<StateCheckTable>,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    let report = report.map_err(|error| {
         rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
     })?;
     Ok(studio_db_api::StateCheck {

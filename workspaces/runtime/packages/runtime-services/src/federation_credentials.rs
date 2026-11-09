@@ -156,11 +156,11 @@ impl Credentials {
                     )
                     .map_err(StoreError::from)?;
                 if !exists {
-                    tx.execute(
-                        "INSERT INTO runtime_federation_identity(id,record) VALUES('local',?1)",
-                        [record.to_string()],
-                    )
-                    .map_err(StoreError::from)?;
+                    studio_runtime_store::access_tables::FederationIdentityRow::insert(
+                        tx,
+                        "local",
+                        record.to_string(),
+                    )?;
                 }
                 Ok(())
             })

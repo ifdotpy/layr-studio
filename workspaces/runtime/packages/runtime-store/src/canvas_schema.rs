@@ -3,7 +3,18 @@ use crate::peer_update_settings::{Canvas, PeerUpdateSettings};
 use crate::work_history::{WorkDecisionsStorageRow, WorkReleasesStorageRow, WorkResultsStorageRow};
 use studio_db_api::db_schema;
 
-pub(crate) fn registry() -> [studio_db_api::Registration; 17] {
+/// Install only the explicitly requested legacy owners, preserving existing rows.
+pub(crate) fn install(
+    connection: &rusqlite::Connection,
+    descriptors: &[studio_db_api::Descriptor],
+) -> rusqlite::Result<()> {
+    for descriptor in descriptors {
+        descriptor.install_if_absent(connection)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn registry() -> [studio_db_api::Registration; 40] {
     db_schema![Canvas;
         crate::interaction_tables::ApprovalsRow,
         crate::interaction_tables::GraphEdgesRow,
@@ -22,5 +33,28 @@ pub(crate) fn registry() -> [studio_db_api::Registration; 17] {
         WorkDecisionsStorageRow,
         WorkReleasesStorageRow,
         WorkResultsStorageRow,
+        crate::project_grants::GrantRow,
+        crate::access_tables::AccessAliasRequestsRow,
+        crate::access_tables::AccessAuditRow,
+        crate::access_tables::AccessAutoAttemptsRow,
+        crate::access_tables::AccessClientsRow,
+        crate::access_tables::AccessDiscoveredRow,
+        crate::access_tables::AccessInvitesRow,
+        crate::access_tables::AccessNameRequestsRow,
+        crate::access_tables::AccessNameTargetsRow,
+        crate::access_tables::AccessNoncesRow,
+        crate::access_tables::AccessUnrevokesRow,
+        crate::access_tables::FederationIdentityRow,
+        crate::access_tables::FederationInboxRow,
+        crate::access_tables::FederationInvitesRow,
+        crate::access_tables::FederationPeersRow,
+        crate::access_tables::FederationRoomsRow,
+        crate::access_tables::ServerExecRow,
+        crate::access_tables::ServerExecAuditRow,
+        crate::access_tables::ServerExecInputRow,
+        crate::access_tables::ServerInboxRow,
+        crate::access_tables::ServerLinksRow,
+        crate::access_tables::ServerOutputToolsRow,
+        crate::access_tables::ServerRetiredRow,
     ]
 }

@@ -515,6 +515,7 @@ async fn accept_invite(
             "runtime-http/routes/multi_server/accept-invite-prior",
             move |tx| {
                 tx.query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                     "SELECT record FROM runtime_access_clients WHERE id=?1",
                     [server_id_for_read],
                     |row| row.get::<_, String>(0),
@@ -551,47 +552,38 @@ async fn accept_invite(
                 "Invalid paired server identity",
             )
         };
-        let record = PersistedAccessClient {
-            id: server_id.to_owned().try_into().map_err(|_| invalid())?,
-            client_id: server_id.to_owned().try_into().map_err(|_| invalid())?,
-            server_id: Field::Value(server_id.to_owned()),
-            kind: AccessClientKind::Server,
-            label: invitation
+        let mut record = PersistedAccessClient::with_identity(
+            server_id.to_owned().try_into().map_err(|_| invalid())?,
+            server_id.to_owned().try_into().map_err(|_| invalid())?,
+            AccessClientKind::Server,
+            invitation
                 .label
                 .as_str()
                 .to_owned()
                 .try_into()
                 .map_err(|_| invalid())?,
-            origin: Field::Value(origin.to_owned()),
-            public_key: public_key.to_owned().try_into().map_err(|_| invalid())?,
-            tailscale_user: Field::Value(owner),
-            status: AccessClientStatus::Paired,
-            created: NonNegativeNumber::try_from(
-                studio_json::Number::from_f64(now).ok_or_else(invalid)?,
-            )
-            .map_err(|_| invalid())?,
-            last_access: Field::Null,
-            revoked: Field::Null,
-            last_seen: Field::Missing,
-            auto_pair: Field::Missing,
-            reachability: Field::Missing,
-            alias: Field::Missing,
-            replaced_by: Field::Missing,
-            grant: Field::Missing,
-            pairing_request_id: Field::Missing,
-            pairing_hash: Field::Missing,
-            pairing_receipt: Field::Missing,
-        };
+            NonNegativeNumber::try_from(studio_json::Number::from_f64(now).ok_or_else(invalid)?)
+                .map_err(|_| invalid())?,
+            public_key.to_owned().try_into().map_err(|_| invalid())?,
+            AccessClientStatus::Paired,
+        );
+        record.server_id = Field::Value(server_id.to_owned());
+        record.origin = Field::Value(origin.to_owned());
+        record.tailscale_user = Field::Value(owner);
         let server_id_for_save = server_id.to_owned();
         store
             .transaction_with(move |tx| {
-                tx.execute(
-                    "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2)",
-                    rusqlite::params![server_id_for_save, studio_json::to_string(&record)?],
+                studio_runtime_store::access_tables::AccessClientsRow::insert(
+                    tx,
+                    &server_id_for_save,
+                    studio_json::to_string(&record)?,
                 )?;
-                tx.execute(
-                    "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,'local','accept_invite',?2)",
-                    rusqlite::params![server_id_for_save, now],
+                studio_runtime_store::access_tables::AccessAuditRow::append(
+                    tx,
+                    &server_id_for_save,
+                    "local",
+                    "accept_invite",
+                    now,
                 )?;
                 Ok(())
             })
@@ -610,6 +602,7 @@ async fn ui_invite(
 ) -> Result<Value, ApiError> {
     let server_id_for_read = server_id.to_owned();
     let peer = store.read_async("runtime-http/routes/multi_server/ui-invite-peer", move |tx| {
+                    // Raw SQL: JSON selectors/projections are outside db_query.
                     tx.query_row("SELECT record FROM runtime_access_clients WHERE id=?1 AND json_extract(record,'$.kind')='server' AND json_extract(record,'$.status')='paired'", [server_id_for_read], |row| row.get::<_, String>(0))
                         .optional()?
                         .map(|raw| studio_runtime_services::multi_server_discovery::StoredPeer::from_raw(&raw).ok_or_else(|| studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_clients".into())))
@@ -767,6 +760,7 @@ async fn remote_set_server_name(
         .transaction_with(move |tx| {
             let previous = tx
                 .query_row(
+                    // Raw SQL: partial projections preserve the existing identity/permission boundary.
                     "SELECT server,label FROM runtime_access_name_targets WHERE id=?1",
                     [request_for_reservation.as_str()],
                     |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
@@ -776,6 +770,7 @@ async fn remote_set_server_name(
                 return Ok::<_, studio_runtime_store::StoreError>(false);
             }
             tx.execute(
+                // Raw SQL: partial projections preserve the existing identity/permission boundary.
                 "INSERT OR IGNORE INTO runtime_access_name_targets(id,server,label) VALUES(?1,?2,?3)",
                 rusqlite::params![request_for_reservation, target_for_reservation, label_for_reservation],
             )?;
@@ -894,6 +889,7 @@ async fn remote_set_server_name(
                 studio_runtime_store::StoreError::SchemaMismatch("invalid peer label".into())
             })?;
             tx.execute(
+                // Raw SQL: legacy partial-record mutation keeps its existing admission.
                 "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                 rusqlite::params![studio_json::to_string(&record)?, target_for_finish],
             )?;

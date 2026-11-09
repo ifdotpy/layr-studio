@@ -320,6 +320,7 @@ impl TailscaleServerDiscovery {
         let paired = store
             .read_async("runtime-server/discovery-paired-check", move |tx| {
                 tx.query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                     "SELECT record FROM runtime_access_clients WHERE id=?1",
                     [&paired_id],
                     |row| row.get::<_, String>(0),
@@ -407,6 +408,7 @@ impl TailscaleServerDiscovery {
                         )
                     })?;
                 tx.execute(
+                    // Raw SQL: legacy partial-record mutation keeps its existing admission.
                     "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
                     params![studio_json::to_string(&client)?, id],
                 )?;
@@ -435,37 +437,49 @@ async fn reserve_auto_pair_id(
         request_id: Field::Missing,
         state: Field::Missing,
     };
-    store.transaction_with(move |tx| {
-        let saved = tx
-            .query_row(
-                "SELECT record FROM runtime_access_auto_attempts WHERE id=?1",
-                [&peer_id],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if let Some(saved_raw) = &saved {
-            let saved: Value = studio_json::from_str(saved_raw).map_err(|_| {
-                studio_runtime_store::StoreError::SchemaMismatch(
-                    "invalid stored object runtime_access_auto_attempts".into(),
+    store
+        .transaction_with(move |tx| {
+            let saved = tx
+                .query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
+                    "SELECT record FROM runtime_access_auto_attempts WHERE id=?1",
+                    [&peer_id],
+                    |row| row.get::<_, String>(0),
                 )
-            })?;
-            let saved = studio_runtime_schema::json_object::JsonObject::<AutoPairAttempt>::deserialize(saved).ok().map(|object| object.0);
-            if let Some(request_id) = saved.as_ref().filter(|saved| saved.same_content(&request_content))
-                .and_then(|saved| saved.request_id.value()).and_then(Value::as_str)
-            {
-                return Ok(request_id.to_owned());
+                .optional()?;
+            if let Some(saved_raw) = &saved {
+                let saved: Value = studio_json::from_str(saved_raw).map_err(|_| {
+                    studio_runtime_store::StoreError::SchemaMismatch(
+                        "invalid stored object runtime_access_auto_attempts".into(),
+                    )
+                })?;
+                let saved =
+                    studio_runtime_schema::json_object::JsonObject::<AutoPairAttempt>::deserialize(
+                        saved,
+                    )
+                    .ok()
+                    .map(|object| object.0);
+                if let Some(request_id) = saved
+                    .as_ref()
+                    .filter(|saved| saved.same_content(&request_content))
+                    .and_then(|saved| saved.request_id.value())
+                    .and_then(Value::as_str)
+                {
+                    return Ok(request_id.to_owned());
+                }
             }
-        }
-        let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
-        request_content.request_id = AutoPairAttempt::present(json!(request_id));
-        request_content.state = AutoPairAttempt::present(json!("attempted"));
-        tx.execute(
-            "INSERT INTO runtime_access_auto_attempts(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![peer_id, studio_json::to_string(&request_content)?],
-        )?;
-        Ok::<_, studio_runtime_store::StoreError>(request_id)
-    }).await
-    .map_err(|_| unavailable("The auto-pair intent could not be saved"))
+            let request_id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+            request_content.request_id = AutoPairAttempt::present(json!(request_id));
+            request_content.state = AutoPairAttempt::present(json!("attempted"));
+            studio_runtime_store::access_tables::AccessAutoAttemptsRow::put(
+                tx,
+                &peer_id,
+                studio_json::to_string(&request_content)?,
+            )?;
+            Ok::<_, studio_runtime_store::StoreError>(request_id)
+        })
+        .await
+        .map_err(|_| unavailable("The auto-pair intent could not be saved"))
 }
 
 async fn save_auto_pair(
@@ -480,75 +494,107 @@ async fn save_auto_pair(
     let id = text(peer, "serverId").to_owned();
     let peer = peer.clone();
     let owner = owner.to_owned();
-    store.transaction_with(move |tx| {
-        let auto_pair_enabled = tx
-            .query_row(
-                "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()?
-            .unwrap_or(1)
-            != 0;
-        if !auto_pair_enabled {
-            return Ok::<_, studio_runtime_store::StoreError>(false);
-        }
-        let saved_raw = tx
-            .query_row(
-                "SELECT record FROM runtime_access_clients WHERE id=?1",
-                [id.as_str()],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let existed = saved_raw.is_some();
-        let saved = saved_raw.as_deref().map(|raw| multi_server_discovery::StoredPeer::from_raw(raw).ok_or_else(|| studio_runtime_store::StoreError::SchemaMismatch("invalid stored object runtime_access_clients".into()))).transpose()?;
-        if existed
-            && (saved.as_ref().is_some_and(|saved| saved.is_revoked())
-                || saved.as_ref().map_or("", |saved| saved.public_key()) != text(&peer, "publicKey")
-                || saved.as_ref().map_or("", |saved| saved.origin()) != text(&peer, "origin"))
-        {
-            return Err(studio_runtime_store::StoreError::SchemaMismatch(
-                "auto-paired server identity changed".into(),
-            ));
-        }
-        let invalid = || studio_runtime_store::StoreError::SchemaMismatch("invalid auto-paired identity".into());
-        let created = match saved.as_ref() { Some(saved) => saved.created().clone(), None => NonNegativeNumber::try_from(studio_json::Number::from(now)).map_err(|_| invalid())? };
-        let mut record = PersistedAccessClient {
-            id: id.clone().try_into().map_err(|_| invalid())?, client_id: id.clone().try_into().map_err(|_| invalid())?,
-            server_id: Field::Value(id.clone()), kind: AccessClientKind::Server,
-            label: text(&peer,"label").to_owned().try_into().map_err(|_| invalid())?,
-            origin: Field::Value(text(&peer,"origin").to_owned()), public_key: text(&peer,"publicKey").to_owned().try_into().map_err(|_| invalid())?,
-            tailscale_user: Field::Value(owner), status: AccessClientStatus::Paired, created,
-            last_access: Field::Null, revoked: Field::Null, last_seen: Field::Missing, auto_pair: Field::Missing,
-            reachability: Field::Missing, alias: Field::Missing, replaced_by: Field::Missing, grant: Field::Missing,
-            pairing_request_id: Field::Missing, pairing_hash: Field::Missing, pairing_receipt: Field::Missing,
-        };
-        if let Some(saved) = saved.as_ref() {
-            record.grant = saved.record().grant.clone();
-            record.alias = saved.record().alias.clone();
-            record.reachability = saved.record().reachability.clone();
-            record.replaced_by = saved.record().replaced_by.clone();
-            record.last_seen = saved.record().last_seen.clone();
-            record.auto_pair = saved.record().auto_pair.clone();
-            record.pairing_request_id = saved.record().pairing_request_id.clone();
-            record.pairing_hash = saved.record().pairing_hash.clone();
-            record.pairing_receipt = saved.record().pairing_receipt.clone();
-        }
-        tx.execute(
-            "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![id, studio_json::to_string(&record)?],
-        )?;
-        if !existed {
-            tx.execute(
-                "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,'local','auto_pair',?2)",
-                params![id, now],
+    store
+        .transaction_with(move |tx| {
+            let auto_pair_enabled = tx
+                .query_row(
+                    "SELECT auto_pair FROM runtime_access_settings WHERE id=1",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .unwrap_or(1)
+                != 0;
+            if !auto_pair_enabled {
+                return Ok::<_, studio_runtime_store::StoreError>(false);
+            }
+            let saved_raw = tx
+                .query_row(
+                    "SELECT record FROM runtime_access_clients WHERE id=?1",
+                    [id.as_str()],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            let existed = saved_raw.is_some();
+            let saved = saved_raw
+                .as_deref()
+                .map(|raw| {
+                    multi_server_discovery::StoredPeer::from_raw(raw).ok_or_else(|| {
+                        studio_runtime_store::StoreError::SchemaMismatch(
+                            "invalid stored object runtime_access_clients".into(),
+                        )
+                    })
+                })
+                .transpose()?;
+            if existed
+                && (saved.as_ref().is_some_and(|saved| saved.is_revoked())
+                    || saved.as_ref().map_or("", |saved| saved.public_key())
+                        != text(&peer, "publicKey")
+                    || saved.as_ref().map_or("", |saved| saved.origin()) != text(&peer, "origin"))
+            {
+                return Err(studio_runtime_store::StoreError::SchemaMismatch(
+                    "auto-paired server identity changed".into(),
+                ));
+            }
+            let invalid = || {
+                studio_runtime_store::StoreError::SchemaMismatch(
+                    "invalid auto-paired identity".into(),
+                )
+            };
+            let created = match saved.as_ref() {
+                Some(saved) => saved.created().clone(),
+                None => NonNegativeNumber::try_from(studio_json::Number::from(now))
+                    .map_err(|_| invalid())?,
+            };
+            let mut record = PersistedAccessClient::with_identity(
+                id.clone().try_into().map_err(|_| invalid())?,
+                id.clone().try_into().map_err(|_| invalid())?,
+                AccessClientKind::Server,
+                text(&peer, "label")
+                    .to_owned()
+                    .try_into()
+                    .map_err(|_| invalid())?,
+                created,
+                text(&peer, "publicKey")
+                    .to_owned()
+                    .try_into()
+                    .map_err(|_| invalid())?,
+                AccessClientStatus::Paired,
+            );
+            record.server_id = Field::Value(id.clone());
+            record.origin = Field::Value(text(&peer, "origin").to_owned());
+            record.tailscale_user = Field::Value(owner);
+            if let Some(saved) = saved.as_ref() {
+                record.grant = saved.record().grant.clone();
+                record.alias = saved.record().alias.clone();
+                record.reachability = saved.record().reachability.clone();
+                record.replaced_by = saved.record().replaced_by.clone();
+                record.last_seen = saved.record().last_seen.clone();
+                record.auto_pair = saved.record().auto_pair.clone();
+                record.pairing_request_id = saved.record().pairing_request_id.clone();
+                record.pairing_hash = saved.record().pairing_hash.clone();
+                record.pairing_receipt = saved.record().pairing_receipt.clone();
+            }
+            studio_runtime_store::access_tables::AccessClientsRow::put(
+                tx,
+                &id,
+                studio_json::to_string(&record)?,
             )?;
-        }
-        Ok::<_, studio_runtime_store::StoreError>(true)
-    }).await
-    .map_err(|_| unavailable("The auto-paired server could not be registered"))?
-    .then_some(())
-    .ok_or_else(|| refused(403, "auto_pair_disabled", "Automatic pairing is disabled"))
+            if !existed {
+                studio_runtime_store::access_tables::AccessAuditRow::append(
+                    tx,
+                    &id,
+                    "local",
+                    "auto_pair",
+                    now as f64,
+                )?;
+            }
+            Ok::<_, studio_runtime_store::StoreError>(true)
+        })
+        .await
+        .map_err(|_| unavailable("The auto-paired server could not be registered"))?
+        .then_some(())
+        .ok_or_else(|| refused(403, "auto_pair_disabled", "Automatic pairing is disabled"))
 }
 
 async fn mark_missing_peers_unreachable(
@@ -557,6 +603,7 @@ async fn mark_missing_peers_unreachable(
 ) -> Result<(), AccessError> {
     let origins = store
         .read_async("runtime-server/discovery-read-peers", |tx| {
+            // Raw SQL: legacy record admission needs a typed-read equivalence proof.
             let mut statement = tx.prepare("SELECT record FROM runtime_access_discovered")?;
             let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
             Ok::<_, studio_runtime_store::StoreError>(rows.collect::<Result<Vec<_>, _>>()?)
@@ -579,6 +626,7 @@ async fn mark_origin_unreachable(store: &RuntimeStore, origin: &str) -> Result<(
     store
         .transaction_with(move |tx| {
             let mut statement = tx.prepare(
+                // Raw SQL: JSON selectors/projections are outside db_query.
                 "SELECT id,record FROM runtime_access_discovered WHERE json_extract(record,'$.origin')=?1",
             )?;
             let rows = statement
@@ -592,6 +640,7 @@ async fn mark_origin_unreachable(store: &RuntimeStore, origin: &str) -> Result<(
                 })?;
                 peer.mark_unreachable();
                 tx.execute(
+                    // Raw SQL: legacy partial-record mutation keeps its existing admission.
                     "UPDATE runtime_access_discovered SET record=?1 WHERE id=?2",
                     params![studio_json::to_string(&peer)?, id],
                 )?;

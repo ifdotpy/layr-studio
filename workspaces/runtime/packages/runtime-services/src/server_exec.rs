@@ -436,7 +436,8 @@ impl ServerExec {
                     .optional()?;
                 if let Some(previous) = previous {
                     let previous: Value = studio_json::from_str(&previous).unwrap_or(Value::Null);
-                    let was_final = !matches!(previous["status"].as_str(), Some("starting" | "running"));
+                    let was_final =
+                        !matches!(previous["status"].as_str(), Some("starting" | "running"));
                     if was_final && !final_record {
                         return Ok(false);
                     }
@@ -446,14 +447,12 @@ impl ServerExec {
                     rusqlite::params![record_owned.to_string(), key_owned],
                 )?;
                 if final_record {
-                    tx.execute(
-                        "UPDATE runtime_server_exec_audit SET end=?1,exit_code=?2,signal=?3 WHERE id=?4",
-                        rusqlite::params![
-                            record_owned["finishedAt"].as_f64(),
-                            record_owned["exitCode"].as_i64(),
-                            record_owned["signal"].as_i64(),
-                            key_owned
-                        ],
+                    studio_runtime_store::access_tables::ServerExecAuditRow::finish(
+                        tx,
+                        &key_owned,
+                        record_owned["finishedAt"].as_f64(),
+                        record_owned["exitCode"].as_i64(),
+                        record_owned["signal"].as_i64(),
                     )?;
                 }
                 Ok(true)
@@ -570,13 +569,10 @@ impl ServerExec {
                     for suffix in [".config.json", ".output.json", ".started"] {
                         drop(std::fs::remove_file(job_path(&folder, &id, suffix)));
                     }
-                    tx.execute("DELETE FROM runtime_server_exec_input WHERE handle=?1", [&id])?;
-                    tx.execute("DELETE FROM runtime_server_exec WHERE id=?1", [&id])?;
+                    studio_runtime_store::access_tables::ServerExecInputRow::delete_handle(tx, &id)?;
+                    studio_runtime_store::access_tables::ServerExecRow::delete(tx, &id)?;
                 }
-                tx.execute(
-                    "DELETE FROM runtime_server_exec_audit WHERE end<?1",
-                    [now() - AUDIT_SECONDS],
-                )?;
+                studio_runtime_store::access_tables::ServerExecAuditRow::expire(tx, now() - AUDIT_SECONDS)?;
                 Ok(())
             })
             .await;
@@ -670,14 +666,26 @@ impl ServerExec {
             let record = record.clone();
             self.store
                 .transaction_with(move |tx| -> Result<(), ExecError> {
-                    tx.execute(
-                        "INSERT INTO runtime_server_exec VALUES(?1,?2,?3,?4)",
-                        rusqlite::params![key, principal, actor, record.to_string()],
+                    studio_runtime_store::access_tables::ServerExecRow::claim(
+                        tx,
+                        &key,
+                        &principal,
+                        &actor,
+                        record.to_string(),
                     )?;
-                    tx.execute(
-                        "INSERT INTO runtime_server_exec_audit VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,NULL,NULL)",
-                        rusqlite::params![key, actor, principal, local_server, cwd, argv_hash, started_at],
-                    )?;
+                    studio_runtime_store::access_tables::ServerExecAuditRow {
+                        id: key,
+                        actor,
+                        source_server: principal,
+                        server: local_server,
+                        cwd,
+                        argv_hash,
+                        start: started_at,
+                        end: None,
+                        exit_code: None,
+                        signal: None,
+                    }
+                    .insert(tx)?;
                     Ok(())
                 })
                 .await
@@ -847,10 +855,7 @@ impl ServerExec {
                             "The command has accepted 32 input requests. No more input can be sent.",
                         );
                     }
-                    tx.execute(
-                        "INSERT INTO runtime_server_exec_input VALUES(?1,?2)",
-                        [&request, &key_owned],
-                    )?;
+                    studio_runtime_store::access_tables::ServerExecInputRow::claim(tx, &request, &key_owned)?;
                     Ok(())
                 })
                 .await?;

@@ -6,6 +6,24 @@ use std::marker::PhantomData;
 use studio_db_api::Codec;
 pub use studio_runtime_schema::raw_json::{RawExtensions, deserialize_with_raw_extensions};
 
+/// Exact id/record write adapters; callers explicitly select only their authorized operations.
+macro_rules! exact_json_row_writes {
+    ($row:ident { $($method:ident => $operation:ident),+ $(,)? }) => {
+        impl $row {
+            $(pub fn $method(
+                transaction: &rusqlite::Transaction<'_>, id: &str, raw: String,
+            ) -> $crate::StoreResult<()> {
+                $crate::peer_update_settings::canvas_tx(transaction).$operation(&Self {
+                    id: id.into(),
+                    record: $crate::json_record_codec::ExactJson::from_stored(raw)?,
+                })?;
+                Ok(())
+            })+
+        }
+    };
+}
+pub(crate) use exact_json_row_writes;
+
 /// An immutable typed JSON value together with its exact admitted storage text.
 /// Unlike `RawJsonRecord`, its owner need not carry a payload ID.
 #[derive(Clone, Debug, PartialEq)]

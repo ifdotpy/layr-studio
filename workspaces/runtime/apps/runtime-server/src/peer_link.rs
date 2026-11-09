@@ -527,6 +527,7 @@ async fn paired_server_keys(store: Arc<RuntimeStore>) -> Result<Vec<String>, Str
     store
         .read_async("runtime-server/peer-link-snapshot", |connection| {
             let mut statement = connection.prepare_cached(
+                // Raw SQL: JSON selectors/projections are outside db_query.
                 "SELECT json_extract(record,'$.publicKey') FROM runtime_access_clients \
                  WHERE json_extract(record,'$.kind')='server' \
                    AND json_extract(record,'$.status')='paired' \

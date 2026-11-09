@@ -431,6 +431,43 @@ pub struct PersistedAccessClient {
     pub pairing_receipt: Field<DevicePairReply>,
 }
 
+impl PersistedAccessClient {
+    /// Initialize identity fields with the historical empty observation/pairing history.
+    pub fn with_identity(
+        id: BoundedText<1, CLIENT_ID_MAX_CHARS>,
+        client_id: BoundedText<1, CLIENT_ID_MAX_CHARS>,
+        kind: AccessClientKind,
+        label: BoundedText<1, CLIENT_LABEL_MAX_CHARS>,
+        created: NonNegativeNumber,
+        public_key: BoundedText<0, CLIENT_PUBLIC_KEY_MAX_CHARS>,
+        status: AccessClientStatus,
+    ) -> Self {
+        Self {
+            id,
+            client_id,
+            kind,
+            label,
+            created,
+            public_key,
+            status,
+            server_id: Field::Missing,
+            origin: Field::Missing,
+            tailscale_user: Field::Missing,
+            last_access: Field::Null,
+            revoked: Field::Null,
+            last_seen: Field::Missing,
+            auto_pair: Field::Missing,
+            reachability: Field::Missing,
+            alias: Field::Missing,
+            replaced_by: Field::Missing,
+            grant: Field::Missing,
+            pairing_request_id: Field::Missing,
+            pairing_hash: Field::Missing,
+            pairing_receipt: Field::Missing,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{AccessGrant, CLIENT_FIELDS, GRANT_FULL, GRANT_OBSERVE, PersistedAccessClient};

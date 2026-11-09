@@ -1,3 +1,5 @@
+pub mod access_payloads;
+pub mod access_tables;
 pub mod account_registry;
 pub mod agent_columns;
 pub mod agent_volatile;

@@ -123,6 +123,7 @@ impl CoordinationRepository {
             return Ok(false);
         }
         let table: bool = connection.query_row(
+            // Raw SQL: partial projections preserve the existing identity/permission boundary.
             "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name='runtime_federation_rooms')",
             [],
             |row| row.get(0),
@@ -131,6 +132,7 @@ impl CoordinationRepository {
             return Ok(false);
         }
         Ok(connection.query_row(
+            // Raw SQL: partial projections preserve the existing identity/permission boundary.
             "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1)",
             [id],
             |row| row.get(0),

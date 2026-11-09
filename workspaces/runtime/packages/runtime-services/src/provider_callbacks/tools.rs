@@ -872,9 +872,8 @@ fn execute_once(
                 && let Some(expires) = staged.output_expires_at
             {
                 value.set_expiry(expires);
-                tx.execute(
-                    "INSERT OR IGNORE INTO runtime_server_output_tools VALUES (?1,?2)",
-                    params![call.id, expires],
+                studio_runtime_store::access_tables::ServerOutputToolsRow::remember(
+                    tx, &call.id, expires,
                 )?;
             }
             (value, staged.signals)
@@ -960,10 +959,7 @@ fn finalize_dispatched(
     let mut value = raw_tool_result(&result.value, success)?;
     if let Some(expires) = output_expires {
         value.set_expiry(expires);
-        tx.execute(
-            "INSERT OR IGNORE INTO runtime_server_output_tools VALUES (?1,?2)",
-            params![id, expires],
-        )?;
+        studio_runtime_store::access_tables::ServerOutputToolsRow::remember(tx, id, expires)?;
     }
     let finalized = chrono::DateTime::from_timestamp_micros((now * 1_000_000.0).round() as i64)
         .ok_or(CallbackError::Invalid("Invalid callback clock"))?

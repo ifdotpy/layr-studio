@@ -81,14 +81,6 @@ const FEATURE_SCHEMA: &str = r#"
         CREATE TABLE IF NOT EXISTS runtime_orchestration_settings (id TEXT PRIMARY KEY, record TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runtime_federation_settings (
           id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_identity (
-          id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_peers (
-          id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_invites (
-          id TEXT PRIMARY KEY, record TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS runtime_federation_rooms (
-          id TEXT PRIMARY KEY, record TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS runtime_federation_inbox (
           peer_id TEXT NOT NULL, message_id TEXT NOT NULL, record TEXT NOT NULL,
           PRIMARY KEY(peer_id,message_id));
@@ -112,26 +104,8 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS user_terminal_decoder_state (terminal TEXT PRIMARY KEY, pending BLOB NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_access_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_pair INTEGER NOT NULL);
             INSERT OR IGNORE INTO runtime_access_settings VALUES(1,1);
-            CREATE TABLE IF NOT EXISTS runtime_access_discovered(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_auto_attempts(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_unrevokes(id TEXT PRIMARY KEY, client TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_clients (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_invites (
-          id TEXT PRIMARY KEY, request_id TEXT NOT NULL UNIQUE, hash TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_nonces (
-          client TEXT NOT NULL, nonce TEXT NOT NULL, created INTEGER NOT NULL, PRIMARY KEY(client,nonce));
-            CREATE INDEX IF NOT EXISTS runtime_access_nonce_age ON runtime_access_nonces(created);
-            CREATE TABLE IF NOT EXISTS runtime_access_audit (
-          seq INTEGER PRIMARY KEY AUTOINCREMENT, client TEXT NOT NULL, actor TEXT NOT NULL,
-          action TEXT NOT NULL, created REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_access_local_alias (
           id INTEGER PRIMARY KEY CHECK(id=1), alias TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_name_targets (
-          id TEXT PRIMARY KEY, server TEXT NOT NULL, label TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_name_requests (
-          id TEXT PRIMARY KEY, label TEXT NOT NULL, actor TEXT NOT NULL, applied INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_access_alias_requests (
-          id TEXT PRIMARY KEY, server TEXT NOT NULL, alias TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_model_status (agent TEXT, revision TEXT, at REAL, record TEXT, PRIMARY KEY(agent,revision));
             CREATE TABLE IF NOT EXISTS runtime_native_notices (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='');
@@ -150,29 +124,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_server_inbox (
                     id TEXT PRIMARY KEY, signature TEXT NOT NULL, state TEXT NOT NULL,
                     result TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, principal TEXT, actor TEXT);
-            CREATE TABLE IF NOT EXISTS runtime_server_links (
-                    id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_server_links_home_parent
-                    ON runtime_server_links(json_extract(record,'$.parent'))
-                    WHERE json_extract(record,'$.side')='home';
-            CREATE TABLE IF NOT EXISTS runtime_server_retired (
-                    id TEXT NOT NULL, direction TEXT NOT NULL, signature TEXT NOT NULL,
-                    server TEXT, actor TEXT, PRIMARY KEY(id,direction));
-            CREATE TABLE IF NOT EXISTS runtime_server_output_tools (
-                    id TEXT PRIMARY KEY, expires REAL NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_server_output_tools_expiry
-                    ON runtime_server_output_tools(expires);
-            CREATE TABLE IF NOT EXISTS runtime_server_exec (
-            id TEXT PRIMARY KEY, owner TEXT NOT NULL, actor TEXT NOT NULL,
-            record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_server_exec_audit (
-            id TEXT PRIMARY KEY, actor TEXT NOT NULL, source_server TEXT NOT NULL,
-            server TEXT NOT NULL, cwd TEXT NOT NULL, argv_hash TEXT NOT NULL,
-            start REAL NOT NULL, end REAL, exit_code INTEGER, signal INTEGER);
-            CREATE TABLE IF NOT EXISTS runtime_server_exec_input (
-            id TEXT PRIMARY KEY, handle TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_server_exec_input_handle
-            ON runtime_server_exec_input(handle);
 "#;
 
 /// Progress records of resumable passes, in Canvas and, for compacted
@@ -199,6 +150,7 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
         descriptor.install_if_absent(transaction)?;
     }
     crate::voice_storage::prepare(transaction)?;
+    crate::access_tables::prepare_features(transaction)?;
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }
@@ -283,6 +235,7 @@ mod tests {
     #[test]
     fn feature_tables_are_not_core_repository_requirements() {
         let connection = Connection::open_in_memory().expect("memory SQLite opens");
+        crate::access_tables::prepare_features(&connection).expect("access feature owners");
         let mut table_statements = 0;
         for statement in feature_statements()
             .iter()

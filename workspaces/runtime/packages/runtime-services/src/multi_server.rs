@@ -78,6 +78,7 @@ fn snapshot_in_transaction(
     let discovered = project_records(tx, "runtime_access_discovered")?;
     let invites = tx
         .prepare_cached(
+            // Raw SQL: legacy record admission needs a typed-read equivalence proof.
             "SELECT id,record FROM runtime_access_invites ORDER BY rowid DESC LIMIT 100",
         )?
         .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
@@ -301,6 +302,7 @@ fn previous_local_identities(
     let queries = [
         (
             "runtime_server_links",
+            // Raw SQL: JSON selectors/projections are outside db_query.
             "SELECT DISTINCT json_extract(record,'$.home') FROM runtime_server_links WHERE json_extract(record,'$.side')='home'",
         ),
         (
@@ -348,7 +350,7 @@ pub async fn manage(
                 }
                 audit_write(tx,"local",&actor,"settings")?;
             }
-            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(studio_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2",rusqlite::params![studio_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?,id])?; audit_write(tx,id,&actor,"revoke")?; } }
+            ManagementRequest::Revoke { client_id, .. } => { let id=client_id.as_str(); let mut client=stored(tx,"runtime_access_clients",id)?.ok_or_else(||MultiServerError::Refused("client does not exist".into()))?; if client.status != AccessClientStatus::Revoked { client.status=AccessClientStatus::Revoked; client.revoked=Field::Value(studio_json::Number::from_f64(unix_time()?).ok_or_else(|| invalid("runtime_access_clients",id,"revoked"))?); studio_runtime_store::access_tables::AccessClientsRow::update(tx, id, studio_json::to_string(&client).map_err(|_|invalid("runtime_access_clients",id,"record"))?)?; audit_write(tx,id,&actor,"revoke")?; } }
             ManagementRequest::Alias { server_id, request_id, alias } => {
                 let server = server_id.as_str();
                 let request = request_id.as_str();
@@ -359,7 +361,7 @@ pub async fn manage(
                 }
                 let local = server == "local" || server == identity.server_id;
                 let target = if local { "local" } else { server };
-                let prior=tx.query_row("SELECT server,alias FROM runtime_access_alias_requests WHERE id=?1",[&request],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).optional()?;
+                let prior=studio_runtime_store::access_tables::AccessAliasRequestsRow::get(tx, request)?.map(|row| (row.server, row.alias));
                 if let Some((saved_target,saved_alias)) = prior {
                     if saved_target != target || saved_alias != alias {
                         return Err(MultiServerError::Conflict("request ID has different content".into()));
@@ -382,13 +384,13 @@ pub async fn manage(
                         let mut peer = stored(tx, "runtime_access_clients", server)?
                             .ok_or_else(|| MultiServerError::Refused("server does not exist".into()))?;
                         peer.alias = Field::Value(alias_value);
-                        tx.execute("UPDATE runtime_access_clients SET record=?1 WHERE id=?2", rusqlite::params![studio_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?, server])?;
+                        studio_runtime_store::access_tables::AccessClientsRow::update(tx, server, studio_json::to_string(&peer).map_err(|_|invalid("runtime_access_clients",server,"record"))?)?;
                     }
-                    tx.execute("INSERT INTO runtime_access_alias_requests VALUES(?,?,?)", rusqlite::params![request,target,alias])?;
+                    studio_runtime_store::access_tables::AccessAliasRequestsRow::insert(tx, request, target, alias)?;
                     audit_write(tx,target,&actor,"alias")?;
                 }
             }
-            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=tx.query_row("SELECT client FROM runtime_access_unrevokes WHERE id=?1",[&request],|r|r.get::<_,String>(0)).optional()?; if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}tx.execute("DELETE FROM runtime_access_clients WHERE id=?1",[&target])?;tx.execute("DELETE FROM runtime_access_auto_attempts WHERE id=?1",[&target])?;tx.execute("INSERT INTO runtime_access_unrevokes VALUES(?1,?2)",rusqlite::params![request,target])?;audit_write(tx,target,&actor,"unrevoke")?;} }
+            ManagementRequest::Unrevoke { request_id, client_id } => { let request = request_id.as_str(); let target = client_id.as_str(); let prior=studio_runtime_store::access_tables::AccessUnrevokesRow::get(tx, request)?.map(|row| row.client); if let Some(saved)=prior {if saved!=target{return Err(MultiServerError::Conflict("request ID selected another server".into()));}} else {let v=stored(tx,"runtime_access_clients",target)?.ok_or_else(||MultiServerError::Refused("select a revoked server".into()))?;if v.status!=AccessClientStatus::Revoked || v.kind!=AccessClientKind::Server{return Err(MultiServerError::Refused("select a revoked server".into()));}studio_runtime_store::access_tables::AccessClientsRow::delete(tx, target)?;studio_runtime_store::access_tables::AccessAutoAttemptsRow::delete(tx, target)?;studio_runtime_store::access_tables::AccessUnrevokesRow::insert(tx, request, target)?;audit_write(tx,target,&actor,"unrevoke")?;} }
             ManagementRequest::AcceptInvite { .. } | ManagementRequest::CreateInvite { .. }
             | ManagementRequest::Discover { .. } | ManagementRequest::Name { .. }
             | ManagementRequest::UiInvite { .. } => return Err(MultiServerError::Refused(format!("unsupported local multi-server action: {}", body.action()))),
@@ -467,6 +469,7 @@ pub async fn create_invite(
         .read_async("runtime-services/multi_server", move |tx| {
             let saved: Option<(String, String, String)> = tx
                 .query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                     "SELECT id,hash,record FROM runtime_access_invites WHERE request_id=?1",
                     [&request_id_for_read],
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
@@ -533,10 +536,13 @@ pub async fn create_invite(
         let actor = actor.to_owned();
         store
             .transaction_with(move |tx| {
-                tx.execute(
-                "INSERT INTO runtime_access_invites(id,request_id,hash,record) VALUES(?1,?2,?3,?4)",
-                rusqlite::params![invite_id, request_id, fingerprint, studio_json::to_string(&invite_for_write)?],
-            )?;
+                studio_runtime_store::access_tables::AccessInvitesRow::insert(
+                    tx,
+                    &invite_id,
+                    &request_id,
+                    &fingerprint,
+                    studio_json::to_string(&invite_for_write)?,
+                )?;
                 audit_write(tx, "local", &actor, "create_invite")?;
                 Ok::<_, StoreError>(())
             })
@@ -657,9 +663,10 @@ fn server_aliases(
                     >::new(alias.clone()))
                     .map_err(|_| invalid("runtime_access_clients", &id, "alias"))?,
                 );
-                tx.execute(
-                    "UPDATE runtime_access_clients SET record=?1 WHERE id=?2",
-                    rusqlite::params![studio_json::to_string(&saved)?, id],
+                studio_runtime_store::access_tables::AccessClientsRow::update(
+                    tx,
+                    &id,
+                    studio_json::to_string(&saved)?,
                 )?;
             }
             alias
@@ -749,9 +756,12 @@ fn audit_write(
     actor: &str,
     action: &str,
 ) -> Result<(), StoreError> {
-    tx.execute(
-        "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,?2,?3,?4)",
-        rusqlite::params![client, actor, action, unix_time()?],
+    studio_runtime_store::access_tables::AccessAuditRow::append(
+        tx,
+        client,
+        actor,
+        action,
+        unix_time()?,
     )?;
     Ok(())
 }

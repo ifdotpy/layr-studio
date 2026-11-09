@@ -144,6 +144,7 @@ pub async fn pending_pairings(
 ) -> std::result::Result<Vec<String>, StoreError> {
     store.read_async("runtime-services/federation_delivery", |connection| {
         let mut statement = connection.prepare_cached(
+            // Raw SQL: JSON selectors/projections are outside db_query.
             "SELECT id FROM runtime_federation_peers WHERE json_extract(record,'$.localApproved')=1 AND json_extract(record,'$.remoteApproved')=0 AND json_extract(record,'$.status')!='revoked' AND json_extract(record,'$.inviteId') IS NOT NULL ORDER BY id",
         )?;
         let rows = statement.query_map([], |row| row.get(0))?;
@@ -160,6 +161,7 @@ pub async fn delivery_deadlines_by_peer(
 ) -> std::result::Result<Vec<(String, f64)>, StoreError> {
     store.read_async("runtime-services/federation_delivery", |connection| {
         let mut statement = connection.prepare(
+                // Raw SQL: JSON selectors/projections are outside db_query.
                 "SELECT peer.id,MIN(CASE WHEN json_type(outbox.payload,'$.record.nextAt') IN ('integer','real') \
                      THEN CAST(json_extract(outbox.payload,'$.record.nextAt') AS REAL) END) \
                  FROM runtime_outbox AS outbox \
@@ -210,6 +212,7 @@ pub async fn pair_peer(
         .read_async("runtime-services/federation_delivery", move |connection| {
             let raw: Option<String> = connection
                 .query_row(
+                    // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                     "SELECT record FROM runtime_federation_peers WHERE id=?1",
                     [&peer_id_for_read],
                     |row| row.get(0),
@@ -683,6 +686,7 @@ pub fn send_message_in_transaction(
     }
     let state_id: String = tx
         .query_row(
+            // Raw SQL: JSON selectors/projections are outside db_query.
             "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
             [],
             |row| row.get(0),

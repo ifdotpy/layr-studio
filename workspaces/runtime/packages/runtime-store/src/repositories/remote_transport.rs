@@ -4,9 +4,12 @@
 use super::super::remote_outbox::{RemoteEffect, RemoteOutbox};
 use super::multi_server_delivery::{admit_remote, remote_result_key, replay_remote, settle_remote};
 use super::outbox::OutboxError;
+use crate::access_tables::AccessNoncesRow;
+use crate::peer_update_settings::canvas_tx;
 use crate::request_results::{Admission, AdmittedRequest};
-use rusqlite::{Connection, OptionalExtension, Transaction, params};
+use rusqlite::{Connection, Transaction, params};
 use serde::{Deserialize, Serialize};
+use studio_db_api::db_delete;
 use studio_json::Value;
 use studio_runtime_schema::persistence::{AccessOutboundState, OutboxStatus};
 
@@ -92,13 +95,9 @@ pub struct RemoteTransportRepository;
 
 impl RemoteTransportRepository {
     pub fn federation_identity(connection: &Connection) -> StoreResult<Option<String>> {
-        Ok(connection
-            .query_row(
-                "SELECT record FROM runtime_federation_identity WHERE id='local'",
-                [],
-                |row| row.get(0),
-            )
-            .optional()?)
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<crate::access_tables::FederationIdentityRow>(&("local".into(),))?
+            .map(|row| row.record.raw().to_owned()))
     }
 
     /// Consume a federation nonce as part of the caller's immediate transaction.
@@ -113,11 +112,14 @@ impl RemoteTransportRepository {
     ) -> StoreResult<bool> {
         let client = format!("{FEDERATION_NONCE_CLIENT_PREFIX}{peer_id}");
         let stale_before = now.saturating_sub(NONCE_RETENTION_SECONDS);
-        transaction.execute(
-            "DELETE FROM runtime_access_nonces WHERE created < ?1",
-            [stale_before],
+        db_delete!(
+            canvas_tx(transaction),
+            AccessNoncesRow,
+            filter(AccessNoncesRow::CREATED.lt(&stale_before))
         )?;
+        // Raw SQL: the federation rate limit counts retained nonce rows.
         let recent: i64 = transaction.query_row(
+            // Raw SQL: aggregate, DISTINCT or join semantics are outside db_query.
             "SELECT count(*) FROM runtime_access_nonces WHERE client=?1 AND created>=?2",
             params![client, now.saturating_sub(FEDERATION_RATE_WINDOW_SECONDS)],
             |row| row.get(0),
@@ -125,10 +127,11 @@ impl RemoteTransportRepository {
         if recent >= FEDERATION_RATE_LIMIT {
             return Ok(false);
         }
-        Ok(transaction.execute(
-            "INSERT OR IGNORE INTO runtime_access_nonces(client,nonce,created) VALUES(?1,?2,?3)",
-            params![client, nonce, signed_timestamp],
-        )? == 1)
+        Ok(canvas_tx(transaction).insert_new(&AccessNoncesRow {
+            client,
+            nonce: nonce.into(),
+            created: signed_timestamp,
+        })?)
     }
 
     /// Compatibility wrapper preserving all existing callers' bool outcome.
@@ -157,12 +160,15 @@ impl RemoteTransportRepository {
         unpaired_attempt: bool,
     ) -> StoreResult<AccessNonceOutcome> {
         let stale_before = now.saturating_sub(NONCE_RETENTION_SECONDS);
-        transaction.execute(
-            "DELETE FROM runtime_access_nonces WHERE created < ?1",
-            [stale_before],
+        db_delete!(
+            canvas_tx(transaction),
+            AccessNoncesRow,
+            filter(AccessNoncesRow::CREATED.lt(&stale_before))
         )?;
         if unpaired_attempt {
+            // Raw SQL: the unpaired budget uses a correlated anti-join and a namespace selector.
             let unpaired: i64 = transaction.query_row(
+                // Raw SQL: aggregate, DISTINCT or join semantics are outside db_query.
                 "SELECT count(*) FROM runtime_access_nonces n \
                  WHERE n.created>=?1 AND substr(n.client,1,?2)<>?3 AND NOT EXISTS \
                  (SELECT 1 FROM runtime_access_clients c WHERE c.id=n.client)",
@@ -177,7 +183,9 @@ impl RemoteTransportRepository {
                 return Ok(AccessNonceOutcome::PairingLimit);
             }
         }
+        // Raw SQL: the per-client nonce budget is an aggregate count.
         let retained: i64 = transaction.query_row(
+            // Raw SQL: aggregate, DISTINCT or join semantics are outside db_query.
             "SELECT count(*) FROM runtime_access_nonces WHERE client=?1",
             [client_id],
             |row| row.get(0),
@@ -185,10 +193,17 @@ impl RemoteTransportRepository {
         if retained >= MULTI_SERVER_MAX_RETAINED_NONCES {
             return Ok(AccessNonceOutcome::ClientLimit);
         }
-        Ok(if transaction.execute(
-            "INSERT OR IGNORE INTO runtime_access_nonces(client,nonce,created) VALUES(?1,?2,?3)",
-            params![client_id, nonce, now],
-        )? == 1 { AccessNonceOutcome::Accepted } else { AccessNonceOutcome::Replay })
+        Ok(
+            if canvas_tx(transaction).insert_new(&AccessNoncesRow {
+                client: client_id.into(),
+                nonce: nonce.into(),
+                created: now,
+            })? {
+                AccessNonceOutcome::Accepted
+            } else {
+                AccessNonceOutcome::Replay
+            },
+        )
     }
 
     /// Reserve or recover an outbound request without changing its identity.

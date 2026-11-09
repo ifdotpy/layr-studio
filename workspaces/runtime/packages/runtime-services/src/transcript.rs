@@ -808,6 +808,7 @@ fn room_view(
     room: &studio_runtime_schema::room_record::RoomRecord,
 ) -> Result<Option<crate::room_projection::RoomProjection>, TranscriptError> {
     if room.kind == studio_runtime_schema::room_record::RoomKind::Federated && !connection.query_row(
+        // Raw SQL: JSON selectors/projections are outside db_query.
         "SELECT EXISTS(SELECT 1 FROM runtime_federation_rooms WHERE id=?1 AND json_extract(record,'$.status')='approved' AND json_extract(record,'$.localApproved')=1 AND json_extract(record,'$.remoteApproved')=1)",
         [&room.id], |r| r.get::<_, bool>(0),
     )? { return Ok(None); }

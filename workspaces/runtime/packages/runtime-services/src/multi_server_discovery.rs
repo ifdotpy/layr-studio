@@ -4,7 +4,6 @@ use futures_util::future::BoxFuture;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 
-use rusqlite::params;
 use serde::Deserialize;
 use serde::de::IgnoredAny;
 use studio_json::Value;
@@ -361,7 +360,8 @@ pub async fn record_probe(
         let decision=decide_probe(&snapshot,&origin,&peer,previous.as_deref(),client.as_deref(),enabled,now)?;
         if let Some(record)=&decision.record {
             let raw=studio_json::to_string(record).map_err(|_| refused(500,"invalid_peer","The peer identity is invalid"))?;
-            tx.execute("INSERT INTO runtime_access_discovered(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",params![id,raw])?;
+            studio_runtime_store::access_tables::AccessDiscoveredRow::put(tx, id, raw)?;
+            // Raw SQL: JSON selectors/projections are outside db_query.
             tx.execute("DELETE FROM runtime_access_discovered WHERE id IN (SELECT id FROM runtime_access_discovered ORDER BY json_extract(record,'$.lastSeen') DESC,id LIMIT -1 OFFSET ?1)",[MAX_DISCOVERED])?;
         }
         Ok(decision)

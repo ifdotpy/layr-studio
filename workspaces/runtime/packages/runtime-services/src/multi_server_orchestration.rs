@@ -177,6 +177,7 @@ fn pending_key_parts(
 ) -> Result<String, AccessError> {
     let exists: bool = match direction {
         Direction::Incoming => tx.query_row(
+            // Raw SQL: partial projections preserve the existing identity/permission boundary.
             "SELECT EXISTS(SELECT 1 FROM runtime_server_inbox WHERE id=?1 AND principal=?2)",
             params![root, authority],
             |r| r.get(0),
@@ -224,6 +225,7 @@ fn settle_delivery(
 ) -> Result<(), AccessError> {
     let mut outgoing = None;
     let (admission, principal, server, actor, body): (String, Option<String>,Option<String>, Option<String>, Option<String>) = match direction {
+        // Raw SQL: partial projections preserve the existing identity/permission boundary.
         Direction::Incoming => tx.query_row("SELECT admission,principal,NULL,actor,NULL FROM runtime_server_inbox WHERE id=?1 AND signature=?2", params![key,signature], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?)))?,
         Direction::Outgoing => {
             let entry = crate::server_outbox::find(tx, key)?
@@ -309,7 +311,7 @@ fn settle_delivery(
     match outgoing {
         Some(entry) => crate::server_outbox::delete(tx, &entry)?,
         None => {
-            tx.execute("DELETE FROM runtime_server_inbox WHERE id=?1", [key])?;
+            studio_runtime_store::access_tables::ServerInboxRow::delete(tx, key)?;
         }
     }
     Ok(())
@@ -518,6 +520,7 @@ impl HttpsPairedTransport {
     ) -> Result<(String, String), AccessError> {
         let raw: Option<String> = connection
             .query_row(
+                // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                 "SELECT record FROM runtime_access_clients WHERE id=?1",
                 [server],
                 |row| row.get(0),
@@ -3627,65 +3630,119 @@ impl OrchestrationDriver {
         let envelope_for_claim = envelope.clone();
         let signature_for_claim = signature.clone();
         let principal_for_claim = principal.to_owned();
-        let (decision, replaying_claim, claim_key) = self.store.transaction_with(move |tx| {
-            if !is_local {
-                require_paired(tx, &principal_for_claim)?;
-            }
-            let key = pending_key(tx,Direction::Incoming,&principal_for_claim,&envelope_for_claim)?;
-            if let Some(result) = replay_delivery(tx,Direction::Incoming,&principal_for_claim,&envelope_for_claim,now)? {
-                return Ok((DeliveryDecision::Return(result), false, key));
-            }
-            let clock=chrono::Utc::now().timestamp_millis();
-            let identity=studio_runtime_schema::persistence::RequestIdentity::new(Direction::Incoming.namespace(),&[&principal_for_claim],&envelope_for_claim.root,&envelope_for_claim.operation_parts())
-                .map_err(|_|replay_error(RequestResultError::Expired))?;
-            identity.validate(clock,studio_runtime_store::request_results::RequestResults::expired_before_ms(tx).map_err(replay_error)?).map_err(|error|replay_error(error.into()))?;
-            let saved = inbox(tx, &key)?;
-            let replaying_claim = saved.is_some();
-            let decision = decide_delivery(
-                saved.as_ref(),
-                &signature_for_claim,
-                None,
-                false,
-                envelope_for_claim.action.as_str(),
-                now,
-            )?;
-            if matches!(decision, DeliveryDecision::Return(ExchangeOutcome::Unknown))
-                && saved.as_ref().is_some_and(|snapshot| {
-                    snapshot.state == ServerDeliveryState::Running
-                        && snapshot.signature == signature_for_claim
-                        && snapshot.server.is_none()
-                })
-                && let Some(receipt) = durable_anchor_input_receipt(tx, &principal_for_claim, &envelope_for_claim)?
-            {
-                let result = ExchangeOutcome::Applied(AppliedReply::new(receipt));
-                let stored_result = studio_json::to_string(&result.to_reply(&envelope_for_claim.root)).map_err(|_| invalid_receipt())?;
-                if stored_result.len() > MAX_RESPONSE_BYTES {
-                    return Ok((
-                        DeliveryDecision::Return(ExchangeOutcome::Unknown),
-                        replaying_claim,
-                        key,
-                    ));
+        let (decision, replaying_claim, claim_key) = self
+            .store
+            .transaction_with(move |tx| {
+                if !is_local {
+                    require_paired(tx, &principal_for_claim)?;
                 }
-                settle_delivery(tx,Direction::Incoming,&key,&envelope_for_claim.root,&signature_for_claim,&result)?;
-                return Ok((DeliveryDecision::Return(result), replaying_claim,key));
-            }
-            if matches!(decision, DeliveryDecision::Execute) {
-                if saved.is_some() {
-                    tx.execute(
+                let key = pending_key(
+                    tx,
+                    Direction::Incoming,
+                    &principal_for_claim,
+                    &envelope_for_claim,
+                )?;
+                if let Some(result) = replay_delivery(
+                    tx,
+                    Direction::Incoming,
+                    &principal_for_claim,
+                    &envelope_for_claim,
+                    now,
+                )? {
+                    return Ok((DeliveryDecision::Return(result), false, key));
+                }
+                let clock = chrono::Utc::now().timestamp_millis();
+                let identity = studio_runtime_schema::persistence::RequestIdentity::new(
+                    Direction::Incoming.namespace(),
+                    &[&principal_for_claim],
+                    &envelope_for_claim.root,
+                    &envelope_for_claim.operation_parts(),
+                )
+                .map_err(|_| replay_error(RequestResultError::Expired))?;
+                identity
+                    .validate(
+                        clock,
+                        studio_runtime_store::request_results::RequestResults::expired_before_ms(
+                            tx,
+                        )
+                        .map_err(replay_error)?,
+                    )
+                    .map_err(|error| replay_error(error.into()))?;
+                let saved = inbox(tx, &key)?;
+                let replaying_claim = saved.is_some();
+                let decision = decide_delivery(
+                    saved.as_ref(),
+                    &signature_for_claim,
+                    None,
+                    false,
+                    envelope_for_claim.action.as_str(),
+                    now,
+                )?;
+                if matches!(decision, DeliveryDecision::Return(ExchangeOutcome::Unknown))
+                    && saved.as_ref().is_some_and(|snapshot| {
+                        snapshot.state == ServerDeliveryState::Running
+                            && snapshot.signature == signature_for_claim
+                            && snapshot.server.is_none()
+                    })
+                    && let Some(receipt) =
+                        durable_anchor_input_receipt(tx, &principal_for_claim, &envelope_for_claim)?
+                {
+                    let result = ExchangeOutcome::Applied(AppliedReply::new(receipt));
+                    let stored_result =
+                        studio_json::to_string(&result.to_reply(&envelope_for_claim.root))
+                            .map_err(|_| invalid_receipt())?;
+                    if stored_result.len() > MAX_RESPONSE_BYTES {
+                        return Ok((
+                            DeliveryDecision::Return(ExchangeOutcome::Unknown),
+                            replaying_claim,
+                            key,
+                        ));
+                    }
+                    settle_delivery(
+                        tx,
+                        Direction::Incoming,
+                        &key,
+                        &envelope_for_claim.root,
+                        &signature_for_claim,
+                        &result,
+                    )?;
+                    return Ok((DeliveryDecision::Return(result), replaying_claim, key));
+                }
+                if matches!(decision, DeliveryDecision::Execute) {
+                    if saved.is_some() {
+                        tx.execute(
                         "UPDATE runtime_server_inbox SET state=?2 WHERE id=?1 AND state IN (?3,?2)",
                         params![&key, ServerDeliveryState::Running,ServerDeliveryState::Waiting],
                     )?;
-                } else {
-                    let admitted = admit_delivery(tx,Direction::Incoming,&principal_for_claim,&envelope_for_claim,now)?;
-                    let admission = studio_json::to_string(&admitted).map_err(|_| refused(503,"invalid_record","Delivery admission could not be saved"))?;
-                    tx.execute(
-                        "INSERT INTO runtime_server_inbox(id,signature,state,result,created_at,principal,actor,admission) VALUES(?1,?2,?7,NULL,?3,?4,?5,?6)",
-                        params![key, signature_for_claim, now, principal_for_claim, envelope_for_claim.command.actor(),admission,ServerDeliveryState::Running],
-                    )?;
+                    } else {
+                        let admitted = admit_delivery(
+                            tx,
+                            Direction::Incoming,
+                            &principal_for_claim,
+                            &envelope_for_claim,
+                            now,
+                        )?;
+                        let admission = studio_json::to_string(&admitted).map_err(|_| {
+                            refused(
+                                503,
+                                "invalid_record",
+                                "Delivery admission could not be saved",
+                            )
+                        })?;
+                        studio_runtime_store::access_tables::ServerInboxRow::claim(
+                            tx,
+                            &key,
+                            &signature_for_claim,
+                            now,
+                            &principal_for_claim,
+                            envelope_for_claim.command.actor(),
+                            admission,
+                        )?;
+                    }
                 }
-            }
-            Ok::<_, AccessError>((decision, replaying_claim,key))
-        }).await?;
+                Ok::<_, AccessError>((decision, replaying_claim, key))
+            })
+            .await?;
         if let DeliveryDecision::Return(result) = decision {
             return Ok(result);
         }
@@ -3995,13 +4052,9 @@ impl OrchestrationDriver {
                 let key_for_update = key.to_owned();
                 self.store
                     .transaction_with(move |tx| {
-                        tx.execute(
-                            "UPDATE runtime_server_inbox SET state=?2 WHERE id=?1 AND state=?3",
-                            params![
-                                key_for_update,
-                                ServerDeliveryState::Waiting,
-                                ServerDeliveryState::Running
-                            ],
+                        studio_runtime_store::access_tables::ServerInboxRow::wait_if_running(
+                            tx,
+                            &key_for_update,
                         )?;
                         Ok::<_, AccessError>(())
                     })

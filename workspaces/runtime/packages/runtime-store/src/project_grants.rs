@@ -17,8 +17,10 @@ use std::str::FromStr;
 use strum::VariantNames;
 
 use crate::StoreResult;
+use crate::peer_update_settings::{Canvas, canvas_tx};
+use studio_db_api::{DbTable, db_query, db_update};
 
-pub const PROJECT_GRANTS_TABLE: &str = "project_grants";
+pub const PROJECT_GRANTS_TABLE: &str = <GrantRow as studio_db_api::Table>::NAME;
 
 /// What a paired project may do. Closed: a new value needs an owner decision.
 #[derive(
@@ -40,14 +42,35 @@ pub enum Capability {
     LeadMessages,
 }
 
+impl rusqlite::types::ToSql for Capability {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        Ok(self.as_ref().into())
+    }
+}
+impl rusqlite::types::FromSql for Capability {
+    fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        Self::from_str(value.as_str()?)
+            .map_err(|error| rusqlite::types::FromSqlError::Other(Box::new(error)))
+    }
+}
+impl studio_db_api::DbValue for Capability {
+    const SQL_TYPE: &'static str = "TEXT";
+}
+
 /// One row of a pairing: one capability of one grant.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, DbTable)]
+#[db(table = "project_grants", database = Canvas, state_check = crate::state_check::count_legacy_rows::<GrantRow>,
+    legacy_ddl = "CREATE TABLE project_grants(\n            grant_id TEXT NOT NULL,\n            peer TEXT NOT NULL,\n            peer_public_key TEXT NOT NULL,\n            local_project TEXT NOT NULL,\n            remote_project TEXT NOT NULL,\n            capability TEXT NOT NULL,\n            created_at INTEGER NOT NULL,\n            revoked_at INTEGER, peer_label TEXT NOT NULL DEFAULT '',\n            PRIMARY KEY(grant_id, capability)\n        )",
+    legacy_index = "CREATE INDEX project_grants_active\n            ON project_grants(peer, local_project) WHERE revoked_at IS NULL"
+)]
 pub struct GrantRow {
+    #[db(key)]
     pub grant_id: String,
     pub peer: String,
     pub peer_public_key: String,
     pub local_project: String,
     pub remote_project: String,
+    #[db(key)]
     pub capability: Capability,
     pub created_at: i64,
     pub revoked_at: Option<i64>,
@@ -68,21 +91,20 @@ fn in_list(values: &[&str]) -> String {
 }
 
 pub fn tables_sql() -> String {
-    format!(
-        "CREATE TABLE IF NOT EXISTS {PROJECT_GRANTS_TABLE}(
-            grant_id TEXT NOT NULL,
-            peer TEXT NOT NULL,
-            peer_public_key TEXT NOT NULL,
-            local_project TEXT NOT NULL,
-            remote_project TEXT NOT NULL,
-            capability TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            revoked_at INTEGER,
-            PRIMARY KEY(grant_id, capability)
-        );
-        CREATE INDEX IF NOT EXISTS project_grants_active
-            ON {PROJECT_GRANTS_TABLE}(peer, local_project) WHERE revoked_at IS NULL;"
-    )
+    use studio_db_api::Table;
+    GrantRow::descriptor()
+        .ddl_statements()
+        .map(|sql| {
+            format!(
+                "{};",
+                sql.replacen("TABLE ", "TABLE IF NOT EXISTS ", 1).replacen(
+                    "INDEX ",
+                    "INDEX IF NOT EXISTS ",
+                    1
+                )
+            )
+        })
+        .collect()
 }
 
 /// Generated `BEFORE INSERT` and `BEFORE UPDATE` check triggers. A revoked row
@@ -121,20 +143,10 @@ pub(crate) fn install(transaction: &Transaction<'_>) -> StoreResult<()> {
 /// Insert the rows of a new pairing. A pairing is one `grant_id` with its capabilities.
 pub fn insert_rows(transaction: &Transaction<'_>, rows: &[GrantRow]) -> StoreResult<()> {
     for row in rows {
-        transaction.execute(
-            "INSERT INTO project_grants(grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,NULL,?8)",
-            params![
-                row.grant_id,
-                row.peer,
-                row.peer_public_key,
-                row.local_project,
-                row.remote_project,
-                row.capability.as_ref(),
-                row.created_at,
-                row.peer_label,
-            ],
-        )?;
+        canvas_tx(transaction).insert(&GrantRow {
+            revoked_at: None,
+            ..row.clone()
+        })?;
     }
     Ok(())
 }
@@ -146,17 +158,21 @@ pub fn active_rows(
     peer: &str,
     local_project: &str,
 ) -> StoreResult<Vec<GrantRow>> {
-    let mut query = transaction.prepare(
-        "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label
-         FROM project_grants WHERE peer=?1 AND local_project=?2 AND revoked_at IS NULL ORDER BY capability",
-    )?;
-    Ok(query
-        .query_map(params![peer, local_project], row_from)?
-        .collect::<Result<Vec<_>, _>>()?)
+    Ok(db_query!(
+        canvas_tx(transaction),
+        GrantRow,
+        filter(
+            GrantRow::PEER.eq(&peer.to_owned()),
+            GrantRow::LOCAL_PROJECT.eq(&local_project.to_owned()),
+            GrantRow::REVOKED_AT.is_null()
+        ),
+        order_by(GrantRow::CAPABILITY.asc)
+    )?)
 }
 
 /// True when the peer key of `peer` has at least one active grant, for any project.
 pub fn has_active_peer(transaction: &Transaction<'_>, peer: &str) -> StoreResult<bool> {
+    // Raw SQL: authorization tests an aggregate without decoding unrelated grant fields.
     let count: i64 = transaction.query_row(
         "SELECT COUNT(*) FROM project_grants WHERE peer=?1 AND revoked_at IS NULL",
         params![peer],
@@ -167,36 +183,43 @@ pub fn has_active_peer(transaction: &Transaction<'_>, peer: &str) -> StoreResult
 
 /// Every row, active or revoked, for the owner's list.
 pub fn all_rows(transaction: &Transaction<'_>) -> StoreResult<Vec<GrantRow>> {
-    let mut query = transaction.prepare(
-        "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label
-         FROM project_grants ORDER BY created_at,grant_id,capability",
-    )?;
-    Ok(query
-        .query_map([], row_from)?
-        .collect::<Result<Vec<_>, _>>()?)
+    Ok(db_query!(
+        canvas_tx(transaction),
+        GrantRow,
+        order_by(
+            GrantRow::CREATED_AT.asc,
+            GrantRow::GRANT_ID.asc,
+            GrantRow::CAPABILITY.asc
+        )
+    )?)
 }
 
 /// The rows of one pairing, active or revoked. Empty when the grant id is unknown.
 pub fn rows_of_grant(transaction: &Transaction<'_>, grant_id: &str) -> StoreResult<Vec<GrantRow>> {
-    let mut query = transaction.prepare(
-        "SELECT grant_id,peer,peer_public_key,local_project,remote_project,capability,created_at,revoked_at,peer_label
-         FROM project_grants WHERE grant_id=?1 ORDER BY capability",
-    )?;
-    Ok(query
-        .query_map(params![grant_id], row_from)?
-        .collect::<Result<Vec<_>, _>>()?)
+    Ok(db_query!(
+        canvas_tx(transaction),
+        GrantRow,
+        filter(GrantRow::GRANT_ID.eq(&grant_id.to_owned())),
+        order_by(GrantRow::CAPABILITY.asc)
+    )?)
 }
 
 /// Revoke one pairing. Returns the number of rows changed: zero when it was already revoked.
 pub fn revoke(transaction: &Transaction<'_>, grant_id: &str, now: i64) -> StoreResult<usize> {
-    Ok(transaction.execute(
-        "UPDATE project_grants SET revoked_at=?2 WHERE grant_id=?1 AND revoked_at IS NULL",
-        params![grant_id, now],
+    Ok(db_update!(
+        canvas_tx(transaction),
+        GrantRow,
+        set(GrantRow::REVOKED_AT = &Some(now)),
+        filter(
+            GrantRow::GRANT_ID.eq(&grant_id.to_owned()),
+            GrantRow::REVOKED_AT.is_null()
+        )
     )?)
 }
 
 /// The distinct public keys of the active pairings. The peer link accepts exactly these.
 pub fn active_peer_keys(transaction: &Transaction<'_>) -> StoreResult<Vec<String>> {
+    // Raw SQL: DISTINCT projects only public keys, preserving the authorization boundary.
     let mut query = transaction.prepare(
         "SELECT DISTINCT peer_public_key FROM project_grants WHERE revoked_at IS NULL ORDER BY peer_public_key",
     )?;
@@ -208,6 +231,7 @@ pub fn active_peer_keys(transaction: &Transaction<'_>) -> StoreResult<Vec<String
 /// The state of a pairing by id: `None` when unknown, `Some(true)` when active and
 /// `Some(false)` when revoked.
 pub fn grant_active(transaction: &Transaction<'_>, grant_id: &str) -> StoreResult<Option<bool>> {
+    // Raw SQL: aggregate NULL distinguishes an unknown pairing from a revoked pairing.
     let active: Option<bool> = transaction.query_row(
         "SELECT MAX(revoked_at IS NULL) FROM project_grants WHERE grant_id=?1",
         [grant_id],
@@ -226,24 +250,6 @@ pub fn active_capabilities(
         .into_iter()
         .map(|row| row.capability)
         .collect())
-}
-
-fn row_from(row: &rusqlite::Row<'_>) -> rusqlite::Result<GrantRow> {
-    let capability: String = row.get(5)?;
-    let capability = Capability::from_str(&capability).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(5, rusqlite::types::Type::Text, Box::new(error))
-    })?;
-    Ok(GrantRow {
-        grant_id: row.get(0)?,
-        peer: row.get(1)?,
-        peer_public_key: row.get(2)?,
-        local_project: row.get(3)?,
-        remote_project: row.get(4)?,
-        capability,
-        created_at: row.get(6)?,
-        revoked_at: row.get(7)?,
-        peer_label: row.get(8)?,
-    })
 }
 
 #[cfg(test)]

@@ -20,7 +20,9 @@
 
 use std::sync::Arc;
 
-use rusqlite::{OptionalExtension, Transaction, params};
+#[cfg(test)]
+use rusqlite::params;
+use rusqlite::{OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
 use studio_json::{Value, json};
 use studio_runtime_schema::{
@@ -269,19 +271,17 @@ pub fn apply(
         let Some(record) = merge_into(local.as_ref(), &entry, now) else {
             continue;
         };
-        tx.execute(
-            "INSERT INTO runtime_access_clients(id,record) VALUES(?1,?2) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![entry.id, studio_json::to_string(&record)?],
+        studio_runtime_store::access_tables::AccessClientsRow::put(
+            tx,
+            &entry.id,
+            studio_json::to_string(&record)?,
         )?;
-        tx.execute(
-            "INSERT INTO runtime_access_audit(client,actor,action,created) VALUES(?1,?2,?3,?4)",
-            params![
-                entry.id,
-                actor,
-                if entry.revoked { "revoke" } else { "trust" },
-                now
-            ],
+        studio_runtime_store::access_tables::AccessAuditRow::append(
+            tx,
+            &entry.id,
+            actor,
+            if entry.revoked { "revoke" } else { "trust" },
+            now,
         )?;
     }
     Ok(())

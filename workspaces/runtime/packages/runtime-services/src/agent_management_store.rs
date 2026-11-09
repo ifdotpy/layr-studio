@@ -349,6 +349,7 @@ fn execute_decision(
     {
         let raw: Option<String> = transaction
             .query_row(
+                // Raw SQL: legacy record admission needs a typed-read equivalence proof.
                 "SELECT record FROM runtime_server_links WHERE id=?1",
                 [link],
                 |row| row.get(0),

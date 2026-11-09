@@ -271,6 +271,7 @@ pub(crate) fn lead_message_in_transaction(
 /// The state id of this server's federation identity.
 fn local_state_id(tx: &Transaction<'_>) -> Result<String> {
     tx.query_row(
+        // Raw SQL: JSON selectors/projections are outside db_query.
         "SELECT json_extract(record,'$.stateId') FROM runtime_federation_identity WHERE id='local'",
         [],
         |row| row.get(0),
