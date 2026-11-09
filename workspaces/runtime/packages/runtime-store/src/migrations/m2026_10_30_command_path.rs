@@ -6,9 +6,10 @@ use rusqlite::Transaction;
 /// `CommandWatermarks::event_revision`.
 pub(super) fn apply(tx: &Transaction<'_>) -> crate::StoreResult<()> {
     crate::repositories::command_watermarks::prepare(tx)?;
+    use studio_db_api::Table;
+    crate::queue_schema::EventRevisionsRow::descriptor().install_if_absent(tx)?;
     tx.execute_batch(
-        "CREATE TABLE IF NOT EXISTS runtime_event_revisions(id TEXT PRIMARY KEY, rev INTEGER NOT NULL) WITHOUT ROWID;
-         CREATE TRIGGER IF NOT EXISTS runtime_event_revision AFTER UPDATE OF status,text ON runtime_events
+        "CREATE TRIGGER IF NOT EXISTS runtime_event_revision AFTER UPDATE OF status,text ON runtime_events
          WHEN OLD.status IS NOT NEW.status OR OLD.text IS NOT NEW.text
          BEGIN INSERT INTO runtime_event_revisions(id,rev) VALUES(NEW.id,2)
                ON CONFLICT(id) DO UPDATE SET rev=rev+1; END;

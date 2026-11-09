@@ -8039,3 +8039,22 @@ These are additional non-unit-test read-only consumers. Their SQL occurs in temp
 ## Review correction: scalar and enum classification
 
 The source name of a column does not identify its encoding. ProviderResponseId, InterruptTicket, VoiceSessionAnswerSdp, request signatures, recovery explanations and generated open ID selectors are named string/scalar owners, not raw-JSON wrappers. Digest/public-key bytes have named byte codecs and legacy-text handling, never a JSON codec. Only actually JSON-encoded records/evidence use named typed payload structs with OwnedRawJson inside them. Open `AgentStatus::Other`, terminal status, usage-resume cause/status, search kind (which can come from an arbitrary transcript title), and process-recovery outcome remain open. Existing closed MigrationStatus, ContextRepairPhase, StartAttemptAction, RequestKind, ApprovalStateKind, CloseReason and VoiceSessionState, plus the fully enumerated private voice approval/speech producer vocabularies are explicitly INTEGER enums in their column contracts. No declaration-order codes are assigned by this document.
+
+### Wave 4 D descriptor cutover notes
+
+Descriptors preserve the existing physical layout; no consolidation occurs here.
+
+- `runtime_items`: a later move must retain physical agent, created seconds, payload identity, transcript inputs and publication scopes.
+- `runtime_item_blobs`: retain the original hash text and size, with fulltext overlap reconciliation before consolidation.
+- `runtime_item_fulltext`: retain original TEXT or compressed BLOB bytes, format checks and dictionaries; never reinterpret compressed bytes as JSON.
+- `runtime_monitors`: retain generated status/error/stream selection, malformed repair candidates, exact records and stream acknowledgements.
+- `user_terminals`: retain snapshot reads of record/output/offset/generation and the existing generation reset owner.
+- `user_terminal_output`: retain composite keys and Unicode-scalar boundaries, reconciling inline output overlap before moving chunks.
+- `user_terminal_decoder_state`: retain pending UTF-8 bytes separately from terminal event acknowledgement.
+- `user_terminal_event_cursor`: retain the exact sequence fence independently of decoder bytes and output offsets.
+
+The three work-history descriptors remain registered by their generated `NAME`
+constants. `runtime_search_next` remains the raw FTS object owned by
+`feature_schema::SEARCH_SCHEMA`. Item hydration, multi-table reconciliation,
+fulltext compression and terminal chunk packing retain raw SQL because their
+existing forms are shorter than additional generated projection/adapter owners.

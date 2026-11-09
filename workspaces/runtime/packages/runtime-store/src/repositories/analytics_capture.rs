@@ -1,4 +1,5 @@
 //! Serialized analytics writes. Rollout files must be read before entering this adapter.
+//! Raw DML stays narrow: dynamic table selection, JSON predicates and original receipt validation are shorter here.
 use crate::CachedSql;
 use crate::{RuntimeStore, StoreError, StoreResult};
 use rusqlite::{
@@ -641,17 +642,17 @@ pub fn check_state_readonly(root: &std::path::Path) -> StoreResult<Vec<crate::St
     crate::stored_text_dictionary::load(&db)?;
     db.pragma_update(None, "query_only", true)?;
     let mut result = Vec::new();
-    for table in [
-        CaptureTable::Agents,
-        CaptureTable::Items,
-        CaptureTable::Turns,
-        CaptureTable::Usage,
-    ] {
-        result.push(check_analytics_table(&db, table)?);
+    for registration in crate::analytics_schema::registry() {
+        let report = (registration.check)(&db)?;
+        result.push(crate::StateCheckTable {
+            table: registration.descriptor.name,
+            row_count: report.row_count,
+            rejected_count: report.rejected_count,
+            failures: report.failures,
+        });
     }
-    let (history, importer) = check_history_rows(&db)?;
-    result.insert(1, history);
-    result.insert(2, importer);
+    // The importer is a separate logical report within analytics_history.
+    result.push(check_history_rows(&db)?.1);
     Ok(result)
 }
 
@@ -664,7 +665,7 @@ fn empty_report(table: &'static str) -> crate::StateCheckTable {
     }
 }
 
-fn check_analytics_table(
+pub(crate) fn check_analytics_table(
     db: &Connection,
     table: CaptureTable,
 ) -> StoreResult<crate::StateCheckTable> {
@@ -707,7 +708,7 @@ fn check_analytics_table(
     Ok(report)
 }
 
-fn check_history_rows(
+pub(crate) fn check_history_rows(
     db: &Connection,
 ) -> StoreResult<(crate::StateCheckTable, crate::StateCheckTable)> {
     const IMPORTER_ROW_ID: &str = "importer";

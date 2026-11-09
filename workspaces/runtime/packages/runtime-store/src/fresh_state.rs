@@ -341,31 +341,7 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
 
 /// Install revision tracking from the same catalog that owns fresh databases.
 pub(crate) fn prepare_analytics_revision_schema(db: &Connection) -> StoreResult<()> {
-    let snapshot: Value = studio_json::from_str(SNAPSHOT)?;
-    let mut entries = snapshot["analytics.sqlite3"]["sqlite_master"]
-        .as_array()
-        .ok_or(StoreError::RecordContract(
-            "fresh analytics catalog is missing",
-        ))?
-        .iter()
-        .filter(|entry| {
-            entry["name"].as_str().is_some_and(|name| {
-                name.starts_with("analytics_usage_revision")
-                    || name.starts_with("analytics_cost_group_revision")
-            })
-        })
-        .collect::<Vec<_>>();
-    entries.sort_by_key(|entry| entry["create_order"].as_i64());
-    for entry in entries {
-        let sql = entry["sql"]
-            .as_str()
-            .ok_or(StoreError::RecordContract("revision schema DDL is missing"))?;
-        let sql = sql
-            .replacen("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ", 1)
-            .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
-            .replacen("CREATE TRIGGER ", "CREATE TRIGGER IF NOT EXISTS ", 1);
-        db.execute_batch(&sql)?;
-    }
+    crate::analytics_schema::install_revisions(db)?;
     db.execute("INSERT INTO analytics_usage_revision_clock SELECT 0 WHERE NOT EXISTS (SELECT 1 FROM analytics_usage_revision_clock)", [])?;
     Ok(())
 }

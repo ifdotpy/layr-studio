@@ -57,13 +57,14 @@ pub(crate) fn columns(prefix: &str) -> String {
 }
 
 pub(crate) static TABLE_SQL: LazyLock<String> = LazyLock::new(|| {
+    use studio_db_api::Table;
     format!(
-        "CREATE TABLE IF NOT EXISTS {AGENT_VOLATILE_TABLE}(id TEXT PRIMARY KEY,{});",
-        AGENT_VOLATILE_FIELDS
-            .iter()
-            .map(|field| format!("\"{field}\" TEXT"))
-            .collect::<Vec<_>>()
-            .join(",")
+        "{};",
+        crate::agent_tables::AgentVolatileStorageRow::DDL.replacen(
+            "TABLE ",
+            "TABLE IF NOT EXISTS ",
+            1
+        )
     )
 });
 

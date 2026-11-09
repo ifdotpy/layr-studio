@@ -1,5 +1,8 @@
 //! The supervisor's independent journal. Never opens the runtime DB. It follows
 //! the shared durability policy of [`crate::sqlite_durability`].
+//! Raw DML stays here: joins, aggregates, fenced updates and narrow projections are
+//! shorter than generated equivalents and preserve each existing decode boundary.
+use crate::supervisor_schema::{OperationWritesRow, OperationsRow, SupervisorInitResult};
 use crate::{python_json, python_json_with_separators, sha256_hex};
 use rusqlite::{
     Connection, OptionalExtension, Transaction, params,
@@ -11,6 +14,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
+use studio_db_api::Table;
 use studio_json::{Value, json};
 use studio_runtime_providers::supervisor_protocol::{
     EVENT_KIND_EXIT, EVENT_KIND_STDERR, EVENT_KIND_STDOUT, EventKind, HANDLE_LIMIT, HandleSnapshot,
@@ -24,29 +28,57 @@ use studio_runtime_schema::queue_command::Field;
 #[serde(untagged)]
 pub enum SupervisorRecovery {
     Object(RecoveryFields),
-    Other(Value),
+    Other(studio_json::OwnedRawJson),
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryFields {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    degraded: Field<Value>,
+    degraded: Field<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    fallback_ready: Field<Value>,
+    fallback_ready: Field<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    blocked: Field<Value>,
+    blocked: Field<studio_json::OwnedRawJson>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    notice: Field<Value>,
+    notice: Field<studio_json::OwnedRawJson>,
     #[serde(flatten)]
-    extra: studio_json::Map<String, Value>,
+    extra: std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
+}
+
+impl<'de> Deserialize<'de> for RecoveryFields {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let mut fields =
+            std::collections::BTreeMap::<String, studio_json::OwnedRawJson>::deserialize(
+                deserializer,
+            )?;
+        // A map retains last-wins duplicate keys, matching the previous Value boundary.
+        fn take(
+            fields: &mut std::collections::BTreeMap<String, studio_json::OwnedRawJson>,
+            key: &str,
+        ) -> Field<studio_json::OwnedRawJson> {
+            match fields.remove(key) {
+                None => Field::Missing,
+                Some(value) if value.as_str() == "null" => Field::Null,
+                Some(value) => Field::Value(value),
+            }
+        }
+        Ok(Self {
+            degraded: take(&mut fields, "degraded"),
+            fallback_ready: take(&mut fields, "fallbackReady"),
+            blocked: take(&mut fields, "blocked"),
+            notice: take(&mut fields, "notice"),
+            extra: fields,
+        })
+    }
 }
 
 impl<'de> Deserialize<'de> for SupervisorRecovery {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let value = Value::deserialize(deserializer)?;
-        if value.is_object() {
-            RecoveryFields::deserialize(value)
+        let value = studio_json::OwnedRawJson::deserialize(deserializer)?;
+        crate::supervisor_schema::validate_legacy_json(&value).map_err(serde::de::Error::custom)?;
+        if value.as_str().starts_with('{') {
+            studio_json::from_str(value.as_str())
                 .map(Self::Object)
                 .map_err(serde::de::Error::custom)
         } else {
@@ -55,11 +87,18 @@ impl<'de> Deserialize<'de> for SupervisorRecovery {
     }
 }
 
+fn recovery_evidence(value: &impl Serialize) -> studio_json::OwnedRawJson {
+    studio_json::OwnedRawJson::from_string(
+        studio_json::to_string(value).expect("serializable recovery scalar"),
+    )
+    .expect("encoded JSON scalar")
+}
+
 impl SupervisorRecovery {
     pub fn clean() -> Self {
         Self::Object(RecoveryFields {
-            degraded: Field::Value(json!(false)),
-            fallback_ready: Field::Value(json!(false)),
+            degraded: Field::Value(recovery_evidence(&false)),
+            fallback_ready: Field::Value(recovery_evidence(&false)),
             blocked: Field::Null,
             notice: Field::Missing,
             extra: Default::default(),
@@ -72,14 +111,14 @@ impl SupervisorRecovery {
         let Self::Object(fields) = self else {
             unreachable!("recovery is constructed as an object")
         };
-        fields.degraded = Field::Value(json!(true));
-        fields.notice = Field::Value(json!(notice));
+        fields.degraded = Field::Value(recovery_evidence(&true));
+        fields.notice = Field::Value(recovery_evidence(&notice));
     }
     pub fn block(&mut self, reason: &str) {
         let Self::Object(fields) = self else {
             unreachable!("recovery is constructed as an object")
         };
-        fields.blocked = Field::Value(json!(reason));
+        fields.blocked = Field::Value(recovery_evidence(&reason));
     }
     pub fn clear_blocked(&mut self) {
         let Self::Object(fields) = self else {
@@ -92,11 +131,11 @@ impl SupervisorRecovery {
         };
     }
     pub fn finish_recovery(&mut self) {
-        let ready = matches!(self, Self::Object(fields) if fields.degraded.value() == Some(&json!(true)) && fields.blocked.value().is_none());
+        let ready = matches!(self, Self::Object(fields) if fields.degraded.value().is_some_and(|value| value.as_str() == "true") && fields.blocked.value().is_none());
         let Self::Object(fields) = self else {
             unreachable!("recovery is constructed as an object")
         };
-        fields.fallback_ready = Field::Value(json!(ready));
+        fields.fallback_ready = Field::Value(recovery_evidence(&ready));
     }
 }
 
@@ -117,10 +156,6 @@ pub enum JournalError {
 }
 pub type Result<T> = std::result::Result<T, JournalError>;
 
-/// Sole DDL owner for both supervisor structure validation and installation.
-pub(crate) const SUPERVISOR_SCHEMA: &str = include_str!("supervisor_schema.sql");
-pub(crate) const WRITTEN_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS operation_writes(handle TEXT NOT NULL,operation_id TEXT NOT NULL,PRIMARY KEY(handle,operation_id));";
-
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaPresence {
     Existing,
@@ -129,8 +164,7 @@ pub(crate) enum SchemaPresence {
 
 pub(crate) fn validate_schema(db: &Connection, presence: SchemaPresence) -> crate::StoreResult<()> {
     let expected = Connection::open_in_memory()?;
-    expected.execute_batch(SUPERVISOR_SCHEMA)?;
-    expected.execute_batch(WRITTEN_SCHEMA)?;
+    crate::supervisor_schema::install(&expected)?;
     let mut tables = expected.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")?;
     for name in tables.query_map([], |row| row.get::<_, String>(0))? {
         let name = name?;
@@ -168,7 +202,7 @@ pub struct StoredHandle {
     pub signature: String,
     pub pid: u32,
     pub snapshot: HandleSnapshot,
-    pub init_result: Option<Value>,
+    pub init_result: Option<SupervisorInitResult>,
     pub closed_at: Option<f64>,
     pub closed_reason: Option<String>,
     pub start_time: Option<String>,
@@ -196,7 +230,7 @@ pub enum JournalEventKind {
 }
 
 impl JournalEventKind {
-    fn parse(value: &str) -> Result<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self> {
         match EventKind::parse(value) {
             EventKind::Stdout => Ok(Self::Stdout),
             EventKind::Stderr => Ok(Self::Stderr),
@@ -204,7 +238,7 @@ impl JournalEventKind {
             EventKind::Unknown(_) => Err(Refusal("Invalid supervisor event kind").into()),
         }
     }
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Stdout => EVENT_KIND_STDOUT,
             Self::Stderr => EVENT_KIND_STDERR,
@@ -277,7 +311,7 @@ fn snapshot(db: &Connection, handle: &str) -> Result<HandleSnapshot> {
 }
 /// Read `operations.native_id` exactly as stored. The column is declared INTEGER, but the
 /// Python supervisor also stores text ids there (see [`NativeId`]).
-fn stored_native_id(value: ValueRef<'_>) -> Result<Option<NativeId>> {
+pub(crate) fn stored_native_id(value: ValueRef<'_>) -> Result<Option<NativeId>> {
     match value {
         ValueRef::Null => Ok(None),
         ValueRef::Integer(id) => Ok(Some(NativeId::Integer(id))),
@@ -289,7 +323,7 @@ fn stored_native_id(value: ValueRef<'_>) -> Result<Option<NativeId>> {
         }
     }
 }
-fn native_sql(id: &NativeId) -> SqlValue {
+pub(crate) fn native_sql(id: &NativeId) -> SqlValue {
     match id {
         NativeId::Integer(id) => SqlValue::Integer(*id),
         NativeId::Text(text) => SqlValue::Text(text.clone()),
@@ -852,13 +886,20 @@ fn sql(value: u64) -> Result<i64> {
 }
 
 pub(crate) fn prepare_schema(db: &Transaction<'_>) -> crate::StoreResult<()> {
-    db.execute_batch(SUPERVISOR_SCHEMA)?;
-    db.execute_batch("CREATE INDEX IF NOT EXISTS operations_monitor_native ON operations(handle,generation,native_id) WHERE substr(operation_id,1,8)='monitor:'")?;
+    for registration in crate::supervisor_schema::registry().iter().take(7) {
+        // Preserve the original stage: install all seven tables before the monitor index.
+        studio_db_api::Descriptor {
+            indexes: &[],
+            ..registration.descriptor
+        }
+        .install_if_absent(db)?;
+    }
+    OperationsRow::descriptor().install_if_absent(db)?;
     Ok(())
 }
 
 pub(crate) fn prepare_written_schema(db: &Transaction<'_>) -> crate::StoreResult<()> {
-    db.execute_batch(WRITTEN_SCHEMA)?;
+    OperationWritesRow::descriptor().install_if_absent(db)?;
     Ok(())
 }
 
@@ -906,7 +947,10 @@ mod tests {
             json!({"blocked":null,"notice":{"future":true}}),
             json!({"degraded":"legacy","fallbackReady":0,"blocked":false,"extra":[1,null]}),
         ] {
-            let recovery = SupervisorRecovery::deserialize(input.clone()).unwrap();
+            let recovery = studio_json::from_str::<SupervisorRecovery>(
+                &studio_json::to_string(&input).unwrap(),
+            )
+            .unwrap();
             let encoded = studio_json::to_string(&recovery).unwrap();
             let decoded: Value = studio_json::from_str(&encoded).unwrap();
             assert_eq!(decoded, input);
@@ -923,12 +967,16 @@ mod tests {
             assert_eq!(studio_json::from_str::<Value>(&saved).unwrap(), input);
         }
         for blocked in [json!(false), json!(0), json!(""), json!({}), json!([])] {
-            let recovery = SupervisorRecovery::deserialize(json!({"blocked":blocked})).unwrap();
+            let recovery = studio_json::from_str::<SupervisorRecovery>(
+                &studio_json::to_string(&json!({"blocked":blocked})).unwrap(),
+            )
+            .unwrap();
             assert!(recovery.blocked());
         }
-        let mut recovery =
-            SupervisorRecovery::deserialize(json!({"degraded":"legacy","blocked":false,"extra":3}))
-                .unwrap();
+        let mut recovery = studio_json::from_str::<SupervisorRecovery>(
+            r#"{"degraded":"legacy","blocked":false,"extra":3}"#,
+        )
+        .unwrap();
         recovery.clear_blocked();
         let saved = recovery.serialize(studio_json::value::Serializer).unwrap();
         assert_eq!(

@@ -1,4 +1,5 @@
 //! Trained zstd dictionaries for stored-text columns, and the SQL access that
+//! Raw queries select only dictionary or encoded columns and preserve their original storage boundaries.
 //! lets queries read compressed values.
 //!
 //! A dictionary is trained from this state's own values, so it contains
@@ -38,24 +39,6 @@ pub const DICTIONARY_BYTES: usize = 112_640;
 pub const DICTIONARY_MIN_ROWS: i64 = 2_048;
 /// Values sampled to train one dictionary. Unit: rows.
 pub const DICTIONARY_SAMPLE_ROWS: usize = 4_096;
-
-pub(crate) const DICTIONARY_SCHEMA: &str = "
-    CREATE TABLE IF NOT EXISTS analytics_stored_text_dictionaries (
-        id INTEGER PRIMARY KEY, name TEXT NOT NULL, created REAL NOT NULL,
-        sha256 TEXT NOT NULL, dictionary BLOB NOT NULL);
-    CREATE INDEX IF NOT EXISTS analytics_stored_text_dictionaries_name
-        ON analytics_stored_text_dictionaries(name, created, id);
-    CREATE TRIGGER IF NOT EXISTS analytics_stored_text_dictionaries_no_update
-        BEFORE UPDATE ON analytics_stored_text_dictionaries BEGIN
-        SELECT RAISE(ABORT, 'stored text dictionaries are immutable'); END;
-    CREATE TRIGGER IF NOT EXISTS analytics_stored_text_dictionaries_no_delete
-        BEFORE DELETE ON analytics_stored_text_dictionaries BEGIN
-        SELECT RAISE(ABORT, 'stored text dictionaries are immutable'); END;
-    CREATE TRIGGER IF NOT EXISTS analytics_stored_text_dictionaries_no_replace
-        BEFORE INSERT ON analytics_stored_text_dictionaries
-        WHEN EXISTS(SELECT 1 FROM analytics_stored_text_dictionaries WHERE id=NEW.id) BEGIN
-        SELECT RAISE(ABORT, 'stored text dictionaries are immutable'); END;
-";
 
 /// Columns of `analytics_items`, in table order. The temporary view repeats
 /// them with `record` decoded.
@@ -194,7 +177,7 @@ pub fn train(samples: &[Vec<u8>]) -> Option<Vec<u8>> {
 /// Create the dictionary, progress and batch tables of the analytics
 /// database.
 pub fn ensure_analytics_schema(connection: &Connection) -> StoreResult<()> {
-    connection.execute_batch(DICTIONARY_SCHEMA)?;
+    crate::analytics_schema::install_dictionary(connection)?;
     connection.execute_batch(crate::feature_schema::PAYLOAD_MIGRATIONS_SCHEMA)?;
     crate::stored_text_compaction::prepare_batches(connection)?;
     Ok(())

@@ -1,5 +1,6 @@
 use crate::CachedSql;
 use std::path::Path;
+use studio_db_api::Table;
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension, functions::FunctionFlags, params};
 use sha2::{Digest, Sha256};
@@ -19,10 +20,9 @@ pub(crate) fn prepare_peer_update_settings(connection: &Connection) -> StoreResu
     Ok(())
 }
 
-pub(crate) const PUBLICATION_OVERFLOW_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS analytics_publication_overflow_receipts (receipt_id TEXT PRIMARY KEY,analytics_overflow INTEGER NOT NULL,publication_overflow INTEGER NOT NULL)";
-
 pub(crate) fn prepare_publication_overflow_receipts(connection: &Connection) -> StoreResult<()> {
-    connection.execute_batch(PUBLICATION_OVERFLOW_SCHEMA)?;
+    crate::analytics_schema::AnalyticsPublicationOverflowReceiptsRow::descriptor()
+        .install_if_absent(connection)?;
     Ok(())
 }
 
@@ -108,7 +108,10 @@ pub(crate) fn prepare_callback_origin(connection: &Connection) -> rusqlite::Resu
             "ALTER TABLE runtime_tool_requests ADD COLUMN origin_key {definition}"
         ))?;
     }
-    connection.execute_batch(CALLBACK_ORIGIN_INDEX)
+    crate::queue_schema::install_index::<crate::queue_schema::ToolRequestsRow>(
+        connection,
+        "runtime_tool_request_origin",
+    )
 }
 
 pub(crate) fn prepare_receipt_owners(connection: &Connection) -> StoreResult<()> {
@@ -139,6 +142,18 @@ pub(crate) fn prepare_receipt_owners(connection: &Connection) -> StoreResult<()>
         connection.execute_batch("DROP INDEX runtime_work_archive_due")?;
     }
     connection.execute_batch(RECEIPT_OWNER_INDEXES)?;
+    for name in [
+        "runtime_tool_request_current_actor",
+        "runtime_tool_request_current_status",
+    ] {
+        crate::queue_schema::install_index::<crate::queue_schema::ToolRequestsRow>(
+            connection, name,
+        )?;
+    }
+    crate::queue_schema::install_index::<crate::queue_schema::ExecutionAttemptsRow>(
+        connection,
+        "runtime_execution_terminal_source",
+    )?;
     crate::StartupRecoveryRepository::prepare_indexes(connection)?;
     Ok(())
 }
@@ -227,7 +242,10 @@ pub(crate) fn verify_serving_pragmas(connection: &Connection, database: &str) ->
 pub(crate) fn ensure_analytics_limits_index(analytics: &Connection) -> StoreResult<()> {
     if table_exists(analytics, "analytics_limits")? {
         analytics.execute_batch(
-            "CREATE INDEX IF NOT EXISTS analytics_limits_account_at ON analytics_limits(account, at)",
+            crate::analytics_schema::AnalyticsLimitsRow::descriptor().indexes[0]
+                .sql
+                .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1)
+                .as_str(),
         )?;
     }
     Ok(())
@@ -690,13 +708,8 @@ fn connection_pragmas(connection: &Connection) -> StoreResult<(String, i64)> {
     Ok((journal_mode, synchronous))
 }
 
-pub(crate) const CALLBACK_ORIGIN_INDEX: &str = "CREATE UNIQUE INDEX IF NOT EXISTS runtime_tool_request_origin ON runtime_tool_requests(origin_key) WHERE origin_key IS NOT NULL";
-
 pub(crate) const RECEIPT_OWNER_INDEXES: &str = "CREATE INDEX IF NOT EXISTS runtime_agent_holds ON runtime_agents(id) WHERE hold_status!='clear';
-         CREATE INDEX IF NOT EXISTS runtime_work_archive_due ON runtime_work(archive_next_at,id) WHERE archive_status IN ('pending','retryable','unknown');
-         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_actor ON runtime_tool_requests(agent,updated DESC,id);
-         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_status ON runtime_tool_requests(status,agent,id);
-         CREATE UNIQUE INDEX IF NOT EXISTS runtime_execution_terminal_source ON runtime_execution_attempts(json_extract(record,'$.terminalRepair.source.accountKey'),json_extract(record,'$.terminalRepair.source.threadId'),json_extract(record,'$.terminalRepair.proof.turnId')) WHERE json_type(record,'$.terminalRepair')='object';";
+         CREATE INDEX IF NOT EXISTS runtime_work_archive_due ON runtime_work(archive_next_at,id) WHERE archive_status IN ('pending','retryable','unknown');";
 
 #[cfg(test)]
 mod tests {

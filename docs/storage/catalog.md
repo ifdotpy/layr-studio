@@ -1,9 +1,10 @@
 # Generated storage catalog
 
-`runtime-state-schema.json` is generated from `canvas_schema::registry` and
-`storage_catalog.rs`'s per-database SQL lists. Unconverted Canvas and Analytics
-tables live in `catalog-canvas.sql` and `catalog-analytics.sql`, with additional
-Canvas objects in `catalog-canvas-objects.sql`. Existing feature, receipt, cost,
+`runtime-state-schema.json` is generated from `canvas_schema::registry`,
+`analytics_schema::registry` and `storage_catalog.rs`'s per-database SQL lists.
+Unconverted Canvas tables live in `catalog-canvas.sql`, with additional Canvas
+objects in `catalog-canvas-objects.sql`. `catalog-analytics.sql` retains only the
+explicit revision triggers; Analytics table/index DDL belongs to its descriptors. Existing feature, receipt, cost,
 dictionary, index, sync, durable, FTS and Supervisor owners are referenced directly.
 Remaining raw entries preserve complete evolved layouts, dynamically constructed
 SQL, or frozen dated-migration definitions. SQLite supplies names, object kinds,

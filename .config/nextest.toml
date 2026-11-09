@@ -87,9 +87,11 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(entity_scopes)) |
     (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(agent_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(queue_schema::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(access_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::federation_credentials::tests::)) |
@@ -98,9 +100,13 @@ default-filter = '''
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(receipt_tables::tests::) | test(=migrations::m2026_11_06_idle_unload::tests::receipt_transfer_upgrade_defers_lookup_until_target_column_exists))) |
+    (package(=studio-runtime-schema) & kind(lib) & test(usage_resume_record::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(supervisor_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(item_monitor_terminal::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
     (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
@@ -312,6 +318,7 @@ default-filter = '''
     (package(=studio-runtime-process) & kind(lib) & test(recovery_and_finish_fallback_preserve_blocking_and_health)) |
     (package(=studio-runtime-server) & kind(bin) & (test(native_probe::tests::probe_response_) | test(native_probe::tests::probe_payload_) | test(native_probe::tests::probe_smoke_) | test(native_probe::tests::compatibility_probe_checks_companion_schema_and_isolated_provider))) |
     (package(=studio-runtime-store) & kind(lib) & test(state_check::tests::system_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(analytics_schema::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(notification_text::tests::)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::tests::publication_off_path::counting_probe_failure_reports_child_panic_once$/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::tests::accepted_turn_reattaches_and_keeps_notification_effects$/)) |
@@ -573,9 +580,11 @@ default-filter = '''
     (package(=studio-runtime-store) & kind(lib) & test(entity_scopes)) |
     (package(=studio-runtime-services) & kind(lib) & test(scope_shaped_unknown_fields)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(agent_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(voice_storage::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::agent_management::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(work_history::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(queue_schema::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(access_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(repositories::federation_credentials::tests::)) |
@@ -584,9 +593,13 @@ default-filter = '''
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-store) & kind(lib) & test(canvas_schema::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & (test(receipt_tables::tests::) | test(=migrations::m2026_11_06_idle_unload::tests::receipt_transfer_upgrade_defers_lookup_until_target_column_exists))) |
+    (package(=studio-runtime-schema) & kind(lib) & test(usage_resume_record::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(supervisor_schema::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::sync_documents::tests::publication_noop_uses_only_hash_and_deleted)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::task_window_refresh_repairs_legacy_position)) |
     (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
+    (package(=studio-runtime-store) & kind(lib) & test(item_monitor_terminal::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/context_settings::tests::|repositories::profiles::tests::/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=account_worker::preparation::receipts::tests::manifest_receipt_retries_keep_historical_serializer_bytes)) |
     (package(=studio-runtime-store) & kind(lib) & test(planning_work::tests::)) |
@@ -798,6 +811,7 @@ default-filter = '''
     (package(=studio-runtime-process) & kind(lib) & test(recovery_and_finish_fallback_preserve_blocking_and_health)) |
     (package(=studio-runtime-server) & kind(bin) & (test(native_probe::tests::probe_response_) | test(native_probe::tests::probe_payload_) | test(native_probe::tests::probe_smoke_) | test(native_probe::tests::compatibility_probe_checks_companion_schema_and_isolated_provider))) |
     (package(=studio-runtime-store) & kind(lib) & test(state_check::tests::system_)) |
+    (package(=studio-runtime-store) & kind(lib) & test(analytics_schema::tests::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(notification_text::tests::)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::tests::publication_off_path::counting_probe_failure_reports_child_panic_once$/)) |
     (package(=studio-runtime-services) & kind(lib) & test(/^account_worker::tests::accepted_turn_reattaches_and_keeps_notification_effects$/)) |

@@ -6,10 +6,7 @@ use serde::Serialize;
 use studio_json::Value;
 
 use crate::StoreResult;
-use crate::records::{
-    AgentRecord, EventMetadataRecord, JsonRecord, MonitorRecord, TerminalRecord,
-    TranscriptItemRecord, UsageResumeRecord,
-};
+use crate::records::JsonRecord;
 
 pub use studio_db_api::StateCheckFailure;
 
@@ -36,18 +33,7 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
     )?;
     connection.pragma_update(None, "query_only", "ON")?;
 
-    let mut tables = vec![
-        check_table::<crate::AccountTransferRecord>(&connection)?,
-        check_table::<AgentRecord>(&connection)?,
-        check_table::<crate::repositories::claude_records::ClaudeAttemptRecord>(&connection)?,
-        check_table::<crate::repositories::continuation::CapacityContinuationRecord>(&connection)?,
-        check_table::<MonitorRecord>(&connection)?,
-        check_table::<TerminalRecord>(&connection)?,
-        check_table::<UsageResumeRecord>(&connection)?,
-        check_table::<TranscriptItemRecord>(&connection)?,
-        check_table::<EventMetadataRecord>(&connection)?,
-        check_table::<crate::MoveRecord>(&connection)?,
-    ];
+    let mut tables = vec![];
     for registration in crate::canvas_schema::registry() {
         let report = (registration.check)(&connection)?;
         tables.push(StateCheckTable {
@@ -57,11 +43,11 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
             failures: report.failures,
         });
     }
-    tables.extend(check_system_tables(&connection)?);
     tables.extend(crate::repositories::federation_messaging::check_state(
         &connection,
     )?);
     tables.extend(crate::analytics_capture::check_state_readonly(state_dir)?);
+    tables.extend(crate::supervisor_schema::check_state_readonly(state_dir)?);
     Ok(StateCheckReport { tables })
 }
 
@@ -207,18 +193,6 @@ fn record_failure(
     *failures
         .entry((pointer.to_owned(), keyword.to_owned()))
         .or_default() += 1;
-}
-
-fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTable>> {
-    check_system_records(
-        connection,
-        &[
-            ("runtime_events", "status"),
-            ("runtime_execution_effects", "record"),
-            ("runtime_execution_runs", "record"),
-            ("runtime_tool_requests", "record"),
-        ],
-    )
 }
 
 fn check_system_records(
@@ -409,7 +383,7 @@ pub(crate) fn check_legacy_chat(
 ) -> rusqlite::Result<studio_db_api::StateCheck> {
     legacy_system_check(connection, "runtime_chat_messages", "deliveries")
 }
-fn legacy_system_check(
+pub(crate) fn legacy_system_check(
     connection: &Connection,
     table: &'static str,
     column: &'static str,

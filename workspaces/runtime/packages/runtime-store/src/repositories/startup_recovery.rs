@@ -161,6 +161,16 @@ impl Selection {
     }
 
     fn definition(&self) -> OwnedRuntimeIndexDefinition {
+        if self.table == "runtime_tool_requests" {
+            return OwnedRuntimeIndexDefinition {
+                name: self.index,
+                table: self.table,
+                create_sql: crate::queue_schema::index_sql::<crate::queue_schema::ToolRequestsRow>(
+                    self.index,
+                )
+                .replacen("INDEX ", "INDEX IF NOT EXISTS ", 1),
+            };
+        }
         OwnedRuntimeIndexDefinition {
             name: self.index,
             table: self.table,

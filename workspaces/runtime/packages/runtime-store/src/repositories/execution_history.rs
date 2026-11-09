@@ -1,4 +1,5 @@
 //! Execution evidence shares the lifecycle transaction; no commits or provider retries here.
+use crate::queue_schema::{ExecutionAttemptsRow, ExecutionRunsRow};
 use crate::request_results::{
     Admission, AdmittedRequest, RequestResultError, RequestResults, ResultEnvelope,
 };
@@ -6,6 +7,7 @@ use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequir
 use crate::{AgentRecord, StoreError, StoreResult};
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
+use studio_db_api::db_query;
 use studio_json::OwnedRawJson as RawValue;
 use studio_json::{Value, json};
 use studio_runtime_schema::persistence::{
@@ -319,12 +321,12 @@ impl ExecutionHistoryRepository {
         Ok(())
     }
     pub fn attempt(tx: &rusqlite::Connection, id: &str) -> StoreResult<Option<ExecutionAttempt>> {
-        tx.query_row(
-            "SELECT record FROM runtime_execution_attempts WHERE id=?1",
-            [id],
-            |r| r.get::<_, String>(0),
-        )
-        .optional()?
+        db_query!(
+            crate::peer_update_settings::canvas_read(tx),
+            ExecutionAttemptsRow,
+            scalar_raw(ExecutionAttemptsRow::RECORD),
+            filter(ExecutionAttemptsRow::ID.eq_ref(id))
+        )?
         .map(|s| {
             let mut attempt: ExecutionAttempt = studio_json::from_str(&s)
                 .map_err(|_| Self::invalid("runtime_execution_attempts", id))?;
@@ -350,12 +352,12 @@ impl ExecutionHistoryRepository {
         let Some(id) = pointer.run_id.as_deref() else {
             return Ok(None);
         };
-        tx.query_row(
-            "SELECT record FROM runtime_execution_runs WHERE id=?1",
-            [id],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
+        db_query!(
+            crate::peer_update_settings::canvas_read(tx),
+            ExecutionRunsRow,
+            scalar_raw(ExecutionRunsRow::RECORD),
+            filter(ExecutionRunsRow::ID.eq_ref(id))
+        )?
         .map(|raw| {
             let run = decode("runtime_execution_runs", id, &raw)?;
             if run.agent != agent.id.0 {

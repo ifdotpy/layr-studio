@@ -1142,3 +1142,34 @@ fn codecs_bind_original_blob_allocations_for_insert_update_and_column_assignment
         row.payload
     );
 }
+
+#[derive(DbTable)]
+#[db(table="camel_columns", database=Canvas, legacy_ddl="CREATE TABLE camel_columns(id TEXT PRIMARY KEY,\"lastEvent\" TEXT)")]
+struct CamelColumns {
+    #[db(key)]
+    id: String,
+    #[db(column = "lastEvent")]
+    last_event: Option<String>,
+}
+#[test]
+fn legacy_camelcase_column_override_keeps_exact_ddl_and_typed_crud() {
+    let mut db = Connection::open_in_memory().unwrap();
+    CamelColumns::descriptor().install_if_absent(&db).unwrap();
+    let actual: String = db
+        .query_row(
+            "SELECT sql FROM sqlite_master WHERE name='camel_columns'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(actual, CamelColumns::DDL);
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&CamelColumns {
+        id: "a".into(),
+        last_event: Some("exact".into()),
+    })
+    .unwrap();
+    let row = tx.get::<CamelColumns>(&("a".into(),)).unwrap().unwrap();
+    assert_eq!(row.last_event.as_deref(), Some("exact"));
+}

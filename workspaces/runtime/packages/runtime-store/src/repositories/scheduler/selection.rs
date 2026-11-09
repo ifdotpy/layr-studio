@@ -835,10 +835,10 @@ impl SchedulerRepository {
             crate::OwnedRuntimeIndexDefinition {
                 name: CHILD_RESULT_PENDING_INDEX,
                 table: "runtime_events",
-                create_sql: format!(
-                    "CREATE INDEX IF NOT EXISTS {CHILD_RESULT_PENDING_INDEX} \
-                     ON runtime_events(created) WHERE kind='child_result' AND status='pending'"
-                ),
+                create_sql: crate::queue_schema::index_sql::<crate::queue_schema::EventsRow>(
+                    CHILD_RESULT_PENDING_INDEX,
+                )
+                .replacen("INDEX ", "INDEX IF NOT EXISTS ", 1),
             },
             crate::OwnedRuntimeIndexDefinition {
                 name: AGENT_PARENT_INDEX,

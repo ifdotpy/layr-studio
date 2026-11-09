@@ -1,6 +1,8 @@
 //! Immutable exact replies. Call only after authorization, inside the owner's writer transaction.
+use crate::receipt_tables::RequestResultsRow;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use studio_db_api::db_query;
 use studio_runtime_schema::persistence::{
     REQUEST_RESULT_TTL_MS, RequestIdentity, RequestIdentityError, RequestReferenceKind,
 };
@@ -91,6 +93,7 @@ impl RequestResults {
             Option<i64>,
             i64,
         );
+        // Raw SQL: this narrow replay tuple is shorter than a separate projection owner.
         let saved: Option<SavedReference> = conn
             .query_row(
                 "SELECT signature,ref_kind,ref_id,ref_rev,created FROM request_results WHERE id=?1",
@@ -135,13 +138,12 @@ impl RequestResults {
         admitted: &AdmittedRequest,
         reference: &RequestReference,
     ) -> Result<RequestReference> {
-        let existing: Option<String> = tx
-            .query_row(
-                "SELECT signature FROM request_results WHERE id=?1",
-                [admitted.id()],
-                |row| row.get(0),
-            )
-            .optional()?;
+        let existing = db_query!(
+            crate::peer_update_settings::canvas_read(tx),
+            RequestResultsRow,
+            scalar(RequestResultsRow::SIGNATURE),
+            filter(RequestResultsRow::ID.eq_ref(admitted.id()))
+        )?;
         if let Some(signature) = existing {
             if signature != admitted.signature() {
                 return Err(RequestResultError::Conflict {

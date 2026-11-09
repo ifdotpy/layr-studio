@@ -315,6 +315,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     let mut revision_field = None::<Ident>;
     for field in &named.named {
         let field_name = field.ident.clone().expect("named field");
+        let mut explicit_column = false;
         let mut f = Field {
             column: field_name.to_string(),
             name: field_name,
@@ -339,6 +340,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
                 } else if meta.path.is_ident("private") {
                     f.private = true;
                 } else if meta.path.is_ident("column") {
+                    explicit_column = true;
                     f.column = meta.value()?.parse::<LitStr>()?.value();
                 } else if meta.path.is_ident("codec") {
                     f.codec = Some(meta.value()?.parse()?);
@@ -352,7 +354,13 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
                 Ok(())
             })?;
         }
-        if legacy_ddl.is_some() {
+        if legacy_ddl.is_some()
+            && explicit_column
+            && f.column.bytes().any(|c| c.is_ascii_uppercase())
+        {
+            // Legacy physical column names may use ASCII camelCase; SQL keywords remain forbidden.
+            identifier(&f.column.to_ascii_lowercase(), field)?;
+        } else if legacy_ddl.is_some() {
             identifier_shape(&f.column, field)?;
         } else {
             identifier(&f.column, field)?;
@@ -1418,6 +1426,38 @@ mod tests {
             assert!(identifier(valid, &span).is_ok());
         }
     }
+    #[test]
+    fn legacy_explicit_columns_accept_camelcase_without_relaxing_other_identifiers() {
+        let accepted = syn::parse_quote! {
+            #[db(table = "legacy_columns", database = Canvas, legacy_ddl = "CREATE TABLE legacy_columns(id TEXT PRIMARY KEY,\"lastEvent\" TEXT)")]
+            struct Legacy { #[db(key)] id: String, #[db(column = "lastEvent")] last_event: Option<String> }
+        };
+        let expanded = expand_table(&accepted)
+            .expect("legacy camelCase override")
+            .to_string();
+        assert!(expanded.contains("lastEvent"));
+        for input in [
+            syn::parse_quote! {
+                #[db(table = "new_columns", database = Canvas)]
+                struct New { #[db(key)] id: String, #[db(column = "lastEvent")] last_event: Option<String> }
+            },
+            syn::parse_quote! {
+                #[db(table = "legacy_columns", database = Canvas, legacy_ddl = "CREATE TABLE legacy_columns(id TEXT PRIMARY KEY,select TEXT)")]
+                struct Keyword { #[db(key)] id: String, #[db(column = "SeLeCt")] field: Option<String> }
+            },
+            syn::parse_quote! {
+                #[db(table = "legacy_columns", database = Canvas, legacy_ddl = "CREATE TABLE legacy_columns(id TEXT PRIMARY KEY)")]
+                struct Invalid { #[db(key)] id: String, #[db(column = "last-event")] field: Option<String> }
+            },
+            syn::parse_quote! {
+                #[db(table = "legacy_columns", database = Canvas, legacy_ddl = "CREATE TABLE legacy_columns(id TEXT PRIMARY KEY)")]
+                struct Implicit { #[db(key)] id: String, lastEvent: Option<String> }
+            },
+        ] {
+            assert!(expand_table(&input).is_err());
+        }
+    }
+
     #[test]
     fn rejects_unstable_enum_codes_and_invalid_table_descriptors() {
         for input in [

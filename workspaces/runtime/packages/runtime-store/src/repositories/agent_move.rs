@@ -4,7 +4,7 @@ use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequir
 use crate::{JsonRecord, RecordKeyMode, RecordQueryShape, StoreResult, Table};
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
-use studio_json::{Map, Value};
+use studio_json::Value;
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: &[],
@@ -23,10 +23,12 @@ pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     bootstrap_connection_functions: &[],
 };
 #[derive(Clone, Serialize, Deserialize)]
-pub struct MoveRecord {
+struct MoveRecordFields {
     id: String,
-    #[serde(flatten)]
-    fields: Map<String, Value>,
+}
+studio_runtime_schema::raw_json_payload! {
+    #[derive(Clone)]
+    pub struct MoveRecord { fields: MoveRecordFields, extensions }
 }
 impl JsonRecord for MoveRecord {
     type Id = String;
@@ -35,7 +37,7 @@ impl JsonRecord for MoveRecord {
     const KEY_MODE: RecordKeyMode = RecordKeyMode::PayloadId;
     const QUERY_SHAPE: RecordQueryShape = RecordQueryShape::None;
     fn record_key(&self) -> Option<&String> {
-        Some(&self.id)
+        Some(&self.fields.id)
     }
     // Remove this override once the record is closed and typed.
     fn encode_stored(&self, _: &rusqlite::Connection, row_id: &str) -> crate::StoreResult<String> {

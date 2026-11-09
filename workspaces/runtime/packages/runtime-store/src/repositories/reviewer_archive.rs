@@ -46,11 +46,10 @@ impl ReviewerArchiveRepository {
             crate::OwnedRuntimeIndexDefinition {
                 name: "runtime_event_reviewer_archive_delivery",
                 table: "runtime_events",
-                create_sql: "CREATE INDEX IF NOT EXISTS runtime_event_reviewer_archive_delivery \
-                    ON runtime_events(agent, \
-                        CASE WHEN json_valid(text) THEN json_extract(text,'$.agent_id') END,id) \
-                    WHERE kind='child_result' AND status='delivered'"
-                    .to_owned(),
+                create_sql: crate::queue_schema::index_sql::<crate::queue_schema::EventsRow>(
+                    "runtime_event_reviewer_archive_delivery",
+                )
+                .replacen("INDEX ", "INDEX IF NOT EXISTS ", 1),
             },
         ]
     }

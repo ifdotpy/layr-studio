@@ -1,6 +1,7 @@
 //! Indexed projections for the scheduler's idle-unload decisions.
 use crate::StoreResult;
 use rusqlite::Transaction;
+use studio_db_api::Table;
 
 pub(crate) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     for column in crate::agent_columns::AGENT_COLUMNS
@@ -50,14 +51,13 @@ pub(crate) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
             ))?;
         }
     }
+    if crate::schema::table_exists(tx, "runtime_account_transfers")? {
+        crate::receipt_tables::AccountTransferRow::descriptor().install_if_absent(tx)?;
+    }
     for (table, sql) in [
         (
             "runtime_agents",
             "CREATE INDEX IF NOT EXISTS runtime_agent_idle_unload ON runtime_agents(account_key,deleted_at,id,account_transfer_id,native_release_reset_pending,is_lead)",
-        ),
-        (
-            "runtime_account_transfers",
-            "CREATE INDEX IF NOT EXISTS runtime_transfer_target_account_key ON runtime_account_transfers(json_extract(record,'$.status'),target_account_key)",
         ),
         (
             "runtime_work",
@@ -93,6 +93,38 @@ fn add_column(tx: &Transaction<'_>, table: &str, name: &str, definition: &str) -
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
+
+    #[test]
+    fn receipt_transfer_upgrade_defers_lookup_until_target_column_exists() {
+        let mut db = crate::fresh_state::test_canvas();
+        db.execute_batch("DROP TABLE runtime_account_transfers; CREATE TABLE runtime_account_transfers(id TEXT PRIMARY KEY,record TEXT NOT NULL);").unwrap();
+        let raw = r#"{ "id":"transfer", "status":"pending", "targetAccountKey":"a", "evidence":{"n":1.0} }"#;
+        db.execute(
+            "INSERT INTO runtime_account_transfers VALUES('transfer',?1)",
+            [raw],
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        // The Oct 30 migration prepares features before Nov 6 adds the selector.
+        super::super::m2026_10_30_text_blobs::apply(&tx).unwrap();
+        let exists = |name: &str| {
+            tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=?1)",
+                [name],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap()
+        };
+        assert!(exists("runtime_account_transfer_status"));
+        assert!(!exists("runtime_transfer_target_account_key"));
+        super::apply(&tx).unwrap();
+        assert!(exists("runtime_transfer_target_account_key"));
+        crate::feature_schema::prepare(&tx).unwrap();
+        let (stored, target): (String, String) = tx.query_row("SELECT record,target_account_key FROM runtime_account_transfers WHERE id='transfer'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+        assert_eq!(stored, raw);
+        assert_eq!(target, "a");
+        tx.commit().unwrap();
+    }
 
     #[test]
     fn projections_match_legacy_values_and_migration_repeats() {

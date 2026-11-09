@@ -57,6 +57,10 @@ pub(crate) fn prepare_sync_schema(transaction: &Transaction<'_>) -> StoreResult<
 
     reconcile_derived_objects(transaction, &expected)?;
     crate::clock_schema::prepare_sync_tables(transaction)?;
+    crate::queue_schema::install_index::<crate::queue_schema::EventsRow>(
+        transaction,
+        "runtime_event_created_id",
+    )?;
     transaction.execute_batch(sections[0])?;
     transaction.execute_batch(sections[1])?;
     transaction.execute_batch(sections[2])?;
@@ -67,9 +71,9 @@ pub(crate) fn prepare_sync_schema(transaction: &Transaction<'_>) -> StoreResult<
 }
 
 pub(crate) fn prepare_runtime_event_indexes(transaction: &Transaction<'_>) -> StoreResult<()> {
-    transaction.execute_batch(
-        "CREATE INDEX IF NOT EXISTS runtime_events_agent_epoch_status_created \
-         ON runtime_events(agent,epoch,status,created,id)",
+    crate::queue_schema::install_index::<crate::queue_schema::EventsRow>(
+        transaction,
+        "runtime_events_agent_epoch_status_created",
     )?;
     crate::SchedulerRepository::prepare_account_wake_index(transaction)?;
     crate::SchedulerRepository::prepare_child_result_hold_indexes(transaction)?;
@@ -161,6 +165,10 @@ fn expected_catalog(
             .map_err(|error| schema_object_mismatch(parent, &error.to_string()))?;
     }
     crate::clock_schema::prepare_sync_tables(&expected)?;
+    crate::queue_schema::install_index::<crate::queue_schema::EventsRow>(
+        &expected,
+        "runtime_event_created_id",
+    )?;
     expected.execute_batch(sections[0])?;
     expected.execute_batch(sections[1])?;
     expected.execute_batch(sections[2])?;

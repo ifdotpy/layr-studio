@@ -1,7 +1,6 @@
 //! Durable per-account usage observations and their compact sync projections.
 
 use rusqlite::{Connection, OptionalExtension};
-use studio_json::Value;
 
 use crate::records::{RecordOrder, RecordPredicate, Table, UsageResumeRecord};
 use crate::schema::{SchemaRequirements, TableRequirement};
@@ -551,11 +550,9 @@ pub fn authentication_recovery_account_keys(
         )?
         .into_iter()
         .filter_map(|record| {
-            record
-                .account_key
-                .value()
-                .and_then(Value::as_str)
-                .map(str::to_owned)
+            record.account_key.value().and_then(
+                studio_runtime_schema::usage_resume_record::AccountIdentityEvidence::account_key,
+            )
         })
         .collect())
 }

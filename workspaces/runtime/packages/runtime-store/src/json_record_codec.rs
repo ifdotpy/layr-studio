@@ -24,6 +24,58 @@ macro_rules! exact_json_row_writes {
 }
 pub(crate) use exact_json_row_writes;
 
+/// Historical evidence whose storage admission precedes typed JSON decoding.
+/// Only owners that already admit malformed records may use this codec.
+pub struct LazyJson<T> {
+    raw: String,
+    owner: PhantomData<T>,
+}
+
+impl<T> From<String> for LazyJson<T> {
+    fn from(raw: String) -> Self {
+        Self {
+            raw,
+            owner: PhantomData,
+        }
+    }
+}
+
+impl<T> LazyJson<T> {
+    pub fn as_raw(&self) -> &str {
+        &self.raw
+    }
+    pub fn into_raw(self) -> String {
+        self.raw
+    }
+    pub fn decode(&self) -> studio_json::Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        studio_json::from_str(&self.raw)
+    }
+}
+
+impl<T> rusqlite::types::ToSql for LazyJson<T> {
+    fn to_sql(&self) -> rusqlite::Result<rusqlite::types::ToSqlOutput<'_>> {
+        self.raw.to_sql()
+    }
+}
+
+pub struct LazyJsonCodec<T>(PhantomData<T>);
+impl<T> Codec<LazyJson<T>> for LazyJsonCodec<T> {
+    type Stored = String;
+    type Encoded<'a>
+        = &'a str
+    where
+        T: 'a;
+    fn encode<'a>(_: &Connection, value: &'a LazyJson<T>) -> rusqlite::Result<&'a str> {
+        Ok(value.as_raw())
+    }
+    fn decode(_: &Connection, raw: String) -> rusqlite::Result<LazyJson<T>> {
+        Ok(raw.into())
+    }
+}
+
 /// An immutable typed JSON value together with its exact admitted storage text.
 /// Unlike `RawJsonRecord`, its owner need not carry a payload ID.
 #[derive(Clone, Debug, PartialEq)]
@@ -236,9 +288,53 @@ impl<R: JsonRecord> Codec<RawJsonRecord<R>> for JsonRecordCodec<R> {
     }
 }
 
+/// Historical object-map readers select the last member at every object depth.
+/// Normalize only the transient typed selectors; ExactJson retains the stored bytes.
+pub(crate) fn last_json_members(
+    raw: studio_json::OwnedRawJson,
+) -> studio_json::Result<studio_json::OwnedRawJson> {
+    let selectors = match raw.as_str().trim_start().as_bytes()[0] {
+        b'{' => {
+            let fields: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+                studio_json::from_str(raw.as_str())?;
+            let fields = fields
+                .into_iter()
+                .map(|(key, value)| Ok((key, last_json_members(value)?)))
+                .collect::<studio_json::Result<std::collections::BTreeMap<_, _>>>()?;
+            studio_json::to_string(&fields)?
+        }
+        b'[' => {
+            let values: Vec<studio_json::OwnedRawJson> = studio_json::from_str(raw.as_str())?;
+            let values = values
+                .into_iter()
+                .map(last_json_members)
+                .collect::<studio_json::Result<Vec<_>>>()?;
+            studio_json::to_string(&values)?
+        }
+        _ => return Ok(raw),
+    };
+    studio_json::OwnedRawJson::from_string(selectors)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lazy_history_evidence_preserves_bytes_before_typed_admission() {
+        let db = Connection::open_in_memory().unwrap();
+        for raw in ["not JSON", "null", " {\"id\":\"a\",\"future\":1.00} "] {
+            let evidence: LazyJson<ExtensionFields> = raw.to_owned().into();
+            assert_eq!(evidence.as_raw(), raw);
+            let stored: String = db
+                .query_row("SELECT ?1", [&evidence], |row| row.get(0))
+                .unwrap();
+            let decoded = LazyJsonCodec::<ExtensionFields>::decode(&db, stored).unwrap();
+            assert_eq!(decoded.as_raw(), raw);
+            assert_eq!(decoded.decode().is_ok(), raw.contains("\"id\""));
+            assert_eq!(decoded.into_raw(), raw);
+        }
+    }
     #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
     struct ExtensionFields {
         id: String,

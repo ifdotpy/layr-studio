@@ -7,7 +7,7 @@ use crate::StoreResult;
 // These tables are installed by Runtime and feature constructors, or on first
 // feature use, in canvas.sqlite3. The Rust feature schema owns their current DDL.
 // `runtime_budget` retains historical state and replay diagnostics.
-pub(crate) const FEATURE_SCHEMA: &str = r#"
+const FEATURE_SCHEMA_BEFORE_AGENT_INDEXES: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_work (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_work_root_status
                 ON runtime_work(json_extract(record,'$.rootId'),json_extract(record,'$.status'));
@@ -21,24 +21,16 @@ pub(crate) const FEATURE_SCHEMA: &str = r#"
                 WHERE json_extract(record,'$.archiveIntent.status')='pending';
             CREATE TABLE IF NOT EXISTS runtime_plans (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_annotations (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_analytics_projection (seq INTEGER PRIMARY KEY AUTOINCREMENT, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_event_meta (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_item_fulltext (id TEXT PRIMARY KEY, body TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_item_blobs (id TEXT PRIMARY KEY, hash TEXT NOT NULL, size INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_search_next_meta (
                 id TEXT PRIMARY KEY, agent TEXT NOT NULL, kind TEXT NOT NULL,
                 search_rowid INTEGER NOT NULL UNIQUE);
 
             CREATE TABLE IF NOT EXISTS runtime_checkpoints (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_lead_requests (id TEXT PRIMARY KEY, agent TEXT NOT NULL, signature TEXT NOT NULL);
 
             CREATE TABLE IF NOT EXISTS runtime_workspace_operations (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_workspace_operation_phase ON runtime_workspace_operations(
                 json_extract(record,'$.phase'), json_extract(record,'$.agent'));
-            CREATE TABLE IF NOT EXISTS runtime_tool_requests (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_tool_request_actor
-                ON runtime_tool_requests(json_extract(record,'$.agent'), json_extract(record,'$.updated') DESC);
             CREATE TABLE IF NOT EXISTS runtime_rules (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             -- What the last publication of each agent's views saw: the publisher compares
             -- it with the new row to find team, room and liveness changes, and keeps a
@@ -47,27 +39,12 @@ pub(crate) const FEATURE_SCHEMA: &str = r#"
             -- Owner, created time and running state of each task in the client task
             -- window, so a task write can place it without its document.
 
-
             -- sync_policy::TASK_WINDOW_EVICT_SQL scans live members, excluding retained tombstones.
-
 
             CREATE INDEX IF NOT EXISTS runtime_rule_ready_tick
                 ON runtime_rules(json_extract(record,'$.status'))
                 WHERE NOT COALESCE(json_extract(record,'$.inFlight'),0);
             CREATE TABLE IF NOT EXISTS runtime_budget (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_execution_runs (id TEXT PRIMARY KEY, agent TEXT NOT NULL, account TEXT NOT NULL, epoch INTEGER NOT NULL, thread TEXT, turn TEXT, created REAL NOT NULL, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_execution_run_agent ON runtime_execution_runs(agent,created DESC);
-            CREATE INDEX IF NOT EXISTS runtime_execution_run_created ON runtime_execution_runs(created DESC);
-            CREATE INDEX IF NOT EXISTS runtime_execution_run_message ON runtime_execution_runs(agent,thread,turn);
-            CREATE INDEX IF NOT EXISTS runtime_execution_run_native ON runtime_execution_runs(agent,account,thread,turn);
-            CREATE TABLE IF NOT EXISTS runtime_execution_attempts (id TEXT PRIMARY KEY, run TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_execution_attempt_run ON runtime_execution_attempts(run);
-            CREATE TABLE IF NOT EXISTS runtime_execution_inputs (run TEXT NOT NULL, event TEXT NOT NULL, PRIMARY KEY(run,event));
-            CREATE INDEX IF NOT EXISTS runtime_execution_input_event ON runtime_execution_inputs(event);
-            CREATE TABLE IF NOT EXISTS runtime_execution_effects (id TEXT PRIMARY KEY, run TEXT NOT NULL, kind TEXT NOT NULL, reference TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_execution_effect_run ON runtime_execution_effects(run);
-            CREATE TABLE IF NOT EXISTS runtime_execution_nodes (id TEXT PRIMARY KEY, run TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_execution_node_run ON runtime_execution_nodes(run);
         CREATE TABLE IF NOT EXISTS runtime_federation_inbox (
           peer_id TEXT NOT NULL, message_id TEXT NOT NULL, record TEXT NOT NULL,
           PRIMARY KEY(peer_id,message_id));
@@ -79,25 +56,8 @@ pub(crate) const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_room_member_first ON runtime_rooms(json_extract(record,'$.members[0]'));
             CREATE INDEX IF NOT EXISTS runtime_room_member_second ON runtime_rooms(json_extract(record,'$.members[1]'));
             CREATE INDEX IF NOT EXISTS runtime_room_many_members ON runtime_rooms(json_array_length(record,'$.members')) WHERE json_array_length(record,'$.members')>2;
-            CREATE TABLE IF NOT EXISTS user_terminals (id TEXT PRIMARY KEY, record TEXT NOT NULL, output TEXT NOT NULL, offset INTEGER NOT NULL, output_generation INTEGER NOT NULL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS user_terminal_output (terminal TEXT NOT NULL, start INTEGER NOT NULL, end INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (terminal,start));
-            CREATE INDEX IF NOT EXISTS user_terminal_output_end ON user_terminal_output (terminal,end);
-            CREATE TABLE IF NOT EXISTS user_terminal_event_cursor (terminal TEXT PRIMARY KEY, sequence INTEGER NOT NULL);
-            CREATE TABLE IF NOT EXISTS user_terminal_decoder_state (terminal TEXT PRIMARY KEY, pending BLOB NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_native_notices (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_agent_sweep_busy_v2 ON runtime_agents(account_key) WHERE provider='codex' AND (context_repair_phase IN ('preparing','submitted','unknown','ready') OR COALESCE(native_tool_refresh_id,'')!='');
-            CREATE INDEX IF NOT EXISTS runtime_agent_sweep_cleanup_v2 ON runtime_agents(source_cleanup_account_key,source_cleanup_thread_id) WHERE source_cleanup_phase IN ('planned','submitted');
-            CREATE INDEX IF NOT EXISTS runtime_agent_unsettled_legacy ON runtime_agents(id) WHERE legacy_unsettled=1;
-            CREATE INDEX IF NOT EXISTS runtime_idle_compaction_deadline ON runtime_agents(idle_episode_type,idle_episode_fire_at,id,idle_episode_id) WHERE idle_episode_type='object';
-            CREATE TABLE IF NOT EXISTS runtime_process_actions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_safety_retries (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_account_transfers(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS runtime_account_transfer_status ON runtime_account_transfers(json_extract(record,'$.status'));
-            CREATE TABLE IF NOT EXISTS runtime_capacity_retries(id TEXT PRIMARY KEY, agent TEXT NOT NULL, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_limit_reset_attempts (id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_limit_reset_requests (id TEXT PRIMARY KEY, attempt_id TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_agent_moves(id TEXT PRIMARY KEY, record TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS runtime_usage_resumes(id TEXT PRIMARY KEY, agent TEXT NOT NULL, record TEXT NOT NULL);
+"#;
+const FEATURE_SCHEMA_AFTER_AGENT_INDEXES: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_server_inbox (
                     id TEXT PRIMARY KEY, signature TEXT NOT NULL, state TEXT NOT NULL,
                     result TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, principal TEXT, actor TEXT);
@@ -113,21 +73,56 @@ pub(crate) const PAYLOAD_MIGRATIONS_SCHEMA: &str = "
 ";
 
 /// Every statement that [`prepare`] runs, in order.
-fn feature_statements() -> [&'static str; 3] {
-    [FEATURE_SCHEMA, SEARCH_SCHEMA, PAYLOAD_MIGRATIONS_SCHEMA]
+pub(crate) fn feature_schema_sql() -> String {
+    let mut sql = FEATURE_SCHEMA_BEFORE_AGENT_INDEXES.to_owned();
+    // Preserve the original feature-installation point and descriptor index order.
+    for index in crate::agent_tables::AgentsStorageRow::INDEXES
+        .iter()
+        .filter(|index| {
+            matches!(
+                index.name,
+                "runtime_agent_sweep_busy_v2"
+                    | "runtime_agent_sweep_cleanup_v2"
+                    | "runtime_agent_unsettled_legacy"
+                    | "runtime_idle_compaction_deadline"
+            )
+        })
+    {
+        sql.push_str(
+            &index
+                .sql
+                .replacen("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS ", 1),
+        );
+        sql.push(';');
+    }
+    sql.push_str(FEATURE_SCHEMA_AFTER_AGENT_INDEXES);
+    sql
+}
+
+fn feature_statements() -> [String; 3] {
+    [
+        feature_schema_sql(),
+        SEARCH_SCHEMA.to_owned(),
+        PAYLOAD_MIGRATIONS_SCHEMA.to_owned(),
+    ]
 }
 
 pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
+    crate::receipt_tables::prepare_features(transaction)?;
     crate::clock_schema::prepare_features(transaction)?;
     crate::settings_schema::prepare_features(transaction)?;
     for descriptor in [
+        crate::agent_tables::LeadRequestsStorageRow::descriptor(),
+        crate::agent_tables::AgentMovesStorageRow::descriptor(),
         GroupsRow::descriptor(),
         MessagesRow::descriptor(),
         GraphEdgesRow::descriptor(),
     ] {
         descriptor.install_if_absent(transaction)?;
     }
+    crate::item_monitor_terminal::prepare(transaction)?;
     crate::voice_storage::prepare(transaction)?;
+    crate::queue_schema::prepare_features(transaction)?;
     crate::access_tables::prepare_features(transaction)?;
     for descriptor in [
         crate::context_settings::AssetsStorageRow::descriptor(),
@@ -137,7 +132,7 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
         descriptor.install_if_absent(transaction)?;
     }
     for schema in feature_statements() {
-        transaction.execute_batch(schema)?;
+        transaction.execute_batch(&schema)?;
     }
     crate::peer_update_settings::canvas_tx(transaction).insert_new(
         &crate::settings_schema::AccessSettings {
@@ -146,7 +141,6 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
         },
     )?;
     crate::stored_text_compaction::prepare_batches(transaction)?;
-    transaction.execute_batch(RECEIPT_TRANSCRIPT_INDEX)?;
     install_summary_delete_triggers(transaction)?;
     // Removing a transcript or its metadata can change materialization even
     // though the event itself is unchanged. Journal that event through its
@@ -184,8 +178,6 @@ pub(crate) fn install_summary_delete_triggers(
     }
     Ok(())
 }
-
-pub(crate) const RECEIPT_TRANSCRIPT_INDEX: &str = "CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))";
 
 pub(crate) const RECEIPT_TRANSCRIPT_TRIGGERS: &str = "CREATE TRIGGER IF NOT EXISTS summary_receipt_meta_delete AFTER DELETE ON runtime_event_meta BEGIN
          UPDATE runtime_events SET id=id WHERE id=OLD.id AND kind='user'; END;

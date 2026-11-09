@@ -2,12 +2,15 @@
 
 use rusqlite::{Connection, OptionalExtension, params, types::Value as SqlValue};
 
+use crate::item_monitor_terminal::{TerminalCursorRow, TerminalDecoderRow};
 use crate::outbox::{Outbox, OutboxRow};
+use crate::peer_update_settings::{canvas_read, canvas_tx};
 use crate::records::{JsonRecord, Table, TerminalRecord};
 use crate::request_results::{Admission, AdmittedRequest, RequestResults, ResultEnvelope};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
 use serde::{Deserialize, Serialize};
+use studio_db_api::db_query;
 use studio_runtime_schema::persistence::{
     OutboxKind, OutboxStatus, OwnerKind, RequestIdentity, TerminalActionFailure,
 };
@@ -135,6 +138,7 @@ impl TerminalsRepository {
         Table::<TerminalRecord>::new(connection).list()
     }
 
+    // Raw SQL: snapshot decoding retains the existing stored-object error and output semantics.
     pub fn get(connection: &Connection, id: &str) -> StoreResult<Option<TerminalRow>> {
         let snapshot = connection
             .query_row(
@@ -220,6 +224,7 @@ impl TerminalsRepository {
         Ok(())
     }
 
+    // Raw SQL: the existing four-table delete is shorter than generated per-table operations.
     pub fn delete(transaction: &rusqlite::Transaction<'_>, id: &str) -> StoreResult<()> {
         transaction.execute("DELETE FROM user_terminal_output WHERE terminal=?1", [id])?;
         transaction.execute(
@@ -338,6 +343,7 @@ impl TerminalsRepository {
         Ok(())
     }
 
+    // Raw SQL: tuple projections and scalar chunk packing are shorter in the existing form.
     pub fn archive_chunks(
         connection: &Connection,
         id: &str,
@@ -404,25 +410,21 @@ impl TerminalsRepository {
     }
 
     pub fn event_cursor(connection: &Connection, id: &str) -> StoreResult<Option<i64>> {
-        connection
-            .query_row(
-                "SELECT sequence FROM user_terminal_event_cursor WHERE terminal=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(StoreError::from)
+        Ok(db_query!(
+            canvas_read(connection),
+            TerminalCursorRow,
+            scalar(TerminalCursorRow::SEQUENCE),
+            filter(TerminalCursorRow::TERMINAL.eq_ref(id))
+        )?)
     }
 
     pub fn decoder_pending(connection: &Connection, id: &str) -> StoreResult<Option<Vec<u8>>> {
-        connection
-            .query_row(
-                "SELECT pending FROM user_terminal_decoder_state WHERE terminal=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()
-            .map_err(StoreError::from)
+        Ok(db_query!(
+            canvas_read(connection),
+            TerminalDecoderRow,
+            scalar(TerminalDecoderRow::PENDING),
+            filter(TerminalDecoderRow::TERMINAL.eq_ref(id))
+        )?)
     }
 
     pub fn save_decoder_pending(
@@ -430,11 +432,10 @@ impl TerminalsRepository {
         id: &str,
         pending: &[u8],
     ) -> StoreResult<()> {
-        transaction.execute(
-            "INSERT INTO user_terminal_decoder_state(terminal,pending) VALUES (?1,?2) \
-             ON CONFLICT(terminal) DO UPDATE SET pending=excluded.pending",
-            params![id, pending],
-        )?;
+        canvas_tx(transaction).upsert(&TerminalDecoderRow {
+            terminal: id.into(),
+            pending: pending.into(),
+        })?;
         Ok(())
     }
 
@@ -443,11 +444,10 @@ impl TerminalsRepository {
         id: &str,
         sequence: i64,
     ) -> StoreResult<()> {
-        transaction.execute(
-            "INSERT INTO user_terminal_event_cursor(terminal,sequence) VALUES (?1,?2) \
-             ON CONFLICT(terminal) DO UPDATE SET sequence=excluded.sequence",
-            params![id, sequence],
-        )?;
+        canvas_tx(transaction).upsert(&TerminalCursorRow {
+            terminal: id.into(),
+            sequence,
+        })?;
         Ok(())
     }
 }

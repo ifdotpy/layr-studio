@@ -109,7 +109,7 @@ impl TurnState {
     }
 
     /// Strict decode of the `state` and `session` columns.
-    fn from_columns(state: &str, session: Option<String>) -> StoreResult<Self> {
+    pub(crate) fn from_columns(state: &str, session: Option<String>) -> StoreResult<Self> {
         let session = session.map(SessionId);
         match (state, session) {
             ("starting", None) => Ok(Self::Starting),
@@ -138,14 +138,14 @@ macro_rules! text_enum {
     ($ty:ty, $what:literal) => {
         impl $ty {
             /// Strict decode of the `state` column.
-            fn from_column(value: &str) -> StoreResult<Self> {
+            pub(crate) fn from_column(value: &str) -> StoreResult<Self> {
                 <$ty>::deserialize(
                     serde::de::value::StrDeserializer::<serde::de::value::Error>::new(value),
                 )
                 .map_err(|_| StoreError::RecordContract($what))
             }
             /// The wire value of the variant, as the check trigger lists it.
-            fn column(self) -> &'static str {
+            pub(crate) fn column(self) -> &'static str {
                 <$ty as VariantNames>::VARIANTS[self as usize]
             }
         }
@@ -198,33 +198,36 @@ fn in_list(values: &[&str]) -> String {
 
 /// Tables and indexes. Column lists are the contract of the row types above.
 pub fn tables_sql() -> String {
-    format!(
-        "CREATE TABLE IF NOT EXISTS {CHAT_TABLE}(
-            id TEXT PRIMARY KEY, state TEXT NOT NULL, status TEXT NOT NULL,
-            auto_wake INTEGER, usage_resume_enabled INTEGER, execution_mode TEXT, turn_epoch INTEGER) STRICT;
-         CREATE TABLE IF NOT EXISTS {SESSION_TABLE}(
-            id TEXT PRIMARY KEY, chat TEXT NOT NULL, thread_id TEXT NOT NULL,
-            account_key TEXT NOT NULL, state TEXT NOT NULL) STRICT;
-         CREATE INDEX IF NOT EXISTS chats_vm ON {CHAT_TABLE}(id) WHERE execution_mode='vm';
-         CREATE INDEX IF NOT EXISTS sessions_thread ON {SESSION_TABLE}(thread_id,account_key) WHERE state<>'ended';
-         CREATE INDEX IF NOT EXISTS sessions_chat ON {SESSION_TABLE}(chat);
-         CREATE TABLE IF NOT EXISTS {TURN_TABLE}(
-            id TEXT PRIMARY KEY, chat TEXT NOT NULL, state TEXT NOT NULL, session TEXT,
-            provider_turn TEXT, attempt TEXT, interrupt_ticket TEXT,
-            attempt_submitted INTEGER GENERATED ALWAYS AS (attempt->>'$.submitted') STORED,
-            attempt_connection_generation INTEGER GENERATED ALWAYS AS (attempt->>'$.connectionGeneration') STORED,
-            attempt_action TEXT GENERATED ALWAYS AS (attempt->>'$.action') STORED,
-            attempt_active_at_reservation INTEGER GENERATED ALWAYS AS (attempt->>'$.activeAtReservation') STORED) STRICT;
-         CREATE UNIQUE INDEX IF NOT EXISTS turns_one_attempt ON {TURN_TABLE}(chat) WHERE attempt IS NOT NULL;
-         CREATE INDEX IF NOT EXISTS turns_callback_context
-            ON {TURN_TABLE}(attempt_connection_generation,chat) WHERE attempt IS NOT NULL;
-         CREATE UNIQUE INDEX IF NOT EXISTS {ONE_UNFINISHED_TURN_INDEX}
-            ON {TURN_TABLE}(chat) WHERE state IN ({unfinished});
-         CREATE INDEX IF NOT EXISTS turns_provider_turn ON {TURN_TABLE}(chat,provider_turn);
-         {status_indexes}",
-        unfinished = in_list(&TurnState::UNFINISHED),
-        status_indexes = status_indexes_sql(),
-    )
+    use studio_db_api::Table;
+    let mut sql: String = [
+        crate::agent_tables::ChatsStorageRow::descriptor(),
+        crate::agent_tables::SessionsStorageRow::descriptor(),
+        crate::agent_tables::TurnsStorageRow::descriptor(),
+    ]
+    .into_iter()
+    .flat_map(|descriptor| {
+        // Upgrades create the thread index before the chat index, preserving planner tie-breaking.
+        std::iter::once(descriptor.ddl)
+            .chain((descriptor.name == SESSION_TABLE).then_some("CREATE INDEX sessions_thread ON sessions(thread_id,account_key) WHERE state<>'ended'"))
+            .chain(descriptor.indexes.iter().map(|index| index.sql))
+    })
+    .map(|sql| {
+        format!(
+            "{};",
+            sql.replacen("TABLE ", "TABLE IF NOT EXISTS ", 1).replacen(
+                "INDEX ",
+                "INDEX IF NOT EXISTS ",
+                1
+            )
+        )
+    })
+    .collect();
+    // Raw SQL: these delayed indexes are absent from the legacy cold-state catalog.
+    sql.push_str(&format!(
+        "CREATE INDEX IF NOT EXISTS chats_vm ON {CHAT_TABLE}(id) WHERE execution_mode='vm'; {}",
+        status_indexes_sql()
+    ));
+    sql
 }
 
 /// Names of the generated check triggers, in creation order.

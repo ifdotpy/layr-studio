@@ -1,4 +1,5 @@
 //! Read-only analytics projections over the Python runtime's persisted rows.
+//! Raw SQL retains short JSON/aggregate projections and the existing pagination/validation boundaries.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;

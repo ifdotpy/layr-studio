@@ -50,7 +50,6 @@ WHERE NOT EXISTS (SELECT 1 FROM sync_identity);
 -- window; the update columns are the runtime_events columns that refresh an event entity.
 -- event-window-size: 200
 -- event-update-columns: id,agent,kind,status,created,error
-CREATE INDEX IF NOT EXISTS runtime_event_created_id ON runtime_events(created DESC,id);
 CREATE TRIGGER IF NOT EXISTS sync_entity_event_INSERT
           AFTER INSERT ON runtime_events  BEGIN
           INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)

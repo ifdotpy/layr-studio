@@ -25,13 +25,10 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
     }
     // Evolved legacy tables precede compatibility installers, which keep them.
     connection.execute_batch(include_str!("catalog-canvas.sql"))?;
+    connection.execute_batch(&crate::feature_schema::feature_schema_sql())?;
     for sql in [
-        crate::feature_schema::FEATURE_SCHEMA,
         crate::feature_schema::SEARCH_SCHEMA,
-        crate::feature_schema::RECEIPT_TRANSCRIPT_INDEX,
         crate::feature_schema::RECEIPT_TRANSCRIPT_TRIGGERS,
-        crate::repositories::command_watermarks::SEND_ADMISSIONS_SCHEMA,
-        crate::schema::CALLBACK_ORIGIN_INDEX,
         crate::schema::RECEIPT_OWNER_INDEXES,
     ] {
         connection.execute_batch(sql)?;
@@ -52,24 +49,14 @@ fn canvas(connection: &Connection) -> crate::StoreResult<()> {
 }
 
 fn analytics(connection: &Connection) -> crate::StoreResult<()> {
-    for sql in [
-        crate::repositories::cost_aggregate::TABLES,
-        include_str!("catalog-analytics.sql"),
-        crate::repositories::cost_aggregate::INDEXES,
-        crate::repositories::cost_aggregate::SCOPE_INDEXES,
-        crate::stored_text_dictionary::DICTIONARY_SCHEMA,
-        crate::schema::PUBLICATION_OVERFLOW_SCHEMA,
-        crate::feature_schema::PAYLOAD_MIGRATIONS_SCHEMA,
-        crate::settings_schema::StoredTextBatches::DDL,
-    ] {
-        connection.execute_batch(sql)?;
-    }
-    crate::schema::ensure_analytics_limits_index(connection)
+    crate::analytics_schema::install(connection)?;
+    connection.execute_batch(crate::feature_schema::PAYLOAD_MIGRATIONS_SCHEMA)?;
+    connection.execute_batch(crate::settings_schema::StoredTextBatches::DDL)?;
+    Ok(())
 }
 
 fn supervisor(connection: &Connection) -> crate::StoreResult<()> {
-    connection.execute_batch(crate::supervisor_journal::SUPERVISOR_SCHEMA)?;
-    connection.execute_batch(crate::supervisor_journal::WRITTEN_SCHEMA)?;
+    crate::supervisor_schema::install(connection)?;
     Ok(())
 }
 

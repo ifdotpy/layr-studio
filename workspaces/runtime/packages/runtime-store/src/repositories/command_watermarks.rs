@@ -15,11 +15,14 @@ pub(crate) fn prepare(connection: &Connection) -> rusqlite::Result<()> {
 pub struct CommandWatermarks;
 
 /// Durable admission for a send, saved before its asset upload.
-pub const SEND_ADMISSIONS_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS command_send_admissions (id TEXT PRIMARY KEY, signature TEXT NOT NULL, created INTEGER NOT NULL) WITHOUT ROWID; CREATE INDEX IF NOT EXISTS command_send_admissions_created ON command_send_admissions(created,id);";
+pub(crate) fn prepare_send_admissions(connection: &Connection) -> rusqlite::Result<()> {
+    use studio_db_api::Table;
+    crate::agent_tables::SendAdmissionsStorageRow::descriptor().install_if_absent(connection)
+}
 
 impl CommandWatermarks {
     pub fn install_send_admissions(tx: &Transaction<'_>, now_ms: i64) -> rusqlite::Result<()> {
-        tx.execute_batch(SEND_ADMISSIONS_SCHEMA)?;
+        prepare_send_admissions(tx)?;
         tx.execute("INSERT INTO runtime_orchestration_settings(id,record) VALUES('global',json_object('sendAdmissionCutoverMs',?1)) ON CONFLICT(id) DO UPDATE SET record=json_insert(record,'$.sendAdmissionCutoverMs',?1)", [now_ms])?;
         Ok(())
     }

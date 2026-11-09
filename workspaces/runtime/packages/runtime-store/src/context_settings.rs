@@ -152,7 +152,7 @@ impl<'de> Deserialize<'de> for BudgetRecordPayload {
                     let replay_conflicts = extra
                         .remove("replayConflicts")
                         .map(|value| {
-                            let selectors = last_budget_members(value)?;
+                            let selectors = crate::json_record_codec::last_json_members(value)?;
                             studio_json::from_str(selectors.as_str())
                         })
                         .transpose()?
@@ -171,31 +171,6 @@ impl<'de> Deserialize<'de> for BudgetRecordPayload {
         };
         parse().map_err(D::Error::custom)
     }
-}
-
-/// The historical budget reader selected the last member at every object depth.
-/// Normalize only the transient typed selectors; ExactJson retains the stored bytes.
-fn last_budget_members(raw: OwnedRawJson) -> studio_json::Result<OwnedRawJson> {
-    let selectors = match raw.as_str().trim_start().as_bytes()[0] {
-        b'{' => {
-            let fields: BTreeMap<String, OwnedRawJson> = studio_json::from_str(raw.as_str())?;
-            let fields = fields
-                .into_iter()
-                .map(|(key, value)| Ok((key, last_budget_members(value)?)))
-                .collect::<studio_json::Result<BTreeMap<_, _>>>()?;
-            studio_json::to_string(&fields)?
-        }
-        b'[' => {
-            let values: Vec<OwnedRawJson> = studio_json::from_str(raw.as_str())?;
-            let values = values
-                .into_iter()
-                .map(last_budget_members)
-                .collect::<studio_json::Result<Vec<_>>>()?;
-            studio_json::to_string(&values)?
-        }
-        _ => return Ok(raw),
-    };
-    OwnedRawJson::from_string(selectors)
 }
 
 /// Status history is an array of the existing agent and monitor projections.

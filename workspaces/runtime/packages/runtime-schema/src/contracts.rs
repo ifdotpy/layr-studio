@@ -473,14 +473,24 @@ const PROVIDER_NATIVE_DISCRIMINATORS: &[(&str, crate::ProviderKind)] = &[
 
 // These SQL predicates must keep their source bytes; generation checks their
 // identity spelling against the runtime-schema ProviderKind owner instead.
-const PROVIDER_SQL_CONSUMERS: &[&str] = &[
-    "workspaces/runtime/packages/runtime-store/src/feature_schema.rs",
-    "workspaces/runtime/packages/runtime-store/src/repositories/scheduler/selection.rs",
+const PROVIDER_SQL_CONSUMERS: &[(&str, usize)] = &[
+    (
+        "workspaces/runtime/packages/runtime-store/src/agent_tables.rs",
+        2,
+    ),
+    (
+        "workspaces/runtime/packages/runtime-store/src/repositories/scheduler/selection.rs",
+        1,
+    ),
 ];
 
-fn check_provider_sql_consumer(path: &str, source: &str) -> Result<(), String> {
+fn check_provider_sql_consumer(
+    path: &str,
+    source: &str,
+    expected_count: usize,
+) -> Result<(), String> {
     let predicate = format!("provider='{}'", crate::ProviderKind::Codex.key());
-    if source.matches(&predicate).count() != 1 {
+    if source.matches(&predicate).count() != expected_count {
         return Err(format!(
             "{path} SQL predicate must match ProviderKind::Codex in runtime-schema/src/provider_kind.rs"
         ));
@@ -489,10 +499,10 @@ fn check_provider_sql_consumer(path: &str, source: &str) -> Result<(), String> {
 }
 
 fn check_provider_sql_parity(root: &Path) -> Result<(), String> {
-    for path in PROVIDER_SQL_CONSUMERS {
+    for (path, expected_count) in PROVIDER_SQL_CONSUMERS {
         let source =
             std::fs::read_to_string(root.join(path)).map_err(|error| format!("{path}: {error}"))?;
-        check_provider_sql_consumer(path, &source)?;
+        check_provider_sql_consumer(path, &source, *expected_count)?;
     }
     Ok(())
 }
@@ -2662,11 +2672,12 @@ process.stdout.write(JSON.stringify(JSON.parse(input).map(([method, params]) => 
                 "{error}"
             );
         }
-        for path in PROVIDER_SQL_CONSUMERS {
+        for (path, expected_count) in PROVIDER_SQL_CONSUMERS {
             let source = std::fs::read_to_string(root.join(path)).expect("SQL source");
             let predicate = format!("provider='{}'", crate::ProviderKind::Codex.key());
             let drifted = source.replace(&predicate, "provider='drift'");
-            let error = check_provider_sql_consumer(path, &drifted).expect_err("SQL drift");
+            let error = check_provider_sql_consumer(path, &drifted, *expected_count)
+                .expect_err("SQL drift");
             assert!(
                 error.contains(path) && error.contains("provider_kind.rs"),
                 "{error}"

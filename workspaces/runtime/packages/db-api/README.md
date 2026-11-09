@@ -45,7 +45,10 @@ Boolean decoding accepts only INTEGER 0/1; optional booleans additionally accept
 
 Legacy descriptors use `#[db(legacy_ddl = "CREATE TABLE …")]` and repeated
 `#[db(legacy_index = "CREATE INDEX …")]` to keep their exact physical SQL in one
-owner. New tables continue to derive DDL. `#[db(generated)]` fields are selected
+owner. Explicit column overrides on legacy DDL owners may use ASCII camelCase;
+case-variant SQL keywords and invalid identifiers remain rejected. The existing
+quoted lowercase legacy-keyword allowance stays unchanged. New tables continue
+to derive DDL. `#[db(generated)]` fields are selected
 but omitted from insert/upsert and cannot be assigned by `db_update!`.
 Generated DML always quotes identifiers. Non-optional Rust keys remain required
 even when legacy DDL permits NULL; state checks report those rows.

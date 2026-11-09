@@ -1,4 +1,5 @@
 //! Incremental per-root session-cost aggregate in analytics.sqlite3.
+//! Raw DML preserves short aggregate, rowid, JSON and NULL-sensitive queries without full fact decoding.
 //!
 //! Every `analytics_usage` write ([`apply_usage_write`]) updates, in the same
 //! transaction, `analytics_cost_rows` (the cost facts of each usage row and the
@@ -21,6 +22,7 @@
 //!
 //! Pricing is not stored: a reader prices the few groups with the current
 //! catalog, so a catalog change needs no invalidation.
+use studio_db_api::Table;
 use studio_runtime_schema::provider_kind::ProviderKind;
 
 use std::borrow::Cow;
@@ -37,33 +39,29 @@ use studio_runtime_schema::usage::{UsageEvidence, UsageObservation, UsageTokens}
 use crate::{CachedSql, StoreError, StoreResult};
 
 /// Current tables of the aggregate, installed during the analytics startup transaction.
-pub(crate) const TABLES: &str = "
-CREATE TABLE analytics_cost_rows (
-    id TEXT PRIMARY KEY, root TEXT NOT NULL, agent TEXT NOT NULL, thread TEXT, turn TEXT,
-    seq INTEGER NOT NULL, at REAL NOT NULL, model TEXT, account_key TEXT, response TEXT,
-    input REAL, cached REAL, cache_write REAL, output REAL, uncached INTEGER NOT NULL,
-    counted INTEGER NOT NULL, counted_model TEXT, eligible INTEGER, final_evidence INTEGER NOT NULL, cache_write_1h REAL);
-CREATE TABLE analytics_cost_groups (
-    root TEXT NOT NULL, model TEXT, account TEXT NOT NULL, input REAL, cached REAL,
-    cache_write REAL, output REAL, uncached INTEGER NOT NULL, count INTEGER NOT NULL, cache_write_1h REAL);
-";
+pub(crate) const TABLES: &str = studio_db_api::static_sql!(
+    crate::analytics_schema::AnalyticsCostRowsRow::DDL,
+    ";",
+    crate::analytics_schema::AnalyticsCostGroupsRow::DDL,
+    ";"
+);
 
 /// Indexes of the aggregate, built after the backfill loaded its rows.
-pub(crate) const INDEXES: &str = "
-CREATE INDEX analytics_cost_rows_scope ON analytics_cost_rows(root, agent, thread, turn);
-CREATE INDEX analytics_cost_rows_response ON analytics_cost_rows(root, thread, response)
-    WHERE response IS NOT NULL;
-";
+pub(crate) const INDEXES: &str = studio_db_api::static_sql!(
+    crate::analytics_schema::AnalyticsCostRowsRow::INDEXES[0].sql,
+    ";",
+    crate::analytics_schema::AnalyticsCostRowsRow::INDEXES[1].sql,
+    ";"
+);
 
 /// Seek response counterparts and eligible model-less facts within one root/agent scope.
 /// Install after compatibility columns exist; retire the broader model-less index once.
-pub(crate) const SCOPE_INDEXES: &str = "
-CREATE INDEX IF NOT EXISTS analytics_cost_rows_agent_response
-    ON analytics_cost_rows(root,agent,response) WHERE response IS NOT NULL;
-CREATE INDEX IF NOT EXISTS analytics_cost_rows_eligible_unmodeled
-    ON analytics_cost_rows(root,agent) WHERE model IS NULL AND eligible IS NOT 0;
-DROP INDEX IF EXISTS analytics_cost_rows_unmodeled;
-";
+pub(crate) const SCOPE_INDEXES: &str = studio_db_api::static_sql!(
+    crate::analytics_schema::AnalyticsCostRowsRow::INDEXES[2].sql,
+    ";",
+    crate::analytics_schema::AnalyticsCostRowsRow::INDEXES[3].sql,
+    ";"
+);
 
 const ROW_COLUMNS: &str = "id,agent,thread,turn,seq,at,model,account_key,response,\
     input,cached,cache_write,output,uncached,counted,counted_model,eligible,final_evidence,cache_write_1h";
@@ -838,8 +836,13 @@ pub fn install(db: &Connection) -> StoreResult<()> {
         db.execute_batch(TABLES)?;
         backfill(db)?;
     }
-    db.execute_batch(SCOPE_INDEXES)?;
-    db.execute_batch(crate::migrations::m2026_10_27_cost_index::INDEX)?;
+    db.execute_batch(&SCOPE_INDEXES.replace("CREATE INDEX ", "CREATE INDEX IF NOT EXISTS "))?;
+    db.execute_batch("DROP INDEX IF EXISTS analytics_cost_rows_unmodeled;")?;
+    db.execute_batch(&crate::migrations::m2026_10_27_cost_index::INDEX.replacen(
+        "CREATE INDEX ",
+        "CREATE INDEX IF NOT EXISTS ",
+        1,
+    ))?;
     Ok(())
 }
 

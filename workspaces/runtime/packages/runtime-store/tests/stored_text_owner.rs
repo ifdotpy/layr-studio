@@ -53,7 +53,10 @@ const FULLTEXT_MENTIONS: &[(&str, &str)] = &[
         "packages/runtime-services/src/stored_text_compaction.rs",
         "tests that insert plain rows and read them through StoredText",
     ),
-    ("packages/runtime-store/src/feature_schema.rs", "table DDL"),
+    (
+        "packages/runtime-store/src/item_monitor_terminal.rs",
+        "table descriptor preserves TEXT/BLOB bytes; tests decode bodies through StoredText",
+    ),
     (
         "packages/runtime-store/src/repositories/claude_retry.rs",
         "schema requirement: table and columns exist",
@@ -151,6 +154,10 @@ fn every_source_that_names_the_fulltext_table_is_a_reviewed_reader() {
 /// `analytics_items`, and why. Studio analytics connections read the table
 /// through the decoding view `temp.analytics_items`.
 const ANALYTICS_ITEMS_MENTIONS: &[(&str, &str)] = &[
+    (
+        "packages/runtime-store/src/analytics_schema.rs",
+        "table/index descriptors; isolated tests preserve TEXT/BLOB through AnalyticsItemEncoding; production DML remains in the main-table capture owner",
+    ),
     (
         "packages/runtime-store/src/stored_text.rs",
         "format owner; names its owned column",

@@ -3,8 +3,10 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::StoreResult;
+use crate::item_monitor_terminal::MonitorsRow;
 use crate::records::{MonitorRecord, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
+use studio_db_api::Table as _;
 
 pub use studio_runtime_schema::monitor_record::{
     MonitorOperationEvidence, MonitorOperationRecord as MonitorOperation,
@@ -69,6 +71,7 @@ pub(crate) const LEGACY_CREATED_EXPRESSION: &str = "CASE WHEN json_valid(record)
 const CREATED_EXPRESSION: &str = "monitor_created";
 const STUDIO_ERROR_PREDICATE: &str = "monitor_error_candidate=1";
 
+// Raw SQL: the indexed UNION preserves malformed repair candidates with a narrow projection.
 fn studio_error_candidates_sql() -> String {
     let predicate = STUDIO_ERROR_PREDICATE;
     format!(
@@ -92,14 +95,18 @@ impl MonitorsRepository {
     /// build pass over malformed rows of an older state.
     pub(crate) fn prepare_indexes(connection: &Connection) -> StoreResult<()> {
         if crate::schema::table_exists(connection, MONITOR_TABLE.name)? {
-            let predicate = STUDIO_ERROR_PREDICATE;
-            connection.execute_batch(&format!(
-                "CREATE INDEX IF NOT EXISTS {QUEUED_STREAM_INDEX} ON runtime_monitors(id) \
-                 WHERE {QUEUED_STREAM_PREDICATE};
-                 CREATE INDEX IF NOT EXISTS {STUDIO_ERROR_INDEX} \
-                 ON runtime_monitors({CREATED_EXPRESSION}) WHERE {predicate}; \
-                 DROP INDEX IF EXISTS {LEGACY_STUDIO_ERROR_INDEX}"
-            ))?;
+            for index in MonitorsRow::INDEXES
+                .iter()
+                .filter(|index| matches!(index.name, QUEUED_STREAM_INDEX | STUDIO_ERROR_INDEX))
+            {
+                connection.execute_batch(&index.sql.replacen(
+                    "CREATE INDEX ",
+                    "CREATE INDEX IF NOT EXISTS ",
+                    1,
+                ))?;
+            }
+            connection
+                .execute_batch(&format!("DROP INDEX IF EXISTS {LEGACY_STUDIO_ERROR_INDEX}"))?;
         }
         Ok(())
     }
@@ -122,6 +129,7 @@ impl MonitorsRepository {
         connection: &Connection,
         id: &str,
     ) -> StoreResult<Option<String>> {
+        // Raw SQL: the exact stored scalar is shorter here and admits malformed repair evidence.
         Ok(connection
             .prepare_cached("SELECT record FROM runtime_monitors WHERE id=?1")?
             .query_row([id], |row| row.get(0))
@@ -131,6 +139,7 @@ impl MonitorsRepository {
     /// `(id, record)` of the first monitor, by id, whose durable result stream
     /// (`streamQueue`) holds an undelivered event, whatever its status. The
     /// queued-stream index bounds this to monitors with pending events.
+    // Raw SQL: this tuple projection is shorter than a separate generated projection owner.
     pub fn first_queued_stream(connection: &Connection) -> StoreResult<Option<(String, String)>> {
         Ok(connection
             .prepare_cached(&format!(

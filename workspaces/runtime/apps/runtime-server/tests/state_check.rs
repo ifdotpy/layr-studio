@@ -14,6 +14,12 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     drop(db);
     let before = fs::read(&database).expect("fixture database is readable");
 
+    let supervisor_path = root.join("supervisor.sqlite3");
+    let supervisor = rusqlite::Connection::open(&supervisor_path).expect("supervisor fixture");
+    supervisor.execute_batch("CREATE TABLE events(handle TEXT, payload TEXT); INSERT INTO events VALUES('private-handle','invalid JSON')").expect("previously unvalidated history");
+    drop(supervisor);
+    let supervisor_before = fs::read(&supervisor_path).expect("supervisor bytes");
+
     let result = Command::new(
         std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
             .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
@@ -38,6 +44,28 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         .map(|table| table["table"].as_str().expect("table name is a string"))
         .collect();
     assert_eq!(names.len(), tables.len(), "one report per table");
+    for name in [
+        "handles",
+        "child_identities",
+        "degraded_handles",
+        "operations",
+        "operation_writes",
+        "events",
+        "recovery_events",
+        "supervisor_state",
+    ] {
+        assert!(names.contains(name), "supervisor registry coverage: {name}");
+        let table = tables
+            .iter()
+            .find(|table| table["table"] == name)
+            .expect("single report");
+        assert_eq!(table["row_count"], u64::from(name == "events"));
+        assert_eq!(table["rejected_count"], 0);
+    }
+    assert_eq!(
+        supervisor_before,
+        fs::read(supervisor_path).expect("unchanged supervisor")
+    );
     // Frozen reports on main c26e8fc0 before wave 2; new reports may be added freely.
     const PRE_WAVE_TWO_REPORTS: &[&str] = &[
         "runtime_access_clients",
