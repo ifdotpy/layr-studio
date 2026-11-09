@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  lstatSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import {
   GATE_LOCK_MAX_WAIT_ENV,
@@ -75,6 +81,10 @@ export async function withGateLock<T>(
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (
+        lstatSync(lockPath, { throwIfNoEntry: false })?.isDirectory() === false
+      )
+        throw new Error(`Gate lock ${lockPath} is not a gate lock folder`);
     }
     const holder = holderPid(lockPath);
     if (holder && isSelfOrAncestor(holder)) break;

@@ -33,6 +33,10 @@ fn templates_use_the_shared_delivery_layout_and_escape_paths() {
 #[test]
 fn systemd_verifies_rendered_unit_with_specifiers_in_path() {
     use std::{fs, os::unix::fs::PermissionsExt, process::ExitCode};
+    // User-manager verification requires a runtime directory.
+    if std::env::var_os("XDG_RUNTIME_DIR").is_none() {
+        return;
+    }
     if super::manager("systemd-analyze", &["--version"]).is_err() {
         return;
     }

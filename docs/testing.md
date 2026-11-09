@@ -354,6 +354,7 @@ gate started under the lock holder (for example the studio-ops wrapper scripts,
 which use the same lock) does not wait. Set `STUDIO_GATE_LOCK_MAX_WAIT_S` to stop
 waiting after that many seconds; the default is no limit. Focused commands do not
 take the lock. Owner: `gate-config.ts`; code: `gate-lock.ts`.
+If the lock path exists but is not a gate lock folder, the gate fails immediately and leaves it untouched.
 
 ### Test result cache
 

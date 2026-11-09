@@ -6,6 +6,9 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
+  rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,6 +22,62 @@ const hold = (lock: string, pid: number) => {
   writeFileSync(path.join(lock, "pid"), `${pid}\n`);
 };
 const fast = { pollMs: 10, noticeMs: 30 };
+
+test("a foreign lock file fails immediately and stays untouched", async () => {
+  const lock = fresh();
+  writeFileSync(lock, "foreign lock\n");
+  const lines: string[] = [];
+  let ran = false;
+  try {
+    await assert.rejects(
+      withGateLock(
+        async () => {
+          ran = true;
+        },
+        {
+          lockPath: lock,
+          ...fast,
+          maxWaitMs: 50,
+          write: (text) => lines.push(text),
+        },
+      ),
+      { message: `Gate lock ${lock} is not a gate lock folder` },
+    );
+    assert.equal(ran, false);
+    assert.deepEqual(lines, []);
+    assert.equal(readFileSync(lock, "utf8"), "foreign lock\n");
+  } finally {
+    rmSync(path.dirname(lock), { recursive: true, force: true });
+  }
+});
+
+test("a dangling lock symlink fails immediately and stays untouched", async () => {
+  const lock = fresh();
+  symlinkSync("missing", lock);
+  const lines: string[] = [];
+  let ran = false;
+  try {
+    await assert.rejects(
+      withGateLock(
+        async () => {
+          ran = true;
+        },
+        {
+          lockPath: lock,
+          ...fast,
+          maxWaitMs: 50,
+          write: (text) => lines.push(text),
+        },
+      ),
+      { message: `Gate lock ${lock} is not a gate lock folder` },
+    );
+    assert.equal(ran, false);
+    assert.deepEqual(lines, []);
+    assert.equal(readlinkSync(lock), "missing");
+  } finally {
+    rmSync(path.dirname(lock), { recursive: true, force: true });
+  }
+});
 
 test("a second runner waits while a live pid holds the lock, then runs", async () => {
   const lock = fresh();
