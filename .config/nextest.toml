@@ -83,6 +83,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
@@ -551,6 +552,7 @@ default-filter = '''
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
     (package(=studio-runtime-store) & kind(lib) & test(json_record_codec::tests::)) |
+    (package(=studio-runtime-schema) & kind(lib) & test(raw_json::tests::)) |
     package(=studio-db-api) |
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |

@@ -4,6 +4,7 @@ use crate::{StoreError, StoreResult};
 use rusqlite::Connection;
 use std::marker::PhantomData;
 use studio_db_api::Codec;
+pub use studio_runtime_schema::raw_json::{RawExtensions, deserialize_with_raw_extensions};
 
 /// An immutable typed JSON value together with its exact admitted storage text.
 /// Unlike `RawJsonRecord`, its owner need not carry a payload ID.
@@ -158,6 +159,28 @@ impl<R: JsonRecord> Codec<RawJsonRecord<R>> for JsonRecordCodec<R> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+    struct ExtensionFields {
+        id: String,
+    }
+    studio_runtime_schema::raw_json_payload!(
+        #[derive(Debug, PartialEq)]
+        struct ExtensionEvidence { fields: ExtensionFields, extra }
+    );
+    #[test]
+    fn exact_json_raw_extensions_preserve_outer_whitespace() {
+        let raw = " \n{\"id\":\"a\",\"future\": { \"x\": [1.00,2] }} \t";
+        let evidence = ExactJson::<ExtensionEvidence>::from_stored(raw.into()).unwrap();
+        assert_eq!(evidence.raw(), raw);
+        assert_eq!(evidence.value().fields.id, "a");
+        assert_eq!(
+            evidence.value().extra["future"].as_str(),
+            r#"{ "x": [1.00,2] }"#
+        );
+        assert!(
+            ExactJson::<ExtensionEvidence>::from_stored(r#"{"id":"a","id":"b"}"#.into()).is_err()
+        );
+    }
     use crate::peer_update_settings::{Canvas, canvas_tx};
     use crate::records::RecordQueryShape;
     use studio_db_api::{DbTable, Table};
