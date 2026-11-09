@@ -430,10 +430,7 @@ impl ProjectsRepository {
     }
 
     pub fn refresh_private_room(transaction: &Transaction<'_>, id: &str) -> StoreResult<()> {
-        let Some(mut room) =
-            crate::Table::<studio_runtime_schema::room_record::RoomRecord>::new(transaction)
-                .get(&id.to_owned())?
-        else {
+        let Some(mut room) = crate::interaction_tables::RoomRow::get(transaction, id)? else {
             return Ok(());
         };
         if room.project_deleted_at.is_some() {

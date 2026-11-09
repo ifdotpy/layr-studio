@@ -1,6 +1,9 @@
 //! Atomic persistence for question and complaint mutations.
 
-use rusqlite::{OptionalExtension, Transaction, params};
+use crate::interaction_tables::ComplaintRow;
+use crate::json_record_codec::RawJsonRecord;
+use crate::peer_update_settings::canvas_tx;
+use rusqlite::{OptionalExtension, Transaction};
 
 use crate::StoreResult;
 use crate::schema::{ConditionalTableRequirement, SchemaRequirements, TableRequirement};
@@ -29,6 +32,7 @@ pub struct QuestionsWriteRepository;
 
 impl QuestionsWriteRepository {
     pub fn complaint(transaction: &Transaction<'_>, id: &str) -> StoreResult<Option<String>> {
+        // Raw fingerprint reads intentionally bypass typed validation for change detection.
         Ok(transaction
             .query_row(
                 "SELECT record FROM runtime_complaints WHERE id=?1",
@@ -46,11 +50,10 @@ impl QuestionsWriteRepository {
                 id: id.to_owned(),
             });
         }
-        transaction.execute(
-            "INSERT INTO runtime_complaints(id,record) VALUES (?1,?2) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![id, record],
-        )?;
+        canvas_tx(transaction).upsert(&ComplaintRow {
+            id: id.to_owned(),
+            record: RawJsonRecord::from_stored(transaction, id, record.to_owned())?,
+        })?;
         Ok(())
     }
 
@@ -58,12 +61,10 @@ impl QuestionsWriteRepository {
         transaction: &Transaction<'_>,
         record: &crate::ComplaintRecord,
     ) -> StoreResult<()> {
-        let encoded = studio_json::to_string(record)?;
-        transaction.execute(
-            "INSERT INTO runtime_complaints(id,record) VALUES (?1,?2) \
-             ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![record.id(), encoded],
-        )?;
+        canvas_tx(transaction).upsert(&ComplaintRow {
+            id: record.id().to_owned(),
+            record: RawJsonRecord::from_record(transaction, record)?,
+        })?;
         Ok(())
     }
 }

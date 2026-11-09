@@ -11,6 +11,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         return Ok(());
     }
     let rows = {
+        // This legacy selection requires an anti-join and JSON method selectors.
         let mut statement = tx.prepare(
             "SELECT id,record FROM runtime_requests WHERE id NOT IN (SELECT id FROM approvals) \
              AND json_extract(record,'$.method') IN ('agent/asyncQuestion','item/tool/requestUserInput') \

@@ -565,6 +565,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
         return Ok(());
     }
     let rows = {
+        // Legacy envelopes precede the current owner and include deliberately unconvertible rows.
         let mut statement = tx.prepare(
             "SELECT id,record FROM runtime_requests WHERE id NOT IN (SELECT id FROM approvals) ORDER BY id",
         )?;

@@ -3390,7 +3390,8 @@ pub struct ChatMessage {
     pub sender: String,
     pub text: String,
     pub created: f64,
-    pub deliveries: Value,
+    pub deliveries:
+        crate::json_record_codec::ExactJson<crate::interaction_tables::ChatDeliveriesPayload>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]

@@ -3385,7 +3385,7 @@ mod tests {
                         sender: "user".into(),
                         text: message_text.into(),
                         created: 1.0,
-                        deliveries: json!({"agent":"queued"}),
+                        deliveries: studio_runtime_store::json_record_codec::ExactJson::from_stored(r#"{"agent":"queued"}"#.into())?,
                     },
                 )?;
                 assert!(SchedulerRepository::mark_submitted_identity(
@@ -3550,7 +3550,7 @@ mod tests {
                 assert!(agent.last_event.is_some());
                 let message = MessageRepository::get(tx, &ChatMessageId::from("message-1"))?
                     .expect("chat message remains");
-                assert_eq!(message.deliveries["agent"], "delivered");
+                assert_eq!(message.deliveries.value().get("agent").and_then(studio_runtime_store::interaction_tables::ChatDelivery::as_str).unwrap(), "delivered");
                 let (manifest_event, manifest): (String, String) = tx.query_row(
                     "SELECT event_id,record FROM runtime_context_manifests WHERE agent='agent' AND thread_id='' AND compactions=0",
                     [],
@@ -3629,7 +3629,15 @@ mod tests {
                 assert_eq!(event.status, "delivered");
                 let message = MessageRepository::get(tx, &ChatMessageId::from("message-1"))?
                     .expect("chat message remains");
-                assert_eq!(message.deliveries["agent"], "delivered");
+                assert_eq!(
+                    message
+                        .deliveries
+                        .value()
+                        .get("agent")
+                        .and_then(studio_runtime_store::interaction_tables::ChatDelivery::as_str)
+                        .unwrap(),
+                    "delivered"
+                );
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
             .await
@@ -3692,7 +3700,14 @@ mod tests {
                         MessageRepository::get(tx, &ChatMessageId::from("message-1"))?.unwrap();
                     assert_eq!(event.status, "delivered");
                     assert_eq!(
-                        message.deliveries["agent"],
+                        message
+                            .deliveries
+                            .value()
+                            .get("agent")
+                            .and_then(
+                                studio_runtime_store::interaction_tables::ChatDelivery::as_str
+                            )
+                            .unwrap(),
                         if delivered { "delivered" } else { "queued" },
                         "{payload}"
                     );

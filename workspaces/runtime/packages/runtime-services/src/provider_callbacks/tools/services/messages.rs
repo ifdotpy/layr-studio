@@ -311,10 +311,8 @@ pub(super) fn authorize_room(
             "The combined feed is available only in the user interface",
         ));
     }
-    let room =
-        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
-            .get(&id.to_owned())?
-            .ok_or(CallbackError::Invalid("Unknown agent chat"))?;
+    let room = studio_runtime_store::interaction_tables::RoomRow::get(tx, id)?
+        .ok_or(CallbackError::Invalid("Unknown agent chat"))?;
     authorize_room_with(tx, snapshot, &room, &mut authority, &directory)
 }
 fn authorize_room_with(
@@ -660,7 +658,9 @@ fn send_as_actor(
         }
         event_write::CallerAdmission::Fresh(admitted) => admitted,
     };
-    if let Some(mut previous) = studio_runtime_store::Table::<RoomRecord>::new(tx).get(&room_id)? {
+    if let Some(mut previous) =
+        studio_runtime_store::interaction_tables::RoomRow::get(tx, &room_id)?
+    {
         if previous.project_deleted_at.is_some() {
             return Err(CallbackError::Invalid(
                 "This project chat was permanently deleted",
@@ -680,7 +680,7 @@ fn send_as_actor(
         studio_runtime_schema::queue_command::Field::Value,
     );
     room.user_hidden = studio_runtime_schema::queue_command::Field::Value(false);
-    studio_runtime_store::Table::new(tx).put(&room)?;
+    studio_runtime_store::interaction_tables::RoomRow::put(tx, &room)?;
     // Python projects the room immediately after writing runtime_rooms, before
     // it enqueues recipient events. Keep the shared global sync sequence in
     // that order; the room is projected again below after the chat message
@@ -932,10 +932,7 @@ pub(super) fn peers(
     }
     agents.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
     let mut rooms = Vec::new();
-    for room in
-        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
-            .list()?
-    {
+    for room in studio_runtime_store::interaction_tables::RoomRow::list(tx)? {
         let visible = match authorize_room_with(tx, snapshot, &room, &mut authority, &directory) {
             Ok(()) => true,
             Err(CallbackError::Invalid(_)) => false,

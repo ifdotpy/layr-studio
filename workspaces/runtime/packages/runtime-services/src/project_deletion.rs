@@ -696,7 +696,7 @@ fn retire_rooms(
                 studio_json::Number::from_f64(now)
                     .ok_or(StoreError::RecordContract("invalid project deletion time"))?,
             );
-            studio_runtime_store::Table::new(tx).put(&room)?;
+            studio_runtime_store::interaction_tables::RoomRow::put(tx, &room)?;
             SyncDocumentsRepository::put_entity(tx, "room", &id, json!({}), true)?;
             retired.insert(id);
         }

@@ -1,4 +1,6 @@
+use crate::interaction_tables::{GraphEdgesRow, GroupsRow, MessagesRow};
 use rusqlite::Transaction;
+use studio_db_api::Table;
 
 use crate::StoreResult;
 
@@ -103,15 +105,6 @@ const FEATURE_SCHEMA: &str = r#"
             CREATE INDEX IF NOT EXISTS runtime_room_member_first ON runtime_rooms(json_extract(record,'$.members[0]'));
             CREATE INDEX IF NOT EXISTS runtime_room_member_second ON runtime_rooms(json_extract(record,'$.members[1]'));
             CREATE INDEX IF NOT EXISTS runtime_room_many_members ON runtime_rooms(json_array_length(record,'$.members')) WHERE json_array_length(record,'$.members')>2;
-            CREATE TABLE IF NOT EXISTS groups (
-                  id TEXT PRIMARY KEY, name TEXT NOT NULL, members TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS messages (
-                  id TEXT PRIMARY KEY, room TEXT NOT NULL, author TEXT NOT NULL,
-                  text TEXT NOT NULL, at REAL NOT NULL, deliveries TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS messages_room ON messages(room, at);
-            CREATE TABLE IF NOT EXISTS graph_edges (
-                  id TEXT PRIMARY KEY, source TEXT NOT NULL, target TEXT NOT NULL,
-                  kind TEXT NOT NULL, UNIQUE(source, target, kind));
             CREATE TABLE IF NOT EXISTS voice_sessions (
                   id TEXT PRIMARY KEY, agent TEXT NOT NULL, created REAL NOT NULL,
                   ended REAL, sdp TEXT, answer TEXT, native_thread TEXT,
@@ -214,6 +207,13 @@ fn feature_statements() -> [&'static str; 3] {
 }
 
 pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
+    for descriptor in [
+        GroupsRow::descriptor(),
+        MessagesRow::descriptor(),
+        GraphEdgesRow::descriptor(),
+    ] {
+        descriptor.install_if_absent(transaction)?;
+    }
     for schema in feature_statements() {
         transaction.execute_batch(schema)?;
     }

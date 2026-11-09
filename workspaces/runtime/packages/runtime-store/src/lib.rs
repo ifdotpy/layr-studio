@@ -8,6 +8,7 @@ pub mod domain;
 pub mod durable_seq;
 pub mod entity_publication;
 pub mod error_incidents;
+pub mod interaction_tables;
 pub mod item_seq_backfill;
 pub mod migrations;
 pub mod online_migration;

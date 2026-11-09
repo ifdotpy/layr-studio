@@ -5,6 +5,7 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_rooms")? {
         return Ok(());
     }
+    // JSON presence predicates distinguish missing fields from explicit null.
     tx.execute("UPDATE runtime_rooms SET record=json_set(record,'$.radio.direct',json('false')) WHERE json_valid(record) AND json_type(record,'$.radio')='object' AND (json_type(record,'$.radio.direct') IS NULL OR json_type(record,'$.radio.direct')='null')", [])?;
     tx.execute("UPDATE runtime_rooms SET record=json_set(record,'$.radio.active',NULL) WHERE json_valid(record) AND json_type(record,'$.radio')='object' AND json_type(record,'$.radio.active') IS NULL", [])?;
     Ok(())

@@ -6,6 +6,7 @@ pub fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_rooms")? {
         return Ok(());
     }
+    // Legacy JSON normalization requires JSON functions and must precede typed decoding.
     let mut statement = tx.prepare("SELECT id,record FROM runtime_rooms ORDER BY id")?;
     let rows = statement
         .query_map([], |row| {

@@ -214,12 +214,9 @@ impl FederationRepository {
                 "UPDATE runtime_federation_rooms SET record=?1 WHERE id=?2",
                 params![room.to_string(), room_id],
             )?;
-            if let Some(mut local) =
-                crate::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
-                    .get(&room_id)?
-            {
+            if let Some(mut local) = crate::interaction_tables::RoomRow::get(tx, &room_id)? {
                 local.status = Some(studio_runtime_schema::room_record::RoomStatus::Revoked);
-                crate::Table::new(tx).put(&local)?;
+                crate::interaction_tables::RoomRow::put(tx, &local)?;
             }
         }
         Ok(())
@@ -470,7 +467,7 @@ impl FederationRepository {
         local_room.peer_id = Some(peer_state.to_owned());
         local_room.peer_label =
             studio_runtime_schema::queue_command::Field::Value(peer_label.to_owned());
-        crate::Table::new(tx).put(&local_room)?;
+        crate::interaction_tables::RoomRow::put(tx, &local_room)?;
         let key = if approve {
             format!("room-accept:{room_id}")
         } else {

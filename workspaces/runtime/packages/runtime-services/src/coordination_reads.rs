@@ -268,14 +268,10 @@ pub fn chat_read(
             ids,
         )
     } else {
-        let stored =
-            studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(
-                connection,
-            )
-            .get(&room_id.to_owned())?
+        let stored = studio_runtime_store::interaction_tables::RoomRow::get(connection, room_id)?
             .ok_or(CoordinationError::InvalidRequest(
-                "Chat is unavailable or you are not a participant",
-            ))?;
+            "Chat is unavailable or you are not a participant",
+        ))?;
         let ctx = context.for_room_identity(
             connection,
             &stored.id,
@@ -434,10 +430,8 @@ pub fn delete_room(
     id: &str,
     _validate: impl Fn(&Value) -> bool,
 ) -> Result<Value, CoordinationError> {
-    let mut room =
-        studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
-            .get(&id.to_owned())?
-            .ok_or(CoordinationError::InvalidRequest("Unknown agent chat"))?;
+    let mut room = studio_runtime_store::interaction_tables::RoomRow::get(tx, id)?
+        .ok_or(CoordinationError::InvalidRequest("Unknown agent chat"))?;
     let changed = room.user_hidden != Field::Value(true);
     room.user_hidden = Field::Value(true);
     let directory = RoomDirectory::load(tx)?;
@@ -451,7 +445,7 @@ pub fn delete_room(
         .map_err(studio_runtime_store::StoreError::from)?
         .filter(|v| !v.members.is_empty());
     if changed {
-        studio_runtime_store::Table::new(tx).put(&room)?;
+        studio_runtime_store::interaction_tables::RoomRow::put(tx, &room)?;
     }
     let deleted = projection.is_none();
     if !deleted || tx.query_row("SELECT EXISTS(SELECT 1 FROM sync_entities WHERE collection='room' AND id=?1 AND deleted=0)", [id], |r| r.get::<_,bool>(0))? {

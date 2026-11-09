@@ -116,7 +116,7 @@ pub async fn convert(
         idle(db,&tree,true)?;
         let moving=tree.iter().filter(|a|a["rootId"]==source).collect::<Vec<_>>();
         let moving_ids=moving.iter().filter_map(|a|a["id"].as_str()).collect::<Vec<_>>();
-        let affected=studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(db).list()?.into_iter().filter(|r| matches!(r.root_id.as_ref().map(String::as_str),Some(root) if root==source.as_str() || root==target.as_str()) || r.members.as_ref().is_some_and(|m|m.iter().any(|id|moving_ids.contains(&id.as_str()) || teams.iter().any(|t|t["members"].as_array().is_some_and(|members|members.iter().any(|member|member.as_str()==Some(id.as_str()))))))).collect::<Vec<_>>();
+        let affected=studio_runtime_store::interaction_tables::RoomRow::list(db)?.into_iter().filter(|r| matches!(r.root_id.as_ref().map(String::as_str),Some(root) if root==source.as_str() || root==target.as_str()) || r.members.as_ref().is_some_and(|m|m.iter().any(|id|moving_ids.contains(&id.as_str()) || teams.iter().any(|t|t["members"].as_array().is_some_and(|members|members.iter().any(|member|member.as_str()==Some(id.as_str()))))))).collect::<Vec<_>>();
         let now=crate::projects::now_seconds();
         let mut next_teams=Vec::new();
         for team in &teams {
@@ -165,7 +165,7 @@ pub async fn convert(
             if room.root_id.as_ref().map(String::as_str)==Some(source.as_str()) {
                 room.root_id=studio_runtime_schema::queue_command::Field::Value(target.clone()); room.updated=studio_json::Number::from_f64(now).map_or(studio_runtime_schema::queue_command::Field::Null, studio_runtime_schema::queue_command::Field::Value);
                 if room.kind==studio_runtime_schema::room_record::RoomKind::Broadcast {room.kind=studio_runtime_schema::room_record::RoomKind::Private;room.members=Some(moving.iter().filter(|a|!truthy(a.get("deletedAt"))).filter_map(|a|a["id"].as_str().map(str::to_owned)).collect());room.custom_name=studio_runtime_schema::queue_command::Field::Value(format!("{} (previous broadcast)",src["name"].as_str().filter(|v|!v.is_empty()).unwrap_or(source.as_str())));}
-                studio_runtime_store::Table::new(db).put(&room)?;
+                studio_runtime_store::interaction_tables::RoomRow::put(db, &room)?;
             }
             crate::radio_runtime::publish_room(db,&room,&prepared)?;
         }

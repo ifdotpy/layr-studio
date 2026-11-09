@@ -233,12 +233,12 @@ pub(crate) fn refresh_project_rooms(
     for id in ids {
         ProjectsRepository::refresh_private_room(tx, &id)?;
         let room =
-            studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(tx)
-                .get(&id)?
-                .ok_or_else(|| ProjectsError::InvalidStored {
+            studio_runtime_store::interaction_tables::RoomRow::get(tx, &id)?.ok_or_else(|| {
+                ProjectsError::InvalidStored {
                     table: "runtime_rooms",
                     id: id.clone(),
-                })?;
+                }
+            })?;
         crate::radio_runtime::publish_room(tx, &room, prepared)?;
     }
     Ok(())

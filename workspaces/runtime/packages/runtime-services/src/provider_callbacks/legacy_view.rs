@@ -10,7 +10,10 @@ use studio_runtime_store::approvals;
 
 /// Seed one legacy-shaped card as a typed approval.
 /// A request of a provider turn without a turn id gets the fixture turn.
-pub fn insert(tx: &Connection, card: &Value) -> Result<(), studio_runtime_store::StoreError> {
+pub fn insert(
+    tx: &rusqlite::Transaction<'_>,
+    card: &Value,
+) -> Result<(), studio_runtime_store::StoreError> {
     let mut card = card.clone();
     let agent_level = matches!(
         card["method"].as_str(),

@@ -117,7 +117,7 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     )
     .expect("cross-runtime test operation succeeds")
     .expect("cross-runtime test operation succeeds");
-    assert_eq!(message.deliveries["delivery"], true);
+    assert!(delivery_flag(&message, "delivery"));
     drop(reader);
 
     let failure: Result<(), StoreError> = store
@@ -179,7 +179,17 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
                 &studio_runtime_store::ChatMessageId::from("cross-message"),
             )?
             .expect("record fixture contains the chat message");
-            message.deliveries["rustReceipt"] = json!(true);
+            let mut deliveries = message.deliveries.value().clone();
+            deliveries.set(
+                "rustReceipt".into(),
+                studio_runtime_store::interaction_tables::ChatDelivery::Legacy(
+                    studio_runtime_schema::raw_json::RawJson(
+                        studio_json::OwnedRawJson::from_string("true".into())?,
+                    ),
+                ),
+            );
+            message.deliveries =
+                studio_runtime_store::json_record_codec::ExactJson::from_value(&deliveries)?;
             MessageRepository::put(transaction, &message)?;
             Ok(())
         })
@@ -244,8 +254,8 @@ async fn fixture_records_are_readable_and_writable_in_rust() {
     )
     .expect("cross-runtime test operation succeeds")
     .expect("Rust-written message remains readable in Rust");
-    assert_eq!(message.deliveries["delivery"], true);
-    assert_eq!(message.deliveries["rustReceipt"], true);
+    assert!(delivery_flag(&message, "delivery"));
+    assert!(delivery_flag(&message, "rustReceipt"));
 
     assert_eq!(rust_numeric_rows.len(), NUMERIC_CREATED.len());
     let mut numeric_created = std::collections::BTreeMap::new();
@@ -508,4 +518,8 @@ async fn server_identity_registry_is_shared_by_store_connections_and_scoped_to_d
     drop(second);
     first_root.cleanup().expect("first fixture removed");
     second_root.cleanup().expect("second fixture removed");
+}
+
+fn delivery_flag(message: &studio_runtime_store::ChatMessage, key: &str) -> bool {
+    message.deliveries.value().get(key).is_some_and(|entry| matches!(entry, studio_runtime_store::interaction_tables::ChatDelivery::Legacy(raw) if raw.0.as_str() == "true"))
 }

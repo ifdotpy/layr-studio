@@ -13,3 +13,41 @@ impl JsonRecord for RoomRecord {
         Some(&self.id)
     }
 }
+
+impl crate::interaction_tables::RoomRow {
+    pub fn get(
+        connection: &rusqlite::Connection,
+        id: &str,
+    ) -> crate::StoreResult<Option<RoomRecord>> {
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .get::<Self>(&(id.to_owned(),))?
+            .map(|row| row.record.record().clone()))
+    }
+
+    pub fn put(
+        transaction: &rusqlite::Transaction<'_>,
+        record: &RoomRecord,
+    ) -> crate::StoreResult<()> {
+        crate::peer_update_settings::canvas_tx(transaction).upsert(&Self {
+            id: record.id.clone(),
+            record: crate::json_record_codec::RawJsonRecord::from_record(transaction, record)?,
+        })?;
+        Ok(())
+    }
+
+    pub fn list(connection: &rusqlite::Connection) -> crate::StoreResult<Vec<RoomRecord>> {
+        use studio_db_api::Table;
+        // Hidden rowid ordering is part of the historical list contract.
+        Ok(crate::peer_update_settings::canvas_read(connection)
+            .query::<Self>(
+                studio_db_api::static_sql!(
+                    crate::interaction_tables::RoomRow::SELECT,
+                    " ORDER BY rowid"
+                ),
+                &[],
+            )?
+            .into_iter()
+            .map(|row| row.record.record().clone())
+            .collect())
+    }
+}

@@ -15,7 +15,7 @@ use serde::Serialize;
 use studio_json::Value;
 use studio_runtime_schema::room_record::RoomRecord;
 use studio_runtime_store::{
-    AgentRecord, AgentRepository, RuntimeStore, StoreResult, SyncDocumentsRepository, Table,
+    AgentRecord, AgentRepository, RuntimeStore, StoreResult, SyncDocumentsRepository,
 };
 
 /// Counts rows changed by the retired-review cleanup.
@@ -68,7 +68,7 @@ fn remove_review_assignments_in_transaction(
                     continue;
                 }
             };
-            Table::<RoomRecord>::new(transaction).put(&record)?;
+            studio_runtime_store::interaction_tables::RoomRow::put(transaction, &record)?;
             remove_projection_field(transaction, "room", &record.id, "reviewTargets")?;
             counts.rooms += 1;
         }

@@ -90,6 +90,7 @@ default-filter = '''
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
+    (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
@@ -562,6 +563,7 @@ default-filter = '''
     package(=studio-db-api-derive) |
     (package(=studio-runtime-store) & kind(lib) & test(peer_update_settings::)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
+    (package(=studio-runtime-store) & kind(lib) & test(interaction_tables::tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |

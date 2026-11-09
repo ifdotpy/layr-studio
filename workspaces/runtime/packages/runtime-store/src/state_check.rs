@@ -8,10 +8,9 @@ use studio_json::Value;
 use crate::ProfileRecord;
 use crate::StoreResult;
 use crate::records::{
-    AgentRecord, AnnotationRecord, CheckpointRecord, ComplaintRecord, EventMetadataRecord,
-    JsonRecord, MonitorRecord, PlanRecord, RequestRecord, RuleRecord, TaskRecord, TerminalRecord,
-    TranscriptAssetRecord, TranscriptItemRecord, UsageResumeRecord, WorkItemRecord,
-    WorkspaceOperationRecord,
+    AgentRecord, AnnotationRecord, CheckpointRecord, EventMetadataRecord, JsonRecord,
+    MonitorRecord, PlanRecord, RuleRecord, TaskRecord, TerminalRecord, TranscriptAssetRecord,
+    TranscriptItemRecord, UsageResumeRecord, WorkItemRecord, WorkspaceOperationRecord,
 };
 
 pub use studio_db_api::StateCheckFailure;
@@ -47,8 +46,6 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
         check_table::<TaskRecord>(&connection)?,
         check_table::<PlanRecord>(&connection)?,
         check_table::<AnnotationRecord>(&connection)?,
-        check_table::<RequestRecord>(&connection)?,
-        check_table::<ComplaintRecord>(&connection)?,
         check_table::<CheckpointRecord>(&connection)?,
         check_table::<MonitorRecord>(&connection)?,
         check_table::<TerminalRecord>(&connection)?,
@@ -219,16 +216,26 @@ fn record_failure(
 }
 
 fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTable>> {
+    let mut reports = check_system_records(
+        connection,
+        &[
+            ("runtime_events", "status"),
+            ("runtime_execution_effects", "record"),
+            ("runtime_execution_runs", "record"),
+            ("runtime_tool_requests", "record"),
+        ],
+    )?;
+    reports.push(check_sync_entities(connection)?);
+    Ok(reports)
+}
+
+fn check_system_records(
+    connection: &Connection,
+    tables: &[(&'static str, &'static str)],
+) -> StoreResult<Vec<StateCheckTable>> {
     use crate::system_reads;
     let mut reports = Vec::new();
-    for (table, column) in [
-        ("runtime_chat_messages", "deliveries"),
-        ("runtime_events", "status"),
-        ("runtime_execution_effects", "record"),
-        ("runtime_execution_runs", "record"),
-        ("runtime_rooms", "record"),
-        ("runtime_tool_requests", "record"),
-    ] {
+    for &(table, column) in tables {
         let mut report = StateCheckTable {
             table,
             row_count: 0,
@@ -296,7 +303,6 @@ fn check_system_tables(connection: &Connection) -> StoreResult<Vec<StateCheckTab
             .collect();
         reports.push(report);
     }
-    reports.push(check_sync_entities(connection)?);
     Ok(reports)
 }
 
@@ -401,6 +407,31 @@ fn check_sync_entities(connection: &Connection) -> StoreResult<StateCheckTable> 
     Ok(report)
 }
 
+pub(crate) fn check_legacy_rooms(
+    connection: &Connection,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    legacy_system_check(connection, "runtime_rooms", "record")
+}
+pub(crate) fn check_legacy_chat(
+    connection: &Connection,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    legacy_system_check(connection, "runtime_chat_messages", "deliveries")
+}
+fn legacy_system_check(
+    connection: &Connection,
+    table: &'static str,
+    column: &'static str,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    let report = check_system_records(connection, &[(table, column)])
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?
+        .remove(0);
+    Ok(studio_db_api::StateCheck {
+        row_count: report.row_count,
+        rejected_count: report.rejected_count,
+        failures: report.failures,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -464,7 +495,8 @@ mod tests {
             .execute("INSERT INTO runtime_rooms VALUES(1, 7)", [])
             .unwrap();
         crate::system_reads::VALIDATE_CALLS.with(|count| count.set(0));
-        let reports = super::check_system_tables(&connection).unwrap();
+        let reports =
+            super::check_system_records(&connection, &[("runtime_rooms", "record")]).unwrap();
         assert_eq!(
             crate::system_reads::VALIDATE_CALLS.with(|count| count.get()),
             0

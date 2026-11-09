@@ -695,8 +695,11 @@ mod tests {
             .expect("monitor deletes");
         {
             use studio_runtime_schema::approvals as typed;
+            let transaction = connection
+                .unchecked_transaction()
+                .expect("fixture transaction");
             crate::approvals::create(
-                &connection,
+                &transaction,
                 crate::approvals::NewApproval {
                     id: typed::ApprovalId("r".into()),
                     agent: typed::AgentId("a".into()),
@@ -719,6 +722,7 @@ mod tests {
                 typed::Timestamp(1.0),
             )
             .expect("request writes");
+            transaction.commit().expect("fixture commit");
         }
         assert!(
             thread_in_use(&connection),

@@ -5,6 +5,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_requests")? {
         return Ok(());
     }
+    // Legacy malformed envelopes must remain untouched rather than fail descriptor decoding.
     let mut query = tx.prepare("SELECT id,record FROM runtime_requests")?;
     let mut rows = query.query([])?;
     while let Some(row) = rows.next()? {

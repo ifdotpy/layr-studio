@@ -1340,7 +1340,9 @@ mod tests {
     }
 
     /// One chat turn with a pending and an answering approval. Returns the turn id.
-    fn turn_with_open_approvals(db: &Connection) -> String {
+    fn turn_with_open_approvals(connection: &Connection) -> String {
+        let tx = connection.unchecked_transaction().unwrap();
+        let db = &tx;
         use studio_runtime_schema::approvals::{
             Answer, ApprovalId, CommandId, Decision, Timestamp as At,
         };
@@ -1363,6 +1365,7 @@ mod tests {
             CommandId("cmd".into()),
         )
         .unwrap();
+        tx.commit().unwrap();
         turn
     }
 

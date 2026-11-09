@@ -925,7 +925,10 @@ mod owner_matrix_tests {
         use studio_runtime_schema::approvals::{
             Answer, ApprovalId, ApprovalState, Deferral, Principal, Timestamp,
         };
-        let db = studio_runtime_store::test_canvas();
+        let connection = studio_runtime_store::test_canvas();
+        let db = connection
+            .unchecked_transaction()
+            .expect("fixture transaction");
         put(&db, "root", None, "approval", &json!({}));
         for epoch in [None, Some(1), Some(2)] {
             for state in ["pending", "answered", "deferred"] {
@@ -974,7 +977,10 @@ mod owner_matrix_tests {
     #[test]
     fn v5_orphan_input_is_local_and_empty_root_never_propagates_to_an_empty_identity() {
         use studio_runtime_schema::approvals::{AgentId, Timestamp};
-        let db = studio_runtime_store::test_canvas();
+        let connection = studio_runtime_store::test_canvas();
+        let db = connection
+            .unchecked_transaction()
+            .expect("fixture transaction");
         put(
             &db,
             "orphan",
@@ -1036,7 +1042,10 @@ mod owner_matrix_tests {
             approvals::{AgentId, Timestamp},
             task_record::{NonnegativeNumber, TaskRecord, TaskType},
         };
-        let db = studio_runtime_store::test_canvas();
+        let connection = studio_runtime_store::test_canvas();
+        let db = connection
+            .unchecked_transaction()
+            .expect("fixture transaction");
         put(&db, "root", None, "waiting", &json!({}));
         put(
             &db,

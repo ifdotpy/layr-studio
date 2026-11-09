@@ -5,6 +5,7 @@ pub(super) fn apply(tx: &Transaction<'_>) -> StoreResult<()> {
     if !crate::schema::table_exists(tx, "runtime_complaints")? {
         return Ok(());
     }
+    // Legacy JSON normalization supplies required fields before typed decoding.
     let mut query = tx.prepare("SELECT id,json_insert(json_remove(record,'$.legacyStatus','$.legacyLeadReadAt'),'$.author',null,'$.leadId',null,'$.text',null,'$.recipient','lead','$.version',null,'$.created',null,'$.updated',null,'$.readAt',null,'$.responses',json('[]')) FROM runtime_complaints")?;
     let mut rows = query.query([])?;
     while let Some(row) = rows.next()? {

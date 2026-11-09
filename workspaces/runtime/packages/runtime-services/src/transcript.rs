@@ -725,7 +725,7 @@ fn search_item_in(
         .optional()
         .map_err(|_| TranscriptError::Store)?
     {
-        let room_record = studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(connection).get(&room)?
+        let room_record = studio_runtime_store::interaction_tables::RoomRow::get(connection, &room)?
             .ok_or(TranscriptError::ChatUnavailable)?;
         if room_view(connection, directory, &room_record)?.is_none() {
             return Err(TranscriptError::ChatUnavailable);
@@ -951,11 +951,7 @@ pub(crate) fn search_work_in_transaction(
         }
     }
     let mut readable = std::collections::BTreeSet::new();
-    for room in studio_runtime_store::Table::<studio_runtime_schema::room_record::RoomRecord>::new(
-        connection,
-    )
-    .list()?
-    {
+    for room in studio_runtime_store::interaction_tables::RoomRow::list(connection)? {
         let Some(view) = room_view(connection, directory, &room)? else {
             continue;
         };

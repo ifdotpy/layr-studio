@@ -1,9 +1,12 @@
 //! Persisted questions, complaints, and workspace checkpoint records.
 
 use crate::StoreResult;
+use crate::interaction_tables::{ComplaintRow, RequestRow};
+use crate::peer_update_settings::canvas_read;
 use crate::records::{AgentRecord, CheckpointRecord, ComplaintRecord, RequestRecord, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use rusqlite::{Connection, OptionalExtension};
+use studio_db_api::Table as _;
 
 const TABLES: &[TableRequirement] = &[
     TableRequirement {
@@ -100,23 +103,33 @@ impl QuestionsReadsRepository {
     }
 
     pub fn questions(connection: &Connection) -> StoreResult<Vec<RequestRecord>> {
-        Table::<RequestRecord>::new(connection).list()
+        // Hidden rowid ordering is part of the historical list contract.
+        Ok(canvas_read(connection)
+            .query::<RequestRow>(
+                studio_db_api::static_sql!(RequestRow::SELECT, " ORDER BY rowid"),
+                &[],
+            )?
+            .into_iter()
+            .map(|row| row.record.record().clone())
+            .collect())
     }
 
     pub fn complaint(connection: &Connection, id: &str) -> StoreResult<Option<ComplaintRecord>> {
-        Table::<ComplaintRecord>::new(connection).get(&id.to_owned())
+        Ok(canvas_read(connection)
+            .get::<ComplaintRow>(&(id.to_owned(),))?
+            .map(|row| row.record.record().clone()))
     }
 
     /// Raw stored bytes for change detection; the view reader validates the record.
     pub fn complaint_fingerprint(connection: &Connection, id: &str) -> StoreResult<Option<String>> {
-        connection
+        // Raw fingerprint reads intentionally bypass typed validation for change detection.
+        Ok(connection
             .query_row(
                 "SELECT record FROM runtime_complaints WHERE id=?1",
                 [id],
                 |row| row.get(0),
             )
-            .optional()
-            .map_err(Into::into)
+            .optional()?)
     }
 
     pub fn checkpoints(connection: &Connection) -> StoreResult<Vec<CheckpointRecord>> {

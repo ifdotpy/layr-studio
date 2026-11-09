@@ -85,7 +85,6 @@ mod tests {
     use rusqlite::Connection;
     use std::fs;
     use std::path::Path;
-    use studio_json::Value;
     use studio_json::json;
     use sync_documents::SyncDocumentsRepository;
 
@@ -110,7 +109,7 @@ mod tests {
                 .map(|column| {
                     if *column == "id" {
                         format!("\"{column}\" TEXT PRIMARY KEY")
-                    } else if *column == "seq" {
+                    } else if matches!(*column, "seq" | "rev") {
                         format!("\"{column}\" INTEGER NOT NULL DEFAULT 1")
                     } else {
                         format!("\"{column}\"")
@@ -237,9 +236,11 @@ mod tests {
             sender: String::new(),
             text: String::new(),
             created: 0.0,
-            deliveries: Value::Null,
+            deliveries: crate::json_record_codec::ExactJson::from_stored("null".into()).unwrap(),
         };
-        MessageRepository::put(&db, &message).expect("message write uses declared objects");
+        let message_tx = db.unchecked_transaction().unwrap();
+        MessageRepository::put(&message_tx, &message).expect("message write uses declared objects");
+        message_tx.commit().unwrap();
         MessageRepository::get(&db, &message.id).expect("message read uses declared objects");
 
         let db = database_with(&account_state::REQUIREMENTS);

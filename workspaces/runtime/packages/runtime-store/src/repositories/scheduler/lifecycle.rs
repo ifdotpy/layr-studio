@@ -3175,18 +3175,23 @@ impl SchedulerRepository {
             {
                 continue;
             }
-            if let Some(delivery) = message
-                .deliveries
-                .as_object_mut()
-                .and_then(|deliveries| deliveries.get_mut(agent_id))
+            let mut deliveries = message.deliveries.value().clone();
+            if let Some(delivery) = deliveries.get_mut(agent_id)
                 && (matches!(delivery.as_str(), Some("queued" | "pending"))
                     || (status != "delivered" && delivery.as_str() == Some("delivered")))
             {
-                *delivery = json!(if status == "uncertain" {
-                    "pending"
-                } else {
-                    status
-                });
+                *delivery = crate::interaction_tables::ChatDelivery::Status(
+                    (if status == "uncertain" {
+                        "pending"
+                    } else {
+                        status
+                    })
+                    .parse()
+                    .map_err(|_| {
+                        crate::StoreError::RecordContract("unknown chat delivery status")
+                    })?,
+                );
+                message.deliveries = crate::json_record_codec::ExactJson::from_value(&deliveries)?;
                 crate::MessageRepository::put(transaction, &message)?;
             }
         }
