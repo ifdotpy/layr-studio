@@ -2500,7 +2500,7 @@ mod tests {
         hints.observe(&store);
         for &(id, provider, account, parent) in agents {
             let agent = AgentRecord::from_value(json!({"compactions":0,
-                "id":id, "rootId":id, "parentId":parent, "name":"Registry fixture",
+                "id":id, "rootId":parent.unwrap_or(id), "parentId":parent, "name":"Registry fixture",
                 "epoch":0, "status":"queued", "autoWake":true, "inFlight":false,
                 "accountHistory":[], "provider":provider,
                 "accountKey":account, "threadId":id, "turnId":"turn", "effort":"high",
