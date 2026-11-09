@@ -19,8 +19,10 @@ pub(crate) fn prepare_peer_update_settings(connection: &Connection) -> StoreResu
     Ok(())
 }
 
+pub(crate) const PUBLICATION_OVERFLOW_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS analytics_publication_overflow_receipts (receipt_id TEXT PRIMARY KEY,analytics_overflow INTEGER NOT NULL,publication_overflow INTEGER NOT NULL)";
+
 pub(crate) fn prepare_publication_overflow_receipts(connection: &Connection) -> StoreResult<()> {
-    connection.execute_batch("CREATE TABLE IF NOT EXISTS analytics_publication_overflow_receipts (receipt_id TEXT PRIMARY KEY,analytics_overflow INTEGER NOT NULL,publication_overflow INTEGER NOT NULL)")?;
+    connection.execute_batch(PUBLICATION_OVERFLOW_SCHEMA)?;
     Ok(())
 }
 
@@ -106,7 +108,7 @@ pub(crate) fn prepare_callback_origin(connection: &Connection) -> rusqlite::Resu
             "ALTER TABLE runtime_tool_requests ADD COLUMN origin_key {definition}"
         ))?;
     }
-    connection.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS runtime_tool_request_origin ON runtime_tool_requests(origin_key) WHERE origin_key IS NOT NULL")
+    connection.execute_batch(CALLBACK_ORIGIN_INDEX)
 }
 
 pub(crate) fn prepare_receipt_owners(connection: &Connection) -> StoreResult<()> {
@@ -136,13 +138,7 @@ pub(crate) fn prepare_receipt_owners(connection: &Connection) -> StoreResult<()>
     if old_archive_index.is_some_and(|sql| !sql.contains("archive_next_at")) {
         connection.execute_batch("DROP INDEX runtime_work_archive_due")?;
     }
-    connection.execute_batch(
-        "CREATE INDEX IF NOT EXISTS runtime_agent_holds ON runtime_agents(id) WHERE hold_status!='clear';
-         CREATE INDEX IF NOT EXISTS runtime_work_archive_due ON runtime_work(archive_next_at,id) WHERE archive_status IN ('pending','retryable','unknown');
-         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_actor ON runtime_tool_requests(agent,updated DESC,id);
-         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_status ON runtime_tool_requests(status,agent,id);
-         CREATE UNIQUE INDEX IF NOT EXISTS runtime_execution_terminal_source ON runtime_execution_attempts(json_extract(record,'$.terminalRepair.source.accountKey'),json_extract(record,'$.terminalRepair.source.threadId'),json_extract(record,'$.terminalRepair.proof.turnId')) WHERE json_type(record,'$.terminalRepair')='object';"
-    )?;
+    connection.execute_batch(RECEIPT_OWNER_INDEXES)?;
     crate::StartupRecoveryRepository::prepare_indexes(connection)?;
     Ok(())
 }
@@ -196,7 +192,7 @@ pub(crate) fn verify_core(canvas_path: &Path, analytics_path: &Path) -> StoreRes
         ("analytics.sqlite3", &analytics),
     ] {
         let (journal, _) = connection_pragmas(connection)?;
-        if journal != "wal" {
+        if journal != crate::sqlite_durability::WRITER_PRAGMAS.journal_mode {
             return Err(object_mismatch(
                 database,
                 "PRAGMA journal_mode",
@@ -211,7 +207,7 @@ pub(crate) fn verify_core(canvas_path: &Path, analytics_path: &Path) -> StoreRes
 /// (`crate::sqlite_durability`).
 pub(crate) fn verify_serving_pragmas(connection: &Connection, database: &str) -> StoreResult<()> {
     let (journal, synchronous) = connection_pragmas(connection)?;
-    if journal != "wal" {
+    if journal != crate::sqlite_durability::WRITER_PRAGMAS.journal_mode {
         return Err(object_mismatch(
             database,
             "PRAGMA journal_mode",
@@ -677,6 +673,14 @@ fn connection_pragmas(connection: &Connection) -> StoreResult<(String, i64)> {
     let synchronous: i64 = connection.query_row("PRAGMA synchronous", [], |row| row.get(0))?;
     Ok((journal_mode, synchronous))
 }
+
+pub(crate) const CALLBACK_ORIGIN_INDEX: &str = "CREATE UNIQUE INDEX IF NOT EXISTS runtime_tool_request_origin ON runtime_tool_requests(origin_key) WHERE origin_key IS NOT NULL";
+
+pub(crate) const RECEIPT_OWNER_INDEXES: &str = "CREATE INDEX IF NOT EXISTS runtime_agent_holds ON runtime_agents(id) WHERE hold_status!='clear';
+         CREATE INDEX IF NOT EXISTS runtime_work_archive_due ON runtime_work(archive_next_at,id) WHERE archive_status IN ('pending','retryable','unknown');
+         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_actor ON runtime_tool_requests(agent,updated DESC,id);
+         CREATE INDEX IF NOT EXISTS runtime_tool_request_current_status ON runtime_tool_requests(status,agent,id);
+         CREATE UNIQUE INDEX IF NOT EXISTS runtime_execution_terminal_source ON runtime_execution_attempts(json_extract(record,'$.terminalRepair.source.accountKey'),json_extract(record,'$.terminalRepair.source.threadId'),json_extract(record,'$.terminalRepair.proof.turnId')) WHERE json_type(record,'$.terminalRepair')='object';";
 
 #[cfg(test)]
 mod tests {

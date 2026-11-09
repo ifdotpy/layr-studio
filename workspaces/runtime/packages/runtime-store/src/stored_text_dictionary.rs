@@ -39,7 +39,7 @@ pub const DICTIONARY_MIN_ROWS: i64 = 2_048;
 /// Values sampled to train one dictionary. Unit: rows.
 pub const DICTIONARY_SAMPLE_ROWS: usize = 4_096;
 
-const DICTIONARY_SCHEMA: &str = "
+pub(crate) const DICTIONARY_SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS analytics_stored_text_dictionaries (
         id INTEGER PRIMARY KEY, name TEXT NOT NULL, created REAL NOT NULL,
         sha256 TEXT NOT NULL, dictionary BLOB NOT NULL);

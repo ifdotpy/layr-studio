@@ -56,6 +56,8 @@ mod schema;
 pub mod settings_schema;
 mod sqlite_actor;
 pub mod sqlite_durability;
+#[cfg(test)]
+mod storage_catalog;
 pub mod voice_storage;
 pub use sqlite_durability::WAL_FLUSH_INTERVAL;
 pub mod state_owner;

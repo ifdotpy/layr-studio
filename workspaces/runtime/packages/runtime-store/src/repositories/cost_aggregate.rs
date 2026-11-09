@@ -49,7 +49,7 @@ CREATE TABLE analytics_cost_groups (
 ";
 
 /// Indexes of the aggregate, built after the backfill loaded its rows.
-const INDEXES: &str = "
+pub(crate) const INDEXES: &str = "
 CREATE INDEX analytics_cost_rows_scope ON analytics_cost_rows(root, agent, thread, turn);
 CREATE INDEX analytics_cost_rows_response ON analytics_cost_rows(root, thread, response)
     WHERE response IS NOT NULL;
@@ -57,7 +57,7 @@ CREATE INDEX analytics_cost_rows_response ON analytics_cost_rows(root, thread, r
 
 /// Seek response counterparts and eligible model-less facts within one root/agent scope.
 /// Install after compatibility columns exist; retire the broader model-less index once.
-const SCOPE_INDEXES: &str = "
+pub(crate) const SCOPE_INDEXES: &str = "
 CREATE INDEX IF NOT EXISTS analytics_cost_rows_agent_response
     ON analytics_cost_rows(root,agent,response) WHERE response IS NOT NULL;
 CREATE INDEX IF NOT EXISTS analytics_cost_rows_eligible_unmodeled

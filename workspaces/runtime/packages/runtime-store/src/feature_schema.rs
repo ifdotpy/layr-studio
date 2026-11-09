@@ -7,7 +7,7 @@ use crate::StoreResult;
 // These tables are installed by Runtime and feature constructors, or on first
 // feature use, in canvas.sqlite3. The Rust feature schema owns their current DDL.
 // `runtime_budget` retains historical state and replay diagnostics.
-const FEATURE_SCHEMA: &str = r#"
+pub(crate) const FEATURE_SCHEMA: &str = r#"
             CREATE TABLE IF NOT EXISTS runtime_work (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS runtime_work_root_status
                 ON runtime_work(json_extract(record,'$.rootId'),json_extract(record,'$.status'));
@@ -29,7 +29,6 @@ const FEATURE_SCHEMA: &str = r#"
                 id TEXT PRIMARY KEY, agent TEXT NOT NULL, kind TEXT NOT NULL,
                 search_rowid INTEGER NOT NULL UNIQUE);
 
-            CREATE VIRTUAL TABLE IF NOT EXISTS runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');
             CREATE TABLE IF NOT EXISTS runtime_checkpoints (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_projects (id TEXT PRIMARY KEY, record TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS runtime_lead_requests (id TEXT PRIMARY KEY, agent TEXT NOT NULL, signature TEXT NOT NULL);
@@ -109,6 +108,9 @@ const FEATURE_SCHEMA: &str = r#"
                     result TEXT, created_at REAL NOT NULL DEFAULT 0, completed_at REAL NOT NULL DEFAULT 0, principal TEXT, actor TEXT);
 "#;
 
+/// The FTS owner shared by feature installation and catalog export.
+pub(crate) const SEARCH_SCHEMA: &str = "CREATE VIRTUAL TABLE IF NOT EXISTS runtime_search_next USING fts5(body,content='',contentless_delete=1,tokenize='unicode61');";
+
 /// Progress records of resumable passes, in Canvas and, for compacted
 /// analytics columns, in analytics.
 pub(crate) const PAYLOAD_MIGRATIONS_SCHEMA: &str = "
@@ -116,8 +118,8 @@ pub(crate) const PAYLOAD_MIGRATIONS_SCHEMA: &str = "
 ";
 
 /// Every statement that [`prepare`] runs, in order.
-fn feature_statements() -> [&'static str; 2] {
-    [FEATURE_SCHEMA, PAYLOAD_MIGRATIONS_SCHEMA]
+fn feature_statements() -> [&'static str; 3] {
+    [FEATURE_SCHEMA, SEARCH_SCHEMA, PAYLOAD_MIGRATIONS_SCHEMA]
 }
 
 pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
@@ -149,7 +151,19 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
         },
     )?;
     crate::stored_text_compaction::prepare_batches(transaction)?;
-    transaction.execute_batch("CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))")?;
+    transaction.execute_batch(RECEIPT_TRANSCRIPT_INDEX)?;
+    install_summary_delete_triggers(transaction)?;
+    // Removing a transcript or its metadata can change materialization even
+    // though the event itself is unchanged. Journal that event through its
+    // source row; semantic event triggers ignore this value-preserving update.
+    transaction.execute_batch(RECEIPT_TRANSCRIPT_TRIGGERS)?;
+    Ok(())
+}
+
+/// Shared owner of feature summary tombstones and their catalog definitions.
+pub(crate) fn install_summary_delete_triggers(
+    connection: &rusqlite::Connection,
+) -> rusqlite::Result<()> {
     // A deleted row is no longer readable by the writer journal. Its source
     // trigger owns the corresponding summary tombstone in the same transaction.
     for (table, collection) in [
@@ -158,7 +172,7 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     ] {
         let tombstone =
             format!("json_object('collection','{collection}','id',OLD.id,'value',json('{{}}'))");
-        transaction.execute_batch(&format!(
+        connection.execute_batch(&format!(
             "CREATE TRIGGER IF NOT EXISTS summary_{collection}_delete AFTER DELETE ON {table} BEGIN
              INSERT INTO sync_entities(collection,id,seq,hash,payload,deleted)
              SELECT '{collection}',OLD.id,(SELECT max(seq)+1 FROM (
@@ -171,19 +185,17 @@ pub(crate) fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
              END;"
         ))?;
     }
-    // Removing a transcript or its metadata can change materialization even
-    // though the event itself is unchanged. Journal that event through its
-    // source row; semantic event triggers ignore this value-preserving update.
-    transaction.execute_batch(
-        "CREATE TRIGGER IF NOT EXISTS summary_receipt_meta_delete AFTER DELETE ON runtime_event_meta BEGIN
+    Ok(())
+}
+
+pub(crate) const RECEIPT_TRANSCRIPT_INDEX: &str = "CREATE INDEX IF NOT EXISTS runtime_receipt_transcript_item ON runtime_event_meta(json_extract(record,'$.transcriptItemId'))";
+
+pub(crate) const RECEIPT_TRANSCRIPT_TRIGGERS: &str = "CREATE TRIGGER IF NOT EXISTS summary_receipt_meta_delete AFTER DELETE ON runtime_event_meta BEGIN
          UPDATE runtime_events SET id=id WHERE id=OLD.id AND kind='user'; END;
          CREATE TRIGGER IF NOT EXISTS summary_receipt_item_delete AFTER DELETE ON runtime_items BEGIN
          UPDATE runtime_events SET id=id WHERE kind='user' AND agent=OLD.agent AND (
             OLD.id=agent || ':' || id OR id IN (SELECT id FROM runtime_event_meta
-                WHERE json_extract(record,'$.transcriptItemId')=OLD.id)); END;"
-    )?;
-    Ok(())
-}
+                WHERE json_extract(record,'$.transcriptItemId')=OLD.id)); END;";
 
 #[cfg(test)]
 mod tests {

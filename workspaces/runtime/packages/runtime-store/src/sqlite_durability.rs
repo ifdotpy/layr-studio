@@ -25,16 +25,28 @@ pub const WAL_FLUSH_INTERVAL: Duration = Duration::from_secs(SQLITE_WAL_FLUSH_IN
 /// The value `PRAGMA synchronous` reports for NORMAL.
 pub const SYNCHRONOUS_NORMAL: i64 = 1;
 
+/// SQLite writer settings retained in the generated storage catalog.
+#[derive(Clone, Copy, serde::Serialize)]
+pub(crate) struct WriterPragmas {
+    pub journal_mode: &'static str,
+    pub synchronous: i64,
+}
+
+pub(crate) const WRITER_PRAGMAS: WriterPragmas = WriterPragmas {
+    journal_mode: "wal",
+    synchronous: SYNCHRONOUS_NORMAL,
+};
+
 /// Apply the shared writer pragmas: WAL, `synchronous=NORMAL`, and the WAL size
 /// limit. `synchronous` is connection-local, so every writer connection calls this.
 pub fn configure_writer(connection: &Connection) -> rusqlite::Result<()> {
-    connection.pragma_update(None, "journal_mode", "WAL")?;
+    connection.pragma_update(None, "journal_mode", WRITER_PRAGMAS.journal_mode)?;
     configure_synchronous(connection)
 }
 
 /// Apply the connection-local pragmas to a writer of a database already in WAL mode.
 pub fn configure_synchronous(connection: &Connection) -> rusqlite::Result<()> {
-    connection.pragma_update(None, "synchronous", SYNCHRONOUS_NORMAL)?;
+    connection.pragma_update(None, "synchronous", WRITER_PRAGMAS.synchronous)?;
     connection.pragma_update(None, "wal_autocheckpoint", 0)?;
     connection.pragma_update(
         None,

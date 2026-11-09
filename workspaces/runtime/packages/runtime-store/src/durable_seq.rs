@@ -136,7 +136,7 @@ const NEXT: &str = "(SELECT MAX(entity_seq,document_seq,generation,durable_seq)+
     (SELECT COALESCE(MAX(seq),0) AS durable_seq FROM durable_rows))";
 
 /// The generator: SQL for the three triggers of one table.
-fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> String {
+pub(crate) fn trigger_sql(table: &str, record_only: bool, team_fence: bool) -> String {
     let now = "CAST(strftime('%s','now') AS INTEGER)";
     let cutoff = format!("{now}-{TOMBSTONE_RETENTION_SECONDS}");
     let put = |id: &str, deleted: u8, at: &str| {

@@ -44,24 +44,7 @@ mod tests {
     use super::*;
     use studio_db_api::Table;
     #[test]
-    fn pilot_ddl_matches_catalog_and_existing_state() {
-        use crate::canvas_schema::tests::{Catalog, Entry};
-        let snapshot: Catalog =
-            studio_json::from_str(crate::fresh_state::SNAPSHOT).expect("catalog");
-        let entry = snapshot
-            .canvas
-            .sqlite_master
-            .iter()
-            .find(|entry| entry.name == PeerUpdateSettings::NAME)
-            .expect("pilot catalog entry");
-        assert_eq!(entry.sql, PeerUpdateSettings::DDL);
-        let exported: Entry = studio_json::from_str(
-            &PeerUpdateSettings::descriptor()
-                .catalog_json(entry.create_order)
-                .expect("export"),
-        )
-        .expect("JSON");
-        assert_eq!(&exported, entry);
+    fn pilot_preserves_existing_state() {
         let mut db = rusqlite::Connection::open_in_memory().expect("db");
         db.execute_batch("CREATE TABLE runtime_peer_update_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_update INTEGER NOT NULL); INSERT INTO runtime_peer_update_settings VALUES(1,0)").expect("pre-existing state");
         let registration = crate::canvas_schema::registry()

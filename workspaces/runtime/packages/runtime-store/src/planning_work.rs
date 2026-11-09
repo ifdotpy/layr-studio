@@ -218,51 +218,11 @@ mod tests {
     use super::*;
     use studio_db_api::{Table, db_schema};
 
-    #[derive(serde::Deserialize)]
-    struct Catalog {
-        #[serde(rename = "canvas.sqlite3")]
-        canvas: Objects,
-    }
-    #[derive(serde::Deserialize)]
-    struct Objects {
-        sqlite_master: Vec<Entry>,
-    }
-    #[derive(serde::Deserialize)]
-    struct Entry {
-        name: String,
-        sql: String,
-        table: String,
-        r#type: String,
-    }
-
     #[test]
-    fn planning_work_descriptors_preserve_every_table_and_index_definition() {
-        let catalog: Catalog = studio_json::from_str(crate::fresh_state::SNAPSHOT).unwrap();
+    fn planning_work_descriptors_install_and_validate_empty_tables() {
         for registration in db_schema![Canvas; AnnotationRow, CheckpointRow, PlanRow, ProjectRow, RuleRow, TaskRow, WorkRow, WorkspaceOperationRow]
         {
             let descriptor = registration.descriptor;
-            let table = catalog
-                .canvas
-                .sqlite_master
-                .iter()
-                .find(|entry| entry.name == descriptor.name && entry.r#type == "table")
-                .unwrap();
-            assert_eq!(descriptor.ddl, table.sql, "{} DDL", descriptor.name);
-            let mut expected = catalog
-                .canvas
-                .sqlite_master
-                .iter()
-                .filter(|entry| entry.table == descriptor.name && entry.r#type == "index")
-                .map(|entry| (&*entry.name, &*entry.sql))
-                .collect::<Vec<_>>();
-            let mut actual = descriptor
-                .indexes
-                .iter()
-                .map(|entry| (entry.name, entry.sql))
-                .collect::<Vec<_>>();
-            expected.sort_unstable();
-            actual.sort_unstable();
-            assert_eq!(actual, expected, "{} indexes", descriptor.name);
             let db = rusqlite::Connection::open_in_memory().unwrap();
             db.execute_batch(descriptor.ddl).unwrap();
             for index in descriptor.indexes {

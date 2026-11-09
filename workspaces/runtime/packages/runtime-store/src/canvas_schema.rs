@@ -104,53 +104,114 @@ pub(crate) mod tests {
     use studio_db_api::Table;
 
     #[derive(serde::Deserialize)]
-    pub(crate) struct Catalog {
+    struct GeneratedCatalog {
         #[serde(rename = "canvas.sqlite3")]
-        pub(crate) canvas: Objects,
+        canvas: GeneratedDatabase,
+        #[serde(rename = "analytics.sqlite3")]
+        analytics: GeneratedDatabase,
+        pragmas: Option<std::collections::BTreeMap<String, GeneratedPragmas>>,
     }
     #[derive(serde::Deserialize)]
-    pub(crate) struct Objects {
-        pub(crate) sqlite_master: Vec<Entry>,
+    struct GeneratedDatabase {
+        sqlite_master: Vec<GeneratedObject>,
     }
-    #[derive(Debug, PartialEq, Eq, serde::Deserialize)]
-    pub(crate) struct Entry {
-        pub(crate) create_order: usize,
-        pub(crate) name: String,
-        pub(crate) sql: String,
-        pub(crate) table: String,
-        pub(crate) r#type: String,
+    #[derive(serde::Deserialize)]
+    struct GeneratedObject {
+        name: String,
+        sql: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct GeneratedPragmas {
+        journal_mode: String,
+        synchronous: i64,
     }
 
     #[test]
-    fn clocks_settings_descriptors_preserve_catalog_and_existing_state() {
-        let snapshot: Catalog =
-            studio_json::from_str(crate::fresh_state::SNAPSHOT).expect("catalog");
+    fn generated_analytics_migration_table_preserves_previous_ddl_and_statuses() {
+        let catalog: GeneratedCatalog =
+            studio_json::from_str(&crate::storage_catalog::generate().unwrap()).unwrap();
+        let table = catalog
+            .analytics
+            .sqlite_master
+            .iter()
+            .find(|entry| entry.name == "runtime_payload_migrations")
+            .unwrap();
+        // Independent pre-generator Analytics layout; Canvas has a different contract.
+        assert_eq!(
+            table.sql,
+            "CREATE TABLE runtime_payload_migrations (name TEXT PRIMARY KEY,cursor INTEGER NOT NULL DEFAULT 0,complete INTEGER NOT NULL DEFAULT 0,status TEXT NOT NULL DEFAULT 'pending',updated REAL,error TEXT)"
+        );
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch(&table.sql).unwrap();
+        db.execute(
+            "INSERT INTO runtime_payload_migrations(name,status) VALUES('legacy','paused')",
+            [],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn generated_catalog_preserves_previous_durability_pragmas() {
+        let catalog: GeneratedCatalog =
+            studio_json::from_str(&crate::storage_catalog::generate().unwrap()).unwrap();
+        let pragmas = catalog.pragmas.expect("retained pragma metadata");
+        assert_eq!(pragmas.len(), 2);
+        for name in ["analytics", "main"] {
+            assert_eq!(pragmas[name].journal_mode, "wal");
+            assert_eq!(pragmas[name].synchronous, 1);
+        }
+    }
+
+    #[test]
+    fn generated_summary_triggers_match_feature_preparation() {
+        let catalog: GeneratedCatalog =
+            studio_json::from_str(&crate::storage_catalog::generate().unwrap()).unwrap();
+        let mut db = crate::fresh_state::test_canvas();
+        db.execute_batch(
+            "DROP TRIGGER summary_messageReceipt_delete; DROP TRIGGER summary_task_delete;",
+        )
+        .unwrap();
+        let tx = db.transaction().unwrap();
+        crate::feature_schema::prepare(&tx).unwrap();
+        for name in ["summary_messageReceipt_delete", "summary_task_delete"] {
+            let actual: String = tx
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE name=?1",
+                    [name],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            let expected = catalog
+                .canvas
+                .sqlite_master
+                .iter()
+                .find(|entry| entry.name == name)
+                .unwrap();
+            assert_eq!(actual, expected.sql, "{name}");
+        }
+    }
+
+    #[test]
+    fn generated_storage_catalog_matches_committed_json() {
+        let generated = crate::storage_catalog::generate().expect("registry export");
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/runtime-state-schema.json");
+        if std::env::var_os("STUDIO_WRITE_STORAGE_CATALOG").is_some() {
+            std::fs::write(&path, &generated).expect("write generated catalog");
+        }
+        assert!(
+            std::fs::read_to_string(path).unwrap() == generated,
+            "run this test with STUDIO_WRITE_STORAGE_CATALOG=1 to regenerate"
+        );
+    }
+
+    #[test]
+    fn clocks_settings_descriptors_preserve_existing_state() {
         let db = crate::fresh_state::test_canvas();
         crate::clock_schema::prepare_features(&db).expect("clock features");
         crate::settings_schema::prepare_features(&db).expect("settings features");
         for registration in registry() {
             let descriptor = registration.descriptor;
-            if let Some(entry) = snapshot
-                .canvas
-                .sqlite_master
-                .iter()
-                .find(|entry| entry.name == descriptor.name)
-            {
-                assert_eq!(descriptor.ddl, entry.sql, "{} DDL", descriptor.name);
-                for entry in snapshot
-                    .canvas
-                    .sqlite_master
-                    .iter()
-                    .filter(|entry| entry.table == descriptor.name && entry.r#type == "index")
-                {
-                    let index = descriptor
-                        .indexes
-                        .iter()
-                        .find(|index| index.name == entry.name)
-                        .expect("owned index");
-                    assert_eq!(index.sql, entry.sql, "{} index", entry.name);
-                }
-            }
             let (rows, rejected) = (registration.check)(&db).expect(descriptor.name).counts();
             assert_eq!(
                 rejected, 0,

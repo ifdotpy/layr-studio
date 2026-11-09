@@ -274,12 +274,7 @@ mod tests {
     use studio_db_api::Table;
 
     #[test]
-    fn interaction_descriptors_preserve_each_legacy_table_and_index() {
-        let catalog: studio_json::Value =
-            studio_json::from_str(include_str!("runtime-state-schema.json")).unwrap();
-        let entries = catalog["canvas.sqlite3"]["sqlite_master"]
-            .as_array()
-            .unwrap();
+    fn interaction_descriptors_cover_repository_validator_columns() {
         for descriptor in [
             GraphEdgesRow::descriptor(),
             GroupsRow::descriptor(),
@@ -289,16 +284,6 @@ mod tests {
             RoomRow::descriptor(),
             ComplaintRow::descriptor(),
         ] {
-            let table = entries
-                .iter()
-                .find(|entry| entry["type"] == "table" && entry["name"] == descriptor.name)
-                .unwrap();
-            assert_eq!(
-                descriptor.ddl,
-                table["sql"].as_str().unwrap(),
-                "{}",
-                descriptor.name
-            );
             // Every repository validator consumes physical names owned by this descriptor.
             for registration in crate::repositories::schema_registrations() {
                 let requirements = registration.requirements;
@@ -325,23 +310,6 @@ mod tests {
                         }
                     }
                 }
-            }
-            let old_indexes = entries
-                .iter()
-                .filter(|entry| entry["type"] == "index" && entry["table"] == descriptor.name)
-                .count();
-            assert_eq!(
-                descriptor.indexes.len(),
-                old_indexes,
-                "{} index coverage",
-                descriptor.name
-            );
-            for index in descriptor.indexes {
-                let old = entries
-                    .iter()
-                    .find(|entry| entry["type"] == "index" && entry["name"] == index.name)
-                    .unwrap();
-                assert_eq!(index.sql, old["sql"].as_str().unwrap(), "{}", index.name);
             }
         }
         let db = rusqlite::Connection::open_in_memory().unwrap();

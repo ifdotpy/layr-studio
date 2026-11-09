@@ -1,4 +1,5 @@
 //! Static SQLite row contracts. Applications own database markers and codec policy.
+pub mod catalog;
 pub use rusqlite;
 mod codec;
 mod query;

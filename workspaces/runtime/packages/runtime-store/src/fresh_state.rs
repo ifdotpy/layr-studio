@@ -1,8 +1,8 @@
 //! Creates the committed fresh-state catalog when the canvas and analytics
 //! databases do not exist. A supervisor journal that already exists is kept.
 //!
-//! The committed `runtime-state-schema.json` beside this file is the schema
-//! source for this bootstrap.
+//! The committed `runtime-state-schema.json` beside this file is generated
+//! from storage registries and checked by the fast gate.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -302,26 +302,7 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
         let sql = entry["sql"]
             .as_str()
             .ok_or(StoreError::RecordContract("fresh schema object has no DDL"))?;
-        let generated = if schema_name == "canvas.sqlite3" {
-            crate::canvas_schema::registry()
-                .into_iter()
-                .find_map(|registration| {
-                    let descriptor = registration.descriptor;
-                    let name = entry["name"].as_str()?;
-                    if name == descriptor.name {
-                        Some(descriptor.ddl)
-                    } else {
-                        descriptor
-                            .indexes
-                            .iter()
-                            .find(|index| index.name == name)
-                            .map(|index| index.sql)
-                    }
-                })
-        } else {
-            None
-        };
-        transaction.execute_batch(generated.unwrap_or(sql))?;
+        transaction.execute_batch(sql)?;
     }
     let version = snapshot[schema_name]["pragma_user_version"]
         .as_i64()

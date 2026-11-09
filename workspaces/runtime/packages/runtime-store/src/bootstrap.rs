@@ -4,7 +4,7 @@ use rusqlite::{Connection, OptionalExtension, Transaction};
 
 use crate::{StoreError, StoreResult};
 
-const SYNC_SCHEMA: &str = include_str!("sync_schema.sql");
+pub(crate) const SYNC_SCHEMA: &str = include_str!("sync_schema.sql");
 
 struct ParentTableRegistration(&'static str);
 

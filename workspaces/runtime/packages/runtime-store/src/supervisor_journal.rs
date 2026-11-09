@@ -118,8 +118,8 @@ pub enum JournalError {
 pub type Result<T> = std::result::Result<T, JournalError>;
 
 /// Sole DDL owner for both supervisor structure validation and installation.
-const SUPERVISOR_SCHEMA: &str = include_str!("supervisor_schema.sql");
-const WRITTEN_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS operation_writes(handle TEXT NOT NULL,operation_id TEXT NOT NULL,PRIMARY KEY(handle,operation_id));";
+pub(crate) const SUPERVISOR_SCHEMA: &str = include_str!("supervisor_schema.sql");
+pub(crate) const WRITTEN_SCHEMA: &str = "CREATE TABLE IF NOT EXISTS operation_writes(handle TEXT NOT NULL,operation_id TEXT NOT NULL,PRIMARY KEY(handle,operation_id));";
 
 #[derive(Clone, Copy)]
 pub(crate) enum SchemaPresence {
