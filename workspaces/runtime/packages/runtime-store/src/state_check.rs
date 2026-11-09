@@ -14,12 +14,7 @@ use crate::records::{
     WorkspaceOperationRecord,
 };
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct StateCheckFailure {
-    pub pointer: String,
-    pub keyword: String,
-    pub count: u64,
-}
+pub use studio_db_api::StateCheckFailure;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct StateCheckTable {
@@ -68,21 +63,13 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
         check_table::<crate::MoveRecord>(&connection)?,
         check_table::<crate::ProjectLocationRecord>(&connection)?,
     ];
-    for registration in crate::peer_update_settings::registry() {
-        let (row_count, rejected_count) = (registration.check)(&connection)?;
+    for registration in crate::canvas_schema::registry() {
+        let report = (registration.check)(&connection)?;
         tables.push(StateCheckTable {
             table: registration.descriptor.name,
-            row_count,
-            rejected_count,
-            failures: if rejected_count == 0 {
-                Vec::new()
-            } else {
-                vec![StateCheckFailure {
-                    pointer: String::new(),
-                    keyword: "storageType".into(),
-                    count: rejected_count,
-                }]
-            },
+            row_count: report.row_count,
+            rejected_count: report.rejected_count,
+            failures: report.failures,
         });
     }
     tables.extend(check_system_tables(&connection)?);
@@ -92,6 +79,20 @@ pub fn check_state_readonly(state_dir: &Path) -> StoreResult<StateCheckReport> {
     tables.extend(crate::analytics_capture::check_state_readonly(state_dir)?);
     tables.extend(crate::multi_server_state_check::check(&connection)?);
     Ok(StateCheckReport { tables })
+}
+
+/// Registry adapter for historical JSON reports, preserving acceptance and diagnostics.
+pub fn check_legacy_json<R: JsonRecord>(
+    connection: &Connection,
+) -> rusqlite::Result<studio_db_api::StateCheck> {
+    let report = check_table::<R>(connection).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(studio_db_api::StateCheck {
+        row_count: report.row_count,
+        rejected_count: report.rejected_count,
+        failures: report.failures,
+    })
 }
 
 fn check_table<R: JsonRecord>(connection: &Connection) -> StoreResult<StateCheckTable> {

@@ -303,7 +303,7 @@ fn create_database(path: &Path, snapshot: &Value, schema_name: &str) -> StoreRes
             .as_str()
             .ok_or(StoreError::RecordContract("fresh schema object has no DDL"))?;
         let generated = if schema_name == "canvas.sqlite3" {
-            crate::peer_update_settings::registry()
+            crate::canvas_schema::registry()
                 .into_iter()
                 .find(|registration| entry["name"].as_str() == Some(registration.descriptor.name))
         } else {

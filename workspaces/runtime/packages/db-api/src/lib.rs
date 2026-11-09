@@ -53,7 +53,7 @@ pub use studio_db_api_derive::{DbEnum, DbTable};
 /// #[derive(DbTable)] #[db(table="aliased_keys",database=Canvas)]
 /// struct Bad { #[db(key)] id: NullableId, #[db(key)] other: String }
 /// ```
-pub use studio_db_api_derive::db_query;
+pub use studio_db_api_derive::{db_delete, db_query, db_update};
 
 /// A marker value is an adapter capability: applications keep its constructor private.
 pub trait Database: Sized {}
@@ -70,6 +70,76 @@ pub struct Tx<'c, D: Database> {
     transaction: &'c Transaction<'c>,
     database: PhantomData<D>,
 }
+/// A capability-bound read view; it cannot execute mutations through this API.
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable, Read, db_delete};
+/// struct Canvas; impl Database for Canvas {}
+/// #[derive(DbTable)] #[db(table="typed_rows", database=Canvas)]
+/// struct Row { #[db(key)] id: i64 }
+/// fn mutate(mut read: Read<'_, Canvas>) { db_delete!(read, Row).unwrap(); }
+/// ```
+/// ```compile_fail
+/// use studio_db_api::{Database, Read};
+/// struct Canvas; impl Database for Canvas {}
+/// fn leak(read: Read<'_, Canvas>) { read.connection().execute("DELETE FROM rows", []).unwrap(); }
+/// ```
+pub struct Read<'c, D: Database> {
+    connection: &'c Connection,
+    database: PhantomData<D>,
+}
+impl<'c, D: Database> Read<'c, D> {
+    #[doc(hidden)]
+    pub fn read(&self) -> &Self {
+        self
+    }
+    pub fn from_adapter(connection: &'c Connection, _capability: &D) -> Self {
+        Self {
+            connection,
+            database: PhantomData,
+        }
+    }
+    fn prepare_read(&self, sql: &'static str) -> rusqlite::Result<rusqlite::CachedStatement<'_>> {
+        let statement = self.connection.prepare_cached(sql)?;
+        if !statement.readonly() {
+            return Err(rusqlite::Error::InvalidQuery);
+        }
+        Ok(statement)
+    }
+    #[doc(hidden)]
+    pub fn parameter<'a, R: Table<Database = D>, C: Column<Row = R>>(
+        &self,
+        column: C,
+        value: &'a C::Value,
+    ) -> rusqlite::Result<C::Parameter<'a>> {
+        parameter::<R, C>(self.connection, column, value)
+    }
+    #[doc(hidden)]
+    pub fn array_parameter<R: Table<Database = D>, C: Column<Row = R>>(
+        &self,
+        column: C,
+        values: &[C::Value],
+    ) -> rusqlite::Result<rusqlite::vtab::array::Array> {
+        array_parameter::<R, C>(self.connection, column, values)
+    }
+    pub fn get<R: Table<Database = D>>(&self, key: &R::Key) -> rusqlite::Result<Option<R>> {
+        let mut statement = self.prepare_read(R::GET)?;
+        R::bind_key(key, |params| {
+            statement
+                .query_row(params, |row| R::read(self.connection, row))
+                .optional()
+        })
+    }
+    pub fn query<R: Table<Database = D>>(
+        &self,
+        sql: &'static str,
+        params: &[&dyn ToSql],
+    ) -> rusqlite::Result<Vec<R>> {
+        let mut statement = self.prepare_read(sql)?;
+        statement
+            .query_map(params, |row| R::read(self.connection, row))?
+            .collect()
+    }
+}
 impl<'c, D: Database> Tx<'c, D> {
     /// Only a trusted application adapter can supply the privately constructed marker.
     pub fn from_adapter(transaction: &'c Transaction<'c>, _capability: &D) -> Self {
@@ -83,12 +153,7 @@ impl<'c, D: Database> Tx<'c, D> {
         self.transaction
     }
     pub fn get<R: Table<Database = D>>(&self, key: &R::Key) -> rusqlite::Result<Option<R>> {
-        let mut statement = self.transaction.prepare_cached(R::GET)?;
-        R::bind_key(key, |params| {
-            statement
-                .query_row(params, |row| R::read(self.transaction, row))
-                .optional()
-        })
+        self.read().get::<R>(key)
     }
     pub fn insert<R: Table<Database = D>>(&mut self, row: &R) -> rusqlite::Result<()> {
         row.validate()?;
@@ -96,6 +161,39 @@ impl<'c, D: Database> Tx<'c, D> {
         row.bind(self.transaction, |params| {
             statement.execute(params).map(|_| ())
         })
+    }
+    pub fn insert_rowid<R: Table<Database = D>>(&mut self, row: &R) -> rusqlite::Result<i64> {
+        self.insert(row)?;
+        Ok(self.transaction.last_insert_rowid())
+    }
+    pub fn insert_new<R: MutableTable<Database = D>>(&mut self, row: &R) -> rusqlite::Result<bool> {
+        row.validate()?;
+        let mut statement = self.transaction.prepare_cached(R::INSERT_NEW)?;
+        row.bind(self.transaction, |params| {
+            statement.execute(params).map(|changed| changed != 0)
+        })
+    }
+    pub fn read(&self) -> Read<'_, D> {
+        Read {
+            connection: self.transaction,
+            database: PhantomData,
+        }
+    }
+    #[doc(hidden)]
+    pub fn execute<R: MutableTable<Database = D>>(
+        &mut self,
+        sql: &'static str,
+        params: &[&dyn ToSql],
+    ) -> rusqlite::Result<usize> {
+        self.transaction.prepare_cached(sql)?.execute(params)
+    }
+    #[doc(hidden)]
+    pub fn update<R: UpdateTable<Database = D>>(
+        &mut self,
+        sql: &'static str,
+        params: &[&dyn ToSql],
+    ) -> rusqlite::Result<usize> {
+        self.execute::<R>(sql, params)
     }
     pub fn upsert<R: MutableTable<Database = D>>(&mut self, row: &R) -> rusqlite::Result<()> {
         row.validate()?;
@@ -117,10 +215,7 @@ impl<'c, D: Database> Tx<'c, D> {
         sql: &'static str,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Vec<R>> {
-        let mut statement = self.transaction.prepare_cached(sql)?;
-        statement
-            .query_map(params, |row| R::read(self.transaction, row))?
-            .collect()
+        self.read().query::<R>(sql, params)
     }
 }
 
@@ -197,6 +292,9 @@ pub trait Table: Sized + 'static {
     fn validate(&self) -> rusqlite::Result<()> {
         Ok(())
     }
+    fn state_check(connection: &Connection) -> rusqlite::Result<StateCheck> {
+        check_rows::<Self>(connection)
+    }
     fn descriptor() -> Descriptor {
         Descriptor {
             name: Self::NAME,
@@ -217,7 +315,33 @@ pub trait Table: Sized + 'static {
 /// ```
 pub trait MutableTable: Table {
     const UPSERT: &'static str;
+    const INSERT_NEW: &'static str;
 }
+/// Checked tables require validated full-row writes.
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable, Tx, db_update};
+/// struct Canvas; impl Database for Canvas {}
+/// #[derive(DbTable)] #[db(table="checked", database=Canvas, check=validate)]
+/// struct Row { #[db(key)] id: i64, count: i64 }
+/// fn validate(_: &Row) -> std::io::Result<()> { Ok(()) }
+/// fn update(mut tx: Tx<'_, Canvas>) { db_update!(tx, Row, set(Row::COUNT = &-1)).unwrap(); }
+/// ```
+/// All-generated rows support insertion, but not conflict-based mutations.
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable, Tx};
+/// struct Canvas; impl Database for Canvas {}
+/// #[derive(DbTable)] #[db(table="automatic", database=Canvas)]
+/// struct Row { #[db(key, generated)] id: i64 }
+/// fn upsert(mut tx: Tx<'_, Canvas>) { tx.upsert(&Row { id: 0 }).unwrap(); }
+/// ```
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable, Tx};
+/// struct Canvas; impl Database for Canvas {}
+/// #[derive(DbTable)] #[db(table="automatic", database=Canvas)]
+/// struct Row { #[db(key, generated)] id: i64 }
+/// fn insert_new(mut tx: Tx<'_, Canvas>) { tx.insert_new(&Row { id: 0 }).unwrap(); }
+/// ```
+pub trait UpdateTable: MutableTable {}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct ColumnDescriptor {
     pub name: &'static str,
@@ -247,6 +371,22 @@ pub struct Descriptor {
     pub columns: &'static [ColumnDescriptor],
 }
 impl Descriptor {
+    /// Install a descriptor without replacing an existing legacy table or its data.
+    pub fn install_if_absent(self, connection: &Connection) -> rusqlite::Result<()> {
+        for sql in self.ddl_statements() {
+            let keyword = if sql.starts_with("CREATE TABLE ") {
+                "TABLE "
+            } else {
+                "INDEX "
+            };
+            connection.execute_batch(&sql.replacen(
+                keyword,
+                &format!("{keyword}IF NOT EXISTS "),
+                1,
+            ))?;
+        }
+        Ok(())
+    }
     pub fn ddl_statements(self) -> impl Iterator<Item = &'static str> {
         std::iter::once(self.ddl).chain(self.indexes.iter().map(|index| index.sql))
     }
@@ -329,10 +469,28 @@ pub trait Column: Copy {
         value: &'a Self::Value,
     ) -> rusqlite::Result<Self::Parameter<'a>>;
     const NAME: &'static str;
+    const QUOTED_NAME: &'static str;
 }
+/// Generated fields cannot be assigned by a typed update.
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable, Tx, db_update};
+/// struct Canvas; impl Database for Canvas {}
+/// #[derive(DbTable)] #[db(table="typed_rows", database=Canvas)]
+/// struct Row { #[db(key)] id: i64, #[db(generated)] computed: i64 }
+/// fn update(mut tx: Tx<'_, Canvas>) {
+///     db_update!(tx, Row, set(Row::COMPUTED = &7)).unwrap();
+/// }
+/// ```
+pub trait WritableColumn: Column {}
 #[doc(hidden)]
 pub const fn column_name<R: Table, C: Column<Row = R>>(_column: C) -> &'static str {
-    C::NAME
+    C::QUOTED_NAME
+}
+#[doc(hidden)]
+pub const fn writable_column_name<R: Table, C: WritableColumn<Row = R>>(
+    _column: C,
+) -> &'static str {
+    C::QUOTED_NAME
 }
 #[doc(hidden)]
 pub fn parameter<'a, R: Table, C: Column<Row = R>>(
@@ -371,16 +529,58 @@ pub fn array_parameter<R: Table, C: Column<Row = R>>(
 
 pub struct Registration {
     pub descriptor: Descriptor,
-    pub check: fn(&Connection) -> rusqlite::Result<(u64, u64)>,
+    pub check: fn(&Connection) -> rusqlite::Result<StateCheck>,
 }
-pub fn check<R: Table>(connection: &Connection) -> rusqlite::Result<(u64, u64)> {
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct StateCheckFailure {
+    pub pointer: String,
+    pub keyword: String,
+    pub count: u64,
+}
+impl std::fmt::Display for StateCheckFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.pointer, self.keyword)
+    }
+}
+impl std::error::Error for StateCheckFailure {}
+impl StateCheckFailure {
+    fn from_decode_error(error: rusqlite::Error) -> Self {
+        if let rusqlite::Error::FromSqlConversionFailure(_, _, source)
+        | rusqlite::Error::ToSqlConversionFailure(source)
+        | rusqlite::Error::UserFunctionError(source) = error
+            && let Some(detail) = source.downcast_ref::<Self>()
+        {
+            return detail.clone();
+        }
+        Self {
+            pointer: String::new(),
+            keyword: "storageType".into(),
+            count: 1,
+        }
+    }
+}
+#[derive(Debug, Default)]
+pub struct StateCheck {
+    pub row_count: u64,
+    pub rejected_count: u64,
+    pub failures: Vec<StateCheckFailure>,
+}
+impl StateCheck {
+    pub fn counts(&self) -> (u64, u64) {
+        (self.row_count, self.rejected_count)
+    }
+}
+pub fn check<R: Table>(connection: &Connection) -> rusqlite::Result<StateCheck> {
+    R::state_check(connection)
+}
+fn check_rows<R: Table>(connection: &Connection) -> rusqlite::Result<StateCheck> {
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
         [R::NAME],
         |row| row.get(0),
     )?;
     if !exists {
-        return Ok((0, 0));
+        return Ok(StateCheck::default());
     }
     // SQLite count(*) is a non-negative signed integer.
     let violations = connection
@@ -389,13 +589,32 @@ pub fn check<R: Table>(connection: &Connection) -> rusqlite::Result<(u64, u64)> 
     let mut statement = connection.prepare_cached(R::VALID_ROWS)?;
     let mut rows = statement.query([])?;
     let (mut count, mut rejected) = (violations, violations);
+    let mut failures = std::collections::BTreeMap::new();
+    if violations > 0 {
+        failures.insert((String::new(), "storageType".to_owned()), violations);
+    }
     while let Some(row) = rows.next()? {
         count += 1;
-        if R::read(connection, row).is_err() {
+        if let Err(error) = R::read(connection, row) {
             rejected += 1;
+            let detail = StateCheckFailure::from_decode_error(error);
+            *failures
+                .entry((detail.pointer, detail.keyword))
+                .or_default() += detail.count;
         }
     }
-    Ok((count, rejected))
+    Ok(StateCheck {
+        row_count: count,
+        rejected_count: rejected,
+        failures: failures
+            .into_iter()
+            .map(|((pointer, keyword), count)| StateCheckFailure {
+                pointer,
+                keyword,
+                count,
+            })
+            .collect(),
+    })
 }
 #[macro_export]
 macro_rules! db_schema {

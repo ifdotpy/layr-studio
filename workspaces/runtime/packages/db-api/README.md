@@ -42,3 +42,25 @@ eager const assertion, so a type alias cannot hide an optional key.
 State checks count declared SQL constraint violations independently of the physical
 DDL, then decode only the other rows, so each rejected row is counted once.
 Boolean decoding accepts only INTEGER 0/1; optional booleans additionally accept NULL.
+
+Legacy descriptors use `#[db(legacy_ddl = "CREATE TABLE …")]` and repeated
+`#[db(legacy_index = "CREATE INDEX …")]` to keep their exact physical SQL in one
+owner. New tables continue to derive DDL. `#[db(generated)]` fields are selected
+but omitted from insert/upsert and cannot be assigned by `db_update!`.
+Generated DML always quotes identifiers. Non-optional Rust keys remain required
+even when legacy DDL permits NULL; state checks report those rows.
+
+`Read::from_adapter(connection, capability)` offers get/query for connection-based
+readers; mutations require `Tx`. `db_update!(tx, Row, set(Row::COL = &value),
+filter(Row::ID.eq(&id)))` and `db_delete!(tx, Row, filter(...))` share the query
+filter grammar and return affected rows. Mutable tables also support
+`tx.insert_new(&row)` (only key conflicts return false), while
+`tx.insert_rowid(&row)` returns SQLite's inserted rowid. `Descriptor::install_if_absent`
+installs bootstrap DDL without replacing existing tables.
+
+`#[db(state_check = check_row)]` calls a
+`fn(&Connection) -> rusqlite::Result<StateCheck>` instead of the generic decoder for
+that table’s single state-check report;
+read/write admission still belongs to `check`. State-check results include counts
+and aggregated pointer/keyword diagnostics. Codecs can return a boxed
+`StateCheckFailure` through a rusqlite conversion error to preserve decode details.

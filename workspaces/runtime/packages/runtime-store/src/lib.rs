@@ -43,6 +43,7 @@ pub use repositories::process_actions::{
 };
 pub use repositories::terminals;
 pub use repositories::{command_watermarks, outbox, remote_outbox, request_results};
+mod canvas_schema;
 pub mod json_record_codec;
 pub mod peer_update_settings;
 mod schema;
@@ -67,7 +68,9 @@ pub use schema::{
     python_json_with_separators, sha256_hex, truthy,
 };
 mod state_check;
-pub use state_check::{StateCheckFailure, StateCheckReport, StateCheckTable, check_state_readonly};
+pub use state_check::{
+    StateCheckFailure, StateCheckReport, StateCheckTable, check_legacy_json, check_state_readonly,
+};
 
 pub use repositories::account_state;
 pub use repositories::account_transfer::{

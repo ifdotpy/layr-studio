@@ -2,6 +2,249 @@ use studio_db_api::rusqlite::Connection;
 use studio_db_api::{Database, DbEnum, DbTable, DbValue, Table, Tx, db_query, db_schema};
 struct Canvas;
 impl Database for Canvas {}
+
+#[test]
+fn read_capability_refuses_delete_returning_before_execution() {
+    let db = Connection::open_in_memory().expect("db");
+    db.execute_batch(
+        "CREATE TABLE text_keys(id TEXT PRIMARY KEY); INSERT INTO text_keys VALUES('kept')",
+    )
+    .expect("fixture");
+    let read = studio_db_api::Read::from_adapter(&db, &Canvas);
+    assert!(
+        read.query::<TextKey>("DELETE FROM text_keys RETURNING id", &[])
+            .is_err()
+    );
+    assert!(
+        read.get::<TextKey>(&("kept".into(),))
+            .expect("read")
+            .is_some()
+    );
+}
+
+#[derive(DbTable)]
+#[db(table="keyword_bool", database=Canvas, legacy_ddl="CREATE TABLE keyword_bool(id INTEGER PRIMARY KEY, \"select\" INTEGER NOT NULL)")]
+struct KeywordBool {
+    #[db(key)]
+    id: i64,
+    #[db(column = "select")]
+    flag: bool,
+}
+#[derive(DbTable)]
+#[db(table="automatic", database=Canvas)]
+struct Automatic {
+    #[db(key, generated)]
+    id: i64,
+}
+#[test]
+fn all_generated_rows_still_allow_default_inserts() {
+    let mut db = Connection::open_in_memory().expect("db");
+    db.execute_batch(Automatic::DDL).expect("DDL");
+    let transaction = db.transaction().expect("tx");
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    assert_eq!(
+        tx.insert_rowid(&Automatic { id: 0 })
+            .expect("default insert"),
+        1
+    );
+    assert_eq!(tx.get::<Automatic>(&(1,)).expect("get").expect("row").id, 1);
+}
+#[test]
+fn state_constraints_quote_legacy_keyword_columns() {
+    let db = Connection::open_in_memory().expect("db");
+    db.execute_batch(KeywordBool::DDL).expect("legacy DDL");
+    db.execute_batch("INSERT INTO keyword_bool VALUES(1,1),(2,7)")
+        .expect("legacy rows");
+    assert_eq!(
+        studio_db_api::check::<KeywordBool>(&db)
+            .expect("quoted constraints")
+            .counts(),
+        (2, 1)
+    );
+}
+
+#[derive(DbTable)]
+#[db(table = "legacy", database = Canvas,
+    legacy_ddl = "CREATE TABLE legacy (id TEXT PRIMARY KEY, end INTEGER NOT NULL, doubled INTEGER GENERATED ALWAYS AS (end * 2) VIRTUAL)",
+    legacy_index = "CREATE UNIQUE INDEX legacy_endId ON legacy(end)")]
+struct Legacy {
+    #[db(key)]
+    id: String,
+    end: i64,
+    #[db(generated)]
+    doubled: i64,
+}
+
+#[derive(DbTable)]
+#[db(table = "numbered", database = Canvas,
+    legacy_ddl = "CREATE TABLE numbered (\n seq INTEGER PRIMARY KEY AUTOINCREMENT, text TEXT NOT NULL)")]
+struct Numbered {
+    #[db(key, generated)]
+    seq: i64,
+    text: String,
+}
+
+#[test]
+fn legacy_ddl_generated_fields_read_capability_and_typed_mutations() {
+    use studio_db_api::{Read, db_delete, db_update};
+    let mut db = Connection::open_in_memory().expect("db");
+    for descriptor in [Legacy::descriptor(), Numbered::descriptor()] {
+        for ddl in descriptor.ddl_statements() {
+            db.execute_batch(ddl).expect("legacy DDL");
+        }
+        let actual: String = db
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE name=?1",
+                [descriptor.name],
+                |r| r.get(0),
+            )
+            .expect("catalog");
+        assert_eq!(actual, descriptor.ddl);
+    }
+    let transaction = db.transaction().expect("tx");
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&Legacy {
+        id: "one".into(),
+        end: 3,
+        doubled: 99,
+    })
+    .expect("generated field omitted");
+    let id = tx
+        .insert_rowid(&Numbered {
+            seq: 99,
+            text: "auto".into(),
+        })
+        .expect("automatic key");
+    assert_eq!(id, 1);
+    assert!(
+        tx.insert_new(&Legacy {
+            id: "other".into(),
+            end: 3,
+            doubled: 0
+        })
+        .is_err(),
+        "other unique conflicts must not be ignored"
+    );
+    assert!(
+        !tx.insert_new(&Legacy {
+            id: "one".into(),
+            end: 30,
+            doubled: 0
+        })
+        .expect("key conflict only")
+    );
+    assert_eq!(
+        tx.get::<Numbered>(&(id,)).expect("get").expect("row").seq,
+        1
+    );
+    assert_eq!(
+        db_update!(
+            tx,
+            Legacy,
+            set(Legacy::END = &4),
+            filter(Legacy::ID.eq(&"one".into()))
+        )
+        .expect("update"),
+        1
+    );
+    let row = tx
+        .get::<Legacy>(&("one".into(),))
+        .expect("get")
+        .expect("row");
+    assert_eq!((row.end, row.doubled), (4, 8));
+    tx.upsert(&Legacy {
+        id: "one".into(),
+        end: 5,
+        doubled: 99,
+    })
+    .expect("upsert omits generated field");
+    assert_eq!(
+        db_delete!(tx, Legacy, filter(Legacy::END.lt(&0))).expect("no match"),
+        0
+    );
+    assert_eq!(
+        db_delete!(tx, Legacy, filter(Legacy::END.eq(&5))).expect("delete"),
+        1
+    );
+    transaction.commit().expect("commit");
+    let read = Read::from_adapter(&db, &Canvas);
+    assert_eq!(
+        read.get::<Numbered>(&(1,))
+            .expect("read get")
+            .expect("row")
+            .text,
+        "auto"
+    );
+    assert_eq!(
+        db_query!(read, Numbered, filter(Numbered::SEQ.eq(&1)))
+            .expect("read query")
+            .len(),
+        1
+    );
+    db.execute("INSERT INTO legacy(id,end) VALUES(NULL,2)", [])
+        .expect("legacy nullable key");
+    assert_eq!(
+        studio_db_api::check::<Legacy>(&db)
+            .expect("legacy check")
+            .counts(),
+        (1, 1)
+    );
+}
+
+#[derive(DbTable)]
+#[db(table = "semantic", database = Canvas, state_check = semantic_check, legacy_ddl = "CREATE TABLE semantic(id PRIMARY KEY)")]
+struct Semantic {
+    #[db(key)]
+    id: i64,
+}
+fn semantic_check(
+    connection: &Connection,
+) -> studio_db_api::rusqlite::Result<studio_db_api::StateCheck> {
+    let (row_count, rejected_count) = connection.query_row(
+        "SELECT count(*), count(*) FILTER (WHERE id=2) FROM semantic",
+        [],
+        |row| Ok((row.get::<_, i64>(0)? as u64, row.get::<_, i64>(1)? as u64)),
+    )?;
+    Ok(studio_db_api::StateCheck {
+        row_count,
+        rejected_count,
+        failures: vec![studio_db_api::StateCheckFailure {
+            pointer: "/id".into(),
+            keyword: "semantic".into(),
+            count: 1,
+        }],
+    })
+}
+#[test]
+fn state_check_hook_preserves_details_without_changing_writes() {
+    let mut db = Connection::open_in_memory().expect("db");
+    Semantic::descriptor()
+        .install_if_absent(&db)
+        .expect("install");
+    Semantic::descriptor()
+        .install_if_absent(&db)
+        .expect("idempotent");
+    let transaction = db.transaction().expect("tx");
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&Semantic { id: 2 })
+        .expect("write admits existing contract");
+    tx.upsert(&Semantic { id: 2 })
+        .expect("upsert admits existing contract");
+    assert!(tx.get::<Semantic>(&(2,)).expect("read").is_some());
+    transaction
+        .execute("INSERT INTO semantic VALUES('historical')", [])
+        .expect("legacy row accepted by the existing checker");
+    let report = studio_db_api::check::<Semantic>(&transaction).expect("state check");
+    assert_eq!(report.counts(), (2, 1));
+    assert_eq!(
+        report.failures,
+        vec![studio_db_api::StateCheckFailure {
+            pointer: "/id".into(),
+            keyword: "semantic".into(),
+            count: 1
+        }]
+    );
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, DbEnum)]
 #[repr(i64)]
 enum Status {
@@ -82,6 +325,12 @@ fn integer_enum_composite_key_predicate_and_crud() {
         vec![changed]
     );
     let empty = [];
+    assert_eq!(
+        db_query!(tx, Witness, limit(-1_i64))
+            .expect("negative limit is unbounded")
+            .len(),
+        2
+    );
     assert!(
         db_query!(tx, Witness, filter(Witness::ORDINAL.in_(&empty)))
             .expect("empty IN")
@@ -123,6 +372,17 @@ impl studio_db_api::Codec<Count> for CountCodec {
         Ok(value.0)
     }
     fn decode(_: &Connection, value: i64) -> studio_db_api::rusqlite::Result<Count> {
+        if value < 0 {
+            return Err(studio_db_api::rusqlite::Error::FromSqlConversionFailure(
+                2,
+                studio_db_api::rusqlite::types::Type::Integer,
+                Box::new(studio_db_api::StateCheckFailure {
+                    pointer: "/count".into(),
+                    keyword: "minimum".into(),
+                    count: 1,
+                }),
+            ));
+        }
         Ok(Count(value))
     }
 }
@@ -173,7 +433,9 @@ fn renamed_foreign_key_custom_codec_and_private_metadata() {
     );
     assert!(Child::COLUMNS[2].private);
     assert_eq!(
-        studio_db_api::check::<Child>(&transaction).expect("check"),
+        studio_db_api::check::<Child>(&transaction)
+            .expect("check")
+            .counts(),
         (1, 0)
     );
 }
@@ -243,6 +505,34 @@ fn codec_columns_use_the_same_encoder_for_filters_arrays_and_order() {
     .expect("codec array and order");
     assert_eq!(rows[0].id, 2);
     assert_eq!(rows[1].id, 1);
+    use studio_db_api::{db_delete, db_update};
+    assert_eq!(
+        db_update!(
+            tx,
+            Child,
+            set(Child::COUNT = &Count(40)),
+            filter(Child::COUNT.in_(&values))
+        )
+        .expect("codec update"),
+        2
+    );
+    assert_eq!(
+        db_delete!(tx, Child, filter(Child::COUNT.eq(&Count(40)))).expect("codec delete"),
+        2
+    );
+    transaction
+        .execute("INSERT INTO children VALUES(1,1,-1),(2,1,-2)", [])
+        .expect("invalid codec rows");
+    let report = studio_db_api::check::<Child>(&transaction).expect("decode diagnostics");
+    assert_eq!(report.counts(), (2, 2));
+    assert_eq!(
+        report.failures,
+        vec![studio_db_api::StateCheckFailure {
+            pointer: "/count".into(),
+            keyword: "minimum".into(),
+            count: 2
+        }]
+    );
 }
 #[test]
 fn nullable_comparisons_follow_sql_null_semantics() {
@@ -301,7 +591,9 @@ fn state_check_enforces_declared_constraints_and_strict_bool_without_double_coun
     )
     .expect("corrupted fixture");
     assert_eq!(
-        studio_db_api::check::<CheckedRow>(&db).expect("check"),
+        studio_db_api::check::<CheckedRow>(&db)
+            .expect("check")
+            .counts(),
         (1, 1)
     );
     let transaction = db.transaction().expect("tx");
@@ -313,7 +605,9 @@ fn state_check_enforces_declared_constraints_and_strict_bool_without_double_coun
     let unchecked = Connection::open_in_memory().expect("unchecked schema");
     unchecked.execute_batch("CREATE TABLE declared_constraints(id INTEGER,flag INTEGER); INSERT INTO declared_constraints VALUES(2,0),(1,1),(NULL,1)").expect("missing physical constraints");
     assert_eq!(
-        studio_db_api::check::<CheckedRow>(&unchecked).expect("declared checks"),
+        studio_db_api::check::<CheckedRow>(&unchecked)
+            .expect("declared checks")
+            .counts(),
         (3, 2)
     );
 }
@@ -372,7 +666,9 @@ fn state_check_preserves_sqlite_null_check_semantics() {
     db.execute_batch(NullableCheckRow::DDL).expect("DDL");
     db.execute_batch("PRAGMA ignore_check_constraints=ON; INSERT INTO nullable_checks VALUES(1,1),(2,2),(3,NULL)").expect("fixture");
     assert_eq!(
-        studio_db_api::check::<NullableCheckRow>(&db).expect("all three rows checked"),
+        studio_db_api::check::<NullableCheckRow>(&db)
+            .expect("all three rows checked")
+            .counts(),
         (3, 1)
     );
 }

@@ -8,7 +8,10 @@ use studio_json::{Map, Value};
 use crate::{StoreError, StoreResult};
 
 pub(crate) fn prepare_peer_update_settings(connection: &Connection) -> StoreResult<()> {
-    for registration in crate::peer_update_settings::registry() {
+    for registration in crate::canvas_schema::registry()
+        .into_iter()
+        .filter(|entry| entry.descriptor.name == "runtime_peer_update_settings")
+    {
         if !table_exists(connection, registration.descriptor.name)? {
             connection.execute_batch(registration.descriptor.ddl)?;
         }

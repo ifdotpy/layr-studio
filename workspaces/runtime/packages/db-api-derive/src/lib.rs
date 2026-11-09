@@ -21,14 +21,24 @@ pub fn enumeration(input: TokenStream) -> TokenStream {
 // SQLite's keyword set. One owner for all unquoted generated identifiers.
 const SQL_KEYWORDS: &str = "abort action add after all alter always analyze and as asc attach autoincrement before begin between by cascade case cast check collate column commit conflict constraint create cross current current_date current_time current_timestamp database default deferrable deferred delete desc detach distinct do drop each else end escape except exclude exclusive exists explain fail filter first following for foreign from full generated glob group groups having if ignore immediate in index indexed initially inner insert instead intersect into is isnull join key last left like limit match materialized natural no not nothing notnull null nulls of offset on or order others outer over partition plan pragma preceding primary query raise range recursive references regexp reindex release rename replace restrict returning right rollback row rows savepoint select set table temp temporary then ties to transaction trigger unbounded union unique update using vacuum values view virtual when where window with without";
 fn identifier(value: &str, span: &impl Spanned) -> syn::Result<()> {
+    identifier_shape(value, span)?;
+    if SQL_KEYWORDS
+        .split_ascii_whitespace()
+        .any(|keyword| keyword == value)
+    {
+        return Err(syn::Error::new(
+            span.span(),
+            "SQL identifier must not be a SQLite keyword",
+        ));
+    }
+    Ok(())
+}
+fn identifier_shape(value: &str, span: &impl Spanned) -> syn::Result<()> {
     if value.is_empty()
         || !value
             .bytes()
             .enumerate()
             .all(|(i, c)| c == b'_' || c.is_ascii_lowercase() || (i > 0 && c.is_ascii_digit()))
-        || SQL_KEYWORDS
-            .split_ascii_whitespace()
-            .any(|keyword| keyword == value)
     {
         return Err(syn::Error::new(
             span.span(),
@@ -36,6 +46,9 @@ fn identifier(value: &str, span: &impl Spanned) -> syn::Result<()> {
         ));
     }
     Ok(())
+}
+fn quoted(value: &str) -> String {
+    format!("\"{value}\"")
 }
 fn expand_enum(input: &DeriveInput) -> syn::Result<Tokens> {
     let name = &input.ident;
@@ -139,6 +152,7 @@ struct Field {
     codec: Option<Path>,
     check: Option<LitStr>,
     fk: Option<Path>,
+    generated: bool,
 }
 fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     let name = &input.ident;
@@ -152,8 +166,11 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     let mut table = None::<LitStr>;
     let mut database = None::<Path>;
     let mut check = None::<Path>;
+    let mut state_check = None::<Path>;
     let (mut strict, mut without_rowid, mut receipt) = (false, false, false);
     let mut indexes = Vec::new();
+    let mut legacy_ddl = None::<LitStr>;
+    let mut legacy_indexes = Vec::<LitStr>::new();
     for attr in input.attrs.iter().filter(|a| a.path().is_ident("db")) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("table") {
@@ -162,12 +179,18 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
                 database = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("check") {
                 check = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("state_check") {
+                state_check = Some(meta.value()?.parse()?);
             } else if meta.path.is_ident("strict") {
                 strict = true;
             } else if meta.path.is_ident("without_rowid") {
                 without_rowid = true;
             } else if meta.path.is_ident("receipt") {
                 receipt = true;
+            } else if meta.path.is_ident("legacy_ddl") {
+                legacy_ddl = Some(meta.value()?.parse()?);
+            } else if meta.path.is_ident("legacy_index") {
+                legacy_indexes.push(meta.value()?.parse()?);
             } else if meta.path.is_ident("index") {
                 let mut index = Index::default();
                 meta.parse_nested_meta(|part| {
@@ -196,7 +219,11 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     }
     let table =
         table.ok_or_else(|| syn::Error::new_spanned(name, "missing #[db(table = \"name\")]"))?;
-    identifier(&table.value(), &table)?;
+    if legacy_ddl.is_some() {
+        identifier_shape(&table.value(), &table)?;
+    } else {
+        identifier(&table.value(), &table)?;
+    }
     let database = database
         .ok_or_else(|| syn::Error::new_spanned(name, "missing #[db(database = Marker)]"))?;
     let syn::Data::Struct(data) = &input.data else {
@@ -220,11 +247,14 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             codec: None,
             check: None,
             fk: None,
+            generated: false,
         };
         for attr in field.attrs.iter().filter(|a| a.path().is_ident("db")) {
             attr.parse_nested_meta(|meta| {
                 if meta.path.is_ident("key") {
                     f.key = true;
+                } else if meta.path.is_ident("generated") {
+                    f.generated = true;
                 } else if meta.path.is_ident("private") {
                     f.private = true;
                 } else if meta.path.is_ident("column") {
@@ -241,7 +271,11 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
                 Ok(())
             })?;
         }
-        identifier(&f.column, field)?;
+        if legacy_ddl.is_some() {
+            identifier_shape(&f.column, field)?;
+        } else {
+            identifier(&f.column, field)?;
+        }
         if fields
             .iter()
             .any(|previous: &Field| previous.column == f.column)
@@ -266,30 +300,41 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     let table_name = table.value();
     let column_list = fields
         .iter()
-        .map(|f| f.column.as_str())
+        .map(|f| quoted(&f.column))
         .collect::<Vec<_>>()
         .join(",");
     let where_key = keys
         .iter()
-        .map(|f| format!("{}=?", f.column))
+        .map(|f| format!("{}=?", quoted(&f.column)))
         .collect::<Vec<_>>()
         .join(" AND ");
     let key_columns = keys
         .iter()
-        .map(|f| f.column.as_str())
+        .map(|f| quoted(&f.column))
         .collect::<Vec<_>>()
         .join(",");
-    let select = format!("SELECT {column_list} FROM {table_name}");
+    let sql_table = quoted(&table_name);
+    let select = format!("SELECT {column_list} FROM {sql_table}");
     let get = format!("{select} WHERE {where_key}");
-    let insert = format!(
-        "INSERT INTO {table_name}({column_list}) VALUES({})",
-        vec!["?"; fields.len()].join(",")
-    );
-    let delete = format!("DELETE FROM {table_name} WHERE {where_key}");
+    let writable = fields.iter().filter(|f| !f.generated).collect::<Vec<_>>();
+    let write_columns = writable
+        .iter()
+        .map(|f| quoted(&f.column))
+        .collect::<Vec<_>>()
+        .join(",");
+    let insert = if writable.is_empty() {
+        format!("INSERT INTO {sql_table} DEFAULT VALUES")
+    } else {
+        format!(
+            "INSERT INTO {sql_table}({write_columns}) VALUES({})",
+            vec!["?"; writable.len()].join(",")
+        )
+    };
+    let delete = format!("DELETE FROM {sql_table} WHERE {where_key}");
     let updates = fields
         .iter()
-        .filter(|f| !f.key)
-        .map(|f| format!("{}=excluded.{}", f.column, f.column))
+        .filter(|f| !f.key && !f.generated)
+        .map(|f| format!("{}=excluded.{}", quoted(&f.column), quoted(&f.column)))
         .collect::<Vec<_>>();
     let upsert = if updates.is_empty() {
         format!("{insert} ON CONFLICT({key_columns}) DO NOTHING")
@@ -321,6 +366,10 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         } else {
             quote!(#ty)
         };
+        if f.key {
+            let not_null = format!(" AND ({} IS NOT NULL)", quoted(column));
+            constraints.push(quote!(#not_null));
+        }
         if i > 0 {
             ddl.push(quote!(", "));
         }
@@ -349,9 +398,10 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             constraints.push(quote!(concat!(" AND (", #check, ")")));
         }
         ddl.extend([quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " CHECK(" }), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { #column }), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " IN (" }), quote!(<#stored as ::studio_db_api::DbValue>::CODES), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { "))" })]);
+        let quoted_column = quoted(column);
         constraints.extend([
             quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " AND (" }),
-            quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { #column }),
+            quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { #quoted_column }),
             quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " IN (" }),
             quote!(<#stored as ::studio_db_api::DbValue>::CODES),
             quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { "))" }),
@@ -379,12 +429,18 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         }
         if let Some(codec) = codec {
             let var = format_ident!("encoded_{i}");
-            encoded.push(quote!(let #var = <#codec as ::studio_db_api::Codec<#ty>>::encode(_connection, &self.#field_name)?;));
             reads.push(quote!(#field_name: <#codec as ::studio_db_api::Codec<#ty>>::decode(_connection, <#stored as ::studio_db_api::DbValue>::read(row, #i)?)?));
-            binds.push(quote!(&#var as &dyn ::studio_db_api::rusqlite::types::ToSql));
+            if !f.generated {
+                encoded.push(quote!(let #var = <#codec as ::studio_db_api::Codec<#ty>>::encode(_connection, &self.#field_name)?;));
+                binds.push(quote!(&#var as &dyn ::studio_db_api::rusqlite::types::ToSql));
+            }
         } else {
             reads.push(quote!(#field_name: <#ty as ::studio_db_api::DbValue>::read(row, #i)?));
-            binds.push(quote!(&self.#field_name as &dyn ::studio_db_api::rusqlite::types::ToSql));
+            if !f.generated {
+                binds.push(
+                    quote!(&self.#field_name as &dyn ::studio_db_api::rusqlite::types::ToSql),
+                );
+            }
         }
         let marker = format_ident!(
             "{}Column{}",
@@ -403,6 +459,9 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         let constant = format_ident!("{}", field_name.to_string().to_uppercase());
         let metadata = format_ident!("__DB_COLUMN_{}", field_name.to_string().to_uppercase());
         markers.push(quote!(#[derive(Clone, Copy)] #input_vis struct #marker;));
+        if !f.generated {
+            markers.push(quote!(impl ::studio_db_api::WritableColumn for #marker {}));
+        }
         constants.push(quote!(pub const #metadata: &'static str = #column;));
         constants.push(quote!(pub const #constant: #marker = #marker;));
         let (parameter, encode) = if let Some(codec) = codec {
@@ -424,12 +483,18 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             type Value = #ty;
             type Parameter<'a> = #parameter;
             const NAME: &'static str = #column;
+            const QUOTED_NAME: &'static str = concat!("\"", #column, "\"");
             fn encode<'a>(connection: &::studio_db_api::rusqlite::Connection, value: &'a #ty) -> ::studio_db_api::rusqlite::Result<Self::Parameter<'a>> { #encode }
         }));
         descriptors.push(quote!(::studio_db_api::ColumnDescriptor { name: #column, storage: <#stored as ::studio_db_api::DbValue>::SQL_TYPE, nullable: <#stored as ::studio_db_api::DbValue>::NULLABLE, private: #private, codes: <#stored as ::studio_db_api::DbValue>::CODE_NAMES }));
     }
     if keys.len() > 1 {
-        let pk = format!(", PRIMARY KEY({key_columns})");
+        let ddl_keys = keys
+            .iter()
+            .map(|f| f.column.as_str())
+            .collect::<Vec<_>>()
+            .join(",");
+        let pk = format!(", PRIMARY KEY({ddl_keys})");
         ddl.push(quote!(#pk));
     }
     let suffix = match (strict, without_rowid) {
@@ -439,7 +504,24 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         (false, false) => ")",
     };
     ddl.push(quote!(#suffix));
+    if let Some(sql) = legacy_ddl {
+        ddl = vec![quote!(#sql)];
+    }
     let mut index_sql = Vec::new();
+    for sql in legacy_indexes {
+        let text = sql.value();
+        let words = text.split_ascii_whitespace().collect::<Vec<_>>();
+        let offset = if words.get(1) == Some(&"UNIQUE") {
+            3
+        } else {
+            2
+        };
+        let index_name = words
+            .get(offset)
+            .ok_or_else(|| syn::Error::new_spanned(&sql, "expected CREATE INDEX name ON table"))?;
+        let index_name = index_name.trim_matches('"');
+        index_sql.push(quote!(::studio_db_api::IndexDescriptor { name: #index_name, sql: #sql }));
+    }
     for index in indexes {
         let index_name = index
             .name
@@ -479,15 +561,22 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
     }
     let key_types = keys.iter().map(|f| &f.ty).collect::<Vec<_>>();
     let key_assertions = key_types.iter().map(|ty| quote!(assert!(!<#ty as ::studio_db_api::DbValue>::NULLABLE, "primary keys cannot be nullable");));
+    let update = if check.is_none() && !receipt && !writable.is_empty() {
+        quote!(impl ::studio_db_api::UpdateTable for #name {})
+    } else {
+        quote!()
+    };
     let validate = check.map(|check| quote!(fn validate(&self) -> ::studio_db_api::rusqlite::Result<()> { #check(self).map_err(|error| ::studio_db_api::rusqlite::Error::ToSqlConversionFailure(Box::new(error))) }));
+    let state_check = state_check.map(|check| quote!(fn state_check(connection: &::studio_db_api::rusqlite::Connection) -> ::studio_db_api::rusqlite::Result<::studio_db_api::StateCheck> { #check(connection) }));
+    let insert_new = format!("{insert} ON CONFLICT({key_columns}) DO NOTHING");
     let key_binds = keys.iter().enumerate().map(|(i, _)| {
         let i = syn::Index::from(i);
         quote!(&key.#i as &dyn ::studio_db_api::rusqlite::types::ToSql)
     });
-    let mutable = if receipt {
+    let mutable = if receipt || writable.is_empty() {
         quote!()
     } else {
-        quote!(impl ::studio_db_api::MutableTable for #name { const UPSERT: &'static str = concat!(#upsert); })
+        quote!(impl ::studio_db_api::MutableTable for #name { const UPSERT: &'static str = concat!(#upsert); const INSERT_NEW: &'static str = #insert_new; })
     };
     Ok(quote! {
         const _: () = { #(#key_assertions)* };
@@ -500,7 +589,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             const DDL: &'static str = ::studio_db_api::static_sql!(#(#ddl),*);
             const INDEXES: &'static [::studio_db_api::IndexDescriptor] = &[#(#index_sql),*];
             const SELECT: &'static str = concat!(#select);
-            const STATE_CHECK: &'static str = ::studio_db_api::static_sql!("SELECT count(*) FROM ", #table, " WHERE NOT (", #(#constraints),*, ")");
+            const STATE_CHECK: &'static str = ::studio_db_api::static_sql!("SELECT count(*) FROM ", #sql_table, " WHERE NOT (", #(#constraints),*, ")");
             const VALID_ROWS: &'static str = ::studio_db_api::static_sql!(#select, " WHERE (", #(#constraints),*, ") IS NOT FALSE");
             const GET: &'static str = concat!(#get);
             const INSERT: &'static str = concat!(#insert);
@@ -508,10 +597,12 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             const COLUMNS: &'static [::studio_db_api::ColumnDescriptor] = &[#(#descriptors),*];
             fn read(_connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>) -> ::studio_db_api::rusqlite::Result<Self> { let value = Self { #(#reads),* }; ::studio_db_api::Table::validate(&value)?; Ok(value) }
             #validate
+            #state_check
             fn bind<T>(&self, _connection: &::studio_db_api::rusqlite::Connection, f: impl FnOnce(&[&dyn ::studio_db_api::rusqlite::types::ToSql]) -> ::studio_db_api::rusqlite::Result<T>) -> ::studio_db_api::rusqlite::Result<T> { #(#encoded)* f(&[#(#binds),*]) }
             fn bind_key<T>(key: &Self::Key, f: impl FnOnce(&[&dyn ::studio_db_api::rusqlite::types::ToSql]) -> ::studio_db_api::rusqlite::Result<T>) -> ::studio_db_api::rusqlite::Result<T> { f(&[#(#key_binds),*]) }
         }
         #mutable
+        #update
     })
 }
 fn predicate_sql(expr: &Expr, fields: &[Field]) -> syn::Result<Tokens> {
@@ -587,9 +678,27 @@ fn predicate_sql(expr: &Expr, fields: &[Field]) -> syn::Result<Tokens> {
 /// Execute a single-table query with compile-time SQL and column-typed bindings.
 #[proc_macro]
 pub fn db_query(input: TokenStream) -> TokenStream {
-    expand_query(parse_macro_input!(input as QueryInput))
+    expand_statement(parse_macro_input!(input as QueryInput), Statement::Select)
         .unwrap_or_else(syn::Error::into_compile_error)
         .into()
+}
+#[proc_macro]
+pub fn db_update(input: TokenStream) -> TokenStream {
+    expand_statement(parse_macro_input!(input as QueryInput), Statement::Update)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+#[proc_macro]
+pub fn db_delete(input: TokenStream) -> TokenStream {
+    expand_statement(parse_macro_input!(input as QueryInput), Statement::Delete)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Statement {
+    Select,
+    Update,
+    Delete,
 }
 struct QueryInput {
     tx: Expr,
@@ -597,6 +706,7 @@ struct QueryInput {
     filters: Vec<Expr>,
     order: Vec<Expr>,
     limit: Option<Expr>,
+    assignments: Vec<Expr>,
 }
 impl syn::parse::Parse for QueryInput {
     fn parse(input: syn::parse::ParseStream<'_>) -> syn::Result<Self> {
@@ -609,6 +719,7 @@ impl syn::parse::Parse for QueryInput {
             filters: vec![],
             order: vec![],
             limit: None,
+            assignments: vec![],
         };
         let mut seen = Vec::new();
         while !input.is_empty() {
@@ -629,6 +740,7 @@ impl syn::parse::Parse for QueryInput {
                 .collect::<Vec<_>>();
             match clause.to_string().as_str() {
                 "filter" => query.filters = args,
+                "set" => query.assignments = args,
                 "order_by" => query.order = args,
                 "limit" if args.len() == 1 => query.limit = args.into_iter().next(),
                 _ => {
@@ -649,17 +761,61 @@ fn query_column(expr: &Expr) -> syn::Result<&Path> {
         Err(syn::Error::new_spanned(expr, "expected Row::COLUMN"))
     }
 }
-fn expand_query(query: QueryInput) -> syn::Result<Tokens> {
+fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
     let QueryInput {
         tx,
         row,
         filters,
         order,
         limit,
+        assignments,
     } = query;
-    let mut sql = vec![quote!(<#row as ::studio_db_api::Table>::SELECT)];
+    if kind != Statement::Select && (!order.is_empty() || limit.is_some()) {
+        return Err(syn::Error::new_spanned(
+            &row,
+            "mutations accept only set and filter clauses",
+        ));
+    }
+    if (kind == Statement::Update) == assignments.is_empty() {
+        return Err(syn::Error::new_spanned(
+            &row,
+            "set(...) is required only for updates",
+        ));
+    }
+    let mut sql = match kind {
+        Statement::Select => vec![quote!(<#row as ::studio_db_api::Table>::SELECT)],
+        Statement::Update => vec![
+            quote!("UPDATE \""),
+            quote!(<#row as ::studio_db_api::Table>::NAME),
+            quote!("\" SET "),
+        ],
+        Statement::Delete => vec![
+            quote!("DELETE FROM \""),
+            quote!(<#row as ::studio_db_api::Table>::NAME),
+            quote!("\""),
+        ],
+    };
     let mut values = Vec::new();
     let mut bindings = Vec::new();
+    for (i, expr) in assignments.iter().enumerate() {
+        let Expr::Assign(assignment) = expr else {
+            return Err(syn::Error::new_spanned(
+                expr,
+                "expected Row::COLUMN = &value",
+            ));
+        };
+        let col = query_column(&assignment.left)?;
+        if i > 0 {
+            sql.push(quote!(", "));
+        }
+        sql.push(quote!(::studio_db_api::writable_column_name::<#row, _>(#col)));
+        sql.push(quote!(" = ?"));
+        let argument = &assignment.right;
+        let input = format_ident!("__db_set_input_{i}");
+        let value = format_ident!("__db_set_value_{i}");
+        values.push(quote!(let #input = #argument; let #value = __db_tx.read().parameter::<#row, _>(#col, #input)?;));
+        bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
+    }
     for (i, expr) in filters.iter().enumerate() {
         let Expr::MethodCall(call) = expr else {
             return Err(syn::Error::new_spanned(
@@ -701,7 +857,7 @@ fn expand_query(query: QueryInput) -> syn::Result<Tokens> {
             sql.push(quote!(" IN rarray(?)"));
             let value = format_ident!("__db_array_{i}");
             values.push(
-                quote!(let #value = ::studio_db_api::array_parameter::<#row, _>(__db_tx.connection(), #col, #argument)?;),
+                quote!(let #value = __db_tx.read().array_parameter::<#row, _>(#col, #argument)?;),
             );
             bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
         } else {
@@ -722,7 +878,7 @@ fn expand_query(query: QueryInput) -> syn::Result<Tokens> {
             sql.push(quote!(#operator));
             let value = format_ident!("__db_parameter_{i}");
             let input = format_ident!("__db_input_{i}");
-            values.push(quote!(let #input = #argument; let #value = ::studio_db_api::parameter::<#row, _>(__db_tx.connection(), #col, #input)?;));
+            values.push(quote!(let #input = #argument; let #value = __db_tx.read().parameter::<#row, _>(#col, #input)?;));
             bindings.push(quote!(&#value as &dyn ::studio_db_api::rusqlite::types::ToSql));
         }
     }
@@ -752,20 +908,37 @@ fn expand_query(query: QueryInput) -> syn::Result<Tokens> {
     if let Some(limit) = limit {
         // A direct LIMIT variable makes SQLite expire the VM on every rebind.
         sql.push(quote!(" LIMIT CAST(? AS INTEGER)"));
-        values.push(quote!(let __db_limit: u32 = #limit;));
+        values.push(quote!(let __db_limit: i64 = ::std::convert::Into::into(#limit);));
         bindings.push(quote!(
             &__db_limit as &dyn ::studio_db_api::rusqlite::types::ToSql
         ));
     }
+    let (result, borrow, execute) = if kind == Statement::Select {
+        (
+            quote!(::std::vec::Vec<#row>),
+            quote!(&(#tx)),
+            quote!(__db_tx.query::<#row>(SQL, &[#(#bindings),*])),
+        )
+    } else if kind == Statement::Update {
+        (
+            quote!(usize),
+            quote!(&mut (#tx)),
+            quote!(__db_tx.update::<#row>(SQL, &[#(#bindings),*])),
+        )
+    } else {
+        (
+            quote!(usize),
+            quote!(&mut (#tx)),
+            quote!(__db_tx.execute::<#row>(SQL, &[#(#bindings),*])),
+        )
+    };
     // Input clause order never affects legal SQL clause order.
-    Ok(
-        quote!((|| -> ::studio_db_api::rusqlite::Result<::std::vec::Vec<#row>> {
+    Ok(quote!((|| -> ::studio_db_api::rusqlite::Result<#result> {
         const SQL: &str = ::studio_db_api::static_sql!(#(#sql),*);
-        let __db_tx = &(#tx);
+        let __db_tx = #borrow;
         #(#values)*
-        __db_tx.query::<#row>(SQL, &[#(#bindings),*])
-    })()),
-    )
+        #execute
+    })()))
 }
 
 #[cfg(test)]

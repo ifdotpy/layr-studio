@@ -5,10 +5,86 @@ use rusqlite::Connection;
 use std::marker::PhantomData;
 use studio_db_api::Codec;
 
+/// An immutable typed JSON value together with its exact admitted storage text.
+/// Unlike `RawJsonRecord`, its owner need not carry a payload ID.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExactJson<T> {
+    value: T,
+    raw: Box<str>,
+}
+
+impl<T: serde::de::DeserializeOwned> ExactJson<T> {
+    pub fn from_stored(raw: String) -> studio_json::Result<Self> {
+        let value = studio_json::from_str(&raw)?;
+        Ok(Self {
+            value,
+            raw: raw.into_boxed_str(),
+        })
+    }
+
+    pub fn value(&self) -> &T {
+        &self.value
+    }
+
+    pub fn raw(&self) -> &str {
+        &self.raw
+    }
+}
+
+impl<T: serde::de::DeserializeOwned + serde::Serialize> ExactJson<T> {
+    pub fn from_value(value: &T) -> studio_json::Result<Self> {
+        Self::from_stored(studio_json::to_string(value)?)
+    }
+}
+
+/// Exact JSON storage for a named serde owner, including SQL-nullable columns.
+pub struct ExactJsonCodec<T>(PhantomData<T>);
+
+impl<T: serde::de::DeserializeOwned> Codec<ExactJson<T>> for ExactJsonCodec<T> {
+    type Stored = String;
+
+    fn encode(_connection: &Connection, value: &ExactJson<T>) -> rusqlite::Result<String> {
+        Ok(value.raw().to_owned())
+    }
+
+    fn decode(_connection: &Connection, value: String) -> rusqlite::Result<ExactJson<T>> {
+        ExactJson::from_stored(value).map_err(|error| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(error),
+            )
+        })
+    }
+}
+
+impl<T: serde::de::DeserializeOwned> Codec<Option<ExactJson<T>>> for ExactJsonCodec<T> {
+    type Stored = Option<String>;
+
+    fn encode(
+        connection: &Connection,
+        value: &Option<ExactJson<T>>,
+    ) -> rusqlite::Result<Option<String>> {
+        value
+            .as_ref()
+            .map(|value| <Self as Codec<ExactJson<T>>>::encode(connection, value))
+            .transpose()
+    }
+
+    fn decode(
+        connection: &Connection,
+        value: Option<String>,
+    ) -> rusqlite::Result<Option<ExactJson<T>>> {
+        value
+            .map(|value| <Self as Codec<ExactJson<T>>>::decode(connection, value))
+            .transpose()
+    }
+}
+
 /// Immutable typed record plus its admitted text, like Table::get_with_raw.
 pub struct RawJsonRecord<R> {
     record: R,
-    raw: studio_json::OwnedRawJson,
+    raw: Box<str>,
 }
 impl<R: JsonRecord> RawJsonRecord<R> {
     pub fn from_stored(connection: &Connection, row_id: &str, raw: String) -> StoreResult<Self> {
@@ -20,7 +96,7 @@ impl<R: JsonRecord> RawJsonRecord<R> {
         let record = R::decode_stored(connection, row_id, &raw)?;
         Ok(Self {
             record,
-            raw: studio_json::OwnedRawJson::from_string(raw)?,
+            raw: raw.into_boxed_str(),
         })
     }
     pub fn from_record(connection: &Connection, record: &R) -> StoreResult<Self> {
@@ -47,7 +123,7 @@ impl<R: JsonRecord> RawJsonRecord<R> {
         &self.record
     }
     pub fn raw(&self) -> &str {
-        self.raw.as_str()
+        &self.raw
     }
 }
 pub struct JsonRecordCodec<R>(PhantomData<R>);
@@ -85,6 +161,71 @@ mod tests {
     use crate::peer_update_settings::{Canvas, canvas_tx};
     use crate::records::RecordQueryShape;
     use studio_db_api::{DbTable, Table};
+
+    #[derive(serde::Deserialize)]
+    struct ExactEvidence {
+        title: String,
+        original: studio_json::OwnedRawJson,
+    }
+
+    #[derive(DbTable)]
+    #[db(table="exact_json_witness",database=Canvas)]
+    struct ExactEvidenceRow {
+        #[db(key)]
+        id: i64,
+        #[db(codec = ExactJsonCodec<ExactEvidence>)]
+        record: ExactJson<ExactEvidence>,
+        #[db(codec = ExactJsonCodec<Option<String>>)]
+        nullable: Option<ExactJson<Option<String>>>,
+    }
+
+    #[test]
+    fn exact_json_codec_preserves_text_types_and_sql_null() {
+        let mut db = Connection::open_in_memory().expect("db");
+        db.execute_batch(ExactEvidenceRow::DDL).expect("DDL");
+        let raw = " \n{ \"title\": \"\\u0061\", \"original\": { \"unknown\": [1, 2.00] } }\t";
+        let record = ExactJson::from_stored(raw.into()).expect("typed JSON");
+        let tx = db.transaction().expect("tx");
+        let mut typed = canvas_tx(&tx);
+        typed
+            .insert(&ExactEvidenceRow {
+                id: 1,
+                record,
+                nullable: None,
+            })
+            .expect("insert");
+        let mut row = typed
+            .get::<ExactEvidenceRow>(&(1,))
+            .expect("read")
+            .expect("row");
+        assert_eq!(row.record.value().title, "a");
+        assert_eq!(
+            row.record.value().original.as_str(),
+            r#"{ "unknown": [1, 2.00] }"#
+        );
+        assert_eq!(row.record.raw(), raw);
+        assert!(row.nullable.is_none());
+        row.nullable = Some(ExactJson::from_stored(" \nnull\t".into()).expect("JSON null"));
+        typed.upsert(&row).expect("upsert");
+        let row = typed
+            .get::<ExactEvidenceRow>(&(1,))
+            .expect("read")
+            .expect("row");
+        assert!(row.nullable.expect("SQL text").value().is_none());
+        assert_eq!(
+            tx.query_row(
+                "SELECT record,nullable FROM exact_json_witness",
+                [],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            )
+            .expect("stored"),
+            (raw.to_owned(), " \nnull\t".to_owned())
+        );
+        assert!(
+            ExactJson::<ExactEvidence>::from_stored(r#"{"title":4,"original":null}"#.into())
+                .is_err()
+        );
+    }
     #[derive(serde::Serialize, serde::Deserialize)]
     #[serde(deny_unknown_fields)]
     struct Evidence {
@@ -118,7 +259,7 @@ mod tests {
     fn json_record_codec_preserves_raw_text_and_owner_validation() {
         let mut db = Connection::open_in_memory().expect("db");
         db.execute_batch(EvidenceRow::DDL).expect("DDL");
-        let raw = r#"{ "title": "\u0061", "id": "row", "original": { "unknown": [1,2] } }"#;
+        let raw = " \n{ \"title\": \"\\u0061\", \"id\": \"row\", \"original\": { \"unknown\": [1,2] } }\t";
         let record = RawJsonRecord::<Evidence>::from_stored(&db, "row", raw.into())
             .expect("owner admission");
         assert_eq!(record.record().title, "a");
@@ -181,7 +322,9 @@ mod tests {
             "read hook rejects mismatched physical key"
         );
         assert_eq!(
-            studio_db_api::check::<EvidenceRow>(&tx).expect("state check"),
+            studio_db_api::check::<EvidenceRow>(&tx)
+                .expect("state check")
+                .counts(),
             (2, 1)
         );
         let normal = RawJsonRecord::<Evidence>::from_record(&tx, row.record.record())

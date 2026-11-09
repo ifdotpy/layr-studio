@@ -1,5 +1,5 @@
 //! Pilot typed table. Canvas adapters own the capability; the physical schema is unchanged.
-use studio_db_api::{Database, DbTable, Tx, db_schema};
+use studio_db_api::{Database, DbTable, Tx};
 
 /// The marker capability has no public constructor.
 /// ```compile_fail
@@ -13,6 +13,10 @@ pub struct Canvas {
     _private: (),
 }
 impl Database for Canvas {}
+
+pub fn canvas_read(connection: &rusqlite::Connection) -> studio_db_api::Read<'_, Canvas> {
+    studio_db_api::Read::from_adapter(connection, &Canvas { _private: () })
+}
 
 pub(crate) fn canvas_tx<'c>(transaction: &'c rusqlite::Transaction<'c>) -> Tx<'c, Canvas> {
     Tx::from_adapter(transaction, &Canvas { _private: () })
@@ -33,10 +37,6 @@ impl PeerUpdateSettings {
     pub fn upsert(&self, transaction: &rusqlite::Transaction<'_>) -> rusqlite::Result<()> {
         canvas_tx(transaction).upsert(self)
     }
-}
-
-pub(crate) fn registry() -> [studio_db_api::Registration; 1] {
-    db_schema![Canvas; PeerUpdateSettings]
 }
 
 #[cfg(test)]
@@ -80,8 +80,14 @@ mod tests {
         assert_eq!(&exported, entry);
         let mut db = rusqlite::Connection::open_in_memory().expect("db");
         db.execute_batch("CREATE TABLE runtime_peer_update_settings(id INTEGER PRIMARY KEY CHECK(id=1), auto_update INTEGER NOT NULL); INSERT INTO runtime_peer_update_settings VALUES(1,0)").expect("pre-existing state");
-        let [registration] = registry();
-        assert_eq!((registration.check)(&db).expect("state check"), (1, 0));
+        let registration = crate::canvas_schema::registry()
+            .into_iter()
+            .find(|entry| entry.descriptor.name == PeerUpdateSettings::NAME)
+            .expect("pilot registration");
+        assert_eq!(
+            (registration.check)(&db).expect("state check").counts(),
+            (1, 0)
+        );
         let transaction = db.transaction().expect("transaction");
         {
             let mut typed = canvas_tx(&transaction);
