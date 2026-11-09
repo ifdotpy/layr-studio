@@ -33,12 +33,65 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
     let report: studio_json::Value =
         studio_json::from_str(&output).expect("state-check prints JSON");
     let tables = report["tables"].as_array().expect("table reports exist");
-    assert_eq!(tables.len(), 39);
     let names: std::collections::BTreeSet<_> = tables
         .iter()
         .map(|table| table["table"].as_str().expect("table name is a string"))
         .collect();
     assert_eq!(names.len(), tables.len(), "one report per table");
+    // Frozen reports on main c26e8fc0 before wave 2; new reports may be added freely.
+    const PRE_WAVE_TWO_REPORTS: &[&str] = &[
+        "runtime_access_clients",
+        "runtime_access_discovered",
+        "runtime_access_invites",
+        "runtime_account_transfers",
+        "runtime_agent_moves",
+        "runtime_agents",
+        "runtime_annotations",
+        "runtime_assets",
+        "runtime_capacity_retries",
+        "runtime_chat_messages",
+        "runtime_checkpoints",
+        "runtime_complaints",
+        "runtime_event_meta",
+        "runtime_events",
+        "runtime_execution_attempts",
+        "runtime_execution_effects",
+        "runtime_execution_runs",
+        "runtime_federation_inbox",
+        "runtime_federation_outbox",
+        "runtime_federation_peers",
+        "runtime_federation_rooms",
+        "runtime_federation_settings",
+        "runtime_items",
+        "runtime_monitors",
+        "runtime_peer_update_settings",
+        "runtime_plans",
+        "runtime_profiles",
+        "runtime_projects",
+        "runtime_requests",
+        "runtime_rooms",
+        "runtime_rules",
+        "runtime_server_inbox",
+        "runtime_tasks",
+        "runtime_tool_requests",
+        "runtime_usage_resumes",
+        "runtime_work",
+        "runtime_workspace_operations",
+        "sync_entities",
+        "user_terminals",
+    ];
+    assert!(
+        PRE_WAVE_TWO_REPORTS.iter().all(|name| names.contains(name)),
+        "pre-wave-two reports must remain present"
+    );
+    // Registry and system checker owners define current coverage for the CLI.
+    let expected: std::collections::BTreeSet<_> = studio_runtime_store::check_state_readonly(&root)
+        .expect("registry and system reports read")
+        .tables
+        .into_iter()
+        .map(|table| table.table)
+        .collect();
+    assert_eq!(names, expected, "registry and system report coverage");
     for retired in ["runtime_budget", "runtime_budget_usage"] {
         assert!(
             !names.contains(retired),
