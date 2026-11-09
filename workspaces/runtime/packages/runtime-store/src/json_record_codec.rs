@@ -135,9 +135,41 @@ impl<R: JsonRecord> Codec<RawJsonRecord<R>> for JsonRecordCodec<R> {
         Ok(value.raw().to_owned())
     }
     fn decode(connection: &Connection, value: String) -> rusqlite::Result<RawJsonRecord<R>> {
-        #[derive(serde::Deserialize)]
         struct PayloadKey {
             id: String,
+        }
+        impl<'de> serde::Deserialize<'de> for PayloadKey {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                struct KeyVisitor;
+                impl<'de> serde::de::Visitor<'de> for KeyVisitor {
+                    type Value = PayloadKey;
+                    fn expecting(
+                        &self,
+                        formatter: &mut std::fmt::Formatter<'_>,
+                    ) -> std::fmt::Result {
+                        formatter.write_str("a payload object")
+                    }
+                    fn visit_map<M: serde::de::MapAccess<'de>>(
+                        self,
+                        mut map: M,
+                    ) -> Result<Self::Value, M::Error> {
+                        let mut id = None;
+                        while let Some(key) = map.next_key::<String>()? {
+                            if key == "id" {
+                                id = Some(map.next_value::<studio_json::OwnedRawJson>()?);
+                            } else {
+                                map.next_value::<serde::de::IgnoredAny>()?;
+                            }
+                        }
+                        let raw = id.ok_or_else(|| serde::de::Error::missing_field("id"))?;
+                        // The record owner decides duplicate admission; key extraction must not narrow it.
+                        let id = studio_json::from_str(raw.as_str())
+                            .map_err(serde::de::Error::custom)?;
+                        Ok(PayloadKey { id })
+                    }
+                }
+                deserializer.deserialize_map(KeyVisitor)
+            }
         }
         let key: PayloadKey = studio_json::from_str(&value).map_err(|error| {
             rusqlite::Error::FromSqlConversionFailure(
@@ -181,6 +213,32 @@ mod tests {
             ExactJson::<ExtensionEvidence>::from_stored(r#"{"id":"a","id":"b"}"#.into()).is_err()
         );
     }
+    #[test]
+    fn json_record_codec_keeps_owner_duplicate_key_policy() {
+        let db = Connection::open_in_memory().unwrap();
+        for raw in [
+            " \n{\"id\":\"old\",\"id\":\"work\",\"status\":\"ready\",\"future\": { \"x\": 1.00 }}\t",
+            r#"{"id":false,"id":"work","status":"ready"}"#,
+        ] {
+            let record = JsonRecordCodec::<crate::WorkItemRecord>::decode(&db, raw.into()).unwrap();
+            assert_eq!(record.record().id().0, "work");
+            assert_eq!(record.raw(), raw);
+        }
+        for raw in [
+            r#"{"id":"work","id":false,"status":"ready"}"#,
+            r#"{"status":"ready"}"#,
+        ] {
+            assert!(JsonRecordCodec::<crate::WorkItemRecord>::decode(&db, raw.into()).is_err());
+        }
+        assert!(
+            JsonRecordCodec::<Evidence>::decode(
+                &db,
+                r#"{"id":"old","id":"new","title":"ok","original":null}"#.into()
+            )
+            .is_err()
+        );
+    }
+
     use crate::peer_update_settings::{Canvas, canvas_tx};
     use crate::records::RecordQueryShape;
     use studio_db_api::{DbTable, Table};
