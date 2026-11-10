@@ -261,7 +261,7 @@ pub struct CopyPlan<L: Table, T: MutableTable<Database = L::Database>> {
     pub source_evidence: fn(&L) -> rusqlite::Result<Evidence>,
     pub target_evidence: fn(&T) -> rusqlite::Result<Evidence>,
     /// Select exactly this plan's target rows, including a partition predicate.
-    pub target_select: &'static str,
+    pub target_select: crate::NamedQuery<L::Database, (), T, crate::ReadMode, crate::Many>,
     pub finish: fn(&mut Tx<'_, L::Database>) -> rusqlite::Result<()>,
 }
 
@@ -273,7 +273,10 @@ where
     /// durably with its initial counters before installing dirty triggers.
     pub fn require_empty(&self, db: &Connection) -> rusqlite::Result<()> {
         let occupied: bool = db.query_row(
-            &format!("SELECT EXISTS(SELECT 1 FROM ({}))", self.target_select),
+            &format!(
+                "SELECT EXISTS(SELECT 1 FROM ({}))",
+                self.target_select.sql()
+            ),
             [],
             |row| row.get(0),
         )?;
@@ -337,12 +340,14 @@ where
     }
     pub fn verify(&self, tx: &Tx<'_, L::Database>) -> rusqlite::Result<()> {
         let mut expected = tx
-            .query::<L>(L::SELECT, &[])?
+            .read()
+            .collect(&L::SELECT_QUERY, &())?
             .iter()
             .map(|row| (self.source_evidence)(row).map(|e| e.digest()))
             .collect::<rusqlite::Result<Vec<_>>>()?;
         let mut actual = tx
-            .query::<T>(self.target_select, &[])?
+            .read()
+            .collect(&self.target_select, &())?
             .iter()
             .map(|row| (self.target_evidence)(row).map(|e| e.digest()))
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -358,7 +363,7 @@ where
     pub fn copy_tx(&self, tx: &mut Tx<'_, L::Database>) -> rusqlite::Result<()> {
         T::descriptor().install_if_absent(tx.connection())?;
         self.require_empty(tx.connection())?;
-        for row in tx.query::<L>(L::SELECT, &[])? {
+        for row in tx.read().collect(&L::SELECT_QUERY, &())? {
             let expected = (self.source_evidence)(&row)?;
             let key = (self.target_key)(&(self.source_key)(&row));
             let out = (self.transform)(row)?;
@@ -391,7 +396,7 @@ where
 /// and the authority/retirement operation remain explicit application functions.
 pub fn migration_skeleton(id: &str, legacy: &str, target: &str) -> String {
     format!(
-        "// Migration {id}\nfn plan() -> CopyPlan<{legacy}, {target}> {{\n    CopyPlan {{\n        name: \"{}\",\n        source_keys: &[],\n        source_key, target_key, transform, source_evidence, target_evidence,\n        target_select: {target}::SELECT, finish: switch_and_retire,\n    }}\n}}\n",
+        "// Migration {id}\nfn plan() -> CopyPlan<{legacy}, {target}> {{\n    CopyPlan {{\n        name: \"{}\",\n        source_keys: &[],\n        source_key, target_key, transform, source_evidence, target_evidence,\n        target_select: {target}::SELECT_QUERY, finish: switch_and_retire,\n    }}\n}}\n",
         id.replace('-', "_")
     )
 }

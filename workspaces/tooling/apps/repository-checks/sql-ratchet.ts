@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import ts from "typescript";
 
+// db-api execution methods consume sealed Statement tokens, so they are not raw-SQL sinks.
 export const SQL_METHODS = [
   ...[
     "execute",
@@ -31,16 +32,6 @@ export const SQL_METHODS = [
     "raw_execute",
     "raw_query",
   ].map((name) => `rusqlite::Statement::${name}`),
-  ...[
-    "query",
-    "project",
-    "project_one",
-    "scalar",
-    "scalars",
-    "scalar_raw",
-    "exists",
-  ].map((name) => `studio_db_api::Read::${name}`),
-  ...["execute", "query", "update"].map((name) => `studio_db_api::Tx::${name}`),
 ];
 // Method spellings are shared by the compiler policy and the structural candidate scan.
 const sqlMethodPattern = [
@@ -235,6 +226,20 @@ export function formatSqlBaseline(rows: Allowance[]): string {
   return `{\n${lines.join(",\n")}\n}\n`;
 }
 export function scanRustNodes(paths: string[]): Node[] {
+  const attributeChainEnd = {
+    not: {
+      any: ["attribute_item", "line_comment", "block_comment"].map((kind) => ({
+        kind,
+      })),
+    },
+  };
+  const dbQueryDerive = {
+    all: [
+      { pattern: "#[derive($$$DERIVES)]" },
+      { has: { kind: "identifier", regex: "^DbQuery$", stopBy: "end" } },
+    ],
+    stopBy: attributeChainEnd,
+  };
   const rules = [
     {
       id: "symbol",
@@ -276,6 +281,22 @@ export function scanRustNodes(paths: string[]): Node[] {
       rule: {
         kind: "macro_invocation",
         regex: "^(?:studio_db_api::)?db_(?:query|update|delete)!",
+      },
+    },
+    {
+      id: "declared-query",
+      language: "Rust",
+      rule: {
+        all: [
+          { pattern: "#[db_query($$$BEFORE sql = $SQL $$$AFTER)]" },
+          { precedes: { kind: "struct_item", stopBy: attributeChainEnd } },
+          { any: [{ follows: dbQueryDerive }, { precedes: dbQueryDerive }] },
+        ],
+      },
+      constraints: {
+        SQL: {
+          any: [{ kind: "string_literal" }, { kind: "raw_string_literal" }],
+        },
       },
     },
     {
@@ -334,20 +355,31 @@ export function scanRustNodes(paths: string[]): Node[] {
     );
     for (const value of array(parsed)) {
       const row = object(value),
-        range = object(row.range),
+        ruleId = string(row.ruleId),
+        selected =
+          ruleId === "declared-query"
+            ? object(object(object(row.metaVariables).single).SQL)
+            : row,
+        range = object(selected.range),
         bytes = object(range.byteOffset),
         start = object(range.start);
       result.push({
         file: string(row.file),
-        text: string(row.text),
-        ruleId: string(row.ruleId),
+        text: string(selected.text),
+        ruleId,
         start: number(bytes.start),
         end: number(bytes.end),
         line: number(start.line) + 1,
       });
     }
   }
-  return result;
+  const key = (node: Node) => `${node.file}\0${node.start}\0${node.end}`;
+  const declared = new Set(
+    result.filter((node) => node.ruleId === "declared-query").map(key),
+  );
+  return result.filter(
+    (node) => node.ruleId !== "sql" || !declared.has(key(node)),
+  );
 }
 function scanPython(file: string): (Node & { symbol: string })[] {
   const rule = JSON.stringify({
@@ -580,7 +612,7 @@ export function scanSql() {
         file: node.file,
         symbol,
         api:
-          node.ruleId === "typed-macro"
+          node.ruleId === "typed-macro" || node.ruleId === "declared-query"
             ? "rust::typed-query-macro"
             : node.ruleId === "call"
               ? "rust::unresolved-sql-candidate"

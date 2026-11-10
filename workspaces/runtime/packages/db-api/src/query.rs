@@ -35,6 +35,33 @@ pub struct Read<'c, D: Database> {
     database: PhantomData<D>,
 }
 impl<'c, D: Database> Read<'c, D> {
+    pub fn visit<P: QueryParams, R>(
+        &self,
+        query: &NamedQuery<D, P, R, ReadMode, Many>,
+        params: &P,
+        visitor: impl FnMut(R) -> rusqlite::Result<()>,
+    ) -> rusqlite::Result<()> {
+        query.visit(self.connection, params, true, visitor)
+    }
+    pub fn collect<P: QueryParams, R>(
+        &self,
+        query: &NamedQuery<D, P, R, ReadMode, Many>,
+        params: &P,
+    ) -> rusqlite::Result<Vec<R>> {
+        let mut rows = Vec::new();
+        self.visit(query, params, |row| {
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+    pub fn named<P: QueryParams, R, C: SingleCardinality>(
+        &self,
+        query: &NamedQuery<D, P, R, ReadMode, C>,
+        params: &P,
+    ) -> rusqlite::Result<C::Output<R>> {
+        query.run(self.connection, params, true)
+    }
     #[doc(hidden)]
     pub fn read(&self) -> &Self {
         self
@@ -86,35 +113,35 @@ impl<'c, D: Database> Read<'c, D> {
     }
     pub fn query<R: Table<Database = D>>(
         &self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Vec<R>> {
-        let mut statement = self.prepare_read(sql)?;
+        let mut statement = self.prepare_read(sql.sql)?;
         statement
             .query_map(params, |row| R::read(self.connection, row))?
             .collect()
     }
     pub fn project<P: Projection>(
         &self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Vec<P>>
     where
         P::Table: Table<Database = D>,
     {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_map(params, |row| P::read(self.connection, row))?
             .collect()
     }
     pub fn project_one<P: Projection>(
         &self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Option<P>>
     where
         P::Table: Table<Database = D>,
     {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_row(params, |row| P::read(self.connection, row))
             .optional()
     }
@@ -122,10 +149,10 @@ impl<'c, D: Database> Read<'c, D> {
     pub fn scalar<R: Table<Database = D>, C: Column<Row = R>>(
         &self,
         _: C,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Option<C::Value>> {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_row(params, |row| C::decode(self.connection, row, 0))
             .optional()
     }
@@ -133,10 +160,10 @@ impl<'c, D: Database> Read<'c, D> {
     pub fn scalars<R: Table<Database = D>, C: Column<Row = R>>(
         &self,
         _: C,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Vec<C::Value>> {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_map(params, |row| C::decode(self.connection, row, 0))?
             .collect()
     }
@@ -144,26 +171,74 @@ impl<'c, D: Database> Read<'c, D> {
     pub fn scalar_raw<R: Table<Database = D>, C: Column<Row = R>>(
         &self,
         _: C,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Option<C::Stored>> {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_row(params, |row| C::Stored::read(row, 0))
             .optional()
     }
     #[doc(hidden)]
     pub fn exists<R: Table<Database = D>>(
         &self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<bool> {
-        self.prepare_read(sql)?
+        self.prepare_read(sql.sql)?
             .query_row(params, |_| Ok(()))
             .optional()
             .map(|row| row.is_some())
     }
 }
 impl<'c, D: Database> Tx<'c, D> {
+    pub fn visit<P: QueryParams, R>(
+        &mut self,
+        query: &NamedQuery<D, P, R, WriteMode, Many>,
+        params: &P,
+        visitor: impl FnMut(R) -> rusqlite::Result<()>,
+    ) -> rusqlite::Result<()> {
+        self.with_named_savepoint(|connection| query.visit(connection, params, false, visitor))
+    }
+    pub fn collect<P: QueryParams, R>(
+        &mut self,
+        query: &NamedQuery<D, P, R, WriteMode, Many>,
+        params: &P,
+    ) -> rusqlite::Result<Vec<R>> {
+        let mut rows = Vec::new();
+        self.visit(query, params, |row| {
+            rows.push(row);
+            Ok(())
+        })?;
+        Ok(rows)
+    }
+    /// A failed write decoder, visitor, cardinality check or terminal step rolls
+    /// back this operation; the caller still owns the surrounding transaction.
+    pub fn named<P: QueryParams, R, C: SingleCardinality>(
+        &mut self,
+        query: &NamedQuery<D, P, R, WriteMode, C>,
+        params: &P,
+    ) -> rusqlite::Result<C::Output<R>> {
+        self.with_named_savepoint(|connection| query.run(connection, params, false))
+    }
+    fn with_named_savepoint<T>(
+        &mut self,
+        operation: impl FnOnce(&Connection) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<T> {
+        self.transaction
+            .execute_batch("SAVEPOINT db_api_named_query")?;
+        match operation(self.transaction) {
+            Ok(value) => {
+                self.transaction
+                    .execute_batch("RELEASE db_api_named_query")?;
+                Ok(value)
+            }
+            Err(error) => {
+                self.transaction
+                    .execute_batch("ROLLBACK TO db_api_named_query; RELEASE db_api_named_query")?;
+                Err(error)
+            }
+        }
+    }
     pub fn partition<P: PartitionTable<Database = D>>(&mut self) -> Partition<'_, 'c, D, P> {
         Partition {
             tx: self,
@@ -211,15 +286,15 @@ impl<'c, D: Database> Tx<'c, D> {
     #[doc(hidden)]
     pub fn execute<R: MutableTable<Database = D>>(
         &mut self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<usize> {
-        self.transaction.prepare_cached(sql)?.execute(params)
+        self.transaction.prepare_cached(sql.sql)?.execute(params)
     }
     #[doc(hidden)]
     pub fn update<R: UpdateTable<Database = D>>(
         &mut self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<usize> {
         self.execute::<R>(sql, params)
@@ -273,7 +348,7 @@ impl<'c, D: Database> Tx<'c, D> {
     /// Static statements emitted by db_query! share the existing connection cache.
     pub fn query<R: Table<Database = D>>(
         &self,
-        sql: &'static str,
+        sql: Statement<D>,
         params: &[&dyn ToSql],
     ) -> rusqlite::Result<Vec<R>> {
         self.read().query::<R>(sql, params)
@@ -288,7 +363,7 @@ impl<D: Database, P: PartitionTable<Database = D>> Partition<'_, '_, D, P> {
         self.tx.get::<P>(key)
     }
     pub fn list(&self) -> rusqlite::Result<Vec<P>> {
-        self.tx.query::<P>(P::LIST, &[])
+        self.tx.read().collect(&P::SELECT_QUERY, &())
     }
 }
 impl<D: Database, P: PartitionTable<Database = D> + MutableTable> Partition<'_, '_, D, P> {
@@ -342,6 +417,7 @@ pub trait ColumnInput<C: Column> {
 /// ```
 pub trait Projection: Sized {
     type Table: Table;
+    const COLUMNS: &'static [ColumnDescriptor];
     const SELECT: &'static str;
     fn read(connection: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<Self>;
 }

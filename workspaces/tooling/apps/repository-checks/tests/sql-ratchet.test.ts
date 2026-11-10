@@ -313,3 +313,92 @@ test("identical SQL moved to a different symbol exceeds its frozen allowance", (
   assert.deepEqual(checkSqlRatchet([original], [original]), []);
   assert.equal(checkSqlRatchet([moved], [original]).length, 1);
 });
+
+test("only derive-bound DbQuery SQL arguments are declared queries", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "studio-db-query-classifier-"));
+  const file = path.join(dir, "witness.rs");
+  const sql = ["SEL", "ECT * FR", "OM named_rows"].join("");
+  try {
+    writeFileSync(
+      file,
+      `
+#[derive(Clone, studio_db_api::DbQuery)]
+#[cfg(test)]
+#[db_query(sql="${sql}")]
+struct Declared;
+const OUTSIDE: &str = "${sql}";
+#[db_query(sql="${sql}")]
+struct MissingDerive;
+#[derive(DbQuery)]
+struct Previous;
+#[db_query(sql="${sql}")]
+struct Next;
+#[derive(DbQuery)]
+#[other(sql="${sql}")]
+struct OtherAttribute;
+#[derive(DbQuery)]
+#[db_query(note="${sql}", sql="${sql}")]
+struct OtherArgument;
+#[db_query(sql="${sql}")]
+#[derive(DbQuery)]
+struct Reversed;
+`,
+    );
+    const nodes = scanRustNodes([file]);
+    const declared = nodes.filter((node) => node.ruleId === "declared-query");
+    const raw = nodes.filter((node) => node.ruleId === "sql");
+    assert.equal(declared.length, 3);
+    assert.equal(raw.length, 5);
+    assert.ok(declared.every((node) => node.text === JSON.stringify(sql)));
+    assert.ok(
+      raw.every((node) => node.text === JSON.stringify(sql)),
+      "the identical literal remains raw outside the bound SQL argument",
+    );
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
+test("sealed statement calls are not compiler SQL sinks but string sinks at the same site remain flagged", () => {
+  const diagnostic = (api: string) =>
+    JSON.stringify({
+      reason: "compiler-message",
+      message: {
+        code: { code: "clippy::disallowed_methods" },
+        message: `use of a disallowed method \`${api}\``,
+        spans: [
+          {
+            is_primary: true,
+            file_name: "same-site.rs",
+            byte_start: 12,
+            byte_end: 40,
+          },
+        ],
+      },
+    });
+  assert.equal(
+    sqlDiagnostic(diagnostic("studio_db_api::query::Read::query")),
+    undefined,
+  );
+  const raw = sqlDiagnostic(diagnostic("rusqlite::Connection::query_row"));
+  assert.deepEqual(raw, {
+    file: "same-site.rs",
+    start: 12,
+    end: 40,
+    api: "rusqlite::Connection::query_row",
+  });
+  assert.ok(raw);
+  assert.equal(
+    checkSqlRatchet(
+      [
+        {
+          ...raw,
+          symbol: "caller",
+          fingerprint: fingerprint("query(sql)", "caller"),
+        },
+      ],
+      [],
+    ).length,
+    1,
+  );
+});

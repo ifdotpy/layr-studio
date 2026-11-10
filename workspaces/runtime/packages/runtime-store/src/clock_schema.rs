@@ -269,3 +269,52 @@ impl SyncEntityMeta {
         })
     }
 }
+
+/// Exceptional clock reads. This module enumerates every declaration for schema checks.
+#[studio_db_api::db_queries]
+pub(crate) mod queries {
+    use super::*;
+    use studio_db_api::DbQuery;
+
+    #[derive(DbQuery)]
+    #[db_query(database = Canvas, mode = read, cardinality = one, result = i64,
+        decode = SyncGeneration::VALUE,
+        tables(entities = SyncEntities, documents = SyncDocuments, generation = SyncGeneration, durable = DurableRows),
+        columns(entity_seq = SyncEntities::SEQ, document_seq = SyncDocuments::SEQ,
+            value = SyncGeneration::VALUE, generation_id = SyncGeneration::ID, durable_seq = DurableRows::SEQ),
+        sql = "SELECT MAX((SELECT COALESCE(MAX({entity_seq}),0) FROM {entities}),
+            (SELECT COALESCE(MAX({document_seq}),0) FROM {documents}),
+            (SELECT COALESCE(MAX({value}),0) FROM {generation} WHERE {generation_id}=1),
+            (SELECT COALESCE(MAX({durable_seq}),0) FROM {durable})) AS {value}")]
+    pub struct High;
+
+    #[derive(DbQuery)]
+    #[db_query(database = Canvas, mode = read, cardinality = one, result = i64,
+        decode = DurableFloor::FLOOR,
+        tables(floors = DurableFloor), columns(floor = DurableFloor::FLOOR, id = DurableFloor::ID),
+        sql = "SELECT {floor} AS {floor} FROM {floors} WHERE {id}=1")]
+    pub struct Floor;
+
+    #[derive(DbQuery)]
+    #[db_query(database = Canvas, mode = read, cardinality = many,
+        result = crate::durable_seq::DurableTombstone, projection = crate::durable_seq::DurableTombstone,
+        tables(rows = DurableRows), columns(id = DurableRows::ID, seq = DurableRows::SEQ,
+            tbl = DurableRows::TBL, deleted = DurableRows::DELETED),
+        sql = "SELECT {id} AS {id},{seq} AS {seq} FROM {rows} WHERE {tbl}=?1 AND {deleted}=1 AND {seq}>?2 AND {seq}<=?3 ORDER BY {seq}")]
+    pub struct Tombstones<'a> {
+        #[db(column = DurableRows::TBL)]
+        pub table: &'a str,
+        #[db(column = DurableRows::SEQ)]
+        pub after: i64,
+        #[db(column = DurableRows::SEQ)]
+        pub high: i64,
+    }
+}
+
+/// Validates all descriptor-owned clock declarations against a disposable schema.
+#[cfg(any(test, feature = "test-support"))]
+pub fn validate_named_queries(
+    connection: &rusqlite::Connection,
+) -> Result<(), studio_db_api::QueryValidationError> {
+    queries::validate_queries(connection)
+}

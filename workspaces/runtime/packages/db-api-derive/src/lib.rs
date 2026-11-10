@@ -1,4 +1,5 @@
 //! Generates ordinary positional rusqlite code; no compile-time database access.
+mod named;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as Tokens;
 use quote::{format_ident, quote};
@@ -1294,7 +1295,7 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             };
             quote!({
                 fn assert_owner<P: ::studio_db_api::Projection<Table = #row>>() {} assert_owner::<#p>();
-                __db_tx.read().#method::<#p>(SQL, &[#(#bindings),*])
+                __db_tx.read().#method::<#p>(__db_statement, &[#(#bindings),*])
             })
         }
         Selection::Scalar(col, raw) => {
@@ -1303,21 +1304,25 @@ fn expand_statement(query: QueryInput, kind: Statement) -> syn::Result<Tokens> {
             } else {
                 format_ident!("scalar")
             };
-            quote!(__db_tx.read().#method::<#row,_>(#col, SQL, &[#(#bindings),*]))
+            quote!(__db_tx.read().#method::<#row,_>(#col, __db_statement, &[#(#bindings),*]))
         }
         Selection::Scalars(col) => {
-            quote!(__db_tx.read().scalars::<#row,_>(#col, SQL, &[#(#bindings),*]))
+            quote!(__db_tx.read().scalars::<#row,_>(#col, __db_statement, &[#(#bindings),*]))
         }
-        Selection::Exists => quote!(__db_tx.read().exists::<#row>(SQL, &[#(#bindings),*])),
+        Selection::Exists => {
+            quote!(__db_tx.read().exists::<#row>(__db_statement, &[#(#bindings),*]))
+        }
         Selection::Rows => match kind {
-            Statement::Select => quote!(__db_tx.query::<#row>(SQL, &[#(#bindings),*])),
-            Statement::Update => quote!(__db_tx.update::<#row>(SQL, &[#(#bindings),*])),
-            Statement::Delete => quote!(__db_tx.execute::<#row>(SQL, &[#(#bindings),*])),
+            Statement::Select => quote!(__db_tx.query::<#row>(__db_statement, &[#(#bindings),*])),
+            Statement::Update => quote!(__db_tx.update::<#row>(__db_statement, &[#(#bindings),*])),
+            Statement::Delete => quote!(__db_tx.execute::<#row>(__db_statement, &[#(#bindings),*])),
         },
     };
+    let declaration_constructor = format_ident!("__generated_{}", "declare");
     // Input clause order never affects legal SQL clause order.
     Ok(quote!((|| -> ::studio_db_api::rusqlite::Result<_> {
         const SQL: &str = ::studio_db_api::static_sql!(#(#sql),*);
+        let __db_statement = ::studio_db_api::Statement::#declaration_constructor(SQL);
         let __db_tx = #borrow;
         #(#values)*
         #execute
@@ -1367,6 +1372,7 @@ fn expand_projection(input: &DeriveInput) -> syn::Result<Tokens> {
     }
     let mut sql = vec![quote!("SELECT ")];
     let mut reads = Vec::new();
+    let mut metadata = Vec::new();
     for (i, field) in fields.named.iter().enumerate() {
         let field_name = field.ident.as_ref().expect("named field");
         let mut column = format_ident!("{}", field_name.to_string().to_uppercase());
@@ -1395,6 +1401,7 @@ fn expand_projection(input: &DeriveInput) -> syn::Result<Tokens> {
             quote!(::studio_db_api::projection_value(connection, row, #i, #owner::#column)?)
         };
         reads.push(quote!(#field_name: #read));
+        metadata.push(quote!(::studio_db_api::query_column_descriptor(#owner::#column)));
     }
     sql.extend([
         quote!(" FROM \""),
@@ -1405,9 +1412,42 @@ fn expand_projection(input: &DeriveInput) -> syn::Result<Tokens> {
     sql.push(quote!(<#owner as ::studio_db_api::Table>::PARTITION));
     Ok(quote!(impl ::studio_db_api::Projection for #name {
         type Table = #owner;
+        const COLUMNS: &'static [::studio_db_api::ColumnDescriptor] = &[#(#metadata),*];
         const SELECT: &'static str = ::studio_db_api::static_sql!(#(#sql),*);
         fn read(connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>) -> ::studio_db_api::rusqlite::Result<Self> { let _ = connection; Ok(Self { #(#reads),* }) }
     }))
+}
+
+#[proc_macro_derive(DbQuery, attributes(db_query, db))]
+pub fn named_query(input: TokenStream) -> TokenStream {
+    named::expand(&parse_macro_input!(input as DeriveInput))
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+/// Enumerates all DbQuery declarations in one descriptor-owned module.
+#[proc_macro_attribute]
+pub fn db_queries(_: TokenStream, input: TokenStream) -> TokenStream {
+    let mut module = parse_macro_input!(input as syn::ItemMod);
+    let Some((_, items)) = &mut module.content else {
+        return syn::Error::new_spanned(module, "inline declaration module required")
+            .into_compile_error()
+            .into();
+    };
+    let names = items
+        .iter()
+        .filter_map(|item| {
+            let syn::Item::Struct(item) = item else {
+                return None;
+            };
+            item.attrs
+                .iter()
+                .any(|a| a.path().is_ident("db_query"))
+                .then_some(&item.ident)
+        })
+        .collect::<Vec<_>>();
+    let validator = quote! { pub fn validate_queries(connection: &::studio_db_api::rusqlite::Connection) -> ::std::result::Result<(),::studio_db_api::QueryValidationError> { #(#names::validate_query(connection)?;)* Ok(()) } };
+    items.push(syn::parse2(validator).expect("generated query registry"));
+    quote!(#module).into()
 }
 
 #[cfg(test)]

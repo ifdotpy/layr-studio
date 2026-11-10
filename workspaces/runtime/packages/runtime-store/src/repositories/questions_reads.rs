@@ -6,7 +6,6 @@ use crate::peer_update_settings::canvas_read;
 use crate::records::{AgentRecord, CheckpointRecord, ComplaintRecord, RequestRecord, Table};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use rusqlite::{Connection, OptionalExtension};
-use studio_db_api::Table as _;
 
 const TABLES: &[TableRequirement] = &[
     TableRequirement {
@@ -104,14 +103,14 @@ impl QuestionsReadsRepository {
 
     pub fn questions(connection: &Connection) -> StoreResult<Vec<RequestRecord>> {
         // Hidden rowid ordering is part of the historical list contract.
-        Ok(canvas_read(connection)
-            .query::<RequestRow>(
-                studio_db_api::static_sql!(RequestRow::SELECT, " ORDER BY rowid"),
-                &[],
-            )?
-            .into_iter()
-            .map(|row| row.record.record().clone())
-            .collect())
+        Ok(studio_db_api::db_query!(
+            canvas_read(connection),
+            RequestRow,
+            order_by(studio_db_api::Rowid::<RequestRow>::COLUMN.asc)
+        )?
+        .into_iter()
+        .map(|row| row.record.record().clone())
+        .collect())
     }
 
     pub fn complaint(connection: &Connection, id: &str) -> StoreResult<Option<ComplaintRecord>> {

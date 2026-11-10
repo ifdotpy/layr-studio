@@ -448,3 +448,73 @@ test("build scripts print relative rerun-if-changed paths", () => {
     ),
   );
 });
+
+const queryConstructorOwner = "workspaces/runtime/packages/db-api/src/named.rs";
+function queryConstructorViolations(
+  files: { file: string; text: string }[],
+): string[] {
+  const generated = ["__generated", "declare"].join("_");
+  const internal = new RegExp(["Statement", "internal"].join("\\s*::\\s*"));
+  return files
+    .filter(
+      ({ file, text }) =>
+        file !== queryConstructorOwner &&
+        (text.includes(generated) || internal.test(text)),
+    )
+    .map(({ file }) => file);
+}
+
+test("generated query constructor spellings stay in the db-api owner", () => {
+  const files = execFileSync(
+    "git",
+    ["ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+    {
+      cwd: root,
+      encoding: "utf8",
+    },
+  )
+    .split("\0")
+    .filter(Boolean)
+    .filter(
+      (file) =>
+        existsSync(path.join(root, file)) &&
+        statSync(path.join(root, file)).isFile(),
+    );
+  assert.deepEqual(
+    queryConstructorViolations(
+      files.map((file) => ({
+        file,
+        text: readFileSync(path.join(root, file), "utf8"),
+      })),
+    ),
+    [],
+  );
+});
+
+test("generated query constructor mutations are rejected for both token types", () => {
+  const file = "workspaces/runtime/packages/runtime-store/src/durable_seq.rs";
+  const source = read(file);
+  const constructor = ["__generated", "declare"].join("_");
+  for (const token of ["Statement", "NamedQuery"]) {
+    const sql = '"fixture statement"';
+    const args =
+      token === "Statement" ? sql : `${sql}, decode, columns, tables`;
+    const mutated = `${source}\nfn fabricated() { let token = studio_db_api::${token}::${constructor}(${args}); }\n`;
+    assert.deepEqual(
+      queryConstructorViolations([{ file, text: mutated }]),
+      [file],
+      token,
+    );
+  }
+  const internal = ["Statement", "internal"].join("::");
+  assert.deepEqual(
+    queryConstructorViolations([{ file, text: `${internal}("fixture")` }]),
+    [file],
+  );
+  assert.deepEqual(
+    queryConstructorViolations([
+      { file: queryConstructorOwner, text: constructor },
+    ]),
+    [],
+  );
+});

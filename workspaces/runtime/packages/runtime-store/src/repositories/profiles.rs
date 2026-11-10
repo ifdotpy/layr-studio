@@ -9,7 +9,6 @@ use crate::peer_update_settings::{canvas_read, canvas_tx};
 use crate::records::{JsonRecord, RecordKeyMode, RecordQueryShape};
 use crate::schema::{SchemaRequirements, TableRequirement};
 use crate::{StoreError, StoreResult};
-use studio_db_api::{Table as _, static_sql};
 
 const PROFILE_TABLE: TableRequirement = TableRequirement {
     name: "runtime_profiles",
@@ -98,15 +97,15 @@ pub struct ProfileRepository;
 impl ProfileRepository {
     pub fn list(connection: &Connection) -> StoreResult<Vec<ProfileRecord>> {
         // Legacy listing order is the implicit rowid, not a declared column.
-        Ok(canvas_read(connection)
-            .query::<ProfilesStorageRow>(
-                static_sql!(ProfilesStorageRow::SELECT, " ORDER BY rowid"),
-                &[],
-            )?
-            .into_iter()
-            // clone: consuming accessor pending
-            .map(|row| row.record.record().clone())
-            .collect())
+        Ok(studio_db_api::db_query!(
+            canvas_read(connection),
+            ProfilesStorageRow,
+            order_by(studio_db_api::Rowid::<ProfilesStorageRow>::COLUMN.asc)
+        )?
+        .into_iter()
+        // clone: consuming accessor pending
+        .map(|row| row.record.record().clone())
+        .collect())
     }
 
     pub fn save(transaction: &Transaction<'_>, profile: &ProfileRecord) -> StoreResult<()> {

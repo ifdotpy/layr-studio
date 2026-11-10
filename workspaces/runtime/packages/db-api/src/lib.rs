@@ -3,11 +3,13 @@ pub mod catalog;
 pub use rusqlite;
 mod codec;
 pub mod migration;
+mod named;
 mod query;
+pub use named::*;
 mod table;
 pub use codec::*;
 pub use query::*;
-pub use studio_db_api_derive::{DbEnum, DbPartition, DbProjection, DbTable};
+pub use studio_db_api_derive::{DbEnum, DbPartition, DbProjection, DbQuery, DbTable, db_queries};
 pub use table::*;
 
 /// Generated SQL rejects unknown columns and parameter types.

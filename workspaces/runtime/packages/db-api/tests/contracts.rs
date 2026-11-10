@@ -3,6 +3,10 @@ use studio_db_api::{Database, DbEnum, DbTable, DbValue, Table, Tx, db_query, db_
 struct Canvas;
 impl Database for Canvas {}
 
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=TextKey,row=TextKey,
+    tables(rows=TextKey),columns(id=TextKey::ID),sql="DELETE FROM {rows} RETURNING {id} AS {id}")]
+struct InvalidRead;
 #[test]
 fn read_capability_refuses_delete_returning_before_execution() {
     let db = Connection::open_in_memory().expect("db");
@@ -11,10 +15,7 @@ fn read_capability_refuses_delete_returning_before_execution() {
     )
     .expect("fixture");
     let read = studio_db_api::Read::from_adapter(&db, &Canvas);
-    assert!(
-        read.query::<TextKey>("DELETE FROM text_keys RETURNING id", &[])
-            .is_err()
-    );
+    assert!(read.collect(&InvalidRead::QUERY, &InvalidRead).is_err());
     assert!(
         read.get::<TextKey>(&("kept".into(),))
             .expect("read")
@@ -1172,4 +1173,78 @@ fn legacy_camelcase_column_override_keeps_exact_ddl_and_typed_crud() {
     .unwrap();
     let row = tx.get::<CamelColumns>(&("a".into(),)).unwrap().unwrap();
     assert_eq!(row.last_event.as_deref(), Some("exact"));
+}
+
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=one,result=Count,decode=Child::COUNT,
+    columns(count=Child::COUNT),sql="SELECT ?1 AS {count}")]
+struct EchoCount {
+    #[db(column=Child::COUNT)]
+    count: Count,
+}
+#[test]
+fn named_query_reuses_custom_column_encode_and_decode() {
+    let db = Connection::open_in_memory().unwrap();
+    EchoCount::validate_query(&db).unwrap();
+    let read = studio_db_api::Read::from_adapter(&db, &Canvas);
+    assert_eq!(
+        read.named(&EchoCount::QUERY, &EchoCount { count: Count(23) })
+            .unwrap()
+            .0,
+        23
+    );
+    assert!(
+        read.named(&EchoCount::QUERY, &EchoCount { count: Count(-1) })
+            .is_err()
+    );
+}
+
+#[derive(studio_db_api::DbProjection)]
+#[db(of=CamelColumns)]
+struct CamelEventProjection {
+    last_event: Option<String>,
+}
+#[derive(studio_db_api::DbProjection)]
+#[db(of=CamelColumns)]
+struct RenamedEventProjection {
+    #[db(field=last_event)]
+    event: Option<String>,
+}
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=CamelEventProjection,projection=CamelEventProjection,
+    tables(rows=CamelColumns),columns(event=CamelColumns::LAST_EVENT),sql="SELECT {event} AS {event} FROM {rows}")]
+struct CamelEvents;
+#[derive(studio_db_api::DbQuery)]
+#[db_query(database=Canvas,mode=read,cardinality=many,result=RenamedEventProjection,projection=RenamedEventProjection,
+    tables(rows=CamelColumns),columns(event=CamelColumns::LAST_EVENT),sql="SELECT {event} AS {event} FROM {rows}")]
+struct RenamedEvents;
+#[test]
+fn named_query_projection_mapping_uses_descriptor_names_for_renamed_fields() {
+    let mut db = Connection::open_in_memory().unwrap();
+    CamelColumns::descriptor().install_if_absent(&db).unwrap();
+    CamelEvents::validate_query(&db).unwrap();
+    RenamedEvents::validate_query(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&CamelColumns {
+        id: "a".into(),
+        last_event: Some("exact".into()),
+    })
+    .unwrap();
+    assert_eq!(
+        tx.read()
+            .collect(&CamelEvents::QUERY, &CamelEvents)
+            .unwrap()[0]
+            .last_event
+            .as_deref(),
+        Some("exact")
+    );
+    assert_eq!(
+        tx.read()
+            .collect(&RenamedEvents::QUERY, &RenamedEvents)
+            .unwrap()[0]
+            .event
+            .as_deref(),
+        Some("exact")
+    );
 }

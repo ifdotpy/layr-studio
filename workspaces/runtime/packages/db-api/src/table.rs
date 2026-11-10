@@ -4,6 +4,8 @@ use rusqlite::{Connection, types::ToSql};
 pub trait Table: Sized + 'static {
     type Database: Database;
     type Key;
+    const SELECT_QUERY: NamedQuery<Self::Database, (), Self, ReadMode, Many> =
+        NamedQuery::all_rows();
     const NAME: &'static str;
     const DDL: &'static str;
     const INDEXES: &'static [IndexDescriptor];

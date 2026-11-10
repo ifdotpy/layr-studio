@@ -36,18 +36,14 @@ impl crate::interaction_tables::RoomRow {
     }
 
     pub fn list(connection: &rusqlite::Connection) -> crate::StoreResult<Vec<RoomRecord>> {
-        use studio_db_api::Table;
         // Hidden rowid ordering is part of the historical list contract.
-        Ok(crate::peer_update_settings::canvas_read(connection)
-            .query::<Self>(
-                studio_db_api::static_sql!(
-                    crate::interaction_tables::RoomRow::SELECT,
-                    " ORDER BY rowid"
-                ),
-                &[],
-            )?
-            .into_iter()
-            .map(|row| row.record.record().clone())
-            .collect())
+        Ok(studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(connection),
+            crate::interaction_tables::RoomRow,
+            order_by(studio_db_api::Rowid::<crate::interaction_tables::RoomRow>::COLUMN.asc)
+        )?
+        .into_iter()
+        .map(|row| row.record.record().clone())
+        .collect())
     }
 }

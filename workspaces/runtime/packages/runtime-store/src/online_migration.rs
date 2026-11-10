@@ -638,7 +638,7 @@ mod tests {
                     &row.bytes,
                 ))
             },
-            target_select: Target::SELECT,
+            target_select: Target::SELECT_QUERY,
             finish: |tx| {
                 tx.connection().execute_batch("CREATE TABLE authority(target INTEGER NOT NULL); INSERT INTO authority VALUES(1);
                     CREATE TRIGGER refuse_legacy BEFORE INSERT ON copy_source BEGIN SELECT RAISE(ABORT,'target is authoritative'); END;")
@@ -886,7 +886,7 @@ mod tests {
                     &row.bytes,
                 ))
             },
-            target_select: Copied::SELECT,
+            target_select: Copied::SELECT_QUERY,
             finish: |tx| tx.connection().execute_batch("DROP TABLE copy_source"),
         };
         let tx = db.transaction().unwrap();

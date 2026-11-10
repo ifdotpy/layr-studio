@@ -346,7 +346,8 @@ pub struct DurableRow {
 }
 
 /// A deleted id.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, studio_db_api::DbProjection)]
+#[db(of = crate::clock_schema::DurableRows)]
 pub struct DurableTombstone {
     pub id: String,
     pub seq: i64,
@@ -367,16 +368,19 @@ pub enum DurableChanges {
 
 /// The highest change number of any sync table.
 pub fn high(connection: &Connection) -> StoreResult<i64> {
-    Ok(connection.query_row(&format!("SELECT {NEXT}-1"), [], |row| row.get(0))?)
+    Ok(crate::peer_update_settings::canvas_read(connection).named(
+        &crate::clock_schema::queries::High::QUERY,
+        &crate::clock_schema::queries::High,
+    )?)
 }
 
 /// The highest change number of any sync table, and the durable tombstone floor.
 pub fn high_and_floor(connection: &Connection) -> StoreResult<(i64, i64)> {
     let high = high(connection)?;
-    let floor = crate::peer_update_settings::canvas_read(connection)
-        .get::<crate::clock_schema::DurableFloor>(&(1,))?
-        .ok_or(rusqlite::Error::QueryReturnedNoRows)?
-        .floor;
+    let floor = crate::peer_update_settings::canvas_read(connection).named(
+        &crate::clock_schema::queries::Floor::QUERY,
+        &crate::clock_schema::queries::Floor,
+    )?;
     Ok((high, floor))
 }
 
@@ -422,18 +426,14 @@ pub fn changes_since(
             seq: high,
         });
     };
-    let tombstones = connection
-        .prepare(
-            "SELECT id,seq FROM durable_rows WHERE tbl=?1 AND deleted=1 AND seq>?2 AND seq<=?3
-             ORDER BY seq",
-        )?
-        .query_map(rusqlite::params![table.name, after, high], |row| {
-            Ok(DurableTombstone {
-                id: row.get(0)?,
-                seq: row.get(1)?,
-            })
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
+    let tombstones = crate::peer_update_settings::canvas_read(connection).collect(
+        &crate::clock_schema::queries::Tombstones::QUERY,
+        &crate::clock_schema::queries::Tombstones {
+            table: table.name,
+            after,
+            high,
+        },
+    )?;
     Ok(DurableChanges::Delta {
         rows: rows(after)?,
         tombstones,
@@ -511,6 +511,73 @@ mod tests {
     use rusqlite::Connection;
 
     use super::*;
+
+    #[test]
+    fn named_clock_queries_validate_fresh_schema_and_missing_floor() {
+        let mut db = canvas();
+        crate::clock_schema::queries::validate_queries(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        crate::peer_update_settings::canvas_tx(&tx)
+            .delete::<crate::clock_schema::DurableFloor>(&(1,))
+            .unwrap();
+        assert!(matches!(
+            high_and_floor(&tx),
+            Err(StoreError::Sqlite(rusqlite::Error::QueryReturnedNoRows))
+        ));
+    }
+
+    #[test]
+    fn named_tombstones_keep_cutoff_order_and_filtering() {
+        use crate::clock_schema::queries::Tombstones;
+        let mut db = canvas();
+        let tx = db.transaction().unwrap();
+        let mut adapter = crate::peer_update_settings::canvas_tx(&tx);
+        for (table, id, seq, deleted) in [
+            ("runtime_work", "lower", 2, 1),
+            ("runtime_work", "live", 3, 0),
+            ("runtime_work", "middle", 4, 1),
+            ("other", "other", 5, 1),
+            ("runtime_work", "upper", 6, 1),
+            ("runtime_work", "future", 7, 1),
+        ] {
+            adapter
+                .insert(&crate::clock_schema::DurableRows {
+                    tbl: table.to_owned(),
+                    id: id.to_owned(),
+                    seq,
+                    deleted,
+                    at: 0,
+                    scope: None,
+                })
+                .unwrap();
+        }
+        let params = Tombstones {
+            table: "runtime_work",
+            after: 2,
+            high: 6,
+        };
+        let result = adapter.read().collect(&Tombstones::QUERY, &params).unwrap();
+        assert_eq!(
+            result,
+            vec![
+                DurableTombstone {
+                    id: "middle".to_owned(),
+                    seq: 4
+                },
+                DurableTombstone {
+                    id: "upper".to_owned(),
+                    seq: 6
+                }
+            ]
+        );
+        assert!(
+            adapter
+                .read()
+                .collect(&Tombstones::QUERY, &Tombstones { after: 6, ..params })
+                .unwrap()
+                .is_empty()
+        );
+    }
 
     fn canvas() -> Connection {
         crate::fresh_state::test_canvas()
