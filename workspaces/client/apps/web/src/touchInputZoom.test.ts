@@ -26,7 +26,6 @@ beforeAll(async () => {
     "studio-preferences.css",
     "components/conversation/MessageQueue/message-queue.css",
     "components/accounts/support/accounts.css",
-    "components/agents/SubagentConcurrencyControl/subagent-concurrency-control.css",
     "components/conversation/questions/SignInCard/sign-in-card.css",
   ]) {
     const declarations: FontDeclaration[] = [];
@@ -130,11 +129,6 @@ test("component input font floors consume the shared owner", () => {
     [
       "components/conversation/MessageQueue/message-queue.css",
       ".message-queue-editor textarea",
-    ],
-    ["components/accounts/support/accounts.css", ".account-name-form input"],
-    [
-      "components/agents/SubagentConcurrencyControl/subagent-concurrency-control.css",
-      ".agent-mode-limit-label input",
     ],
     [
       "components/conversation/questions/SignInCard/sign-in-card.css",

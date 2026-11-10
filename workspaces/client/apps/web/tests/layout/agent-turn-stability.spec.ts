@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rustUiFixture, spawnFixture, test } from "../playwright.ts";
+import { expect, rustUiFixture, spawnFixture, test } from "../playwright.ts";
+import type { components } from "../../src/generated/api.ts";
+import { desktopNotices } from "../../src/components/shell/SupervisorRecoveryNotice/desktopNotices.ts";
 
 // An agent turn changes state many times: it starts, reasons, runs a command,
 // reports usage, streams text and ends. None of these steps is the user's
@@ -37,6 +39,10 @@ for (const device of [
       );
       fixture.once("exit", () => reject(new Error(log)));
     });
+    const desktopResponse = await fetch(`http://127.0.0.1:${port}/api/desktop`);
+    assert.ok(desktopResponse.ok);
+    const desktop: components["schemas"]["DesktopResponse"] =
+      await desktopResponse.json();
     const context = await browser.newContext({
       viewport: { width: device.width, height: device.height },
       hasTouch: device.touch,
@@ -54,6 +60,11 @@ for (const device of [
       );
     await row.click();
     await page.locator("#message").waitFor();
+    // Host notices load independently of the chat. Measure the settled idle
+    // layout, rather than attributing their initial arrival to the agent turn.
+    await expect(page.locator(".supervisor-recovery-notice")).toHaveText(
+      desktopNotices(desktop).map((notice) => notice.text),
+    );
     const rects = () =>
       page.evaluate(() => {
         const out: Rects = {};

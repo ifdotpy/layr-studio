@@ -762,11 +762,6 @@ export const layoutTokens = {
     purpose:
       "Existing workspace diff line-number button width, distinct from rail button diameter",
   },
-  "legacy_main_appearance.agentModeLimitWidth": {
-    value: 64,
-    unit: "px",
-    purpose: "Existing agent mode limit input width",
-  },
   "legacy_main_style.tasksDrawerHeaderMin": {
     value: 64,
     unit: "px",
@@ -999,7 +994,6 @@ export const layoutValues = {
   },
   legacy_main_appearance: {
     query0e42fa00: 760,
-    agentModeLimitWidth: 64,
   },
   legacy_main_components_Analytics: {
     dimensiond0f63a09: 320,

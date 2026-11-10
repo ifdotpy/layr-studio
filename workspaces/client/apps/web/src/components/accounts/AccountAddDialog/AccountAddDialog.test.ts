@@ -21,21 +21,7 @@ vi.mock("../ClaudeAddSignIn/ClaudeAddSignIn.tsx", () => ({
 
 it("updates provider and details when intent changes during an open sign-in flow", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const state = {
-    data: {
-      accounts: [],
-      archivedAccounts: [],
-      defaultAccountKey: "default",
-      defaultAccountGroups: [],
-      logins: [],
-      supportsDelete: true,
-      supportsDisconnect: true,
-    },
-    setData: vi.fn(),
-    error: "",
-    refresh: vi.fn(async () => null),
-    scope: "local",
-  } satisfies ComponentProps<typeof AccountAddDialog>["state"];
+
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
@@ -48,7 +34,7 @@ it("updates provider and details when intent changes during an open sign-in flow
           createElement(AccountAddDialog, {
             opened: true,
             intent,
-            state,
+            scope: "local",
             onClose: vi.fn(),
           }),
         ),

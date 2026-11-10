@@ -60,7 +60,6 @@ it("updates project change indicators from the mounted model without a parent re
               archivedAccounts: [],
               defaultAccountKey: "default",
               defaultAccountGroups: [],
-              logins: [],
               supportsDelete: true,
               supportsDisconnect: true,
             },

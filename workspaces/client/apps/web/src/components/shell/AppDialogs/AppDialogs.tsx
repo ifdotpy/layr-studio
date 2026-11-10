@@ -43,12 +43,16 @@ export const AppDialogs = observer(function AppDialogs() {
           title="New shared chat"
           size="lg"
         >
-          <SharedChatCreate
-            source={a}
-            accounts={a.accounts.data}
-            initialPath={a.creation.sharedCreationInitialPath}
-            created={a.creation.sharedCreated}
-          />
+          {a.accounts ? (
+            <SharedChatCreate
+              source={a}
+              accounts={a.accounts}
+              initialPath={a.creation.sharedCreationInitialPath}
+              created={a.creation.sharedCreated}
+            />
+          ) : (
+            <p role="status">Loading accounts…</p>
+          )}
         </Modal>
       )}
     </>

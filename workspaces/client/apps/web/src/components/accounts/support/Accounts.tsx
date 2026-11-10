@@ -1,7 +1,7 @@
-import type { GetResult } from "../../../api.ts";
+import type { StateCollections } from "../../../generated/observableResources.ts";
 
-export type AccountsState = import("../../../deepReadonly.ts").DeepReadonly<
-  GetResult<"/api/accounts">
+export type AccountsState = NonNullable<
+  ReturnType<StateCollections["accountsSummary"]["get"]>
 >;
 
 export type Account = AccountsState["accounts"][number];

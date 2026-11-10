@@ -1,6 +1,6 @@
 import { nativeHost } from "./client.ts";
 import { isNativeFrame } from "./frame.ts";
-import { prepareNativeClose } from "./closeState.ts";
+import { flushUnsentText } from "../unsent/store.ts";
 import { serverParentOrigin } from "../servers/environment.ts";
 
 const QUERY = "studio-native-close-query";
@@ -30,7 +30,7 @@ export async function initializeNativeClose() {
       if (kind !== QUERY || typeof id !== "string" || active) return;
       active = { id, release: freeze() };
       try {
-        await prepareNativeClose();
+        await flushUnsentText();
         window.parent.postMessage(
           { kind: REPLY, id, ready: true },
           serverParentOrigin,
@@ -70,7 +70,7 @@ export async function initializeNativeClose() {
     const release = freeze();
     document.getElementById("studio-close-error")?.remove();
     try {
-      await prepareNativeClose();
+      await flushUnsentText();
       await host.core.invoke("close_response", { id, ready: true });
     } catch (error) {
       release();

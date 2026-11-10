@@ -4,9 +4,9 @@ import {
   type TransferStorage,
   type StagedEntityInterval,
 } from "./entityTransfer.ts";
-import type { components } from "../generated/api.ts";
-import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
+import { SubscriptionReplyKind, type components } from "../generated/api.ts";
 
+type Frame = components["schemas"]["ResourceEntityTransferEvent"];
 type Batch = components["schemas"]["EntityChangeBatch"];
 class MemoryStaging implements TransferStorage {
   readonly rows = new Map<string, string>();
@@ -42,11 +42,11 @@ function batch(after: number, count: number, text = "fixture"): Batch {
     })),
   };
 }
-function parts(pages: Batch[], scope = "one", fragmentSize = 30000) {
+function parts(pages: Batch[], scope = "one", fragmentSize = 30000): Frame[] {
   return pages.flatMap((page, pageIndex) => {
     const data = JSON.stringify(page);
     const partCount = Math.ceil(data.length / fragmentSize);
-    return Array.from({ length: partCount }, (_, partIndex) => ({
+    return Array.from({ length: partCount }, (_, partIndex): Frame => ({
       protocol: 4,
       workspaceId: "a".repeat(32),
       epoch: "epoch",
@@ -54,7 +54,7 @@ function parts(pages: Batch[], scope = "one", fragmentSize = 30000) {
       reason: "initial",
       resource: { kind: "agentDetail", agentId: scope },
       cursor: { workspaceId: "a".repeat(32), seq: pages.at(-1)!.through },
-      replyKind: "snapshot",
+      replyKind: SubscriptionReplyKind.snapshot,
       transferId: scope,
       pageIndex,
       payloadKind: "entity",
@@ -76,15 +76,17 @@ async function pages(interval: StagedEntityInterval | undefined) {
 describe("complete bounded entity transfer", () => {
   it("assembles the default stream transfer without browser database storage", async () => {
     const assembler = new EntityTransferAssembler();
-    const complete = await assembler.receive(parts([batch(0, 1)])[0]);
+    const complete = await assembler.receive(parts([batch(0, 1)])[0]!);
     expect(await pages(complete)).toEqual([batch(0, 1)]);
     await complete?.dispose();
   });
   it("leaves completed staging with its interval owner until disposal", async () => {
     const storage = new MemoryStaging();
     const assembler = new EntityTransferAssembler(storage);
-    const removed = await assembler.receive(parts([batch(0, 1)], "removed")[0]);
-    const kept = await assembler.receive(parts([batch(0, 1)], "kept")[0]);
+    const removed = await assembler.receive(
+      parts([batch(0, 1)], "removed")[0]!,
+    );
+    const kept = await assembler.receive(parts([batch(0, 1)], "kept")[0]!);
     await assembler.remove([{ kind: "agentDetail", agentId: "removed" }]);
     expect(await pages(removed)).toEqual([batch(0, 1)]);
     await removed?.dispose();
@@ -129,10 +131,10 @@ describe("complete bounded entity transfer", () => {
     expect(two?.resource).toEqual({ kind: "agentDetail", agentId: "two" });
     expect(await assembler.receive(first.at(-1)!)).toBeUndefined();
     await expect(
-      assembler.receive({ ...first[0], data: "changed" }),
+      assembler.receive({ ...first[0]!, data: "changed" }),
     ).rejects.toThrow();
   });
-  it("cancels incomplete buffers and rejects out-of-order, invalid interval and oversized frames", async () => {
+  it("cancels incomplete buffers and rejects out-of-order and invalid intervals", async () => {
     const storage = new MemoryStaging();
     const assembler = new EntityTransferAssembler(storage);
     const frames = parts([batch(0, 1)], "one", 50);
@@ -142,12 +144,6 @@ describe("complete bounded entity transfer", () => {
     expect(storage.closed).toBe(true);
     expect(storage.rows.size).toBe(0);
     await expect(assembler.receive(frames[1]!)).rejects.toThrow();
-    await expect(
-      assembler.receive({
-        ...frames[0],
-        data: "x".repeat(SYNC_STREAM_EVENT_MAX_BYTES),
-      }),
-    ).rejects.toThrow();
     await expect(
       new EntityTransferAssembler(new MemoryStaging()).receive(
         parts([{ ...batch(0, 1), through: 0 }])[0]!,
@@ -208,8 +204,8 @@ describe("complete bounded entity transfer", () => {
     const assembler = new EntityTransferAssembler(new MemoryStaging());
     const [frame] = parts([batch(513, 1)]);
     const complete = await assembler.receive({
-      ...frame,
-      replyKind: "delta",
+      ...frame!,
+      replyKind: SubscriptionReplyKind.delta,
       reason: "change",
     });
     expect((await pages(complete))[0]?.after).toBe(513);
@@ -220,12 +216,12 @@ describe("complete bounded entity transfer", () => {
     const entry = {
       revision: 1,
       cursor: { workspaceId: "a".repeat(32), seq: 1 },
-      replyKind: "snapshot",
+      replyKind: SubscriptionReplyKind.snapshot,
       viewSnapshot: { processes: { processes: [], activities: [] } },
     };
     await expect(
       new EntityTransferAssembler().receive({
-        ...parts([batch(0, 1)])[0],
+        ...parts([batch(0, 1)])[0]!,
         payloadKind: "view",
         resource: { kind: "processes", agentId: "one" },
         data: JSON.stringify(entry),
@@ -234,16 +230,16 @@ describe("complete bounded entity transfer", () => {
   });
   it("rejects a terminal generation change between fragments", async () => {
     const assembler = new EntityTransferAssembler();
-    const frames = parts([batch(0, 1)], "one", 50).map((frame) => ({
+    const frames = parts([batch(0, 1)], "one", 50).map((frame): Frame => ({
       ...frame,
       payloadKind: "view",
       resource: { kind: "terminal-output", terminalId: "one" },
       cursor: { ...frame.cursor, terminalGeneration: 1 },
     }));
-    await assembler.receive(frames[0]);
+    await assembler.receive(frames[0]!);
     await expect(
       assembler.receive({
-        ...frames[1],
+        ...frames[1]!,
         cursor: { ...frames[1]!.cursor, terminalGeneration: 2 },
       }),
     ).rejects.toThrow("Entity transfer identity changed");
@@ -252,13 +248,13 @@ describe("complete bounded entity transfer", () => {
     const storage = new MemoryStaging();
     const assembler = new EntityTransferAssembler(storage);
     const old = parts([batch(0, 1)], "one", 50);
-    await assembler.receive(old[0]);
+    await assembler.receive(old[0]!);
     const next = parts([batch(0, 1)]).map((frame) => ({
       ...frame,
       epoch: "new",
       transferId: "new",
     }));
-    const complete = await assembler.receive(next[0]);
+    const complete = await assembler.receive(next[0]!);
     expect(complete?.epoch).toBe("new");
     expect([...storage.rows.keys()].some((key) => key.startsWith("one:"))).toBe(
       false,

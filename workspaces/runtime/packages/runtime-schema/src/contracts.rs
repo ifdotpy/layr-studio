@@ -40,41 +40,6 @@ pub fn admitted_request_schema() -> Value {
     studio_json::json!({"title":"AdmittedRequest","type":"object","additionalProperties":false,"properties":{"id":{"type":"string"},"signature":{"type":"string"},"created":{"type":"integer","format":"int64"}},"required":["id","signature","created"]})
 }
 
-fn persistence_ts(root: &Path) -> Result<String, String> {
-    let mut text = format!("// {HEADER}\n");
-    ts_constants(
-        &mut text,
-        &[
-            (
-                "REQUEST_RESULT_TTL_MS",
-                crate::persistence::REQUEST_RESULT_TTL_MS.to_string(),
-            ),
-            (
-                "REQUEST_ID_FUTURE_SKEW_MS",
-                crate::persistence::REQUEST_ID_FUTURE_SKEW_MS.to_string(),
-            ),
-        ],
-    );
-    for (name, variants) in crate::persistence::ENUM_CONTRACTS {
-        writeln!(text, "export const {name}Values = [").expect("String write");
-        for wire in *variants {
-            writeln!(text, "  {},", json_string(wire)).expect("String write");
-        }
-        writeln!(
-            text,
-            "] as const;\nexport type {name} = (typeof {name}Values)[number];"
-        )
-        .expect("String write");
-    }
-    text.push_str("export type { RecipientDelivery } from \"./rustOwned\";\n");
-    run_node(
-        root,
-        "node_modules/oxfmt/bin/oxfmt",
-        "--stdin-filepath=workspaces/client/apps/web/src/generated/persistence.ts",
-        &text,
-    )
-}
-
 fn json_string(value: &str) -> String {
     studio_json::to_string(value).expect("a string serializes")
 }
@@ -1804,10 +1769,6 @@ pub fn render(root: &Path, with_api_types: bool) -> Result<Vec<Rendered>, String
         Rendered {
             path: "workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json".into(),
             text: run_node(root, "node_modules/oxfmt/bin/oxfmt", "--stdin-filepath=workspaces/runtime/packages/runtime-schema/src/schemas/persisted-room-record.schema.json", &studio_json::to_string_pretty(&crate::room_record::schema()).map_err(|error| error.to_string())?)?,
-        },
-        Rendered {
-            path: web("persistence.ts"),
-            text: persistence_ts(root)?,
         },
         Rendered {
             path: web("workspaceModes.ts"),

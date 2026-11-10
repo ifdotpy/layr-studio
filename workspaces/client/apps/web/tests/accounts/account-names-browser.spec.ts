@@ -112,151 +112,93 @@ async function fixture(page: Page) {
       loseResponse = true;
     },
     close: () => server.close(),
+    publish: () =>
+      page.evaluate(
+        (serialized) => window.publishAccounts(JSON.parse(serialized)),
+        JSON.stringify(data()),
+      ),
   };
 }
 
-test("accounts names save, clear, keys, exact retry, and themes", async ({
+async function rename(page: Page, identity: string) {
+  const row = page.locator('[data-account-identity="' + identity + '"]');
+  await row.getByRole("button", { name: /^Actions for/ }).click();
+  await row.getByRole("menuitem", { name: "Rename", exact: true }).click();
+  return page.getByRole("dialog", { name: /^Rename/ });
+}
+
+test("settings account rename saves exact keys and shows errors across themes", async ({
   page,
-}, testInfo) => {
-  test.setTimeout(90_000);
+}) => {
   const f = await fixture(page);
   try {
-    const row = page.locator('[data-account="default"]');
-    await row
-      .getByRole("button", { name: "Limit details for personal@example.com" })
-      .click();
-    await row
-      .getByRole("button", { name: "Edit name for personal@example.com" })
-      .click();
-    const input = row.getByRole("textbox", {
-      name: "Name for personal@example.com",
+    let dialog = await rename(page, "codex:personal@example.com");
+    await dialog
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill("Work 2");
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(dialog).not.toBeVisible();
+    expect(f.bodies[0]).toMatchObject({
+      account_key: "default",
+      label: "Work 2",
     });
-    await expect(input).toHaveAttribute("placeholder", "personal");
-    await input.fill("  Work 2  ");
-    await input.press("Enter");
+    await f.publish();
     await expect(
-      row.getByRole("button", { name: "Edit name for personal@example.com" }),
+      page.locator(
+        '[data-account-identity="codex:personal@example.com"] .account-identity strong',
+      ),
     ).toHaveText("Work 2");
-    await row
-      .getByRole("button", { name: "Edit name for personal@example.com" })
-      .click();
-    await input.fill("Discard");
-    await input.press("Escape");
-    expect(f.bodies).toHaveLength(1);
-    await row
-      .getByRole("button", { name: "Edit name for personal@example.com" })
-      .click();
-    await input.fill("x".repeat(33));
-    await expect(row.locator(".mantine-TextInput-error")).toHaveText(
-      "Use at most 32 characters.",
-    );
-    await expect(
-      row.getByRole("button", { name: "Save", exact: true }),
-    ).toBeDisabled();
-    expect(f.bodies).toHaveLength(1);
-    await input.fill("");
+    dialog = await rename(page, "claude:work@example.com");
+    await dialog
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill("Team");
     f.loseNextResponse();
-    await input.press("Enter");
-    await expect(row.locator(".mantine-TextInput-error")).toBeVisible();
-    await row.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(
-      row.getByRole("button", { name: "Edit name for personal@example.com" }),
-    ).toHaveText("personal");
-    expect(f.bodies[1]).toEqual(f.bodies[2]);
-    const claude = page.locator('[data-account="work"]');
-    await claude
-      .getByRole("button", { name: "Limit details for work@example.com" })
-      .click();
-    await claude
-      .getByRole("button", { name: "Edit name for work@example.com" })
-      .click();
-    await claude
-      .getByRole("textbox", { name: "Name for work@example.com" })
-      .fill("Claude 1");
-    await claude.getByRole("button", { name: "Save", exact: true }).click();
-    await expect(
-      claude.getByRole("button", { name: "Edit name for work@example.com" }),
-    ).toHaveText("Claude 1");
-    await claude.getByText("Configure Claude", { exact: true }).click();
-    await claude
-      .getByRole("button", { name: "Save Claude profile", exact: true })
-      .click();
-    await expect(
-      claude.getByText("Claude profile saved.", { exact: true }),
-    ).toBeVisible();
-    expect(f.bodies.at(-1)).not.toHaveProperty("label");
-    await expect(
-      claude.getByRole("button", { name: "Edit name for work@example.com" }),
-    ).toHaveText("Claude 1");
-    await claude.getByText("Configure Claude", { exact: true }).click();
-    for (const [theme, width] of [
+    await dialog.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(page.getByRole("alert").first()).toBeVisible();
+    await expect(dialog).toBeVisible();
+    expect(f.bodies.at(-1)).toMatchObject({
+      account_key: "work",
+      label: "Team",
+    });
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    for (const [color, width] of [
       ["dark", 1280],
       ["light", 1280],
       ["dark", 390],
       ["light", 390],
     ] as const) {
       await page.setViewportSize({ width, height: 1000 });
-      await page.evaluate((value) => window.setTheme(value), theme);
+      await page.evaluate((value) => window.setTheme(value), color);
       await expect(page.locator("html")).toHaveAttribute(
         "data-mantine-color-scheme",
-        theme,
+        color,
       );
       expect(
         await page.evaluate(
           () => document.documentElement.scrollWidth <= innerWidth,
         ),
       ).toBe(true);
-      if (width === 390 && theme === "dark") {
-        await claude
-          .getByRole("button", { name: "Edit name for work@example.com" })
-          .click();
-        await expect(
-          claude.getByRole("textbox", { name: "Name for work@example.com" }),
-        ).toBeVisible();
-        expect(
-          await page.evaluate(
-            () => document.documentElement.scrollWidth <= innerWidth,
-          ),
-        ).toBe(true);
-        await claude
-          .getByRole("button", { name: "Cancel", exact: true })
-          .click();
-      }
     }
   } finally {
-    try {
-      if (testInfo.status !== testInfo.expectedStatus)
-        await testInfo.attach("accounts", {
-          body: await page.screenshot(),
-          contentType: "image/png",
-        });
-    } finally {
-      await f.close();
-    }
+    await f.close();
   }
 });
 
-test("accounts Name Escape keeps the inline manager visible", async ({
+test("settings rename Escape closes the modal and keeps the account list visible", async ({
   page,
 }) => {
-  test.setTimeout(90_000);
   const f = await fixture(page);
   try {
-    const manager = page.locator(".accounts-manager-inline");
-    await manager
-      .getByRole("button", { name: "Limit details for personal@example.com" })
-      .click();
-    await manager
-      .getByRole("button", { name: "Edit name for personal@example.com" })
-      .click();
-    await manager
-      .getByRole("textbox", { name: "Name for personal@example.com" })
+    const dialog = await rename(page, "codex:personal@example.com");
+    await dialog
+      .getByRole("textbox", { name: "Name", exact: true })
+      .fill("Discard");
+    await dialog
+      .getByRole("textbox", { name: "Name", exact: true })
       .press("Escape");
-    await expect(manager).toBeVisible();
+    await expect(dialog).not.toBeVisible();
     await expect(
-      manager.getByRole("button", {
-        name: "Edit name for personal@example.com",
-      }),
+      page.getByRole("region", { name: "Accounts", exact: true }),
     ).toBeVisible();
     expect(f.bodies).toHaveLength(0);
   } finally {

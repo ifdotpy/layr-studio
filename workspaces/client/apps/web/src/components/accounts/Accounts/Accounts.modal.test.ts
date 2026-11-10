@@ -48,8 +48,8 @@ test("changing the callback while an account modal is open does not report a clo
           { env: "test" },
           createElement(Accounts, {
             managerOnly: true,
-            dialogsOnly: true,
-            state,
+            state: state.data,
+            scope: state.scope,
             onError() {},
             externalCommand: command,
             onModalOpenChange: report,

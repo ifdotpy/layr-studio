@@ -152,11 +152,6 @@ p {
 .picker .mantine-Button-inner {
   justify-content: flex-start;
 }
-.tab-count {
-  font-size: var(--studio-text-meta);
-  padding-left: 3px;
-  color: var(--muted);
-}
 #open-complaints.selected {
   background: var(--selected);
 }
@@ -220,30 +215,6 @@ p {
 }
 /* Notices above the transcript take no height in the flow: the stack floats
    under the header, so a notice that appears or leaves moves nothing. */
-.workspace-notices {
-  position: relative;
-  z-index: 40;
-  flex: none;
-  height: 0;
-}
-.workspace-notices-stack {
-  position: absolute;
-  inset-block-start: var(--mantine-spacing-xs);
-  inset-inline: var(--chat-gutter, var(--mantine-spacing-md));
-  display: grid;
-  gap: var(--mantine-spacing-xs);
-  max-height: 40dvh;
-  overflow: auto;
-  pointer-events: none;
-}
-.workspace-notices-stack > *,
-.workspace-notices-stack .sync-status {
-  pointer-events: auto;
-}
-.workspace-notices-stack:empty,
-.workspace-notices-stack .sync-notices:empty {
-  display: none;
-}
 #error {
   padding: 10px 14px;
   border: var(--studio-border-width) solid
@@ -792,30 +763,6 @@ p {
 .answer-field p {
   margin: 0;
 }
-.picker {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  overflow-wrap: anywhere;
-}
-.picker button {
-  min-height: 38px;
-  height: auto;
-  padding: 10px 12px;
-  justify-content: flex-start;
-}
-.picker .mantine-Button-label {
-  white-space: normal;
-  text-align: left;
-  display: block;
-  height: auto;
-}
-.picker button small {
-  display: block;
-  font-size: var(--studio-text-meta);
-  margin-top: 3px;
-}
 #complaint-book {
   flex: 1;
   min-height: 0;
@@ -910,14 +857,6 @@ p {
 /* Sentence opacity does not change text geometry. */
 .markdown-block {
   min-width: 0;
-}
-.sentence-enter {
-  animation: sentence-enter 180ms ease-out;
-}
-@media (prefers-reduced-motion: reduce) {
-  .sentence-enter {
-    animation: none;
-  }
 }
 .markdown-block + .markdown-block {
   margin-top: 16px;
@@ -1256,13 +1195,6 @@ p {
   align-items: center;
   gap: 8px;
 }
-.task-kind-icon {
-  color: var(--muted);
-  display: flex;
-}
-.task-kind-icon.active {
-  color: var(--studio-state-working);
-}
 .task-row-kind {
   font-size: var(--studio-text-meta);
   color: var(--muted);
@@ -1293,13 +1225,6 @@ p {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: var(--studio-text-meta);
-  color: var(--muted);
-}
-.tasks-footnote {
-  padding: 12px 16px;
-  margin: 0;
-  border-top: 1px solid var(--line);
   font-size: var(--studio-text-meta);
   color: var(--muted);
 }

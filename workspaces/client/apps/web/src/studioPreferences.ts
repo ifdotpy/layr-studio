@@ -26,7 +26,6 @@ export type StudioPreferences = {
     undefined
   >;
 };
-export type StudioFontFamily = StudioPreferences["fontFamily"];
 
 export const defaultStudioPreferences: StudioPreferences = {
   theme: "auto",

@@ -9,7 +9,7 @@ import { expect, it } from "vitest";
 // entry needs an owner. A removed use must leave this list, so the list always
 // matches the source.
 const allowed: Record<string, string> = {
-  "browserPersistence.ts": "allowed browser persistence and legacy cleanup",
+  "browserPersistence.ts": "allowed browser persistence and request fences",
   "servers/excludedServers.ts":
     "servers removed from this UI, so they stay out of the trusted list",
   "servers/routes.ts": "routes that a paired server reported, for each server",

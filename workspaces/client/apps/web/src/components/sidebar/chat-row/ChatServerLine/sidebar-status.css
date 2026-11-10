@@ -65,8 +65,3 @@
   overflow-wrap: anywhere;
   font-weight: 400;
 }
-.server-sidebar .project-show-more {
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}

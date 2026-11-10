@@ -102,35 +102,21 @@ it("pending to uncertain allows a user retry with the original login identity an
     accountKey: "account",
     status: "pending",
   } as const;
-  const state = {
-    scope: "local",
-    data: {
-      accounts: [],
-      archivedAccounts: [],
-      defaultAccountKey: "default",
-      defaultAccountGroups: [],
-      logins: [pending],
-      supportsDelete: true,
-      supportsDisconnect: true,
-    },
-    setData: vi.fn(),
-    error: "",
-    refresh: vi.fn(async () => null),
-  } satisfies ComponentProps<typeof AccountSignIn>["state"];
+
   fixture.post.mockResolvedValue(pending);
-  const f = await mount(createElement(AccountSignIn, { state }));
+  const f = await mount(createElement(AccountSignIn, { scope: "local" }));
   try {
+    await deliver(pending, 1);
     expect(button("Sign in").disabled).toBe(true);
-    await deliver({ ...pending, status: "uncertain" }, 1);
+    await deliver({ ...pending, status: "uncertain" }, 2);
     expect(button("Sign in").disabled).toBe(false);
     await act(async () => {
       fixture.services!.connection("offline");
       fixture.services!.connection("live");
     });
-    await deliver({ ...pending, status: "uncertain" }, 2);
+    await deliver({ ...pending, status: "uncertain" }, 3);
     expect(fixture.post).not.toHaveBeenCalled();
     expect(fixture.get).not.toHaveBeenCalled();
-    expect(state.refresh).not.toHaveBeenCalled();
     await act(async () => button("Sign in").click());
     expect(fixture.post).toHaveBeenCalledOnce();
     expect(fixture.post.mock.calls[0]?.[1]).toMatchObject({
@@ -333,23 +319,9 @@ it("restores a sign-in code after a resource hint finishes behind inline progres
     status: "ready",
     eligibility: { kind: "available" },
   } as const;
-  const state = {
-    scope: "local",
-    data: {
-      accounts: [account],
-      archivedAccounts: [],
-      defaultAccountKey: "default",
-      defaultAccountGroups: [],
-      logins: [],
-      supportsDelete: true,
-      supportsDisconnect: true,
-    },
-    setData: vi.fn(),
-    error: "",
-    refresh: vi.fn(async () => null),
-  } satisfies ComponentProps<typeof AccountSignIn>["state"];
+
   const f = await mount(
-    createElement(AccountSignIn, { state, targetAccount: account }),
+    createElement(AccountSignIn, { scope: "local", targetAccount: account }),
   );
   const ref = { kind: "auth-progress", requestId: "login" } as const;
   try {
@@ -388,5 +360,34 @@ it("restores a sign-in code after a resource hint finishes behind inline progres
     expect(fixture.post).not.toHaveBeenCalled();
   } finally {
     await f.close();
+  }
+});
+
+it("resumes the saved Codex sign-in after a reload from generated auth progress without account readbacks", async () => {
+  const pending = {
+    requestId: "login",
+    accountKey: "account",
+    status: "pending",
+    userCode: "ABCD-EFGH",
+    verificationUrl: "https://auth.openai.com/codex/device",
+  } as const;
+  for (let load = 0; load < 2; load++) {
+    fixture.services = transientTestFixture();
+    const f = await mount(createElement(AccountSignIn, { scope: "local" }));
+    try {
+      await deliver(pending, 1);
+      expect(document.body.textContent).toContain("ABCD-EFGH");
+      expect(button("Sign in").disabled).toBe(true);
+      expect(
+        fixture.services.transport.watchResourceChanges,
+      ).toHaveBeenCalledWith(
+        { kind: "auth-progress", requestId: "login" },
+        expect.any(Function),
+      );
+      expect(fixture.get).not.toHaveBeenCalled();
+      expect(fixture.post).not.toHaveBeenCalled();
+    } finally {
+      await f.close();
+    }
   }
 });

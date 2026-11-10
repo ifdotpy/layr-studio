@@ -5,17 +5,10 @@ import {
   formatAgentStatus,
   type ReadState,
 } from "../status/operationalStatus.ts";
-import {
-  normalizeStudioPreferences,
-  studioPreferencesStorageKey,
-} from "../studioPreferences.ts";
 import { errorText } from "../api.ts";
-import { executeSidebarRequest, serializeSidebarError } from "./sidebarRpc.ts";
 import { desktopAlerts, nextAlertChange } from "../desktop/desktopAlerts.ts";
 import { serverViewId, serverParentOrigin } from "./environment.ts";
-import { publishServerAliases } from "./serverAliases.ts";
 import {
-  isServerCommand,
   navigationSnapshot,
   readServerAccounts,
   type ServerAccount,
@@ -25,7 +18,7 @@ import { resourceData } from "../store/runtime.ts";
 import { sidebarEntities } from "./sidebarSnapshot.ts";
 import { createSidebarViewModel } from "../components/sidebar/support/viewModel.ts";
 import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
-import { preferenceMemory, serverStorageEventKey } from "./storage.ts";
+import { serverStorageEventKey } from "./storage.ts";
 import type { AppScope, Disposer } from "../app/contracts.ts";
 import type {
   ScreenMessage,
@@ -52,7 +45,7 @@ export interface FrameInputs {
   readonly opened: string | null;
   readonly error: string;
   readonly pendingReads: ReadonlyMap<string, ReadState>;
-  readonly accounts: ServerAccount[];
+  readonly accounts: ServerAccount[] | undefined;
   readonly creating: boolean;
   run(command: ServerCommand): void | Promise<void>;
 }
@@ -140,74 +133,6 @@ export function startServerFrame(
       );
     } else await source.run(command);
   };
-  const receive = (event: MessageEvent) => {
-    if (
-      !legacy ||
-      !event.data ||
-      typeof event.data !== "object" ||
-      event.source !== window.parent ||
-      event.origin !== serverParentOrigin ||
-      event.data.serverId !== serverViewId
-    )
-      return;
-    if (event.data.kind === "studio-sidebar-request") {
-      if (typeof event.data.correlation !== "string") return;
-      const correlation = event.data.correlation;
-      void executeSidebarRequest(
-        event.data.value,
-        async () => {
-          return navigation();
-        },
-        execute,
-        services.api.getToken(),
-      ).then(
-        (result) =>
-          publish({ kind: "studio-sidebar-result", correlation, result }),
-        (failure) =>
-          publish({
-            kind: "studio-sidebar-result",
-            correlation,
-            error: serializeSidebarError(failure),
-          }),
-      );
-    } else if (event.data.kind === "studio-server-shell-layout") {
-      const width = event.data.sidebarWidth;
-      if (typeof width !== "number" || !(width >= 0) || width > 2000) return;
-      const root = document.documentElement;
-      root.style.setProperty("--shell-sidebar-width", `${Math.round(width)}px`);
-      if (width > 0) root.dataset.shellSidebar = "true";
-      else delete root.dataset.shellSidebar;
-    } else if (event.data.kind === "studio-server-preferences") {
-      const aliases = event.data.aliases;
-      if (
-        aliases &&
-        typeof aliases === "object" &&
-        Object.values(aliases).every(
-          (value) => typeof value === "string" && /^[A-Z]{1,3}$/.test(value),
-        )
-      )
-        publishServerAliases(aliases);
-      try {
-        const value = JSON.stringify(
-          normalizeStudioPreferences(event.data.preferences),
-        );
-        if (preferenceMemory.getItem(studioPreferencesStorageKey) !== value) {
-          preferenceMemory.setItem(studioPreferencesStorageKey, value);
-          window.dispatchEvent(
-            new StorageEvent("storage", {
-              key: studioPreferencesStorageKey,
-              newValue: value,
-            }),
-          );
-        }
-      } catch {}
-    } else if (
-      event.data.kind === "studio-server-command" &&
-      isServerCommand(event.data.command)
-    ) {
-      void execute(event.data.command);
-    }
-  };
   const publishNavigation = () =>
     publish({ kind: "studio-server-navigation", navigation: navigation() });
   const preferencesChanged = (event: Event) => {
@@ -269,7 +194,6 @@ export function startServerFrame(
     ),
   ];
   if (legacy) {
-    window.addEventListener("message", receive);
     window.addEventListener(preferenceEvent, preferencesChanged);
     window.addEventListener("storage", preferencesChanged);
   }
@@ -277,7 +201,6 @@ export function startServerFrame(
     disposed = true;
     clearTimeout(timer);
     stops.reverse().forEach((stop) => stop());
-    window.removeEventListener("message", receive);
     window.removeEventListener(preferenceEvent, preferencesChanged);
     window.removeEventListener("storage", preferencesChanged);
   };
@@ -312,7 +235,7 @@ export function startAppFrame(areas: ServerAreas): Disposer {
       return areas.read.pendingReadTargets;
     },
     get accounts() {
-      return frameAccounts(areas.accounts.data);
+      return frameAccounts(areas.accounts);
     },
     get creating() {
       return areas.creation.isCreating;

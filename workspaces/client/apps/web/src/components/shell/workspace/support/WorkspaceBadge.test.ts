@@ -2,12 +2,9 @@ import {
   WorkspaceMode as GeneratedApiWorkspaceMode,
   AgentRole as GeneratedApiAgentRole,
 } from "../../../../generated/api.ts";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { expect, test } from "vitest";
 import type { Agent } from "../../../../types.ts";
-import WorkspaceBadge from "./WorkspaceBadge.tsx";
-import { workspaceBadgeInfo } from "../support/WorkspaceBadge.tsx";
+import { workspaceBadgeInfo } from "./WorkspaceBadge.tsx";
 
 const agent = (values: Partial<Agent>): Agent => ({
   id: "worker",
@@ -24,11 +21,6 @@ test.each([
   const current = agent({ workspaceMode });
   const info = workspaceBadgeInfo(current);
   expect(info).toEqual({ label, title: `${name} · /projects/example` });
-  const markup = renderToStaticMarkup(
-    createElement(WorkspaceBadge, { agent: current }),
-  );
-  expect(markup).toContain(`title="${name} · /projects/example"`);
-  expect(markup).toContain(`>${label}</span>`);
 });
 
 test("hides the badge for leads and unknown remote workspaces", () => {
@@ -64,11 +56,7 @@ test.each([
   ["worktree", "WT"],
 ] as const)("shows the chat workspace %s as %s", (workspaceMode, label) => {
   const current = agent({ isLead: true, workspaceMode });
-  const markup = renderToStaticMarkup(
-    createElement(WorkspaceBadge, { agent: current }),
-  );
   expect(workspaceBadgeInfo(current)?.label).toBe(label);
-  expect(markup).toContain(`>${label}</span>`);
 });
 
 test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
@@ -76,9 +64,6 @@ test.each([false, true])("shows the layr worker badge, remote=%s", (remote) => {
     ...(remote ? { remoteWorker: { server: "remote", link: "link" } } : {}),
     legacyVmWorkspace: true,
   });
-  expect(
-    renderToStaticMarkup(createElement(WorkspaceBadge, { agent: current })),
-  ).toContain(">Unavailable</span>");
   expect(workspaceBadgeInfo(current)).toEqual({
     label: "Unavailable",
     title: "Legacy workspace unavailable · /projects/example",

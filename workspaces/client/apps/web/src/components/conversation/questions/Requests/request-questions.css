@@ -154,10 +154,6 @@
   margin-left: 6px;
   font-variant-numeric: tabular-nums;
 }
-.request-deferred-note {
-  margin: 8px 0;
-  font-size: var(--studio-text-meta);
-}
 
 /* Compact requests keep the question above secondary details. */
 .request-copy {

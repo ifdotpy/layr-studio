@@ -155,11 +155,12 @@ export default {
       "src/native/signInProtocol.test.ts",
       // The native producer must wait while the stream consumer saves a frame.
       "src/native/stream.test.ts",
+      "src/native/close.test.ts",
       "src/native/audioFrames.test.ts",
       "src/native/externalLinks.test.ts",
       "src/api.test.ts",
       "src/servers/apiScope.test.ts",
-      "src/components/shell/workspace/WorkspaceBadge/WorkspaceBadge.test.ts",
+      "src/components/shell/workspace/support/WorkspaceBadge.test.ts",
       "src/components/shell/tasks/support/backgroundTaskModel.test.ts",
       "src/components/shell/tasks/BackgroundTasks/BackgroundTasks.test.ts",
       "src/components/shell/tasks/MonitorRestart/MonitorRestart.test.ts",

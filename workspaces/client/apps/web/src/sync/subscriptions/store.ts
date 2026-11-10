@@ -267,4 +267,3 @@ export function createSubscriptionStore(transport: SubscriptionTransport) {
     },
   };
 }
-export type SubscriptionStore = ReturnType<typeof createSubscriptionStore>;

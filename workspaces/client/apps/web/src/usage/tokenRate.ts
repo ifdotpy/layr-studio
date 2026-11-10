@@ -3,11 +3,6 @@ import { createTokenRateSnapshotMirror } from "../generated/observableResources.
 import { observeInterest } from "../store/interest.ts";
 import type { components } from "../generated/api.ts";
 
-import {
-  TOKEN_RATE_MAX_ENTRIES,
-  TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS,
-} from "../generated/api.ts";
-
 // This cache receives volatile SSE events. It never enters the sync database.
 export type TokenRate = import("../deepReadonly.ts").DeepReadonly<
   components["schemas"]["TokenRateRecord"]
@@ -15,70 +10,6 @@ export type TokenRate = import("../deepReadonly.ts").DeepReadonly<
 type TokenRateEvent = components["schemas"]["ResourceTokenRatesEvent"];
 type WorkspaceRates =
   import("../generated/observableResources.ts").TokenRateSnapshot;
-
-const recordKeys = {
-  agentId: true,
-  rootId: true,
-  turnId: true,
-  active: true,
-  estimated: true,
-  rate: true,
-  outputTokens: true,
-} satisfies Record<keyof TokenRate, true>;
-
-function validIdentifier(value: unknown): value is string {
-  if (typeof value !== "string" || !value.length) return false;
-  let codepoints = 0;
-  for (const _character of value) {
-    if (++codepoints > TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS) return false;
-  }
-  return true;
-}
-
-// One validation at the untrusted snapshot boundary, using generated types and limits.
-function isTokenRateSnapshot(
-  value: unknown,
-  agents = new Set<string>(),
-): value is WorkspaceRates {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    !("records" in value) ||
-    !Array.isArray(value.records) ||
-    value.records.length > TOKEN_RATE_MAX_ENTRIES
-  )
-    return false;
-  return value.records.every((record: unknown): record is TokenRate => {
-    if (!record || typeof record !== "object" || Array.isArray(record))
-      return false;
-    if (
-      !("agentId" in record) ||
-      !validIdentifier(record.agentId) ||
-      agents.has(record.agentId)
-    )
-      return false;
-    agents.add(record.agentId);
-    return (
-      "rootId" in record &&
-      validIdentifier(record.rootId) &&
-      "turnId" in record &&
-      validIdentifier(record.turnId) &&
-      "active" in record &&
-      typeof record.active === "boolean" &&
-      "estimated" in record &&
-      typeof record.estimated === "boolean" &&
-      "rate" in record &&
-      typeof record.rate === "number" &&
-      Number.isFinite(record.rate) &&
-      record.rate >= 0 &&
-      "outputTokens" in record &&
-      typeof record.outputTokens === "number" &&
-      Number.isFinite(record.outputTokens) &&
-      record.outputTokens >= 0 &&
-      Object.keys(record).every((key) => Object.hasOwn(recordKeys, key))
-    );
-  });
-}
 
 export function tweenTokenRate(from: number, to: number, elapsed: number) {
   const progress = Math.min(1, Math.max(0, elapsed / 450));
@@ -138,34 +69,13 @@ export function createTokenRateCache() {
         baselineWorkspaceId !== event.workspaceId)
     )
       return false;
-    const changed = new Set<string>();
-    if (
-      typeof event.snapshot !== "boolean" ||
-      !Array.isArray(event.removed) ||
-      event.removed.length > TOKEN_RATE_MAX_ENTRIES ||
-      (event.snapshot && event.removed.length !== 0) ||
-      !isTokenRateSnapshot(event, changed)
-    )
-      return false;
     if (event.snapshot) {
       replaceWorkspaceTokenRates(event);
       baselineEpoch = event.epoch;
       baselineWorkspaceId = event.workspaceId;
       return true;
     }
-    const removed = new Set<string>();
-    const records = index.get();
-    let size = records.size;
-    for (const id of event.removed) {
-      if (!validIdentifier(id) || removed.has(id) || changed.has(id))
-        return false;
-      removed.add(id);
-      if (records.has(id)) size--;
-    }
-    for (const record of event.records)
-      if (!records.has(record.agentId)) size++;
-    if (size > TOKEN_RATE_MAX_ENTRIES) return false;
-    const next = new Map(records);
+    const next = new Map(index.get());
     for (const id of event.removed) next.delete(id);
     for (const record of event.records) next.set(record.agentId, record);
     mirror.apply({ records: [...next.values()] });
@@ -177,8 +87,7 @@ export function createTokenRateCache() {
     return { records: mirror.current.records.map((record) => ({ ...record })) };
   }
 
-  function receiveWorkspaceTokenRates(value: unknown) {
-    if (!isTokenRateSnapshot(value)) return false;
+  function receiveWorkspaceTokenRates(value: WorkspaceRates) {
     return replaceWorkspaceTokenRates(value);
   }
 

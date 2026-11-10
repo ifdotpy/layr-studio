@@ -33,48 +33,21 @@ const emptyQueue: QueueView = {
   capabilities: { reorder: false, receipts: false },
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function isStringArray(value: unknown): value is string[] {
-  return (
-    Array.isArray(value) && value.every((item) => typeof item === "string")
-  );
-}
-
-function readStoredQueueRequest(storage: Storage, suffix: string): unknown {
+function readStoredQueueRequest(
+  storage: Storage,
+  suffix: string,
+): { pending: QueueMutation | null; error: string } {
   try {
-    const stored = outboxRequests(storage).get("queueChange", suffix);
-    if (stored === null) return null;
-    try {
-      const request: unknown = JSON.parse(stored);
-      return request;
-    } catch {
-      return stored;
-    }
-  } catch {
-    return "";
+    const pending: QueueMutation | null = JSON.parse(
+      outboxRequests(storage).get("queueChange", suffix) ?? "null",
+    );
+    return { pending, error: "" };
+  } catch (error) {
+    return {
+      pending: null,
+      error: `The saved queue change could not be read. ${errorText(error)}`,
+    };
   }
-}
-
-function isQueueMutation(value: unknown): value is QueueMutation {
-  if (
-    !isRecord(value) ||
-    "message_id" in value ||
-    typeof value.agent !== "string" ||
-    typeof value.request_id !== "string" ||
-    typeof value.expected_revision !== "string"
-  )
-    return false;
-  if (value.action === "reorder") return isStringArray(value.ordered_ids);
-  if (typeof value.id !== "string") return false;
-  return (
-    value.action === "first" ||
-    ((value.action === "send_now" || value.action === "edit") &&
-      typeof value.expectedText === "string" &&
-      (value.action !== "edit" || typeof value.text === "string"))
-  );
 }
 
 type QueueOptions = {
@@ -97,12 +70,14 @@ export function useMessageQueue(p: QueueOptions) {
   const queue = useMemo(() => {
     const suffix = `${p.scope}:${p.id}`,
       key = outboxRequests(storage).key("queueChange", suffix);
+    const stored = readStoredQueueRequest(storage, suffix);
     const queue = {
       key,
       active: true,
-      error: "",
+      error: stored.error,
+      blocked: !!stored.error,
       busy: false,
-      pending: readStoredQueueRequest(storage, suffix),
+      pending: stored.pending,
       commands: api.pending.list(),
       get current() {
         return p.enabled && p.id ? store.state().current : undefined;
@@ -130,9 +105,9 @@ export function useMessageQueue(p: QueueOptions) {
         return !["live", "stale"].includes(this.current?.status || "");
       },
       get canReorder() {
-        return !!this.view.capabilities?.reorder;
+        return !this.blocked && !!this.view.capabilities?.reorder;
       },
-      setPending(request: unknown) {
+      setPending(request: QueueMutation | null) {
         this.pending = request;
       },
       finish() {
@@ -140,24 +115,25 @@ export function useMessageQueue(p: QueueOptions) {
         this.busy = false;
       },
       syncPending() {
-        this.setPending(readStoredQueueRequest(storage, suffix));
+        const stored = readStoredQueueRequest(storage, suffix);
+        if (stored.error || this.blocked) this.error = stored.error;
+        this.blocked = !!stored.error;
+        this.setPending(stored.pending);
       },
       syncCommands() {
         this.commands = api.pending.list();
       },
       async clearRequest(request: QueueMutation) {
-        const next = await updateQueueRequest<unknown>(
+        const next = await updateQueueRequest<QueueMutation | null>(
           suffix,
           null,
           (current) =>
-            isQueueMutation(current) &&
-            current.request_id === request.request_id
-              ? null
-              : current,
+            current?.request_id === request.request_id ? null : current,
         );
         if (this.active) this.setPending(next);
       },
       async run(operation: () => Promise<void>) {
+        if (this.blocked) throw new Error(this.error);
         if (locks.has(key))
           throw new Error("Wait for the current queue change.");
         locks.add(key);
@@ -194,8 +170,9 @@ export function useMessageQueue(p: QueueOptions) {
       },
       async mutate(change: QueueChange) {
         if (!p.id) throw new Error("The queue belongs to another chat.");
-        const existing = readStoredQueueRequest(storage, suffix);
-        this.pending = existing;
+        this.syncPending();
+        if (this.blocked) throw new Error(this.error);
+        const existing = this.pending;
         if (existing !== null)
           throw new Error(
             "Retry the previous queue change before making another change.",
@@ -222,11 +199,10 @@ export function useMessageQueue(p: QueueOptions) {
         return this.execute(request);
       },
       async retry() {
-        const request = readStoredQueueRequest(storage, suffix);
-        this.pending = request;
+        this.syncPending();
+        if (this.blocked) throw new Error(this.error);
+        const request = this.pending;
         if (request !== null) {
-          if (!isQueueMutation(request))
-            throw new Error("The saved queue change cannot be verified.");
           await this.execute(request);
         }
       },

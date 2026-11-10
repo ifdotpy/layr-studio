@@ -103,35 +103,18 @@ it("does not remove another operation when its own response succeeds", async () 
   ]);
 });
 
-it("shows and migrates a legacy uncertain request without changing its identity", async () => {
+it("ignores retired management records without migrating or sending them", async () => {
   const f = fixture();
-  const request = { action: "discover" as const, requestId: "legacy-discover" };
-  f.storage.setItem(
-    "studio-server-discovery-pending-v1",
-    JSON.stringify(request),
-  );
+  f.storage.setItem("studio-server-discovery-pending-v1", "retired-format");
   const send = vi.fn(async () => {});
   const manager = new ServerManagementRequests("home", f.storage, f.lock, send);
-  expect(manager.pending()).toEqual([request]);
-  await manager.run(request);
-  expect(send).toHaveBeenCalledWith(request);
-  expect(f.records.size).toBe(0);
-});
-
-it("blocks a malformed legacy management request without migrating or sending it", async () => {
-  const f = fixture();
-  const raw = JSON.stringify({
-    action: "revoke",
-    requestId: "original",
-    clientId: {},
+  expect(manager.pending()).toEqual([]);
+  await manager.run({ action: "discover", requestId: "current" });
+  expect(send).toHaveBeenCalledExactlyOnceWith({
+    action: "discover",
+    requestId: "current",
   });
-  f.storage.setItem("studio-server-discovery-pending-v1", raw);
-  const send = vi.fn(async () => {});
-  const manager = new ServerManagementRequests("home", f.storage, f.lock, send);
-  expect(() => manager.pending()).toThrow();
-  await expect(
-    manager.run({ action: "revoke", requestId: "new", clientId: "id" }),
-  ).rejects.toThrow();
-  expect(f.storage.getItem("studio-server-discovery-pending-v1")).toBe(raw);
-  expect(send).not.toHaveBeenCalled();
+  expect(f.storage.getItem("studio-server-discovery-pending-v1")).toBe(
+    "retired-format",
+  );
 });

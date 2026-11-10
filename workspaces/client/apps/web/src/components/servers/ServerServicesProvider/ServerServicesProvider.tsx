@@ -149,19 +149,11 @@ export function useServerStore() {
     );
   return store;
 }
-export const useServerTranscripts = () =>
-  useServerServices()?.transcripts ?? defaultTranscripts;
 export const useServerTokenRates = () =>
   useServerServices()?.tokenRates ?? defaultTokenRates;
 
 export const useServerOutbox = () =>
   useServerServices()?.outbox ?? defaultOutbox;
-
-export const useServerActivityScope = () =>
-  useServerServices()?.activity ?? defaultActivity;
-
-export const useServerResourceReads = () =>
-  useServerServices()?.watchResourceReads ?? watchResourceReads;
 
 export const useServerFileDialogs = () =>
   useServerServices()?.fileDialogs ?? defaultFileDialogs;
@@ -171,9 +163,6 @@ export const useServerFileActions = () =>
 
 export const useServerStorage = () =>
   useServerServices()?.storage ?? serverLocalStorage;
-
-export const useServerChatCreations = () =>
-  useServerServices()?.chatCreations ?? defaultChatCreations;
 
 export const useServerLocalDrafts = () =>
   useServerServices()?.localDrafts ?? defaultLocalDrafts;

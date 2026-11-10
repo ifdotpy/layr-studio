@@ -123,12 +123,9 @@ test("claude login ui", async ({ page: runnerPage }) => {
       await page.getByRole("button", { name: "Manage accounts" }).click();
       await page
         .getByRole("button", {
-          name: "Actions for me@example.com",
+          name: "Sign in to Personal on Fixture",
           exact: true,
         })
-        .click();
-      await page
-        .getByRole("menuitem", { name: "Sign in again", exact: true })
         .click();
     };
     const resetToken = String(Date.now());
@@ -153,6 +150,10 @@ test("claude login ui", async ({ page: runnerPage }) => {
     const first = starts[0];
     await page.reload();
     await open();
+    await page.evaluate(
+      (serialized) => window.publishClaudeReceipt(JSON.parse(serialized)),
+      JSON.stringify(receipt),
+    );
     await page.getByRole("link", { name: "Open Claude sign-in" }).waitFor();
     assert.equal(starts.length, 1);
     await page.getByLabel("Final authorization response").fill("secret-code");
@@ -171,6 +172,10 @@ test("claude login ui", async ({ page: runnerPage }) => {
     );
     await page.reload();
     await open();
+    await page.evaluate(
+      (serialized) => window.publishClaudeReceipt(JSON.parse(serialized)),
+      JSON.stringify(receipt),
+    );
     unsafeNext = true;
     await page.getByRole("button", { name: "Start new sign-in" }).click();
     await page

@@ -5,7 +5,14 @@ import { autorun } from "mobx";
 import { resourceData } from "../store/runtime.ts";
 import { agentSummaryFixture } from "../servers/agentSummaryFixture.ts";
 // Captured from the Rust entity transfer writer; see just regenerate-entity-server-frames.
-import coldFrames from "./entityServerFrames.fixture.json";
+import { readFileSync } from "node:fs";
+const coldFrames: components["schemas"]["ResourceEntityTransferEvent"][] =
+  JSON.parse(
+    readFileSync(
+      new URL("./entityServerFrames.fixture.json", import.meta.url),
+      "utf8",
+    ),
+  );
 import { EventHistory } from "./eventHistory.testHelper.ts";
 import { backgroundDisplay } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import {
@@ -224,9 +231,13 @@ class FixtureTransferStorage {
     this.rows.clear();
   }
 }
-async function* wireFrames(
-  response: Response,
-): AsyncGenerator<{ name: string; value: unknown }> {
+async function* wireFrames(response: Response): AsyncGenerator<
+  | {
+      name: "entity-transfer";
+      value: import("../generated/api.ts").components["schemas"]["ResourceEntityTransferEvent"];
+    }
+  | { name: "resources"; value: ResourceChangeEvent }
+> {
   const reader = response.body!.getReader();
   let buffer = "";
   const decoder = new TextDecoder();
@@ -246,7 +257,8 @@ async function* wireFrames(
         const data = frame
           .split("\n")
           .find((line) => line.startsWith("data: "));
-        if (name && data) yield { name, value: JSON.parse(data.slice(6)) };
+        if ((name === "resources" || name === "entity-transfer") && data)
+          yield { name, value: JSON.parse(data.slice(6)) };
       }
     }
   } finally {
@@ -627,7 +639,7 @@ it("revives moved rows after inline and staged local eviction in either scope or
             ...metadata,
             resource,
             cursor: { workspaceId, seq: through },
-            replyKind: "snapshot",
+            replyKind: SubscriptionReplyKind.snapshot,
             transferId: crypto.randomUUID(),
             pageIndex: 0,
             payloadKind: "entity",

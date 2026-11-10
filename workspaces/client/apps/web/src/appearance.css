@@ -102,13 +102,6 @@
   .mantine-Button-section[data-position="right"] {
   margin-left: auto;
 }
-.chat-settings-panel .settings-new-chat {
-  justify-self: start;
-  font-size: var(--studio-text-meta);
-  min-height: 30px;
-  padding: 0 8px;
-  margin-left: -8px;
-}
 :root[data-mantine-color-scheme="light"] body {
   color: var(--text);
   background: var(--studio-page);
@@ -273,15 +266,8 @@
   #team .worker-error-details summary {
     width: 100%;
   }
-  #team .team-filters button {
-    font-size: var(--studio-text-meta);
-  }
   #team .worker-text {
     min-width: 0;
-  }
-  #team .worker-model-summary {
-    white-space: normal;
-    overflow-wrap: anywhere;
   }
 
   /* Portals use the visible viewport, including the keyboard and safe areas. */
@@ -314,19 +300,6 @@
     max-height: calc(var(--mobile-viewport-height, 100dvh) - 64px);
     overscroll-behavior: contain;
   }
-  .model-picker-row {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 4px;
-    padding: 10px;
-  }
-  .model-picker-value > span:first-child {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .model-picker-value .model-picker-tag {
-    flex-shrink: 0;
-  }
   .analytics-scroll {
     min-height: 0;
     max-height: calc(var(--mobile-viewport-height, 100dvh) - 270px);
@@ -357,21 +330,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-}
-.chat-settings-panel .agent-mode-visible-label {
-  display: none;
-}
-.chat-settings-panel .agent-mode-limit-label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.chat-settings-panel .agent-mode-limit-label input {
-  width: 64px;
-}
-.settings-change-label {
-  color: var(--muted);
-  margin-left: 12px;
 }
 .message-queue-preview:not(.expanded) {
   -webkit-line-clamp: 1;
@@ -536,14 +494,6 @@
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
-}
-.chat-settings-rows .agent-mode-limit-label {
-  display: flex;
-  gap: 0;
-}
-.chat-settings-rows .agent-mode-limit-label input {
-  width: 64px;
-  min-height: 32px;
 }
 .chat-settings-rows .chat-settings-footer {
   margin-top: 12px;

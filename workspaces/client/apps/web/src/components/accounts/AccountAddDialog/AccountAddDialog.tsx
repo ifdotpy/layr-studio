@@ -8,7 +8,6 @@ import {
 import { Modal, Stack, TextInput } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { layerZIndex } from "../../../theme.ts";
-import type { AccountsController } from "../Accounts/Accounts.tsx";
 import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
 import ClaudeAddSignIn from "../ClaudeAddSignIn/ClaudeAddSignIn.tsx";
 import { ProviderKind } from "../../../generated/providerKind.ts";
@@ -23,12 +22,12 @@ export type AddAccountIntent = {
 export default observer(function AccountAddDialog({
   opened,
   intent,
-  state,
+  scope,
   onClose,
 }: {
   opened: boolean;
   intent: AddAccountIntent | null;
-  state: AccountsController;
+  scope?: string | undefined;
   onClose: () => void;
 }) {
   const [draft] = useState(createAccountAddDraft);
@@ -79,7 +78,7 @@ export default observer(function AccountAddDialog({
               browser has another ChatGPT account signed in.
             </p>
             <AccountSignIn
-              state={state}
+              scope={scope}
               emailHint={draft.email}
               label={draft.label}
             />
@@ -91,7 +90,7 @@ export default observer(function AccountAddDialog({
           label={draft.label || "Claude Code"}
           email={draft.email}
           serverLabel={serverLabel}
-          scope={state.scope || "local"}
+          scope={scope || "local"}
           opened={opened}
           onClose={close}
         />

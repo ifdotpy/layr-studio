@@ -186,19 +186,15 @@ function Fixture() {
               />
               <Accounts
                 managerOnly
-                state={partialOrganizationState({
-                  data: {
-                    accounts: [account],
-                    archivedAccounts: [],
-                    defaultAccountKey: "claude",
-                    defaultAccountGroups: [],
-                    logins: [],
-                  },
-                  setData: () => {},
-                  refresh: async () => {},
-                  error: "",
-                  scope: "fixture",
-                } satisfies PartialOrganizationState)}
+                state={{
+                  accounts: [account],
+                  archivedAccounts: [],
+                  defaultAccountKey: "claude",
+                  defaultAccountGroups: [],
+                  supportsDelete: true,
+                  supportsDisconnect: true,
+                }}
+                scope="fixture"
                 onError={() => {}}
               />
               <ClaudeProfile account={account} onSaved={() => {}} expanded />
@@ -216,16 +212,4 @@ function partialOrganizationUsageAccount(
   value: Omit<UsageAccount, "loading">,
 ): UsageAccount {
   return value as UsageAccount;
-}
-type OrganizationState = React.ComponentProps<typeof Accounts>["state"];
-type PartialOrganizationState = Omit<OrganizationState, "data" | "refresh"> & {
-  data: Omit<
-    NonNullable<OrganizationState["data"]>,
-    "supportsDelete" | "supportsDisconnect"
-  >;
-  refresh: (...args: Parameters<OrganizationState["refresh"]>) => Promise<void>;
-};
-// Base state omits supportsDelete/supportsDisconnect; refresh resolves undefined.
-function partialOrganizationState(value: unknown): OrganizationState {
-  return value as OrganizationState;
 }

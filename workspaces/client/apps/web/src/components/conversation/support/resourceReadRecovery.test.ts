@@ -1,3 +1,6 @@
+import { useServerStorage } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { outboxRequests } from "../../../browserPersistence.ts";
+import { resourceData } from "../../../store/runtime.ts";
 import type { ComponentSnapshot as Snapshot } from "../ComposerAttachments/componentTestFixtures.ts";
 // @vitest-environment happy-dom
 import { observable, runInAction } from "mobx";
@@ -151,7 +154,7 @@ vi.mock("../../../sync/localDraft.ts", async (importOriginal) => ({
     fallback: unknown,
     update: (value: unknown) => unknown,
   ) => {
-    const key = `studio-queue-change:${suffix}`;
+    const key = outboxRequests().key("queueChange", suffix);
     const raw = localStorage.getItem(key);
     const result = update(raw === null ? fallback : JSON.parse(raw));
     if (result === null) localStorage.removeItem(key);
@@ -299,7 +302,6 @@ import {
   useWorkerModels,
   readWorkerModels,
 } from "../../agents/support/WorkerModelPicker.tsx";
-import { createAccountsView } from "../../accounts/Accounts/Accounts.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import ProductUsage from "../Usage/Usage.tsx";
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
@@ -490,7 +492,13 @@ describe("resource read callers", () => {
   });
 
   it("applies safe account summaries without baseline or update GETs", async () => {
-    const accountView = createAccountsView(nativeStore, get, "workspace");
+    const accountView = {
+      get data() {
+        return resourceData(nativeStore.state().current)?.accountsSummary.get(
+          "current",
+        );
+      },
+    };
     const initial = {
       accounts: [{ id: "connected", email: "person@example.test" }],
       archivedAccounts: [],
@@ -501,7 +509,7 @@ describe("resource read callers", () => {
     };
     for (const accept of projectionListeners)
       accept({ runtime: { accountsSummary: initial } });
-    expect(accountView.data).toEqual({ ...initial, logins: [] });
+    expect(accountView.data).toEqual(initial);
     const changed = {
       ...initial,
       accounts: [{ id: "connected", disconnected: true }],
@@ -509,23 +517,9 @@ describe("resource read callers", () => {
     for (const accept of projectionListeners)
       accept({ runtime: { accountsSummary: changed } });
     await vi.advanceTimersByTimeAsync(60_000);
-    expect(accountView.data).toEqual({ ...changed, logins: [] });
+    expect(accountView.data).toEqual(changed);
     expect(get).not.toHaveBeenCalled();
     expect(watchers.size).toBe(0);
-  });
-
-  it("keeps explicit account recovery reads available", async () => {
-    const response = {
-      accounts: [],
-      archivedAccounts: [],
-      defaultAccountKey: "default",
-      logins: [],
-    };
-    get.mockResolvedValue(response);
-    const accounts = createAccountsView(nativeStore, get, "workspace");
-    await accounts.refresh();
-    expect(get).toHaveBeenCalledExactlyOnceWith("/api/accounts");
-    expect(accounts.data).toEqual(response);
   });
 
   it("applies queue projections without GETs at baseline, update, and idle", async () => {
@@ -576,8 +570,44 @@ describe("resource read callers", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it.each(["read", "parse"])(
+    "blocks queue writes after a %s failure without losing the conversation",
+    async (failure) => {
+      const storage = useServerStorage();
+      const key = outboxRequests(storage).key("queueChange", "scope:lead");
+      storage.setItem(key, "unreadable-current-schema");
+      const write = vi.spyOn(storage, "setItem").mockClear();
+      const read = vi.spyOn(storage, "getItem");
+      if (failure === "read")
+        read.mockImplementation(() => {
+          throw new Error("storage unavailable");
+        });
+      publishQueue("v1", "kept message");
+      const queue = mount(() =>
+        useMessageQueue({
+          id: "lead",
+          enabled: true,
+          scope: "scope",
+          workspaceId: "workspace",
+        }),
+      );
+      expect(queue.blocked).toBe(true);
+      expect(queue.error).not.toBe("");
+      expect(queue.items).toMatchObject([{ text: "kept message" }]);
+      await expect(queue.sendNow(queue.items[0]!)).rejects.toThrow();
+      await expect(queue.reorder(["message-one"])).rejects.toThrow();
+      await expect(queue.cancel(queue.items[0]!)).rejects.toThrow();
+      await expect(queue.retry()).rejects.toThrow();
+      expect(syncPost).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
+      read.mockRestore();
+      write.mockRestore();
+      expect(storage.getItem(key)).toBe("unreadable-current-schema");
+    },
+  );
+
   it("retains a request on signature conflict and clears an ordinary refusal", async () => {
-    const key = "studio-queue-change:scope:lead";
+    const key = outboxRequests().key("queueChange", "scope:lead");
     const request = {
       action: "send_now",
       agent: "lead",

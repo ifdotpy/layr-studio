@@ -1,10 +1,5 @@
 import "../../src/rendererStyles.ts";
-import { observer } from "mobx-react-lite";
-import * as api from "../../src/api.ts";
-import {
-  AgentModelsFixture,
-  observableFixture,
-} from "../../src/components/shell/integration-support/observableFixture.tsx";
+import { AgentModelsFixture } from "../../src/components/shell/integration-support/observableFixture.tsx";
 import type { Agent, Project } from "../../src/types.ts";
 import type { GetResult } from "../../src/apiTypes.ts";
 declare global {
@@ -24,7 +19,6 @@ import { ClaudeSettings } from "../../src/components/settings/ClaudeSettings/Cla
 import { ProjectNameForm } from "../../src/components/projects/ProjectNameForm/ProjectNameForm.tsx";
 import { MoveChatForm } from "../../src/components/projects/MoveChatForm/MoveChatForm.tsx";
 import ProjectAccount from "../../src/components/projects/ProjectAccount/ProjectAccount.tsx";
-import { createAccountsView } from "../../src/components/accounts/Accounts/Accounts.tsx";
 import { AccountTransferStatus } from "../../src/components/accounts/AccountTransferStatus/AccountTransferStatus.tsx";
 const mode = new URLSearchParams(location.search).get("case")!;
 const project: Project = {
@@ -80,32 +74,6 @@ const saved = async () => {
     throw Error("Snapshot unavailable");
   }
 };
-const accountModels = observableFixture([agent]);
-const state = createAccountsView(accountModels.store, api.get, "/fixture");
-if (mode.startsWith("accounts")) void state.refresh();
-const AccountsFixture = observer(function AccountsFixture() {
-  return (
-    <>
-      <button onClick={() => state.refresh()}>Refresh accounts</button>
-      <button
-        onClick={() =>
-          state.setData({
-            accounts: [account("ready", "New account", "ready")],
-            archivedAccounts: [],
-            logins: [],
-            supportsDisconnect: true,
-            supportsDelete: true,
-            defaultAccountGroups: [],
-            defaultAccountKey: "ready",
-          })
-        }
-      >
-        Use saved accounts
-      </button>
-      <output>{state.data.accounts.map((a) => a.label).join(",")}</output>
-    </>
-  );
-});
 let body =
   mode === "picker" ? (
     <Picker
@@ -116,8 +84,6 @@ let body =
     />
   ) : mode === "claude" || mode === "deadline" ? (
     <ClaudeSettings agent={agent} />
-  ) : mode.startsWith("accounts") ? (
-    <AccountsFixture />
   ) : ["name", "confirmed", "rejected", "project-deadline"].includes(mode) ? (
     <ProjectNameForm project={project} folder="new" saved={saved} />
   ) : mode === "move" ? (

@@ -1,4 +1,6 @@
 import "../../src/rendererStyles.ts";
+import { initializeNativeClose } from "../../src/native/close.ts";
+void initializeNativeClose();
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { createDirectDrafts } from "../../src/sync/directDrafts.ts";

@@ -1,5 +1,4 @@
 import type { components } from "../generated/api.ts";
-import { isStudioSettingsTab } from "../components/settings/StudioSettingsTabs/StudioSettingsTabs.tsx";
 import type { StudioSettingsTab } from "../components/settings/StudioSettingsLayout/StudioSettingsLayout.tsx";
 import type { DesktopAlert } from "../desktop/desktopAlerts.ts";
 import type {
@@ -7,10 +6,7 @@ import type {
   ProjectionMetadata,
 } from "../generated/observableResources.ts";
 import { saved } from "../api.ts";
-import {
-  isNewChatSettings,
-  type NewChatSettings,
-} from "../app/projects/newChatSettings.ts";
+import { type NewChatSettings } from "../app/projects/newChatSettings.ts";
 import type { LocationProject } from "./projectLocations.ts";
 import type {
   SidebarAgent,
@@ -22,7 +18,7 @@ import {
   type ServerSidebarSnapshot,
   type SidebarEntity,
 } from "./sidebarSnapshot.ts";
-import { isProviderKind, ProviderKind } from "../generated/providerKind.ts";
+import { type ProviderKind } from "../generated/providerKind.ts";
 export type ServerAccount = {
   accountKey?: string;
   provider: ProviderKind;
@@ -219,92 +215,4 @@ export function navigationSnapshot(
     opened,
     error,
   };
-}
-const readStateFields = {
-  threadId: (value: unknown) => typeof value === "string",
-  turnId: (value: unknown) => typeof value === "string",
-  read: (value: unknown) => typeof value === "boolean",
-  revision: (value: unknown) =>
-    typeof value === "number" && Number.isSafeInteger(value) && value >= 0,
-} satisfies Record<keyof ReadStateDto, (value: unknown) => boolean>;
-function isReadState(value: unknown): value is ReadStateDto {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const fields = value as Record<string, unknown>;
-  return Object.entries(readStateFields).every(([name, valid]) =>
-    valid(fields[name]),
-  );
-}
-export function isServerCommand(value: unknown): value is ServerCommand {
-  if (!value || typeof value !== "object") return false;
-  const command = value as Record<string, unknown>;
-  if (command.action === "delete-project")
-    return typeof command.projectId === "string" && !!command.projectId;
-  if (command.action === "terminal")
-    return command.operation === "toggle" || command.operation === "new";
-  if (command.action === "prepare-chat" || command.action === "change-project")
-    return typeof command.id === "string";
-  if (command.action === "mark-unread")
-    return typeof command.id === "string" && isReadState(command.target);
-  if (command.action === "remove-chat")
-    return typeof command.id === "string" && typeof command.room === "boolean";
-  if (command.action === "project-account")
-    return typeof command.path === "string";
-  if (command.action === "new-shared-chat")
-    return command.path === undefined || typeof command.path === "string";
-  if (command.action === "project-folders")
-    return (
-      typeof command.projectId === "string" &&
-      (command.server === undefined || typeof command.server === "string")
-    );
-  if (command.action === "search")
-    return (
-      typeof command.query === "string" && typeof command.requestId === "string"
-    );
-  if (command.action === "notifications")
-    return typeof command.agentId === "string";
-  if (command.action === "account-sign-in")
-    return (
-      isProviderKind(command.provider) &&
-      (command.email === null || typeof command.email === "string") &&
-      typeof command.label === "string" &&
-      typeof command.serverLabel === "string" &&
-      (command.accountKey === undefined ||
-        (typeof command.accountKey === "string" && !!command.accountKey)) &&
-      !(command.accountKey !== undefined && command.forceAdd === true) &&
-      (command.forceAdd === undefined || typeof command.forceAdd === "boolean")
-    );
-  if (command.action === "account-action")
-    return (
-      [
-        "rename",
-        "default",
-        "disconnect",
-        "remove",
-        "configure-profile",
-      ].includes(String(command.operation)) &&
-      isProviderKind(command.provider) &&
-      (command.operation !== "configure-profile" ||
-        command.provider === ProviderKind.Claude) &&
-      (command.email === null || typeof command.email === "string") &&
-      typeof command.label === "string" &&
-      (command.accountKey === undefined ||
-        (typeof command.accountKey === "string" && !!command.accountKey)) &&
-      (command.nextLabel === undefined || typeof command.nextLabel === "string")
-    );
-  return command.action === "open"
-    ? typeof command.id === "string" && !!command.id
-    : command.action === "new-chat"
-      ? (command.settings === undefined ||
-          isNewChatSettings(command.settings)) &&
-        (command.path === undefined || typeof command.path === "string") &&
-        (command.folder === undefined || typeof command.folder === "string") &&
-        (command.projectId === undefined ||
-          typeof command.projectId === "string") &&
-        (command.projectServerId === undefined ||
-          typeof command.projectServerId === "string")
-      : (command.action === "settings" &&
-          (command.tab === undefined || isStudioSettingsTab(command.tab))) ||
-        command.action === "projects" ||
-        command.action === "add-project" ||
-        command.action === "focus";
 }

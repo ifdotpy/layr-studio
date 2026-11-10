@@ -66,8 +66,6 @@ test("Ux request recovery browser", async ({
           "picker",
           "claude",
           "deadline",
-          "accounts",
-          "accounts-write",
           "name",
           "move",
           "project-account",
@@ -86,8 +84,7 @@ test("Ux request recovery browser", async ({
         >[] = [],
         errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.message));
-      let reads = 0,
-        releaseOld: (() => void) | undefined;
+      let reads = 0;
       if (mode.endsWith("deadline"))
         await page.addInitScript(() => {
           const original = window.setTimeout;
@@ -176,32 +173,6 @@ test("Ux request recovery browser", async ({
               version: "fixture",
               settings: { permissionMode: "default", thinking: true },
               turns: [],
-            },
-            headers: apiSchemaHeaders(),
-          });
-        }
-        if (path === "/api/accounts") {
-          const sequence = ++reads;
-          if (sequence === 1)
-            await new Promise<void>((resolve) => {
-              releaseOld = resolve;
-            });
-          return route.fulfill({
-            json: {
-              archivedAccounts: [],
-              logins: [],
-              supportsDisconnect: true,
-              supportsDelete: true,
-              accounts: [
-                {
-                  id: "ready",
-                  label: sequence === 1 ? "Old account" : "New account",
-                  home: "/home/fixture/ready",
-                  source: "Codex CLI",
-                  status: "ready",
-                },
-              ],
-              defaultAccountKey: "ready",
             },
             headers: apiSchemaHeaders(),
           });
@@ -326,43 +297,6 @@ test("Ux request recovery browser", async ({
               })
               .count(),
             1,
-          );
-        } else if (mode.startsWith("accounts")) {
-          await page
-            .getByRole("button", { name: "Refresh accounts", exact: true })
-            .waitFor();
-          await page.waitForFunction(() => !!document.querySelector("output"));
-          await page
-            .getByRole("button", { name: "Refresh accounts", exact: true })
-            .click();
-          for (let attempt = 0; attempt < 100 && !releaseOld; attempt++)
-            await new Promise((resolve) => setTimeout(resolve, 10));
-          assert.equal(typeof releaseOld, "function");
-          await page
-            .getByRole("button", {
-              name:
-                mode === "accounts-write"
-                  ? "Use saved accounts"
-                  : "Refresh accounts",
-              exact: true,
-            })
-            .click();
-          await page.getByText("New account", { exact: true }).waitFor();
-          const oldResponse = page.waitForResponse((response) =>
-            response.url().endsWith("/api/accounts"),
-          );
-          required(releaseOld)();
-          await oldResponse;
-          await page.evaluate(
-            () =>
-              new Promise((resolve) =>
-                requestAnimationFrame(() => requestAnimationFrame(resolve)),
-              ),
-          );
-          assert.equal(
-            await page.locator("output").textContent(),
-            "New account",
-            "A late response must not replace a newer account list",
           );
         } else if (mode === "transfer") {
           const text = await page.locator('[role="status"]').innerText();
@@ -489,7 +423,6 @@ test("Ux request recovery browser", async ({
           error: String((error as Error).message).slice(0, 400),
         });
       } finally {
-        releaseOld?.();
         await page.close();
       }
     }

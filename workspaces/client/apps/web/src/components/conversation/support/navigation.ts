@@ -19,7 +19,6 @@ export type ConversationSendOptions = {
   onPersist?: () => void | Promise<void>;
   delivery?: DeliveryMoment;
 };
-
 export type ConversationActions =
   import("../../../app/ServerAreasProvider.tsx").ServerAreas;
 export {

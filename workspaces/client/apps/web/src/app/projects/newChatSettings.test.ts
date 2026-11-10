@@ -6,7 +6,6 @@ import {
   settingsForNewChatAccount,
   type NewChatWorkspaceMode,
 } from "./newChatSettings.ts";
-import { isServerCommand } from "../../servers/navigation.ts";
 import { ACCOUNT_KEY_MAX_CHARS } from "../../generated/sharedValues.ts";
 
 test.each(["layr-native", "worktree"] satisfies NewChatWorkspaceMode[])(
@@ -80,48 +79,6 @@ test("new chat accepts explicit reviewer Fast mode and rejects malformed review 
       isNewChatSettings({
         workspaceMode: "worktree",
         review_defaults: { model: null, effort: null, ...patch },
-      }),
-    ).toBe(false);
-  }
-});
-
-test("accepts the actual selector values and rejects receipt overrides", () => {
-  const settings = {
-    workspaceMode: "layr-native",
-    model: "gpt-6-astra",
-    effort: "high",
-    fast_mode: true,
-    worker_defaults: {
-      model: null,
-      effort: null,
-      fast_mode: false,
-    },
-    review_defaults: { model: null, effort: null },
-  };
-  expect(isNewChatSettings(settings)).toBe(true);
-  expect(isServerCommand({ action: "new-chat", settings })).toBe(true);
-  for (const patch of [
-    { id: "other" },
-    { previous: "other" },
-    { workspaceMode: "shared" },
-    { fast_mode: "true" },
-    { account_key: null },
-    { worker_defaults: [] },
-    {
-      worker_defaults: {
-        model: "x",
-        effort: null,
-        fast_mode: false,
-        id: "other",
-      },
-    },
-    { review_defaults: { model: null } },
-  ]) {
-    expect(isNewChatSettings({ ...settings, ...patch })).toBe(false);
-    expect(
-      isServerCommand({
-        action: "new-chat",
-        settings: { ...settings, ...patch },
       }),
     ).toBe(false);
   }

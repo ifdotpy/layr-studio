@@ -46,7 +46,6 @@ type RadioAccount = Pick<
 const accounts: SharedAccounts = {
   archivedAccounts: [],
   defaultAccountGroups: [],
-  logins: [],
   supportsDelete: true,
   supportsDisconnect: true,
   defaultAccountKey: "codex",

@@ -1,5 +1,4 @@
-.account-menu-note,
-.accounts-intro {
+.account-menu-note {
   color: var(--muted);
   font-size: var(--studio-text-meta);
 }
@@ -18,21 +17,8 @@
 .account-menu-note small {
   display: block;
 }
-.accounts-manager {
-  padding-top: 0;
-}
-.accounts-intro {
-  line-height: 1.6;
-  margin: 0 0 var(--mantine-spacing-sm);
-}
 .account-plan {
   text-transform: capitalize;
-}
-.accounts-actions {
-  display: flex;
-  gap: var(--mantine-spacing-xs);
-  flex-wrap: wrap;
-  margin-top: var(--studio-text-body);
 }
 .account-action-error,
 .account-row p[role="alert"] {
@@ -90,56 +76,8 @@
   gap: var(--mantine-spacing-xs);
   line-height: 1.4;
 }
-.account-capacity-pool {
-  display: grid;
-  grid-template-columns: calc(var(--studio-action-size) * 1.5) minmax(0, 1fr);
-  gap: var(--mantine-spacing-sm);
-  align-items: baseline;
-  font-size: var(--studio-text-meta);
-}
-.account-capacity-pool > span {
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.account-capacity-pool > div {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--mantine-spacing-xs) var(--mantine-spacing-sm);
-}
-.account-capacity-window {
-  display: flex;
-  flex-direction: column;
-  gap: calc(var(--mantine-spacing-xs) * 0.2);
-  min-width: 0;
-}
-.account-capacity-window strong {
-  font-size: var(--studio-text-meta);
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-.account-capacity-window time {
-  color: var(--muted);
-  font-size: var(--studio-text-meta);
-  overflow-wrap: anywhere;
-}
 /* Phone and tablet controls stack at this content breakpoint. */
 @media (max-width: 37.5rem) {
-  .account-capacity-pool {
-    grid-template-columns: calc(var(--mantine-spacing-xs) * 3.8) minmax(0, 1fr);
-    gap: var(--mantine-spacing-xs);
-  }
-  .account-capacity-pool > div {
-    gap: var(--mantine-spacing-xs);
-  }
-  .account-capacity-window strong {
-    font-size: var(--studio-text-meta);
-  }
-  .account-capacity-window time {
-    font-size: var(--studio-text-meta);
-  }
-  .accounts-actions > .mantine-Button-root {
-    width: 100%;
-  }
   .account-register form {
     flex-wrap: wrap;
   }
@@ -192,24 +130,15 @@
   }
 }
 
-.account-capacity-pool > div:has(> :only-child) {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.accounts-add-header,
 .account-confirm-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: var(--mantine-spacing-sm);
 }
-.accounts-add-header h3,
 .accounts-runtime h3 {
   margin: 0;
   font-size: var(--studio-text-body);
-}
-.accounts-setup {
-  margin-bottom: var(--mantine-spacing-md);
 }
 .account-register {
   font-size: var(--studio-text-body);
@@ -272,11 +201,6 @@
     align-items: stretch;
   }
 }
-
-.accounts-setup h3 {
-  font-size: var(--studio-text-body);
-  margin: 0 0 var(--mantine-spacing-sm);
-}
 .account-add-heading strong {
   font-weight: 600;
 }
@@ -285,62 +209,7 @@
   overflow-wrap: anywhere;
   font-size: var(--studio-text-body);
 }
-
-.account-name,
-.account-name-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-xs);
-  min-width: 0;
-}
-.account-name > button {
-  max-width: 100%;
-  height: auto;
-  min-height: var(--studio-action-size);
-}
-.account-name > button .mantine-Button-label {
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.account-name-form {
-  display: flex;
-  align-items: flex-end;
-  flex-wrap: wrap;
-  gap: var(--mantine-spacing-xs);
-  width: 100%;
-}
-.account-name-form > .mantine-TextInput-root {
-  flex: 1 1 var(--studio-settings-nav-size);
-  min-width: 0;
-}
 /* Phone and tablet controls stack at this content breakpoint. */
-@media (max-width: 37.5rem) {
-  .account-name button {
-    min-height: var(--studio-touch-target);
-  }
-  .account-name-form input {
-    font-size: max(
-      var(--studio-touch-input-min-font-size),
-      var(--mantine-font-size-lg)
-    );
-  }
-}
-
-.accounts-list {
-  display: grid;
-  gap: var(--mantine-spacing-xl);
-}
-.accounts-provider {
-  min-width: 0;
-}
-.accounts-provider > h3 {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-xs);
-  margin: 0 0 var(--mantine-spacing-sm);
-  font-size: var(--studio-text-body);
-  font-weight: 600;
-}
 .accounts-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -360,45 +229,10 @@
   gap: calc(var(--mantine-spacing-xs) * 0.4);
   min-width: 0;
 }
-.account-card-heading .account-name {
-  flex: 1;
-}
-.account-card-heading .account-name > button {
-  padding-inline: 0;
-  font-weight: 600;
-}
 .account-card-menu {
   flex: 0 0 auto;
   width: var(--studio-action-size);
   padding-inline: 0;
-}
-.account-email {
-  font-size: var(--studio-text-meta);
-  color: var(--muted);
-  overflow-wrap: anywhere;
-}
-.account-card-status {
-  display: flex;
-  align-items: center;
-  gap: var(--mantine-spacing-xs) var(--mantine-spacing-xs);
-  flex-wrap: wrap;
-}
-.account-status {
-  font-size: var(--studio-text-meta);
-  padding: var(--studio-rail-size) calc(var(--mantine-spacing-xs) * 0.7);
-  border-radius: calc(var(--mantine-spacing-xs) * 0.5);
-  color: var(--muted);
-  background: var(--mantine-color-default-hover);
-}
-.account-status[data-status="error"] {
-  color: var(--studio-state-error);
-}
-.account-default {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(var(--mantine-spacing-xs) * 0.4);
-  color: var(--muted);
-  font-size: var(--studio-text-meta);
 }
 .account-limit-summary {
   display: flex;
@@ -415,23 +249,10 @@
 .account-limit-summary > :last-child {
   font-variant-numeric: tabular-nums;
 }
-.account-limit-details {
-  color: var(--muted);
-  font-size: var(--studio-text-meta);
-}
-.account-limit-details > summary {
-  cursor: pointer;
-}
-.account-limit-details[open] > summary {
-  margin-bottom: var(--mantine-spacing-xs);
-}
 .account-row > p {
   margin: 0;
   font-size: var(--studio-text-meta);
   color: var(--muted);
-}
-.account-limit-details .account-capacity-pool + .account-capacity-pool {
-  margin-top: var(--mantine-spacing-xs);
 }
 /* Phone and tablet controls stack at this content breakpoint. */
 @media (max-width: 37.5rem) {
@@ -497,7 +318,6 @@
   overflow-wrap: anywhere;
 }
 .server-account-heading small,
-.account-muted,
 .server-accounts-help {
   color: var(--muted);
   font-size: var(--studio-text-meta);
@@ -532,8 +352,7 @@
   align-items: center;
 }
 .account-card-heading > strong,
-.server-account-heading strong,
-.account-card-heading .account-name > button .mantine-Button-label {
+.server-account-heading strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -560,29 +379,6 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
-:is(.account-row, .server-account-row) .account-limit-details {
-  display: contents;
-}
-:is(.account-row, .server-account-row) .account-limit-details > summary {
-  grid-column: 3;
-  grid-row: 1;
-  min-height: var(--studio-action-size);
-  align-content: center;
-  white-space: nowrap;
-}
-.account-limit-details-body {
-  grid-column: 1 / -1;
-  display: grid;
-  gap: var(--mantine-spacing-sm);
-  min-width: 0;
-  padding-block: var(--mantine-spacing-sm);
-}
-.account-strip-metadata {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--mantine-spacing-xs);
-  color: var(--muted);
-}
 .account-strip-state {
   display: inline-flex;
   flex: none;
@@ -597,16 +393,7 @@
 }
 /* The disclosure keeps its accessible name while the native marker saves phone space. */
 @media (max-width: 47.5rem) {
-  :is(.account-row, .server-account-row) .account-limit-details > summary {
-    min-width: var(--studio-touch-target);
-    min-height: var(--studio-touch-target);
-    text-align: center;
-  }
-  .server-account-heading .account-strip-state-label,
-  :is(.account-row, .server-account-row)
-    .account-limit-details
-    > summary
-    > span {
+  .server-account-heading .account-strip-state-label {
     position: absolute;
     inline-size: var(--studio-border-width);
     block-size: var(--studio-border-width);
@@ -637,13 +424,6 @@
   gap: var(--mantine-spacing-xs);
   min-width: 0;
 }
-.account-window-grid .account-capacity-pool {
-  grid-template-columns: calc(var(--studio-action-size) * 1.5) minmax(0, 1fr);
-  gap: var(--mantine-spacing-xs);
-}
-.account-window-grid .account-capacity-window {
-  gap: var(--studio-rail-size);
-}
 .account-window-meter {
   height: var(--studio-meter-size);
   background: var(--mantine-color-default-hover);
@@ -651,12 +431,6 @@
 }
 .account-window-grid time {
   font-variant-numeric: tabular-nums;
-}
-@media (max-width: 37.5rem) {
-  .account-window-grid .account-capacity-pool {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--studio-rail-size);
-  }
 }
 .server-accounts-panel > .ui-settings-section > .ui-panel-header {
   flex-wrap: wrap;
@@ -718,7 +492,6 @@
 }
 .account-identity > [role="img"],
 .account-identity > .account-plan,
-.account-identity > .account-default,
 .account-identity > .account-strip-state,
 .account-identity > .mantine-Badge-root {
   flex: none;

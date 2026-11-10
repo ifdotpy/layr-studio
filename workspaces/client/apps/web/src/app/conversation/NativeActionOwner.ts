@@ -11,29 +11,6 @@ type Request = Omit<PostBody<"/api/action">, "action"> & {
 };
 type Action = Request["action"];
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object";
-}
-
-function isActionRequest(value: unknown): value is Request {
-  if (!isRecord(value)) return false;
-  const request = value;
-  if (
-    typeof request.id !== "string" ||
-    typeof request.request_id !== "string" ||
-    !request.request_id ||
-    (request.action !== "compact" && request.action !== "review") ||
-    !isRecord(request.context)
-  )
-    return false;
-  const context = request.context;
-  return (
-    typeof context.accountKey === "string" &&
-    (context.threadId === undefined || typeof context.threadId === "string") &&
-    (context.epoch === undefined || typeof context.epoch === "number")
-  );
-}
-
 export function isDefinitivelyNotApplied(error: unknown): boolean {
   if (
     !(error instanceof ApiError) ||
@@ -75,8 +52,8 @@ export class NativeActionOwner {
       key,
     );
     if (!raw) return null;
-    const request: unknown = JSON.parse(raw);
-    if (!isActionRequest(request) || request.id !== id)
+    const request: Request = JSON.parse(raw);
+    if (request.id !== id)
       throw new Error(
         "The saved action request is invalid. Restore browser storage before this action.",
       );

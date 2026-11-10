@@ -3,10 +3,6 @@ export interface LocalFileLink {
   line?: number;
 }
 
-// Keep URL schemes explicit. Local paths still go through the server's workspace checks.
-export const markdownUriPattern =
-  /^(?:(?:https?|mailto|tel|sms|cid|xmpp|file|sandbox):|[^a-z]|[a-z+.-]+(?:[^a-z+.\-:]|$))/i;
-
 // Generated Markdown can carry zero-width padding around a path. Preserve
 // interior characters, which can be part of an actual filename.
 function trimLinkPadding(value: string) {

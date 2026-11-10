@@ -1,21 +1,10 @@
 import { MessageSendStatus } from "../generated/api.ts";
 import type { GetResult } from "../api.ts";
 import type { Message } from "../types.ts";
-import type { OutgoingMessage, DeliveryState } from "./send.ts";
-import { serverStatus } from "../messageSendStatus.ts";
+import type { OutgoingMessage } from "./send.ts";
 
 type MessageReceiptResponse = GetResult<"/api/messages/receipts">;
 export type MessageReceipt = MessageReceiptResponse["items"][number];
-
-export function awaitingReceipt(state?: DeliveryState) {
-  const status = serverStatus(state);
-  return (
-    state?.source === "device" ||
-    status === MessageSendStatus.queued ||
-    status === MessageSendStatus.sending ||
-    status === MessageSendStatus.uncertain
-  );
-}
 
 export function checkedMessageReceipts(
   value: MessageReceiptResponse,

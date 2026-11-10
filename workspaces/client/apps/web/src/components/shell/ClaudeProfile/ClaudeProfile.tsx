@@ -18,7 +18,7 @@ export default function ClaudeProfile({
   expanded = false,
 }: {
   account?: Account;
-  onSaved: (state: ClaudeProfileResult) => void;
+  onSaved?: (state: ClaudeProfileResult) => void;
   expanded?: boolean;
 }) {
   const { post } = useServerApi();
@@ -71,7 +71,7 @@ export default function ClaudeProfile({
         options,
         ...(account ? { account_key: account.id } : { label: label.trim() }),
       });
-      onSaved(result);
+      onSaved?.(result);
       setSaved(true);
     } catch (failure) {
       setError(errorText(failure));

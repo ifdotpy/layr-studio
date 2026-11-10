@@ -49,19 +49,12 @@ function mount() {
   function Fixture() {
     current = UnifiedAgentSettings({
       state: {
-        data: {
-          accounts: [],
-          archivedAccounts: [],
-          defaultAccountGroups: [],
-          defaultAccountKey: "default",
-          logins: [],
-          supportsDelete: false,
-          supportsDisconnect: false,
-        },
-        setData: vi.fn(),
-        error: "",
-        refresh,
-        scope: "",
+        accounts: [],
+        archivedAccounts: [],
+        defaultAccountGroups: [],
+        defaultAccountKey: "default",
+        supportsDelete: false,
+        supportsDisconnect: false,
       },
       agent: { id: "lead", isLead: true } as ComponentProps<
         typeof UnifiedAgentSettings
@@ -113,11 +106,21 @@ test("keeps a lost response locked through stale SSE and bases the next edit on 
   });
   const f = mount();
   try {
-    await act(async () => f.picker().onWorkerExcludedAccountKeysChange(["A"]));
+    await act(async () => {
+      f.picker().onWorkerExcludedAccountKeysChange(["A"]);
+      await Promise.allSettled(
+        harness.post.mock.results.map((result) => result.value),
+      );
+    });
     expect(f.picker().accountDisabled).toBe(true);
     f.publish([], 1);
     expect(f.picker().accountDisabled).toBe(true);
-    await act(async () => f.picker().onWorkerExcludedAccountKeysChange(["A"]));
+    await act(async () => {
+      f.picker().onWorkerExcludedAccountKeysChange(["A"]);
+      await Promise.allSettled(
+        harness.post.mock.results.map((result) => result.value),
+      );
+    });
     expect(identities).toHaveLength(2);
     expect(identities[1]).toBe(identities[0]);
     f.publish(["A"], 2);
@@ -140,7 +143,12 @@ test("unlocks a successful save superseded by another client's authoritative pub
   harness.post.mockResolvedValue({});
   const f = mount();
   try {
-    await act(async () => f.picker().onWorkerExcludedAccountKeysChange(["A"]));
+    await act(async () => {
+      f.picker().onWorkerExcludedAccountKeysChange(["A"]);
+      await Promise.allSettled(
+        harness.post.mock.results.map((result) => result.value),
+      );
+    });
     expect(f.picker().accountDisabled).toBe(true);
     f.publish(["C"], 2);
     expect(f.picker().accountDisabled).toBe(false);

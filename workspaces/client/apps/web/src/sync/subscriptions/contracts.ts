@@ -122,8 +122,3 @@ export function flatResourceKey(
       .sort(([left], [right]) => left.localeCompare(right)),
   );
 }
-
-export type UseSubscription = <R extends ResourceRef>(
-  ref: R | null,
-  options?: SubscriptionOptions,
-) => SubscriptionState<ResourceData<R>>;

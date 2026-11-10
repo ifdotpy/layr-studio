@@ -35,8 +35,7 @@ against the same OpenAPI document and the persisted-state schema documents.
 `persistence.rs` owns closed storage enums, their serde wire spellings,
 `strum::VariantNames`, generated SQL CHECK expressions, and optional `sqlite`
 feature codecs. `records::WorkStatus` and `studio_errors::Kind` re-export their
-persistence owners. `studio-contracts` generates the web `persistence.ts` unions
-and request-age constants from this module.
+persistence owners.
 
 `RequestIdentity::new(namespace, authority, root_request_id, operation)` creates
 a canonical tuple key from an explicit UUIDv7 root. `issue_root()` generates a

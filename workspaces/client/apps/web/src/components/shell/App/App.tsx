@@ -81,8 +81,8 @@ export default observer(function App() {
   );
   const signIn = (key: string) => {
     const account = [
-      ...a.accounts.data.accounts,
-      ...a.accounts.data.archivedAccounts,
+      ...(a.accounts?.accounts || []),
+      ...(a.accounts?.archivedAccounts || []),
     ].find((row) => row.id === key);
     if (account) {
       c.closeChatSettings();
@@ -564,28 +564,14 @@ export class AppUi {
   }
   showProjectAccount(path: string) {
     this.closeDialog();
-    const projects = [...(this.areas.state?.projects.values() || [])];
     this.areas.sidebar.close();
     const generation = this.generation,
       scope = this.areas.startup.creationScope;
     this.descriptor = {
       title: "Project settings",
       body: (
-        <ProjectAccount
+        <ProjectAccountSettings
           path={path}
-          project={projects.find((p) => p.path === path)}
-          accounts={this.areas.accounts.data}
-          defaultAccountKey={
-            projects
-              .filter(
-                (p) =>
-                  p.path &&
-                  (path === p.path ||
-                    path.startsWith(p.path.replace(/\/$/, "") + "/")),
-              )
-              .sort((x, y) => (y.path?.length || 0) - (x.path?.length || 0))[0]
-              ?.accountKey || this.areas.accounts.data.defaultAccountKey
-          }
           saved={async () => {
             if (
               !this.disposed &&
@@ -935,8 +921,8 @@ const AppSettings = observer(function AppSettings({
     <>
       <Accounts
         managerOnly
-        dialogsOnly
         state={a.accounts}
+        scope={a.scope.services.owner.id}
         onError={a.notices.notify}
         onModalOpenChange={c.reportAccountDialog}
         externalCommand={c.command}
@@ -956,23 +942,27 @@ const AppSettings = observer(function AppSettings({
           <StudioSettingsLayout value={c.tab} onChange={c.activateTab}>
             <Tabs.Panel value="accounts" pt="md">
               <section className="settings-group" aria-label="Studio accounts">
-                <ServerAccountsPanel
-                  servers={[server]}
-                  accountsByServer={{
-                    [server.id]: frameAccounts(a.accounts.data),
-                  }}
-                  statuses={{ [server.id]: "live" }}
-                  servicesFor={(id) =>
-                    id === server.id ? a.scope.services : undefined
-                  }
-                  startAccount={(_id, command) => c.setCommand(command)}
-                  accountAction={(_id, command) => c.setCommand(command)}
-                  onDiscover={() => {
-                    void a.scope.services.api
-                      .post("/api/accounts/discover", {})
-                      .catch((error) => a.notices.notify(errorText(error)));
-                  }}
-                />
+                {a.accounts ? (
+                  <ServerAccountsPanel
+                    servers={[server]}
+                    accountsByServer={{
+                      [server.id]: frameAccounts(a.accounts),
+                    }}
+                    statuses={{ [server.id]: "live" }}
+                    servicesFor={(id) =>
+                      id === server.id ? a.scope.services : undefined
+                    }
+                    startAccount={(_id, command) => c.setCommand(command)}
+                    accountAction={(_id, command) => c.setCommand(command)}
+                    onDiscover={() => {
+                      void a.scope.services.api
+                        .post("/api/accounts/discover", {})
+                        .catch((error) => a.notices.notify(errorText(error)));
+                    }}
+                  />
+                ) : (
+                  <p role="status">Loading accounts…</p>
+                )}
               </section>
             </Tabs.Panel>
             <Tabs.Panel value="servers" pt="md" keepMounted={false}>
@@ -1051,11 +1041,14 @@ const AppAccountNotices = observer(function AppAccountNotices({
   const key =
     agent?.accountKey ||
     lead?.accountKey ||
-    (agent ? "default" : a.accounts.data.defaultAccountKey) ||
+    (agent ? "default" : a.accounts?.defaultAccountKey) ||
     "default";
   return (
     <>
-      {[...a.accounts.data.accounts, ...a.accounts.data.archivedAccounts]
+      {[
+        ...(a.accounts?.accounts || []),
+        ...(a.accounts?.archivedAccounts || []),
+      ]
         .filter(
           (account) =>
             account.id === key ||
@@ -1075,5 +1068,37 @@ const AppAccountNotices = observer(function AppAccountNotices({
           />
         ))}
     </>
+  );
+});
+
+const ProjectAccountSettings = observer(function ProjectAccountSettings({
+  path,
+  saved,
+}: {
+  path: string;
+  saved: () => Promise<void>;
+}) {
+  const a = useServerAreas();
+  const accounts = a.accounts;
+  if (!accounts) return <p role="status">Loading accounts…</p>;
+  const projects = [...(a.state?.projects.values() || [])];
+  return (
+    <ProjectAccount
+      path={path}
+      project={projects.find((p) => p.path === path)}
+      accounts={accounts}
+      defaultAccountKey={
+        projects
+          .filter(
+            (p) =>
+              p.path &&
+              (path === p.path ||
+                path.startsWith(p.path.replace(/\/$/, "") + "/")),
+          )
+          .sort((x, y) => (y.path?.length || 0) - (x.path?.length || 0))[0]
+          ?.accountKey || accounts.defaultAccountKey
+      }
+      saved={saved}
+    />
   );
 });

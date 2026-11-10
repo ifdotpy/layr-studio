@@ -13,7 +13,6 @@ import { Check, Copy, ExternalLink, Plus, RefreshCw, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { errorText, type PostResult } from "../../../api.ts";
 import type { Account } from "../support/Accounts.tsx";
-import type { AccountsController } from "../Accounts/Accounts.tsx";
 import { copyText } from "../../../clipboard/clipboard.ts";
 
 export type LoginReceipt = PostResult<"/api/accounts/login">;
@@ -34,13 +33,13 @@ export function deviceCodeCountdownSeconds(
 }
 
 export default observer(function AccountSignIn({
-  state,
+  scope,
   targetAccount,
   emailHint,
   label,
   onConnected,
 }: {
-  state: AccountsController;
+  scope?: string | undefined;
   targetAccount?: Account;
   emailHint?: string;
   label?: string;
@@ -51,7 +50,7 @@ export default observer(function AccountSignIn({
   const resources = useServerResources();
   const storeView = useServerStore();
 
-  const storageKey = `account-sign-in:${state.scope || "local"}${targetAccount ? `:${targetAccount.id}` : ""}`;
+  const storageKey = `account-sign-in:${scope || "local"}${targetAccount ? `:${targetAccount.id}` : ""}`;
   const [requestId, setRequestId] = useState(() =>
     saved<string>(storageKey, ""),
   );
@@ -62,9 +61,6 @@ export default observer(function AccountSignIn({
   const [expectedEmail, setExpectedEmail] = useState(emailHint || "");
   const lock = useRef(false);
   const reported = useRef("");
-  const receipts = (state.data.logins || []).filter(
-    (r) => r.reauthAccountKey === targetAccount?.id,
-  );
   const liveReceipt = (
     requestId
       ? resourceData(
@@ -75,15 +71,13 @@ export default observer(function AccountSignIn({
     | import("../../../deepReadonly.ts").DeepReadonly<LoginReceipt>
     | undefined;
   const receipt =
-    (liveReceipt?.requestId === requestId &&
+    liveReceipt?.requestId === requestId &&
     (!targetAccount || liveReceipt.accountKey === targetAccount.id)
       ? liveReceipt
-      : undefined) ||
-    receipts.find((r) => r.requestId === requestId) ||
-    [...receipts].reverse().find((r) => active(r.status));
-  const account = state.data.accounts.find(
-    (a) => a.id === receipt?.resolvedAccountKey,
-  );
+      : undefined;
+  const account = resourceData(storeView.state().current)
+    ?.accountsSummary.get("current")
+    ?.accounts.find((a) => a.id === receipt?.resolvedAccountKey);
   useEffect(() => {
     if (
       account &&

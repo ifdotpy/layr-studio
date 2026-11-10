@@ -131,12 +131,6 @@
   flex: 1;
   padding: var(--mantine-spacing-md);
 }
-.team-room-messages > div {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mantine-spacing-sm);
-  min-width: 0;
-}
 .unified-message-scroll > div {
   max-width: var(--studio-form-max);
   margin: 0 auto;
@@ -252,37 +246,6 @@
   display: flex;
   flex: 1;
   min-height: 0;
-}
-.messages-for-you {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding: var(--mantine-spacing-md);
-}
-.messages-for-you > .workspace-toolbar {
-  justify-content: flex-end;
-}
-.messages-for-you > .workspace-toolbar > span,
-.for-you .workspace-toolbar > span {
-  display: none;
-}
-.for-you .workspace-toolbar {
-  padding: 0 var(--mantine-spacing-sm);
-  flex-wrap: wrap;
-}
-.for-you #requests {
-  padding: 0 var(--mantine-spacing-sm);
-  max-height: none;
-  overflow: visible;
-}
-.for-you .request-summary {
-  flex-wrap: wrap;
-}
-.for-you .request-summary .request-copy {
-  flex-basis: calc(100% - var(--studio-action-size));
-}
-.for-you .request-actions {
-  margin-left: auto;
 }
 
 /* A narrow drawer needs the same list/detail navigation as a phone. */

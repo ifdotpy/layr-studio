@@ -16,7 +16,9 @@ import { createSubscriptions } from "../../../sync/subscriptions/module.ts";
 import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ModelWhitelistSettings } from "../../settings/models/ModelWhitelistSettings/ModelWhitelistSettings.tsx";
 import { createWorkerCatalog } from "../../agents/support/WorkerModelPicker.tsx";
-import { createAccountsView } from "../Accounts/Accounts.tsx";
+import { conversationActionsFixture } from "../../shell/integration-support/observableFixture.tsx";
+import { frameAccounts } from "../Accounts/Accounts.tsx";
+import ServerAccountsPanel from "../../servers/ServerAccountsPanel/ServerAccountsPanel.tsx";
 
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
@@ -63,11 +65,14 @@ function fixture() {
       current: { status: "live" as const, data: models.current },
     }),
   };
+  const areas = conversationActionsFixture(undefined, store);
   return {
+    areas,
     state,
     models,
     store,
     close() {
+      areas.scope.services.close();
       runtime.dispose();
       resources.dispose();
     },
@@ -123,20 +128,14 @@ it("retains normalized model rows across equal refreshes and isolates the server
   first.close();
   second.close();
 });
-it("retains the account view object and full login list on an unchanged refresh", async () => {
+it("retains the generated summary identity on an unchanged publication", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const f = fixture();
   f.state.apply([summary]);
   const snapshots: unknown[] = [];
-  const accounts = createAccountsView(
-    f.store,
-    async () => {
-      throw new Error("Unexpected account read");
-    },
-    "workspace",
-  );
+  const accounts = f.areas;
   const Probe = observer(function Probe() {
-    snapshots.push(accounts.data);
+    snapshots.push(accounts.accounts);
     return null;
   });
   const host = document.createElement("div");
@@ -194,32 +193,6 @@ it("updates an actual model consumer when generated models change", async () => 
   f.close();
 });
 
-it("retains account identities across identical explicit HTTP refreshes", async () => {
-  const f = fixture();
-  f.state.apply([summary]);
-  const result = { ...summary.value, logins: [] };
-  const get = vi.fn().mockImplementation(async () => structuredClone(result));
-  const view = createAccountsView(f.store, get, "workspace");
-  const seen: unknown[] = [];
-  const stop = autorun(() => seen.push(view.data));
-  await view.refresh();
-  const before = view.data;
-  const renders = seen.length;
-  await view.refresh();
-  expect(view.data).toBe(before);
-  expect(view.data.accounts).toBe(before.accounts);
-  expect(view.data.logins).toBe(before.logins);
-  expect(seen).toHaveLength(renders);
-  get.mockResolvedValueOnce({
-    ...result,
-    defaultAccountKey: "readback-only-change",
-  });
-  await view.refresh();
-  expect(view.data.accounts).toBe(before.accounts);
-  stop();
-  f.close();
-});
-
 it("updates an open Profiles draft when its generated catalog changes", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("visualViewport", {
@@ -274,4 +247,115 @@ it("updates an open Profiles draft when its generated catalog changes", async ()
   expect(document.body.textContent).not.toContain("Astra");
   await act(async () => root.unmount());
   f.close();
+});
+
+it("keeps a missing generated accounts summary loading and returns its exact model when present", () => {
+  const f = fixture();
+  const view = f.areas;
+  try {
+    expect(view.accounts).toBeUndefined();
+    f.state.apply([summary]);
+    expect(view.accounts).toBe(f.state.current.accountsSummary.get("current"));
+  } finally {
+    f.close();
+  }
+});
+
+it("updates settings account names, defaults and status from incremental generated summaries without a refresh", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  window.matchMedia = vi.fn(() => ({
+    matches: false,
+    addListener: noop,
+    removeListener: noop,
+    addEventListener: noop,
+    removeEventListener: noop,
+    dispatchEvent: () => true,
+    media: "",
+    onchange: null,
+  }));
+  const f = fixture();
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  const get = vi.spyOn(f.areas.scope.services.api, "get");
+  const server = {
+    id: "local",
+    label: "Fixture",
+    origin: "https://fixture.test",
+  };
+  const account = (id: string, label: string, status: "ready" | "error") => ({
+    id,
+    label,
+    status,
+    provider: "codex" as const,
+    home: "/fixture/" + id,
+    source: "fixture",
+    email: id + "@example.test",
+  });
+  const publish = (
+    label: string,
+    status: "ready" | "error",
+    defaultAccountKey: string,
+  ) =>
+    f.state.apply([
+      {
+        ...summary,
+        value: {
+          ...summary.value,
+          accounts: [
+            account("one", label, status),
+            account("two", "Other", "ready"),
+          ],
+          defaultAccountKey,
+        },
+      },
+    ]);
+  const Screen = observer(function Screen() {
+    const accounts = f.areas.accounts;
+    return accounts
+      ? createElement(ServerAccountsPanel, {
+          servers: [server],
+          accountsByServer: { local: frameAccounts(accounts) },
+          statuses: { local: "live" },
+          startAccount: noop,
+          accountAction: noop,
+        })
+      : createElement("p", { role: "status" }, "Loading accounts…");
+  });
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          ServerStoreProvider,
+          { value: f.store },
+          createElement(
+            MantineProvider,
+            { env: "test" },
+            createElement(Screen),
+          ),
+        ),
+      ),
+    );
+    expect(host.textContent).toContain("Loading accounts");
+    expect(host.textContent).not.toContain("No accounts found");
+    await act(async () => publish("Original", "ready", "one"));
+    const generated = f.areas.accounts;
+    const row = () =>
+      host.querySelector('[data-account-identity="codex:one@example.test"]');
+    expect(row()?.textContent).toContain("Original");
+    expect(row()?.textContent).toContain("Default Fixture");
+    await act(async () => publish("Renamed", "error", "two"));
+    expect(f.areas.accounts).toBe(generated);
+    expect(row()?.textContent).toContain("Renamed");
+    expect(row()?.textContent).not.toContain("Original");
+    expect(row()?.textContent).not.toContain("Default Fixture");
+    expect(row()?.textContent).toContain("Sign-in check failed");
+    expect(
+      host.querySelector('[data-account-identity="codex:two@example.test"]')
+        ?.textContent,
+    ).toContain("Default Fixture");
+    expect(get).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    f.close();
+  }
 });

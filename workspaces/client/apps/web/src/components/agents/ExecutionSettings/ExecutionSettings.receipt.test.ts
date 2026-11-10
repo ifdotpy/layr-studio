@@ -1,3 +1,4 @@
+import { resourceData } from "../../../store/runtime.ts";
 import { settingsAreasFixture } from "../../../app/settings/SettingsAreasFixture.ts";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { agentSummaryFixture } from "../../../servers/agentSummaryFixture.ts";
@@ -23,7 +24,6 @@ import type { PostBody } from "../../../apiTypes.ts";
 import { ApiError } from "../../../api.ts";
 import * as appLog from "../../../appLog.ts";
 import { AccountTransferStatus } from "../../accounts/AccountTransferStatus/AccountTransferStatus.tsx";
-import { createAccountsView } from "../../accounts/Accounts/Accounts.tsx";
 import {
   required,
   type ComponentHookCell,
@@ -535,7 +535,22 @@ test("Daybreak remains available for a Codex main agent and absent for Claude", 
 function chatSettings(agent: Agent) {
   h.chatAgent = agent;
   const input = settingsInput(agent);
-  const store = required(generatedAgents.get(input.summary.id)).store;
+  const f = required(generatedAgents.get(input.summary.id));
+  f.apply([
+    {
+      collection: "accounts",
+      id: "current",
+      value: {
+        accounts: [],
+        archivedAccounts: [],
+        defaultAccountGroups: [],
+        defaultAccountKey: "default",
+        supportsDelete: true,
+        supportsDisconnect: true,
+      },
+    },
+  ]);
+  const store = f.store;
   return invoke(
     createElement(ChatSettingsDialog, {
       areas: settingsAreasFixture({
@@ -543,6 +558,7 @@ function chatSettings(agent: Agent) {
           store,
           services: {
             modelReader: { scope: "settings-receipt", read: h.read },
+            owner: { id: "fixture" },
           },
         },
         navigation: {
@@ -554,7 +570,9 @@ function chatSettings(agent: Agent) {
         creation: { isCreating: false },
         dialogs: { changeProjectFolder() {} },
       }),
-      accounts: createAccountsView(store, h.read, "fixture"),
+      accounts: resourceData(store.state().current)?.accountsSummary.get(
+        "current",
+      ),
       settings: {
         chatOpen: true,
         accountModalOpen: false,

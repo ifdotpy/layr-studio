@@ -18,7 +18,6 @@ export type StudioServer = StudioServerIdentity & {
 export function serverResourceScope(server?: Pick<StudioServer, "id">) {
   return !server || server.id === "current" ? "local" : server.id;
 }
-export const LOCAL_NAME_KEY = "studio-local-server-name-v1";
 export const SERVER_REGISTRY_KEY = PAIRED_SERVERS_KEY;
 export const SERVER_REGISTRY_EVENT = "studio-server-registry";
 const metadata = new Map<string, StudioServer>();

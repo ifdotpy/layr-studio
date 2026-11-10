@@ -8,6 +8,7 @@ import {
   errorText,
   untilAnswered,
   type PostBody,
+  type PostResult,
 } from "../../../api.ts";
 
 import type { components } from "../../../generated/api.ts";
@@ -17,25 +18,16 @@ type Order = Readonly<Record<string, readonly string[]>>;
 type Drag = { group: string; id: string };
 export type SidebarDragTarget = Drag & { after: boolean };
 type ServerOrder = DeepReadonly<components["schemas"]["SidebarOrderDto"]>;
-type SidebarOrderResponse = components["schemas"]["SidebarOrderResponse"];
 type Pending = {
   ownerId?: string;
   body: Extract<PostBody<"/api/projects">, { action: "reorder" }>;
 };
 
-function isSidebarOrderResponse(value: unknown): value is SidebarOrderResponse {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return false;
-  const record = value as Record<string, unknown>;
-  if (typeof record.revision !== "number" || !Number.isFinite(record.revision))
-    return false;
-  if (record.groups === null) return true;
-  if (typeof record.groups !== "object" || Array.isArray(record.groups))
-    return false;
-  return Object.values(record.groups).every(
-    (items) =>
-      Array.isArray(items) && items.every((item) => typeof item === "string"),
-  );
+// ProjectsResponse also includes generic JSON; narrow its reorder variant.
+function isSidebarOrderResponse(
+  value: PostResult<"/api/projects">,
+): value is components["schemas"]["SidebarOrderResponse"] {
+  return "groups" in value && typeof value.revision === "number";
 }
 
 export function sidebarOrderCanWrite(
@@ -167,9 +159,7 @@ export class SidebarOrderOwner {
       const result = await untilAnswered(() =>
         backend.post("/api/projects", request.body, { timeoutMs: 30000 }),
       );
-      if (!isSidebarOrderResponse(result))
-        throw new Error("Invalid sidebar order response");
-      if (result.revision >= this.revision) {
+      if (isSidebarOrderResponse(result) && result.revision >= this.revision) {
         this.revision = result.revision;
         this.setOrder(result.groups || {});
       }

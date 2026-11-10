@@ -137,20 +137,15 @@ vi.mock("../../agents/AgentSetupPicker/AgentSetupPicker.tsx", () => ({
   },
 }));
 const catalog = { models: [], loading: false, error: "", retry: () => {} };
-const accounts: ComponentProps<typeof UnifiedAgentSettings>["state"] = {
-  data: {
-    accounts: [],
-    archivedAccounts: [],
-    defaultAccountKey: "default",
-    defaultAccountGroups: [],
-    logins: [],
-    supportsDelete: true,
-    supportsDisconnect: true,
-  },
-  error: "",
-  setData: () => {},
-  refresh: async () => null,
-  scope: "owner",
+const accounts: NonNullable<
+  ComponentProps<typeof UnifiedAgentSettings>["state"]
+> = {
+  accounts: [],
+  archivedAccounts: [],
+  defaultAccountKey: "default",
+  defaultAccountGroups: [],
+  supportsDelete: true,
+  supportsDisconnect: true,
 };
 const record = {
   id: "lead",

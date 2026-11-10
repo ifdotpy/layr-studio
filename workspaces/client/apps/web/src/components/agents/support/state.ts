@@ -27,19 +27,6 @@ function collections(store: Store) {
 export function useStateCollections() {
   return collections(useServerStore());
 }
-export function useAgentSummary(id: string) {
-  return useStateCollections()?.agents.get(id);
-}
-/** Only an observed leaf opens detail interest in its owning server. */
-export function useAgentDetail(agent: Pick<SidebarAgent, "id"> | undefined) {
-  const store = useServerStore();
-  if (!agent) return undefined;
-  const current = store.agentDetail(agentId(agent.id)).current;
-  return resourceData(current);
-}
-export function useWorkspace() {
-  return useStateCollections()?.workspaces.values().next().value;
-}
 
 export function useActivityView(agent: SidebarAgent) {
   const store = useServerStore();

@@ -8,7 +8,6 @@ import {
 import { agentSummaryFixture } from "./agentSummaryFixture.ts";
 import { AgentSource } from "../generated/api.ts";
 import { required } from "../components/conversation/ComposerAttachments/componentTestFixtures.ts";
-import assert from "node:assert/strict";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { ServerNavigation, ServerAccount } from "./navigation.ts";
@@ -38,11 +37,8 @@ vi.mock("../sync/subscriptions/events.ts", () => ({
 
 import * as api from "../api.ts";
 import { startServerFrame } from "./frameBridge.ts";
-import * as sidebarRpc from "./sidebarRpc.ts";
-import { ApiError } from "../api.ts";
 import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
 import { writePreferenceEdit } from "../sync/uiPreferenceStore.ts";
-import { defaultStudioPreferences } from "../studioPreferences.ts";
 import { preferenceMemory } from "./storage.ts";
 
 class TestStorageEvent extends Event {
@@ -220,16 +216,6 @@ function navigationMessages(): [NavigationMessage, string][] {
     .map(([message, origin]): [NavigationMessage, string] => [message, origin]);
 }
 
-function message(
-  data: unknown,
-  origin = "https://parent.example",
-  source: unknown = surface.parent,
-) {
-  surface.dispatchEvent(
-    Object.assign(new Event("message"), { data, origin, source }),
-  );
-}
-
 it("publishes a real scoped snapshot and republishes after a saved preference edit", () => {
   records.set(
     "codex-project-compact:/same/state",
@@ -327,37 +313,6 @@ it("republishes saved order and tree changes from scoped or materialized storage
   ).toEqual({});
 });
 
-it("keeps command and preference source, origin and server checks", () => {
-  const run = mount();
-  const command = {
-    kind: "studio-server-command",
-    serverId: "remote",
-    command: { action: "open", id: "lead" },
-  };
-  message(command, "https://untrusted.example");
-  message(command, "https://parent.example", {});
-  message({ ...command, serverId: "other" });
-  const preference = {
-    kind: "studio-server-preferences",
-    serverId: "remote",
-    preferences: { ...defaultStudioPreferences, theme: "dark" },
-  };
-  message(preference, "https://untrusted.example");
-  message(preference, "https://parent.example", {});
-  message({ ...preference, serverId: "other" });
-  expect(run).not.toHaveBeenCalled();
-  expect(records.has("codex-studio-preferences-v1")).toBe(false);
-  message(command);
-  expect(run).toHaveBeenCalledExactlyOnceWith({ action: "open", id: "lead" });
-  message(preference);
-  expect(
-    JSON.parse(
-      preferenceMemory.getItem("codex-studio-preferences-v1") || "null",
-    ).theme,
-  ).toBe("dark");
-  expect(navigationMessages()).toHaveLength(1);
-});
-
 it("removes preference and storage listeners when the frame effect stops", () => {
   mount();
   cleanup.forEach((stop) => stop());
@@ -387,117 +342,6 @@ it("keeps navigation without sidebar data until a snapshot is available", () => 
   });
   expect(required(navigationMessages()[0])[0].navigation).not.toHaveProperty(
     "sidebar",
-  );
-});
-
-it("executes sidebar requests only from the bound parent and replies with the same identity", async () => {
-  const execute = vi
-    .spyOn(sidebarRpc, "executeSidebarRequest")
-    .mockResolvedValue({ ok: true });
-  mount();
-  const request = {
-    kind: "studio-sidebar-request",
-    serverId: "remote",
-    correlation: "exact-request",
-    value: {
-      action: "post",
-      path: "/api/rename",
-      body: { id: "lead", name: "Changed", request_id: "mutation" },
-    },
-  };
-  message(null);
-  message(request, "https://untrusted.example");
-  message(request, "https://parent.example", {});
-  message({ ...request, serverId: "other" });
-  message({ ...request, correlation: null });
-  expect(execute).not.toHaveBeenCalled();
-  message(request);
-  await Promise.resolve();
-  expect(execute).toHaveBeenCalledOnce();
-  assert.ok(execute.mock.calls[0] != null);
-  expect(execute.mock.calls[0][0]).toEqual(request.value);
-  expect(surface.parent.postMessage).toHaveBeenLastCalledWith(
-    {
-      kind: "studio-sidebar-result",
-      serverId: "remote",
-      correlation: "exact-request",
-      result: { ok: true },
-    },
-    "https://parent.example",
-  );
-});
-
-it("forwards typed operational diagnostics and only documented validation details", async () => {
-  const execute = vi.spyOn(sidebarRpc, "executeSidebarRequest");
-  mount();
-  const request = {
-    kind: "studio-sidebar-request",
-    serverId: "remote",
-    correlation: "typed-error",
-    value: { action: "refresh" },
-  };
-  execute.mockRejectedValueOnce(
-    new ApiError("Conflict", 409, {
-      error: "Conflict",
-      code: "request_conflict",
-      metadata: { attempt: 2 },
-      outcome: "not_applied",
-      catalogPending: true,
-      protocolVersion: 3,
-      supportedVersions: [2, 3],
-      extra: "must not cross the frame boundary",
-    }),
-  );
-  message(request);
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(surface.parent.postMessage).toHaveBeenLastCalledWith(
-    {
-      kind: "studio-sidebar-result",
-      serverId: "remote",
-      correlation: "typed-error",
-      result: undefined,
-      error: {
-        message: "Conflict",
-        status: 409,
-        code: "request_conflict",
-        metadata: { attempt: 2 },
-        outcome: "not_applied",
-        catalogPending: true,
-        protocolVersion: 3,
-        supportedVersions: [2, 3],
-      },
-    },
-    "https://parent.example",
-  );
-
-  execute.mockRejectedValueOnce(
-    new ApiError(
-      "Invalid request",
-      422,
-      {
-        error: "Invalid request",
-        location: ["body", "name"],
-      },
-      ["body", "name"],
-    ),
-  );
-  message({ ...request, correlation: "validation-error" });
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(surface.parent.postMessage).toHaveBeenLastCalledWith(
-    {
-      kind: "studio-sidebar-result",
-      serverId: "remote",
-      correlation: "validation-error",
-      result: undefined,
-      error: {
-        message: "Invalid request (body.name).",
-        status: 422,
-        location: ["body", "name"],
-      },
-    },
-    "https://parent.example",
   );
 });
 
@@ -571,4 +415,20 @@ it("captures row-only facts and independent tails as plain native entities", () 
       },
     ]),
   );
+});
+
+it("ignores retired parent commands while the screen channel owns execution", async () => {
+  const run = mount();
+  surface.dispatchEvent(
+    Object.assign(new Event("message"), {
+      source: surface.parent,
+      origin: "https://parent.example",
+      data: {
+        kind: "studio-server-command",
+        serverId: "remote",
+        command: { action: "open", id: "lead" },
+      },
+    }),
+  );
+  expect(run).not.toHaveBeenCalled();
 });

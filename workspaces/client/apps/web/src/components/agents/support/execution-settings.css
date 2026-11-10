@@ -70,14 +70,6 @@
   padding-block: var(--mantine-spacing-xs);
   background: var(--mantine-color-body);
 }
-.worker-model-summary {
-  color: var(--mantine-color-dimmed);
-  font-size: var(--mantine-font-size-xs);
-  text-align: right;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 /* The model picker sheet keeps one height for every role, like its popover. */
 .setup-sheet .mantine-Drawer-content {
   height: 75dvh;

@@ -1,4 +1,3 @@
-import { frameMessageOrigin } from "./frameOrigin.ts";
 import { expect, it } from "vitest";
 import { createRequire } from "node:module";
 const native: typeof import("../../../desktop/frame-owner.ts") = createRequire(
@@ -45,21 +44,6 @@ it("encodes server IDs as lowercase unpadded base32 in labels of at most 50 char
   ] as const) {
     expect(serverFrameHost(id), id).toBe(host);
   }
-});
-
-it("uses exact WebKit origins without collapsing native hosts to null", () => {
-  expect(frameMessageOrigin("studio-view://studio-one.localhost/?q=x")).toBe(
-    "studio-view://studio-one.localhost",
-  );
-  expect(frameMessageOrigin("studio-view://studio-two.localhost/")).not.toBe(
-    frameMessageOrigin("studio-view://studio-one.localhost/"),
-  );
-  expect(frameMessageOrigin("tauri://localhost/index.html")).toBe(
-    "tauri://localhost",
-  );
-  expect(frameMessageOrigin("http://localhost:4621/")).toBe(
-    "http://localhost:4621",
-  );
 });
 
 it.each(["classic", "combined"])(

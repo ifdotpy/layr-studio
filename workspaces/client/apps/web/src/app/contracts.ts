@@ -9,9 +9,6 @@ import type { ScreenChannel } from "../servers/screenChannel.ts";
 export type AgentModel = NonNullable<
   ReturnType<StateCollections["agents"]["get"]>
 >;
-export type RoomModel = NonNullable<
-  ReturnType<StateCollections["rooms"]["get"]>
->;
 export type ProjectModel = NonNullable<
   ReturnType<StateCollections["projects"]["get"]>
 >;

@@ -213,5 +213,3 @@ export function createCommandClient(
       ),
   };
 }
-
-export type CommandClient = ReturnType<typeof createCommandClient>;

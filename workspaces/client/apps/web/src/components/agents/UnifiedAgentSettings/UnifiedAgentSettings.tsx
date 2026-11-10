@@ -6,9 +6,8 @@ import { observer } from "mobx-react-lite";
 import type { Agent } from "../../../types.ts";
 import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import "../../../api.ts";
-import Accounts, {
-  type AccountsController,
-} from "../../accounts/Accounts/Accounts.tsx";
+import Accounts from "../../accounts/Accounts/Accounts.tsx";
+import type { AccountsState } from "../../accounts/support/Accounts.tsx";
 import { ExecutionSettings } from "../ExecutionSettings/ExecutionSettings.tsx";
 import { ApiError, ApiSchemaMismatchError, errorText } from "../../../api.ts";
 import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
@@ -17,6 +16,7 @@ import { useCallback, useEffect, useState, type ComponentProps } from "react";
 
 export function UnifiedAgentSettingsView({
   state,
+  scope,
   notify,
   onAccountModalOpenChange,
   showAccountExclusions,
@@ -28,7 +28,8 @@ export function UnifiedAgentSettingsView({
 > & {
   agent: Agent;
   lead?: Agent | undefined;
-  state: AccountsController;
+  state: AccountsState | undefined;
+  scope?: string | undefined;
   notify: (message: string) => void;
   onAccountModalOpenChange?: (opened: boolean) => void;
   showAccountExclusions?: boolean;
@@ -88,9 +89,11 @@ export function UnifiedAgentSettingsView({
       }
     });
   };
+  if (!state) return <p role="status">Loading accounts…</p>;
   return (
     <Accounts
       state={state}
+      scope={scope}
       showTransferStatus={showTransferStatus}
       onModalOpenChange={updateAccountModalOpen}
       agent={settings.agent}
@@ -112,7 +115,7 @@ export function UnifiedAgentSettingsView({
                 ? { kind: "agent", summary: settings.lead, detail: leadDetail }
                 : undefined
             }
-            accounts={state.data.accounts}
+            accounts={state.accounts}
             onAccountChange={selectAccount}
             accountDisabled={disabled || exclusionsSaving !== null}
             accountModalOpen={accountModalOpen}

@@ -23,7 +23,7 @@ export function ChatSettingsFixture({
   settingsOpen: boolean;
   accountModalOpen: boolean;
   setSettingsOpen: (value: boolean) => void;
-  accounts: { data: AccountsState };
+  accounts: AccountsState | undefined;
   notify: (message: string) => unknown;
   agentModels: unknown;
   data: Snapshot;
@@ -64,9 +64,7 @@ export function ChatSettingsFixture({
   return (
     <ChatSettingsDialog
       areas={fixture.areas}
-      accounts={
-        accounts as import("../../components/accounts/Accounts/Accounts.tsx").AccountsController
-      }
+      accounts={accounts}
       settings={{
         chatOpen: settingsOpen,
         accountModalOpen,

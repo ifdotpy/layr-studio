@@ -1,8 +1,6 @@
 import { BackgroundTaskKind } from "../../../../generated/api.ts";
 import type { components } from "../../../../generated/api.ts";
 import type { DeepReadonly } from "../../../../deepReadonly.ts";
-
-export type RendererTaskKind = components["schemas"]["BackgroundTaskKind"];
 export type DisplayLegacyTask = DeepReadonly<
   components["schemas"]["TaskRecordView"]
 >;

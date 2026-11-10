@@ -4,8 +4,8 @@ vi.mock("../api.ts", () => ({
   syncPost: vi.fn(),
   ApiError: class extends Error {},
 }));
-vi.mock("../unsent/store.ts", () => ({
-  UNSENT_FAILURE_EVENT: "studio-unsent-input-failure",
+vi.mock(import("../unsent/store.ts"), async (importOriginal) => ({
+  ...(await importOriginal()),
   draftStore: () => ({
     put: async () => {},
     delete: async () => {},

@@ -438,7 +438,3 @@
   color: var(--muted);
   font-size: var(--studio-text-meta);
 }
-.rail-outline-slot .prompt-navigation {
-  display: block;
-  margin: 0;
-}

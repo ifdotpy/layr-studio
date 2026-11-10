@@ -1,4 +1,3 @@
-export const LOCAL_ALIAS_KEY = "studio-local-server-alias-v1";
 export const DEFAULT_LOCAL_SERVER_ALIAS = "LOC";
 export const ALIASES_EVENT = "studio-server-aliases";
 

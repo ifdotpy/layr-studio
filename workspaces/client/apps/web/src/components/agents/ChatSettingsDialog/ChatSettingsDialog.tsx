@@ -13,7 +13,7 @@ import {
 } from "../ExecutionSettings/ExecutionSettings.tsx";
 import SubagentConcurrencyControl from "../SubagentConcurrencyControl/SubagentConcurrencyControl.tsx";
 import type { ServerAreas } from "../../../app/contracts.ts";
-import type { AccountsController } from "../../accounts/Accounts/Accounts.tsx";
+import type { AccountsState } from "../../accounts/support/Accounts.tsx";
 import type { SettingsUi } from "../../../app/settings/useAppSettings.ts";
 
 const ClaudeSettings = lazy(() =>
@@ -31,7 +31,7 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
   onChangeProject,
 }: {
   areas: ServerAreas;
-  accounts: AccountsController;
+  accounts: AccountsState | undefined;
   settings: Pick<
     SettingsUi,
     "chatOpen" | "accountModalOpen" | "closeChatSettings"
@@ -52,12 +52,12 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
   const key =
     agent?.accountKey ||
     root?.accountKey ||
-    (agent ? "default" : accounts.data.defaultAccountKey) ||
+    (agent ? "default" : accounts?.defaultAccountKey) ||
     "default";
   const catalog = workerCatalog(store, services.modelReader, key);
   const account = [
-    ...accounts.data.accounts,
-    ...accounts.data.archivedAccounts,
+    ...(accounts?.accounts || []),
+    ...(accounts?.archivedAccounts || []),
   ].find((a) => a.id === key);
   return (
     <Modal
@@ -70,73 +70,87 @@ export const ChatSettingsDialog = observer(function ChatSettingsDialog({
       fullScreen={areas.layout.isSettingsFullscreen}
       className="execution-settings-modal"
     >
-      <div className="chat-execution-settings">
-        <Stack gap="sm">
-          {root?.source === AgentSource.managed && (
-            <section aria-label="Team">
-              <div className="execution-team-fields">
-                <SubagentConcurrencyControl
-                  lead={root}
-                  stateDir={accounts.scope || ""}
-                  workspaceId={areas.startup.workspaceId}
-                />
-                <DelegationSettings
-                  settingsRow
-                  input={{ kind: "agent", summary: root, detail: rootDetail }}
-                  catalog={catalog}
-                  accounts={accounts.data.accounts}
-                />
-              </div>
-            </section>
-          )}
-          <section aria-label="Permissions">
-            <Stack gap="sm" id="chat-settings-permissions">
-              {agent?.source === AgentSource.managed &&
-                agent.provider === ProviderKind.Codex && (
-                  <ExecutionPermissions
-                    settingsRow
-                    input={{ kind: "agent", summary: agent, detail }}
-                    catalog={catalog}
-                  />
-                )}
-              {agent?.provider === ProviderKind.Claude && (
-                <Suspense fallback={null}>
-                  <ClaudeSettings
-                    key={agent.id}
-                    agent={agent}
-                    account={account}
-                    onSignIn={onSignIn}
-                  />
-                </Suspense>
+      {!accounts ? (
+        <p role="status">Loading accounts…</p>
+      ) : (
+        <>
+          <div className="chat-execution-settings">
+            <Stack gap="sm">
+              {root?.source === AgentSource.managed && (
+                <section aria-label="Team">
+                  <div className="execution-team-fields">
+                    <SubagentConcurrencyControl
+                      lead={root}
+                      stateDir={services.owner.id}
+                      workspaceId={areas.startup.workspaceId}
+                    />
+                    <DelegationSettings
+                      settingsRow
+                      input={{
+                        kind: "agent",
+                        summary: root,
+                        detail: rootDetail,
+                      }}
+                      catalog={catalog}
+                      accounts={accounts.accounts}
+                    />
+                  </div>
+                </section>
               )}
+              <section aria-label="Permissions">
+                <Stack gap="sm" id="chat-settings-permissions">
+                  {agent?.source === AgentSource.managed &&
+                    agent.provider === ProviderKind.Codex && (
+                      <ExecutionPermissions
+                        settingsRow
+                        input={{ kind: "agent", summary: agent, detail }}
+                        catalog={catalog}
+                      />
+                    )}
+                  {agent?.provider === ProviderKind.Claude && (
+                    <Suspense fallback={null}>
+                      <ClaudeSettings
+                        key={agent.id}
+                        agent={agent}
+                        account={account}
+                        onSignIn={onSignIn}
+                      />
+                    </Suspense>
+                  )}
+                </Stack>
+              </section>
             </Stack>
-          </section>
-        </Stack>
-      </div>
-      {root?.projectPath && (
-        <Group justify="flex-end" gap="xs" className="execution-dialog-actions">
-          <Button
-            size="xs"
-            variant="default"
-            disabled={areas.creation.isCreating}
-            onClick={() => {
-              settings.closeChatSettings();
-              onNewChat?.(root.projectPath || undefined);
-            }}
-          >
-            New chat in this project
-          </Button>
-          <Button
-            size="xs"
-            variant="subtle"
-            onClick={() => {
-              settings.closeChatSettings();
-              onChangeProject?.(root);
-            }}
-          >
-            Choose project folder
-          </Button>
-        </Group>
+          </div>
+          {root?.projectPath && (
+            <Group
+              justify="flex-end"
+              gap="xs"
+              className="execution-dialog-actions"
+            >
+              <Button
+                size="xs"
+                variant="default"
+                disabled={areas.creation.isCreating}
+                onClick={() => {
+                  settings.closeChatSettings();
+                  onNewChat?.(root.projectPath || undefined);
+                }}
+              >
+                New chat in this project
+              </Button>
+              <Button
+                size="xs"
+                variant="subtle"
+                onClick={() => {
+                  settings.closeChatSettings();
+                  onChangeProject?.(root);
+                }}
+              >
+                Choose project folder
+              </Button>
+            </Group>
+          )}
+        </>
       )}
     </Modal>
   );

@@ -247,5 +247,4 @@ export function createSendingMessageRemoval(
 
   return { removeSendingMessage, removeAllSendingMessages };
 }
-export const { removeSendingMessage, removeAllSendingMessages } =
-  createSendingMessageRemoval();
+export const { removeSendingMessage } = createSendingMessageRemoval();

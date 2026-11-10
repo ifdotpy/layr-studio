@@ -1,3 +1,4 @@
+import { API_SCHEMA_HASH } from "./generated/apiSchema.ts";
 import { scopedStorage } from "./servers/storage.ts";
 
 /** Browser databases allowed for device keys, credentials, and request fences. */
@@ -18,12 +19,12 @@ export function browserIndexedDB(): IDBFactory | undefined {
 }
 
 const outboxPrefixes = {
-  nativeAction: "studio-native-action:",
+  nativeAction: `studio-native-action:${API_SCHEMA_HASH}:`,
   stableRequest: "request-id:",
   chatCreation: "codex-pending-creation:",
   complaintResponse: "studio-message-responses:",
   projectSave: "studio-peer-convert:",
-  queueChange: "studio-queue-change:",
+  queueChange: `studio-queue-change:${API_SCHEMA_HASH}:`,
   removeSending: "studio-remove-sending:",
   removedSend: "studio-removed-send:",
   sidebarOrder: "codex-sidebar-order:",
@@ -31,14 +32,13 @@ const outboxPrefixes = {
   serverAccess: "studio-server-access-pending",
   pairing: "studio-pairing-attempt-v1",
   serverManagement: "studio-server-management-v1:",
-  legacyServerManagement: "studio-server-discovery-pending-v1",
   monitorRestart: "monitor-restart:",
   processControl: "process-control:",
   mcpReconnect: "studio-mcp-reconnect:",
 } as const;
 export type OutboxRequestKind = keyof typeof outboxPrefixes;
 
-/** One logical outbox, retaining existing keys and exact request bytes. */
+/** One logical outbox, retaining owner keys and exact request bytes. */
 export function outboxRequests(
   storage: Pick<
     Storage,
@@ -127,77 +127,6 @@ export function createQueueOutbox(storage: Storage, databaseName: string) {
       };
     });
   };
-}
-
-/** Remove retired local copies without touching credentials or request fences. */
-export async function cleanupLegacyPersistence(
-  storage: Pick<
-    Storage,
-    "length" | "key" | "removeItem"
-  > = globalThis.localStorage,
-  factory:
-    | Pick<IDBFactory, "databases" | "deleteDatabase">
-    | undefined = browserIndexedDB(),
-) {
-  const retiredKeys = [
-    "codex-chat-draft:",
-    "codex-queue-edit:",
-    "codex-drafts:",
-    "studio-session-cost:",
-    "studio-upload-cancelled:",
-    "studio-upload-settled:",
-    "studio-workspace-panel-width:",
-    "studio-sidebar-width:",
-    "studio-removed-messages:",
-    "studio-peer-conversion-dialog:",
-    "studio-routes-v1:",
-    "studio-chat-scroll:",
-  ];
-  const keys = Array.from({ length: storage.length }, (_, index) =>
-    storage.key(index),
-  );
-  for (const key of keys) {
-    if (!key) continue;
-    const logical = key.replace(/^:server:[^:]+:/, "");
-    if (
-      retiredKeys.some((prefix) => logical.startsWith(prefix)) ||
-      (logical.startsWith("studio-turns:") &&
-        logical.endsWith(":window-anchor")) ||
-      logical === "studio-automatic-ui-removals-v1" ||
-      logical === "studio-automatic-ui-migration-v3" ||
-      (logical.startsWith(outboxPrefixes.sidebarOrder) &&
-        !logical.endsWith(":pending")) ||
-      (logical.startsWith(outboxPrefixes.chatCreation) &&
-        /:(?:rejected|dismissed):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-          logical,
-        ) &&
-        !logical.includes(":request:"))
-    )
-      storage.removeItem(key);
-  }
-  if (!factory) return;
-  const retiredDatabases = [
-    "codex-studio-dictation",
-    "codex-studio-uploads",
-    "studio-automatic-ui-access-v1",
-    "studio-thin-cache",
-  ];
-  for (const { name } of await factory.databases()) {
-    if (
-      !name ||
-      !retiredDatabases.some(
-        (prefix) => name === prefix || name.startsWith(`${prefix}:server:`),
-      )
-    )
-      continue;
-    await new Promise<void>((resolve, reject) => {
-      const request = factory.deleteDatabase(name);
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () =>
-        reject(new Error("Close older Studio pages to remove retired data."));
-    });
-  }
 }
 
 export const PAIRED_SERVERS_KEY = "studio-paired-servers-v1";

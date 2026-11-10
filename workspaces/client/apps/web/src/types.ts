@@ -1,6 +1,6 @@
+import type { GetResult } from "./api.ts";
 import { AgentStatus } from "./generated/api.ts";
 import { nativeErrorView } from "./nativeErrors.ts";
-import type { GetResult } from "./api.ts";
 import type {
   AgentEntityDto,
   AgentSummaryEntityDto,
@@ -15,7 +15,6 @@ import type {
   RuleEntityDto,
   TaskEntityDto,
   WorkEntityDto,
-  components,
 } from "./generated/api.ts";
 
 export type {
@@ -52,10 +51,6 @@ export type Project = ProjectEntityDto;
 export type Event = EventEntityDto;
 export type Work = WorkEntityDto;
 export type Edge = EdgeEntityDto;
-
-export type FederationPeer = components["schemas"]["FederationPeer"];
-export type FederationRoom = components["schemas"]["FederationRoom"];
-export type FederationSnapshot = components["schemas"]["FederationSnapshot"];
 
 type TranscriptAsset = NonNullable<TranscriptWireItem["assets"]>[number];
 export type LocalMessageAttachment = {

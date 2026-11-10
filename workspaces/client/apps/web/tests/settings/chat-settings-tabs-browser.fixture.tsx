@@ -177,13 +177,6 @@ function Fixture() {
     [opened, setOpened] = useState(true);
   window.agent = agent;
   window.updateAgent = (value) => flushSync(() => setAgent(value));
-  const state = {
-    data: accountsData,
-    setData: () => {},
-    error: "",
-    refresh: async () => accountsData,
-    scope: "fixture",
-  };
   return (
     <MantineProvider
       theme={theme}
@@ -201,7 +194,7 @@ function Fixture() {
           accountModalOpen={false}
           agent={agent}
           lead={agent}
-          accounts={state}
+          accounts={accountsData}
           agentModels={{ models, loading: false, error: "", retry: () => {} }}
           data={{ ...fixtureSnapshot([]), stateDir: "execution-preview" }}
           workspaceId="1234567890abcdef1234567890abcdef"

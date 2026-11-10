@@ -39,30 +39,11 @@ function readSavedFlow(
   key: string,
   { save, saved }: Pick<ReturnType<typeof useServerApi>, "save" | "saved">,
 ): SavedFlow | null {
-  const normalize = (flow: SavedFlow): SavedFlow => ({
-    ...flow,
-    createdAt: flow.createdAt || Date.now(),
-    codeSubmissionUncertain:
-      flow.codeSubmissionUncertain ?? !!flow.codeRequestId,
-  });
   const active = saved<unknown>(key, null);
   if (typeof active === "string") {
     const flow = saved<SavedFlow | null>(attemptKey(key, active), null);
     if (!flow) save(key, null);
-    return flow ? normalize(flow) : null;
-  }
-  if (
-    active &&
-    typeof active === "object" &&
-    "requestId" in active &&
-    typeof active.requestId === "string"
-  ) {
-    const legacy = normalize(active as SavedFlow);
-    save(attemptKey(key, legacy.requestId), {
-      ...legacy,
-    });
-    save(key, legacy.requestId);
-    return legacy;
+    return flow;
   }
   return null;
 }

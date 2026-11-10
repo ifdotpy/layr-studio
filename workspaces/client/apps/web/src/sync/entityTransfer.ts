@@ -1,13 +1,7 @@
 import { SubscriptionReplyKind } from "../generated/api.ts";
 import { subscriptionKey } from "./subscriptions/contracts.ts";
 import { SYNC_PROTOCOL_VERSION, type components } from "../generated/api.ts";
-import {
-  MAX_SYNC_RESOURCE_COUNT,
-  SYNC_ENTITY_TRANSFER_ID_MAX_CODEPOINTS,
-  SYNC_ENTITY_STREAM_MAX_DOCUMENTS,
-  SYNC_STREAM_EVENT_MAX_BYTES,
-} from "../generated/sharedValues.ts";
-import { SUBSCRIPTION_ENTITY_SCOPES } from "../generated/subscriptionEntities.ts";
+import { MAX_SYNC_RESOURCE_COUNT } from "../generated/sharedValues.ts";
 
 type Batch = components["schemas"]["EntityChangeBatch"];
 type Frame = components["schemas"]["ResourceEntityTransferEvent"];
@@ -55,102 +49,41 @@ export class MemoryTransferStorage implements TransferStorage {
   }
 }
 
-function object(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
+function sequence(value: number): boolean {
+  return Number.isSafeInteger(value) && value >= 0;
 }
-function sequence(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-const frameFields = new Set([
-  "protocol",
-  "payloadKind",
-  "workspaceId",
-  "epoch",
-  "revision",
-  "reason",
-  "resource",
-  "cursor",
-  "replyKind",
-  "transferId",
-  "pageIndex",
-  "partIndex",
-  "partCount",
-  "complete",
-  "data",
-]);
-function frameValue(value: unknown): Frame {
+function frameValue(value: Frame): Frame {
   if (
-    !object(value) ||
-    Object.keys(value).some((key) => !frameFields.has(key)) ||
-    Object.keys(value).length !== frameFields.size ||
     value.protocol !== SYNC_PROTOCOL_VERSION ||
-    typeof value.workspaceId !== "string" ||
-    !value.workspaceId ||
-    typeof value.epoch !== "string" ||
-    !value.epoch ||
     !sequence(value.revision) ||
-    !["initial", "reconnect", "change", "workspace", "overflow"].includes(
-      String(value.reason),
-    ) ||
-    !object(value.resource) ||
-    typeof value.resource.kind !== "string" ||
-    (value.payloadKind === "entity"
-      ? !(value.resource.kind in SUBSCRIPTION_ENTITY_SCOPES)
-      : value.payloadKind === "transcript"
-        ? value.resource.kind !== "transcript"
-        : value.payloadKind !== "view") ||
-    !object(value.cursor) ||
     value.cursor.workspaceId !== value.workspaceId ||
     !sequence(value.cursor.seq) ||
     (value.cursor.terminalGeneration !== undefined &&
       !sequence(value.cursor.terminalGeneration)) ||
-    Object.keys(value.cursor).some(
-      (key) =>
-        key !== "workspaceId" && key !== "seq" && key !== "terminalGeneration",
-    ) ||
-    !["snapshot", "delta"].includes(String(value.replyKind)) ||
-    typeof value.transferId !== "string" ||
-    !value.transferId ||
-    Array.from(value.transferId).length >
-      SYNC_ENTITY_TRANSFER_ID_MAX_CODEPOINTS ||
     !sequence(value.pageIndex) ||
     !sequence(value.partIndex) ||
     !sequence(value.partCount) ||
     value.partCount < 1 ||
     value.partIndex >= value.partCount ||
-    typeof value.complete !== "boolean" ||
-    (value.complete && value.partIndex + 1 !== value.partCount) ||
-    typeof value.data !== "string" ||
-    new TextEncoder().encode(
-      `event: entity-transfer\ndata: ${JSON.stringify(value)}\n\n`,
-    ).length > SYNC_STREAM_EVENT_MAX_BYTES
+    (value.complete && value.partIndex + 1 !== value.partCount)
   )
     throw new TypeError("Invalid bounded entity transfer frame");
-  return value as Frame;
+  return value;
 }
-/** Canonical values were validated by the server Registry before framing. Keep
- * the existing entity DTO contract, and check transport/page interval boundaries
- * before any cache write, without introducing another schema implementation. */
-function pageValue(value: unknown, after: number, through: number): Batch {
+/** The schema hash fences DTO shape; sequence checks fence each staged interval. */
+function pageValue(value: Batch, after: number, through: number): Batch {
   if (
-    !object(value) ||
-    Object.keys(value).some(
-      (key) => !["after", "through", "documents"].includes(key),
-    ) ||
+    !sequence(value.after) ||
     value.after !== after ||
     !sequence(value.through) ||
     value.through < after ||
-    value.through > through ||
-    !Array.isArray(value.documents) ||
-    value.documents.length > SYNC_ENTITY_STREAM_MAX_DOCUMENTS
+    value.through > through
   )
     throw new TypeError("Invalid canonical entity page interval");
   let previous = after;
   for (const row of value.documents) {
     if (
-      !object(row) ||
       !sequence(row.seq) ||
-      // Rows built from one server change share its number: the order is non-decreasing.
       row.seq < previous ||
       row.seq <= after ||
       row.seq > value.through
@@ -158,7 +91,7 @@ function pageValue(value: unknown, after: number, through: number): Batch {
       throw new TypeError("Invalid canonical entity page record");
     previous = row.seq;
   }
-  return value as Batch;
+  return value;
 }
 type Pending = {
   frame: Frame;
@@ -194,7 +127,7 @@ export class EntityTransferAssembler {
         await this.storage.remove(`${pending.frame.transferId}:`);
     }
   }
-  async receive(value: unknown): Promise<StagedEntityInterval | undefined> {
+  async receive(value: Frame): Promise<StagedEntityInterval | undefined> {
     const frame = frameValue(value);
     const generation = this.generation;
     const scope = JSON.stringify(frame.resource);
@@ -270,7 +203,7 @@ export class EntityTransferAssembler {
       chunks.push(chunk);
     }
     const encoded = chunks.join("");
-    const decoded: unknown = JSON.parse(encoded);
+    const decoded: Batch = JSON.parse(encoded);
     if (frame.payloadKind !== "entity") {
       if (frame.pageIndex !== 0 || !frame.complete)
         throw new Error("Incomplete resource transfer page");
@@ -300,9 +233,7 @@ export class EntityTransferAssembler {
         },
       };
     }
-    const after =
-      pending.through ??
-      (object(decoded) && sequence(decoded.after) ? decoded.after : -1);
+    const after = pending.through ?? decoded.after;
     const batch = pageValue(decoded, after, frame.cursor.seq);
     if (pending.after === undefined) {
       pending.after = batch.after;

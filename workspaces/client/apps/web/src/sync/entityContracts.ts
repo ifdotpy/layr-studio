@@ -4,9 +4,6 @@ import { ENTITY_COLLECTIONS } from "../generated/entityCollections.ts";
 export type UiPreferencesDto = components["schemas"]["UiPreferencesDto"];
 export const UI_PREFERENCE_SCOPES = ["user", "server"] as const;
 export type UiPreferenceScope = (typeof UI_PREFERENCE_SCOPES)[number];
-export const UI_PREFERENCE_ENTITY_IDS = UI_PREFERENCE_SCOPES.map(
-  (scope) => `entity:uiPreferences:${scope}`,
-);
 export type UiPreferenceProjection = Partial<
   Record<UiPreferenceScope, DeepReadonly<UiPreferencesDto> | undefined>
 >;

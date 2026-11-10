@@ -690,11 +690,6 @@
       "unit": "px",
       "purpose": "Existing workspace diff line-number button width, distinct from rail button diameter"
     },
-    "legacy_main_appearance.agentModeLimitWidth": {
-      "value": 64,
-      "unit": "px",
-      "purpose": "Existing agent mode limit input width"
-    },
     "legacy_main_style.tasksDrawerHeaderMin": {
       "value": 64,
       "unit": "px",
@@ -1416,15 +1411,6 @@
     {
       "path": "src/style.css",
       "kind": "dimension",
-      "signature": "{ min-height: 38px",
-      "key": "legacy_style.dimension116",
-      "count": 1,
-      "purpose": "Retained dimension consumer in style",
-      "plannedOwner": "slice1-contract"
-    },
-    {
-      "path": "src/style.css",
-      "kind": "dimension",
       "signature": "; max-height: 100px",
       "key": "legacy_style.dimension117",
       "count": 1,
@@ -1552,7 +1538,7 @@
       "path": "src/components/accounts/support/accounts.css",
       "kind": "query",
       "signature": "@media (max-width: 37.5rem) {",
-      "count": 9,
+      "count": 7,
       "key": "legacy_main_components_accounts.query452cba01",
       "plannedOwner": "main visual component",
       "purpose": "Retain the main component's exact query contract during responsive integration"
@@ -1579,7 +1565,7 @@
       "path": "src/components/agents/ChatSettingsDialog/chat-settings-dialog.css",
       "kind": "query",
       "signature": "@container (max-width: 26em) {",
-      "count": 3,
+      "count": 2,
       "key": "legacy_main_components_agents_chat_settings_dialog.querye51eafe3",
       "plannedOwner": "main visual component",
       "purpose": "Retain the main component's exact query contract during responsive integration"
@@ -1727,16 +1713,6 @@
       "key": "legacy_main_components_studio_settings.query0bafbd4a",
       "plannedOwner": "main visual component",
       "purpose": "Wide settings dialog keeps one height; the same boundary as its narrow layout"
-    },
-    {
-      "path": "src/style.css",
-      "kind": "layer",
-      "signature": "z-index: 40",
-      "count": 1,
-      "key": "workspaceNotices.layer",
-      "plannedOwner": "main visual component",
-      "purpose": "Workspace notices float over the transcript under the header",
-      "scope": "local"
     },
     {
       "path": "src/components/conversation/transcript/MessageInfo/message-info.css",
@@ -2009,15 +1985,6 @@
       "key": "legacy_main_workspace.diffLineNumberWidth",
       "plannedOwner": "main visual component",
       "purpose": "Keep the existing workspace diff line-number button width during responsive integration"
-    },
-    {
-      "path": "src/appearance.css",
-      "kind": "dimension",
-      "signature": "{ width: 64px",
-      "count": 2,
-      "key": "legacy_main_appearance.agentModeLimitWidth",
-      "plannedOwner": "main visual component",
-      "purpose": "Existing agent mode limit input width"
     },
     {
       "path": "src/style.css",

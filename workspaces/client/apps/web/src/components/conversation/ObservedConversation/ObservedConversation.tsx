@@ -3,6 +3,4 @@ import { observer } from "mobx-react-lite";
 
 const ObservedConversation = observer(ConversationView);
 
-export const LiveConversation = ObservedConversation;
-
 export default ObservedConversation;

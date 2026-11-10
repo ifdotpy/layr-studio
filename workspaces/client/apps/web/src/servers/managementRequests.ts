@@ -1,19 +1,5 @@
 import { outboxRequestKeys, outboxRequests } from "../browserPersistence.ts";
 import type { ServerAccessRequest } from "./accessContract.ts";
-function readLegacy(raw: string): ServerAccessRequest {
-  const value: ServerAccessRequest = JSON.parse(raw);
-  if (
-    !value ||
-    typeof value.requestId !== "string" ||
-    !value.requestId ||
-    ((value.action === "revoke" || value.action === "unrevoke") &&
-      typeof value.clientId !== "string")
-  )
-    throw new Error(
-      "The saved server request is invalid. Resolve it before retrying.",
-    );
-  return value;
-}
 export class ServerManagementRequests {
   private scope: string;
   private outbox: ReturnType<typeof outboxRequests>;
@@ -44,26 +30,10 @@ export class ServerManagementRequests {
       start,
     ))
       records.push(JSON.parse(this.outbox.get("serverManagement", key)!));
-    const legacy = this.outbox.get("legacyServerManagement", "");
-    if (legacy) {
-      const previous = readLegacy(legacy);
-      if (!records.some((value) => value.requestId === previous.requestId))
-        records.push(previous);
-    }
     return records;
   }
   async run(request: ServerAccessRequest) {
     await this.lock("studio-server-management:" + this.scope, async () => {
-      const legacy = this.outbox.get("legacyServerManagement", "");
-      if (legacy) {
-        const previous = readLegacy(legacy);
-        this.outbox.set(
-          "serverManagement",
-          this.key(previous.requestId),
-          legacy,
-        );
-        this.outbox.remove("legacyServerManagement", "");
-      }
       const pending = this.pending();
       const fingerprint = (value: ServerAccessRequest) =>
         JSON.stringify({ ...value, requestId: "" });

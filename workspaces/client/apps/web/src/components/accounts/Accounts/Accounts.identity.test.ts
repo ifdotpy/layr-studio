@@ -75,18 +75,12 @@ async function receive(
     archivedAccounts: [],
     defaultAccountKey: "personal",
     defaultAccountGroups: [],
-    logins: [],
     supportsDelete: true,
     supportsDisconnect: true,
   };
   Accounts({
-    state: {
-      data,
-      setData: vi.fn(),
-      error: "",
-      refresh: hooks.refresh.mockResolvedValue(data),
-      scope: "fixture",
-    },
+    state: data,
+    scope: "fixture",
     onError: vi.fn(),
     externalCommand: command,
   });

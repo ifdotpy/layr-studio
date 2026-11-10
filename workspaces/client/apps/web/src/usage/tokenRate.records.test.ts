@@ -1,11 +1,7 @@
 import { reaction, toJS, compareStructural } from "mobx";
 import type { components } from "../generated/api.ts";
 import { expect, it, vi } from "vitest";
-import {
-  TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS,
-  TOKEN_RATE_MAX_ENTRIES,
-  SYNC_PROTOCOL_VERSION,
-} from "../generated/api.ts";
+import { SYNC_PROTOCOL_VERSION } from "../generated/api.ts";
 import { createTokenRateCache, type TokenRate } from "./tokenRate.ts";
 
 it("one token record drives footer and team without an agent projection, moves roots and clears removals", () => {
@@ -53,67 +49,6 @@ it("one token record drives footer and team without an agent projection, moves r
   closeFirst();
   closeSecond();
   cache.dispose();
-});
-
-it("rejects nonfinite, malformed, duplicate and oversized records atomically at the snapshot boundary", async () => {
-  const { TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS, TOKEN_RATE_MAX_ENTRIES } =
-    await import("../generated/api.ts");
-  const cache = createTokenRateCache();
-  const record = {
-    agentId: "agent",
-    rootId: "root",
-    turnId: "turn",
-    active: false,
-    estimated: false,
-    rate: 3,
-    outputTokens: 6,
-  };
-  expect(cache.receiveWorkspaceTokenRates({ records: [record] })).toBe(true);
-  for (const field of ["agentId", "rootId", "turnId"] as const) {
-    for (const value of [
-      "",
-      "💠".repeat(TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS + 1),
-      null,
-    ])
-      expect(
-        cache.receiveWorkspaceTokenRates({
-          records: [{ ...record, [field]: value }],
-        }),
-      ).toBe(false);
-  }
-  for (const field of ["rate", "outputTokens"] as const)
-    for (const value of [Infinity, -Infinity, NaN, -1, null, "3"])
-      expect(
-        cache.receiveWorkspaceTokenRates({
-          records: [{ ...record, [field]: value }],
-        }),
-      ).toBe(false);
-  for (const invalid of [
-    null,
-    [],
-    { records: {} },
-    { records: [record, record] },
-    { records: [{ ...record, active: 1 }] },
-    { records: [{ ...record, estimated: 1 }] },
-    { records: [{ ...record, extension: 1 }] },
-  ])
-    expect(cache.receiveWorkspaceTokenRates(invalid)).toBe(false);
-  expect(cache.getTokenRate("agent")).toEqual(record);
-  const id = "💠".repeat(TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS);
-  const atLimit = Array.from(
-    { length: TOKEN_RATE_MAX_ENTRIES },
-    (_, index) => ({
-      ...record,
-      agentId: String(index),
-      rootId: id,
-      turnId: id,
-    }),
-  );
-  expect(cache.receiveWorkspaceTokenRates({ records: atLimit })).toBe(true);
-  expect(
-    cache.receiveWorkspaceTokenRates({ records: [...atLimit, record] }),
-  ).toBe(false);
-  expect(cache.getTokenRate("0")).toEqual(atLimit[0]);
 });
 
 it("applies token-rate deltas atomically, preserves quiet records, and replaces on reconnect", () => {
@@ -175,75 +110,6 @@ it("applies token-rate deltas atomically, preserves quiet records, and replaces 
   expect(cache.getTokenRate("active")).toBeNull();
   stop();
   cache.dispose();
-});
-
-it("rejects malformed delta metadata and aggregate overflow without partially applying", () => {
-  const cache = createTokenRateCache();
-  const record: TokenRate = {
-    agentId: "agent",
-    rootId: "root",
-    turnId: "turn",
-    active: true,
-    estimated: false,
-    rate: 1,
-    outputTokens: 10,
-  };
-  const frame = {
-    protocol: SYNC_PROTOCOL_VERSION,
-    workspaceId: "workspace",
-    epoch: "epoch",
-    revision: 1,
-    snapshot: true,
-    records: [record],
-    removed: [] as string[],
-  };
-  expect(cache.receiveResourceTokenRates(frame)).toBe(true);
-  for (const invalid of [
-    { ...frame, snapshot: undefined },
-    { ...frame, removed: undefined },
-    { ...frame, snapshot: false, removed: ["agent", "agent"] },
-    { ...frame, snapshot: false, removed: ["agent"] },
-    { ...frame, snapshot: false, records: [], removed: [""] },
-    { ...frame, removed: ["other"] },
-    {
-      ...frame,
-      snapshot: false,
-      records: [],
-      removed: ["a".repeat(TOKEN_RATE_IDENTIFIER_MAX_CODEPOINTS + 1)],
-    },
-    {
-      ...frame,
-      snapshot: false,
-      records: [],
-      removed: Array.from(
-        { length: TOKEN_RATE_MAX_ENTRIES + 1 },
-        (_, index) => `removed-${index}`,
-      ),
-    },
-  ]) {
-    expect(cache.receiveResourceTokenRates(invalid as typeof frame)).toBe(
-      false,
-    );
-    expect(cache.getTokenRate("agent")).toEqual(record);
-  }
-  const records = Array.from(
-    { length: TOKEN_RATE_MAX_ENTRIES },
-    (_, index) => ({ ...record, agentId: `agent-${index}` }),
-  );
-  expect(cache.receiveResourceTokenRates({ ...frame, records })).toBe(true);
-  expect(cache.receiveResourceTokenRates({ ...frame, snapshot: false })).toBe(
-    false,
-  );
-  expect(cache.getTokenRate("agent")).toBeNull();
-  expect(
-    cache.receiveResourceTokenRates({
-      ...frame,
-      snapshot: false,
-      removed: ["agent-0"],
-    }),
-  ).toBe(true);
-  expect(cache.getTokenRate("agent-0")).toBeNull();
-  expect(cache.getTokenRate("agent")).toEqual(record);
 });
 
 it("requires a token baseline for each epoch before applying deltas", () => {

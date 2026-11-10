@@ -5,11 +5,6 @@ export type { Approval };
 
 /** What the request asks. Fixed at creation; it decides which answers fit. */
 export type ApprovalKind = Approval["request"]["kind"];
-/** The state of one approval: pending, answering, answered, unknown or closed. */
-export type ApprovalStateKind = Approval["state"]["kind"];
-export type ApprovalOf<K extends ApprovalKind> = Approval & {
-  request: Extract<Approval["request"], { kind: K }>;
-};
 
 /** Kinds that ask the person questions. */
 export const QUESTION_KINDS: readonly ApprovalKind[] = [
@@ -27,9 +22,6 @@ export const isDeferred = (approval: DeepReadonly<Approval>) =>
 /** Pending and not moved aside: it needs the person now. */
 export const needsAnswer = (approval: DeepReadonly<Approval>) =>
   isPending(approval) && !isDeferred(approval);
-
-export const isQuestion = (approval: DeepReadonly<Approval>) =>
-  QUESTION_KINDS.includes(approval.request.kind);
 
 /** Question that waits for a person and lets the agent keep working. */
 export const isAgentQuestion = (approval: DeepReadonly<Approval>) =>

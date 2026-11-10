@@ -14,7 +14,6 @@ import { NavigationOwner } from "./shell/NavigationOwner.ts";
 import { LayoutOwner } from "./shell/LayoutOwner.ts";
 import { SidebarOwner } from "./shell/SidebarOwner.ts";
 import { CreationOwner } from "./projects/CreationOwner.ts";
-import { createAccountsView } from "../components/accounts/Accounts/Accounts.tsx";
 import { createUiPreferenceBridge } from "../sync/uiPreferenceBridge.ts";
 import { loadStudioPreferences } from "./settings/useAppPreferences.ts";
 import { DeliveryOwner } from "./conversation/DeliveryOwner.ts";
@@ -35,7 +34,11 @@ export class ServerAreas {
   readonly navigation: NavigationOwner;
   readonly creation: CreationOwner;
   readonly preferences;
-  readonly accounts;
+  get accounts() {
+    return resourceData(this.scope.store.state().current)?.accountsSummary.get(
+      "current",
+    );
+  }
   readonly preferenceBridge;
   readonly read: ReadStateOwner;
   readonly rename: RenameOwner;
@@ -64,11 +67,6 @@ export class ServerAreas {
   disposed = false;
   constructor(scope: AppScope) {
     this.scope = scope;
-    this.accounts = createAccountsView(
-      scope.store,
-      scope.services.api.get,
-      scope.services.owner.id,
-    );
     this.preferenceBridge = createUiPreferenceBridge(
       scope.services.storage,
       scope.services.api.syncPost,
@@ -171,7 +169,6 @@ export class ServerAreas {
     this.disposed = true;
     this.ui.generation++;
     clearTimeout(this.toastTimer);
-    this.accounts.invalidate();
     runInAction(() => {
       this.notices.toast = "";
     });

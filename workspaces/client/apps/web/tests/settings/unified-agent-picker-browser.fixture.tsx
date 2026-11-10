@@ -247,7 +247,6 @@ const accountsData = {
   defaultAccountKey: "account-0",
   archivedAccounts: [],
   defaultAccountGroups: [],
-  logins: [],
   supportsDelete: false,
   supportsDisconnect: false,
 } satisfies AccountsState;

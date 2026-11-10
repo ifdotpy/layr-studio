@@ -31,6 +31,35 @@ const STORE = "input";
 
 const db = indexedDb(DATABASE, STORE, DATABASE_VERSION);
 
+// Includes composer saves registered synchronously before their queue starts them.
+const textWrites = new Set<Promise<void>>();
+let textWriteFailure: Error | undefined;
+let failureReported = false;
+export function trackUnsentTextWrite(operation: Promise<void>) {
+  textWrites.add(operation);
+  void operation.then(
+    () => {
+      textWrites.delete(operation);
+    },
+    (error: unknown) => {
+      textWrites.delete(operation);
+      textWriteFailure ??= new Error(
+        `The draft is not saved. ${String(error)}`,
+      );
+    },
+  );
+  return operation;
+}
+
+/** Await queued and active saves. A visible refusal acknowledges a session failure. */
+export async function flushUnsentText() {
+  while (textWrites.size) await Promise.allSettled(textWrites);
+  if (textWriteFailure && !failureReported) {
+    failureReported = true;
+    throw textWriteFailure;
+  }
+}
+
 type StoredValue = Extract<UnsentRecord, { kind: "text" }>;
 export type TextFeature = "form" | "answer" | "queue-edit" | "reply";
 function putRecord(key: string, value: UnsentRecord) {
@@ -64,14 +93,16 @@ export function unsentStore(server: string, feature: TextFeature) {
       return record?.value;
     },
     async put(id: string, value: string) {
-      await putRecord(prefix(id), encode(value));
+      await trackUnsentTextWrite(putRecord(prefix(id), encode(value)));
     },
     async delete(id: string) {
-      await db.delete(prefix(id));
+      await trackUnsentTextWrite(db.delete(prefix(id)));
     },
     async deleteIfEqual(id: string, value: string) {
-      await db.update(prefix(id), (current) =>
-        decode(current)?.value === value ? undefined : current,
+      await trackUnsentTextWrite(
+        db.update(prefix(id), (current) =>
+          decode(current)?.value === value ? undefined : current,
+        ),
       );
     },
     async loadAll(): Promise<[string, string][]> {
@@ -152,14 +183,16 @@ export function draftStore(server: string) {
   const key = (id: string) => unsentKey(server, "draft", id);
   return {
     async put(id: string, value: Draft) {
-      await putRecord(key(id), {
-        version: UNSENT_FORMAT_VERSION,
-        kind: "draft",
-        value,
-      });
+      await trackUnsentTextWrite(
+        putRecord(key(id), {
+          version: UNSENT_FORMAT_VERSION,
+          kind: "draft",
+          value,
+        }),
+      );
     },
     async delete(id: string) {
-      await db.delete(key(id));
+      await trackUnsentTextWrite(db.delete(key(id)));
     },
     loadAll: () => loadRecords(server, "draft", decodeDraft),
   };
