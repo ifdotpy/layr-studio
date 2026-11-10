@@ -7,7 +7,7 @@
  * (docs/sync-protocol.md).
  */
 
-import { newIdentityNonce, verifyIdentityProof } from "./pairing.ts";
+import { newIdentityNonce, verifyIdentityProof } from "../pairing.ts";
 
 /** Longest wait for one identity answer, in milliseconds. */
 export const ROUTE_IDENTITY_TIMEOUT_MS = 5_000;

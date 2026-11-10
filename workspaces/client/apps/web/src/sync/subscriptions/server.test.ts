@@ -14,7 +14,7 @@ vi.mock("../resourceEvents.ts", () => ({
     };
   },
 }));
-vi.mock("../../servers/eventSource.ts", () => ({
+vi.mock("../../servers/net/eventSource.ts", () => ({
   SignedEventSource: class {
     constructor(...args: unknown[]) {
       mocks.source(...args);

@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   watch: vi.fn((_listener: () => void) => () => {}),
 }));
 
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   refreshSession: mocks.sessionRead,
   syncPost: mocks.syncPost,
   errorText: (error: unknown) =>

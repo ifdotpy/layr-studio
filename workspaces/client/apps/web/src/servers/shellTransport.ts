@@ -1,6 +1,6 @@
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import type { CredentialBridge } from "../../../desktop/api.ts";
-import type { StreamChunk } from "./desktopCredentials.ts";
+import type { StreamChunk } from "./net/desktopCredentials.ts";
 import { serverParentOrigin, serverViewId } from "./environment.ts";
 
 export function shellCredentialBridge(): CredentialBridge {

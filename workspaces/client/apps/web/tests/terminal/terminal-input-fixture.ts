@@ -8,7 +8,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import TerminalDock from "../../src/components/shell/TerminalDock/TerminalDock.tsx";
-import { setToken } from "../../src/api.ts";
+import { setToken } from "../../src/servers/net/api.ts";
 const Terminal = observer(function Terminal() {
   const agent = resourceData(useServerStore().state().current)?.agents.get(
     "agent",

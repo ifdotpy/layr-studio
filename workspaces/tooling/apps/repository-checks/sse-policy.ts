@@ -6,7 +6,7 @@ export type Site = { file: string; callee: string };
 
 // Owners of explicit user actions, bounded resync and the stream transport.
 const requestOwners = new Set([
-  "api.ts",
+  "servers/net/api.ts",
   "commands.ts",
   "sync/resync.ts",
   "servers/eventSource.ts",

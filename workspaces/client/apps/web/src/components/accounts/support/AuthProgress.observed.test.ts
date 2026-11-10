@@ -172,7 +172,7 @@ it.each(["ready", "codeSubmitted"] as const)(
   "late recovery cannot regress a command's %s receipt across reconnect and replay",
   async (completed) => {
     type Receipt =
-      import("../../../api.ts").PostResult<"/api/accounts/claude/login">;
+      import("../../../servers/net/api.ts").PostResult<"/api/accounts/claude/login">;
     let finish!: (value: Receipt) => void;
     const recover = vi.fn(
       () =>

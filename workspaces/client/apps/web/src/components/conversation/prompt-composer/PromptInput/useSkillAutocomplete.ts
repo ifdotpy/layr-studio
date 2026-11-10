@@ -1,9 +1,6 @@
 import { useRef, useState } from "react";
 import type { GetResult } from "../../../../api.ts";
-import {
-  useServerApi,
-  useServerStore,
-} from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../../../store/runtime.ts";
 
 type SkillCatalog = GetResult<"/api/skills">;
@@ -59,10 +56,9 @@ export function useSkillAutocomplete({
   input: React.RefObject<HTMLTextAreaElement | null>;
   insert: (text: string, start: number, end: number) => void;
 }) {
-  const api = useServerApi(),
-    store = useServerStore();
+  const net = useServerNet();
   const query = { agent: agentId };
-  const read = store.reads.skills(api, query, {
+  const read = net.reads.skills(query, {
     workspace,
     account,
     cwd,

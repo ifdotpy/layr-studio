@@ -30,7 +30,10 @@ test("detects new request and persistence access while permitting transport owne
     ),
     ["localStorage"],
   );
-  assert.deepEqual(violations("api.ts", "fetch('/');"), []);
+  assert.deepEqual(violations("servers/net/api.ts", "fetch('/');"), []);
+  assert.deepEqual(violations("api.ts", "fetch('/');"), [
+    { file: "api.ts", callee: "fetch" },
+  ]);
   assert.deepEqual(
     violations("browserPersistence.ts", "indexedDB.open('x');"),
     [],

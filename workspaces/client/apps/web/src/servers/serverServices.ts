@@ -1,3 +1,5 @@
+import { createNet } from "./net/net.ts";
+import { NetStatus } from "./net/status.ts";
 import type { ServerSettings } from "./ServerSettingsContext.tsx";
 import { ServerAreas } from "../app/ServerAreasProvider.tsx";
 import { ScreenOwner } from "../app/startup/ScreenOwner.ts";
@@ -26,15 +28,15 @@ import { createServerStore } from "../store/server.ts";
 import { createTranscriptCache } from "../sync/transcriptCache.ts";
 import { createTokenRateCache } from "../usage/tokenRate.ts";
 import { createEntitySequenceScope } from "../sync/entitySequence.ts";
-import { createApiScope } from "../api.ts";
+import { createApiScope } from "./net/api.ts";
 import { hasNativeClient } from "../native/client.ts";
 import { nativeFetch } from "../native/http.ts";
 import { preferenceStorageForServer } from "../sync/uiPreferenceStore.ts";
 import { createServerActivity } from "./activity.ts";
 import { createMutationJournal } from "./mutationIdentity.ts";
 import type { StudioServer } from "./registry.ts";
-import { createServerTransport } from "./serverTransport.ts";
-import { serverCredentialAdapter } from "./transport.ts";
+import { createServerTransport } from "./net/serverTransport.ts";
+import { serverCredentialAdapter } from "./net/transport.ts";
 import { scopedSessionOutbox } from "../browserPersistence.ts";
 import { indexedDb } from "../indexedDb.ts";
 
@@ -58,16 +60,18 @@ export function createServerServices(server: StudioServer) {
     "subscriptions",
     1,
   );
+  const netStatus = new NetStatus();
   const api = createApiScope({
     origin: transport.owner.origin,
     fetch: transport.fetch,
+    requestStatus: netStatus,
     localStorage: storage,
     sessionStorage: scopedSessionOutbox(`:server:${transport.owner.id}:`),
     beginMutation: createMutationJournal(transport.owner.id, storage),
     beginActivity: activity.beginServerActivity,
   });
   // The pending layer of this server ends when its own stream checkpoint reaches the response.
-  sequences.onEntitySequenceAdvance((sequence, reset) => {
+  const stopSequences = sequences.onEntitySequenceAdvance((sequence, reset) => {
     if (reset) api.pending.resetClientSeq();
     api.pending.observeClientSeq(sequence);
   });
@@ -82,6 +86,7 @@ export function createServerServices(server: StudioServer) {
       }
     | undefined;
   let stopName = () => {};
+  let stopConnection = () => {};
   const synchronization = () => {
     if (runtime) return runtime;
     let sync!: ReturnType<typeof createSyncClient>;
@@ -117,6 +122,9 @@ export function createServerServices(server: StudioServer) {
             ).join(""),
     });
     runtime = { sync, resources, store: createServerStore(resources) };
+    stopConnection = resources.watchResourceConnection((health) =>
+      netStatus.receive(health),
+    );
     if (transport.owner.id !== "local")
       stopName = watchServerName(transport.owner, runtime.store);
     return runtime;
@@ -159,10 +167,18 @@ export function createServerServices(server: StudioServer) {
     }
     await initialization;
   }
+  const net = createNet(api, () => synchronization().store, netStatus, {
+    storage,
+    updateQueueRequest: localDrafts.updateQueueRequest,
+  });
+  const stopSchema = api.onApiSchemaMismatch(() =>
+    netStatus.receive("schema-mismatch"),
+  );
   const screen = new ScreenOwner();
   let areas: ServerAreas | undefined;
   let sidebarServices: ReturnType<typeof createSidebarServices> | undefined;
   return {
+    net,
     screen,
     shellSettings: undefined as ServerSettings | undefined,
     get areas(): ServerAreas {
@@ -229,6 +245,9 @@ export function createServerServices(server: StudioServer) {
     storage,
     ready,
     close(removeCache = false) {
+      stopSchema();
+      stopConnection();
+      stopSequences();
       tokenRates.dispose();
       areas?.dispose();
       audio.close();

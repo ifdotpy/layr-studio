@@ -1,3 +1,5 @@
+import { createNet } from "../../../servers/net/net.ts";
+import * as api from "../../../servers/net/api.ts";
 import type { ComponentSnapshot as Snapshot } from "../ComposerAttachments/componentTestFixtures.ts";
 vi.mock("../../agents/support/state.ts", async (original) => ({
   ...(await original<typeof import("../../agents/support/state.ts")>()),
@@ -92,7 +94,12 @@ const detailStore = {
 };
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (original) => ({
+    ...(await original<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
+    useServerNet: () =>
+      createNet({ ...api, get: h.get, post: h.post }, () => reads),
     useServerStore: () => detailStore,
     useServerApi: () => ({
       get: h.get,

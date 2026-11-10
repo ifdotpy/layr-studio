@@ -9,7 +9,7 @@ import { createSubscriptionStore } from "./subscriptions/store.ts";
 import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 import { SYNC_STREAM_EVENT_MAX_BYTES } from "../generated/sharedValues.ts";
 import { SYNC_PROTOCOL_VERSION } from "../generated/api.ts";
-import { EventStreamParser } from "../servers/eventSource.ts";
+import { EventStreamParser } from "../servers/net/eventSource.ts";
 
 vi.mock("./client.ts", () => ({ syncDatabase: vi.fn() }));
 vi.mock("../usage/tokenRate.ts", () => ({

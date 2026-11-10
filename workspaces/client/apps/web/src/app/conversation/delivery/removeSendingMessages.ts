@@ -3,7 +3,7 @@ import { outboxRequests } from "../../../browserPersistence.ts";
 import { AgentSource as GeneratedApiAgentSource } from "../../../generated/api.ts";
 import { DeliveryMoment } from "../../../generated/deliveryMoment.ts";
 import { serverLocalStorage as localStorage } from "../../../servers/storage.ts";
-import { get, command, ApiError } from "../../../api.ts";
+import { get, command, ApiError } from "../../../servers/net/api.ts";
 import type { CommandRequest } from "../../../commands.ts";
 import type { Message } from "../../../types.ts";
 import type { StateCollections } from "../../../generated/observableResources.ts";

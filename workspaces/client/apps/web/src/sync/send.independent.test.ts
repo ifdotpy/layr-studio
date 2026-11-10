@@ -305,7 +305,7 @@ it("removes a pending request when the stream confirms the matching workspace an
 });
 
 it("removes a definitive rejection from the buffer", async () => {
-  const { ApiError } = await import("../api.ts");
+  const { ApiError } = await import("../servers/net/api.ts");
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi
@@ -486,7 +486,7 @@ it("coalesces a reconnect with a send whose persistence callback is still runnin
 });
 
 it("keeps a remote outcome-unknown error uncertain instead of treating it as a refusal", async () => {
-  const { ApiError } = await import("../api.ts");
+  const { ApiError } = await import("../servers/net/api.ts");
   const storage = new MemoryStorage();
   const buffer = new MemoryBuffer();
   const post = vi

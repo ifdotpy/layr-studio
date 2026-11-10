@@ -8,7 +8,7 @@ import { conversationActionsFixture } from "../../src/components/shell/integrati
 import type { ServerServices } from "../../src/servers/serverServices.ts";
 import { createServerStore } from "../../src/store/server.ts";
 import { ServerStoreProvider } from "../../src/components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import * as api from "../../src/api.ts";
+import * as api from "../../src/servers/net/api.ts";
 import { defaultSyncClient } from "../../src/sync/client.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import { useState, useRef } from "react";

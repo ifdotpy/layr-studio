@@ -18,7 +18,7 @@ import {
 } from "./discoveryModel.ts";
 import type { ServerAccessRequest } from "./accessContract.ts";
 import { readServers, setLocalServerDetails } from "./registry.ts";
-import { serverCredentialAdapter } from "./transport.ts";
+import { serverCredentialAdapter } from "./net/transport.ts";
 import { adoptTrustedServers } from "./trustedServers.ts";
 export function useServerDiscovery(
   enabled: boolean,

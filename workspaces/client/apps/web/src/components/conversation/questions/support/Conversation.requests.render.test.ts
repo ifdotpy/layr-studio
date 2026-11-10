@@ -4,7 +4,7 @@ import { act, createElement, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import * as defaultApi from "../../../../api.ts";
+import * as defaultApi from "../../../../servers/net/api.ts";
 import type { Message } from "../../../../types.ts";
 import { ServerStoreProvider } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { requestFixture } from "./requestFixtures.ts";

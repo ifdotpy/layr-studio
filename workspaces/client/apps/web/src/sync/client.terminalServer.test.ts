@@ -19,7 +19,7 @@ import type { ResourceChangeEvent } from "./subscriptions/events.ts";
 const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
 }));
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),

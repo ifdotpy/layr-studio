@@ -7,7 +7,7 @@ import { SubscriptionReplyKind } from "../generated/api.ts";
 import {
   openServerEvents,
   type ServerEventSource,
-} from "../servers/eventSource.ts";
+} from "../servers/net/eventSource.ts";
 
 import {
   SYNC_PROTOCOL_VERSION,
@@ -33,7 +33,7 @@ import {
   post,
   receiveStreamSession,
   clearStreamSession,
-} from "../api.ts";
+} from "../servers/net/api.ts";
 
 import {
   persistResourceEntityChanges,
@@ -134,7 +134,7 @@ export type ResourceEventsOptions = {
   /** Receives the origins the server answers on, once per connection. */
   onRoutes?: (routes: readonly string[]) => void;
   api: Pick<
-    import("../api.ts").ServerApi,
+    import("../servers/net/api.ts").ServerApi,
     | "clearSchemaUpdateAttemptAfterMatch"
     | "get"
     | "post"
@@ -145,7 +145,7 @@ export type ResourceEventsOptions = {
   > &
     Partial<
       Pick<
-        import("../api.ts").ServerApi,
+        import("../servers/net/api.ts").ServerApi,
         "receiveStreamSession" | "clearStreamSession"
       >
     >;

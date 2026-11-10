@@ -15,7 +15,7 @@ import {
   setWorkspace,
   syncGet,
   untilAnswered,
-} from "./api.ts";
+} from "./servers/net/api.ts";
 
 describe("OpenAPI transport facade", () => {
   it("releases renderer activity when a pending chat delete is aborted", async () => {

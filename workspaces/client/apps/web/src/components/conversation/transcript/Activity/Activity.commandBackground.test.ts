@@ -279,7 +279,7 @@ describe("process action construction", () => {
         epoch: 4,
       };
     // @ts-expect-error A found receipt always carries the saved result.
-    const found: import("../../../../api.ts").GetResult<"/api/processes/action"> =
+    const found: import("../../../../servers/net/api.ts").GetResult<"/api/processes/action"> =
       {
         found: true,
       };
@@ -305,7 +305,7 @@ describe("process action construction", () => {
       };
     // @ts-expect-error A failed process outcome requires its error payload.
     const failed: NonNullable<
-      import("../../../../api.ts").PostResult<"/api/processes/action">["processes"]
+      import("../../../../servers/net/api.ts").PostResult<"/api/processes/action">["processes"]
     >[number] = { key: "key", agent: "lead", status: "failed" };
     void mixed;
     void descendants;

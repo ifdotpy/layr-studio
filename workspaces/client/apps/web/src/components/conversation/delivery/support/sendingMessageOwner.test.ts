@@ -5,7 +5,7 @@ vi.mock(
   "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({}),
 );
-vi.mock("../../../../api.ts", () => ({
+vi.mock("../../../../servers/net/api.ts", () => ({
   get: vi.fn(),
   command: { make: vi.fn(), run: vi.fn() },
   ApiError: class extends Error {},

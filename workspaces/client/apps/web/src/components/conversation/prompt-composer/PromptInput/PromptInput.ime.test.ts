@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { createNet } from "../../../../servers/net/net.ts";
+import * as api from "../../../../servers/net/api.ts";
 import { MantineProvider } from "@mantine/core";
 import { act, createElement, createRef } from "react";
 import { createRoot } from "react-dom/client";
@@ -14,6 +16,7 @@ vi.mock(
       typeof import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
     useServerStore: () => models.store,
+    useServerNet: () => createNet(api, () => models.store),
   }),
 );
 afterAll(() => models.store.dispose());

@@ -23,7 +23,11 @@ const owner = {
 };
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (original) => ({
+    ...(await original<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
+    useServerNet: () => ({}),
     useServerStore: () => owner,
     useServerApi: () => ({ post: vi.fn() }),
     useServerFileDialogs: () => ({

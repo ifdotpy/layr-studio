@@ -93,7 +93,7 @@ it("does not restore an upload removed while its request is in flight", async ()
 });
 
 it("keeps the upload until the server confirms it", async () => {
-  const { ApiError } = await import("../api.ts");
+  const { ApiError } = await import("../servers/net/api.ts");
   const rows = new Map<string, StoredUpload>();
   const buffer = {
     put: async (key: string, value: StoredUpload) => {

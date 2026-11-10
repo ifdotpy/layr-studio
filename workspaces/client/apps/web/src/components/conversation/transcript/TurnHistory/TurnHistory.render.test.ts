@@ -13,6 +13,7 @@ vi.mock(
     ...(await original<
       typeof import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
+    useServerNet: () => ({}),
     useServerStore: () => ({}),
     useServerApi: () => ({}),
   }),

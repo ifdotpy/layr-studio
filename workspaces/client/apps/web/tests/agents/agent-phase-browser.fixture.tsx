@@ -18,7 +18,7 @@ import type {
   ResourceRef,
 } from "../../src/sync/resourceEvents.ts";
 import type { ResourceData } from "../../src/sync/subscriptions/contracts.ts";
-import type { ServerEventSource } from "../../src/servers/eventSource.ts";
+import type { ServerEventSource } from "../../src/servers/net/eventSource.ts";
 import { API_SCHEMA_HASH } from "../../src/generated/apiSchema.ts";
 import {
   SYNC_PROTOCOL_VERSION,

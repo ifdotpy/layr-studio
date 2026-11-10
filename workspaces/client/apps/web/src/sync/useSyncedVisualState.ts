@@ -1,13 +1,12 @@
 import {
-  useServerApi,
+  useServerPreferences,
   useServerStorageEventKey,
 } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useEffect, useState } from "react";
-import "../api.ts";
 import { preferenceEvent } from "./uiPreferenceMerge.ts";
 /** Local cache supplies the first render; entity delivery updates later renders. */
 export function useSyncedVisualState<T>(key: string, fallback: T) {
-  const { saved } = useServerApi();
+  const { saved } = useServerPreferences();
   const storageEventKey = useServerStorageEventKey();
 
   const [value, setValue] = useState<T>(() => saved(key, fallback));

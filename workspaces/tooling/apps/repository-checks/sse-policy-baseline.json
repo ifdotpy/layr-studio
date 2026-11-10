@@ -4,32 +4,24 @@
     "callee": "syncGet"
   },
   {
-    "file": "api.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage"
   },
   {
-    "file": "api.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage"
   },
   {
-    "file": "api.ts",
-    "callee": "localStorage"
-  },
-  {
-    "file": "api.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage.getItem"
   },
   {
-    "file": "api.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage.setItem"
   },
   {
-    "file": "api.ts",
+    "file": "apiStorage.ts",
     "callee": "localStorage.getItem"
-  },
-  {
-    "file": "api.ts",
-    "callee": "localStorage"
   },
   {
     "file": "apiSchema.test.ts",
@@ -140,7 +132,7 @@
     "callee": "localStorage.setItem"
   },
   {
-    "file": "components/conversation/support/useMessageQueue.ts",
+    "file": "servers/net/queue.ts",
     "callee": "syncPost"
   },
   {
@@ -172,7 +164,7 @@
     "callee": "new NativeServerCredentials().fetch"
   },
   {
-    "file": "servers/browserCredentials.ts",
+    "file": "servers/net/browserCredentials.ts",
     "callee": "fetch"
   },
   {
@@ -200,19 +192,19 @@
     "callee": "globalThis.fetch"
   },
   {
-    "file": "servers/routes.ts",
+    "file": "servers/net/routes.ts",
     "callee": "fetch"
   },
   {
-    "file": "servers/routes.ts",
+    "file": "servers/net/routes.ts",
     "callee": "fetch"
   },
   {
-    "file": "servers/routes.ts",
+    "file": "servers/net/routes.ts",
     "callee": "localStorage.getItem"
   },
   {
-    "file": "servers/routes.ts",
+    "file": "servers/net/routes.ts",
     "callee": "localStorage.setItem"
   },
   {
@@ -244,27 +236,27 @@
     "callee": "globalThis.localStorage"
   },
   {
-    "file": "servers/summary.ts",
+    "file": "servers/net/summary.ts",
     "callee": "fetch"
   },
   {
-    "file": "servers/summary.ts",
+    "file": "servers/net/summary.ts",
     "callee": "createServerTransport(server, (owner, request) =>\n            serverCredentialAdapter().fetch(owner, request),\n          ).fetch"
   },
   {
-    "file": "servers/summary.ts",
+    "file": "servers/net/summary.ts",
     "callee": "serverCredentialAdapter().fetch"
   },
   {
-    "file": "servers/transport.ts",
+    "file": "servers/net/transport.ts",
     "callee": "globalThis.fetch"
   },
   {
-    "file": "servers/transport.ts",
+    "file": "servers/net/transport.ts",
     "callee": "globalThis.fetch"
   },
   {
-    "file": "servers/transport.ts",
+    "file": "servers/net/transport.ts",
     "callee": "serverCredentialAdapter().fetch"
   },
   {

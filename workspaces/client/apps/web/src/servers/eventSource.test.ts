@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 /// <reference lib="es2024.promise" />
 import { expect, it, vi, afterEach } from "vitest";
-import { EventStreamParser } from "./eventSource.ts";
+import { EventStreamParser } from "./net/eventSource.ts";
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
@@ -29,7 +29,7 @@ it.each(["", "&tokenRates=false", "&tokenRates=true"])(
   "uses signed fetch for remote events with selector %s and cancels the stream on close",
   async (selector) => {
     vi.stubGlobal("location", { origin: "http://studio.test", search: "" });
-    const { SignedEventSource } = await import("./eventSource.ts");
+    const { SignedEventSource } = await import("./net/eventSource.ts");
     let stream!: ReadableStreamDefaultController<Uint8Array>;
     const cancelled = Promise.withResolvers<void>();
     const delivered = Promise.withResolvers<void>();
@@ -81,7 +81,7 @@ it.each(["", "&tokenRates=false", "&tokenRates=true"])(
 );
 it("cancels a rejected event response", async () => {
   vi.stubGlobal("location", { origin: "http://studio.test", search: "" });
-  const { SignedEventSource } = await import("./eventSource.ts");
+  const { SignedEventSource } = await import("./net/eventSource.ts");
   const cancel = vi.fn();
   const source = new SignedEventSource(
     "/api/sync/stream",
@@ -100,7 +100,7 @@ it("cancels a rejected event response", async () => {
 });
 it("reports the HTTP status of a refused event response", async () => {
   vi.stubGlobal("location", { origin: "http://studio.test", search: "" });
-  const { SignedEventSource } = await import("./eventSource.ts");
+  const { SignedEventSource } = await import("./net/eventSource.ts");
   const source = new SignedEventSource(
     "/api/sync/stream",
     async () => new Response("no", { status: 403 }),
@@ -112,7 +112,7 @@ it("reports the HTTP status of a refused event response", async () => {
 });
 it("backpressures reads while staging and close interrupts an unfinished hold", async () => {
   vi.stubGlobal("location", { origin: "http://studio.test", search: "" });
-  const { SignedEventSource } = await import("./eventSource.ts");
+  const { SignedEventSource } = await import("./net/eventSource.ts");
   let stream!: ReadableStreamDefaultController<Uint8Array>;
   const cancelled = Promise.withResolvers<void>();
   const received = Promise.withResolvers<void>();
@@ -152,7 +152,7 @@ it("backpressures reads while staging and close interrupts an unfinished hold", 
 });
 it("settled staging holds retain no lifetime result chain", async () => {
   vi.stubGlobal("location", { origin: "http://studio.test", search: "" });
-  const { SignedEventSource } = await import("./eventSource.ts");
+  const { SignedEventSource } = await import("./net/eventSource.ts");
   const source = new SignedEventSource(
     "/api/sync/stream",
     async () =>

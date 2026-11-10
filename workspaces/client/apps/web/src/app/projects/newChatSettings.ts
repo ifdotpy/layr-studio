@@ -9,12 +9,12 @@ import {
   type GetResult,
   type GetOptions,
   type PostBody,
-} from "../../api.ts";
+} from "../../servers/net/api.ts";
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,
 } from "../../generated/apiSchema.ts";
-import { serverCredentialAdapter } from "../../servers/transport.ts";
+import { serverCredentialAdapter } from "../../servers/net/transport.ts";
 import type { StudioServer } from "../../servers/registry.ts";
 import {
   ACCOUNT_KEY_MIN_CHARS,

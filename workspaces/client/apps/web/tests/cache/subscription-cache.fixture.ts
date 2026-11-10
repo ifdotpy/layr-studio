@@ -1,6 +1,6 @@
 import { observeGeneratedState } from "../../src/sync/generatedState.testHelper.ts";
 import { serializeStateCollections } from "../../src/generated/observableResources.ts";
-import { syncGet } from "../../src/api.ts";
+import { syncGet } from "../../src/servers/net/api.ts";
 import { createSyncClient } from "../../src/sync/client.ts";
 import { createResourceEvents } from "../../src/sync/resourceEvents.ts";
 import { createEntitySequenceScope } from "../../src/sync/entitySequence.ts";

@@ -8,7 +8,7 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import * as defaultApi from "../../../../api.ts";
+import * as defaultApi from "../../../../servers/net/api.ts";
 import { createSubscriptions } from "../../../../sync/subscriptions/module.ts";
 import { createServerStore } from "../../../../store/server.ts";
 import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts";

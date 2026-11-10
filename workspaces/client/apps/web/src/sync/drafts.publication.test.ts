@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   syncPost: vi.fn(),
   ApiError: class extends Error {},
 }));

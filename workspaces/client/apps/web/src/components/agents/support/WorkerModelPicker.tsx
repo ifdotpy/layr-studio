@@ -6,7 +6,7 @@ import {
 import { makeAutoObservable, runInAction } from "mobx";
 import { resourceData } from "../../../store/runtime.ts";
 import type { DeepReadonly } from "../../../deepReadonly.ts";
-import { ApiError, get, errorText } from "../../../api.ts";
+import { ApiError, get, errorText } from "../../../servers/net/api.ts";
 import { serverResourceScope } from "../../../servers/registry.ts";
 
 import type { components } from "../../../generated/api.ts";

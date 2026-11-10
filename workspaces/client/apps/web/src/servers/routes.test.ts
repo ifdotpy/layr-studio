@@ -35,7 +35,7 @@ import {
   retarget,
   routesFor,
   sendRouted,
-} from "./routes.ts";
+} from "./net/routes.ts";
 
 const PAIRED = "https://mac.tail.ts.net";
 const LAN = "https://192.168.1.5:8443";
@@ -242,7 +242,7 @@ describe("learned routes (rule 3)", () => {
       JSON.stringify([LAN]),
     );
     vi.resetModules();
-    const reloaded = await import("./routes.ts");
+    const reloaded = await import("./net/routes.ts");
     expect(
       reloaded.routesFor({ id: "reload-test", origin: PAIRED }).routes(),
     ).toEqual([PAIRED, LAN]);

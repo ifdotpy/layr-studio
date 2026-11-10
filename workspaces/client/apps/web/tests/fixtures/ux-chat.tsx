@@ -4,7 +4,7 @@ import {
   createServerServices,
   type ServerServices,
 } from "../../src/servers/serverServices.ts";
-import * as fixtureApi from "../../src/api.ts";
+import * as fixtureApi from "../../src/servers/net/api.ts";
 import { createServerStore } from "../../src/store/server.ts";
 import { defaultSubscriptions } from "../../src/sync/subscriptions/events.ts";
 import {

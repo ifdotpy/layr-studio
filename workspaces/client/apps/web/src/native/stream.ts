@@ -3,7 +3,7 @@ import { listenNativeEvents, nativeRequest } from "./client.ts";
 import type {
   NativeStreamRetry,
   ServerEventSource,
-} from "../servers/eventSource.ts";
+} from "../servers/net/eventSource.ts";
 
 type NativeStreamMessage = {
   event?: string;

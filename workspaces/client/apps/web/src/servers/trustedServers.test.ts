@@ -9,7 +9,9 @@ const mocks = vi.hoisted(() => ({
   trusted: vi.fn(),
   written: [] as StudioServer[][],
 }));
-vi.mock("./browserCredentials.ts", () => ({ trustedServer: mocks.trusted }));
+vi.mock("./net/browserCredentials.ts", () => ({
+  trustedServer: mocks.trusted,
+}));
 vi.mock("./excludedServers.ts", () => ({
   excludedServers: () => mocks.excluded,
 }));

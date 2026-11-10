@@ -17,7 +17,7 @@ import {
   type HTMLAttributes,
   type ReactNode,
 } from "react";
-import { ApiError, command, errorText } from "../../../../api.ts";
+import { ApiError, command, errorText } from "../../../../servers/net/api.ts";
 import type { CommandRequest } from "../../../../commands.ts";
 import { MAX_DRAFT_TEXT_CODEPOINTS } from "../../../../generated/sharedValues.ts";
 import { useSidebarBackend } from "../../../sidebar/support/services.tsx";

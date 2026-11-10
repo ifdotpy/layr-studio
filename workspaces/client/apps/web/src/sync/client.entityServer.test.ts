@@ -42,7 +42,7 @@ const mocks = vi.hoisted(() => ({
   syncGet: vi.fn(),
   invalidations: new Set<(version?: ResourceVersion) => void>(),
 }));
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   syncPost: vi.fn(),

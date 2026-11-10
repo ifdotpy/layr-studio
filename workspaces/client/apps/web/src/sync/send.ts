@@ -6,7 +6,12 @@ import {
 } from "../unsent/store.ts";
 import { serverViewId } from "../servers/environment.ts";
 import { serverMutationResponseIsUncertain } from "../servers/mutationIdentity.ts";
-import { ApiError, command, errorText, getStreamSession } from "../api.ts";
+import {
+  ApiError,
+  command,
+  errorText,
+  getStreamSession,
+} from "../servers/net/api.ts";
 import {
   messageReceipt,
   type MessageDelivery,
@@ -57,7 +62,10 @@ export function matchesMessageDelivery(value: unknown, id: string) {
 }
 
 export function createOutbox(options: {
-  api: Pick<import("../api.ts").ServerApi, "command" | "getStreamSession">;
+  api: Pick<
+    import("../servers/net/api.ts").ServerApi,
+    "command" | "getStreamSession"
+  >;
   buffer?: ReturnType<typeof sendStore>;
   serverId?: string;
   watchResourceConnection: typeof watchResourceConnection;

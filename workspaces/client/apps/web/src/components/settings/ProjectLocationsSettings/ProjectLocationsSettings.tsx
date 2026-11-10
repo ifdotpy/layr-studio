@@ -5,6 +5,7 @@ import { useServerStore } from "../../servers/ServerServicesProvider/ServerServi
 import { observer } from "mobx-react-lite";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
+  useServerNet,
   useServerApi,
   useServerStorage,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
@@ -49,6 +50,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
   initialBrowse?: DirectoryBrowse | undefined;
   initialHeads?: LocationHeadRead[] | undefined;
 }) {
+  const net = useServerNet();
   const api = useServerApi(),
     store = useServerStore();
   const { post, refreshSession } = api;
@@ -237,8 +239,7 @@ const ProjectLocationsSettings = observer(function ProjectLocationsSettings({
           onClick={() =>
             setAdding(
               browseDirectory(
-                store,
-                api,
+                net,
                 undefined,
                 initialServer || servers?.[0]?.id || "local",
                 project.id,

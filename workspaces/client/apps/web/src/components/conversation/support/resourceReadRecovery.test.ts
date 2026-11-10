@@ -1,3 +1,7 @@
+import { createNet } from "../../../servers/net/net.ts";
+import * as netApi from "../../../servers/net/api.ts";
+import * as netLocalDrafts from "../../../sync/localDraft.ts";
+import { serverLocalStorage } from "../../../servers/storage.ts";
 import { useServerStorage } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import { resourceData } from "../../../store/runtime.ts";
@@ -141,8 +145,8 @@ vi.mock("react", async (importOriginal) => {
     },
   };
 });
-vi.mock("../../../api.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../../api.ts")>()),
+vi.mock("../../../servers/net/api.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../servers/net/api.ts")>()),
   get,
   post,
   syncPost,
@@ -257,6 +261,11 @@ vi.mock(
       typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
     useServerStore: () => nativeStore,
+    useServerNet: () =>
+      createNet(netApi, () => nativeStore, undefined, {
+        storage: serverLocalStorage,
+        updateQueueRequest: netLocalDrafts.updateQueueRequest,
+      }),
     useServerModelReader: () => modelReader,
     useServerResources: () => ({ replaceStream: reconnect }),
   }),

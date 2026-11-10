@@ -7,7 +7,7 @@ import type {
   CredentialResult,
   StreamChunk,
 } from "../../../desktop/api.ts";
-import { DesktopServerCredentials } from "./desktopCredentials.ts";
+import { DesktopServerCredentials } from "./net/desktopCredentials.ts";
 import type { StudioServer } from "./registry.ts";
 
 const server = {

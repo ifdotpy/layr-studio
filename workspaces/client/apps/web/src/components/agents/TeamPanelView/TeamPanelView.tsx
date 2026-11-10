@@ -1,7 +1,7 @@
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { resourceData } from "../../../store/runtime.ts";
 import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerPreferences } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { observer } from "mobx-react-lite";
 
 import { useTeam } from "../support/TeamPanelContext.tsx";
@@ -28,7 +28,7 @@ export const TeamPanelView = observer(function TeamPanelView() {
     setTeamOpen,
     setWideTeamOpen,
   } = useTeam();
-  const { save } = useServerApi();
+  const { save } = useServerPreferences();
   const lead = view.lead;
   const query = view.query;
   const shown = view.shown;

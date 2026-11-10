@@ -1,5 +1,13 @@
+import { createNet } from "../../../servers/net/net.ts";
 // @vitest-environment happy-dom
-import { act, createElement as h, StrictMode, useRef, useState } from "react";
+import {
+  act,
+  createElement as h,
+  StrictMode,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { FrontendLocality } from "../../../generated/api.ts";
 import { observer } from "mobx-react-lite";
 import { createRoot } from "react-dom/client";
@@ -34,22 +42,34 @@ const streamSession = () => ({
 });
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  async (original) => ({
-    ...(await original<
-      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
-    >()),
-    useServerApi: () => ({
-      ...api,
-      get: fixture.get,
-      getStreamSession: streamSession,
-    }),
-    useServerFileDialogs: () => ({
-      canPickDirectory: () => false,
-      pickDirectory: async () => null,
-    }),
-  }),
+  async (original) => {
+    const actual =
+      await original<
+        typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+      >();
+    return {
+      ...actual,
+      useServerNet: () => {
+        const store = actual.useServerStore();
+        return useMemo(() => {
+          const boundApi = { ...api, getStreamSession: streamSession };
+          vi.spyOn(boundApi, "get").mockImplementation(fixture.get);
+          return createNet(boundApi, () => store);
+        }, [store]);
+      },
+      useServerApi: () => ({
+        ...api,
+        get: fixture.get,
+        getStreamSession: streamSession,
+      }),
+      useServerFileDialogs: () => ({
+        canPickDirectory: () => false,
+        pickDirectory: async () => null,
+      }),
+    };
+  },
 );
-import * as api from "../../../api.ts";
+import * as api from "../../../servers/net/api.ts";
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 afterEach(() => {
   fixture.get.mockReset();

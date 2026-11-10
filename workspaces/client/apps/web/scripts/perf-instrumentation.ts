@@ -19,7 +19,7 @@ export function perfInstrumentation(apiOnly = false): Plugin {
     name: "studio-perf-instrumentation",
     enforce: "pre",
     transform(source, id) {
-      if (id.endsWith("/src/api.ts")) {
+      if (id.endsWith("/src/servers/net/api.ts")) {
         source = replace(
           source,
           '  const client = createClient<paths, "application/json">({',
@@ -49,7 +49,7 @@ export function perfInstrumentation(apiOnly = false): Plugin {
       if (apiOnly) return;
       if (id.endsWith("/src/mount.tsx")) {
         source =
-          'import { PerformanceReporting } from "./components/performance/PerformanceReporting/PerformanceReporting.tsx";\nimport * as serverViewApi from "./api";\n' +
+          'import { PerformanceReporting } from "./components/performance/PerformanceReporting/PerformanceReporting.tsx";\nimport * as serverViewApi from "./servers/net/api.ts";\n' +
           source;
         return replace(
           source,

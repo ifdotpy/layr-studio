@@ -17,7 +17,7 @@ vi.mock("./storage.ts", () => ({
     removeItem: (key: string) => rows.delete(key),
   },
 }));
-vi.mock("./transport.ts", () => ({
+vi.mock("./net/transport.ts", () => ({
   apiOrigin: () => "http://localhost",
   serverFetch: (request: Request) => globalThis.fetch(request),
 }));
@@ -26,7 +26,7 @@ import {
   createMutationJournal,
   serverMutationResponseIsUncertain,
 } from "./mutationIdentity.ts";
-import { post } from "../api.ts";
+import { post } from "./net/api.ts";
 import { NativeCommandAction } from "../generated/api.ts";
 beforeEach(() => rows.clear());
 it("keeps the same durable journal key and uncertain identity without subtle", async () => {

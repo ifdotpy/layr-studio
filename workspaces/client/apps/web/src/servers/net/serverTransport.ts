@@ -1,4 +1,4 @@
-import type { StudioServer } from "./registry.ts";
+import type { StudioServer } from "../registry.ts";
 
 /** An immutable server owner, shared by a view and its background requests. */
 export function createServerTransport(

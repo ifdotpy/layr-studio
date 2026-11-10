@@ -1,3 +1,5 @@
+import { defaultNetStatus } from "../../../servers/net/status.ts";
+import { createNet } from "../../../servers/net/net.ts";
 import type { ServerSettings } from "../../../servers/ServerSettingsContext.tsx";
 import type { ServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import type { AppScope } from "../../../app/contracts.ts";
@@ -31,7 +33,7 @@ import {
   type ReactNode,
 } from "react";
 import { localSidebarServices } from "../../sidebar/support/services.tsx";
-import * as defaultApi from "../../../api.ts";
+import * as defaultApi from "../../../servers/net/api.ts";
 import * as defaultSync from "../../../sync/client.ts";
 import { defaultSubscriptions as defaultResources } from "../../../sync/subscriptions/events.ts";
 import * as defaultTranscripts from "../../../sync/transcriptCache.ts";
@@ -56,6 +58,16 @@ export function createServerViewServices(
 ): ServerServices {
   const owner = viewServer(serverViewId || "local");
   const store = createServerStore(defaultResources);
+  const net = createNet(defaultApi, () => store, defaultNetStatus, {
+    storage: serverLocalStorage,
+    updateQueueRequest: defaultLocalDrafts.updateQueueRequest,
+  });
+  const stopConnection = defaultResources.watchResourceConnection((health) =>
+    net.status.receive(health),
+  );
+  const stopSchema = defaultApi.onApiSchemaMismatch(() =>
+    net.status.receive("schema-mismatch"),
+  );
   const screen = new ScreenOwner();
   const audio = createServerAudio();
   const drafts = createDrafts({
@@ -66,6 +78,7 @@ export function createServerViewServices(
   let areas: ServerAreas | undefined;
   const services: ServerServices = {
     owner,
+    net,
     store,
     screen,
     shellSettings: undefined as ServerSettings | undefined,
@@ -99,6 +112,8 @@ export function createServerViewServices(
       await defaultApi.refreshSession();
     },
     close() {
+      stopConnection();
+      stopSchema();
       areas?.dispose();
       store.dispose();
       audio.close();
@@ -178,3 +193,33 @@ export const useServerAudio = () =>
 
 export const useServerUploads = () =>
   useServerServices()?.uploads ?? defaultUploads;
+
+const defaultNets = new WeakMap<
+  ReturnType<typeof createServerStore>,
+  ReturnType<typeof createNet>
+>();
+export function useServerNet() {
+  const services = useServerServices();
+  const store = useServerStore();
+  if (services) return services.net;
+  let net = defaultNets.get(store);
+  if (!net) {
+    net = createNet(defaultApi, () => store, defaultNetStatus, {
+      storage: serverLocalStorage,
+      updateQueueRequest: defaultLocalDrafts.updateQueueRequest,
+    });
+    defaultNets.set(store, net);
+  }
+  return net;
+}
+
+export function useServerOwner() {
+  return useServerServices()?.owner;
+}
+export function useServerPreferences() {
+  const { saved, save } = useServerApi();
+  return { saved, save };
+}
+export function useServerPending() {
+  return useServerApi().pending;
+}

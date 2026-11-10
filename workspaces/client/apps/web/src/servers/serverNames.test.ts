@@ -4,7 +4,7 @@ import { required } from "../components/conversation/ComposerAttachments/compone
 import { afterEach, expect, test, vi } from "vitest";
 import { validateServerName, watchServerName } from "./serverNames.ts";
 import { readServers, writeServers, SERVER_REGISTRY_KEY } from "./registry.ts";
-import { setServerCredentialAdapter } from "./transport.ts";
+import { setServerCredentialAdapter } from "./net/transport.ts";
 
 test("server names accept visible Unicode and reject controls and outer spaces", () => {
   for (const name of [

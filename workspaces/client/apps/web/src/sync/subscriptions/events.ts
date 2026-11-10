@@ -1,4 +1,4 @@
-import * as api from "../../api.ts";
+import * as api from "../../servers/net/api.ts";
 /** Internal adapters for projection, recovery and non-React consumers. Components
  * use server resources; transport details stay within the subscription boundary. */
 import * as transport from "../resourceEvents.ts";

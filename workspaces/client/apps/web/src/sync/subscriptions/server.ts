@@ -1,5 +1,5 @@
-import { SignedEventSource } from "../../servers/eventSource.ts";
-import { routesFor } from "../../servers/routes.ts";
+import { SignedEventSource } from "../../servers/net/eventSource.ts";
+import { routesFor } from "../../servers/net/routes.ts";
 import { hasNativeClient } from "../../native/client.ts";
 import { NativeEventSource } from "../../native/stream.ts";
 import type { createApiScope } from "../../api.ts";

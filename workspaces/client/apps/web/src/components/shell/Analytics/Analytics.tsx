@@ -1,8 +1,7 @@
 import { observer } from "mobx-react-lite";
 import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
-import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { AnalyticsScope as GeneratedApiAnalyticsScope } from "../../../generated/api.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { localDateTime, localTime } from "../../../local-time.ts";
 import { useEffect, useState } from "react";
 import {
@@ -438,9 +437,7 @@ export default observer(function Analytics({
   selection: AnalyticsSelection;
   onClose: () => void;
 }) {
-  const api = useServerApi(),
-    store = useServerStore();
-  const { apiDownload } = api;
+  const net = useServerNet();
 
   const [current, setCurrent] = useState(selection);
   const { query, read: currentRead } = current;
@@ -492,7 +489,7 @@ export default observer(function Analytics({
       : detailError?.error;
   const loadOlderDetails = (detail: "rateLimits" | "turns") => {
     if (!data) return;
-    const read = store.reads.analytics(api, {
+    const read = net.reads.analytics({
       ...query,
       view: "detail",
       detail,
@@ -508,7 +505,7 @@ export default observer(function Analytics({
   };
   const load = (patch: Partial<AnalyticsQuery> = {}) => {
     const next = { ...query, offset: 0, ...patch };
-    const read = store.reads.analytics(api, next);
+    const read = net.reads.analytics(next);
     setCurrent({ query: next, read });
     setSelected(null);
     setDetails({ rateLimits: [], turns: [] });
@@ -525,7 +522,7 @@ export default observer(function Analytics({
   const download = async () => {
     setError("");
     try {
-      const { blob } = await apiDownload("/api/analytics", {
+      const { blob } = await net.exportAnalytics({
         ...query,
         export: "1",
       });

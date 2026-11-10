@@ -109,7 +109,7 @@ import {
   createTerminalOutputMirror,
 } from "../../../generated/observableResources.ts";
 import { ShellView, TerminalActionsProvider } from "./TerminalDock.tsx";
-import * as api from "../../../api.ts";
+import * as api from "../../../servers/net/api.ts";
 const { writes } = vi.hoisted(() => ({ writes: [] as string[] }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {

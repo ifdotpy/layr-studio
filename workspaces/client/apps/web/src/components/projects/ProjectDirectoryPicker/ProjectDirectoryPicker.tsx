@@ -4,7 +4,7 @@ import { observable, runInAction } from "mobx";
 import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { GetResult } from "../../../api.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useServerFileDialogs } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 import {
@@ -35,8 +35,7 @@ export type DirectoryBrowse = {
   matches: ReadSlot<GetResult<"/api/project-locations">> | null;
 };
 export function browseDirectory(
-  store: ReturnType<typeof useServerStore>,
-  api: ReturnType<typeof useServerApi>,
+  net: ReturnType<typeof useServerNet>,
   path?: string,
   server = "local",
   project?: string,
@@ -45,7 +44,7 @@ export function browseDirectory(
   const browse: DirectoryBrowse = observable.object(
     {
       path,
-      directory: store.reads.directories(api, query),
+      directory: net.reads.directories(query),
       matches: null,
     },
     {},
@@ -55,7 +54,7 @@ export function browseDirectory(
     .read()
     .then((result) => {
       if (!project) return;
-      const matches = store.reads.projectLocations(api, {
+      const matches = net.reads.projectLocations({
         project,
         server,
         action: "matches",
@@ -90,7 +89,7 @@ export default observer(function ProjectDirectoryPicker({
   submitLabel?: string;
 }) {
   const { canPickDirectory, pickDirectory } = useServerFileDialogs();
-  const api = useServerApi(),
+  const net = useServerNet(),
     store = useServerStore();
 
   const discovery = serverChoices ? undefined : store.multiServer().current;
@@ -129,7 +128,7 @@ export default observer(function ProjectDirectoryPicker({
     setSelectionError("");
     setQuery("");
     setTypedPath(undefined);
-    setBrowse(browseDirectory(store, api, next, nextServer, projectId));
+    setBrowse(browseDirectory(net, next, nextServer, projectId));
   };
   const rows = directory?.directories.filter((row) =>
     row.name.toLocaleLowerCase().includes(query.toLocaleLowerCase()),

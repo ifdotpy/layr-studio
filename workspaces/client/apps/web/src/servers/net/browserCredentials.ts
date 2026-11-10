@@ -3,28 +3,28 @@ import {
   browserDatabases,
   browserIndexedDB,
   browserStores,
-} from "../browserPersistence.ts";
+} from "../../browserPersistence.ts";
 import type {
   ServerCredentialAdapter,
   PairAttemptIdentity,
 } from "./transport.ts";
-import { isServerMethod } from "../../../desktop/api.ts";
+import { isServerMethod } from "../../../../desktop/api.ts";
 import {
   isRemoteServerView,
   serverParentOrigin,
   serverViewId,
-} from "./environment.ts";
+} from "../environment.ts";
 import {
   parseInvitation,
   pairedServer,
   signedRequest,
   requestIdentity,
   type PairReceipt,
-} from "./pairing.ts";
-import { deviceKey, replaceDeviceKey } from "./deviceKey.ts";
-import { serveOrigin, type StudioServer } from "./registry.ts";
+} from "../pairing.ts";
+import { deviceKey, replaceDeviceKey } from "../deviceKey.ts";
+import { serveOrigin, type StudioServer } from "../registry.ts";
 import { retarget, routesFor, sendRouted } from "./routes.ts";
-import { ACCESS_PROTOCOL_VERSION } from "../generated/multiServerProtocol.ts";
+import { ACCESS_PROTOCOL_VERSION } from "../../generated/multiServerProtocol.ts";
 type Credential = {
   inviteId?: string;
   id: string;

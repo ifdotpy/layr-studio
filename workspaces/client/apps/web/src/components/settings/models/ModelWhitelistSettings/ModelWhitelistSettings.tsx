@@ -2,7 +2,7 @@ import { observer } from "mobx-react-lite";
 import { providerLabel } from "../../../../generated/providerKind.ts";
 import {
   useServerStorage,
-  useServerServices,
+  useServerOwner,
 } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useServerSettings } from "../../../../servers/ServerSettingsContext.tsx";
 import { Button, Checkbox, Group, Stack, Text } from "@mantine/core";
@@ -26,9 +26,9 @@ import {
 
 export const ModelWhitelistSettings = observer(
   function ModelWhitelistSettings() {
-    const services = useServerServices();
+    const server = useServerOwner();
     const settings = useServerSettings();
-    const owner = services?.owner || settings?.server;
+    const owner = server || settings?.server;
     const catalog = useWorkerModels("default", true, true);
     const choices = useModelChoices();
     const storage = useServerStorage();

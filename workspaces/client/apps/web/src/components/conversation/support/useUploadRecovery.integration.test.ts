@@ -52,7 +52,7 @@ vi.mock("../../../sync/resume.ts", () => ({
     return () => mocks.resumeListeners.delete(listener);
   },
 }));
-vi.mock("../../../api.ts", () => ({
+vi.mock("../../../servers/net/api.ts", () => ({
   errorText: (error: unknown) =>
     error instanceof Error ? error.message : String(error),
 }));

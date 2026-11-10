@@ -82,7 +82,7 @@ import {
   type LocationProject,
 } from "../../../servers/projectLocations.ts";
 import { projectChatCommand } from "../../../servers/projectChatCommand.ts";
-import { fetchServerSummary } from "../../../servers/summary.ts";
+import { fetchServerSummary } from "../../../servers/net/summary.ts";
 import { frameAccounts } from "../../accounts/Accounts/Accounts.tsx";
 import { resourceData } from "../../../store/runtime.ts";
 import { recoverMatchingServers } from "../../../servers/schemaRecovery.ts";

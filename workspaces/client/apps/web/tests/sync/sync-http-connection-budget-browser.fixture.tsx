@@ -5,7 +5,7 @@ import React, { useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { useStartupFixture } from "./startup-fixture.ts";
 import { createDrafts } from "../../src/sync/drafts.ts";
-import * as api from "../../src/api.ts";
+import * as api from "../../src/servers/net/api.ts";
 import * as resources from "../../src/sync/resourceEvents.ts";
 import {
   subscribeTranscriptProjection,

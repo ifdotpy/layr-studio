@@ -3,7 +3,7 @@ import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 type Intent = { value: string | boolean; request_id: string };
 
 export function settingsRequestId(
-  api: Pick<typeof import("../../api.ts"), "saved" | "save">,
+  api: Pick<typeof import("../../servers/net/api.ts"), "saved" | "save">,
   key: string,
   value: Intent["value"],
 ): string {
@@ -15,7 +15,7 @@ export function settingsRequestId(
 }
 
 export function clearSettingsRequest(
-  api: Pick<typeof import("../../api.ts"), "saved" | "save">,
+  api: Pick<typeof import("../../servers/net/api.ts"), "saved" | "save">,
   key: string,
   requestId: string,
 ): void {

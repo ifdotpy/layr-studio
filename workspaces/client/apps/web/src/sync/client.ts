@@ -30,7 +30,7 @@ import {
   save,
   setWorkspace,
   isApiSchemaMismatch,
-} from "../api.ts";
+} from "../servers/net/api.ts";
 
 import type { SyncEntityPayload } from "../generated/api.ts";
 
@@ -106,7 +106,7 @@ export type SyncClientOptions = {
     receipts: import("./messageReceipts.ts").MessageReceipt[],
   ) => void | Promise<void>;
   api: Pick<
-    import("../api.ts").ServerApi,
+    import("../servers/net/api.ts").ServerApi,
     | "syncGet"
     | "syncPost"
     | "saved"

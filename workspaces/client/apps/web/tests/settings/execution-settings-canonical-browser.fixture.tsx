@@ -110,7 +110,7 @@ import {
   ModelCatalogFixture,
   type ModelCatalogFixtureSource,
 } from "../../src/components/servers/ServerServicesProvider/modelCatalogFixture.tsx";
-import { get } from "../../src/api.ts";
+import { get } from "../../src/servers/net/api.ts";
 const fixtureModelRead = (
   options: Pick<GetOptions<"/api/models">, "query" | "signal">,
 ) => get("/api/models", options);

@@ -14,7 +14,7 @@ import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import "@mantine/core/styles.css";
 import { NativeError } from "../../src/components/shell/NativeNotice/NativeNotice.tsx";
-import { setToken } from "../../src/api.ts";
+import { setToken } from "../../src/servers/net/api.ts";
 setToken("fixture-token");
 window.disconnectRecoveryUiFixtureRefreshes = [];
 const Harness = observer(function Harness() {

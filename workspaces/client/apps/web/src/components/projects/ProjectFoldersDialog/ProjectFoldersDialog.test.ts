@@ -1,4 +1,6 @@
 // @vitest-environment happy-dom
+import { createNet } from "../../../servers/net/net.ts";
+import * as api from "../../../servers/net/api.ts";
 import { expect, it, vi } from "vitest";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
@@ -42,7 +44,11 @@ const leaf = vi.hoisted(() => ({
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (original) => ({
+    ...(await original<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
+    useServerNet: () => createNet(api, () => fixtureStore),
     useServerStore: () => fixtureStore,
     useServerApi: () => ({
       getStreamSession: () => undefined,

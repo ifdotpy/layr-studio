@@ -132,7 +132,7 @@ it("removes a refused edit from the buffer", async () => {
       rows.delete(key);
     },
   };
-  const { ApiError } = await import("../api.ts");
+  const { ApiError } = await import("../servers/net/api.ts");
   const store = createDirectDrafts({
     post: vi.fn().mockRejectedValue(new ApiError("refused", 403)),
     changed: vi.fn(),

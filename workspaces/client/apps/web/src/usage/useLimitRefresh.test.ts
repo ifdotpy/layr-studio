@@ -2,7 +2,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { createApiScope } from "../api.ts";
+import { createApiScope } from "../servers/net/api.ts";
 import { createMutationJournal } from "../servers/mutationIdentity.ts";
 import { preferenceMemory } from "../servers/storage.ts";
 import {

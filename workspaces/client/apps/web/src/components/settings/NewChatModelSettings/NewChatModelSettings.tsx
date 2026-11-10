@@ -220,7 +220,9 @@ const ModelDraft = observer(function ModelDraft({
   ]);
   const patch = useCallback(
     (
-      value: Partial<import("../../../api.ts").PostBody<"/api/conversation">>,
+      value: Partial<
+        import("../../../servers/net/api.ts").PostBody<"/api/conversation">
+      >,
     ) => {
       const { id: _id, expected_account_key: _expected, ...values } = value;
       setSettings((previous) => ({ ...previous, ...values }));

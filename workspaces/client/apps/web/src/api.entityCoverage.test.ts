@@ -25,7 +25,7 @@ describe("mutation response entity delivery", () => {
       ),
     );
 
-    const api = await import("./api.ts");
+    const api = await import("./servers/net/api.ts");
     api.setToken("test-token");
     api.setWorkspace("workspace-a");
     await expect(api.post("/api/sync/drafts", { rows: [] })).resolves.toEqual({

@@ -1,6 +1,6 @@
 import { AccessClientStatus, Reachability } from "../generated/api.ts";
 import type { ConnectionHealth } from "../sync/connectionState.ts";
-import { get, post, refreshSession, type GetResult } from "../api.ts";
+import { get, post, refreshSession, type GetResult } from "./net/api.ts";
 import { serverLocalStorage } from "./storage.ts";
 
 import { readServers, type StudioServer } from "./registry.ts";

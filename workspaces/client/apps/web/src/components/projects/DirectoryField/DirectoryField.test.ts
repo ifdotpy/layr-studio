@@ -6,8 +6,12 @@ import { expect, it, vi } from "vitest";
 const owner = {};
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (original) => ({
+    ...(await original<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
     useServerApi: () => ({}),
+    useServerNet: () => ({}),
     useServerStore: () => owner,
     useServerFileDialogs: () => ({
       canPickDirectory: () => false,

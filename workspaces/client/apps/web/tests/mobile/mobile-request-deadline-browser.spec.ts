@@ -67,7 +67,7 @@ async function runDeadlineChecks(
       await page.clock.install();
       const { start, readDeadline } = await page.evaluate(async () => {
         const { get, post, syncPost, READ_DEADLINE_MS } =
-          await import("/src/api.ts");
+          await import("/src/servers/net/api.ts");
         window.outcomes = {};
         const record = (key: string, p: Promise<unknown>) =>
           p.then(
@@ -116,7 +116,7 @@ async function runDeadlineChecks(
       await held.get("/api/held-ordinary")!.fulfill({ json: { ok: true } });
       await page.waitForFunction(() => window.outcomes.ordinary === "success");
       await page.evaluate(async () => {
-        const { get, post } = await import("/src/api.ts");
+        const { get, post } = await import("/src/servers/net/api.ts");
         const record = (key: string, promise: Promise<unknown>) =>
           promise.then(
             () => (window.outcomes[key] = "success"),

@@ -31,7 +31,7 @@ vi.mock(
     useServerStorage: () => controls.storage,
   }),
 );
-vi.mock("../../../../api.ts", () => ({
+vi.mock("../../../../servers/net/api.ts", () => ({
   ApiError: class extends Error {},
   errorText: (error: unknown) =>
     String(error instanceof Error ? error.message : error),

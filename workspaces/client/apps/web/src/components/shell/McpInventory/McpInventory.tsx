@@ -8,7 +8,7 @@ import {
   type PostBody,
   type PostResult,
 } from "../../../api.ts";
-import { useServerServices } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerOwner } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { serverViewId } from "../../../servers/environment.ts";
 
 type Inventory = GetResult<"/api/capabilities">;
@@ -54,9 +54,9 @@ export function McpInventory({
   loadPage,
   reconnect,
 }: Props) {
-  const services = useServerServices();
+  const server = useServerOwner();
   const outbox = sessionOutboxRequests();
-  const owner = services?.owner.id ?? serverViewId ?? "local";
+  const owner = server?.id ?? serverViewId ?? "local";
   const [inventory, setInventory] = useState(initial);
   const [rows, setRows] = useState(() => mcpServers(initial.mcp));
   const [pageBusy, setPageBusy] = useState(false);

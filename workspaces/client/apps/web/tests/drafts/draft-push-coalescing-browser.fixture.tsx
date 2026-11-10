@@ -1,7 +1,7 @@
 import { readDraft } from "./draft-fixture-helpers.ts";
 import { createDrafts } from "../../src/sync/drafts.ts";
 import { observeOutbox } from "../../src/sync/send.ts";
-import * as api from "../../src/api.ts";
+import * as api from "../../src/servers/net/api.ts";
 import * as resources from "../../src/sync/resourceEvents.ts";
 import { syncDatabase } from "../../src/sync/client.ts";
 declare global {

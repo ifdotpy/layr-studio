@@ -25,7 +25,7 @@ import {
   type BackgroundTaskActions,
 } from "../support/backgroundTaskActions.tsx";
 import { afterEach, expect, it, vi } from "vitest";
-import { createApiScope, type ServerApi } from "../../../../api.ts";
+import { createApiScope, type ServerApi } from "../../../../servers/net/api.ts";
 import { createMutationJournal } from "../../../../servers/mutationIdentity.ts";
 import { monitorInputStoreFixture } from "../../../../servers/monitorInputStore.fixture.ts";
 

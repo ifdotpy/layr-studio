@@ -26,7 +26,7 @@ vi.mock(
     useServerApi: () => ({ fetchApiRequest: mocks.fetch }),
   }),
 );
-vi.mock("./eventSource.ts", () => ({
+vi.mock("./net/eventSource.ts", () => ({
   SignedEventSource: class extends EventTarget {
     constructor() {
       super();

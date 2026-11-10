@@ -1,3 +1,4 @@
+import { NetworkIndicator } from "../../servers/NetworkIndicator/NetworkIndicator.tsx";
 import { AppTeam } from "../AppTeam/AppTeam.tsx";
 import { AppPanels } from "../AppPanels/AppPanels.tsx";
 import { AppDialogs } from "../AppDialogs/AppDialogs.tsx";
@@ -123,6 +124,7 @@ export default observer(function App() {
         <AppDialogs />
         <SchemaUpdateDialog />
         <ToastNotice />
+        <NetworkIndicator net={scope.services.net} />
       </div>
     </AppTeam>
   );
@@ -341,11 +343,7 @@ export class AppUi {
     this.searchOpen = false;
   }
   showPreview(target: PreviewTarget) {
-    this.filePreview = openFilePreview(
-      this.areas.scope.store,
-      this.areas.scope.services.api,
-      target,
-    );
+    this.filePreview = openFilePreview(this.areas.scope.services.net, target);
   }
   closePreview() {
     this.filePreview = null;
@@ -364,10 +362,7 @@ export class AppUi {
       title: "Add project",
       body: (
         <ProjectDirectoryPicker
-          initialBrowse={browseDirectory(
-            this.areas.scope.store,
-            this.areas.scope.services.api,
-          )}
+          initialBrowse={browseDirectory(this.areas.scope.services.net)}
           onSelect={async (path, server) => {
             await registerProject(path, server, randomUUID(), {
               ...this.areas.scope.services.api,
@@ -511,8 +506,7 @@ export class AppUi {
                 initialBrowse={
                   server
                     ? browseDirectory(
-                        this.areas.scope.store,
-                        this.areas.scope.services.api,
+                        this.areas.scope.services.net,
                         undefined,
                         server,
                         project.id,
@@ -538,8 +532,7 @@ export class AppUi {
         <ProjectDirectoryPicker
           initialPath={agent.projectPath || undefined}
           initialBrowse={browseDirectory(
-            this.areas.scope.store,
-            this.areas.scope.services.api,
+            this.areas.scope.services.net,
             agent.projectPath || undefined,
           )}
           serverChoices={[

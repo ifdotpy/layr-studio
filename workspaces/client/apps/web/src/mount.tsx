@@ -13,9 +13,9 @@ import { isNativeFrame } from "./native/frame.ts";
 import {
   DesktopServerCredentials,
   nativeCredentialBridge,
-} from "./servers/desktopCredentials.ts";
-import { BrowserServerCredentials } from "./servers/browserCredentials.ts";
-import { setServerCredentialAdapter } from "./servers/transport.ts";
+} from "./servers/net/desktopCredentials.ts";
+import { BrowserServerCredentials } from "./servers/net/browserCredentials.ts";
+import { setServerCredentialAdapter } from "./servers/net/transport.ts";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
 import App from "./components/shell/App/App.tsx";

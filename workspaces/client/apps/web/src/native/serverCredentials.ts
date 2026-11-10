@@ -2,7 +2,7 @@ import type {
   ServerCredentialAdapter,
   PairAttemptIdentity,
   AutomaticPairApproval,
-} from "../servers/transport.ts";
+} from "../servers/net/transport.ts";
 import type { StudioServer } from "../servers/registry.ts";
 import {
   parseInvitation,

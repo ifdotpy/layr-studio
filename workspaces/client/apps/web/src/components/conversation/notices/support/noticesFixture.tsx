@@ -1,7 +1,7 @@
 import type { Message } from "../../../../types.ts";
 import type { NativeNotice } from "../../../../app/notices/warnings.ts";
 import { useState, type ReactNode } from "react";
-import * as api from "../../../../api.ts";
+import * as api from "../../../../servers/net/api.ts";
 import {
   conversationActionsFixture,
   observableFixture,

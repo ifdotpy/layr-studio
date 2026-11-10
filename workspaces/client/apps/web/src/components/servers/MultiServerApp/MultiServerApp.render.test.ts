@@ -154,7 +154,7 @@ it("opens settings with streamed running counts and accounts without a summary r
   const { createServerServices } = serverServices;
   const { AgentSource, AccountStatus, ProviderKind } =
     await import("../../../generated/api.ts");
-  const summary = await import("../../../servers/summary.ts");
+  const summary = await import("../../../servers/net/summary.ts");
   const read = vi
     .spyOn(summary, "fetchServerSummary")
     .mockRejectedValue(new Error("Unexpected summary read"));

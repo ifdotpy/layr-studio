@@ -67,7 +67,7 @@ export function createDataObserver(
   events: SubscriptionTransport,
   observeEntities?: ObserveSubscriptionData,
   api?: Pick<
-    ReturnType<typeof import("../../api.ts").createApiScope>,
+    ReturnType<typeof import("../../servers/net/api.ts").createApiScope>,
     "get" | "post"
   >,
 ): ObserveSubscriptionData {

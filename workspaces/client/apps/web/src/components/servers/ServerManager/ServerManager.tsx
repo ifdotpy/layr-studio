@@ -35,7 +35,7 @@ import { defaultServerAlias } from "../../../servers/serverAliases.ts";
 import ServerDetailsEditor from "../ServerDetailsEditor/ServerDetailsEditor.tsx";
 import { Check, Copy } from "lucide-react";
 
-import { serverCredentialAdapter } from "../../../servers/transport.ts";
+import { serverCredentialAdapter } from "../../../servers/net/transport.ts";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import type {
   ServerNavigation,

@@ -1,7 +1,7 @@
-import { hasNativeClient } from "../native/client.ts";
-import { nativeFetch } from "../native/http.ts";
-import { serverViewId, isolatedServerView } from "./environment.ts";
-import { viewServer, type StudioServer } from "./registry.ts";
+import { hasNativeClient } from "../../native/client.ts";
+import { nativeFetch } from "../../native/http.ts";
+import { serverViewId, isolatedServerView } from "../environment.ts";
+import { viewServer, type StudioServer } from "../registry.ts";
 
 const LOCAL_FRAME_ACCOUNT_MUTATIONS = new Set([
   "/api/accounts/login",
@@ -24,8 +24,8 @@ export type FrameSigningCredential = {
   clientId: string;
   privateKey: CryptoKey;
 };
-import type { AutomaticPairApproval } from "../../../desktop/api.ts";
-export type { AutomaticPairApproval } from "../../../desktop/api.ts";
+import type { AutomaticPairApproval } from "../../../../desktop/api.ts";
+export type { AutomaticPairApproval } from "../../../../desktop/api.ts";
 export interface ServerCredentialAdapter {
   hasPairAttempt(attempt: PairAttemptIdentity): Promise<boolean>;
   pair(

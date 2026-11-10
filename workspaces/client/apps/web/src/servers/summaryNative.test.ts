@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 vi.mock("../native/client.ts", () => ({ hasNativeClient: () => true }));
 vi.mock("../native/http.ts", () => ({ nativeFetch: vi.fn() }));
 import { nativeFetch } from "../native/http.ts";
-import { fetchServerSummary } from "./summary.ts";
+import { fetchServerSummary } from "./net/summary.ts";
 import { API_SCHEMA_HASH } from "../generated/apiSchema.ts";
 afterEach(() => vi.unstubAllGlobals());
 it("loads the local shell summary through the verified native backend", async () => {

@@ -43,7 +43,7 @@ const mocks = vi.hoisted(() => ({
     emit(name: string, value: unknown): void;
   }[],
 }));
-vi.mock("../servers/eventSource.ts", () => ({
+vi.mock("../servers/net/eventSource.ts", () => ({
   openServerEvents: vi.fn(),
   SignedEventSource: class {
     listeners = new Map<string, (event: Event) => void>();
@@ -69,7 +69,7 @@ vi.mock("../servers/eventSource.ts", () => ({
     }
   },
 }));
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   ApiError: class extends Error {},
   syncGet: mocks.syncGet,
   get: mocks.syncGet,
@@ -1197,7 +1197,7 @@ it.each([false, true])(
     vi.stubGlobal("BroadcastChannel", undefined);
     const { createServerSubscriptions } =
       await import("./subscriptions/server.ts");
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const subscriptions = createServerSubscriptions({
       owner: { id: "local", origin: "http://studio.test" },
       api: { ...api, fetchApiRequest: vi.fn() },
@@ -1534,7 +1534,7 @@ it.each(["burst", "inline removal", "staged removal"])(
     vi.stubGlobal("BroadcastChannel", undefined);
     const { createServerSubscriptions } =
       await import("./subscriptions/server.ts");
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const subscriptions = createServerSubscriptions({
       owner: { id: "local", origin: "http://studio.test" },
       api: { ...api, fetchApiRequest: vi.fn() },

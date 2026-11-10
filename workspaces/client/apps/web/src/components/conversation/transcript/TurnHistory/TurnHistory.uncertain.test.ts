@@ -4,6 +4,7 @@ vi.mock(
     ...(await original<
       typeof import("../../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
     >()),
+    useServerNet: () => ({}),
     useServerStore: () => ({
       state: () => ({ current: { status: "loading" } }),
       agentDetail: () => ({ current: { status: "loading" } }),

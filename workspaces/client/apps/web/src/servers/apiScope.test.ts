@@ -7,7 +7,7 @@ import {
   createApiScope,
   ApiSchemaMismatchError,
   NetworkTimeoutError,
-} from "../api.ts";
+} from "./net/api.ts";
 import {
   API_SCHEMA_HASH,
   API_SCHEMA_HASH_HEADER,

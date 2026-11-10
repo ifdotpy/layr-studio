@@ -10,7 +10,7 @@ import {
   providerToString,
 } from "../../../generated/providerKind.ts";
 import { serializePrimitiveParam } from "openapi-fetch";
-import { post } from "../../../api.ts";
+import { post } from "../../../servers/net/api.ts";
 import type { LocalQueueItem, QueueItem } from "./MessageQueue.tsx";
 import type { components } from "../../../generated/api.ts";
 import type {
@@ -538,7 +538,7 @@ export type RendererNativeError = Assert<
 >;
 
 function serverAccessContractAssertions(
-  api: import("../../../api.ts").ServerApi,
+  api: import("../../../servers/net/api.ts").ServerApi,
 ) {
   // @ts-expect-error POST requires a body.
   void api.serverAccess("POST");

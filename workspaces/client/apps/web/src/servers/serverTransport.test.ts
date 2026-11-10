@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createServerTransport } from "./serverTransport.ts";
+import { createServerTransport } from "./net/serverTransport.ts";
 import type { StudioServer } from "./registry.ts";
 
 const server = {

@@ -4,20 +4,20 @@ import type {
   PairAttemptIdentity,
   AutomaticPairApproval,
 } from "./transport.ts";
-import type { StudioServer } from "./registry.ts";
+import type { StudioServer } from "../registry.ts";
 import {
   parseInvitation,
   requestIdentity,
   PairingNotAppliedError,
-} from "./pairing.ts";
-import { serverViewId } from "./environment.ts";
+} from "../pairing.ts";
+import { serverViewId } from "../environment.ts";
 export type {
   CredentialRequest,
   CredentialResponse,
   StreamChunk,
-} from "../../../desktop/api.ts";
-import type { CredentialBridge, StreamChunk } from "../../../desktop/api.ts";
-import { isServerMethod } from "../../../desktop/api.ts";
+} from "../../../../desktop/api.ts";
+import type { CredentialBridge, StreamChunk } from "../../../../desktop/api.ts";
+import { isServerMethod } from "../../../../desktop/api.ts";
 export class DesktopServerCredentials implements ServerCredentialAdapter {
   declare private bridge: CredentialBridge;
   constructor(bridge: CredentialBridge) {

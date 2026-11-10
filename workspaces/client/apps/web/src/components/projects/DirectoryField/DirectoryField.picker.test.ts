@@ -27,7 +27,7 @@ const owner = {};
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   () => ({
-    useServerApi: () => ({}),
+    useServerNet: () => ({}),
     useServerStore: () => owner,
     useServerFileDialogs: () => ({
       canPickDirectory: () => h.native,

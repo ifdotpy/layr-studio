@@ -431,7 +431,7 @@ test("upload recovery browser", async ({ browser }) => {
     });
     await page.waitForFunction(() => !!window.releaseFileRead);
     await page.evaluate(async () => {
-      (await import("/src/api.ts")).setWorkspace("b".repeat(32));
+      (await import("/src/servers/net/api.ts")).setWorkspace("b".repeat(32));
       window.releaseFileRead();
     });
     await wait(() =>

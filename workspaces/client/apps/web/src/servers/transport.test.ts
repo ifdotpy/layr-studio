@@ -8,7 +8,7 @@ vi.mock("./registry.ts", () => ({
   viewServer: () => ({ origin: "http://127.0.0.1:1234" }),
 }));
 
-import { serverFetch, setServerCredentialAdapter } from "./transport.ts";
+import { serverFetch, setServerCredentialAdapter } from "./net/transport.ts";
 
 beforeEach(() => {
   vi.stubGlobal("location", new URL("http://studio-local.localhost:1234/"));

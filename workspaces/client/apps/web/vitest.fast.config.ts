@@ -7,6 +7,7 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/servers/net/net.test.ts",
       "src/components/conversation/MessageQueue/MessageQueue.render.test.ts",
       "src/components/projects/ProjectAccount/ProjectAccount.render.test.ts",
       "src/components/agents/TeamPanelView/TeamPanelView.TeamPanel.layout.test.ts",

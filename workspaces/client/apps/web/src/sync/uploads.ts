@@ -1,7 +1,12 @@
 import { uploadStore } from "../unsent/store.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import { serverStorageName } from "../servers/environment.ts";
-import { syncGet, syncPost, refreshSession, type GetResult } from "../api.ts";
+import {
+  syncGet,
+  syncPost,
+  refreshSession,
+  type GetResult,
+} from "../servers/net/api.ts";
 import { syncDatabase } from "./client.ts";
 import type { Attachment } from "../components/conversation/ComposerAttachments/ComposerAttachments.tsx";
 import {

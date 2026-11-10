@@ -1,6 +1,6 @@
 import { useReadView } from "../../../ui/support/useReadView.ts";
 import { observer } from "mobx-react-lite";
-import { useServerApi } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerNet } from "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useRef, useState } from "react";
 import { ActionIcon, Popover } from "@mantine/core";
 import { Copy, Info, X } from "lucide-react";
@@ -42,7 +42,7 @@ export default observer(function MessageInfo({
   onCopy,
 }: MessageInfoProps) {
   const store = useServerStore();
-  const api = useServerApi();
+  const net = useServerNet();
 
   const [selection, setSelection] =
     useReadView<ReadSlot<GetResult<"/api/analytics">>>();
@@ -85,7 +85,7 @@ export default observer(function MessageInfo({
       ...(message.turnId ? { turn: message.turnId } : {}),
       ...(threadId ? { thread: threadId } : {}),
     } satisfies NonNullable<GetOptions<"/api/analytics">["query"]>;
-    const slot = store.reads.analytics(api, query);
+    const slot = net.reads.analytics(query);
     setSelection(slot);
     void slot.read().catch(() => {});
   };

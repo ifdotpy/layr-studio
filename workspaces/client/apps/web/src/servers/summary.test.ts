@@ -6,7 +6,7 @@ import {
   isSummaryRequest,
   SchemaMismatchError,
   summaryFailure,
-} from "./summary.ts";
+} from "./net/summary.ts";
 const server = {
   id: "remote",
   label: "Remote",

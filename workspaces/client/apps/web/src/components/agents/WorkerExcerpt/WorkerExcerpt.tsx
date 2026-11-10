@@ -1,6 +1,6 @@
 import { Button } from "@mantine/core";
 import { FileText, ChevronRight } from "lucide-react";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import { useServerPreferences } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useSyncedVisualState } from "../../../sync/useSyncedVisualState.ts";
 import Disclosure from "../../ui/Disclosure/Disclosure.tsx";
 
@@ -17,7 +17,7 @@ export default function WorkerExcerpt({
   truncated?: boolean | undefined;
   open: () => void;
 }) {
-  const { save, saved } = useServerApi();
+  const { save, saved } = useServerPreferences();
 
   const storageKey = "codex-worker-disclosures";
   const key = `${agentId}:${label}`;

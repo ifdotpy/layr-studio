@@ -1,3 +1,4 @@
+import { createNet } from "../../../servers/net/net.ts";
 // @vitest-environment happy-dom
 import type { Agent } from "../../../types.ts";
 import { ServerAreasContextProvider } from "../../../app/ServerAreasProvider.tsx";
@@ -90,6 +91,13 @@ vi.mock(
         }),
       },
     useServerApi: () => h.api ?? { get: h.read, post: vi.fn() },
+    useServerNet: () => {
+      const api = h.api,
+        store = h.store;
+      if (!api || !store)
+        throw new Error("The live read fixture requires its server owner.");
+      return createNet(api, () => store);
+    },
     useServerSync: () => ({ subscribeStateProjection: () => () => {} }),
     useServerOutbox: () => ({}),
     useServerUploads: () => ({}),

@@ -1,6 +1,6 @@
 import { required } from "../../conversation/ComposerAttachments/componentTestFixtures.ts";
 import { describe, expect, it, vi } from "vitest";
-import { post, saved, save } from "../../../api.ts";
+import { post, saved, save } from "../../../servers/net/api.ts";
 import { serverLocalStorage } from "../../../servers/storage.ts";
 import { writePreferenceEdit } from "../../../sync/uiPreferenceStore.ts";
 import {

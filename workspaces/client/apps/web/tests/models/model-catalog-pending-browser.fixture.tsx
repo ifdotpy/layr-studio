@@ -10,7 +10,7 @@ import { createRoot } from "react-dom/client";
 import type { Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { useWorkerModels } from "../../src/components/agents/support/WorkerModelPicker.tsx";
-import { get } from "../../src/api.ts";
+import { get } from "../../src/servers/net/api.ts";
 
 type Reader = ModelCatalogFixtureSource;
 export type ModelSnapshot = Parameters<

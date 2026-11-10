@@ -31,7 +31,7 @@ const mocks = vi.hoisted(() => ({
   removeMessageFromDevice: vi.fn<typeof removeMessageFromDevice>(),
 }));
 
-vi.mock("../../../api.ts", () => ({
+vi.mock("../../../servers/net/api.ts", () => ({
   get: mocks.get,
   command: { make: mocks.make, run: mocks.run },
   ApiError: class ApiError extends Error {

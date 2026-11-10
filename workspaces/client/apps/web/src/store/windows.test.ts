@@ -23,7 +23,7 @@ import { createObservableResourceRuntime } from "./runtime.ts";
 
 // Only isolate the default server singletons. The clients below use the real
 // projection, durable cursor, data adapter, subscription owner and slot runtime.
-vi.mock("../api.ts", () => ({
+vi.mock("../servers/net/api.ts", () => ({
   syncGet: vi.fn(),
   syncPost: vi.fn(),
   saved: (_key: string, fallback: unknown) => fallback,

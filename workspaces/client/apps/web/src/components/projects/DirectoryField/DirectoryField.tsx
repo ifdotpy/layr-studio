@@ -9,8 +9,7 @@ import { useReadView } from "../../ui/support/useReadView.ts";
 import { useState } from "react";
 import { errorText } from "../../../api.ts";
 import {
-  useServerApi,
-  useServerStore,
+  useServerNet,
   useServerFileDialogs,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import ProjectDirectoryPicker, {
@@ -37,8 +36,7 @@ export default function DirectoryField({
   ...input
 }: Props) {
   const [choosing, setChoosing] = useReadView<DirectoryBrowse>();
-  const api = useServerApi(),
-    store = useServerStore();
+  const net = useServerNet();
   const [error, setError] = useState("");
   const { canPickDirectory, pickDirectory } = useServerFileDialogs();
   return (
@@ -60,9 +58,7 @@ export default function DirectoryField({
               disabled={!!disabled}
               onClick={() => {
                 if (!canPickDirectory()) {
-                  setChoosing(
-                    browseDirectory(store, api, value.trim() || undefined),
-                  );
+                  setChoosing(browseDirectory(net, value.trim() || undefined));
                   return;
                 }
                 setError("");

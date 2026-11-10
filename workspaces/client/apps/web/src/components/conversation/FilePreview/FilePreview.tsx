@@ -1,7 +1,6 @@
 import {
-  useServerApi,
+  useServerNet,
   useServerFileActions,
-  useServerStore,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { useReadView } from "../../ui/support/useReadView.ts";
 import { observer } from "mobx-react-lite";
@@ -9,7 +8,6 @@ import { resourceData, type ReadSlot } from "../../../store/runtime.ts";
 import type { GetResult } from "../../../api.ts";
 import { Button, Loader } from "@mantine/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import "../../../api.ts";
 
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
 import { isolatedDocument } from "../RichPreview/RichPreview.tsx";
@@ -45,24 +43,22 @@ type LoadedFile = {
   format: ReturnType<typeof fileFormat>;
 };
 export function useFilePreview() {
-  const api = useServerApi(),
-    store = useServerStore();
+  const net = useServerNet();
   const [target, setTarget] = useReadView<FilePreviewSelection>();
   return [
     target,
     (next: PreviewTarget | null) => {
-      setTarget(next ? openFilePreview(store, api, next) : null);
+      setTarget(next ? openFilePreview(net, next) : null);
     },
   ] as const;
 }
 export function openFilePreview(
-  store: ReturnType<typeof useServerStore>,
-  api: ReturnType<typeof useServerApi>,
+  net: ReturnType<typeof useServerNet>,
   target: PreviewTarget,
 ) {
   const { agent, path, asset } = target;
   const query = { agent, path, asset };
-  const slot = store.reads.file(api, query);
+  const slot = net.reads.file(query);
   void slot.read().catch(() => {});
   return { target, slot };
 }

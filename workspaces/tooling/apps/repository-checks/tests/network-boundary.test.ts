@@ -1,3 +1,4 @@
+import ts from "typescript";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
@@ -49,7 +50,7 @@ test("network exceptions only shrink and every remaining entry still violates", 
   assert.ok(exceptions);
   assert.deepEqual(exceptions.rules, { "no-restricted-imports": "off" });
   // Owner: this ceiling counts grandfathered source files, never diagnostics.
-  const MAX_NETWORK_EXCEPTIONS = 87;
+  const MAX_NETWORK_EXCEPTIONS = 72;
   assert.ok(
     exceptions.files.length <= MAX_NETWORK_EXCEPTIONS,
     "network exception count grew",
@@ -290,6 +291,122 @@ test("React network boundary rejects direct transports and permits store/owner u
         counts[item.code] = (counts[item.code] ?? 0) + 1;
       assert.deepEqual(counts, expected, file);
     }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+/** Follow runtime edges, including barrels, aliases and literal dynamic imports. */
+function runtimeImports(entry: string, base: string): string[] {
+  const seen = new Set<string>();
+  const visit = (file: string) => {
+    if (seen.has(file)) return;
+    seen.add(file);
+    const source = ts.createSourceFile(
+      file,
+      readFileSync(file, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const follow = (specifier: string) => {
+      const resolved = ts.resolveModuleName(
+        specifier,
+        file,
+        {
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
+          paths: { "/src/*": [path.join(base, "*")] },
+        },
+        ts.sys,
+      ).resolvedModule?.resolvedFileName;
+      if (resolved && resolved.startsWith(base) && !resolved.endsWith(".d.ts"))
+        visit(resolved);
+    };
+    const walk = (node: ts.Node) => {
+      if (
+        ts.isImportDeclaration(node) &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        const clause = node.importClause;
+        if (
+          !clause?.isTypeOnly &&
+          !(
+            clause?.namedBindings &&
+            ts.isNamedImports(clause.namedBindings) &&
+            clause.namedBindings.elements.every((item) => item.isTypeOnly)
+          )
+        )
+          follow(node.moduleSpecifier.text);
+      } else if (
+        ts.isExportDeclaration(node) &&
+        !node.isTypeOnly &&
+        node.moduleSpecifier &&
+        ts.isStringLiteral(node.moduleSpecifier)
+      ) {
+        if (
+          !node.exportClause ||
+          !ts.isNamedExports(node.exportClause) ||
+          node.exportClause.elements.some((item) => !item.isTypeOnly)
+        )
+          follow(node.moduleSpecifier.text);
+      } else if (
+        ts.isCallExpression(node) &&
+        node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+        node.arguments[0] &&
+        ts.isStringLiteral(node.arguments[0])
+      )
+        follow(node.arguments[0].text);
+      ts.forEachChild(node, walk);
+    };
+    walk(source);
+  };
+  visit(entry);
+  return [...seen];
+}
+
+test("public API contracts have no runtime transport re-export", () => {
+  const source = path.join(root, web);
+  const graph = runtimeImports(path.join(source, "api.ts"), source);
+  assert.ok(
+    !graph.some((file) => file.includes("/servers/net/")),
+    graph.join("\n"),
+  );
+  const compiled = ts.transpileModule(
+    readFileSync(path.join(source, "api.ts"), "utf8"),
+    {
+      compilerOptions: { module: ts.ModuleKind.ESNext },
+    },
+  ).outputText;
+  assert.ok(!compiled.includes("servers/net/api"), compiled);
+});
+
+test("compiler graph follows transport imports through a barrel, dynamic import and alias", () => {
+  const temporary = mkdtempSync(path.join(tmpdir(), "studio-net-graph-"));
+  try {
+    mkdirSync(path.join(temporary, "servers/net"), { recursive: true });
+    writeFileSync(
+      path.join(temporary, "entry.ts"),
+      'export { load } from "./barrel.ts";',
+    );
+    writeFileSync(
+      path.join(temporary, "barrel.ts"),
+      'export const load = () => import("/src/servers/net/api.ts");',
+    );
+    const transport = path.join(temporary, "servers/net/api.ts");
+    writeFileSync(transport, "export const post = () => {};");
+    assert.ok(
+      runtimeImports(path.join(temporary, "entry.ts"), temporary).includes(
+        transport,
+      ),
+    );
+    writeFileSync(
+      path.join(temporary, "entry.ts"),
+      'export type { post } from "/src/servers/net/api.ts";',
+    );
+    assert.ok(
+      !runtimeImports(path.join(temporary, "entry.ts"), temporary).includes(
+        transport,
+      ),
+    );
   } finally {
     rmSync(temporary, { recursive: true, force: true });
   }

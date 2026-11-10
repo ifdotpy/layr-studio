@@ -1,6 +1,6 @@
 import { AccessClientStatus } from "../generated/api.ts";
 import type { DiscoveredServer, DiscoverySnapshot } from "./discoveryModel.ts";
-import { trustedServer } from "./browserCredentials.ts";
+import { trustedServer } from "./net/browserCredentials.ts";
 import { excludedServers } from "./excludedServers.ts";
 import { readServers, writeServers, type StudioServer } from "./registry.ts";
 

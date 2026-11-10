@@ -6,7 +6,7 @@ import type { ResourceVersion } from "../sync/resourceEvents.ts";
 import { agentId } from "../generated/observableResources.ts";
 import { createServerStore } from "./server.ts";
 import type { GetResult, ServerApi } from "../api.ts";
-import * as defaultApi from "../api.ts";
+import * as defaultApi from "../servers/net/api.ts";
 import { createSubscriptions } from "../sync/subscriptions/module.ts";
 import { subscriptionKey } from "../sync/subscriptions/contracts.ts";
 import type { ResourceRef } from "../sync/subscriptions/contracts.ts";

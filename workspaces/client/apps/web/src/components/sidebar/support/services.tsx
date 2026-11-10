@@ -1,7 +1,7 @@
 import type { DeepReadonly } from "../../../deepReadonly.ts";
 import { createContext, useContext } from "react";
 import * as resources from "../../../sync/subscriptions/events.ts";
-import { post, saved, save } from "../../../api.ts";
+import { post, saved, save } from "../../../servers/net/api.ts";
 import { serverViewId } from "../../../servers/environment.ts";
 import { serverLocalStorage } from "../../../servers/storage.ts";
 import { preferenceEvent } from "../../../sync/uiPreferenceMerge.ts";

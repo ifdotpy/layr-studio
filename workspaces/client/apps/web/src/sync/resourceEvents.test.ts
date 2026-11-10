@@ -14,7 +14,7 @@ const { syncDatabase, appendAppLog } = vi.hoisted(() => ({
 }));
 vi.mock("../appLog.ts", () => ({ appendAppLog }));
 vi.mock("../uuid.ts", () => ({ randomUUID: () => crypto.randomUUID() }));
-vi.mock("../servers/eventSource.ts", () => ({
+vi.mock("../servers/net/eventSource.ts", () => ({
   openServerEvents: (url: string) =>
     new (
       (globalThis as { NativeTestSource?: typeof EventSource })
@@ -174,7 +174,7 @@ async function expectRecovered(listener: ReturnType<typeof vi.fn>) {
 }
 
 async function loadTransport() {
-  const api = await import("../api.ts");
+  const api = await import("../servers/net/api.ts");
   vi.spyOn(api, "post").mockImplementation(async (_path, body) => {
     const update = body as {
       gen: number;
@@ -483,7 +483,7 @@ describe("shared resource event transport", () => {
   afterEach(async () => {
     for (const stop of activeStops) stop();
     await vi.advanceTimersByTimeAsync(0);
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     api.markApiSchemaMismatch();
     // Drain deferred coordinator shutdown without assuming a fixed timer deadline.
     // The assertion still rejects recurring timers after cleanup.
@@ -700,7 +700,7 @@ describe("shared resource event transport", () => {
     "delivers other writers' stream changes while a mutation is %s",
     async (outcome) => {
       syncDatabase.mockResolvedValue({ workspaceId });
-      const api = await import("../api.ts");
+      const api = await import("../servers/net/api.ts");
       // Keep the real mutation caller; loadTransport mocks subscription updates.
       const post = api.post;
       const transport = await loadTransport();
@@ -896,7 +896,7 @@ describe("shared resource event transport", () => {
     stop();
     expect(vi.getTimerCount()).toBeGreaterThan(0);
 
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     api.markApiSchemaMismatch();
     expect(vi.getTimerCount()).toBe(0);
     const removeCalls = windowStub.removeEventListener.mock.calls.length;
@@ -950,7 +950,9 @@ describe("shared resource event transport", () => {
     });
     expect(source.closed).toBe(true);
     const identityRequests = syncDatabase.mock.calls.length;
-    expect((await import("../api.ts")).isApiSchemaMismatch()).toBe(true);
+    expect((await import("../servers/net/api.ts")).isApiSchemaMismatch()).toBe(
+      true,
+    );
     await vi.advanceTimersByTimeAsync(30_000);
     expect(Source.instances).toHaveLength(1);
     expect(syncDatabase).toHaveBeenCalledTimes(identityRequests);
@@ -1045,7 +1047,7 @@ describe("shared resource event transport", () => {
           }),
       );
       vi.stubGlobal("fetch", fetch);
-      const api = await import("../api.ts");
+      const api = await import("../servers/net/api.ts");
       const transport = await loadTransport();
       const stop = transport.watchResourceChanges({ kind: "state" }, vi.fn());
       await vi.advanceTimersByTimeAsync(20);
@@ -1097,7 +1099,7 @@ describe("shared resource event transport", () => {
       );
       vi.stubGlobal("fetch", fetch);
       Source.skipNextAutoHandshake = true;
-      const api = await import("../api.ts");
+      const api = await import("../servers/net/api.ts");
       const transport = await loadTransport();
       const stop = transport.watchResourceChanges({ kind: "state" }, vi.fn());
       await vi.advanceTimersByTimeAsync(20);
@@ -1231,7 +1233,7 @@ describe("shared resource event transport", () => {
         }),
     );
     Source.skipNextAutoHandshake = true;
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const transport = await loadTransport();
     const states: string[] = [];
     const stopStatus = transport.watchResourceConnection((status) =>
@@ -1999,7 +2001,7 @@ describe("shared resource event transport", () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Unexpected fetch"));
     vi.stubGlobal("fetch", fetch);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2065,7 +2067,7 @@ describe("shared resource event transport", () => {
     vi.stubGlobal("fetch", fetch);
     vi.spyOn(Math, "random").mockReturnValue(0.5);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2126,7 +2128,7 @@ describe("shared resource event transport", () => {
     const fetch = vi.fn().mockRejectedValue(new TypeError("Unexpected fetch"));
     vi.stubGlobal("fetch", fetch);
     syncDatabase.mockResolvedValue({ workspaceId });
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const identityProbe = vi
       .spyOn(api, "get")
       .mockRejectedValue(new Error("Unexpected identity probe"));
@@ -2311,7 +2313,7 @@ describe("connection owner: retries, wakeups and stream probes", () => {
   afterEach(async () => {
     for (const stop of activeStops) stop();
     await vi.advanceTimersByTimeAsync(0);
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     api.markApiSchemaMismatch();
     // Drain deferred coordinator shutdown without assuming a fixed timer deadline.
     // The assertion still rejects recurring timers after cleanup.
@@ -2450,7 +2452,7 @@ describe("connection owner: retries, wakeups and stream probes", () => {
   });
 
   it("replaces the stream when the probe gets no answer in time", async () => {
-    const api = await import("../api.ts");
+    const api = await import("../servers/net/api.ts");
     const { windowListeners, goLive } = await open();
     const stream = await goLive();
     vi.spyOn(api, "post").mockImplementation(async () => new Promise(() => {}));

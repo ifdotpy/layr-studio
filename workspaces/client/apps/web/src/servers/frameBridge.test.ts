@@ -23,8 +23,8 @@ vi.mock("./environment.ts", async (importOriginal) => ({
   serverParentOrigin: "https://parent.example",
   serverStorageName: (name: string) => `${name}:server:remote`,
 }));
-vi.mock("./transport.ts", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("./transport.ts")>()),
+vi.mock("./net/transport.ts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./net/transport.ts")>()),
   apiOrigin: () => "https://remote.example",
 }));
 const stopConnection = vi.hoisted(() => vi.fn());
@@ -35,7 +35,7 @@ vi.mock("../sync/subscriptions/events.ts", () => ({
   defaultSubscriptions: { watchResourceConnection: () => stopConnection },
 }));
 
-import * as api from "../api.ts";
+import * as api from "./net/api.ts";
 import { startServerFrame } from "./frameBridge.ts";
 import { preferenceEvent } from "../sync/uiPreferenceMerge.ts";
 import { writePreferenceEdit } from "../sync/uiPreferenceStore.ts";

@@ -78,9 +78,9 @@ it("does not retry an uncertain server write", async () => {
 });
 it("releases every rejected summary response before the next poll", async () => {
   const { setServerCredentialAdapter } =
-    await import("../servers/transport.ts");
+    await import("../servers/net/transport.ts");
   const { fetchServerSummary, SchemaMismatchError } =
-    await import("../servers/summary.ts");
+    await import("../servers/net/summary.ts");
   vi.stubGlobal("window", {});
   const open = new Set<string>();
   let next = 0;
