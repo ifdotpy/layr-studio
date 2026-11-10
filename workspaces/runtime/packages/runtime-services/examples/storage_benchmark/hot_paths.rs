@@ -1,8 +1,13 @@
 //! P0-C workloads reuse the storage driver's copy, budgets and timing machinery.
 use super::*;
+use studio_db_api::migration::{CopyPlan, Evidence, decode_key};
+use studio_db_api::{DbTable, Table, db_update};
+use studio_runtime_store::online_migration::{self, Step, SystemClock};
+use studio_runtime_store::peer_update_settings::{Canvas, canvas_tx};
+use studio_runtime_store::settings_schema::{OnlineMigrationDirty, PayloadMigrations};
 use studio_runtime_store::{AgentIndexedReads, SchedulerRepository, TerminalsRepository};
 
-pub const FAMILIES: [&str; 9] = [
+pub const FAMILIES: [&str; 14] = [
     "agent_account_selection",
     "agent_root_selection",
     "agent_wake_selection",
@@ -12,7 +17,183 @@ pub const FAMILIES: [&str; 9] = [
     "transcript_paging",
     "transcript_search",
     "terminal_replay",
+    "f1_publication_change",
+    "f1_publication_noop",
+    "f1_publication_delete",
+    "f1_publication_resume",
+    "f1_dirty_replay",
 ];
+
+// Three rows stay live: a changed value, a moved key and a rolling high key.
+// The high key advances each frame so step() retains its dirty tracking triggers.
+#[derive(DbTable)]
+#[db(table = "benchmark_f1_source", database = Canvas)]
+struct DirtySource {
+    #[db(key)]
+    id: i64,
+    value: i64,
+}
+#[derive(DbTable)]
+#[db(table = "benchmark_f1_target", database = Canvas)]
+struct DirtyTarget {
+    #[db(key)]
+    id: i64,
+    value: i64,
+}
+
+fn dirty_evidence(id: i64, value: i64) -> rusqlite::Result<Evidence> {
+    Ok(Evidence {
+        identity: vec![SqlValue::Integer(id)],
+        ordering: vec![],
+        values: vec![SqlValue::Integer(value)],
+    })
+}
+fn dirty_plan() -> CopyPlan<DirtySource, DirtyTarget> {
+    CopyPlan {
+        name: "benchmark_f1_dirty",
+        source_keys: &["id"],
+        source_key: |row| (row.id,),
+        target_key: Clone::clone,
+        transform: |row| {
+            Ok(DirtyTarget {
+                id: row.id,
+                value: row.value,
+            })
+        },
+        source_evidence: |row| dirty_evidence(row.id, row.value),
+        target_evidence: |row| dirty_evidence(row.id, row.value),
+        target_select: DirtyTarget::SELECT_QUERY,
+        finish: |_| Ok(()),
+    }
+}
+
+fn check_cursor(tx: &rusqlite::Transaction<'_>, expected: i64) -> StoreResult<()> {
+    let typed = canvas_tx(tx);
+    let progress = typed
+        .get::<PayloadMigrations>(&("online:benchmark_f1_dirty".to_owned(),))?
+        .ok_or(StoreError::RecordContract("dirty probe has no ledger"))?;
+    let mark = progress
+        .cursor_key
+        .as_deref()
+        .map(decode_key::<(i64,)>)
+        .transpose()?;
+    let dirty = studio_db_api::db_query!(
+        typed.read(),
+        OnlineMigrationDirty,
+        filter(OnlineMigrationDirty::MIGRATION.eq(&"online:benchmark_f1_dirty".to_owned()))
+    )?;
+    if progress.complete != 0
+        || progress.cursor != expected
+        || mark != Some((expected,))
+        || progress.copy_source_rows != Some(3)
+        || progress.copy_target_rows != Some(3)
+        || !dirty.is_empty()
+    {
+        return Err(StoreError::RecordContract(
+            "dirty probe cursor, coverage or queue did not advance",
+        ));
+    }
+    Ok(())
+}
+
+fn dirty_replay(tx: &rusqlite::Transaction<'_>, n: i64) -> StoreResult<()> {
+    let mut typed = canvas_tx(tx);
+    typed.insert_new(&DirtySource { id: n, value: n })?;
+    typed.update_existing(&DirtySource { id: -1, value: n })?;
+    typed.delete::<DirtySource>(&(n - 1,))?;
+    let from = if n % 2 == 0 { -2 } else { -3 };
+    let to = if from == -2 { -3 } else { -2 };
+    db_update!(
+        typed,
+        DirtySource,
+        set(DirtySource::ID = &to),
+        filter(DirtySource::ID.eq(&from))
+    )?;
+    if online_migration::step(tx, &dirty_plan(), &SystemClock::new())? != Step::Progress {
+        return Err(StoreError::RecordContract(
+            "dirty probe unexpectedly completed",
+        ));
+    }
+    check_cursor(tx, n)?;
+    // Fail a partial batch instead of reporting a different amount of work.
+    for (id, value) in [(n, n), (-1, n), (to, 0)] {
+        if typed.get::<DirtyTarget>(&(id,))?.map(|row| row.value) != Some(value) {
+            return Err(StoreError::RecordContract(
+                "dirty probe did not replay all writes",
+            ));
+        }
+    }
+    if typed.get::<DirtyTarget>(&(n - 1,))?.is_some()
+        || typed.get::<DirtyTarget>(&(from,))?.is_some()
+    {
+        return Err(StoreError::RecordContract(
+            "dirty probe retained a deleted key",
+        ));
+    }
+    Ok(())
+}
+
+pub enum Observation {
+    Other,
+    Write {
+        changed: bool,
+        before: i64,
+        after: i64,
+    },
+    Resume {
+        high: i64,
+        rows: usize,
+        resumed: Option<i64>,
+    },
+}
+
+fn publication(tx: &rusqlite::Transaction<'_>, family: usize, n: u64) -> StoreResult<Observation> {
+    #[derive(Serialize)]
+    struct Revision {
+        revision: u64,
+    }
+    let before = SyncDocumentsRepository::entity_sequence(tx)?;
+    if family == 12 {
+        let replay = SyncDocumentsRepository::entities_after(tx, before - 1, 8)?;
+        if !replay.iter().any(|row| {
+            row.collection == "benchmark_f1"
+                && row.id == "publication"
+                && row.deleted
+                && row.sequence == before
+        }) {
+            return Err(StoreError::RecordContract(
+                "publication resume lost tombstone",
+            ));
+        }
+        Ok(Observation::Resume {
+            high: before,
+            rows: replay.len(),
+            resumed: replay.last().map(|row| row.sequence),
+        })
+    } else {
+        let changed = SyncDocumentsRepository::put_entity(
+            tx,
+            "benchmark_f1",
+            "publication",
+            Revision { revision: n },
+            family == 11,
+        )?;
+        let after = SyncDocumentsRepository::entity_sequence(tx)?;
+        if changed != (family != 10)
+            || (family == 10 && after != before)
+            || (family != 10 && after <= before)
+        {
+            return Err(StoreError::RecordContract(
+                "publication change/no-op clock mismatch",
+            ));
+        }
+        Ok(Observation::Write {
+            changed,
+            before,
+            after,
+        })
+    }
+}
 
 #[derive(Serialize)]
 pub struct ProcessReport {
@@ -115,6 +296,19 @@ pub async fn seed(store: &RuntimeStore, rows: u64) -> Result<()> {
                 0,
                 &"synthetic terminal replay\n".repeat(rows as usize),
             )?;
+            DirtySource::descriptor().install_if_absent(tx)?;
+            DirtyTarget::descriptor().install_if_absent(tx)?;
+            let mut typed = canvas_tx(tx);
+            for id in [-1, if rows % 2 == 0 { -2 } else { -3 }, rows as i64 - 1] {
+                typed.insert_new(&DirtySource { id, value: 0 })?;
+            }
+            online_migration::begin(tx, &dirty_plan())?;
+            if online_migration::step(tx, &dirty_plan(), &SystemClock::new())? != Step::Progress {
+                return Err(StoreError::RecordContract(
+                    "dirty probe initialization completed",
+                ));
+            }
+            check_cursor(tx, rows as i64 - 1)?;
             Ok(())
         })
         .await?;
@@ -160,7 +354,7 @@ fn read(tx: &rusqlite::Transaction<'_>, family: usize) -> StoreResult<()> {
     Ok(())
 }
 
-pub async fn operation(store: &RuntimeStore, family: usize, n: u64) -> Result<()> {
+pub async fn operation(store: &RuntimeStore, family: usize, n: u64) -> Result<Observation> {
     match family {
         // Insert exercises the actual newest-200 publication triggers including retirement.
         5 => {
@@ -189,13 +383,23 @@ pub async fn operation(store: &RuntimeStore, family: usize, n: u64) -> Result<()
                 .await?,
             );
         }
+        9..=12 => {
+            return Ok(store
+                .transaction_with(move |tx| publication(tx, family, n))
+                .await?);
+        }
+        13 => {
+            store
+                .transaction_with(move |tx| dirty_replay(tx, n as i64))
+                .await?;
+        }
         _ => {
             store
                 .read_async("storage-benchmark/hot-path", move |tx| read(tx, family))
                 .await?;
         }
     }
-    Ok(())
+    Ok(Observation::Other)
 }
 
 pub async fn read_plans(store: &RuntimeStore) -> Result<ReadPlans> {
@@ -269,6 +473,124 @@ pub fn frame_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn f1_probes_are_in_every_fixed_frame() {
+        for name in [
+            "f1_publication_change",
+            "f1_publication_noop",
+            "f1_publication_delete",
+            "f1_publication_resume",
+        ] {
+            assert!(FAMILIES.contains(&name));
+        }
+        assert!(FAMILIES.contains(&"f1_dirty_replay"));
+    }
+    fn check_frame(tx: &rusqlite::Transaction<'_>, n: u64) -> StoreResult<()> {
+        let row = canvas_tx(tx)
+            .get::<studio_runtime_store::clock_schema::SyncEntities>(&(
+                "benchmark_f1".to_owned(),
+                "publication".to_owned(),
+            ))?
+            .ok_or(StoreError::RecordContract(
+                "publication dispatch did no work",
+            ))?;
+        if row.deleted != 1 || row.seq != SyncDocumentsRepository::entity_sequence(tx)? {
+            return Err(StoreError::RecordContract(
+                "publication dispatch did not publish a tombstone",
+            ));
+        }
+        check_cursor(tx, n as i64)?;
+        let moved = if n % 2 == 0 { -3 } else { -2 };
+        let typed = canvas_tx(tx);
+        for (id, value) in [(n as i64, n as i64), (-1, n as i64), (moved, 0)] {
+            if typed.get::<DirtyTarget>(&(id,))?.map(|row| row.value) != Some(value) {
+                return Err(StoreError::RecordContract("dirty dispatch did no work"));
+            }
+        }
+        Ok(())
+    }
+    #[tokio::test]
+    async fn f1_frames_publish_and_replay_all_four_dirty_mutations() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        super::super::seed(&store, 2).await.unwrap();
+        super::seed(&store, 2).await.unwrap();
+        // Independent observations must reject a skipped dispatch.
+        assert!(
+            store
+                .read_async("missing-f1-frame", |tx| check_frame(tx, 2))
+                .await
+                .is_err()
+        );
+        for n in 2..10 {
+            for family in 9..=13 {
+                let before = store
+                    .read_async("publication-clock-before", |tx| {
+                        SyncDocumentsRepository::entity_sequence(tx)
+                    })
+                    .await
+                    .unwrap();
+                let observed = operation(&store, family, n).await.unwrap();
+                let after = store
+                    .read_async("publication-clock-after", |tx| {
+                        SyncDocumentsRepository::entity_sequence(tx)
+                    })
+                    .await
+                    .unwrap();
+                match (family, observed) {
+                    (
+                        9..=11,
+                        Observation::Write {
+                            changed,
+                            before: reported_before,
+                            after: reported_after,
+                        },
+                    ) => {
+                        assert_eq!((reported_before, reported_after), (before, after));
+                        assert_eq!(changed, family != 10);
+                        if family == 10 {
+                            assert_eq!(after, before);
+                        } else {
+                            assert!(after > before);
+                        }
+                    }
+                    (
+                        12,
+                        Observation::Resume {
+                            high,
+                            rows,
+                            resumed,
+                        },
+                    ) => {
+                        assert_eq!((high, after), (before, before));
+                        assert_eq!(rows, 1);
+                        assert_eq!(resumed, Some(high));
+                    }
+                    (13, Observation::Other) => {}
+                    _ => panic!("publication family {family} returned no observable result"),
+                }
+            }
+            store
+                .read_async("verify-f1-frame", move |tx| check_frame(tx, n))
+                .await
+                .unwrap();
+        }
+        store
+            .transaction_with(|tx| -> StoreResult<()> {
+                let mut typed = canvas_tx(tx);
+                let mut progress = typed
+                    .get::<PayloadMigrations>(&("online:benchmark_f1_dirty".to_owned(),))?
+                    .unwrap();
+                // Reproduce budget exhaustion after dirty rows match but before the high-key cursor advances.
+                progress.cursor = 8;
+                progress.cursor_key = Some(studio_db_api::migration::encode_key(&(8i64,)));
+                typed.update_existing(&progress)?;
+                assert!(check_cursor(tx, 9).is_err());
+                Ok(())
+            })
+            .await
+            .unwrap();
+    }
     #[test]
     fn sidecars_and_copy_overhead_must_fit_before_copying() {
         let gib = 1024 * 1024 * 1024;

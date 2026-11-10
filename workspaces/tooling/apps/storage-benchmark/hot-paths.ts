@@ -55,7 +55,7 @@ await withGateLock(async () => {
     return;
   }
   console.error(
-    "Manual P0-C run: <=60 measured seconds, one sequential producer, 100 fixed frames (8 for smoke), <=16 GiB database/WAL, <=32 GiB temporary copies. No providers. Exclusive ordinary-gate lock; timeout 10 minutes including copying.",
+    "Manual P0-C/F1 run: <=60 measured seconds, one sequential producer, 100 fixed frames (8 for smoke), including publication and dirty replay; <=16 GiB database/WAL, <=32 GiB temporary copies. No providers. Exclusive ordinary-gate lock; timeout 10 minutes including copying.",
   );
   const cache = join(homedir(), ".cache/codex-studio/tmp");
   mkdirSync(cache, { recursive: true });
@@ -126,6 +126,7 @@ await withGateLock(async () => {
       throw Error(`Benchmark failed; recorded ${output}`);
     }
     const report: unknown = JSON.parse(readFileSync(reportPath, "utf8"));
+    // Rust owns the family list; the same frames include the two F1 probes.
     const timing = readFileSync(usage, "utf8");
     const match = timing.match(
       /P0_CPU user=([0-9.]+)s? sys=([0-9.]+)s? rss=([0-9]+)/,
