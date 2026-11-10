@@ -7,6 +7,8 @@ export default {
     ...base.test,
     name: "fast",
     include: [
+      "src/browserPersistence.test.ts",
+      "src/useNativeAction.test.ts",
       "src/servers/net/net.test.ts",
       "src/components/conversation/MessageQueue/MessageQueue.render.test.ts",
       "src/components/projects/ProjectAccount/ProjectAccount.render.test.ts",

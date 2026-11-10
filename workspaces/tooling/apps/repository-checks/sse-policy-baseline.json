@@ -77,14 +77,6 @@
   },
   {
     "file": "components/conversation/support/resourceReadRecovery.test.ts",
-    "callee": "localStorage.getItem"
-  },
-  {
-    "file": "components/conversation/support/resourceReadRecovery.test.ts",
-    "callee": "localStorage.removeItem"
-  },
-  {
-    "file": "components/conversation/support/resourceReadRecovery.test.ts",
     "callee": "localStorage.setItem"
   },
   {

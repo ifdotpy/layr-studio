@@ -5,6 +5,7 @@ import { conversationActionsFixture } from "./components/shell/integration-suppo
 import { required } from "./components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { expect, it, vi } from "vitest";
 import type { Agent } from "./types.ts";
+import type { PostBody } from "./api.ts";
 function memoryStorage(): Storage {
   const values = new Map<string, string>();
   return {
@@ -22,6 +23,49 @@ function memoryStorage(): Storage {
     clear: () => values.clear(),
   };
 }
+it("retries a native action saved before schema-hashed keys with the same identity", async () => {
+  const post = vi.fn().mockRejectedValue(new Error("Unknown outcome"));
+  const area = conversationActionsFixture();
+  const storage = memoryStorage();
+  area.scope.services.api.post = post;
+  Object.defineProperty(area.scope.services, "storage", { value: storage });
+  setStartupFixture(area, {
+    ...Object.assign(snapshotFixture(), { token: "", stateDir: "/fixture" }),
+    stateDir: "workspace",
+  });
+  area.startup.workspaceId = "workspace";
+  const request = {
+    id: "chat",
+    action: "compact",
+    request_id: "original-request",
+    context: {
+      accountKey: "original-account",
+      threadId: "original-thread",
+      epoch: 1,
+    },
+  } satisfies PostBody<"/api/action">;
+  storage.setItem(
+    `studio-native-action:${area.startup.creationScope}:chat`,
+    JSON.stringify(request),
+  );
+  try {
+    expect(area.native.pending("chat")).toEqual(request);
+    await expect(area.native.submit({ id: "chat" }, "review")).rejects.toThrow(
+      "Check the saved action request before another action.",
+    );
+    expect(post).not.toHaveBeenCalled();
+    await expect(
+      area.native.submit(
+        { id: "chat", accountKey: "changed", threadId: "changed", epoch: 2 },
+        "compact",
+      ),
+    ).rejects.toThrow("Unknown outcome");
+    expect(post.mock.calls[0]?.[1]).toEqual(request);
+    expect(area.native.pending("chat")).toEqual(request);
+  } finally {
+    area.scope.services.close();
+  }
+});
 it("retries an uncertain action with its original request and server after another owner is selected", async () => {
   const postA = vi.fn().mockRejectedValue(new Error("Unknown outcome"));
   const postB = vi.fn().mockRejectedValue(new Error("Unknown outcome"));

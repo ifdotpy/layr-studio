@@ -18,13 +18,18 @@ export function browserIndexedDB(): IDBFactory | undefined {
   return globalThis.indexedDB;
 }
 
+const previousOutboxPrefixes = {
+  nativeAction: "studio-native-action:",
+  queueChange: "studio-queue-change:",
+} as const;
+
 const outboxPrefixes = {
-  nativeAction: `studio-native-action:${API_SCHEMA_HASH}:`,
+  nativeAction: `${previousOutboxPrefixes.nativeAction}${API_SCHEMA_HASH}:`,
   stableRequest: "request-id:",
   chatCreation: "codex-pending-creation:",
   complaintResponse: "studio-message-responses:",
   projectSave: "studio-peer-convert:",
-  queueChange: `studio-queue-change:${API_SCHEMA_HASH}:`,
+  queueChange: `${previousOutboxPrefixes.queueChange}${API_SCHEMA_HASH}:`,
   removeSending: "studio-remove-sending:",
   removedSend: "studio-removed-send:",
   sidebarOrder: "codex-sidebar-order:",
@@ -49,12 +54,23 @@ export function outboxRequests(
     outboxPrefixes[kind] + suffix;
   return {
     key,
-    get: (kind: OutboxRequestKind, suffix: string) =>
-      storage.getItem(key(kind, suffix)),
+    get: (kind: OutboxRequestKind, suffix: string) => {
+      const currentKey = key(kind, suffix);
+      const current = storage.getItem(currentKey);
+      if (
+        current !== null ||
+        (kind !== "nativeAction" && kind !== "queueChange")
+      )
+        return current;
+      return storage.getItem(previousOutboxPrefixes[kind] + suffix);
+    },
     set: (kind: OutboxRequestKind, suffix: string, value: string) =>
       storage.setItem(key(kind, suffix), value),
-    remove: (kind: OutboxRequestKind, suffix: string) =>
-      storage.removeItem(key(kind, suffix)),
+    remove: (kind: OutboxRequestKind, suffix: string) => {
+      storage.removeItem(key(kind, suffix));
+      if (kind === "nativeAction" || kind === "queueChange")
+        storage.removeItem(previousOutboxPrefixes[kind] + suffix);
+    },
   };
 }
 
@@ -90,7 +106,8 @@ export function createQueueOutbox(storage: Storage, databaseName: string) {
     fallback: T,
     update: (current: T) => T,
   ): Promise<T> {
-    const key = outboxRequests(storage).key("queueChange", suffix);
+    const outbox = outboxRequests(storage);
+    const key = outbox.key("queueChange", suffix);
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
       const request = browserIndexedDB()!.open(databaseName, 1);
       request.onupgradeneeded = () =>
@@ -104,10 +121,10 @@ export function createQueueOutbox(storage: Storage, databaseName: string) {
       let failure: unknown;
       tx.objectStore("writes").get(key).onsuccess = () => {
         try {
-          const raw = storage.getItem(key);
+          const raw = outbox.get("queueChange", suffix);
           result = update(raw === null ? fallback : JSON.parse(raw));
-          if (result === null) storage.removeItem(key);
-          else storage.setItem(key, JSON.stringify(result));
+          if (result === null) outbox.remove("queueChange", suffix);
+          else outbox.set("queueChange", suffix, JSON.stringify(result));
         } catch (error) {
           failure = error;
           tx.abort();

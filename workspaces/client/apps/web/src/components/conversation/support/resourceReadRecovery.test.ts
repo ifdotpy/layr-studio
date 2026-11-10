@@ -159,9 +159,9 @@ vi.mock("../../../sync/localDraft.ts", async (importOriginal) => ({
     update: (value: unknown) => unknown,
   ) => {
     const key = outboxRequests().key("queueChange", suffix);
-    const raw = localStorage.getItem(key);
+    const raw = outboxRequests().get("queueChange", suffix);
     const result = update(raw === null ? fallback : JSON.parse(raw));
-    if (result === null) localStorage.removeItem(key);
+    if (result === null) outboxRequests().remove("queueChange", suffix);
     else localStorage.setItem(key, JSON.stringify(result));
     return result;
   },
@@ -615,37 +615,54 @@ describe("resource read callers", () => {
     },
   );
 
-  it("retains a request on signature conflict and clears an ordinary refusal", async () => {
-    const key = outboxRequests().key("queueChange", "scope:lead");
-    const request = {
-      action: "send_now",
-      agent: "lead",
-      id: "a",
-      expectedText: "text",
-      expected_revision: "r",
-      request_id: "request",
-    };
-    localStorage.setItem(key, JSON.stringify(request));
-    get.mockResolvedValue({
-      items: [],
-      revision: "r",
-      capabilities: { reorder: true, receipts: true },
-    });
-    const queue = mount(() =>
-      useMessageQueue({
-        id: "lead",
-        enabled: true,
-        scope: "scope",
+  it.each(["current", "previous"])(
+    "retains a %s-key request on signature conflict and clears an ordinary refusal",
+    async (version) => {
+      const key = outboxRequests().key("queueChange", "scope:lead");
+      const request = {
+        action: "send_now",
+        agent: "lead",
+        id: "a",
+        expectedText: "text",
+        expected_revision: "r",
+        request_id: "request",
+      };
+      localStorage.setItem(
+        version === "previous" ? "studio-queue-change:scope:lead" : key,
+        JSON.stringify(request),
+      );
+      get.mockResolvedValue({
+        items: [],
+        revision: "r",
+        capabilities: { reorder: true, receipts: true },
+      });
+      const queue = mount(() =>
+        useMessageQueue({
+          id: "lead",
+          enabled: true,
+          scope: "scope",
+          workspaceId: "workspace",
+        }),
+      );
+      await expect(queue.reorder(["a"])).rejects.toThrow(
+        "Retry the previous queue change before making another change.",
+      );
+      expect(syncPost).not.toHaveBeenCalled();
+      syncPost.mockRejectedValueOnce(new ApiError("signature conflict", 409));
+      await expect(queue.retry()).rejects.toThrow("signature conflict");
+      expect(syncPost).toHaveBeenCalledWith("/api/queue", request, {
         workspaceId: "workspace",
-      }),
-    );
-    syncPost.mockRejectedValueOnce(new ApiError("signature conflict", 409));
-    await expect(queue.retry()).rejects.toThrow("signature conflict");
-    expect(localStorage.getItem(key)).toBe(JSON.stringify(request));
-    syncPost.mockRejectedValueOnce(new ApiError("ordinary conflict", 400));
-    await expect(queue.retry()).rejects.toThrow("ordinary conflict");
-    expect(localStorage.getItem(key)).toBeNull();
-  });
+      });
+      expect(outboxRequests().get("queueChange", "scope:lead")).toBe(
+        JSON.stringify(request),
+      );
+      syncPost.mockRejectedValueOnce(new ApiError("ordinary conflict", 400));
+      await expect(queue.retry()).rejects.toThrow("ordinary conflict");
+      expect(localStorage.getItem(key)).toBeNull();
+      expect(localStorage.getItem("studio-queue-change:scope:lead")).toBeNull();
+      expect(outboxRequests().get("queueChange", "scope:lead")).toBeNull();
+    },
+  );
 
   it("uses streamed models for display and a fresh owner read for selection", async () => {
     const publish = (model: string) =>
