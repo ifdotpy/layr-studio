@@ -107,6 +107,7 @@ pub mod monitor_matches;
 mod monitor_observation;
 pub mod monitor_output;
 pub mod monitor_policy;
+mod monitor_quarantine;
 pub mod monitor_receipts;
 pub mod monitor_runtime;
 pub mod monitor_runtime_wiring;

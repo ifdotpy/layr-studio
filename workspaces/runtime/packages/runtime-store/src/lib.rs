@@ -175,7 +175,8 @@ pub use repositories::federation_credentials::FederationCredentialsRepository;
 pub use repositories::federation_messaging;
 pub use repositories::monitor_runtime;
 pub use repositories::monitors::{
-    MonitorOperation, MonitorOperationEvidence, MonitorsRepository, StoredMonitor,
+    MONITOR_HOLD_PREFIX, MonitorOperation, MonitorOperationEvidence, MonitorsRepository,
+    StoredMonitor, unheld_sql as monitor_unheld_sql,
 };
 pub use repositories::multi_server::MultiServerRepository;
 pub use repositories::notification_dispatch::NotificationDispatchRepository;

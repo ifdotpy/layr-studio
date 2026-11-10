@@ -2,6 +2,75 @@ use std::{process::Stdio, time::Duration};
 use studio_runtime_store::RuntimeStore;
 
 #[tokio::test]
+async fn startup_reseed_holds_unreadable_active_and_terminal_monitors_and_serves_health() {
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+    let state = tempfile::tempdir().expect("state");
+    let store = RuntimeStore::open(Some(state.path())).await.unwrap();
+    store.transaction(|tx| {
+        tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+        tx.execute("INSERT INTO runtime_agents(id,record) VALUES('owner',?1)",
+            [studio_json::json!({"id":"owner","rootId":"owner","compactions":0,"provider":"codex","epoch":0,"status":"completed","autoWake":true,"accountKey":"default"}).to_string()])?;
+        for (id, status) in [("bad-active", "running"), ("bad-terminal", "completed")] {
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)", (id,
+                studio_json::json!({"id":id,"agent":"owner","status":status,"created":1,"epoch":"invalid"}).to_string()))?;
+        }
+        tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('bad-base64',?1)",
+            [studio_json::json!({"id":"bad-base64","agent":"owner","epoch":0,"status":"running","requestId":"fixture","created":0,"activityAt":0,"activityGeneration":0,"bytes":0,"command":"","cwd":std::env::temp_dir(),"interactive":false,"livenessCommand":"","log":std::env::temp_dir().join("held.log"),"stallTimeoutSeconds":0,"stallWakeGeneration":-1,"successExitCodes":[0],"tail":"","timeout_ms":3600000,"wakeOn":"exit","outputLineTail":{"stdout":"!"}}).to_string()])?;
+        Ok(())
+    }).await.unwrap();
+    drop(store);
+    let mut child = tokio::process::Command::new(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server").expect("server binary"),
+    )
+    .args(["--port", "0"])
+    .env("CODEX_AGENTS_STATE_DIR", state.path())
+    .env_remove("CODEX_BACKEND_BUILD")
+    .stdin(Stdio::null())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true)
+    .spawn()
+    .unwrap();
+    let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+    let mut stderr = child.stderr.take().unwrap();
+    let address = tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let Some(line) = lines.next_line().await.unwrap() else {
+                let mut error = String::new();
+                stderr.read_to_string(&mut error).await.unwrap();
+                panic!("server must reach readiness after reseeding: {error}");
+            };
+            if let Some(address) = line.strip_prefix("Codex Canvas: http://") {
+                break address.to_owned();
+            }
+        }
+    })
+    .await
+    .expect("bounded startup");
+    let mut stream = tokio::net::TcpStream::connect(&address).await.unwrap();
+    stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    assert!(
+        response.contains("200 OK") && response.contains("ready"),
+        "{response}"
+    );
+    child.kill().await.unwrap();
+    let db = rusqlite::Connection::open(state.path().join("canvas.sqlite3")).unwrap();
+    let holds: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM runtime_error_incidents WHERE id LIKE 'monitor-hold:bad-%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(holds, 3);
+}
+
+#[tokio::test]
 async fn startup_serves_health_and_refuses_commands_while_database_is_busy() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let state = tempfile::tempdir().expect("state");

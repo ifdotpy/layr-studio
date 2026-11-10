@@ -272,6 +272,16 @@ pub async fn recover_pending(store: &RuntimeStore, limit: usize) -> Result<usize
             return Ok(recovered);
         };
         if let Err(error) = restore(store, &receipt).await {
+            if crate::monitor_quarantine::hold_error(
+                store,
+                &error,
+                "receipt_restore",
+                crate::event_write::unix_time()?,
+            )
+            .await?
+            {
+                continue;
+            }
             if crate::monitor_runtime::startup_store_failure(&error) {
                 return Err(error);
             }

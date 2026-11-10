@@ -81,6 +81,9 @@ inherits = "ci"
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
+    (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
@@ -113,6 +116,8 @@ default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
+    (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::monitor_runtime_)) |
+    (package(=studio-runtime-server) & kind(lib) & test(startup_gate::tests::monitor_runtime_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/^perf_reporting::tests::sql_(normalizes_once_across_profile_rows_and_sweeps|normalization_memo_full_preserves_reports|normalization_memo_skips_long_text)$/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::summary_publication_preserves_pending_bounded_task_retirement)) |
@@ -573,6 +578,9 @@ platform = 'cfg(target_os = "linux")'
 # Task cancellation without a result ID keeps followup review and user inputs claimable.
 # Required transfer discriminator rejects missing, null and unknown payload kinds.
 default-filter = '''
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
+    (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
+    (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
@@ -605,6 +613,8 @@ default-filter = '''
     (package(=studio-runtime-schema) & kind(lib) & test(=sync_protocol::tests::transfer_payload_kind_is_required_and_strict)) |
     (package(=studio-runtime-store) & kind(lib) & test(migrations::m2026_11_07_auth_resume_proof::tests::)) |
     (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::auth_resume_proof_)) |
+    (package(=studio-runtime-server) & kind(bin) & binary(=studio-runtime-server) & test(exit_logging_tests::monitor_runtime_)) |
+    (package(=studio-runtime-server) & kind(lib) & test(startup_gate::tests::monitor_runtime_)) |
     (package(=studio-runtime-services) & kind(lib) & test(entity_scope::catch_up_query_tests::)) |
     (package(=studio-runtime-store) & kind(lib) & test(/^perf_reporting::tests::sql_(normalizes_once_across_profile_rows_and_sweeps|normalization_memo_full_preserves_reports|normalization_memo_skips_long_text)$/)) |
     (package(=studio-runtime-services) & kind(lib) & test(=sync_policy::tests::summary_publication_preserves_pending_bounded_task_retirement)) |

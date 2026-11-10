@@ -113,7 +113,7 @@ impl MonitorError {
         matches!(self, Self::Io(_)) || self.store_error().is_some_and(retryable_store_error)
     }
 
-    fn store_error(&self) -> Option<&studio_runtime_store::StoreError> {
+    pub(crate) fn store_error(&self) -> Option<&studio_runtime_store::StoreError> {
         match self {
             Self::Store(error)
             | Self::Event(crate::event_write::EventWriteError::Store(error))

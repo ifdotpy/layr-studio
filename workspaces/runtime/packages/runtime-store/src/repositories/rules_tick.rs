@@ -63,8 +63,8 @@ impl RulesTickRepository {
             "agents",
         )?;
         let mut query = connection.prepare_cached(
-            "SELECT m.id,m.record FROM runtime_monitors m JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent') \
-             WHERE a.root_id=?1 AND json_extract(m.record,'$.status')='running' ORDER BY m.rowid LIMIT ?2",
+            &format!("SELECT m.id,m.record FROM runtime_monitors m JOIN runtime_agents a ON a.id=json_extract(m.record,'$.agent') \
+             WHERE {} AND a.root_id=?1 AND json_extract(m.record,'$.status')='running' ORDER BY m.rowid LIMIT ?2", crate::monitor_unheld_sql("m.id")),
         )?;
         let mut rows = query.query(params![root_id, MAX_TEAM_RECORDS as i64 + 1])?;
         let mut monitors = Vec::new();

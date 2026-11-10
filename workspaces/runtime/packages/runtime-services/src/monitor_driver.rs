@@ -476,7 +476,7 @@ fn pending_cancel_ids_in(
 ) -> Result<Vec<String>, MonitorError> {
     let mut statement = connection
         .prepare(
-            "SELECT id FROM runtime_monitors WHERE json_extract(record,'$.status')='running' AND json_extract(record,'$.cancelRequested')=1 AND COALESCE(json_extract(record,'$.cancelDispatch.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.cancelDispatch.nextAttemptAt'),0)<=?1 ORDER BY id LIMIT 64",
+            &format!("SELECT id FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')='running' AND json_extract(record,'$.cancelRequested')=1 AND COALESCE(json_extract(record,'$.cancelDispatch.status'),'pending')='pending' AND COALESCE(json_extract(record,'$.cancelDispatch.nextAttemptAt'),0)<=?1 ORDER BY id LIMIT 64", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
     let ids = statement
@@ -500,7 +500,7 @@ pub async fn pending_start_ids(store: &RuntimeStore) -> Result<Vec<String>, Moni
 fn pending_start_ids_in(connection: &rusqlite::Connection) -> Result<Vec<String>, MonitorError> {
     let mut statement = connection
         .prepare(
-            "SELECT m.id FROM runtime_monitors m WHERE json_extract(m.record,'$.status')='starting' AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running' AND json_extract(m.record,'$.operation') IS NULL AND json_extract(m.record,'$.ruleId') IS NULL AND (json_extract(m.record,'$.restartAfter') IS NULL OR EXISTS (SELECT 1 FROM runtime_monitors old WHERE old.id=json_extract(m.record,'$.restartAfter') AND json_extract(old.record,'$.status') IN ('completed','failed','cancelled'))) ORDER BY json_extract(m.record,'$.created'),m.id LIMIT 64",
+            &format!("SELECT m.id FROM runtime_monitors m WHERE {} AND json_extract(m.record,'$.status')='starting' AND COALESCE(json_extract(m.record,'$.reattachRecovery.status'),'')!='running' AND json_extract(m.record,'$.operation') IS NULL AND json_extract(m.record,'$.ruleId') IS NULL AND (json_extract(m.record,'$.restartAfter') IS NULL OR EXISTS (SELECT 1 FROM runtime_monitors old WHERE old.id=json_extract(m.record,'$.restartAfter') AND json_extract(old.record,'$.status') IN ('completed','failed','cancelled'))) ORDER BY json_extract(m.record,'$.created'),m.id LIMIT 64", studio_runtime_store::monitor_unheld_sql("m.id")),
         )
         .map_err(studio_runtime_store::StoreError::from)?;
     let ids = statement

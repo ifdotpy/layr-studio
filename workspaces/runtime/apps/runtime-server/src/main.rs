@@ -328,6 +328,28 @@ async fn shutdown_join<T>(
         })
 }
 
+async fn monitor_runtime_exit(
+    task: &mut Option<
+        tokio::task::JoinHandle<Result<(), studio_runtime_services::monitor_policy::MonitorError>>,
+    >,
+    release_offer: &handover::Kept,
+) -> std::io::Error {
+    let result = task.as_mut().expect("owned monitor runtime task").await;
+    // A JoinHandle must never be polled again after observing its result.
+    task.take();
+    if let Ok(mut kept) = release_offer.lock() {
+        kept.take();
+    }
+    let reason = match result {
+        Ok(Ok(())) => "completed unexpectedly".to_owned(),
+        Ok(Err(error)) => error.to_string(),
+        Err(error) => error.to_string(),
+    };
+    std::io::Error::other(format!(
+        "monitor runtime task exited unexpectedly: {reason}"
+    ))
+}
+
 fn runtime_initialization_exit_log(reason: &str) -> String {
     format!("runtime server exiting because Tokio runtime initialization failed: {reason}")
 }
@@ -949,12 +971,7 @@ async fn run(
             return Err(error);
         }
     };
-    let app = app
-        .route(
-            "/health",
-            axum::routing::get(studio_runtime_server::startup_gate::ready),
-        )
-        .merge(web_assets::router(web_assets::WebAssets::discover()));
+    let app = app.merge(web_assets::router(web_assets::WebAssets::discover()));
     startup_trace("http-router-completed");
     // Start the peer child only after listener bind and all fallible router
     // construction have succeeded. The pre-created advert is already shared
@@ -1010,9 +1027,15 @@ async fn run(
         history_runtime::HistoryRuntime::new(Arc::clone(&store), Arc::clone(&account_driver))
             .spawn(monitor_shutdown.subscribe());
     let monitor_task = studio_runtime_services::monitor_runtime_wiring::start(
-        monitor_runtime,
+        Arc::clone(&monitor_runtime),
         monitor_shutdown.subscribe(),
     );
+    let app = app.route(
+        "/health",
+        axum::routing::get(studio_runtime_server::startup_gate::ready)
+            .layer(Extension(monitor_task.abort_handle())),
+    );
+    let mut monitor_task = Some(monitor_task);
     // Sign-in links of agents: the host bridge of native chats
     // serves the launcher and control sockets; one poll for each source writes the cards.
     #[cfg(unix)]
@@ -1395,12 +1418,19 @@ async fn run(
     let mutation_shutdown = state.clone();
     let shutdown_sync_changes = Arc::clone(&sync_changes);
     let shutdown_cost_scans = Arc::clone(&cost_scan_cancelled);
+    let (monitor_stopped, monitor_result) = tokio::sync::oneshot::channel();
     let result = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .with_graceful_shutdown(async move {
+        let mut monitor_failure = None;
         let log = tokio::select! {
+            error = monitor_runtime_exit(&mut monitor_task, &release_offer) => {
+                eprintln!("runtime server unhealthy: {error}; monitor_tick_phase={}", monitor_runtime.phase());
+                monitor_failure = Some(error);
+                "runtime server shutdown requested because the monitor runtime task exited"
+            }
             reason = shutdown_signal() => {
                 // No handover: the port closes with this server, as for any stop.
                 if let Ok(mut kept) = release_offer.lock() {
@@ -1422,8 +1452,10 @@ async fn run(
         if let Err(error) = shutdown_requested.send(()) {
             eprintln!("runtime server shutdown watchdog could not start: {error}");
         }
+        drop(monitor_stopped.send((monitor_task, monitor_failure)));
     })
     .await;
+    let (monitor_task, monitor_failure) = monitor_result.await?;
     let drained: Result<(), Box<dyn std::error::Error>> = async {
         // Keep account/provider dependencies live while HTTP mutations and durable
         // login/cancel work drain. The existing 20-second watchdog bounds this
@@ -1489,8 +1521,10 @@ async fn run(
         if let Some(task) = peer_projects_task {
             shutdown_join("peer projects task", task).await??;
         }
-        let monitor_result = shutdown_join("monitor runtime task", monitor_task).await?;
-        monitor_result.map_err(std::io::Error::other)??;
+        if let Some(monitor_task) = monitor_task {
+            let monitor_result = shutdown_join("monitor runtime task", monitor_task).await?;
+            monitor_result.map_err(std::io::Error::other)??;
+        }
         #[cfg(unix)]
         {
             let terminal_cleanup = shutdown_join(
@@ -1528,6 +1562,9 @@ async fn run(
         };
     drained?;
     result?;
+    if let Some(error) = monitor_failure {
+        return Err(error.into());
+    }
     if flushed {
         shutdown_marker::finish(store.root())?;
     }
@@ -2487,6 +2524,64 @@ mod targeted_scheduler_wake_tests {
 mod exit_logging_tests {
     use std::{collections::BTreeMap, sync::Arc, time::Duration};
     use tokio::sync::{Notify, watch};
+
+    #[tokio::test(start_paused = true)]
+    async fn monitor_runtime_failure_stops_the_server_wait_without_a_shutdown_signal() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let socket = listener.into_std().unwrap();
+        let kept_listener = socket.try_clone().unwrap();
+        let listener = tokio::net::TcpListener::from_std(socket).unwrap();
+        let kept = Arc::new(std::sync::Mutex::new(Some(kept_listener)));
+        let retained_by_handover_thread = Arc::clone(&kept);
+        let mut task = Some(tokio::spawn(async {
+            Err(
+                studio_runtime_services::monitor_policy::MonitorError::Refused(
+                    "fixture monitor store failure",
+                ),
+            )
+        }));
+        let (failed, failure) = tokio::sync::oneshot::channel();
+        let server = axum::serve(listener, axum::Router::new()).with_graceful_shutdown(async move {
+            let error = tokio::select! {
+                error = super::monitor_runtime_exit(&mut task, &kept) => error,
+                () = std::future::pending::<()>() => unreachable!("no external shutdown signal"),
+            };
+            assert!(task.is_none(), "shutdown must not poll a completed handle twice");
+            failed.send(error).unwrap();
+        });
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            std::future::IntoFuture::into_future(server),
+        )
+        .await
+        .expect("monitor failure must stop HTTP serving without an external shutdown signal")
+        .unwrap();
+        let error = failure.await.unwrap();
+        assert!(error.to_string().contains("monitor runtime task"));
+        assert!(error.to_string().contains("fixture monitor store failure"));
+        assert!(
+            retained_by_handover_thread.lock().unwrap().is_none(),
+            "failure must release the handover listener before cleanup"
+        );
+        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn monitor_runtime_success_and_panic_are_also_unexpected_exits() {
+        let kept = Arc::new(std::sync::Mutex::new(None));
+        let mut task = Some(tokio::spawn(async { Ok(()) }));
+        assert!(
+            super::monitor_runtime_exit(&mut task, &kept)
+                .await
+                .to_string()
+                .contains("completed unexpectedly")
+        );
+        let mut task = Some(tokio::spawn(async { panic!("fixture monitor panic") }));
+        let error = super::monitor_runtime_exit(&mut task, &kept).await;
+        assert!(error.to_string().contains("monitor runtime task"));
+        assert!(error.to_string().contains("panicked"));
+    }
 
     use super::{
         CONTINUATION_FAILURE_RETRY_SECONDS, ContinuationTickState, ContinuationWait,

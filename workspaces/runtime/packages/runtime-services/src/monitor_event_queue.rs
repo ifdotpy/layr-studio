@@ -23,6 +23,12 @@ pub const STREAM_QUEUE_MAX_BYTES: usize = 1024 * 1024;
 // receipt after the output stream reaches its normal admission limit.
 const RESERVED_EVENTS: usize = 2;
 pub const TERMINAL_RECEIPT_RESERVE_BYTES: usize = 64 * 1024;
+/// Output admission budgets shared by live queues and held diagnostic evidence.
+const OUTPUT_MAX_EVENTS: usize = MAX_EVENTS - RESERVED_EVENTS;
+const OUTPUT_MAX_BYTES: usize = STREAM_QUEUE_MAX_BYTES - TERMINAL_RECEIPT_RESERVE_BYTES;
+/// Recent overflow identities retained per monitor; unit: cursor keys. Cursors
+/// from different journal scopes have no shared chronological ordering.
+const DROPPED_CURSOR_HISTORY: usize = 8;
 pub const PROBE_RESULT_MAX_BYTES: usize = 32 * 1024;
 /// Python stores at most this many characters in a command monitor's error/tail.
 pub const EXIT_RECEIPT_MAX_ERROR_BYTES: usize = 12_000;
@@ -35,11 +41,136 @@ pub struct JournalEventScope<'a> {
     pub expected_agent: Option<&'a str>,
 }
 
-#[derive(serde::Deserialize)]
+#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OutputDelta {
     pub delta_base64: String,
     pub stream: Option<MonitorStream>,
+}
+
+/// Private diagnostic evidence, never deliverable output or replay authority.
+/// A held monitor must never resume. Any future release/repair must settle it
+/// failed or unknown with this evidence attached. There is no release path today.
+/// Each monitor retains at most the live output budget, then only byte/entry
+/// counts in the same row. Journal settlement prevents recounting committed frames.
+pub(crate) const HELD_OUTPUT_PREFIX: &str = "monitor-held-output:";
+
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct HeldOutputEvidence {
+    entries: Vec<HeldOutput>,
+    dropped_entries: u64,
+    dropped_bytes: u64,
+    #[serde(default)]
+    recent_dropped: Vec<DroppedOutputCursor>,
+}
+
+#[derive(PartialEq, serde::Serialize, serde::Deserialize)]
+struct DroppedOutputCursor {
+    cursor_scope: String,
+    generation: u64,
+    cursor: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct HeldOutput {
+    account: String,
+    cursor_scope: String,
+    generation: u64,
+    cursor: u64,
+    byte_length: u64,
+    delta: OutputDelta,
+}
+
+fn preserve_held_output(
+    tx: &Transaction<'_>,
+    process_id: &str,
+    scope: &JournalEventScope<'_>,
+    delta: &OutputDelta,
+) -> Result<(), NotificationDispatchError> {
+    let id = format!("{HELD_OUTPUT_PREFIX}{process_id}");
+    let previous: Option<String> = tx
+        .query_row(
+            "SELECT payload FROM runtime_error_incidents WHERE id=?1",
+            [&id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(StoreError::from)?;
+    let mut evidence: HeldOutputEvidence = previous
+        .map(|raw| studio_json::from_str(&raw))
+        .transpose()
+        .map_err(StoreError::from)?
+        .unwrap_or_default();
+    if let Some(previous) = evidence.entries.iter().find(|entry| {
+        entry.cursor_scope == scope.cursor_scope
+            && entry.generation == scope.generation
+            && entry.cursor == scope.cursor
+    }) {
+        return if previous.account == scope.account && previous.delta == *delta {
+            Ok(())
+        } else {
+            Err(NotificationDispatchError::ConflictingDelivery)
+        };
+    }
+    let byte_length = base64::engine::general_purpose::STANDARD
+        .decode(&delta.delta_base64)
+        .map_err(|_| NotificationDispatchError::invalid())?
+        .len() as u64;
+    let retained_bytes: u64 = evidence.entries.iter().map(|entry| entry.byte_length).sum();
+    if evidence.entries.len() < OUTPUT_MAX_EVENTS
+        && retained_bytes + byte_length <= OUTPUT_MAX_BYTES as u64
+    {
+        evidence.entries.push(HeldOutput {
+            account: scope.account.into(),
+            cursor_scope: scope.cursor_scope.into(),
+            generation: scope.generation,
+            cursor: scope.cursor,
+            byte_length,
+            delta: OutputDelta {
+                delta_base64: delta.delta_base64.clone(),
+                stream: delta.stream,
+            },
+        });
+    } else {
+        let cursor = DroppedOutputCursor {
+            cursor_scope: scope.cursor_scope.into(),
+            generation: scope.generation,
+            cursor: scope.cursor,
+        };
+        // A thread-routed frame can enqueue twice in the same journal commit.
+        if evidence.recent_dropped.contains(&cursor) {
+            return Ok(());
+        }
+        if evidence.recent_dropped.len() == DROPPED_CURSOR_HISTORY {
+            evidence.recent_dropped.remove(0);
+        }
+        evidence.recent_dropped.push(cursor);
+        evidence.dropped_entries =
+            evidence
+                .dropped_entries
+                .checked_add(1)
+                .ok_or(StoreError::RecordContract(
+                    "held output entry count overflow",
+                ))?;
+        evidence.dropped_bytes =
+            evidence
+                .dropped_bytes
+                .checked_add(byte_length)
+                .ok_or(StoreError::RecordContract(
+                    "held output byte count overflow",
+                ))?;
+    }
+    let payload = studio_json::to_string(&evidence).map_err(StoreError::from)?;
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0.0, |duration| duration.as_secs_f64());
+    let at = studio_runtime_store::error_incidents::timestamp_ms(seconds)?;
+    tx.execute(
+        "INSERT INTO runtime_error_incidents(id,kind,owner_kind,owner_id,created,last_seen,payload) VALUES(?1,?2,?3,?4,?5,?5,?6) ON CONFLICT(id) DO UPDATE SET last_seen=excluded.last_seen,payload=excluded.payload",
+        rusqlite::params![id, studio_runtime_schema::persistence::IncidentKind::StoredRecordInvalid,
+            studio_runtime_schema::persistence::OwnerKind::Monitor, process_id, at, payload],
+    ).map_err(StoreError::from)?;
+    Ok(())
 }
 
 /// Append `command/exec/outputDelta` while the provider notification receipt is
@@ -73,6 +204,13 @@ pub fn enqueue_output_with_scope_in_transaction(
     scope: JournalEventScope<'_>,
     params: &OutputDelta,
 ) -> Result<bool, NotificationDispatchError> {
+    // A held queue is deliberately never consumed. Preserve subsequent output
+    // separately, including when the held monitor record cannot be decoded, so
+    // its capacity cannot stop the account journal or overwrite the held row.
+    if MonitorsRepository::is_held(tx, process_id)? {
+        preserve_held_output(tx, process_id, &scope, params)?;
+        return Ok(true);
+    }
     let Some(mut record) = Table::<MonitorRecord>::new(tx).get(&process_id.to_owned())? else {
         return Ok(false);
     };
@@ -162,9 +300,8 @@ pub fn enqueue_output_with_scope_in_transaction(
         .iter()
         .map(MonitorQueueEvent::byte_length)
         .sum::<u64>();
-    if queue.len() >= MAX_EVENTS - RESERVED_EVENTS
-        || queued_bytes.saturating_add(bytes.len() as u64)
-            > (STREAM_QUEUE_MAX_BYTES - TERMINAL_RECEIPT_RESERVE_BYTES) as u64
+    if queue.len() >= OUTPUT_MAX_EVENTS
+        || queued_bytes.saturating_add(bytes.len() as u64) > OUTPUT_MAX_BYTES as u64
     {
         return Err(NotificationDispatchError::StreamCapacity);
     }
@@ -210,22 +347,27 @@ pub async fn next(store: &RuntimeStore) -> Result<Option<Delivery>, MonitorError
     let Some((id, encoded)) = row else {
         return Ok(None);
     };
-    let record: MonitorRecord = studio_json::from_str(&encoded)
-        .map_err(|_| MonitorError::InvalidDeliveryIdentity("monitor output queue"))?;
+    decode_queued(&id, &encoded).map(Some)
+}
+
+fn decode_queued(id: &str, encoded: &str) -> Result<Delivery, MonitorError> {
+    let invalid = |location: &str| MonitorError::InvalidStored {
+        id: id.to_owned(),
+        location: location.into(),
+    };
+    let mut decoder = studio_json::Deserializer::from_str(encoded);
+    let record: MonitorRecord = serde_path_to_error::deserialize(&mut decoder)
+        .map_err(|error| invalid(&format!("/{}", error.path())))?;
     if record.id != id {
-        return Err(MonitorError::InvalidDeliveryIdentity(
-            "monitor output owner",
-        ));
+        return Err(invalid("/id"));
     }
     let item = record
         .stream_queue
         .and_then(|queue| queue.into_iter().next())
-        .ok_or(MonitorError::InvalidDeliveryIdentity("monitor output head"))?;
+        .ok_or_else(|| invalid("/streamQueue/0"))?;
     let cursor = item.cursor().to_owned();
     if cursor.is_empty() {
-        return Err(MonitorError::InvalidDeliveryIdentity(
-            "monitor output cursor",
-        ));
+        return Err(invalid("/streamQueue/0/cursor"));
     }
     let operation = item.operation().clone();
     let event = match item {
@@ -251,9 +393,9 @@ pub async fn next(store: &RuntimeStore) -> Result<Option<Delivery>, MonitorError
         } => {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(delta_base64)
-                .map_err(|_| MonitorError::InvalidDeliveryIdentity("monitor output encoding"))?;
+                .map_err(|_| invalid("/streamQueue/0/deltaBase64"))?;
             if byte_length != bytes.len() as u64 {
-                return Err(MonitorError::InvalidDeliveryIdentity("monitor output size"));
+                return Err(invalid("/streamQueue/0/byteLength"));
             }
             MonitorEvent::OutputStream {
                 offset,
@@ -266,12 +408,12 @@ pub async fn next(store: &RuntimeStore) -> Result<Option<Delivery>, MonitorError
             }
         }
     };
-    Ok(Some(Delivery {
-        id,
+    Ok(Delivery {
+        id: id.to_owned(),
         operation,
         cursor,
         event,
-    }))
+    })
 }
 
 /// Persist a completed liveness request behind already-received output. The
@@ -458,8 +600,111 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU64, Ordering};
 
+    #[tokio::test]
+    async fn held_output_evidence_is_exact_atomic_private_and_replay_checked() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store.transaction_with(|tx| {
+            // A quarantine receipt is authoritative even for an undecodable row.
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('bad',?1)", [r#"{"id":"bad","status":"running"}"#])?;
+            studio_runtime_store::error_incidents::dismiss(tx, "monitor-hold:bad", 1.0, false)?;
+            let delta = OutputDelta { delta_base64: "AP9oZWxsbwo=".into(), stream: Some(MonitorStream::Stderr) };
+            let enqueue = |cursor, delta: &OutputDelta| enqueue_output_with_scope_in_transaction(tx, "bad", JournalEventScope {
+                account: "account", cursor_scope: "scope", generation: 7, cursor, expected_agent: None,
+            }, delta);
+            let before = crate::studio_errors::list(tx, 2.0)?;
+            tx.execute_batch("SAVEPOINT output_rollback")?;
+            assert!(enqueue(1, &delta).unwrap());
+            tx.execute_batch("ROLLBACK TO output_rollback; RELEASE output_rollback")?;
+            let count = || tx.query_row("SELECT COUNT(*) FROM runtime_error_incidents WHERE owner_id='bad'", [], |row| row.get::<_, i64>(0)).unwrap();
+            assert_eq!(count(), 0, "evidence rolls back with the account journal");
+            assert!(enqueue(1, &delta).unwrap());
+            assert!(enqueue(1, &delta).unwrap());
+            assert_eq!(count(), 1, "same cursor preserves exactly one body");
+            assert!(matches!(enqueue(1, &OutputDelta { delta_base64: "eA==".into(), stream: None }), Err(NotificationDispatchError::ConflictingDelivery)));
+            // Later cursors retain separate exact bodies.
+            assert!(enqueue(2, &delta).unwrap());
+            assert_eq!(count(), 1);
+            let saved: String = tx.query_row("SELECT payload FROM runtime_error_incidents WHERE owner_id='bad' ORDER BY id LIMIT 1", [], |row| row.get(0))?;
+            let saved: HeldOutputEvidence = studio_json::from_str(&saved).unwrap();
+            assert_eq!(saved.entries.len(), 2);
+            assert_eq!(saved.entries[0].account, "account");
+            assert_eq!(saved.entries[0].cursor_scope, "scope");
+            assert_eq!(saved.entries[0].generation, 7);
+            assert_eq!(saved.entries[0].delta.delta_base64, delta.delta_base64);
+            assert_eq!(saved.entries[0].delta.stream, delta.stream);
+            assert_eq!(crate::studio_errors::list(tx, 2.0)?, before, "private evidence must not enter the diagnostic decoder");
+            Ok::<_, StoreError>(())
+        }).await.unwrap();
+    }
+
     fn operation() -> Value {
         json!({"agent":"worker","epoch":1,"accountKey":"default","connectionId":"connection"})
+    }
+
+    #[tokio::test]
+    async fn held_output_evidence_byte_bound_keeps_exact_overflow_totals() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(root.path())).await.unwrap();
+        store
+            .transaction_with(|tx| {
+                studio_runtime_store::error_incidents::dismiss(
+                    tx,
+                    "monitor-hold:large",
+                    1.0,
+                    false,
+                )?;
+                let bytes = vec![0xFF; OUTPUT_MAX_BYTES / 2];
+                let delta = OutputDelta {
+                    delta_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+                    stream: None,
+                };
+                // A frame can pass both account journaling and thread dispatch;
+                // repeated and older overflow cursors must be counted once.
+                for cursor in [1, 2, 3, 3, 4, 3, 4] {
+                    assert!(
+                        enqueue_output_with_scope_in_transaction(
+                            tx,
+                            "large",
+                            JournalEventScope {
+                                account: "account",
+                                cursor_scope: "scope",
+                                generation: 7,
+                                cursor,
+                                expected_agent: None,
+                            },
+                            &delta
+                        )
+                        .unwrap()
+                    );
+                }
+                assert_eq!(
+                    tx.query_row(
+                        "SELECT COUNT(*) FROM runtime_error_incidents WHERE owner_id='large'",
+                        [],
+                        |row| row.get::<_, i64>(0)
+                    )?,
+                    1
+                );
+                let saved: String = tx.query_row(
+                    "SELECT payload FROM runtime_error_incidents WHERE owner_id='large'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                let saved: HeldOutputEvidence = studio_json::from_str(&saved).unwrap();
+                assert_eq!(saved.entries.len(), 2);
+                assert!(
+                    saved
+                        .entries
+                        .iter()
+                        .all(|entry| entry.delta.delta_base64 == delta.delta_base64)
+                );
+                assert_eq!(saved.dropped_entries, 2);
+                assert_eq!(saved.dropped_bytes, 2 * bytes.len() as u64);
+                Ok::<_, StoreError>(())
+            })
+            .await
+            .unwrap();
     }
 
     /// Store `count` finished monitors without a pending event, starting at

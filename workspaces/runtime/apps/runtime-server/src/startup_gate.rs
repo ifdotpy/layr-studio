@@ -45,8 +45,14 @@ async fn health(State(gate): State<StartupGate>) -> Result<Json<Status>, StatusC
     }))
 }
 
-pub async fn ready() -> Json<&'static str> {
-    Json("ready")
+pub async fn ready(
+    axum::Extension(monitor): axum::Extension<tokio::task::AbortHandle>,
+) -> Result<Json<&'static str>, StatusCode> {
+    if monitor.is_finished() {
+        Err(StatusCode::SERVICE_UNAVAILABLE)
+    } else {
+        Ok(Json("ready"))
+    }
 }
 
 pub fn router(gate: StartupGate) -> Router {
@@ -61,6 +67,37 @@ mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
     use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn monitor_runtime_failure_marks_health_unavailable() {
+        let task = tokio::spawn(async { Err::<(), _>("fixture monitor store failure") });
+        let health = Router::new().route(
+            "/health",
+            get(ready).layer(axum::Extension(task.abort_handle())),
+        );
+        let response = health
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        task.await.unwrap().unwrap_err();
+        let response = health
+            .oneshot(
+                Request::builder()
+                    .uri("/health")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
 
     #[tokio::test]
     async fn startup_status_is_readable_and_commands_are_refused() {

@@ -1075,6 +1075,129 @@ async fn a_full_monitor_output_queue_holds_the_journal_until_it_drains() {
     worker.shutdown().await.unwrap();
 }
 
+/// A held queue is never consumed, so it must not block the account journal.
+#[tokio::test]
+async fn a_held_full_monitor_preserves_output_and_other_agent_progress() {
+    let state = State::new().await;
+    let (agent, epoch) = (state.agent.clone(), state.epoch);
+    second_agent(&state, "agent-b", "fake-thread-1", "b-input").await;
+    state.bridge.run(move |store| async move {
+        store.transaction_with(move |tx| {
+            let operation = json!({"agent":agent,"epoch":epoch,"accountKey":"default","connectionId":"connection"});
+            let queue = (0..126).map(|index| json!({
+                "kind":"output","cursor":format!("seed:{index}"),"offset":index,
+                "byteLength":1,"deltaBase64":"eA==","stream":"stdout","operation":operation
+            })).collect::<Vec<_>>();
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('monitor-held',?1)",
+                [crate::monitor_policy::complete_test_monitor(json!({
+                    "id":"monitor-held","agent":agent,"epoch":epoch,"status":"running",
+                    "bytes":0,"created":1.0,"operation":operation,"streamQueue":queue
+                })).to_string()])?;
+            studio_runtime_store::error_incidents::dismiss(tx, "monitor-hold:monitor-held", 1.0, false)?;
+            Ok::<_, StoreError>(())
+        }).await?;
+        Ok(())
+    }).await.unwrap();
+    let original = state
+        .bridge
+        .run(|store| async move {
+            Ok(store.test_reader()?.query_row(
+                "SELECT record FROM runtime_monitors WHERE id='monitor-held'",
+                [],
+                |row| row.get::<_, String>(0),
+            )?)
+        })
+        .await
+        .unwrap();
+    let mut peer = Peer::new();
+    let mut worker = peer.worker(state.bridge.clone()).await;
+    let b_start = start_agent(&state, &mut peer, &worker, "agent-b", "fake-thread-1").await;
+    let delta = peer
+        .frame(json!({"method":"command/exec/outputDelta","params":{
+            "processId":"monitor-held","stream":"stderr","deltaBase64":"AP9oZWxsbwo="
+        }}))
+        .await;
+    for _ in 1..130 {
+        peer.frame(json!({"method":"command/exec/outputDelta","params":{
+            "processId":"monitor-held","stream":"stderr","deltaBase64":"AP9oZWxsbwo="
+        }}))
+        .await;
+    }
+    let reply = peer
+        .frame(json!({"id":b_start["id"],"result":{"turn":{"id":"turn-b"}}}))
+        .await;
+    tokio::time::timeout(
+        PROGRESS_DEADLINE,
+        peer.acknowledged_or_worker_exits(reply, &mut worker),
+    )
+    .await
+    .expect("held output must not block another agent's reply");
+    assert_eq!(state.event_status("b-input").await, "delivered");
+    let (saved, evidence): (String, String) = state
+        .bridge
+        .run(|store| async move {
+            let db = store.test_reader()?;
+            assert_eq!(
+                db.query_row(
+                    "SELECT COUNT(*) FROM runtime_error_incidents WHERE owner_id='monitor-held'",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )?,
+                1,
+                "held evidence uses one row regardless of output count"
+            );
+            Ok((
+                db.query_row(
+                    "SELECT record FROM runtime_monitors WHERE id='monitor-held'",
+                    [],
+                    |row| row.get(0),
+                )?,
+                db.query_row(
+                    "SELECT payload FROM runtime_error_incidents WHERE owner_id='monitor-held'",
+                    [],
+                    |row| row.get(0),
+                )?,
+            ))
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved, original, "held monitor evidence must stay unchanged");
+    #[derive(serde::Deserialize)]
+    struct Evidence {
+        entries: Vec<Entry>,
+        dropped_entries: u64,
+        dropped_bytes: u64,
+    }
+    #[derive(serde::Deserialize)]
+    struct Entry {
+        cursor: u64,
+        delta: SavedDelta,
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SavedDelta {
+        delta_base64: String,
+        stream: Option<studio_runtime_schema::monitor_record::MonitorStream>,
+    }
+    let evidence: Evidence = studio_json::from_str(&evidence).unwrap();
+    assert_eq!(evidence.entries.len(), 126);
+    assert_eq!(evidence.dropped_entries, 4);
+    assert_eq!(evidence.dropped_bytes, 32);
+    assert_eq!(evidence.entries[0].cursor, delta);
+    assert!(
+        evidence
+            .entries
+            .iter()
+            .all(|entry| entry.delta.delta_base64 == "AP9oZWxsbwo=")
+    );
+    assert_eq!(
+        evidence.entries[0].delta.stream,
+        Some(studio_runtime_schema::monitor_record::MonitorStream::Stderr)
+    );
+    assert_running(&mut worker).await;
+    worker.shutdown().await.unwrap();
+}
+
 /// A monitor output delta that fails its check holds the monitor's agent; the
 /// account worker keeps journaling the next provider frames.
 #[tokio::test]

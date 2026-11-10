@@ -1045,9 +1045,22 @@ async fn malformed_failed_monitor_fields_remain_candidates_and_stream_after_a_he
         Ok(())
     }).await;
     assert!(
-        following.is_err(),
-        "strict monitor projection rejects malformed retained rows"
+        following.is_ok(),
+        "malformed monitor holds must not reject a healthy source write"
     );
+    let db = store.test_reader().unwrap();
+    for id in ["bad-exit", "object-exit", "bad-created"] {
+        assert!(studio_runtime_store::MonitorsRepository::is_held(&db, id).unwrap());
+    }
+    let name: String = db
+        .query_row(
+            "SELECT json_extract(record,'$.name') FROM runtime_agents WHERE id='owner'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(name, "Healthy following source");
+    drop(db);
     let (_, body) = call(&app, "GET", "/api/studio-errors", None).await;
     for id in [
         "bad-exit",

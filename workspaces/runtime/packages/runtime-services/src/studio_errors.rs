@@ -395,7 +395,7 @@ fn agent_error(id: &str, record: &OwnerFields<'_>) -> Option<StudioError> {
     })
 }
 
-fn invalid_source(
+pub(crate) fn invalid_source(
     id: String,
     object: &str,
     source_id: &str,
@@ -768,11 +768,12 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
         );
     }
 
-    let mut incidents = tx.prepare_cached("SELECT id,payload FROM runtime_error_incidents WHERE created>=?1 AND payload!='null' ORDER BY created DESC,id LIMIT ?2")?;
+    let mut incidents = tx.prepare_cached("SELECT id,payload FROM runtime_error_incidents WHERE created>=?1 AND payload!='null' AND substr(id,1,length(?3))!=?3 ORDER BY created DESC,id LIMIT ?2")?;
     for record in incidents.query_map(
         rusqlite::params![
             error_incidents::timestamp_ms(since.max(0.0))?,
-            MAX_ROWS as i64
+            MAX_ROWS as i64,
+            crate::monitor_event_queue::HELD_OUTPUT_PREFIX
         ],
         |row| {
             Ok((
@@ -821,8 +822,13 @@ fn build(tx: &Transaction<'_>, now: f64) -> Result<(Vec<StudioError>, Baseline),
         };
         let payload = json!({"collection":"studioError","id":logical_id,"value":incident});
         if logical_id != incident.id
-            || !matches!(incident.kind, Kind::HttpFailure | Kind::RecoveryFailed)
-            || !matches!(incident.target, Target::Details)
+            || !(matches!(incident.kind, Kind::HttpFailure | Kind::RecoveryFailed)
+                && matches!(incident.target, Target::Details)
+                || incident
+                    .id
+                    .starts_with(studio_runtime_store::MONITOR_HOLD_PREFIX)
+                    && incident.kind == Kind::StoredRecordInvalid
+                    && matches!(incident.target, Target::Details | Target::Check { .. }))
             || !studio_runtime_schema::validate_sync_entity_payload_strict(
                 "studioError",
                 &logical_id,

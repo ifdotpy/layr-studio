@@ -166,6 +166,16 @@ fn retained_monitor_approval(
     };
     match snapshot(tx, monitor) {
         Ok((monitor, _)) => Ok(monitor.retains_approval_for(row.agent.as_str())),
+        Err(error)
+            if crate::monitor_quarantine::hold_error_in(
+                tx,
+                &error,
+                "startup_monitor_approval",
+                crate::event_write::unix_time()?,
+            )? =>
+        {
+            Ok(true)
+        }
         Err(error) if startup_store_failure(&error) => Err(error),
         Err(_) => Ok(false),
     }
@@ -249,6 +259,14 @@ fn recover_active_monitors(tx: &Transaction<'_>, now: f64) -> Result<usize, Moni
             Ok::<bool, MonitorError>(true)
         })();
         if let Err(error) = result {
+            if crate::monitor_quarantine::hold_error_in(
+                tx,
+                &error,
+                "startup_monitor_recovery",
+                now,
+            )? {
+                continue;
+            }
             if startup_store_failure(&error) {
                 return Err(error);
             }
@@ -261,10 +279,13 @@ fn recover_active_monitors(tx: &Transaction<'_>, now: f64) -> Result<usize, Moni
 }
 
 fn active_monitor_ids(tx: &Transaction<'_>) -> Result<Vec<String>, MonitorError> {
-    Ok(StartupRecoveryRepository::active_monitors(tx)?
-        .into_iter()
-        .map(|(id, _)| id)
-        .collect())
+    let mut ids = Vec::new();
+    for (id, _) in StartupRecoveryRepository::active_monitors(tx)? {
+        if !MonitorsRepository::is_held(tx, &id)? {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
 }
 
 pub(crate) fn startup_store_failure(error: &MonitorError) -> bool {
@@ -593,6 +614,11 @@ pub fn finish_in_transaction(
     error: Option<&str>,
     now: f64,
 ) -> Result<(), MonitorError> {
+    if MonitorsRepository::is_held(tx, id)? {
+        return Err(MonitorError::Refused(
+            "Monitor is held; result receipt retained",
+        ));
+    }
     let (snapshot, actor) = snapshot(tx, id)?;
     let decision = policy::finish(&snapshot, operation, code, error, now)?;
     refuse_unavailable(&decision)?;
@@ -736,7 +762,7 @@ pub async fn tick_page(
     let start = after.clone();
     let any_running = store.read_async("runtime-services/monitor_tick_page", move |tx| {
         tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM runtime_monitors WHERE json_extract(record,'$.status')='running' AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND id>?1)",
+            &format!("SELECT EXISTS(SELECT 1 FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')='running' AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND id>?1)", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
             [start.as_deref().unwrap_or("")],
             |row| row.get::<_, bool>(0),
         ).map_err(|error| MonitorError::from(studio_runtime_store::StoreError::from(error)))
@@ -749,7 +775,7 @@ pub async fn tick_page(
     }
     store.transaction_with(move |tx| {
         let mut statement = tx.prepare_cached(
-            "SELECT id FROM runtime_monitors WHERE json_extract(record,'$.status')='running' AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND id>?1 ORDER BY id LIMIT ?2",
+            &format!("SELECT id FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')='running' AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND id>?1 ORDER BY id LIMIT ?2", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
         ).map_err(studio_runtime_store::StoreError::from)?;
         let ids = statement
             .query_map((after.as_deref().unwrap_or(""), (MONITOR_TICK_BATCH + 1) as i64), |row| {
@@ -1333,7 +1359,7 @@ pub async fn late_answer_ids(
     store
         .read_async("runtime-services/monitor_late_answers", move |connection| {
             let mut statement = connection.prepare_cached(
-                "SELECT id FROM runtime_monitors WHERE json_extract(record,'$.status')='lost' AND json_extract(record,'$.reattachRecovery.proof')=?1 AND json_extract(record,'$.finished')>?2 AND id>?3 ORDER BY id LIMIT ?4",
+                &format!("SELECT id FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')='lost' AND json_extract(record,'$.reattachRecovery.proof')=?1 AND json_extract(record,'$.finished')>?2 AND id>?3 ORDER BY id LIMIT ?4", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
             )?;
             let ids = statement
                 .query_map(
@@ -1363,7 +1389,7 @@ pub async fn unqueued_running_ids(
     store
         .read_async("runtime-services/monitor_orphans", move |connection| {
             let mut statement = connection.prepare_cached(
-                "SELECT id FROM runtime_monitors WHERE json_extract(record,'$.status')='running' AND json_type(record,'$.operation')='object' AND json_extract(record,'$.ruleId') IS NULL AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND COALESCE(json_array_length(record,'$.streamQueue'),0)=0 AND id>?1 ORDER BY id LIMIT ?2",
+                &format!("SELECT id FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')='running' AND json_type(record,'$.operation')='object' AND json_extract(record,'$.ruleId') IS NULL AND COALESCE(json_extract(record,'$.reattachRecovery.status'),'')!='running' AND COALESCE(json_array_length(record,'$.streamQueue'),0)=0 AND id>?1 ORDER BY id LIMIT ?2", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
             )?;
             let ids = statement
                 .query_map((after.as_str(), MONITOR_TICK_BATCH as i64), |row| {
@@ -1901,6 +1927,9 @@ mod recovery_selection_tests {
     #[test]
     fn startup_monitor_selection_keeps_only_active_statuses_in_id_order() {
         let mut connection = Connection::open_in_memory().expect("in-memory database");
+        connection.execute_batch(
+            <studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL,
+        ).expect("monitor hold fixture schema");
         connection
             .execute_batch(
                 "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY, record TEXT NOT NULL, stream_pending INTEGER NOT NULL DEFAULT 0, monitor_status TEXT, monitor_error_candidate INTEGER NOT NULL DEFAULT 1, monitor_created REAL NOT NULL DEFAULT 0);

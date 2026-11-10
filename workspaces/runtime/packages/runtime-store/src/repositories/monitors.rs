@@ -65,7 +65,27 @@ fn studio_error_candidates_sql() -> String {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct MonitorsRepository;
 
+/// Durable diagnostic identity also holds the original monitor and its receipts.
+/// Dismissing a diagnostic does not authorize replay or release the hold.
+pub const MONITOR_HOLD_PREFIX: &str = "monitor-hold:";
+
+/// SQL for autonomous scans only. Direct reads retain access to held evidence.
+pub fn unheld_sql(id_column: &str) -> String {
+    format!(
+        "NOT EXISTS(SELECT 1 FROM runtime_error_incidents h WHERE h.id='{MONITOR_HOLD_PREFIX}'||{id_column})"
+    )
+}
+
 impl MonitorsRepository {
+    /// Holds survive dismissal and restart; only explicit repair may release them.
+    pub fn is_held(connection: &Connection, id: &str) -> StoreResult<bool> {
+        Ok(connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM runtime_error_incidents WHERE id=?1)",
+            [format!("{MONITOR_HOLD_PREFIX}{id}")],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn get(connection: &Connection, id: &str) -> StoreResult<Option<MonitorRecord>> {
         Table::<MonitorRecord>::new(connection).get(&id.to_owned())
     }
@@ -124,8 +144,9 @@ impl MonitorsRepository {
     pub fn first_queued_stream(connection: &Connection) -> StoreResult<Option<(String, String)>> {
         Ok(connection
             .prepare_cached(&format!(
-                "SELECT id,record FROM runtime_monitors WHERE {QUEUED_STREAM_PREDICATE} \
-                 ORDER BY id LIMIT 1"
+                "SELECT id,record FROM runtime_monitors WHERE {QUEUED_STREAM_PREDICATE} AND {} \
+                 ORDER BY id LIMIT 1",
+                unheld_sql("runtime_monitors.id")
             ))?
             .query_row([], |row| Ok((row.get(0)?, row.get(1)?)))
             .optional()?)
@@ -296,6 +317,7 @@ mod tests {
         connection
             .execute_batch(crate::item_monitor_terminal::MonitorsRow::DDL)
             .unwrap();
+        crate::receipt_schema::create(&connection).unwrap();
         connection
             .execute_batch(
                 "

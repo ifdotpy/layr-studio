@@ -1681,7 +1681,7 @@ fn maintain_monitor_window(
             .map(|index| format!("?{index}"))
             .collect::<Vec<_>>()
             .join(",");
-        let mut statement = transaction.prepare(&format!("SELECT id,record FROM runtime_monitors WHERE json_extract(record,'$.status') IN ({placeholders})"))?;
+        let mut statement = transaction.prepare(&format!("SELECT id,record FROM runtime_monitors WHERE {} AND json_extract(record,'$.status') IN ({placeholders})", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")))?;
         let rows = statement
             .query_map(rusqlite::params_from_iter(MONITOR_ACTIVE_STATUSES), |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1689,12 +1689,13 @@ fn maintain_monitor_window(
             .collect::<Result<Vec<_>, _>>()?;
         drop(statement);
         for (id, raw) in rows {
-            let record = decode_monitor(&id, &raw)?;
-            kept.insert(id, record);
+            if let Some(record) = decode_or_hold_monitor(transaction, &id, &raw)? {
+                kept.insert(id, record);
+            }
         }
         let mut terminals = Vec::new();
         for status in MONITOR_TERMINAL_STATUSES {
-            let mut statement = transaction.prepare("SELECT id,record FROM runtime_monitors WHERE json_extract(record,'$.status')=?1 ORDER BY json_extract(record,'$.created') DESC LIMIT ?2")?;
+            let mut statement = transaction.prepare(&format!("SELECT id,record FROM runtime_monitors WHERE {} AND json_extract(record,'$.status')=?1 ORDER BY json_extract(record,'$.created') DESC LIMIT ?2", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")))?;
             let rows = statement
                 .query_map(
                     rusqlite::params![status, MONITOR_TERMINAL_WINDOW as i64],
@@ -1703,7 +1704,9 @@ fn maintain_monitor_window(
                 .collect::<Result<Vec<_>, _>>()?;
             drop(statement);
             for (id, raw) in rows {
-                terminals.push(decode_monitor(&id, &raw)?);
+                if let Some(record) = decode_or_hold_monitor(transaction, &id, &raw)? {
+                    terminals.push(record);
+                }
             }
         }
         terminals.sort_by(compare_created_desc);
@@ -1711,8 +1714,10 @@ fn maintain_monitor_window(
             kept.insert(record.id.clone(), record);
         }
     } else {
-        let mut statement =
-            transaction.prepare("SELECT id,record FROM runtime_monitors ORDER BY rowid")?;
+        let mut statement = transaction.prepare(&format!(
+            "SELECT id,record FROM runtime_monitors WHERE {} ORDER BY rowid",
+            studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")
+        ))?;
         let rows = statement
             .query_map([], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -1721,8 +1726,11 @@ fn maintain_monitor_window(
         drop(statement);
         let records = rows
             .into_iter()
-            .map(|(id, raw)| decode_monitor(&id, &raw))
-            .collect::<StoreResult<Vec<_>>>()?;
+            .map(|(id, raw)| decode_or_hold_monitor(transaction, &id, &raw))
+            .collect::<StoreResult<Vec<_>>>()?
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>();
         for status in MONITOR_ACTIVE_STATUSES {
             for record in records
                 .iter()
@@ -1902,6 +1910,31 @@ pub(crate) fn decode_monitor(
         return Err(invalid());
     }
     Ok(record)
+}
+
+fn decode_or_hold_monitor(
+    tx: &Transaction<'_>,
+    id: &str,
+    raw: &str,
+) -> StoreResult<Option<studio_runtime_store::MonitorRecord>> {
+    let location = if let Ok(record) = decode_monitor(id, raw) {
+        // Use the publication owner's full validation before selecting a row,
+        // including retained matcher state that serde alone cannot validate.
+        if project_monitor_record(&record).is_ok() {
+            return Ok(Some(record));
+        }
+        crate::monitor_matches::validate(&record)
+            .err()
+            .unwrap_or("id")
+    } else {
+        "/record"
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| StoreError::RecordContract("invalid clock during monitor quarantine"))?
+        .as_secs_f64();
+    crate::monitor_quarantine::hold_in(tx, id, location, "monitor_window", now)?;
+    Ok(None)
 }
 fn compare_created_desc(
     left: &studio_runtime_store::MonitorRecord,
@@ -2987,6 +3020,7 @@ mod tests {
     #[test]
     fn monitor_window_keeps_active_rows_without_projecting_inactive_owners() {
         let mut connection = Connection::open_in_memory().expect("database");
+        connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
         // Keep a record-only legacy source table so non-object corruption reaches the reader.
         // The current provider column rejects that corruption at write time.
         connection
@@ -3136,14 +3170,17 @@ mod tests {
                 [],
             )
             .expect("invalid monitor");
+        maintain_monitor_window(&transaction, &|_, _, _, _| true).expect("malformed rows are held");
         assert!(
-            matches!(maintain_monitor_window(&transaction, &|_, _, _, _| true), Err(StoreError::InvalidStoredRecord { object: "monitors", id }) if id == "invalid-monitor")
+            studio_runtime_store::MonitorsRepository::is_held(&transaction, "invalid-monitor")
+                .unwrap()
         );
     }
 
     #[test]
     fn indexed_monitor_window_matches_python_tie_boundary_and_filters_owner_after_selection() {
         let mut connection = Connection::open_in_memory().expect("database");
+        connection.execute_batch(<studio_runtime_store::receipt_tables::ErrorIncidentRow as studio_db_api::Table>::DDL).unwrap();
         // Keep a record-only legacy source table so non-object corruption reaches the reader.
         // The current provider column rejects that corruption at write time.
         connection

@@ -200,6 +200,7 @@ pub struct MonitorRuntime {
     agent_hints: Arc<Mutex<AgentHints>>,
     observation_slots: Semaphore,
     last_tick_error: Mutex<Option<String>>,
+    phase: Mutex<&'static str>,
     watcher_error: Mutex<Option<String>>,
     #[cfg(test)]
     watcher_failures: AtomicUsize,
@@ -274,6 +275,7 @@ impl MonitorRuntime {
                 ..Scan::default()
             }),
             last_tick_error: Mutex::new(None),
+            phase: Mutex::new("starting"),
             watcher_error: Mutex::new(None),
             #[cfg(test)]
             watcher_failures: AtomicUsize::new(0),
@@ -423,6 +425,21 @@ impl MonitorRuntime {
             })
     }
 
+    /// Last consumer boundary, retained after an unexpected task exit.
+    pub fn phase(&self) -> &'static str {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn set_phase(&self, phase: &'static str) {
+        *self
+            .phase
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = phase;
+    }
+
     fn record_watcher_error(&self, error: &MonitorError) {
         *self
             .watcher_error
@@ -490,7 +507,20 @@ impl MonitorRuntime {
     async fn tick_with_progress(&self, now: f64) -> Result<bool, MonitorError> {
         #[cfg(test)]
         self.loop_activity.ticks.fetch_add(1, Ordering::SeqCst);
-        let result = self.tick_inner(now).await;
+        let result = match self.tick_inner(now).await {
+            Err(error)
+                if crate::monitor_quarantine::hold_error(
+                    &self.store,
+                    &error,
+                    self.phase(),
+                    now,
+                )
+                .await? =>
+            {
+                Ok(true)
+            }
+            result => result,
+        };
         *self
             .last_tick_error
             .lock()
@@ -513,16 +543,19 @@ impl MonitorRuntime {
         // Receipt files are scanned only at startup or on a native filesystem event.
         // Full batches remain scheduled immediately so recovery is bounded per pass.
         let result_batch_full = if scan.recovering_receipts {
+            self.set_phase("receipt_recovery");
             let full = monitor_receipts::recover_pending(&self.store, BATCH).await? == BATCH;
             scan.recovering_receipts = full;
             full
         } else {
             false
         };
+        self.set_phase("reattach");
         let attach_more = self.attach_batch(&mut scan, now).await?;
         let mut drained = false;
         let mut failure = None;
         for _ in 0..BATCH {
+            self.set_phase("queue_next");
             let delivery = match self.port.next().await {
                 Ok(Some(delivery)) => delivery,
                 Ok(None) => {
@@ -535,6 +568,7 @@ impl MonitorRuntime {
                     break;
                 }
             };
+            self.set_phase("delivery");
             if let Err(error) = self.deliver_inner(&delivery, now, false).await {
                 if error.is_bad_delivery() {
                     if let Err(quarantine_error) =
@@ -563,6 +597,7 @@ impl MonitorRuntime {
         // Cancellation receipts and rule pages progress even under sustained stream
         // output. Their exact identities and replay receipts make this safe.
         let mut start_more = false;
+        self.set_phase("start_dispatch");
         match monitor_driver::pending_start_ids(&self.store).await {
             Ok(ids) => {
                 start_more = ids.len() == BATCH;
@@ -575,6 +610,7 @@ impl MonitorRuntime {
             Err(error) => record_tick_failure(&mut failure, error),
         }
         let mut cancel_more = false;
+        self.set_phase("cancel_dispatch");
         match monitor_driver::pending_cancel_ids(&self.store, now).await {
             Ok(ids) => {
                 cancel_more = ids.len() == BATCH;
@@ -591,6 +627,7 @@ impl MonitorRuntime {
                 record_tick_failure(&mut failure, error);
             }
         }
+        self.set_phase("rules");
         let rules = if scan.recovering_rules {
             rules_tick::recover_batch(&self.store, scan.rule, now, self.port.as_ref()).await
         } else {
@@ -626,6 +663,7 @@ impl MonitorRuntime {
         let mut orphan_more = false;
         let mut late_more = false;
         if drained && !result_batch_full && failure.is_none() {
+            self.set_phase("stall_scan");
             if let Some(after) = scan.stall_monitor.as_deref() {
                 match monitor_runtime::tick_page(&self.store, now, Some(after)).await {
                     Ok(page) => {
@@ -647,10 +685,12 @@ impl MonitorRuntime {
                     }
                 }
             }
+            self.set_phase("orphan_scan");
             match self.settle_orphans(&mut scan, now).await {
                 Ok(more) => orphan_more = more,
                 Err(error) => record_tick_failure(&mut failure, error),
             }
+            self.set_phase("late_answers");
             match self.await_late_answers(&mut scan, now).await {
                 Ok(more) => late_more = more,
                 Err(error) => record_tick_failure(&mut failure, error),
@@ -806,7 +846,7 @@ impl MonitorRuntime {
         let ids = self
             .store
             .read_async("runtime-services/monitor_reattach", move |connection| {
-                let mut query = connection.prepare_cached("SELECT id FROM runtime_monitors WHERE id>?1 AND monitor_status IN ('running','starting','approval') AND json_extract(record,'$.reattachRecovery.status')='running' ORDER BY id LIMIT ?2")?;
+                let mut query = connection.prepare_cached(&format!("SELECT id FROM runtime_monitors WHERE {} AND id>?1 AND monitor_status IN ('running','starting','approval') AND json_extract(record,'$.reattachRecovery.status')='running' ORDER BY id LIMIT ?2", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")))?;
                 let ids = query
                     .query_map((&after, BATCH as i64), |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()?;
@@ -1261,12 +1301,16 @@ fn agent_commit_needs_tick_in(
     let running =
         "m.monitor_status IN ('running','starting','approval') AND m.monitor_status='running'";
     let sql = if full {
-        format!("SELECT EXISTS(SELECT 1 FROM runtime_monitors m WHERE {running})")
+        format!(
+            "SELECT EXISTS(SELECT 1 FROM runtime_monitors m WHERE {} AND {running})",
+            studio_runtime_store::monitor_unheld_sql("m.id")
+        )
     } else {
         format!(
-            "SELECT EXISTS(SELECT 1 FROM runtime_monitors m WHERE {running} AND \
+            "SELECT EXISTS(SELECT 1 FROM runtime_monitors m WHERE {running} AND {} AND \
              json_extract(m.record,'$.agent') IN \
-             (SELECT id FROM runtime_agents WHERE rowid IN (SELECT value FROM json_each(?1))))"
+             (SELECT id FROM runtime_agents WHERE rowid IN (SELECT value FROM json_each(?1))))",
+            studio_runtime_store::monitor_unheld_sql("m.id")
         )
     };
     let mut statement = connection
@@ -1283,10 +1327,11 @@ fn agent_commit_needs_tick_in(
 
 // Keep the small active index as the outer loop. Without it, deadline reads
 // repeatedly pull the historical monitor records into the SQLite page cache.
-const MONITOR_DEADLINE_SQL: &str = "WITH active_monitors AS MATERIALIZED (
+fn monitor_deadline_sql() -> String {
+    format!("WITH active_monitors AS MATERIALIZED (
                 SELECT id, monitor_status, jsonb(record) AS record
                 FROM runtime_monitors INDEXED BY runtime_monitor_startup_active
-                WHERE monitor_status IN ('running','starting','approval') AND monitor_status='running'
+                WHERE monitor_status IN ('running','starting','approval') AND monitor_status='running' AND {unheld}
             ) SELECT MIN(deadline) FROM (
                 SELECT CASE
                     WHEN COALESCE(json_extract(m.record,'$.stallProbeGeneration'),-1)=json_extract(m.record,'$.activityGeneration')
@@ -1321,14 +1366,15 @@ const MONITOR_DEADLINE_SQL: &str = "WITH active_monitors AS MATERIALIZED (
                 WHERE monitor_status IN ('running','starting','approval') AND monitor_status='running'
                   AND json_extract(record,'$.cancelRequested')=1
                   AND COALESCE(json_extract(record,'$.cancelDispatch.status'),'pending')='pending'
-            )";
+            )", unheld = studio_runtime_store::monitor_unheld_sql("runtime_monitors.id"))
+}
 
 /// The earliest persisted work deadline, in Unix seconds. Monitor reads use
 /// the active-monitor partial index before evaluating active records' JSON.
 fn next_deadline_in(connection: &rusqlite::Connection) -> Result<Option<f64>, MonitorError> {
     let monitor_deadline: Option<f64> = connection
         .query_row(
-            MONITOR_DEADLINE_SQL,
+            &monitor_deadline_sql(),
             rusqlite::params![
                 crate::monitor_policy::PROBE_LEASE_SECONDS,
                 crate::monitor_policy::DEFAULT_MONITOR_STALL_SECONDS as i64,
@@ -1392,7 +1438,7 @@ fn next_deadline_in(connection: &rusqlite::Connection) -> Result<Option<f64>, Mo
     // An unresolved reattach recovery settles once its window ends.
     let reattach_deadline = connection
         .query_row(
-            "SELECT MIN(json_extract(record,'$.reattachRecovery.startedAt')+?1) FROM runtime_monitors WHERE monitor_status IN ('running','starting','approval') AND json_extract(record,'$.reattachRecovery.status')='running'",
+            &format!("SELECT MIN(json_extract(record,'$.reattachRecovery.startedAt')+?1) FROM runtime_monitors WHERE {} AND monitor_status IN ('running','starting','approval') AND json_extract(record,'$.reattachRecovery.status')='running'", studio_runtime_store::monitor_unheld_sql("runtime_monitors.id")),
             [crate::monitor_policy::MONITOR_REATTACH_WINDOW_SECONDS],
             |row| row.get::<_, Option<f64>>(0),
         )
@@ -1464,6 +1510,7 @@ pub fn start(
             }
             let now = tokio::time::Instant::now();
             if watcher.is_none() && watcher_retry_at.is_none_or(|deadline| now >= deadline) {
+                runtime.set_phase("watch_install");
                 match install_file_watcher(
                     &runtime,
                     receipt_tx.clone(),
@@ -1572,6 +1619,7 @@ pub fn start(
                 }
             }
 
+            runtime.set_phase("deadlines");
             let durable_deadline = match runtime.next_deadline().await {
                 Ok(Some(deadline)) => match event_write::unix_time() {
                     Ok(now) => {
@@ -1625,6 +1673,7 @@ pub fn start(
                 runtime.loop_activity.waited.notify_one();
             }
             loop {
+                runtime.set_phase("wait");
                 tokio::select! {
                     changed = shutdown.changed() => {
                         if changed.is_err() || *shutdown.borrow() { return Ok(()); }
@@ -1821,6 +1870,7 @@ mod tests {
 
     #[derive(Default)]
     struct EventPort {
+        queue_store: Option<Arc<RuntimeStore>>,
         next_calls: AtomicUsize,
         fail_next: AtomicUsize,
         queued_results: AtomicUsize,
@@ -1894,6 +1944,9 @@ mod tests {
             &'a self,
         ) -> futures_util::future::BoxFuture<'a, Result<Option<Delivery>, MonitorError>> {
             Box::pin(async move {
+                if let Some(store) = &self.queue_store {
+                    return crate::monitor_event_queue::next(store).await;
+                }
                 self.next_calls.fetch_add(1, Ordering::SeqCst);
                 self.called.notify_one();
                 let queued = self.queued_results.swap(0, Ordering::SeqCst);
@@ -1914,9 +1967,14 @@ mod tests {
         }
         fn acknowledge<'a>(
             &'a self,
-            _delivery: &'a Delivery,
+            delivery: &'a Delivery,
         ) -> futures_util::future::BoxFuture<'a, Result<(), MonitorError>> {
-            Box::pin(async { Ok(()) })
+            Box::pin(async move {
+                if let Some(store) = &self.queue_store {
+                    return crate::monitor_event_queue::acknowledge(store, delivery).await;
+                }
+                Ok(())
+            })
         }
         fn reattach<'a>(
             &'a self,
@@ -2234,6 +2292,305 @@ mod tests {
             })
             .await
             .expect("persist active owner fixture");
+    }
+
+    async fn malformed_monitor_case(poison_head: bool) {
+        let (_root, store, _) = fixture().await;
+        store.transaction_with(|tx| {
+            for id in ["parent", "owner"] {
+                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", (id,
+                    studio_json::json!({"id":id,"rootId":"parent","parentId":(id == "owner").then_some("parent"),
+                        "compactions":0,"provider":"codex","epoch":0,"turnEpoch":0,"status":"ready",
+                        "autoWake":true,"accountKey":"default","threadId":id}).to_string()))?;
+            }
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }).await.expect("parent and monitor owner");
+        let port = Arc::new(EventPort {
+            queue_store: Some(Arc::clone(&store)),
+            ..EventPort::default()
+        });
+        let runtime = Arc::new(MonitorRuntime::new(
+            Arc::clone(&store),
+            port,
+            Arc::new(Notify::new()),
+        ));
+        let (shutdown, receiver) = watch::channel(false);
+        let mut task = super::start(Arc::clone(&runtime), receiver);
+        wait_for_cycles(&runtime, 1).await;
+        // Corruption arrives after the real consumer has started and gone idle.
+        let bad = store.transaction_with(move |tx| {
+            for id in ["a-bad", "z-healthy", "zz-gate"] {
+                let record = crate::monitor_policy::complete_test_monitor(studio_json::json!({
+                    "id":id,"agent":"owner","epoch":0,"status":"running","created":1,
+                    "stallTimeoutSeconds":0,
+                    "operation":{"agent":"owner","epoch":0,"accountKey":"default","connectionId":"c"},
+                    "streamQueue":[{"kind":"exit","cursor":format!("result:{id}"),"code":0,"error":null,"finished":2,"byteLength":0,
+                        "operation":{"agent":"owner","epoch":0,"accountKey":"default","connectionId":"c"}}]
+                }));
+                tx.execute("INSERT INTO runtime_monitors(id,record) VALUES(?1,?2)", (id, record.to_string()))?;
+            }
+            tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.taskGate',json('{\"taskId\":\"task\",\"resultId\":\"result\"}')) WHERE id='zz-gate'", [])?;
+            studio_runtime_store::WorkItemsRepository::put_work(tx, "task", &studio_json::json!({
+                "id":"task","rootId":"parent","owner":"owner","title":"gate","description":"",
+                "status":"review","dependencies":[],"version":1,"created":1,"updated":1,
+                "results":[{"id":"result","agent":"owner","gate":{"status":"running","monitorId":"zz-gate"}}],"decisions":[]
+            }))?;
+            if poison_head {
+                tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.streamQueue[0].cursor','') WHERE id='a-bad'", [])?;
+            } else {
+                tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.epoch','invalid','$.reattachRecovery',json('{\"status\":\"running\",\"startedAt\":1,\"accountKey\":\"default\",\"epoch\":0}')) WHERE id='a-bad'", [])?;
+            }
+            Ok::<String, studio_runtime_store::StoreError>(tx.query_row("SELECT record FROM runtime_monitors WHERE id='a-bad'", [], |row| row.get(0))?)
+        }).await.expect("inject malformed selected row and healthy result");
+        // The commit wake is the only trigger; the consumer must not die or spin on a-bad.
+        tokio::select! {
+            () = wait_for_cycles(&runtime, 2) => (),
+            result = &mut task => panic!("consumer stopped during {}: {result:?}", runtime.phase()),
+        }
+        shutdown.send_replace(true);
+        task.await
+            .expect("consumer joins")
+            .expect("bad row cannot kill consumer");
+        let connection = store.test_reader().expect("reader");
+        let exits: i64 = connection.query_row("SELECT COUNT(*) FROM runtime_events WHERE kind='monitor_exit' AND id='monitor:z-healthy'", [], |row| row.get(0)).expect("healthy exit");
+        assert_eq!(exits, 1, "healthy exit must progress exactly once");
+        let gate: String = connection.query_row("SELECT json_extract(record,'$.results[0].gate.status') FROM runtime_work WHERE id='task'", [], |row| row.get(0)).expect("gate evidence");
+        assert_eq!(gate, "passed");
+        let retained: String = connection
+            .query_row(
+                "SELECT record FROM runtime_monitors WHERE id='a-bad'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            retained, bad,
+            "held row and its exact queue remain untouched"
+        );
+        let incident: studio_runtime_schema::studio_errors::StudioError = studio_json::from_str(
+            &connection
+                .query_row::<String, _, _>(
+                    "SELECT payload FROM runtime_error_incidents WHERE id='monitor-hold:a-bad'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("visible bad-row diagnostic"),
+        )
+        .unwrap();
+        assert_eq!(incident.monitor_id.as_deref(), Some("a-bad"));
+        assert!(
+            matches!(incident.target, studio_runtime_schema::studio_errors::Target::Check { ref agent_id, .. } if agent_id == "owner")
+        );
+        assert!(
+            incident
+                .detail
+                .contains(if poison_head { "cursor" } else { "epoch" })
+        );
+        drop(connection);
+        // Feed the settled child turn through its real parent-result caller.
+        // The fixture has consumed the healthy exit/review, as the provider would.
+        store.transaction_with(|tx| {
+            tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.status','completed') WHERE id='owner'", [])?;
+            tx.execute("UPDATE runtime_events SET status='delivered' WHERE agent='owner'", [])?;
+            for _ in 0..2 {
+                crate::lifecycle_effects::notify_parent_of_turn(tx, "owner", "healthy-turn", 3.0)?;
+            }
+            let children: i64 = tx.query_row("SELECT COUNT(*) FROM runtime_events WHERE agent='parent' AND kind='child_result' AND id='child:owner:healthy-turn'", [], |row| row.get(0))?;
+            assert_eq!(children, 1);
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }).await.expect("one parent result after healthy exit");
+        #[derive(serde::Deserialize)]
+        struct ErrorList {
+            items: Vec<studio_runtime_schema::studio_errors::StudioError>,
+        }
+        let visible: ErrorList = store
+            .transaction_with(|tx| {
+                let now = crate::event_write::unix_time().unwrap();
+                let list = crate::studio_errors::list(tx, now)?;
+                Ok::<_, studio_runtime_store::StoreError>(
+                    <ErrorList as serde::Deserialize>::deserialize(list)?,
+                )
+            })
+            .await
+            .expect("actual incident projection");
+        assert!(
+            visible
+                .items
+                .iter()
+                .any(|item| item.id == "monitor-hold:a-bad"
+                    && matches!(
+                        item.target,
+                        studio_runtime_schema::studio_errors::Target::Check { .. }
+                    ))
+        );
+    }
+
+    #[tokio::test]
+    async fn malformed_monitor_row_does_not_stop_live_consumer() {
+        malformed_monitor_case(false).await;
+    }
+
+    #[tokio::test]
+    async fn malformed_monitor_at_startup_is_held_and_consumer_stays_running() {
+        let (_root, store, port) = fixture().await;
+        insert_active_owner(&store).await;
+        let bad = store.transaction_with(|tx| {
+            let record = crate::monitor_policy::complete_test_monitor(studio_json::json!({
+                "id":"bad-boot","agent":"owner","epoch":0,"status":"running","stallTimeoutSeconds":0
+            }));
+            tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('bad-boot',json_set(?1,'$.epoch','invalid'))", [record.to_string()])?;
+            Ok::<String, studio_runtime_store::StoreError>(tx.query_row("SELECT record FROM runtime_monitors WHERE id='bad-boot'", [], |row| row.get(0))?)
+        }).await.expect("malformed retained monitor");
+        crate::monitor_runtime::recover_on_startup(&store, 100.0)
+            .await
+            .expect("startup recovery holds one bad row");
+        let runtime = Arc::new(MonitorRuntime::new(
+            Arc::clone(&store),
+            port,
+            Arc::new(Notify::new()),
+        ));
+        let (shutdown, receiver) = watch::channel(false);
+        let task = super::start(Arc::clone(&runtime), receiver);
+        wait_for_cycles(&runtime, 1).await;
+        assert!(
+            !task.is_finished(),
+            "a retained bad row cannot cause a supervised restart loop"
+        );
+        shutdown.send_replace(true);
+        task.await.expect("join").expect("normal shutdown");
+        let db = store.test_reader().expect("reader");
+        let retained: String = db
+            .query_row(
+                "SELECT record FROM runtime_monitors WHERE id='bad-boot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, bad);
+        let holds: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_error_incidents WHERE id='monitor-hold:bad-boot'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(holds, 1);
+    }
+
+    #[tokio::test]
+    async fn malformed_monitor_reseed_is_held_before_runtime_startup() {
+        let (_root, store, _) = fixture().await;
+        insert_active_owner(&store).await;
+        store.transaction_with(|tx| {
+            tx.execute("DELETE FROM sync_entity_meta WHERE key=?1", [studio_runtime_store::WORK_DETAILS_SEED_MARKER])?;
+            for status in ["running", "completed", "failed"] {
+                let record = crate::monitor_policy::complete_test_monitor(studio_json::json!({
+                    "id":status,"agent":"owner","epoch":0,"status":status,"created":1
+                }));
+                tx.execute("INSERT INTO runtime_monitors(id,record) VALUES(?1,json_set(?2,'$.epoch','invalid'))", (status, record.to_string()))?;
+            }
+            Ok::<_, studio_runtime_store::StoreError>(())
+        }).await.expect("unheld malformed upgrade rows");
+        crate::entity_publication::install(&store)
+            .await
+            .expect("publication reseed must quarantine before monitor recovery");
+        crate::monitor_runtime::recover_on_startup(&store, 100.0)
+            .await
+            .expect("startup continues");
+        let db = store.test_reader().unwrap();
+        let held: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM runtime_error_incidents WHERE id LIKE 'monitor-hold:%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(held, 3);
+    }
+
+    #[tokio::test]
+    async fn malformed_monitor_hold_preserves_row_and_result_receipt_across_restart() {
+        for with_receipt in [false, true] {
+            let (root, store, _) = fixture().await;
+            insert_active_owner(&store).await;
+            let raw = store.transaction_with(|tx| {
+                let raw = crate::monitor_policy::complete_test_monitor(studio_json::json!({
+                    "id":"held","agent":"owner","epoch":0,"status":"running","created":1,"stallTimeoutSeconds":0,
+                    "operation":{"agent":"owner","epoch":0,"accountKey":"default","connectionId":"c"},
+                    "streamQueue":[{"kind":"exit","cursor":"","code":0,"error":null,"finished":2,"byteLength":0,
+                        "operation":{"agent":"owner","epoch":0,"accountKey":"default","connectionId":"c"}}]
+                })).to_string();
+                tx.execute("INSERT INTO runtime_monitors(id,record) VALUES('held',?1)", [&raw])?;
+                Ok::<_, studio_runtime_store::StoreError>(raw)
+            }).await.unwrap();
+            crate::monitor_quarantine::hold_error(
+                &store,
+                &MonitorError::InvalidStored {
+                    id: "held".into(),
+                    location: "/streamQueue/0/cursor".into(),
+                },
+                "queue_next",
+                100.0,
+            )
+            .await
+            .unwrap();
+            let receipt_path = root.path().join("monitor-results").join(format!(
+                "{}.json",
+                studio_runtime_store::sha256_hex(b"held")
+            ));
+            let receipt_bytes = if with_receipt {
+                let record: studio_runtime_store::MonitorRecord =
+                    studio_json::from_str(&raw).unwrap();
+                crate::monitor_receipts::persist(
+                    root.path(),
+                    &crate::monitor_receipts::ResultReceipt {
+                        version: 1,
+                        key: "held".into(),
+                        code: Some(0),
+                        error: None,
+                        operation: record.operation,
+                        finished: 2.0,
+                    },
+                )
+                .unwrap();
+                Some(std::fs::read(&receipt_path).unwrap())
+            } else {
+                None
+            };
+            drop(store);
+            let reopened = RuntimeStore::open(Some(root.path())).await.unwrap();
+            crate::monitor_runtime::recover_on_startup(&reopened, 200.0)
+                .await
+                .expect("restart retains held evidence");
+            let db = reopened.test_reader().unwrap();
+            let after: String = db
+                .query_row(
+                    "SELECT record FROM runtime_monitors WHERE id='held'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(after, raw, "startup must never rewrite held rows");
+            if let Some(bytes) = receipt_bytes {
+                assert_eq!(
+                    std::fs::read(&receipt_path).expect("held receipt remains"),
+                    bytes
+                );
+            }
+            let exits: i64 = db
+                .query_row(
+                    "SELECT COUNT(*) FROM runtime_events WHERE kind='monitor_exit'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exits, 0, "a hold grants no completion authority");
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_monitor_poison_head_preserves_receipts_and_delivers_other_monitors() {
+        malformed_monitor_case(true).await;
     }
 
     #[tokio::test]
@@ -2934,6 +3291,8 @@ mod tests {
     #[test]
     fn monitor_deadlines_skip_historical_records_before_parsing() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_error_incidents(id TEXT PRIMARY KEY)")
+            .unwrap();
         db.execute_batch(
             "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL);
              CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL);
@@ -2950,6 +3309,8 @@ mod tests {
     #[ignore = "manual Callgrind fixture"]
     fn monitor_deadline_callgrind_50() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_error_incidents(id TEXT PRIMARY KEY)")
+            .unwrap();
         db.execute_batch("CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT NOT NULL,monitor_status TEXT NOT NULL); CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE TABLE runtime_rules(id TEXT PRIMARY KEY,record TEXT NOT NULL); CREATE INDEX runtime_monitor_startup_active ON runtime_monitors(id) WHERE monitor_status IN ('running','starting','approval'); INSERT INTO runtime_agents VALUES('a','{\"autoWake\":true,\"epoch\":1}');").expect("schema");
         for i in 0..50 {
             let record = studio_json::json!({"status":"running", "agent":"a", "epoch":1, "created":10.0, "activityAt":10.0, "activityGeneration":1, "outputMatchesPending":{}, "outputMatchExcerpts":{"example":"x".repeat(4096)}});
@@ -2967,6 +3328,8 @@ mod tests {
     #[test]
     fn monitor_deadline_plan_drives_agent_lookups_from_active_monitors() {
         let db = rusqlite::Connection::open_in_memory().expect("database");
+        db.execute_batch("CREATE TABLE runtime_error_incidents(id TEXT PRIMARY KEY)")
+            .unwrap();
         db.execute_batch(
             "CREATE TABLE runtime_monitors(id TEXT PRIMARY KEY,record TEXT,monitor_status TEXT);
              CREATE TABLE runtime_agents(id TEXT PRIMARY KEY,record TEXT);
@@ -2980,7 +3343,7 @@ mod tests {
         let plan: Vec<String> = db
             .prepare(&format!(
                 "EXPLAIN QUERY PLAN {}",
-                super::MONITOR_DEADLINE_SQL
+                super::monitor_deadline_sql()
             ))
             .expect("plan")
             .query_map((1, 1, 1), |row| row.get(3))

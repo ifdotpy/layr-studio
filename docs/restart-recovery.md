@@ -6,6 +6,18 @@ menu can disable that service without stopping the server or its active work.
 
 ## Automatic recovery
 
+Malformed monitor records are held under `monitor-hold:<id>` in
+`runtime_error_incidents`. The monitor row, queued output, and result receipts
+remain intact; autonomous scans continue with other monitors. The diagnostic
+names the monitor, consumer operation, and invalid field, and opens its owning
+agent when that identity is available. Holds are permanent: these commands never
+resume, and their retained work is never replayed. Dismissing a diagnostic does
+not release its hold. Subsequent output is diagnostic evidence only, kept within
+the normal output queue budget in one private incident per monitor. Overflow
+updates dropped-entry and byte counts so other agents on the account can progress.
+An unexpected monitor consumer exit makes service health unavailable and starts
+bounded server shutdown; the error log includes the last consumer phase.
+
 - The service starts after macOS login and restores a stopped backend.
 - Closing the desktop window preserves the backend. A renderer crash reloads its
   interface. The retry budget resets after 60 seconds with a healthy renderer.
