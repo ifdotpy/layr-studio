@@ -408,6 +408,9 @@ fn copy_state(options: &Options, destination: &Path) -> Result<()> {
                 .to_str()
                 .ok_or("invalid destination")?],
         )?;
+        // VACUUM INTO resets journal mode; restore the writer policy before schema validation.
+        let measured = Connection::open(destination.join(name))?;
+        studio_runtime_store::sqlite_durability::configure_writer(&measured)?;
     }
     Ok(())
 }

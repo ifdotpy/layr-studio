@@ -473,6 +473,53 @@ pub fn frame_pending(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn vacuum_copy_preserves_wal_before_store_validation() {
+        use std::io::{Read, Write};
+
+        let source = tempfile::tempdir().unwrap();
+        let measured = tempfile::tempdir().unwrap();
+        let live = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(source.path())).await.unwrap();
+        drop(store);
+        require_wal(source.path()).unwrap();
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let server = format!("http://{}", listener.local_addr().unwrap());
+        let body = format!(
+            "{{\"stateDir\":{}}}",
+            studio_json::to_string(live.path()).unwrap()
+        );
+        let discovery = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = [0; 4096];
+            socket.read(&mut request).unwrap();
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        let options = Options {
+            seconds: 1,
+            rows: 8,
+            samples: 8,
+            state: Some(source.path().to_path_buf()),
+            server: Some(server),
+            label: "wal-regression".into(),
+            hot_paths: true,
+        };
+        copy_state(&options, measured.path()).unwrap();
+        discovery.join().unwrap();
+        require_wal(measured.path()).unwrap();
+        RuntimeStore::open(Some(measured.path())).await.unwrap();
+    }
+
     #[test]
     fn f1_probes_are_in_every_fixed_frame() {
         for name in [
