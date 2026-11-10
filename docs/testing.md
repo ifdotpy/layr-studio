@@ -950,3 +950,67 @@ artifact-retention controls only for debugging.
 Runtime Clippy (`just clippy-runtime`) rejects blocking calls on Tokio threads,
 blocking filesystem work in HTTP handlers, guards across awaits, and oversized
 inline futures; policy lives in [runtime/clippy.toml](../workspaces/runtime/clippy.toml).
+
+### Consolidation hot-path gate (P0-C)
+
+The existing `storage_benchmark` example accepts `--hot-paths`. It remains a
+manual benchmark, excluded from ordinary tests and CI. Build with
+`cargo build --workspace --exclude studio-native-client --example storage_benchmark -j 4`
+before reserving a measurement window. Use the same profile, fixture, binary
+provenance and machine for the F2–F4 before/after runs.
+
+The hot-path frame invokes production account slot selection, root team records,
+account wake selection, pending queue dispatch selection, pending metadata repair
+validation, an event insert with newest-200 publication triggers, transcript page,
+transcript search, and terminal archive replay. Dispatch measures selection, not
+provider submission. Repair measures validation, not a repair write. A frame is
+one sequential call to each of these nine operations. The copied database retains
+its real background cardinalities; named synthetic agent/transcript/queue/terminal
+fixtures (1,000 rows by default) make the selected owner repeatable. Queue fixtures
+include typed delivery/assets metadata through the production metadata owner;
+setup verifies nonempty pending metadata and successful validation before timing. This is not
+a sample of every real conversation. No providers or backend servers start.
+
+Run the F0-style accounting wrapper on an otherwise idle machine:
+
+```sh
+node workspaces/tooling/apps/storage-benchmark/hot-paths.ts \
+  target/debug/examples/storage_benchmark \
+  "$HOME/.cache/codex-studio/tmp/livecopy-20261110/state" \
+  http://127.0.0.1:PORT /tmp/p0-c-main.json MAIN_COMMIT
+```
+
+The URL is used only for the existing live-path exclusion check. The wrapper
+records an immutable binary SHA-256, source commit, observation time and load.
+It uses the ordinary gates’ `withGateLock` directory protocol and records a deferred report when the
+1-minute load is at least 8. The binary independently enforces that load limit.
+The lead schedules baseline windows separately from builds and ordinary checks.
+A deferred report contains no latency evidence; rerun after the machine is idle.
+
+The input must already be a consistent operator copy. Every database/sidecar path
+is checked against discovered live state before files are copied to staging.
+SQLite opens staging only, then `VACUUM INTO` creates the measured disposable
+state. The original copy is never opened by SQLite. Before copying, total source
+DB/WAL/SHM bytes are checked against the budget, and target free space must cover
+32 GiB. Staging shares the target filesystem; source staging, VACUUM working space
+and the measured DB/WAL budget must fit inside that 32 GiB temporary cap.
+Both measured databases must
+use WAL. Hot mode allows 16 GiB combined database/WAL and requires 32 GiB free
+space for copies, with one producer and exactly 100 frames (eight for smoke).
+The default 60-second deadline is a failure limit: partial hot-path runs fail and
+produce no comparable latency report. Every revision executes identical frame
+counts and queue growth. Allow ten minutes including copy/startup. The wrapper places all copies under `~/.cache/codex-studio/tmp`, stops its child
+process group on timeout or interruption, and deletes its temporary directory.
+For a development smoke, use `--hot-paths --smoke` directly after reserving an idle
+window (one second, eight rounds maximum).
+
+JSON reports per-family p50/p95/p99 wall milliseconds, process CPU milliseconds
+per frame during measurement, final RSS bytes, WAL bytes before/after checkpoint,
+and NULL-bound `EXPLAIN QUERY PLAN` for captured production SELECTs. External
+Zsh’s `time` (as in the F0 driver) reports whole-process user/system CPU seconds and peak RSS KiB,
+including copying/startup. Query plans show scan/index work; they do **not** count
+actual rows visited. Trigger-internal SELECTs are not exposed by statement tracing.
+Reader-pool tracing is best effort for service page/search queries; inspect the
+captured SQL list before claiming their plans were measured. No payloads, bindings,
+account keys or transcript text are included. CPU has the platform process-counter
+resolution, so a short smoke is unsuitable for CPU comparisons.

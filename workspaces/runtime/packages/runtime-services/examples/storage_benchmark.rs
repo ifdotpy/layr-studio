@@ -25,6 +25,9 @@ use studio_runtime_store::{
     StoreResult, SyncDocumentsRepository, TranscriptRepository, monitor_runtime,
 };
 
+#[path = "storage_benchmark/hot_paths.rs"]
+mod hot_paths;
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 const AGENT: &str = "storage-benchmark-agent";
 const MONITOR: &str = "storage-benchmark-monitor";
@@ -39,6 +42,10 @@ const FAMILIES: [&str; 8] = [
     "sse_catch_up",
 ];
 // Benchmark budget owners: wall seconds, fixture rows, samples per family, database bytes.
+// Hot-path copies include the 5.7 GiB main fixture. Unit: database + WAL bytes.
+// Identical hot-path frames per revision; timeout fails instead of truncating.
+const HOT_FIXED_FRAMES: u64 = 100;
+const HOT_DATABASE_BUDGET_BYTES: u64 = 16 * 1024 * 1024 * 1024;
 const DEFAULT_SECONDS: u64 = 60;
 const DEFAULT_ROWS: u64 = 1000;
 const MAX_SAMPLES: u64 = 10_000;
@@ -54,6 +61,7 @@ static READ_SQL: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 struct Distribution {
     samples: usize,
     p50_ms: Option<f64>,
+    p95_ms: Option<f64>,
     p99_ms: Option<f64>,
 }
 #[derive(Serialize)]
@@ -182,6 +190,7 @@ struct Report {
     fixture: Fixture,
     budget: Budget,
     measured_seconds: f64,
+    process: hot_paths::ProcessReport,
     families: Vec<FamilyReport>,
     busy: BusyReport,
     wal_checkpoint: BTreeMap<&'static str, CheckpointReport>,
@@ -260,6 +269,7 @@ struct Options {
     state: Option<PathBuf>,
     server: Option<String>,
     label: String,
+    hot_paths: bool,
 }
 fn options() -> Result<Options> {
     let mut options = Options {
@@ -269,9 +279,15 @@ fn options() -> Result<Options> {
         state: None,
         server: None,
         label: "unlabelled".into(),
+        hot_paths: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
+        if arg == "--hot-paths" {
+            options.hot_paths = true;
+            options.samples = options.samples.min(HOT_FIXED_FRAMES);
+            continue;
+        }
         if arg == "--smoke" {
             options.seconds = 1;
             options.rows = 8;
@@ -280,7 +296,7 @@ fn options() -> Result<Options> {
         }
         if arg == "--help" {
             println!(
-                "storage_benchmark [--smoke] [--seconds 60] [--rows 1000] [--label revision] [--state COPY --server URL]\nJSON: stdout; table: stderr. One sequential producer; max 10000 samples/family.\nCopy mode requires live-state discovery through /api/desktop.\nNo real data is printed. Runs always mutate a disposable temporary database."
+                "storage_benchmark [--hot-paths] [--smoke] [--seconds 60] [--rows 1000] [--label revision] [--state COPY --server URL]\nJSON: stdout; table: stderr. One sequential producer; max 10000 samples/family.\nCopy mode requires live-state discovery through /api/desktop.\nNo real data is printed. Runs always mutate a disposable temporary database."
             );
             std::process::exit(0);
         }
@@ -331,10 +347,13 @@ fn copy_state(options: &Options, destination: &Path) -> Result<()> {
         return Err("refusing live state directory or its ancestors/descendants".into());
     }
     // Validate every database and existing SQLite sidecar before opening any file.
+    let staging = tempfile::tempdir_in(destination.parent().ok_or("missing copy parent")?)?;
     let mut inputs = Vec::new();
+    let mut files = Vec::new();
     for name in ["canvas.sqlite3", "analytics.sqlite3"] {
         let input = studio_runtime_store::path_identity::CanonicalPath::existing(copy.join(name))?;
         refuse_live_path(input.as_path(), live.as_path())?;
+        files.push((name.to_owned(), input.as_path().to_path_buf()));
         for suffix in ["-wal", "-shm"] {
             let mut sidecar = input.as_os_str().to_os_string();
             sidecar.push(suffix);
@@ -344,18 +363,43 @@ fn copy_state(options: &Options, destination: &Path) -> Result<()> {
                     let resolved =
                         studio_runtime_store::path_identity::CanonicalPath::existing(sidecar)?;
                     refuse_live_path(resolved.as_path(), live.as_path())?;
+                    files.push((format!("{name}{suffix}"), resolved.as_path().to_path_buf()));
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                 Err(error) => return Err(error.into()),
             }
         }
-        if std::fs::metadata(input.as_path())?.len() > DATABASE_BUDGET_BYTES / 2 {
-            return Err("copy exceeds 1 GiB per database budget".into());
+        if std::fs::metadata(input.as_path())?.len() > database_budget(options) / 2 {
+            return Err("copy exceeds per-database budget".into());
         }
         inputs.push((name, input));
     }
-    for (name, input) in inputs {
-        let db = Connection::open_with_flags(input.as_path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let source_bytes = files
+        .iter()
+        .try_fold(0_u64, |bytes, (_, path)| -> Result<u64> {
+            let metadata = std::fs::metadata(path)?;
+            if !metadata.is_file() {
+                return Err("source database/sidecar must be a file".into());
+            }
+            bytes
+                .checked_add(metadata.len())
+                .ok_or_else(|| "source size overflow".into())
+        })?;
+    let space = rustix::fs::statvfs(destination)?;
+    let available_bytes = space
+        .f_bavail
+        .checked_mul(space.f_frsize)
+        .ok_or("free space overflow")?;
+    hot_paths::check_copy_budget(source_bytes, database_budget(options), available_bytes)?;
+    // SQLite never opens the supplied source, even read-only (WAL can create SHM).
+    for (name, input) in files {
+        std::fs::copy(input, staging.path().join(name))?;
+    }
+    for (name, _) in inputs {
+        let db = Connection::open_with_flags(
+            staging.path().join(name),
+            OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )?;
         db.busy_timeout(Duration::from_secs(1))?;
         db.execute(
             "VACUUM INTO ?1",
@@ -366,6 +410,14 @@ fn copy_state(options: &Options, destination: &Path) -> Result<()> {
         )?;
     }
     Ok(())
+}
+
+fn database_budget(options: &Options) -> u64 {
+    if options.hot_paths {
+        HOT_DATABASE_BUDGET_BYTES
+    } else {
+        DATABASE_BUDGET_BYTES
+    }
 }
 
 fn refuse_live_path(path: &Path, live: &Path) -> Result<()> {
@@ -699,6 +751,7 @@ fn distribution(mut samples: Vec<f64>) -> Distribution {
     Distribution {
         samples: samples.len(),
         p50_ms: percentile(&mut samples, 0.50),
+        p95_ms: percentile(&mut samples, 0.95),
         p99_ms: percentile(&mut samples, 0.99),
     }
 }
@@ -743,27 +796,56 @@ fn checkpoints(root: &Path) -> Result<BTreeMap<&'static str, CheckpointReport>> 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     let options = options()?;
+    if options.hot_paths && sysinfo::System::load_average().one >= 8.0 {
+        return Err(format!(
+            "hot-path measurement deferred: 1-minute load {} >= 8",
+            sysinfo::System::load_average().one
+        )
+        .into());
+    }
+    let family_names: &[&str] = if options.hot_paths {
+        &hot_paths::FAMILIES
+    } else {
+        &FAMILIES
+    };
     eprintln!(
-        "Manual storage benchmark: <= {}s measured workload; one sequential producer; <= {} samples/family; 2 GiB database budget; no providers or child commands. Run alone, outside ordinary checks.",
-        options.seconds, options.samples
+        "Manual storage benchmark: <= {}s measured workload; one sequential producer; <= {} samples/family; {} byte database budget; no providers or child commands. Run alone, outside ordinary checks.",
+        options.seconds,
+        options.samples,
+        database_budget(&options)
     );
     let directory = tempfile::tempdir()?;
     copy_state(&options, directory.path())?;
     let store = RuntimeStore::open(Some(directory.path())).await?;
     seed(&store, options.rows).await?;
+    if options.hot_paths {
+        hot_paths::seed(&store, options.rows).await?;
+    }
+    hot_paths::require_wal(directory.path())?;
     let initial_sizes = sizes(directory.path())?;
     let output = MonitorOutput::default();
+    let mut process = hot_paths::ProcessMeasurement::start()?;
     let start = Instant::now();
-    let mut samples: [Vec<f64>; 8] = std::array::from_fn(|_| Vec::new());
-    let mut waits: [Vec<f64>; 8] = std::array::from_fn(|_| Vec::new());
+    let mut samples = vec![Vec::new(); family_names.len()];
+    let mut waits = vec![Vec::new(); family_names.len()];
     let mut offset = 0;
     let mut iterations = 0;
-    while iterations < options.samples && start.elapsed() < Duration::from_secs(options.seconds) {
+    while hot_paths::frame_pending(
+        options.hot_paths,
+        iterations,
+        options.samples,
+        start.elapsed(),
+        Duration::from_secs(options.seconds),
+    )? {
         let n = options.rows + iterations;
-        for family in 0..FAMILIES.len() {
+        for family in 0..family_names.len() {
             let busy_before = BUSY_NS.load(Ordering::Relaxed);
             let began = Instant::now();
-            operation(&store, &output, family, n, &mut offset).await?;
+            if options.hot_paths {
+                hot_paths::operation(&store, family, n).await?;
+            } else {
+                operation(&store, &output, family, n, &mut offset).await?;
+            }
             samples[family].push(began.elapsed().as_secs_f64() * 1000.0);
             if family != 7 {
                 waits[family].push((BUSY_NS.load(Ordering::Relaxed) - busy_before) as f64 / 1e6);
@@ -773,20 +855,25 @@ async fn main() -> Result<()> {
         if iterations % 100 == 0 {
             let current = sizes(directory.path())?;
             let bytes: u64 = current.values().map(|v| v.db_bytes + v.wal_bytes).sum();
-            if bytes > DATABASE_BUDGET_BYTES {
+            if bytes > database_budget(&options) {
                 return Err("database budget exceeded".into());
             }
         }
     }
     let elapsed = start.elapsed().as_secs_f64();
+    let process = process.finish(iterations)?;
     let before_checkpoint = sizes(directory.path())?;
     let wal_checkpoint = checkpoints(directory.path())?;
-    let query_plans = read_plans(&store).await?;
+    let query_plans = if options.hot_paths {
+        hot_paths::read_plans(&store).await?
+    } else {
+        read_plans(&store).await?
+    };
     let mut families = Vec::new();
     eprintln!("family                       samples      p50 ms      p99 ms   busy p99 ms");
-    for (i, name) in FAMILIES.iter().enumerate() {
+    for (i, name) in family_names.iter().enumerate() {
         let latency = distribution(std::mem::take(&mut samples[i]));
-        let busy_wait = if i == 7 {
+        let busy_wait = if options.hot_paths || i == 7 {
             BusyMeasurement::Unavailable
         } else {
             BusyMeasurement::Measured(distribution(std::mem::take(&mut waits[i])))
@@ -819,7 +906,7 @@ async fn main() -> Result<()> {
             sqlite: rusqlite::version(),
             architecture: std::env::consts::ARCH,
         },
-        label: options.label,
+        label: options.label.clone(),
         timestamp_ms: now_ms(),
         fixture: Fixture {
             source: if options.state.is_some() {
@@ -834,9 +921,10 @@ async fn main() -> Result<()> {
         budget: Budget {
             seconds: options.seconds,
             samples_per_family: options.samples,
-            database_bytes: DATABASE_BUDGET_BYTES,
+            database_bytes: database_budget(&options),
         },
         measured_seconds: elapsed,
+        process,
         families,
         busy: BusyReport {
             callbacks: BUSY_CALLS.load(Ordering::Relaxed),
