@@ -1,0 +1,315 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import {
+  checkSqlRatchet,
+  fingerprint,
+  formatSqlBaseline,
+  ownerFor,
+  tablesIn,
+  scanRustNodes,
+  scanSql,
+  scanTypeScript,
+  SQLITE_DRIVERS,
+  compilerWitnessErrors,
+  COMPILER_SQL_WITNESS_FILE,
+  readSqlBaseline,
+  sqlDiagnostic,
+  constructorErrors,
+  QUERY_CONSTRUCTOR_OWNER,
+} from "../sql-ratchet.ts";
+
+test("SQL ratchet rejects additions and duplicate calls and permits removals", () => {
+  const site = {
+    file: "caller.rs",
+    symbol: "load",
+    api: "rusqlite::Connection::query_row",
+    fingerprint: fingerprint("db.query_row(sql, [], decode)", "load"),
+  };
+  const baseline = [site];
+  assert.deepEqual(checkSqlRatchet([site], baseline), []);
+  assert.deepEqual(checkSqlRatchet([], baseline), []);
+  assert.equal(checkSqlRatchet([site, site], baseline).length, 1);
+  assert.equal(
+    checkSqlRatchet([{ ...site, file: "new-caller.rs" }], baseline).length,
+    1,
+  );
+  assert.equal(
+    checkSqlRatchet(
+      [
+        {
+          ...site,
+          fingerprint: fingerprint(
+            "db.query_row(other_sql, [], decode)",
+            "load",
+          ),
+        },
+      ],
+      baseline,
+    ).length,
+    1,
+  );
+});
+
+test("ownership is exclusive and multi-family callers belong to F1-shared", () => {
+  assert.equal(ownerFor("src/reader.rs", ["F2"]), "F2");
+  assert.equal(ownerFor("src/reader.rs", ["F2", "F3"]), "F1-shared");
+  assert.equal(
+    ownerFor("workspaces/runtime/packages/db-api/src/query.rs", ["F2"]),
+    "F1",
+  );
+  assert.equal(
+    ownerFor("workspaces/tooling/apps/installed-smoke/usage.ts", ["F2"]),
+    "F1-shared",
+  );
+});
+
+test("table evidence retains qualified names and unresolved dynamic identifiers", () => {
+  const names = ["runtime_agents", "runtime_events"];
+  assert.deepEqual(
+    tablesIn(
+      'SELECT a.id FROM "runtime_agents" a JOIN runtime_events e ON e.agent=a.id',
+      names,
+    ),
+    names,
+  );
+  assert.deepEqual(tablesIn("SELECT * FROM {table}", names), ["<dynamic>"]);
+});
+
+test("Rust AST inventory sees generic/dynamic calls and ignores comments and non-SQL method names", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "studio-sql-inventory-"));
+  const file = path.join(dir, "witness.rs");
+  try {
+    writeFileSync(
+      file,
+      `fn caller() {
+      // db.execute("DELETE FROM hidden", []);
+      db.query::<Row>(sql, args);
+      tx.execute(dynamic_sql, params);
+      result.unwrap_or_else(|| db.query_row(SQL, [], decode));
+      Statement::declare("SELECT * FROM runtime_agents");
+    }`,
+    );
+    const nodes = scanRustNodes([file]);
+    assert.equal(nodes.filter((node) => node.ruleId === "call").length, 3);
+    assert.equal(nodes.filter((node) => node.ruleId === "boundary").length, 1);
+    assert.equal(nodes.filter((node) => node.ruleId === "sql").length, 1);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
+test("compiler resolution distinguishes rusqlite methods from unrelated method collisions", () => {
+  const diagnostic = (api: string) =>
+    JSON.stringify({
+      reason: "compiler-message",
+      message: {
+        code: { code: "clippy::disallowed_methods" },
+        message: `use of a disallowed method \`${api}\``,
+        spans: [
+          {
+            is_primary: true,
+            file_name: "caller.rs",
+            byte_start: 12,
+            byte_end: 21,
+          },
+        ],
+      },
+    });
+  assert.equal(
+    sqlDiagnostic(diagnostic("rusqlite::Connection::query_row"))?.api,
+    "rusqlite::Connection::query_row",
+  );
+  assert.equal(
+    sqlDiagnostic(diagnostic("other_crate::Connection::query_row")),
+    undefined,
+  );
+});
+
+test("repository SQL sites stay within the frozen file/symbol baseline and file ownership is exclusive", () => {
+  const scan = scanSql();
+  const sites = scan.sites.filter(
+    (site) =>
+      !/^workspaces\/runtime\/packages\/db-api(?:-derive)?\//.test(site.file) &&
+      site.api !== "rust::typed-query-macro",
+  );
+  assert.deepEqual(checkSqlRatchet(sites, readSqlBaseline()), []);
+  assert.deepEqual(scan.forbiddenConstructors, []);
+  assert.equal(
+    new Set(scan.manifest.map((row) => row.file)).size,
+    scan.manifest.length,
+  );
+  assert.ok(
+    scan.manifest.every((row) => /^(F[1-8]|F1-shared)$/.test(row.owner)),
+  );
+  assert.ok(
+    scan.sites.some((site) =>
+      site.file.endsWith("upgrade-canary/studio-claude-profile.ts"),
+    ),
+  );
+  assert.ok(
+    scan.sites.some((site) => site.file.endsWith("installed-smoke/usage.ts")),
+  );
+  assert.ok(
+    scan.sites.some((site) => site.file.endsWith("verify-rust-chat-scale.ts")),
+  );
+});
+
+test("generated query constructors are forbidden in fabricated calls, comments, fixtures and prose", () => {
+  const hidden = ["__generated", "declare"].join("_");
+  const internal = ["Statement", "internal"].join("::");
+  for (const file of [
+    "caller.rs",
+    "db-api-derive/src/named.rs",
+    "docs/query.md",
+    "tests/fixture.ts",
+  ]) {
+    for (const text of [
+      `NamedQuery::${hidden}(sql)`,
+      `// ${hidden}`,
+      `const sql = "${internal}"`,
+      `${["Statement", "internal"].join(" :: ")}(sql)`,
+    ]) {
+      assert.equal(constructorErrors([{ file, text }]).length, 1);
+    }
+  }
+  assert.deepEqual(
+    constructorErrors([
+      { file: QUERY_CONSTRUCTOR_OWNER, text: hidden + internal },
+    ]),
+    [],
+  );
+});
+
+test("new SQLite-capable modules fail regardless of receiver or import form", () => {
+  const sources = [
+    `import {DatabaseSync} from "node:sqlite"; const db = new DatabaseSync(":memory:"); db["exec"](["CREATE", "TABLE t(id)"].join(" "));`,
+    `import type {DatabaseSync} from "node:sqlite"; function write(c: DatabaseSync, sql: string) { c.exec(sql); }`,
+    `const driver = await import("node:sqlite");`,
+    `export {DatabaseSync} from "node:sqlite";`,
+  ];
+  for (const source of sources) {
+    const file = "new-sqlite-module.ts";
+    const sites = scanTypeScript(file, source)
+      .filter((site) => site.driver)
+      .map(() => ({
+        file,
+        symbol: "<module>",
+        api: "typescript::sqlite-driver",
+        fingerprint: fingerprint("file", "<module>"),
+      }));
+    assert.equal(sites.length, 1, source);
+    assert.equal(checkSqlRatchet(sites, []).length, 1);
+    assert.deepEqual(
+      checkSqlRatchet(
+        sites,
+        sites.map((site) => ({ ...site, reason: "frozen SQLite file" })),
+      ),
+      [],
+    );
+    assert.equal(
+      checkSqlRatchet(
+        sites,
+        sites.map((site) => ({
+          ...site,
+          file: "other.ts",
+          reason: "other frozen file",
+        })),
+      ).length,
+      1,
+    );
+  }
+});
+
+test("all SQLite specifier literals freeze JavaScript and TypeScript files", () => {
+  for (const driver of SQLITE_DRIVERS)
+    for (const file of ["new.ts", "new.js", "new.cjs", "new.mjs"]) {
+      const source = `const specifier = ${JSON.stringify(driver)}; const loader = require; loader(specifier);`;
+      assert.equal(
+        scanTypeScript(file, source).filter((site) => site.driver).length,
+        1,
+      );
+    }
+});
+
+test("SQL fingerprints preserve spaces inside string literals", () => {
+  assert.notEqual(fingerprint(`SELECT 'a b'`), fingerprint(`SELECT 'a  b'`));
+});
+
+test("landing compiler SQL check requires both alias and macro witnesses", () => {
+  const sites = [
+    "compiler_detects_sql_function_alias",
+    "compiler_detects_sql_in_macro_argument",
+  ].map((symbol) => ({
+    file: COMPILER_SQL_WITNESS_FILE,
+    symbol,
+    api: "rusqlite::Connection::execute",
+    fingerprint: "fixture",
+  }));
+  assert.equal(compilerWitnessErrors([]).length, 2);
+  assert.equal(compilerWitnessErrors(sites.slice(0, 1)).length, 1);
+  assert.deepEqual(compilerWitnessErrors(sites), []);
+  assert.equal(
+    checkSqlRatchet(
+      sites.map((site) => ({ ...site, file: "caller.rs" })),
+      [],
+    ).length,
+    2,
+  );
+});
+
+test("compact baseline loads grouped fingerprints and preserves duplicate budgets", () => {
+  const dir = mkdtempSync(path.join(tmpdir(), "studio-sql-baseline-"));
+  const file = path.join(dir, "baseline.json");
+  try {
+    const fp = fingerprint("statement");
+    assert.match(fp, /^[a-f0-9]{16}$/);
+    writeFileSync(
+      file,
+      JSON.stringify({ "caller.rs": { "sqlite::execute": [fp, fp] } }),
+    );
+    const baseline = readSqlBaseline(file);
+    const site = {
+      file: "caller.rs",
+      symbol: "load",
+      api: "sqlite::execute",
+      fingerprint: fp,
+    };
+    assert.equal(baseline.length, 2);
+    assert.deepEqual(checkSqlRatchet([site, site], baseline), []);
+    assert.equal(checkSqlRatchet([site, site, site], baseline).length, 1);
+  } finally {
+    rmSync(dir, { recursive: true });
+  }
+});
+
+test("generated baseline is compact, sorted and one line per file", () => {
+  const baseline = readSqlBaseline();
+  const source = readFileSync(
+    new URL("../sql-baseline.json", import.meta.url),
+    "utf8",
+  );
+  assert.equal(source, formatSqlBaseline(baseline));
+  assert.ok(Buffer.byteLength(source) < 1_000_000);
+  assert.equal(
+    source.trim().split("\n").length,
+    new Set(baseline.map((row) => row.file)).size + 2,
+  );
+});
+
+test("identical SQL moved to a different symbol exceeds its frozen allowance", () => {
+  const text = "db.query_row(sql, [], decode)";
+  const call = (symbol: string) => ({
+    file: "caller.rs",
+    symbol,
+    api: "rusqlite::Connection::query_row",
+    fingerprint: fingerprint(text, symbol),
+  });
+  const original = call("original");
+  const moved = call("moved");
+  assert.notEqual(moved.fingerprint, original.fingerprint);
+  assert.deepEqual(checkSqlRatchet([original], [original]), []);
+  assert.equal(checkSqlRatchet([moved], [original]).length, 1);
+});

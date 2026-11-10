@@ -1,3 +1,4 @@
+import { checkResolvedSql, sqlDiagnostic } from "./sql-ratchet.ts";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -49,6 +50,7 @@ export function collector() {
   const matches = new Map<string, Match>();
   function add(line: string) {
     if (!line) return;
+    if (sqlDiagnostic(line)) return;
     const item = JSON.parse(line);
     if (item.reason !== "compiler-message") return;
     const diagnostic = item.message;
@@ -162,6 +164,7 @@ export function scopedBaseline(
 export async function run(
   shrink = false,
   excludeNative = false,
+  sqlInventory?: string,
 ): Promise<number> {
   // The gate's command (gate-config.ts), with the job count and the message format before `--`.
   const end = RUST_CLIPPY_ARGS.indexOf("--");
@@ -188,14 +191,21 @@ export async function run(
   const exit = once(child, "close");
   const scan = collector();
   const failures: unknown[] = [];
+  const sqlLines: string[] = [];
   for await (const line of createInterface({ input: child.stdout })) {
     try {
+      if (sqlDiagnostic(line)) sqlLines.push(line);
       scan.add(line);
     } catch (error) {
       failures.push(error);
     }
   }
   const [status] = await exit;
+  if (sqlInventory)
+    writeFileSync(
+      `${sqlInventory}.diagnostics.ndjson`,
+      sqlLines.join("\n") + "\n",
+    );
   if (failures.length)
     throw new Error(
       failures
@@ -226,6 +236,7 @@ export async function run(
   const errors = lints.flatMap((rule) =>
     checkRatchet(rule, found[rule] ?? [], checkedBaseline),
   );
+  errors.push(...checkResolvedSql(sqlLines, sqlInventory));
   errors.forEach((error) => console.error(error));
   return errors.length ? 1 : 0;
 }
@@ -233,4 +244,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url))
   process.exitCode = await run(
     process.argv.includes("--shrink"),
     process.argv.includes("--exclude-native"),
+    process.argv.includes("--sql-inventory")
+      ? process.argv[process.argv.indexOf("--sql-inventory") + 1]
+      : undefined,
   );

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { collect, scopedBaseline } from "../clippy-ratchet.ts";
+import { SQL_CLIPPY_CONFIG } from "../sql-ratchet.ts";
 import { checkRatchet } from "../ratchet.ts";
 
 const file = "workspaces/runtime/packages/runtime-store/src/lib.rs";
@@ -77,7 +78,10 @@ test("ratchet Clippy config extends the HTTP policy", () => {
   { path = "studio_json::to_value", reason = "prefer typed serialization" },`;
   assert.equal(
     config,
-    owner.replace("disallowed-methods = [", `disallowed-methods = [${extras}`),
+    owner.replace(
+      "disallowed-methods = [",
+      `disallowed-methods = [\n${SQL_CLIPPY_CONFIG}${extras}`,
+    ),
   );
 });
 
