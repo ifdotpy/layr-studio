@@ -40,6 +40,19 @@
 .sidebar-header {
   flex: none;
 }
+.network-dot {
+  flex: none;
+  inline-size: 8px;
+  block-size: 8px;
+  border-radius: 50%;
+  background: var(--studio-state-error);
+}
+.network-dot[data-connection="live"] {
+  background: var(--studio-state-unread);
+}
+.network-dot[data-connection="reconnecting"] {
+  background: var(--studio-warning);
+}
 .brand {
   flex: 1;
   min-inline-size: 0;
@@ -366,7 +379,7 @@
   -webkit-app-region: drag;
   padding-block: var(--mantine-spacing-md) var(--mantine-spacing-xs);
 }
-.desktop-inset-titlebar .sidebar-header :is(button, a) {
+.desktop-inset-titlebar .sidebar-header :is(button, a, .network-dot) {
   -webkit-app-region: no-drag;
 }
 /* Retain the existing user-selected sidebar typography contract. */

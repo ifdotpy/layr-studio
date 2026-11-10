@@ -18,6 +18,8 @@ import { SidebarFrame } from "../SidebarFrame/SidebarFrame.tsx";
 import { serverViewId } from "../../../servers/environment.ts";
 import RemoteProjects from "../RemoteProjects/RemoteProjects.tsx";
 import { SidebarWarningsTarget } from "../SidebarWarnings/SidebarWarnings.tsx";
+import { NetworkIndicator } from "../../servers/NetworkIndicator/NetworkIndicator.tsx";
+import { useServerNet } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 import { SidebarAttention } from "../SidebarAttention/SidebarAttention.tsx";
 
@@ -39,6 +41,7 @@ export const SidebarContents = observer(function SidebarContents({
   notice?: string | undefined;
 }) {
   const sidebar = useSidebarState();
+  const net = useServerNet();
   sidebarRender("SidebarContents");
   const content = (
     <>
@@ -55,6 +58,7 @@ export const SidebarContents = observer(function SidebarContents({
           </span>
         </a>
         <SidebarWarningsTarget />
+        <NetworkIndicator net={net} />
         <ActionIcon
           className="sidebar-search"
           aria-label="Search chats"

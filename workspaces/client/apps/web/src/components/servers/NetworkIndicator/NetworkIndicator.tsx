@@ -1,27 +1,34 @@
+import { Tooltip } from "@mantine/core";
 import { observer } from "mobx-react-lite";
 import type { Net } from "../../../servers/net/net.ts";
 
+const labels = {
+  live: "Connected",
+  offline: "Offline",
+  reconnecting: "Reconnecting",
+  "schema-mismatch": "Update required",
+} as const;
+
+/** A colored dot for the server connection; its tooltip opens on hover and focus. */
 export const NetworkIndicator = observer(function NetworkIndicator({
   net,
 }: {
   net: Net;
 }) {
-  const { connection, inFlight, lastError } = net.status;
+  const { connection, lastError } = net.status;
+  const label = `Server connection: ${labels[connection]}`;
   return (
-    <span
-      role="status"
-      aria-label="Server connection"
-      data-connection={connection}
-      title={lastError || undefined}
+    <Tooltip
+      label={lastError ? `${label}. ${lastError}` : label}
+      events={{ hover: true, focus: true, touch: true }}
     >
-      {connection === "schema-mismatch"
-        ? "Update required"
-        : connection === "live"
-          ? "Live"
-          : connection === "offline"
-            ? "Offline"
-            : "Reconnecting"}
-      {inFlight > 0 && ` · ${inFlight} active requests`}
-    </span>
+      <span
+        className="network-dot"
+        role="status"
+        tabIndex={0}
+        aria-label={lastError ? `${label}. ${lastError}` : label}
+        data-connection={connection}
+      />
+    </Tooltip>
   );
 });

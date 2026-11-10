@@ -1,3 +1,4 @@
+import { MantineProvider } from "@mantine/core";
 import { NetworkTimeoutError, errorText } from "../../apiErrors.ts";
 // @vitest-environment happy-dom
 import { act, createElement } from "react";
@@ -59,7 +60,13 @@ it("observes every connection state and finite request outcome without probing",
     root = createRoot(host);
   try {
     await act(async () =>
-      root.render(createElement(NetworkIndicator, { net })),
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(NetworkIndicator, { net }),
+        ),
+      ),
     );
     for (const [health, expected] of [
       ["live", "live"],
@@ -69,16 +76,22 @@ it("observes every connection state and finite request outcome without probing",
       ["live", "schema-mismatch"],
     ] as const) {
       await act(async () => status.receive(health));
-      expect(host.firstElementChild?.getAttribute("data-connection")).toBe(
-        expected,
-      );
+      expect(
+        host.querySelector(".network-dot")?.getAttribute("data-connection"),
+      ).toBe(expected);
     }
+    const dot = () => host.querySelector(".network-dot");
+    expect(dot()?.textContent).toBe("");
+    expect(dot()?.getAttribute("tabindex")).toBe("0");
+    expect(dot()?.getAttribute("aria-label")).toBe(
+      "Server connection: Update required",
+    );
     expect(fetch).not.toHaveBeenCalled();
     let request: Promise<unknown> = Promise.resolve();
     await act(async () => {
       request = api.get("/api/session").catch(() => {});
     });
-    expect(host.textContent).toContain("1 active requests");
+    expect(dot()?.textContent).toBe("");
     await act(async () => {
       pending.resolve(
         new Response(JSON.stringify({ error: "Request refused" }), {
@@ -93,8 +106,8 @@ it("observes every connection state and finite request outcome without probing",
     });
     expect(status.inFlight).toBe(0);
     expect(status.lastError).toBe("Request refused");
-    expect(host.firstElementChild?.getAttribute("title")).toBe(
-      "Request refused",
+    expect(dot()?.getAttribute("aria-label")).toBe(
+      "Server connection: Update required. Request refused",
     );
     await act(async () => {
       const finish = status.begin();

@@ -1,4 +1,3 @@
-import { NetworkIndicator } from "../../servers/NetworkIndicator/NetworkIndicator.tsx";
 import { AppTeam } from "../AppTeam/AppTeam.tsx";
 import { AppPanels } from "../AppPanels/AppPanels.tsx";
 import { AppDialogs } from "../AppDialogs/AppDialogs.tsx";
@@ -124,7 +123,6 @@ export default observer(function App() {
         <AppDialogs />
         <SchemaUpdateDialog />
         <ToastNotice />
-        <NetworkIndicator net={scope.services.net} />
       </div>
     </AppTeam>
   );
