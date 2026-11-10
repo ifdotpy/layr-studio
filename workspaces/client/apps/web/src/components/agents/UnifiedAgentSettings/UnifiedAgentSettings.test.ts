@@ -8,6 +8,8 @@ import { act, createElement, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { ApiError } from "../../../api.ts";
 import { createMutationJournal } from "../../../servers/mutationIdentity.ts";
+import { accountsFixture } from "../../accounts/Accounts/Accounts.fixture.ts";
+import { Provider } from "../../../app/ServerAreasProvider.tsx";
 import { UnifiedAgentSettingsView as UnifiedAgentSettings } from "./UnifiedAgentSettings.tsx";
 
 const harness = vi.hoisted(() => ({
@@ -17,7 +19,10 @@ const harness = vi.hoisted(() => ({
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  () => ({
+  async (original) => ({
+    ...(await original<
+      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
+    >()),
     useServerStore: () => ({
       agentDetail: () => ({
         appliedVersion: harness.version,
@@ -42,6 +47,7 @@ beforeEach(() => {
 });
 
 function mount() {
+  const accounts = accountsFixture();
   const refresh = vi.fn();
   const notify = vi.fn();
   let current!: ReturnType<typeof UnifiedAgentSettings>;
@@ -56,19 +62,29 @@ function mount() {
         supportsDelete: false,
         supportsDisconnect: false,
       },
-      agent: { id: "lead", isLead: true } as ComponentProps<
-        typeof UnifiedAgentSettings
-      >["agent"],
+      agent: {
+        id: "lead",
+        isLead: true,
+        accountChange: { kind: "select" },
+      } as ComponentProps<typeof UnifiedAgentSettings>["agent"],
       catalog: { models: [], loading: false, error: "", retry: () => {} },
       notify,
     });
     return null;
   }
-  const render = () => act(() => root.render(createElement(Fixture)));
+  const render = () =>
+    act(() =>
+      root.render(
+        createElement(
+          Provider,
+          { value: accounts.areas },
+          createElement(Fixture),
+        ),
+      ),
+    );
   render();
   return {
-    picker: () =>
-      current.props.renderPicker(() => {}, false).props.children.props,
+    picker: () => current.props.children[0].props,
     publish(keys: string[], revision: number, epoch = "session") {
       harness.excluded = keys;
       harness.version = { epoch, revision };
@@ -76,7 +92,10 @@ function mount() {
     },
     refresh,
     notify,
-    close: () => act(() => root.unmount()),
+    close: () => {
+      act(() => root.unmount());
+      accounts.close();
+    },
   };
 }
 

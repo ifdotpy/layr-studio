@@ -1,117 +1,111 @@
 import { useSidebarBackend } from "../../sidebar/support/services.tsx";
-import { useRef, useState } from "react";
+import type { SidebarBackend } from "../../sidebar/support/services.tsx";
+import { useState } from "react";
+import { makeAutoObservable, observableRef } from "mobx";
 import { outboxRequests } from "../../../browserPersistence.ts";
 import {
   ApiError,
   errorText,
   type ApiPostPath,
   type PostBody,
-  type PostResult,
 } from "../../../api.ts";
 
-export function persistedProjectRequest<Path extends ApiPostPath>(
-  persisted: PostBody<Path> | null,
-  next: PostBody<Path>,
-): PostBody<Path> {
-  return persisted ?? next;
-}
-
-// Project metadata uses exact values and revision checks for a safe retry.
-export function useProjectSave<Path extends ApiPostPath>(
-  path: Path,
-  onSaved: () => Promise<void>,
-  validate?: (result: PostResult<Path>) => void,
-  storageKey?: string,
-) {
-  // A retry uses the server connection selected when this form opened.
-  const backend = useRef(useSidebarBackend()).current;
-  const { post, storage } = backend;
-  const outbox = outboxRequests(storage);
-  type StoredRequest = {
-    body: PostBody<Path>;
-    acknowledged: boolean;
-  };
-  const [stored] = useState<StoredRequest | null>(() =>
-    (() => {
-      try {
-        return storageKey
-          ? JSON.parse(outbox.get("projectSave", storageKey) || "null")
-          : null;
-      } catch {
-        return null;
-      }
-    })(),
-  );
-  const [pending, setPending] = useState(false);
-  const [frozen, setFrozen] = useState(!!stored);
-  const [retryLabel, setRetryLabel] = useState<string | null>(
-    stored
-      ? stored.acknowledged
-        ? "Refresh project"
-        : "Retry saved request"
-      : null,
-  );
-  const [error, setError] = useState("");
-  const lock = useRef(false);
-  const request = useRef<PostBody<Path> | null>(stored?.body ?? null);
-  const acknowledged = useRef(!!stored?.acknowledged);
-  const persist = () => {
-    if (storageKey)
-      outbox.set(
-        "projectSave",
-        storageKey,
-        JSON.stringify({
-          body: request.current,
-          acknowledged: acknowledged.current,
-        }),
-      );
-  };
-  const submit = async (body: PostBody<Path>) => {
-    if (lock.current) return;
-    lock.current = true;
-    const requestBody = persistedProjectRequest(request.current, body);
-    request.current = requestBody;
-    setPending(true);
-    setFrozen(true);
-    setError("");
+/** One form's immutable request, including an uncertain or acknowledged retry. */
+export class ProjectSave<Path extends ApiPostPath> {
+  pending = false;
+  frozen = false;
+  error = "";
+  request: PostBody<Path> | null = null;
+  acknowledged = false;
+  #backend: SidebarBackend;
+  #path: Path;
+  #onSaved: () => Promise<void>;
+  #storageKey: string | undefined;
+  #outbox: ReturnType<typeof outboxRequests>;
+  constructor(
+    backend: SidebarBackend,
+    path: Path,
+    onSaved: () => Promise<void>,
+    storageKey?: string,
+  ) {
+    this.#backend = backend;
+    this.#path = path;
+    this.#onSaved = onSaved;
+    this.#storageKey = storageKey;
+    this.#outbox = outboxRequests(backend.storage);
     try {
-      persist();
-      if (!acknowledged.current) {
-        const result = await post(path, requestBody, { timeoutMs: 15000 });
-        validate?.(result);
-        acknowledged.current = true;
-        persist();
+      const stored = storageKey
+        ? JSON.parse(this.#outbox.get("projectSave", storageKey) || "null")
+        : null;
+      this.request = stored?.body ?? null;
+      this.acknowledged = !!stored?.acknowledged;
+      this.frozen = !!stored;
+      this.retryLabel = stored
+        ? this.acknowledged
+          ? "Refresh project"
+          : "Retry saved request"
+        : null;
+    } catch {
+      /* Unreadable local requests cannot be restored. */
+    }
+    makeAutoObservable(this, { request: observableRef }, { autoBind: true });
+  }
+  retryLabel: string | null = null;
+  persist() {
+    if (this.#storageKey)
+      this.#outbox.set(
+        "projectSave",
+        this.#storageKey,
+        JSON.stringify({ body: this.request, acknowledged: this.acknowledged }),
+      );
+  }
+  *submit(body: PostBody<Path>): Generator<Promise<unknown>, void, unknown> {
+    if (this.pending) return;
+    this.pending = this.frozen = true;
+    this.error = "";
+    this.request ??= body;
+    try {
+      this.persist();
+      if (!this.acknowledged) {
+        yield this.#backend.post(this.#path, this.request, {
+          timeoutMs: 15000,
+        });
+        this.acknowledged = true;
+        this.persist();
       }
-      await onSaved();
-      if (storageKey) outbox.remove("projectSave", storageKey);
+      yield this.#onSaved();
+      if (this.#storageKey)
+        this.#outbox.remove("projectSave", this.#storageKey);
     } catch (failure) {
       if (
-        !acknowledged.current &&
+        !this.acknowledged &&
         failure instanceof ApiError &&
         failure.status >= 400 &&
         failure.status < 500 &&
         failure.status !== 408
       ) {
-        request.current = null;
-        if (storageKey) outbox.remove("projectSave", storageKey);
-        setFrozen(false);
-        setRetryLabel(null);
-      } else {
-        setRetryLabel(
-          acknowledged.current ? "Refresh project" : "Retry saved request",
-        );
+        this.request = null;
+        if (this.#storageKey)
+          this.#outbox.remove("projectSave", this.#storageKey);
+        this.frozen = false;
+        this.retryLabel = null;
       }
-      setError(errorText(failure));
+      if (this.frozen)
+        this.retryLabel = this.acknowledged
+          ? "Refresh project"
+          : "Retry saved request";
+      this.error = errorText(failure);
     } finally {
-      lock.current = false;
-      setPending(false);
+      this.pending = false;
     }
-  };
-  return {
-    submit,
-    pending,
-    frozen,
-    error,
-    retryLabel,
-  };
+  }
+}
+
+export function useProjectSave<Path extends ApiPostPath>(
+  path: Path,
+  onSaved: () => Promise<void>,
+  storageKey?: string,
+) {
+  const backend = useSidebarBackend();
+  return useState(() => new ProjectSave(backend, path, onSaved, storageKey))[0];
 }

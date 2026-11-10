@@ -99,6 +99,32 @@ export function FederationSettings({
     }
   };
 
+  const members = (
+    <>
+      {team.map((agent) => (
+        <Checkbox
+          key={agent.id}
+          label={agent.isLead ? `${agent.name} (lead)` : agent.name}
+          checked={localMembers.includes(agent.id)}
+          disabled={busy || (agent.id !== leadId && !shareNames)}
+          onChange={(event) =>
+            toggleMember(agent.id, event.currentTarget.checked)
+          }
+        />
+      ))}
+      <Checkbox
+        label="Share names of selected agents"
+        checked={shareNames}
+        onChange={(event) => setShareNames(event.currentTarget.checked)}
+      />
+      <Checkbox
+        label="Share selected agents’ current status"
+        checked={shareStatus}
+        onChange={(event) => setShareStatus(event.currentTarget.checked)}
+      />
+    </>
+  );
+
   return (
     <section
       className="settings-group federation-settings"
@@ -233,27 +259,7 @@ export function FederationSettings({
             By default, only the local lead display name is shared. Extra names
             and status require opt-in.
           </p>
-          {team.map((agent) => (
-            <Checkbox
-              key={agent.id}
-              label={agent.isLead ? `${agent.name} (lead)` : agent.name}
-              checked={localMembers.includes(agent.id)}
-              disabled={busy || (agent.id !== leadId && !shareNames)}
-              onChange={(event) =>
-                toggleMember(agent.id, event.currentTarget.checked)
-              }
-            />
-          ))}
-          <Checkbox
-            label="Share names of selected agents"
-            checked={shareNames}
-            onChange={(event) => setShareNames(event.currentTarget.checked)}
-          />
-          <Checkbox
-            label="Share selected agents’ current status"
-            checked={shareStatus}
-            onChange={(event) => setShareStatus(event.currentTarget.checked)}
-          />
+          {members}
           {state.peers
             .filter((peer) => peer.status === GeneratedApiPeerStatus.approved)
             .map((peer) => (
@@ -293,31 +299,7 @@ export function FederationSettings({
                   Approve access for the local lead. Select extra members only
                   when needed.
                 </p>
-                {team.map((agent) => (
-                  <Checkbox
-                    key={`${room.id}:${agent.id}`}
-                    label={agent.isLead ? `${agent.name} (lead)` : agent.name}
-                    checked={localMembers.includes(agent.id)}
-                    disabled={busy || (agent.id !== leadId && !shareNames)}
-                    onChange={(event) =>
-                      toggleMember(agent.id, event.currentTarget.checked)
-                    }
-                  />
-                ))}
-                <Checkbox
-                  label="Share names of selected agents"
-                  checked={shareNames}
-                  onChange={(event) =>
-                    setShareNames(event.currentTarget.checked)
-                  }
-                />
-                <Checkbox
-                  label="Share selected agents’ current status"
-                  checked={shareStatus}
-                  onChange={(event) =>
-                    setShareStatus(event.currentTarget.checked)
-                  }
-                />
+                {members}
                 <Button
                   disabled={busy || !localMembers.includes(leadId)}
                   onClick={() =>

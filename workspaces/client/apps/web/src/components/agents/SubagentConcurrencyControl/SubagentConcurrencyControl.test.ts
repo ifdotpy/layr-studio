@@ -1,3 +1,4 @@
+import { AgentMode } from "../../../generated/api.ts";
 vi.mock("mobx-react-lite", async (original) => ({
   ...(await original<typeof import("mobx-react-lite")>()),
   observer: <T>(component: T) => component,
@@ -114,7 +115,7 @@ it("retains and blocks a malformed request introduced while a save is pending", 
       id: "other",
       request_id: "other",
       expected_mode_revision: 0,
-      agent_mode: "multi",
+      subagent_concurrency: 4,
     },
   });
   fixture.disk.set(key, raw);
@@ -139,12 +140,21 @@ it("retains and blocks a malformed request introduced while a save is pending", 
   expect(fixture.disk.get(key)).toBe(raw);
 });
 
-it("blocks malformed or other-lead pending requests while preserving valid legacy requests", () => {
+it("blocks malformed requests and preserves supported mode and numeric receipts", () => {
+  const mode = {
+    id: "lead",
+    request_id: "old",
+    expected_mode_revision: 2,
+    agent_mode: AgentMode["multi"],
+  };
+  expect(
+    decodeStoredConcurrency(JSON.stringify({ pending: mode }), "lead").pending,
+  ).toEqual(mode);
   const legacy = {
     id: "lead",
     request_id: "original",
     expected_mode_revision: 2,
-    agent_mode: "multi",
+    subagent_concurrency: 4,
   };
   expect(
     decodeStoredConcurrency(JSON.stringify({ pending: legacy }), "lead")

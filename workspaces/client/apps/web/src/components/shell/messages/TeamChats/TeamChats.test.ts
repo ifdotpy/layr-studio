@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { RoomKind } from "../../../../generated/api.ts";
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { MantineProvider } from "@mantine/core";
@@ -12,7 +13,11 @@ import { agentSummaryFixture } from "../../../../servers/agentSummaryFixture.ts"
 import type { StateEntity } from "../../../../generated/observableResources.ts";
 import { serverLocalStorage } from "../../../../servers/storage.ts";
 
-const realRoom = vi.hoisted(() => ({ enabled: false, syncGet: vi.fn() }));
+const realRoom = vi.hoisted(() => ({
+  enabled: false,
+  syncGet: vi.fn(),
+  save: vi.fn(),
+}));
 vi.mock(
   "../../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
   async (original) => {
@@ -23,7 +28,7 @@ vi.mock(
     const api = {
       syncGet: realRoom.syncGet,
       saved: (_key: string, fallback: unknown) => fallback,
-      save: () => {},
+      save: realRoom.save,
     };
     return {
       ...actual,
@@ -160,7 +165,7 @@ it("room content updates isolate siblings and search never renders open detail",
     expect(history.mock.calls.length).toBe(before);
     expect(
       serverLocalStorage.getItem("codex-chat-seen:messages-isolation"),
-    ).toContain('"b":1');
+    ).toBeNull();
   } finally {
     await act(async () => root.unmount());
     f.store.dispose();
@@ -268,6 +273,197 @@ it("can request an older page after selecting another room and returning", async
     });
     realRoom.enabled = false;
     realRoom.syncGet.mockReset();
+    f.store.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("failed room history leaves its unread position unacknowledged", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  realRoom.enabled = true;
+  realRoom.save.mockClear();
+  const f = observableFixture();
+  vi.spyOn(f.store, "room").mockReturnValue({
+    current: { status: "error", error: new Error("History unavailable") },
+  });
+  f.apply([
+    { collection: "workspace", id: "w", value: { stateDir: "failed-history" } },
+    {
+      collection: "agentSummary",
+      id: "lead",
+      value: agentSummaryFixture("lead"),
+    },
+    {
+      collection: "room",
+      id: "failed",
+      value: {
+        id: "failed",
+        name: "Room",
+        kind: RoomKind.broadcast,
+        rootId: "lead",
+        lastMessage: { seq: 9, created: 1, sender: "lead", text: "Unread" },
+      },
+    },
+  ]);
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          {},
+          createElement(
+            f.Provider,
+            {},
+            createElement(
+              ConversationProvider,
+              { value: conversationActionsFixture() },
+              createElement(TeamChats, { leadId: "lead" }),
+            ),
+          ),
+        ),
+      ),
+    );
+    await act(async () =>
+      host.querySelector<HTMLElement>('[data-room="failed"]')!.click(),
+    );
+    expect(host.textContent).toContain("History unavailable");
+    expect(
+      host
+        .querySelector('[data-room="failed"]')
+        ?.getAttribute("data-studio-state"),
+    ).toBe("unread");
+    expect(realRoom.save).not.toHaveBeenCalled();
+  } finally {
+    await act(async () => root.unmount());
+    realRoom.enabled = false;
+    realRoom.save.mockReset();
+    f.store.dispose();
+    host.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("acknowledges only loaded rows inside the viewport as the room scrolls", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  realRoom.enabled = true;
+  realRoom.save.mockClear();
+  const f = observableFixture();
+  const mirror = createRoomMirror({
+    room: { id: "visible" },
+    messages: [2, 3].map((seq) => ({
+      id: "m" + seq,
+      seq,
+      room: "visible",
+      sender: "lead",
+      senderName: "Lead",
+      created: 1,
+      text: "Message " + seq,
+      deliveries: {},
+    })),
+  });
+  vi.spyOn(f.store, "room").mockReturnValue({
+    current: { status: "live", data: mirror.current },
+  });
+  f.apply([
+    {
+      collection: "workspace",
+      id: "w",
+      value: { stateDir: "visible-history" },
+    },
+    {
+      collection: "agentSummary",
+      id: "lead",
+      value: agentSummaryFixture("lead"),
+    },
+    {
+      collection: "room",
+      id: "visible",
+      value: {
+        id: "visible",
+        name: "Room",
+        kind: RoomKind.broadcast,
+        rootId: "lead",
+        lastMessage: {
+          seq: 9,
+          created: 1,
+          sender: "lead",
+          text: "Not loaded yet",
+        },
+      },
+    },
+  ]);
+  let scrolled = false;
+  const rects = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("unified-message-scroll"))
+        return new DOMRect(0, 0, 200, 100);
+      if (this.dataset.roomRow)
+        return new DOMRect(
+          0,
+          (this.dataset.roomRow === "m2" ? 20 : 140) - (scrolled ? 120 : 0),
+          200,
+          60,
+        );
+      return new DOMRect();
+    });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          {},
+          createElement(
+            f.Provider,
+            {},
+            createElement(
+              ConversationProvider,
+              { value: conversationActionsFixture() },
+              createElement(TeamChats, { leadId: "lead" }),
+            ),
+          ),
+        ),
+      ),
+    );
+    await act(async () =>
+      host.querySelector<HTMLElement>('[data-room="visible"]')!.click(),
+    );
+    expect(realRoom.save).toHaveBeenLastCalledWith(
+      "codex-chat-seen:visible-history",
+      { visible: 2 },
+    );
+    expect(
+      host
+        .querySelector('[data-room="visible"]')
+        ?.getAttribute("data-studio-state"),
+    ).toBe("unread");
+    scrolled = true;
+    await act(async () =>
+      host
+        .querySelector(".unified-message-scroll")!
+        .dispatchEvent(new Event("scroll")),
+    );
+    expect(realRoom.save).toHaveBeenLastCalledWith(
+      "codex-chat-seen:visible-history",
+      { visible: 3 },
+    );
+    expect(
+      host
+        .querySelector('[data-room="visible"]')
+        ?.getAttribute("data-studio-state"),
+    ).toBe("unread");
+  } finally {
+    await act(async () => root.unmount());
+    rects.mockRestore();
+    realRoom.enabled = false;
+    realRoom.save.mockReset();
     f.store.dispose();
     host.remove();
     vi.unstubAllGlobals();

@@ -83,8 +83,7 @@ fn sha256_reader(mut reader: impl Read) -> io::Result<String> {
     reason = "backend identity hashing runs on a labeled blocking worker"
 )]
 fn executable_build() -> io::Result<String> {
-    let executable_path = std::env::current_exe()?;
-    sha256_reader(std::fs::File::open(executable_path)?)
+    sha256_reader(studio_runtime_process::current_executable_file()?)
 }
 
 fn is_sha256_hex(value: &str) -> bool {

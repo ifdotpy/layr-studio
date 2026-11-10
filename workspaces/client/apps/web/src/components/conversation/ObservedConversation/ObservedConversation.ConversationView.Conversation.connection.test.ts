@@ -113,7 +113,7 @@ vi.mock("../support/useConversationScroll.ts", () => ({
   }),
 }));
 vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDrafts: () => [{}, vi.fn()],
+  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
 }));
 vi.mock("../support/useUploadRecovery.ts", () => ({
   useUploadRecovery: () => ({ pending: [] }),
@@ -139,7 +139,7 @@ vi.mock("../../../hooks/conversationData", () => ({
 }));
 import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ConversationView as Conversation } from "../ConversationView/ConversationView.tsx";
+import { renderConversationViewFixture as Conversation } from "../ConversationView/ConversationView.fixture.tsx";
 import { LiveAgentPhase } from "../../agents/AgentPhase/AgentPhase.tsx";
 import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
 import { localTime } from "../../../local-time.ts";

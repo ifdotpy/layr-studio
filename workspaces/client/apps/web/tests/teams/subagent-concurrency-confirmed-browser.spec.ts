@@ -20,7 +20,9 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-test("subagent concurrency uses the confirmed response", async ({ page }) => {
+test("subagent concurrency follows the resource after confirmation", async ({
+  page,
+}) => {
   test.setTimeout(60000);
   const root = join(import.meta.dirname, "../../");
   const cacheDir = await mkdtemp(
@@ -108,6 +110,9 @@ test("subagent concurrency uses the confirmed response", async ({ page }) => {
     releaseReply!();
     await expect(input).toBeEnabled();
     assert.equal(await page.evaluate(() => window.refreshCount), 0);
+    await expect(control).toHaveAttribute("data-concurrency", "32");
+    await expect(control).toHaveAttribute("data-agent-mode-revision", "0");
+    await page.evaluate((lead) => window.setLead!(lead), reply);
     await expect(control).toHaveAttribute("data-concurrency", "64");
     await expect(control).toHaveAttribute("data-agent-mode-revision", "1");
     await expect(input).toBeEnabled({ timeout: 1000 });
@@ -124,6 +129,8 @@ test("subagent concurrency uses the confirmed response", async ({ page }) => {
     await expect(input).toBeDisabled();
     releaseReply!();
     await expect(input).toBeEnabled();
+    await expect(control).toHaveAttribute("data-agent-mode", "multi");
+    await page.evaluate((lead) => window.setLead!(lead), reply);
     await expect(control).toHaveAttribute("data-agent-mode", "single");
     await expect(input).toBeEnabled();
     assert.equal(writes[1]!.expected_mode_revision, 1);

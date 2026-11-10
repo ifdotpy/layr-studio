@@ -36,25 +36,6 @@ function isServerQueueItem(item: QueueItem): item is QueueItemDto {
   return item.localDelivery !== true;
 }
 
-type QueueAsset = Pick<
-  NonNullable<QueueItemDto["assets"]>[number],
-  "id" | "name"
->;
-function isQueueAsset(value: unknown): value is QueueAsset {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    !Array.isArray(value) &&
-    typeof (value as QueueAsset).id === "string" &&
-    typeof (value as QueueAsset).name === "string"
-  );
-}
-
-function displayQueueAssets(item: QueueItem): readonly QueueAsset[] {
-  const assets = item.assets ?? [];
-  return isServerQueueItem(item) ? assets : assets.filter(isQueueAsset);
-}
-
 type Props = {
   items: readonly QueueItem[];
   scope: string;
@@ -171,7 +152,6 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
     current && !p.items.some((item) => item.id === current.item.id)
       ? current
       : undefined;
-  const orphan = p.loading ? undefined : absent;
   const disabled = busy || !!p.refreshing || !!p.loading;
 
   const dismiss = () => {
@@ -404,7 +384,7 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
                     )}
                     {!!item.assets?.length && (
                       <div className="message-queue-assets">
-                        {displayQueueAssets(item).map((asset) => (
+                        {(item.assets ?? []).map((asset) => (
                           <span key={asset.id}>
                             <Paperclip size={12} />
                             <span>{asset.name}</span>
@@ -501,11 +481,8 @@ const ScopedMessageQueue = observer(function ScopedMessageQueue(p: Props) {
             );
           })}
         </ol>
-        {p.loading && absent && (
+        {absent && (
           <div className="message-queue-orphan">{editor(absent, true)}</div>
-        )}
-        {orphan && (
-          <div className="message-queue-orphan">{editor(orphan, true)}</div>
         )}
       </div>
     </section>

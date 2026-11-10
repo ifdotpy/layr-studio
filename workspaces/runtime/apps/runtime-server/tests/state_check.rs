@@ -182,3 +182,57 @@ fn state_check_reads_fixture_rows_without_changing_or_disclosing_them() {
         before
     );
 }
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+#[allow(clippy::disallowed_methods)]
+async fn startup_keeps_its_executable_after_the_path_is_unlinked() {
+    use std::os::fd::AsRawFd;
+    use std::process::Stdio;
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+    use tokio::time::timeout;
+
+    let root = tempfile::tempdir().expect("owned startup directory");
+    let binary = root.path().join("runtime");
+    fs::copy(env!("CARGO_BIN_EXE_studio-runtime-server"), &binary).expect("copy executable");
+    let executable = fs::File::open(&binary).expect("keep executable open");
+    fs::remove_file(&binary).expect("unlink executable before its identity step");
+    let mut child = tokio::process::Command::new(format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        executable.as_raw_fd()
+    ))
+    .args(["--port", "0"])
+    .env_clear()
+    .env("HOME", root.path())
+    .env("PATH", root.path().join("empty-path"))
+    .env("CARGO_MANIFEST_DIR", env!("CARGO_MANIFEST_DIR"))
+    .env("CODEX_AGENTS_STATE_DIR", root.path().join("state"))
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .kill_on_drop(true)
+    .spawn()
+    .expect("execute the open file after unlink");
+    let mut stdout = BufReader::new(child.stdout.take().expect("startup output"));
+    let mut line = String::new();
+    let read = timeout(Duration::from_secs(30), stdout.read_line(&mut line)).await;
+    if !matches!(read, Ok(Ok(count)) if count > 0) {
+        drop(child.kill().await);
+        let mut stderr = String::new();
+        child
+            .stderr
+            .take()
+            .expect("startup diagnostics")
+            .read_to_string(&mut stderr)
+            .await
+            .expect("read diagnostics");
+        panic!("server did not start from its unlinked executable: {stderr}");
+    }
+    assert!(
+        line.starts_with("Codex Canvas: http://127.0.0.1:"),
+        "{line}"
+    );
+    child.kill().await.expect("stop fixture");
+    child.wait().await.expect("reap fixture");
+}

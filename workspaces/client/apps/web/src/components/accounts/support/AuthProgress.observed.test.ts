@@ -26,7 +26,11 @@ vi.mock(
       get: fixture.get,
       post: fixture.post,
       saved: (key: string, fallback: unknown) =>
-        key.endsWith("code-submission-uncertain") ? fallback : "login",
+        key.startsWith("claude-add-sign-in:") ||
+        key.endsWith("code-submission-uncertain") ||
+        key.endsWith(":body")
+          ? fallback
+          : "login",
       save() {},
       stableRequestId: () => "http-request",
       clearStableRequestId() {},
@@ -40,6 +44,7 @@ vi.mock(
 );
 import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
 import ClaudeSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
+import ClaudeAddSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
 
 async function mount(child: ReactNode) {
   vi.useFakeTimers();
@@ -389,5 +394,55 @@ it("resumes the saved Codex sign-in after a reload from generated auth progress 
     } finally {
       await f.close();
     }
+  }
+});
+
+it("the mounted Claude add view locks a deferred start and renders its completed receipt", async () => {
+  fixture.services = transientTestFixture();
+  type Receipt =
+    import("../../../api.ts").PostResult<"/api/accounts/claude/login">;
+  let finish!: (value: Receipt) => void;
+  fixture.post.mockImplementationOnce(
+    () =>
+      new Promise<Receipt>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const f = await mount(
+    createElement(ClaudeAddSignIn, {
+      label: "New profile",
+      email: "person@example.test",
+      scope: "fixture",
+      serverLabel: "Fixture",
+      opened: true,
+      onClose() {},
+    }),
+  );
+  try {
+    await act(async () => {
+      button("Start sign-in").click();
+      button("Start sign-in").click();
+    });
+    expect(fixture.post).toHaveBeenCalledOnce();
+    expect(button("Retry sign-in").disabled).toBe(true);
+    const body: import("../../../api.ts").PostBody<"/api/accounts/claude/add"> =
+      fixture.post.mock.calls[0]?.[1];
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+      finish({
+        requestId: body.login_id,
+        accountKey: body.login_id,
+        status: "pending",
+        verificationUrl: "https://claude.com/cai/oauth/authorize",
+      });
+    });
+    expect(button("Submit authorization response")).toBeDefined();
+    expect(
+      document.querySelector(
+        'a[href="https://claude.com/cai/oauth/authorize"]',
+      ),
+    ).not.toBeNull();
+  } finally {
+    await f.close();
   }
 });

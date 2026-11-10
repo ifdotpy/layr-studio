@@ -14,31 +14,21 @@ import {
   TextInput,
   UnstyledButton,
 } from "@mantine/core";
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Inbox, Megaphone, Search, Users } from "lucide-react";
 import "../../../../api.ts";
 import { useRoomHistory } from "../../../../conversation/roomHistory.ts";
-import {
-  compareShallow,
-  computed,
-  observable,
-  runInAction,
-  type ObservableMap,
-} from "mobx";
+
 import { observer } from "mobx-react-lite";
-import type { StateCollections } from "../../../../generated/observableResources.ts";
-import { approvalSummary, isPending } from "../../../../approvals.ts";
-import type { RequestModel } from "../../../conversation/questions/RequestArea/RequestArea.tsx";
 import { resourceData } from "../../../../store/runtime.ts";
+import {
+  createTeamChatsStore,
+  TeamChatsProvider,
+  useTeamChats,
+  preview,
+  type MessageRoom,
+} from "./TeamChatsStore.ts";
 import { useConversationActions } from "../../../conversation/support/navigation.ts";
-import { useRequestsView } from "../../../conversation/support/requestView.ts";
 import StreamingText from "../../../conversation/transcript/StreamingText/StreamingText.tsx";
 import Requests, {
   RequestArea,
@@ -76,121 +66,55 @@ export default observer(function TeamChats(props: Props) {
   useMessageRenderProbe("team-chats");
   const store = useServerStore();
   const state = resourceData(store.state().current);
-  const rooms = useMemo(
-    () =>
-      computed(
-        () => eligibleRooms(resourceData(store.state().current), props.leadId),
-        { equals: compareShallow },
-      ),
-    [store, props.leadId],
-  );
   const stateDir = state?.workspaces.values().next().value?.stateDir || "";
-  const scope = stateDir + ":" + props.leadId;
-  const { saved } = useServerApi();
-  const [seen] = useState(() => observable.map<string, number>());
-  useEffect(() => {
-    runInAction(() => seen.replace(saved("codex-chat-seen:" + stateDir, {})));
-  }, [seen, stateDir, saved]);
-  const [selection, setSelection] = useState({
-    scope,
-    id: "you",
-    detail: false,
-  });
-  const selected = selection.scope === scope ? selection.id : "you";
-  const choose = useCallback(
-    (id: string) => setSelection({ scope, id, detail: true }),
-    [scope],
+  const api = useServerApi();
+  const chats = useMemo(
+    () => createTeamChatsStore(store, api, stateDir, props.leadId),
+    [store, api, stateDir, props.leadId],
   );
-  useEffect(() => {
-    if (props.focusRoomId) choose(props.focusRoomId);
-    else if (props.focusItemId || props.focusRequestId) choose("you");
-  }, [choose, props.focusRoomId, props.focusItemId, props.focusRequestId]);
-  const room = rooms.get().find((room) => room.id === selected);
+  useEffect(
+    () =>
+      chats.focus(props.focusRoomId, props.focusItemId, props.focusRequestId),
+    [chats, props.focusRoomId, props.focusItemId, props.focusRequestId],
+  );
   return (
-    <div className="team-chats-container">
-      <section
-        className={
-          "team-chats messages-chat-list " +
-          (selection.scope === scope && selection.detail ? "show-room" : "")
-        }
-        aria-label="Messages"
-      >
-        <RoomList
-          rooms={rooms.get()}
-          state={state}
-          seen={seen}
-          scope={scope}
-          selected={room?.id || "you"}
-          leadId={props.leadId}
-          choose={choose}
-        />
-        <TeamDetail
-          {...props}
-          state={state}
-          stateDir={stateDir}
-          seen={seen}
-          room={room}
-          selected={selected}
-          scope={scope}
-          detailOpen={selection.detail}
-          onBack={() => setSelection({ scope, id: selected, detail: false })}
-        />
-      </section>
-    </div>
+    <TeamChatsProvider value={chats}>
+      <div className="team-chats-container">
+        <section
+          className={
+            "team-chats messages-chat-list " + (chats.detail ? "show-room" : "")
+          }
+          aria-label="Messages"
+        >
+          <RoomList />
+          <TeamDetail {...props} />
+        </section>
+      </div>
+    </TeamChatsProvider>
   );
 });
 
 const TeamDetail = observer(function TeamDetail({
-  state,
-  stateDir,
-  seen,
-  room,
-  selected,
-  scope,
-  detailOpen,
-  onBack,
-  leadId,
   focusItemId,
   focusRequestId,
   focusRoomId,
-}: Props & {
-  state: StateCollections | undefined;
-  stateDir: string;
-  seen: ObservableMap<string, number>;
-  room: MessageRoom | undefined;
-  selected: string;
-  scope: string;
-  detailOpen: boolean;
-  onBack(): void;
-}) {
+}: Props) {
+  const chats = useTeamChats();
+  const {
+    stateDir,
+    room,
+    selected,
+    scope,
+    detail: detailOpen,
+    leadId,
+    back: onBack,
+  } = chats;
   const {
     notices: { notify },
   } = useConversationActions();
   useMessageRenderProbe("team-detail", room?.id || "you");
   const showYou = selected === "you" || !room;
   const messages = useRoomHistory(!showYou && room ? room.id : null, stateDir);
-  const { save, saved } = useServerApi();
-  const sequence = room?.lastMessage?.seq;
-  useEffect(() => {
-    if (
-      !messages.loaded ||
-      !detailOpen ||
-      !room ||
-      sequence === undefined ||
-      (seen.get(room.id) || 0) >= sequence
-    )
-      return;
-    const key = "codex-chat-seen:" + stateDir;
-    const next = {
-      ...saved<Record<string, number>>(key, {}),
-      ...Object.fromEntries(seen),
-      [room.id]: sequence,
-    };
-    save(key, next);
-    runInAction(() => {
-      seen.replace(next);
-    });
-  }, [seen, room, sequence, messages.loaded, detailOpen, save, saved]);
   const detailHeading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
     if (detailOpen) detailHeading.current?.focus({ preventScroll: true });
@@ -212,12 +136,23 @@ const TeamDetail = observer(function TeamDetail({
       // Newly mounted rows must be measured before changing the window again.
       // Waiting for ResizeObserver lets estimated and actual heights alternate
       // during layout commits, moving the scroll position back and forth.
+      const bounds = root.getBoundingClientRect();
+      let seen = 0;
       for (const node of root.querySelectorAll<HTMLElement>(
         "[data-room-row]",
       )) {
-        const height = Math.ceil(node.getBoundingClientRect().height);
+        const rect = node.getBoundingClientRect();
+        const height = Math.ceil(rect.height);
+        if (rect.bottom > bounds.top && rect.top < bounds.bottom)
+          seen = Math.max(seen, Number(node.dataset.roomSeq) || 0);
         if (height) heights.current.set(node.dataset.roomRow!, height);
       }
+      chats.markSeen(
+        room,
+        messages.loaded && !messages.notice,
+        detailOpen,
+        seen,
+      );
       const estimate = (message: (typeof messages.items)[number]) =>
         heights.current.get(message.id) ||
         Math.max(112, Math.ceil((message.text?.length || 0) / 78) * 23 + 82);
@@ -263,6 +198,8 @@ const TeamDetail = observer(function TeamDetail({
       root.removeEventListener("scroll", update);
     };
   }, [
+    detailOpen,
+    messages.notice,
     messages.items,
     showYou,
     messages.loaded,
@@ -307,7 +244,7 @@ const TeamDetail = observer(function TeamDetail({
         {roomIcon(showYou ? undefined : room, leadId)}
         <div>
           <h2 ref={detailHeading} tabIndex={-1}>
-            {showYou ? "For you" : roomName(state, room!, leadId)}
+            {showYou ? "For you" : chats.name(room!)}
           </h2>
           <span className="team-room-kind">
             {showYou
@@ -362,8 +299,6 @@ const TeamDetail = observer(function TeamDetail({
           )}
           {showYou ? (
             <PersonalFeed
-              state={state}
-              stateDir={stateDir}
               focusItemId={focusItemId}
               focusRequestId={focusRequestId}
             />
@@ -373,7 +308,11 @@ const TeamDetail = observer(function TeamDetail({
               {messages.items
                 .slice(virtualRange.start, virtualRange.end)
                 .map((message) => (
-                  <div key={message.id} data-room-row={message.id}>
+                  <div
+                    key={message.id}
+                    data-room-row={message.id}
+                    data-room-seq={message.seq}
+                  >
                     <article className="team-message" data-message={message.id}>
                       <div className="chat-message-author">
                         <AgentAvatar id={message.sender || "agent"} size={24} />
@@ -443,81 +382,12 @@ function roomIcon(item?: MessageRoom, leadId?: string) {
   );
 }
 
-type MessageRoom =
-  StateCollections["rooms"] extends ReadonlyMap<string, infer T> ? T : never;
-function eligibleRooms(
-  state: StateCollections | undefined,
-  leadId: string | undefined,
-): readonly MessageRoom[] {
-  const member = (id: string) =>
-    id === leadId || state?.agents.get(id)?.rootId === leadId;
-  return [...(state?.rooms.values() || [])].filter(
-    (room) =>
-      leadId &&
-      (room.kind === GeneratedApiRoomKind.federated
-        ? (room.localMembers ?? room.members ?? []).some((id) => member(id))
-        : room.kind === GeneratedApiRoomKind.broadcast
-          ? room.rootId === leadId
-          : !!room.members?.length &&
-            (room.members.every((id) => member(id)) ||
-              (!!room.peerTeamId && room.members.some((id) => member(id))))),
-  );
-}
-function roomName(
-  state: StateCollections | undefined,
-  room: MessageRoom,
-  leadId: string | undefined,
-) {
-  if (room.kind === GeneratedApiRoomKind.federated)
-    return room.peerLabel || room.name;
-  if (room.kind === GeneratedApiRoomKind.broadcast) return "Team broadcast";
-  const peers = (room.members ?? []).filter((id) => id !== leadId);
-  return peers.length === 1
-    ? state?.agents.get(peers[0]!)?.name || room.name
-    : room.name;
-}
-function personalItems(
-  state: StateCollections | undefined,
-  requests: readonly RequestModel[],
-) {
-  return [...(state?.complaints.values() || []), ...requests];
-}
-function newest<T extends { created?: number | null | undefined }>(
-  items: readonly T[],
-): T | undefined {
-  return items.reduce<T | undefined>(
-    (latest, item) =>
-      !latest || (item.created || 0) > (latest.created || 0) ? item : latest,
-    undefined,
-  );
-}
-function preview(item: ReturnType<typeof personalItems>[number] | undefined) {
-  return (
-    (item && ("request" in item ? approvalSummary(item) : item.title)) ||
-    "Questions, messages and replies"
-  );
-}
-type ListProps = {
-  state: StateCollections | undefined;
-  seen: ObservableMap<string, number>;
-  selected: string;
-  leadId: string | undefined;
-  scope: string;
-  choose(id: string): void;
-};
-const RoomRow = observer(function RoomRow({
-  item,
-  state,
-  seen,
-  selected,
-  leadId,
-  choose,
-}: ListProps & { item?: MessageRoom }) {
-  const requests = useRequestsView({ all: true });
-  const latest = item
-    ? undefined
-    : newest(personalItems(state, requests.allRequests));
-  const attention = !item && requests.allRequests.some(isPending);
+const RoomRow = observer(function RoomRow({ item }: { item?: MessageRoom }) {
+  const chats = useTeamChats();
+  const { seen, leadId, choose } = chats;
+  const selected = chats.room?.id || "you";
+  const latest = item ? undefined : chats.latest;
+  const attention = !item && chats.attention;
   const unread =
     !!item?.lastMessage && (seen.get(item.id) || 0) < item.lastMessage.seq;
   useMessageRenderProbe(item ? "room-row" : "personal-row", item?.id);
@@ -533,7 +403,7 @@ const RoomRow = observer(function RoomRow({
       {roomIcon(item, leadId)}
       <div className="team-room-copy">
         <div className="team-room-title">
-          <strong>{item ? roomName(state, item, leadId) : "For you"}</strong>
+          <strong>{item ? chats.name(item) : "For you"}</strong>
           <RoomDate at={item?.lastMessage?.created ?? latest?.created} />
         </div>
         <div className="team-room-preview">
@@ -553,41 +423,10 @@ const RoomRow = observer(function RoomRow({
     </UnstyledButton>
   );
 });
-const RoomList = observer(function RoomList({
-  rooms,
-  ...props
-}: ListProps & { rooms: readonly MessageRoom[] }) {
+const RoomList = observer(function RoomList() {
   useMessageRenderProbe("room-list");
-  const requests = useRequestsView({ all: true });
-  const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(60);
-  useEffect(() => {
-    setQuery("");
-    setLimit(60);
-  }, [props.scope]);
-  const matches = (text: string) =>
-    text.toLowerCase().includes(query.toLowerCase());
-  const filtered = rooms
-    .filter(
-      (item) =>
-        !query ||
-        matches(
-          roomName(props.state, item, props.leadId) +
-            " " +
-            (item.lastMessage?.text || ""),
-        ),
-    )
-    .sort(
-      (a, b) =>
-        (b.lastMessage?.created ?? b.updated ?? 0) -
-        (a.lastMessage?.created ?? a.updated ?? 0),
-    );
-  const personal =
-    !query ||
-    matches(
-      "For you " +
-        preview(newest(personalItems(props.state, requests.allRequests))),
-    );
+  const chats = useTeamChats();
+  const { query, limit, filtered } = chats;
   return (
     <nav className="team-room-list" aria-label="Message chats">
       <div className="team-room-search">
@@ -597,26 +436,21 @@ const RoomList = observer(function RoomList({
           leftSection={<Search size={16} />}
           value={query}
           onChange={(event) => {
-            setQuery(event.currentTarget.value);
-            setLimit(60);
+            chats.search(event.currentTarget.value);
           }}
         />
       </div>
       <div className="team-room-rows">
-        {personal && <RoomRow {...props} />}
+        {chats.personal && <RoomRow />}
         {filtered.slice(0, limit).map((item) => (
-          <RoomRow key={item.id} item={item} {...props} />
+          <RoomRow key={item.id} item={item} />
         ))}
         {filtered.length > limit && (
-          <Button
-            variant="subtle"
-            fullWidth
-            onClick={() => setLimit((value) => value + 60)}
-          >
+          <Button variant="subtle" fullWidth onClick={chats.more}>
             More chats
           </Button>
         )}
-        {query && !filtered.length && !personal && (
+        {query && !filtered.length && !chats.personal && (
           <p className="team-chat-empty">
             No rooms match “{query}”. Try an agent or team name.
           </p>
@@ -626,24 +460,16 @@ const RoomList = observer(function RoomList({
   );
 });
 const PersonalFeed = observer(function PersonalFeed({
-  state,
-  stateDir,
   focusItemId,
   focusRequestId,
 }: {
-  state: StateCollections | undefined;
-  stateDir: string;
   focusItemId: string | undefined;
   focusRequestId: string | undefined;
 }) {
   const area = useConversationActions();
   const { notify } = area.notices;
-  const requests = useRequestsView({ all: true });
   useMessageRenderProbe("personal-feed");
-  const items = personalItems(
-    state,
-    requests.allRequests.filter(isPending),
-  ).sort((a, b) => (a.created || 0) - (b.created || 0));
+  const { stateDir, feed: items } = useTeamChats();
   return (
     <RequestArea scope={stateDir} notify={notify}>
       {items.map((item) => {

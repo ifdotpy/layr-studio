@@ -1,5 +1,6 @@
-import { TerminalState as GeneratedApiTerminalState } from "../../../generated/api.ts";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { TerminalState as GeneratedApiTerminalState } from "../../../generated/api.ts";
+import { TerminalDockStore } from "./TerminalDockStore.ts";
 import { useScreenEnvironment } from "../../../servers/ScreenContext.tsx";
 import {
   useServerApi,
@@ -17,9 +18,8 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useLayoutEffect } from "react";
-import type { CSSProperties } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { errorText, type GetResult, type PostBody } from "../../../api.ts";
+import { errorText, type GetResult } from "../../../api.ts";
 import { observer } from "mobx-react-lite";
 import { resourceData, type ResourceSlot } from "../../../store/runtime.ts";
 import {
@@ -28,7 +28,6 @@ import {
   type TerminalRecord,
 } from "../../../generated/observableResources.ts";
 import { createArea } from "../../../app/area.ts";
-
 import { copyText } from "../../../clipboard/clipboard.ts";
 import { serverParentOrigin } from "../../../servers/environment.ts";
 
@@ -121,24 +120,27 @@ export default observer(function TerminalDock({
     cancelResize();
     return () => resize.current.cancel();
   }, [scope, opened]);
-  const commitHeight = (next: number) => {
+  const commitHeight = (value: number) => {
+    const next = Math.min(geometry.max, Math.max(geometry.min, value));
     setHeight(next);
     save("codex.terminal.height", next);
   };
   const [selected, setSelected] = useState(() =>
     saved("codex.terminal.selected", ""),
   );
-  const [query, setQuery] = useState("");
+  const [creating, setCreating] = useState(false);
   const [scrollTop, setScrollTop] = useState(0);
   const error = "error" in terminalList ? errorText(terminalList.error) : "";
-  const [creating, setCreating] = useState(false);
-  const [renaming, setRenaming] = useState(false);
-  const [title, setTitle] = useState("");
-  const [pending, setPending] = useState(false);
-  const [endTarget, setEndTarget] = useState<string | null>(null);
   const list = useRef<HTMLDivElement>(null);
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  const [ui] = useState(
+    () =>
+      new TerminalDockStore({
+        post,
+        notify: (message) => notifyRef.current(message),
+      }),
+  );
   // Page layout rules read this flag instead of #root:has(.terminal-dock).
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -150,7 +152,7 @@ export default observer(function TerminalDock({
     };
   }, [opened]);
   useEffect(() => {
-    if (!opened) setEndTarget(null);
+    if (!opened) ui.confirmEnd(null);
     save("codex.terminal.open", opened);
   }, [opened]);
   useLayoutEffect(() => {
@@ -174,8 +176,7 @@ export default observer(function TerminalDock({
   }, []);
   useEffect(() => {
     save("codex.terminal.selected", selected);
-    setRenaming(false);
-    setEndTarget(null);
+    ui.select();
   }, [selected]);
   const entries = shells.filter(
     (shell) => shell.status !== GeneratedApiTerminalState.closed,
@@ -186,7 +187,7 @@ export default observer(function TerminalDock({
   const filtered = entries.filter((entry) =>
     `${entry.title} ${entry.cwd || ""} ${owner(entry.agent)} ${entry.status}`
       .toLowerCase()
-      .includes(query.toLowerCase()),
+      .includes(ui.query.toLowerCase()),
   );
   const rowHeight = 58;
   const start = Math.max(
@@ -212,7 +213,7 @@ export default observer(function TerminalDock({
         rows: 24,
       });
       setSelected(`shell:${shell.id}`);
-      setQuery("");
+      ui.search("");
       setScrollTop(0);
       if (list.current) list.current.scrollTop = 0;
     } catch (e) {
@@ -267,23 +268,6 @@ export default observer(function TerminalDock({
     window.addEventListener("studio-terminal-command", command);
     return () => window.removeEventListener("studio-terminal-command", command);
   }, [screen, shellTerminal]);
-  const action = async <
-    Path extends "/api/terminals/rename" | "/api/terminals/close",
-  >(
-    path: Path,
-    body: PostBody<Path>,
-  ) => {
-    setPending(true);
-    try {
-      await post(path, body);
-      return true;
-    } catch (e) {
-      notifyRef.current(errorText(e));
-      return false;
-    } finally {
-      setPending(false);
-    }
-  };
   return (
     <TerminalActionsProvider value={actions}>
       <section
@@ -291,12 +275,7 @@ export default observer(function TerminalDock({
         className={`terminal-dock ${opened ? "is-open" : ""}`}
         data-shell-terminal={shellTerminal || undefined}
         aria-label="Terminals"
-        style={
-          {
-            height: geometry.height,
-            "--terminal-dock-height": `${geometry.height}px`,
-          } as CSSProperties
-        }
+        style={{ height: geometry.height }}
       >
         {opened && (
           <div
@@ -314,14 +293,8 @@ export default observer(function TerminalDock({
                 event.preventDefault();
                 cancelResize();
                 commitHeight(
-                  Math.min(
-                    geometry.max,
-                    Math.max(
-                      geometry.min,
-                      geometry.height +
-                        (event.key === "ArrowUp" ? heightStep : -heightStep),
-                    ),
-                  ),
+                  geometry.height +
+                    (event.key === "ArrowUp" ? heightStep : -heightStep),
                 );
               }
             }}
@@ -348,10 +321,7 @@ export default observer(function TerminalDock({
             }}
             onPointerUp={(event) => {
               const next = resize.current.finish(scope, event.pointerId);
-              if (next !== null)
-                commitHeight(
-                  Math.min(geometry.max, Math.max(geometry.min, next)),
-                );
+              if (next !== null) commitHeight(next);
               setDragHeight(null);
               if (event.currentTarget.hasPointerCapture(event.pointerId))
                 event.currentTarget.releasePointerCapture(event.pointerId);
@@ -417,9 +387,9 @@ export default observer(function TerminalDock({
                 placeholder="Find a terminal"
                 leftSection={<Search size={13} />}
                 size="xs"
-                value={query}
+                value={ui.query}
                 onChange={(event) => {
-                  setQuery(event.currentTarget.value);
+                  ui.search(event.currentTarget.value);
                   setScrollTop(0);
                   if (list.current) list.current.scrollTop = 0;
                 }}
@@ -467,7 +437,7 @@ export default observer(function TerminalDock({
                 </div>
                 {!filtered.length && (
                   <p className="terminal-dock-empty">
-                    {query
+                    {ui.query
                       ? "No matching sessions"
                       : "Your terminals appear here."}
                   </p>
@@ -483,34 +453,32 @@ export default observer(function TerminalDock({
               {current ? (
                 <>
                   <div className="terminal-detail-heading">
-                    {renaming ? (
+                    {ui.renameTitle !== null ? (
                       <form
                         onSubmit={(event) => {
                           event.preventDefault();
-                          void action("/api/terminals/rename", {
+                          void ui.action("/api/terminals/rename", {
                             id: current.id,
-                            title,
-                          }).then((ok) => {
-                            if (ok) setRenaming(false);
+                            title: ui.renameTitle ?? "",
                           });
                         }}
                       >
                         <TextInput
                           aria-label="Terminal name"
-                          value={title}
+                          value={ui.renameTitle}
                           autoFocus
                           maxLength={120}
                           onChange={(event) =>
-                            setTitle(event.currentTarget.value)
+                            ui.rename(event.currentTarget.value)
                           }
                           onKeyDown={(event) => {
-                            if (event.key === "Escape") setRenaming(false);
+                            if (event.key === "Escape") ui.rename(null);
                           }}
                         />
                         <Button
                           size="compact-xs"
                           type="submit"
-                          disabled={pending || !title.trim()}
+                          disabled={ui.pending || !ui.renameTitle.trim()}
                         >
                           Save
                         </Button>
@@ -520,8 +488,7 @@ export default observer(function TerminalDock({
                         className="terminal-detail-title"
                         title="Rename terminal"
                         onClick={() => {
-                          setTitle(current.title);
-                          setRenaming(true);
+                          ui.rename(current.title);
                         }}
                       >
                         {current.title}
@@ -538,11 +505,11 @@ export default observer(function TerminalDock({
                       size="compact-xs"
                       color="red"
                       variant="subtle"
-                      disabled={pending}
+                      disabled={ui.pending}
                       onClick={() => {
-                        if (running(current.status)) setEndTarget(current.id);
+                        if (running(current.status)) ui.confirmEnd(current.id);
                         else
-                          void action("/api/terminals/close", {
+                          void ui.action("/api/terminals/close", {
                             id: current.id,
                           });
                       }}
@@ -550,7 +517,7 @@ export default observer(function TerminalDock({
                       End session
                     </Button>
                   </div>
-                  {endTarget === current.id && (
+                  {ui.endTarget === current.id && (
                     <div
                       className="terminal-end-confirm"
                       role="alertdialog"
@@ -562,8 +529,8 @@ export default observer(function TerminalDock({
                       </p>
                       <Button
                         size="compact-xs"
-                        disabled={pending}
-                        onClick={() => setEndTarget(null)}
+                        disabled={ui.pending}
+                        onClick={() => ui.confirmEnd(null)}
                       >
                         Keep session
                       </Button>
@@ -571,11 +538,11 @@ export default observer(function TerminalDock({
                         variant="filled"
                         size="compact-xs"
                         color="red"
-                        loading={pending}
+                        loading={ui.pending}
                         onClick={() => {
                           const id = current.id;
-                          setEndTarget(null);
-                          void action("/api/terminals/close", { id });
+                          ui.confirmEnd(null);
+                          void ui.action("/api/terminals/close", { id });
                         }}
                       >
                         End session and stop processes
@@ -693,15 +660,9 @@ export const ShellView = observer(function ShellView({
         });
         if (downloadAttempt.current !== attempt) return;
         if (
-          !value ||
-          typeof value.offset !== "number" ||
-          !Number.isSafeInteger(value.offset) ||
-          typeof value.availableOffset !== "number" ||
-          !Number.isSafeInteger(value.availableOffset) ||
-          typeof value.historyStart !== "number" ||
-          !Number.isSafeInteger(value.historyStart) ||
-          typeof value.text !== "string" ||
-          typeof value.hasMore !== "boolean"
+          value.availableOffset == null ||
+          value.historyStart == null ||
+          value.hasMore == null
         )
           throw new Error("The server did not return saved terminal output.");
         const endOffset = end ?? value.availableOffset;
@@ -717,15 +678,14 @@ export const ShellView = observer(function ShellView({
           const url = URL.createObjectURL(
             new Blob(parts, { type: "text/plain;charset=utf-8" }),
           );
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = `terminal-${shell.id}.txt`;
+          const link = Object.assign(document.createElement("a"), {
+            href: url,
+            download: `terminal-${shell.id}.txt`,
+          });
           link.click();
           setTimeout(() => URL.revokeObjectURL(url), 60000);
           setDownloadStatus(
-            incomplete
-              ? "Saved output downloaded. Earlier output is unavailable."
-              : "Saved output downloaded.",
+            `Saved output downloaded.${incomplete ? " Earlier output is unavailable." : ""}`,
           );
           return;
         }
@@ -956,10 +916,7 @@ export const ShellView = observer(function ShellView({
           leftSection={<Copy size={12} />}
           onClick={() => {
             const text = terminal.current?.getSelection();
-            if (!text) {
-              notify("Select terminal text first.");
-              return;
-            }
+            if (!text) return notify("Select terminal text first.");
             void copyText(text).catch((e) => notify(errorText(e)));
           }}
         >

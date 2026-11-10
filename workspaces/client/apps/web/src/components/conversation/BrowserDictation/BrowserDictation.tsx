@@ -1,32 +1,13 @@
 import { useServerActivity } from "../../../servers/activity.ts";
+import { observer } from "mobx-react-lite";
+import {
+  DictationPanel,
+  DictationStore,
+} from "../DictationPanel/DictationPanel.tsx";
+import type { DictationProps } from "../Dictation/Dictation.tsx";
 import { useEffect, useRef, useState } from "react";
-import { Popover } from "@mantine/core";
-import { Mic } from "lucide-react";
 
-const dictationLocales = [
-  "en-US",
-  "ru-RU",
-  "de-DE",
-  "fr-FR",
-  "es-ES",
-  "pl-PL",
-  "uk-UA",
-] as const;
-let languageNames: { locale: string; names: Intl.DisplayNames } | undefined;
-export function dictationLanguageOptions() {
-  const locale = navigator.language;
-  if (languageNames?.locale !== locale)
-    languageNames = {
-      locale,
-      names: new Intl.DisplayNames([locale], { type: "language" }),
-    };
-  const names = languageNames.names;
-  return [...new Set([locale, ...dictationLocales])].map((code) => (
-    <option key={code} value={code}>
-      {names.of(code) || code}
-    </option>
-  ));
-}
+export { dictationLanguageOptions } from "../DictationPanel/DictationPanel.tsx";
 
 // Web Speech is implemented by the browser. It is not the Electron speech bridge.
 export type Recognition = {
@@ -49,23 +30,13 @@ export type SpeechWindow = Window & {
   SpeechRecognition?: new () => Recognition;
   webkitSpeechRecognition?: new () => Recognition;
 };
-export function BrowserDictation({
+export const BrowserDictation = observer(function BrowserDictation({
   chatId,
   onInsert,
   disabled = false,
-}: {
-  chatId: string;
-  onInsert: (text: string) => void;
-  disabled?: boolean;
-}) {
-  const [open, setOpen] = useState(false);
-  const [active, setActive] = useState(false);
-  useServerActivity(active);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [text, setText] = useState("");
-  const [partial, setPartial] = useState("");
-  const [locale, setLocale] = useState(navigator.language);
+}: DictationProps) {
+  const [state] = useState(() => new DictationStore());
+  useServerActivity(state.active);
   const recognition = useRef<Recognition | null>(null);
   const stopTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
     undefined,
@@ -75,7 +46,7 @@ export function BrowserDictation({
     (window as SpeechWindow).webkitSpeechRecognition;
   const supported = window.isSecureContext && !!Constructor;
   useEffect(() => {
-    setText("");
+    state.update({ text: "", active: false });
     return () => {
       clearTimeout(stopTimer.current);
       const current = recognition.current;
@@ -91,18 +62,17 @@ export function BrowserDictation({
   }, [chatId]);
   const start = () => {
     if (!supported || !Constructor || recognition.current) return;
-    setError("");
-    setPartial("");
-    setStatus("Starting microphone…");
-    setActive(true);
+    state.update({ error: "", partial: "" });
+    state.update({ status: "Starting microphone…", active: true });
     const current = new Constructor();
-    const prefix = text.trim();
+    const prefix = state.text.trim();
     recognition.current = current;
-    current.lang = locale;
+    current.lang = state.locale;
     current.continuous = true;
     current.interimResults = true;
     current.onstart = () => {
-      if (recognition.current === current) setStatus("Listening");
+      if (recognition.current === current)
+        state.update({ status: "Listening" });
     };
     current.onresult = (event) => {
       if (recognition.current !== current) return;
@@ -111,8 +81,10 @@ export function BrowserDictation({
       Array.from(event.results).forEach((result) =>
         (result.isFinal ? final : pending).push(result[0].transcript),
       );
-      setText([prefix, final.join(" ")].filter(Boolean).join("\n"));
-      setPartial(pending.join(" "));
+      state.update({
+        text: [prefix, final.join(" ")].filter(Boolean).join("\n"),
+      });
+      state.update({ partial: pending.join(" ") });
     };
     current.onerror = (event) => {
       if (recognition.current !== current) return;
@@ -131,140 +103,91 @@ export function BrowserDictation({
           "The browser speech service does not support this language.",
       };
       if (event.error !== "aborted")
-        setError(
-          messages[event.error] ||
+        state.update({
+          error:
+            messages[event.error] ||
             "Dictation stopped. The text already shown remains available here.",
-        );
+        });
       if (event.error !== "aborted") current.abort();
     };
     current.onend = () => {
       if (recognition.current !== current) return;
       clearTimeout(stopTimer.current);
       recognition.current = null;
-      setActive(false);
-      setPartial("");
-      setStatus("Microphone stopped. Review the text.");
+      state.update({ active: false });
+      state.update({ partial: "" });
+      state.update({ status: "Microphone stopped. Review the text." });
     };
     try {
       current.start();
     } catch (failure) {
       recognition.current = null;
-      setActive(false);
-      setStatus("");
-      setError(String(failure));
+      state.update({ active: false, status: "", error: String(failure) });
     }
   };
   const stop = () => {
     const current = recognition.current;
     if (!current) return;
-    setStatus("Finishing text…");
+    state.update({ status: "Finishing text…" });
     current.stop();
     stopTimer.current = setTimeout(() => {
       if (recognition.current !== current) return;
       current.abort();
       recognition.current = null;
-      setActive(false);
-      setPartial("");
-      setStatus("Microphone stopped. Review the text.");
-      setError(
-        "The browser did not return the final words. Check the text before you insert it.",
-      );
+      state.update({ active: false });
+      state.update({ partial: "" });
+      state.update({ status: "Microphone stopped. Review the text." });
+      state.update({
+        error:
+          "The browser did not return the final words. Check the text before you insert it.",
+      });
     }, 5000);
   };
   return (
     <>
-      <Popover
-        opened={open}
-        onChange={setOpen}
-        position="top-start"
-        width={360}
-        withinPortal
+      <DictationPanel
+        state={state}
+        disabled={disabled}
+        locked={state.active}
+        supported={supported}
       >
-        <Popover.Target>
-          <button
-            type="button"
-            className={`dictation-trigger ${active ? "is-recording" : ""}`}
-            aria-label="Dictation"
-            title="Dictation"
-            disabled={disabled && !active}
-            onClick={() => setOpen(!open)}
-          >
-            <Mic size={18} />
-          </button>
-        </Popover.Target>
-        <Popover.Dropdown className="dictation-popover">
-          <header>
-            <strong>Dictation</strong>
-          </header>
-          <p className="dictation-note">
-            Your browser converts speech to text. Its speech service may get the
-            audio.
-          </p>
-          {!supported && (
-            <p role="status">
-              Dictation is unavailable in this browser. Use keyboard dictation
-              or the desktop app.
-            </p>
-          )}
-          <label className="dictation-language">
-            Language
-            <select
-              aria-label="Dictation language"
-              value={locale}
-              disabled={active}
-              onChange={(event) => setLocale(event.target.value)}
-            >
-              {dictationLanguageOptions()}
-            </select>
-          </label>
-          {!active && (
-            <button
-              type="button"
-              className="dictation-record"
-              disabled={!supported || disabled}
-              onClick={start}
-            >
-              Record
-            </button>
-          )}
-          {active && open && (
-            <button type="button" className="dictation-record" onClick={stop}>
-              Stop dictation
-            </button>
-          )}
-          {status && open && <p role="status">{status}</p>}
-          {partial && <p className="dictation-note">{partial}</p>}
-          {error && (
-            <p role="alert" className="dictation-error">
-              {error}
-            </p>
-          )}
-          <label className="dictation-review">
-            Review text
-            <textarea
-              aria-label="Review dictated text"
-              value={text}
-              disabled={active}
-              onChange={(event) => setText(event.target.value)}
-            />
-          </label>
+        {(!state.active || state.open) && (
           <button
             type="button"
             className="dictation-record"
-            disabled={active || !text.trim()}
-            onClick={() => onInsert(text)}
+            disabled={!state.active && (!supported || disabled)}
+            onClick={state.active ? stop : start}
           >
-            Insert into message
+            {state.active ? "Stop dictation" : "Record"}
           </button>
-        </Popover.Dropdown>
-      </Popover>
-      {active && !open && (
+        )}
+        {state.status && state.open && <p role="status">{state.status}</p>}
+        {state.partial && <p className="dictation-note">{state.partial}</p>}
+        <label className="dictation-review">
+          Review text
+          <textarea
+            aria-label="Review dictated text"
+            value={state.text}
+            disabled={state.active}
+            onChange={(event) => state.update({ text: event.target.value })}
+          />
+        </label>
+        <button
+          type="button"
+          className="dictation-record"
+          disabled={!state.canInsert}
+          onClick={() => onInsert(state.text)}
+        >
+          Insert into message
+        </button>
+      </DictationPanel>
+      {state.active && !state.open && (
         <div
           className="voice-active-bar"
           role="group"
           aria-label="Active dictation"
         >
-          <span role="status">Dictation: {status}</span>
+          <span role="status">Dictation: {state.status}</span>
           <button type="button" onClick={stop}>
             Stop dictation
           </button>
@@ -272,4 +195,4 @@ export function BrowserDictation({
       )}
     </>
   );
-}
+});

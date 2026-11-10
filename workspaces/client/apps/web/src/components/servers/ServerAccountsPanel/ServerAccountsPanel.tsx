@@ -23,7 +23,6 @@ import {
 } from "../../../servers/serverAccountRows.ts";
 import {
   serverAccounts,
-  matchServerAccount,
   type AccountSource,
 } from "../../../servers/ServerAccountLimits.tsx";
 import { AccountLimitsAcrossServers } from "../AccountLimitsAcrossServers/AccountLimitsAcrossServers.tsx";
@@ -89,7 +88,12 @@ export function accountSources(
     if (servicesFor && !services) return [];
     const listed = row.byServer[server.id];
     const account =
-      listed && matchServerAccount(fullAccounts[server.id], listed);
+      listed &&
+      fullAccounts[server.id]?.find(
+        (candidate) =>
+          candidate.id === listed.accountKey &&
+          candidate.provider === listed.provider,
+      );
     return account && !account.disconnected
       ? [
           {
@@ -193,9 +197,7 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
                 servicesFor,
               );
               const exactAccountKey = (serverId: string) =>
-                row.byServer[serverId]?.accountKey ||
-                sources.find((source) => source.serverId === serverId)?.account
-                  .id;
+                row.byServer[serverId]?.accountKey;
               const cannotSignIn = (server: StudioServer) =>
                 serverConnection(statuses[server.id])?.blocked === true ||
                 (!!servicesFor && !servicesFor(server.id)) ||
@@ -205,7 +207,9 @@ const ServerAccountsPanel = observer(function ServerAccountsPanel({
                 const accountKey = exactAccountKey(server.id);
                 startAccount(server.id, {
                   action: "account-sign-in",
-                  ...(accountKey ? { accountKey } : {}),
+                  ...(accountKey
+                    ? { accountKey }
+                    : { forceAdd: true as const }),
                   provider: row.provider,
                   email: row.email,
                   label: row.label,

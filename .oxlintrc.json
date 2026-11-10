@@ -266,8 +266,6 @@
         "workspaces/client/apps/web/src/components/accounts/AccountGroup/AccountGroup.tsx",
         "workspaces/client/apps/web/src/components/accounts/AccountSignIn/AccountSignIn.tsx",
         "workspaces/client/apps/web/src/components/accounts/AccountStartThrottle/AccountStartThrottle.tsx",
-        "workspaces/client/apps/web/src/components/accounts/Accounts/Accounts.tsx",
-        "workspaces/client/apps/web/src/components/accounts/ClaudeAddSignIn/ClaudeAddSignIn.tsx",
         "workspaces/client/apps/web/src/components/accounts/ClaudeSignIn/ClaudeSignIn.tsx",
         "workspaces/client/apps/web/src/components/accounts/CodexSignIn/CodexSignIn.tsx",
         "workspaces/client/apps/web/src/components/accounts/SignInPushSettings/SignInPushSettings.tsx",

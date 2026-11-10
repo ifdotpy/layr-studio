@@ -1,3 +1,7 @@
+import {
+  ConversationStore,
+  type ConversationContext,
+} from "../../components/conversation/support/ConversationStore.ts";
 import { accountLimits } from "../../usage/accountUsage.ts";
 import { trimTranscriptPageCache } from "../../transcriptPageBounds.ts";
 import { receiptTranscript } from "../../sync/messageReceipts.ts";
@@ -45,6 +49,24 @@ import { createConversationMenuTools } from "../../components/conversation/Conve
 import type { NativeActionOwner } from "./NativeActionOwner.ts";
 
 export class SelectedConversationOwner {
+  conversation: ConversationStore | undefined;
+  openConversation(context: ConversationContext) {
+    if (
+      this.conversation?.context.opened === context.opened &&
+      this.conversation.context.stateDir === context.stateDir &&
+      this.conversation.context.kind === context.kind
+    ) {
+      Object.assign(this.conversation.context, context);
+      return this.conversation;
+    }
+    this.closeConversation();
+    return (this.conversation = new ConversationStore(context));
+  }
+  closeConversation() {
+    if (this.conversation) this.conversation.navigationAttempt++;
+    this.conversation?.dispose();
+    this.conversation = undefined;
+  }
   serverAliases: Record<string, string> = {};
   suspended = observable.set<string>();
   pendingDeletion = observable.map<string, AbortController>();
@@ -108,6 +130,7 @@ export class SelectedConversationOwner {
       {
         areas: false,
         history: observableRef,
+        conversation: observableRef,
         removed: observableRef,
         historyScope: false,
         histories: false,
@@ -476,6 +499,7 @@ export class SelectedConversationOwner {
         this.releaseReaders();
         const stops: (() => void)[] = [];
         if (key !== this.historyScope) {
+          this.closeConversation();
           this.historyScope = key;
           this.history = this.createHistory();
           this.removed = createRemovedMessages(
@@ -503,6 +527,7 @@ export class SelectedConversationOwner {
       this.histories.clear();
       aliases();
       stop();
+      this.closeConversation();
       runInAction(this.releaseReaders);
     };
   }

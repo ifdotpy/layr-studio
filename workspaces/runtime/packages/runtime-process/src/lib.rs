@@ -1,5 +1,18 @@
 //! Asynchronous provider adapters, process ports and the supervisor v2 client.
 
+/// Open the running executable even when its original name was replaced or unlinked.
+#[allow(
+    clippy::disallowed_methods,
+    reason = "startup callers open their executable on the blocking pool or startup thread"
+)]
+pub fn current_executable_file() -> std::io::Result<std::fs::File> {
+    #[cfg(target_os = "linux")]
+    let path = std::path::PathBuf::from("/proc/self/exe");
+    #[cfg(not(target_os = "linux"))]
+    let path = std::env::current_exe()?;
+    std::fs::File::open(path)
+}
+
 pub use studio_runtime_store::blocking_pool;
 pub mod child_priority;
 mod client;

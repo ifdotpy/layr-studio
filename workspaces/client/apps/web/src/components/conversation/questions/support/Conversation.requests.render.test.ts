@@ -1,4 +1,4 @@
-import { runInAction } from "mobx";
+import { autorun, runInAction } from "mobx";
 // @vitest-environment happy-dom
 import { act, createElement, useRef } from "react";
 import { createRoot } from "react-dom/client";
@@ -79,7 +79,7 @@ vi.mock("../../support/useConversationScroll.ts", async (original) => ({
   }),
 }));
 vi.mock("../../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDrafts: () => [{}, vi.fn()],
+  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
 }));
 vi.mock("../../support/useUploadRecovery.ts", () => ({
   useUploadRecovery: () => ({ pending: h.empty }),
@@ -170,6 +170,7 @@ it.each(["add", "remove"] as const)(
     const root = createRoot(
       document.body.appendChild(document.createElement("div")),
     );
+    let stopPartition = () => {};
     try {
       await act(async () =>
         root.render(
@@ -198,9 +199,12 @@ it.each(["add", "remove"] as const)(
         document.querySelectorAll('[data-request="question"]'),
       ).toHaveLength(1);
       let renders = 0;
-      window.__studioPromptComposerRenderProbe = (component) => {
-        if (component === "conversation") renders++;
-      };
+      // The partition now belongs to the chat store; the layout stays asleep.
+      stopPartition = autorun(() => {
+        void actions.selected.conversation?.inlineRequests;
+        renders++;
+      });
+      renders = 0;
       const publish = async (requests: (typeof request)[]) =>
         act(async () => {
           f.live.apply(
@@ -239,6 +243,7 @@ it.each(["add", "remove"] as const)(
         document.querySelector('.request-deferred [data-request="question"]'),
       ).not.toBeNull();
     } finally {
+      stopPartition();
       await act(async () => root.unmount());
       f.store.dispose();
     }
@@ -282,14 +287,19 @@ it("a pending withdrawal causes no repeated partition invalidation across render
     });
   try {
     await render(false);
+    const queue = actions.selected.conversation?.context.messageQueue;
     h.withdrawalPending = true;
     for (const sending of [true, false, true]) {
       const before = h.withdrawalReads;
       await render(sending);
       expect(
         h.withdrawalReads - before,
-        "each explicit render computes the queue once and commits without re-invalidating its partition",
-      ).toBe(1);
+        "composer state changes keep the queue hook idle without re-invalidating its partition",
+      ).toBe(0);
+      expect(actions.selected.conversation?.context.messageQueue).toBe(queue);
+      expect(document.querySelector("#send-state")?.textContent).toBe(
+        sending ? "Sending…" : "",
+      );
     }
   } finally {
     await act(async () => root.unmount());

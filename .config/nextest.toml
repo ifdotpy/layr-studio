@@ -84,6 +84,8 @@ default-filter = '''
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
     (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(=state_check::startup_keeps_its_executable_after_the_path_is_unlinked)) |
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/live_handover::(unlinked_running_executable_hands_off_to_a_standby|standby_recovers_after_its_executable_is_unlinked)$/)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |
@@ -581,6 +583,8 @@ default-filter = '''
     (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(startup_reseed_holds_)) |
     (package(=studio-runtime-services) & kind(lib) & (test(a_held_full_monitor_preserves_output_and_other_agent_progress) | test(held_output_evidence_))) |
     (package(=studio-runtime-services) & kind(lib) & test(malformed_monitor_)) |
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(=state_check::startup_keeps_its_executable_after_the_path_is_unlinked)) |
+    (package(=studio-runtime-server) & kind(test) & binary(=integration) & test(/live_handover::(unlinked_running_executable_hands_off_to_a_standby|standby_recovers_after_its_executable_is_unlinked)$/)) |
     (package(=studio-runtime-schema) & kind(lib) & test(=persistence::tests::integer_enum_preserves_wire_spelling_and_permanent_codes)) |
     (package(=studio-runtime-services) & kind(lib) & test(=multi_server::tests::settings_change_only_the_fields_they_name)) |
     (package(=studio-runtime-store) & kind(lib) & test(=repositories::request_results::tests::receipt_result_exact_replay_conflict_and_atomic_rollback)) |

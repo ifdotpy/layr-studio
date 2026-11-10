@@ -5,7 +5,9 @@ import { MantineProvider } from "@mantine/core";
 import { expect, test, vi } from "vitest";
 import Accounts from "./Accounts.tsx";
 import { ProviderKind } from "../../../generated/api.ts";
-import { observableFixture } from "../../shell/integration-support/observableFixture.tsx";
+import { accountsFixture } from "./Accounts.fixture.ts";
+import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { ServerServicesProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
 test("changing the callback while an account modal is open does not report a close", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -31,29 +33,33 @@ test("changing the callback while an account modal is open does not report a clo
   };
   const command = {
     action: "account-sign-in" as const,
-    forceAdd: true,
+    forceAdd: true as const,
     provider: ProviderKind.codex,
     email: null,
     label: "New account",
     serverLabel: "Fixture",
   };
-  const fixture = observableFixture();
+  const fixture = accountsFixture();
   const render = (report: (open: boolean) => void) =>
     root.render(
       createElement(
-        fixture.Provider,
-        null,
+        ServerServicesProvider,
+        { services: fixture.areas.scope.services, children: null },
         createElement(
-          MantineProvider,
-          { env: "test" },
-          createElement(Accounts, {
-            managerOnly: true,
-            state: state.data,
-            scope: state.scope,
-            onError() {},
-            externalCommand: command,
-            onModalOpenChange: report,
-          }),
+          Provider,
+          { value: fixture.areas },
+          createElement(
+            MantineProvider,
+            { env: "test" },
+            createElement(Accounts, {
+              managerOnly: true,
+              state: state.data,
+              scope: state.scope,
+              onError() {},
+              externalCommand: command,
+              onModalOpenChange: report,
+            }),
+          ),
         ),
       ),
     );
@@ -66,6 +72,7 @@ test("changing the callback while an account modal is open does not report a clo
     expect(second).toHaveBeenLastCalledWith(true);
   } finally {
     await act(async () => root.unmount());
+    fixture.close();
     host.remove();
     vi.unstubAllGlobals();
   }

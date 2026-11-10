@@ -6,16 +6,18 @@ import { useServerActivity } from "../../../servers/activity.ts";
 import { localTime } from "../../../local-time.ts";
 import ErrorDescription from "../../shell/ErrorDescription/ErrorDescription.tsx";
 import { errorDetails } from "../../../errorPresentation.ts";
+import { observer } from "mobx-react-lite";
+import {
+  DictationPanel,
+  DictationStore,
+  duration,
+} from "../DictationPanel/DictationPanel.tsx";
 import { useEffect, useRef, useState } from "react";
-import { Popover } from "@mantine/core";
 import { Download, Mic, Square, Trash2 } from "lucide-react";
 import type { Recording } from "../../../dictation/storage.ts";
 import { useServerRecordings } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 
-import {
-  BrowserDictation,
-  dictationLanguageOptions,
-} from "../BrowserDictation/BrowserDictation.tsx";
+import { BrowserDictation } from "../BrowserDictation/BrowserDictation.tsx";
 // Older recordings store plain text. New structured diagnostics retain JSON
 // in that same string field; decode only objects and arrays for presentation.
 function recordingDiagnostic(value: unknown): unknown {
@@ -27,30 +29,21 @@ function recordingDiagnostic(value: unknown): unknown {
     return value;
   }
 }
-const duration = (seconds: number) =>
-  `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2, "0")}`;
-type DictationProps = {
+export type DictationProps = {
   chatId: string;
   onInsert: (text: string) => void;
   disabled?: boolean;
 };
 export function Dictation(props: DictationProps) {
   const { dictationBridge } = useServerAudio();
-  return dictationBridge() ? (
-    <NativeDictation {...props} />
-  ) : (
-    <BrowserDictation {...props} />
-  );
+  const Component = dictationBridge() ? NativeDictation : BrowserDictation;
+  return <Component {...props} />;
 }
-function NativeDictation({
+const NativeDictation = observer(function NativeDictation({
   chatId,
   onInsert,
   disabled = false,
-}: {
-  chatId: string;
-  onInsert: (text: string) => void;
-  disabled?: boolean;
-}) {
+}: DictationProps) {
   const {
     deleteRecording,
     listRecordings,
@@ -65,46 +58,33 @@ function NativeDictation({
   } = useServerRecordings();
   const { dictationBridge, captureAudio } = useServerAudio();
   const desktop = dictationBridge();
-  const [open, setOpen] = useState(false),
-    [rows, setRows] = useState<Recording[]>([]),
-    [error, setError] = useState<unknown>(null),
-    [busy, setBusy] = useState("");
-  const [locale, setLocale] = useState(navigator.language);
-  const [deleted, setDeleted] = useState<Recording[]>([]);
-  const [progress, setProgress] = useState("");
-  const attemptRef = useRef("");
-  const cancelledAttempt = useRef("");
+  const [state] = useState(() => new DictationStore());
   const supported =
     !!desktop?.requestMicrophone &&
     !!desktop?.prepareTranscription &&
     !!desktop?.transcribeAudio;
-  const [elapsed, setElapsed] = useState(0),
-    [recording, setRecording] = useState(false);
   const capture = useRef<Awaited<ReturnType<typeof captureAudio>> | null>(null);
   const mounted = useRef(true),
     active = useRef<Recording | null>(null),
     queue = useRef(Promise.resolve());
   const durable = useRef<Recording | null>(null);
-  const storageFailed = useRef(false);
-  useServerActivity(recording || !!busy || storageFailed.current);
+  useServerActivity(state.active || !!state.busy || state.storageFailed);
   const scope = useRef(chatId);
   scope.current = chatId;
   const load = async () => {
     const result = await listRecordings(chatId);
     const removed = await deletedRecordings(chatId);
     if (mounted.current && scope.current === chatId) {
-      setRows(result);
-      setDeleted(removed);
+      state.update({ rows: result, deleted: removed });
     }
   };
   const fail = (e: unknown) => {
-    if (mounted.current) setError(e);
+    if (mounted.current) state.update({ error: e });
   };
   const stop = async () => {
     let ready: Recording | undefined;
     if (mounted.current) {
-      setBusy("stop");
-      setRecording(false);
+      state.update({ busy: "stop", active: false });
     }
     const recorder = capture.current;
     capture.current = null;
@@ -139,8 +119,7 @@ function NativeDictation({
       finalError ||= error;
     } finally {
       if (mounted.current) {
-        setRecording(false);
-        setBusy("");
+        state.update({ active: false, busy: "" });
         try {
           await load();
         } catch (error) {
@@ -153,8 +132,7 @@ function NativeDictation({
   };
   useEffect(() => {
     mounted.current = true;
-    setRows([]);
-    setError("");
+    state.update({ rows: [], error: "" });
     void load().catch(fail);
     return () => {
       mounted.current = false;
@@ -164,26 +142,33 @@ function NativeDictation({
   useEffect(
     () =>
       desktop?.onTranscriptionProgress?.((value) => {
-        if (value.id === attemptRef.current)
-          setProgress(`${value.completed} of ${value.total} parts`);
+        if (value.id === state.attempt)
+          state.update({
+            progress: `${value.completed} of ${value.total} parts`,
+          });
       }),
     [],
   );
   useEffect(() => {
-    if (open) void load().catch(fail);
-  }, [open]);
+    if (state.open) void load().catch(fail);
+  }, [state.open]);
   useEffect(() => {
-    if (!recording) return;
-    const id = setInterval(() => setElapsed((n) => n + 1), 1000);
+    if (!state.active) return;
+    const id = setInterval(
+      () => state.update({ elapsed: state.elapsed + 1 }),
+      1000,
+    );
     return () => clearInterval(id);
-  }, [recording]);
+  }, [state.active]);
   const start = async () => {
-    setError("");
+    state.update({ error: "" });
     if (!supported) {
-      setError("Update the desktop app before you record dictation.");
+      state.update({
+        error: "Update the desktop app before you record dictation.",
+      });
       return;
     }
-    setBusy("start");
+    state.update({ busy: "start" });
     const owner = chatId;
     let index = 0;
     try {
@@ -209,7 +194,7 @@ function NativeDictation({
       }
       active.current = row;
       durable.current = { ...row };
-      storageFailed.current = false;
+      state.update({ storageFailed: false });
       const recorder = await captureAudio((pcm) => {
         if (!active.current || active.current.id !== row.id) return;
         row.samples += pcm.length;
@@ -217,12 +202,12 @@ function NativeDictation({
           number = index++;
         queue.current = queue.current
           .then(async () => {
-            if (storageFailed.current) return;
+            if (state.storageFailed) return;
             await saveChunk(snapshot, number, pcm);
             durable.current = snapshot;
           })
           .catch((e) => {
-            storageFailed.current = true;
+            state.update({ storageFailed: true });
             fail(
               Error(
                 `Recording stopped: ${errorDetails(e)}. Saved audio remains available.`,
@@ -231,7 +216,7 @@ function NativeDictation({
             void stop().catch(fail);
           });
         if (row.samples / row.sampleRate >= 1800) {
-          setError("The 30 minute recording limit was reached.");
+          state.update({ error: "The 30 minute recording limit was reached." });
           void stop().catch(fail);
         }
       });
@@ -241,13 +226,11 @@ function NativeDictation({
         await stop();
         return;
       }
-      setElapsed(0);
-      setRecording(true);
-      setBusy("");
+      state.update({ elapsed: 0, active: true, busy: "" });
     } catch (e) {
       await stop().catch(() => {});
       fail(e);
-      if (mounted.current) setBusy("");
+      if (mounted.current) state.update({ busy: "" });
     }
   };
   const transcribe = async (
@@ -256,41 +239,27 @@ function NativeDictation({
   ) => {
     const owner = chatId,
       attempt = randomUUID();
-    setBusy(row.id);
-    setError("");
-    setProgress("Preparing audio…");
-    attemptRef.current = attempt;
+    state.update({ busy: row.id, error: "" });
+    state.update({ progress: "Preparing audio…", attempt });
     try {
       // Reserve the native gesture synchronously, then claim this saved recording.
-      const prepared =
-        reservation ||
-        (desktop?.transcribeAudio
-          ? desktop.prepareTranscription().then(
-              (permit) => ({ permit, error: undefined }),
-              (error) => ({ permit: undefined, error }),
-            )
-          : Promise.resolve({
-              permit: undefined,
-              error: Error(
-                "Transcription is unavailable in this app. Use an updated desktop app with transcription support. Your recording is saved.",
-              ),
-            }));
+      const prepared = reservation || prepare();
       if (!(await beginTranscription(row, attempt)))
         throw Error("The recording was deleted.");
       const authorization = await prepared;
       if (authorization.error) throw authorization.error;
-      if (cancelledAttempt.current === attempt)
+      if (state.cancelledAttempt === attempt)
         throw Error("Transcription cancelled. Your recording is saved.");
       const audio = await recordingAudio(row);
-      if (cancelledAttempt.current === attempt)
+      if (state.cancelledAttempt === attempt)
         throw Error("Transcription cancelled. Your recording is saved.");
       const result = await desktop!.transcribeAudio({
         id: attempt,
         permit: authorization.permit!,
         audio: await audio.arrayBuffer(),
-        locale,
+        locale: state.locale,
       });
-      if (cancelledAttempt.current === attempt)
+      if (state.cancelledAttempt === attempt)
         throw Error("Transcription cancelled. Your recording is saved.");
       await updateRecording(
         {
@@ -315,18 +284,23 @@ function NativeDictation({
       ).catch(() => {});
     } finally {
       if (mounted.current && scope.current === owner) {
-        setBusy("");
-        attemptRef.current = "";
-        setProgress("");
+        state.update({ busy: "", attempt: "", progress: "" });
         await load().catch(fail);
       }
     }
   };
   function prepare() {
-    return desktop!.prepareTranscription().then(
-      (permit) => ({ permit, error: undefined }),
-      (error) => ({ permit: undefined, error }),
-    );
+    return desktop?.transcribeAudio
+      ? desktop.prepareTranscription().then(
+          (permit) => ({ permit, error: undefined }),
+          (error) => ({ permit: undefined, error }),
+        )
+      : Promise.resolve({
+          permit: undefined,
+          error: Error(
+            "Transcription is unavailable in this app. Use an updated desktop app with transcription support. Your recording is saved.",
+          ),
+        });
   }
   const finish = async () => {
     // Reserve native authorization while Stop is still a trusted button gesture.
@@ -335,125 +309,82 @@ function NativeDictation({
     if (row && mounted.current) await transcribe(row, reservation);
   };
   return (
-    <Popover
-      opened={open}
-      onChange={setOpen}
-      position="top-start"
-      width={360}
-      withinPortal
+    <DictationPanel
+      state={state}
+      disabled={disabled}
+      locked={state.active || !!state.busy}
+      supported={supported}
+      saved
     >
-      <Popover.Target>
-        <button
-          type="button"
-          className={`dictation-trigger ${recording ? "is-recording" : ""}`}
-          aria-label="Dictation"
-          title="Dictation"
-          disabled={disabled && !recording && !busy}
-          onClick={() => setOpen(!open)}
-        >
-          <Mic size={18} />
-          {recording && <span>{duration(elapsed)}</span>}
-        </button>
-      </Popover.Target>
-      <Popover.Dropdown className="dictation-popover">
-        <header>
-          <strong>Dictation</strong>
-          <span>Audio saved on this device</span>
-        </header>
-        <p className="dictation-note">Stop to transcribe.</p>
-        {!supported && (
-          <p role="status">
-            Update the desktop app before you record dictation.
-          </p>
-        )}
-        <label className="dictation-language">
-          Language{" "}
-          <select
-            aria-label="Dictation language"
-            value={locale}
-            disabled={!!busy || recording}
-            onChange={(event) => setLocale(event.target.value)}
+      <button
+        type="button"
+        className="dictation-record"
+        disabled={!!state.busy || !supported}
+        onClick={() => void (state.active ? finish() : start()).catch(fail)}
+      >
+        {state.active ? <Square size={14} /> : <Mic size={14} />}{" "}
+        {state.active
+          ? `Stop · ${duration(state.elapsed)}`
+          : state.busy === "start"
+            ? "Starting…"
+            : "Record"}
+      </button>
+      {state.attempt && (
+        <div className="dictation-progress">
+          <p role="status">Transcribing… {state.progress}</p>
+          <button
+            type="button"
+            onClick={() => {
+              state.update({ cancelledAttempt: state.attempt });
+              void desktop?.cancelTranscription?.(state.attempt).catch(fail);
+            }}
           >
-            {dictationLanguageOptions()}
-          </select>
-        </label>
-        <button
-          type="button"
-          className="dictation-record"
-          disabled={!!busy || !supported}
-          onClick={() => void (recording ? finish() : start()).catch(fail)}
-        >
-          {recording ? <Square size={14} /> : <Mic size={14} />}{" "}
-          {recording
-            ? `Stop · ${duration(elapsed)}`
-            : busy === "start"
-              ? "Starting…"
-              : "Record"}
-        </button>
-        {attemptRef.current && (
-          <div className="dictation-progress">
-            <p role="status">Transcribing… {progress}</p>
-            <button
-              type="button"
-              onClick={() => {
-                cancelledAttempt.current = attemptRef.current;
-                void desktop
-                  ?.cancelTranscription?.(attemptRef.current)
-                  .catch(fail);
-              }}
-            >
-              Cancel transcription
-            </button>
-          </div>
-        )}
-        {!!deleted.length && (
-          <div role="status" className="dictation-undo">
-            {deleted.length} deleted. Undo is available for 24 hours.{" "}
-            <button
-              type="button"
-              onClick={() =>
-                void Promise.all(deleted.map(restoreRecording))
-                  .then(load)
-                  .catch(fail)
-              }
-            >
-              Undo delete
-            </button>
-          </div>
-        )}
-        {!!error && (
-          <p role="alert" className="dictation-error">
-            <ErrorDescription value={error} />
-          </p>
-        )}
-        <div className="dictation-recordings">
-          {rows.map((row) => (
-            <RecordingItem
-              key={row.id}
-              row={row}
-              busy={!!busy || recording}
-              transcribing={busy === row.id}
-              onTranscribe={() => void transcribe(row)}
-              onReview={(reviewedText) =>
-                void updateRecording({ ...row, reviewedText }).catch(fail)
-              }
-              onDelete={() => void trashRecording(row).then(load).catch(fail)}
-              onInsert={(text) => {
-                if (row.transcript && row.chatId === scope.current) {
-                  try {
-                    onInsert(text);
-                  } catch (e) {
-                    fail(e);
-                  }
-                }
-              }}
-            />
-          ))}
+            Cancel transcription
+          </button>
         </div>
-      </Popover.Dropdown>
-    </Popover>
+      )}
+      {!!state.deleted.length && (
+        <div role="status" className="dictation-undo">
+          {state.deleted.length} deleted. Undo is available for 24 hours.{" "}
+          <button
+            type="button"
+            onClick={() =>
+              void Promise.all(state.deleted.map(restoreRecording))
+                .then(load)
+                .catch(fail)
+            }
+          >
+            Undo delete
+          </button>
+        </div>
+      )}
+      <div className="dictation-recordings">
+        {state.rows.map((row) => (
+          <RecordingItem
+            key={row.id}
+            row={row}
+            busy={!!state.busy || state.active}
+            transcribing={state.busy === row.id}
+            onTranscribe={() => void transcribe(row)}
+            onReview={(reviewedText) =>
+              void updateRecording({ ...row, reviewedText }).catch(fail)
+            }
+            onDelete={() => void trashRecording(row).then(load).catch(fail)}
+            onInsert={(text) => {
+              if (row.transcript && row.chatId === scope.current) {
+                try {
+                  onInsert(text);
+                } catch (e) {
+                  fail(e);
+                }
+              }
+            }}
+          />
+        ))}
+      </div>
+    </DictationPanel>
   );
-}
+});
 function RecordingItem({
   row,
   busy,

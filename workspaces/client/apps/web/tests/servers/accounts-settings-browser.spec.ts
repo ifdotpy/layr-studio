@@ -504,6 +504,12 @@ test("accounts settings show per-server state and provider choices", async ({
     });
 
     required(remoteAccounts[1]).claudeOptions = body.options;
+    required(
+      required(remote.snapshot.runtime.accountsSummary).accounts.find(
+        (account) => account.id === body.account_key,
+      ),
+    ).claudeOptions = body.options;
+    remote.publishState();
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -819,7 +825,7 @@ test("accounts settings show per-server state and provider choices", async ({
   await lostCodeResponse;
   expect(codeAttempts).toHaveLength(2);
   expect(codeAttempts[0]!.body.login_id).toBe(codeAttempts[1]!.body.login_id);
-  expect(codeAttempts[0]!.requestId).toBe(codeAttempts[1]!.requestId);
+  expect(codeAttempts[0]!.requestId).not.toBe(codeAttempts[1]!.requestId);
   await expect(claudeSignIn).toContainText(
     "Studio could not confirm whether Claude received the authorization response.",
   );
@@ -839,6 +845,12 @@ test("accounts settings show per-server state and provider choices", async ({
   ).toBeHidden();
   expect(codeAttempts).toHaveLength(2);
   statusConfirmsCodeSubmission = true;
+  remote.setClaudeProgress(loginRequestId, {
+    requestId: loginRequestId,
+    accountKey: loginRequestId,
+    status: "pending",
+    codeSubmitted: true,
+  });
   await checkStatus.click();
   await expect(claudeSignIn).toContainText(
     "The full authorization response was submitted. Waiting for Claude to verify it; do not submit it again.",
@@ -850,6 +862,14 @@ test("accounts settings show per-server state and provider choices", async ({
   try {
     await checkStatus.click();
     verificationReady = true;
+    remote.setClaudeProgress(loginRequestId, {
+      requestId: loginRequestId,
+      accountKey: loginRequestId,
+      status: "ready",
+      codeSubmitted: true,
+      email: "new@example.test",
+      plan: "Max",
+    });
   } finally {
     releaseFinalStatus();
   }

@@ -367,3 +367,23 @@ it.each([
   expect(html).toContain(`Workstation: ${label}`);
   expect(html).not.toContain("Sign in needed");
 });
+
+it("does not invent a key for a keyless navigation row from a cached matching email", () => {
+  const { accountKey: _key, ...keyless } = account;
+  const row = {
+    key: "claude:work@example.test",
+    provider: "claude" as const,
+    label: account.label,
+    email: account.email,
+    plan: account.plan,
+    byServer: { remote: keyless },
+  };
+  const cached = {
+    ...account,
+    id: account.accountKey,
+    home: "/fixture",
+    source: "fixture",
+    status: "ready" as const,
+  };
+  expect(accountSources(row, [remote], { remote: [cached] })).toEqual([]);
+});

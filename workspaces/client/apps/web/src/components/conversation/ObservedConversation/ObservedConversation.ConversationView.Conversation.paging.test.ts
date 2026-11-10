@@ -125,7 +125,7 @@ vi.mock("../support/useConversationScroll.ts", () => ({
   }),
 }));
 vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDrafts: () => [{}, vi.fn()],
+  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
 }));
 vi.mock("../support/useUploadRecovery.ts", () => ({
   useUploadRecovery: () => ({ pending: [] }),
@@ -146,7 +146,7 @@ vi.mock("../support/useSendingMessageRemoval.ts", () => ({
   useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../wasm/client.ts", () => ({}));
-import { ConversationView as Conversation } from "../ConversationView/ConversationView.tsx";
+import { renderConversationViewFixture as Conversation } from "../ConversationView/ConversationView.fixture.tsx";
 
 type Props = { id: string };
 const propsFixture: Props = {
@@ -168,6 +168,7 @@ function elements(node: ReactNode): ReactElement<{
     return [];
   return [node, ...elements(node.props.children)];
 }
+let selectedAreas: ReturnType<typeof conversationActionsFixture> | undefined;
 function renderConversation(props: Props) {
   h.refIndex = 0;
   vi.spyOn(TranscriptHistory.prototype, "older").mockImplementation(h.older);
@@ -178,7 +179,7 @@ function renderConversation(props: Props) {
   vi.spyOn(TranscriptHistory.prototype, "showLatest").mockImplementation(
     h.showLatest,
   );
-  const actions = conversationActionsFixture();
+  const actions = (selectedAreas ??= conversationActionsFixture());
   actions.navigation.selectedId = props.id;
   Object.assign(actions.selected.history, {
     before: "older",
@@ -196,6 +197,7 @@ afterEach(() => {
   h.effects = [];
   h.refs = [];
   h.refIndex = 0;
+  selectedAreas = undefined;
 });
 it.each([
   [50, "older"],

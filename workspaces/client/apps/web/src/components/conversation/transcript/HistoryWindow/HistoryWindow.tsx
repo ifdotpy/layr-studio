@@ -61,28 +61,27 @@ type HistoryWindowProps = {
 /** Observe message geometry outside the viewport's scroll/resize state. */
 export default observer(function HistoryWindow(props: HistoryWindowProps) {
   const { rows } = props;
-  const geometry = useMemo(
+  const { geometry, anchorRows } = useMemo(
     () =>
       computed(
-        () => ({
-          estimates: historyOffsets(rows, new Map()),
-          count: rows.reduce((count, row) => count + row.items.length, 0),
-        }),
+        () => {
+          const anchorRows = new Map<string, string>();
+          for (const row of rows)
+            for (const item of row.items)
+              for (const id of [messageRenderKey(item), item.id, item.sourceId])
+                if (id && !anchorRows.has(id)) anchorRows.set(id, row.id);
+          for (const row of rows)
+            if (!anchorRows.has(row.id)) anchorRows.set(row.id, row.id);
+          return {
+            geometry: {
+              estimates: historyOffsets(rows, new Map()),
+              count: rows.reduce((count, row) => count + row.items.length, 0),
+            },
+            anchorRows,
+          };
+        },
         { equals: compareStructural },
       ),
-    [rows],
-  ).get();
-  const anchorRows = useMemo(
-    () =>
-      computed(() => {
-        const ids = new Map<string, string>();
-        for (const row of rows)
-          for (const item of row.items)
-            for (const id of [messageRenderKey(item), item.id, item.sourceId])
-              if (id && !ids.has(id)) ids.set(id, row.id);
-        for (const row of rows) if (!ids.has(row.id)) ids.set(row.id, row.id);
-        return ids;
-      }),
     [rows],
   ).get();
   return (
@@ -203,6 +202,12 @@ function HistoryViewport({
     };
     root.addEventListener("studio-history-reveal", reveal);
     root.addEventListener("studio-history-reset-anchor", resetAnchor);
+    const visibleIn = (element: HTMLElement, bounds: DOMRect) => {
+      const box = element.getBoundingClientRect();
+      return (
+        box.height > 0 && box.bottom > bounds.top && box.top < bounds.bottom
+      );
+    };
     const persistAnchor = (force = false) => {
       const bounds = root.getBoundingClientRect();
       const row = Array.from(
@@ -227,26 +232,14 @@ function HistoryViewport({
           row.querySelectorAll<HTMLElement>(
             "[data-message]:not([data-lazy-message])",
           ),
-        ).find((message) => {
-          const box = message.getBoundingClientRect();
-          return (
-            box.height > 0 && box.bottom > bounds.top && box.top < bounds.bottom
-          );
-        });
+        ).find((message) => visibleIn(message, bounds));
         const item = visible
           ? metadata.items.find((item) => item.id === visible.dataset.message)
           : metadata.items[0];
         const paragraph =
           visible &&
           Array.from(visible.querySelectorAll<HTMLElement>("p, pre, li")).find(
-            (part) => {
-              const box = part.getBoundingClientRect();
-              return (
-                box.height > 0 &&
-                box.bottom > bounds.top &&
-                box.top < bounds.bottom
-              );
-            },
+            (part) => visibleIn(part, bounds),
           );
         const anchor: WindowAnchor = item
           ? {
@@ -365,12 +358,7 @@ function HistoryViewport({
       const bounds = root.getBoundingClientRect();
       const visible = Array.from(
         node.querySelectorAll<HTMLElement>("[data-message]"),
-      ).filter((message) => {
-        const box = message.getBoundingClientRect();
-        return (
-          box.height > 0 && box.bottom > bounds.top && box.top < bounds.bottom
-        );
-      });
+      ).filter((message) => visibleIn(message, bounds));
       detail.endId = visible.at(-1)?.dataset.message || null;
       if (anchor) {
         restoringAnchor.current = anchor.id;

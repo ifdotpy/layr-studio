@@ -10,6 +10,7 @@ vi.mock("react", () => ({
   useRef: (current: unknown) => (mocks.ref ??= { current }),
   useState: () => [0, vi.fn()],
   useEffect: () => {},
+  useLayoutEffect: () => {},
 }));
 vi.mock(
   "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",

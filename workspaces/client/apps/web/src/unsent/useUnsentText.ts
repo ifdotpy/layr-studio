@@ -1,63 +1,61 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
+import { flowResult, makeAutoObservable } from "mobx";
 import { useServerServices } from "../components/servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { serverViewId } from "../servers/environment.ts";
 import { reportUnsentFailure, unsentStore, type TextFeature } from "./store.ts";
 
-/** Keep a text edit on this device until its caller clears it. */
-export function useUnsentText(feature: TextFeature, id: string) {
-  const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
-  const identity = JSON.stringify([server, feature, id]);
-  const [value, setValue] = useState<string | null>(null);
-  const current = useRef<{
-    identity: string;
-    changed: boolean;
-    value: string | null;
-  }>({ identity, changed: false, value: null });
-  if (current.current.identity !== identity)
-    current.current = { identity, changed: false, value: null };
-  useEffect(() => {
+/** One editing subject's device buffer. Writes retain the existing close barrier. */
+export class UnsentText {
+  value: string | null = null;
+  changed = false;
+  #store: ReturnType<typeof unsentStore>;
+  #id: string;
+  constructor(server: string, feature: TextFeature, id: string) {
+    this.#store = unsentStore(server, feature);
+    this.#id = id;
+    makeAutoObservable(this, {}, { autoBind: true });
+  }
+  start() {
     let active = true;
-    const owner = current.current;
-    setValue(null);
-    void unsentStore(server, feature)
-      .get(id)
-      .then((saved) => {
-        if (active && !owner.changed && typeof saved === "string") {
-          owner.value = saved;
-          setValue(saved);
-        }
-      })
-      .catch(reportUnsentFailure);
+    void flowResult(this.restore(() => active)).catch(reportUnsentFailure);
     return () => {
       active = false;
     };
-  }, [identity]);
-  const clear = useCallback(
-    (expected = current.current.value) => {
-      current.current.changed = true;
-      if (expected === null) return Promise.resolve();
-      return unsentStore(server, feature)
-        .deleteIfEqual(id, expected)
-        .catch((error: unknown) => {
-          reportUnsentFailure();
-          throw error;
-        });
-    },
-    [identity],
+  }
+  *restore(
+    active: () => boolean,
+  ): Generator<Promise<string | undefined>, void, string | undefined> {
+    const saved = yield this.#store.get(this.#id);
+    if (active() && !this.changed && typeof saved === "string")
+      this.value = saved;
+  }
+  clear(expected = this.value) {
+    this.changed = true;
+    return expected === null
+      ? Promise.resolve()
+      : this.#store
+          .deleteIfEqual(this.#id, expected)
+          .catch((error: unknown) => {
+            reportUnsentFailure();
+            throw error;
+          });
+  }
+  update(next: string | null) {
+    const previous = this.value;
+    this.changed = true;
+    this.value = next;
+    void (
+      next === null ? this.clear(previous) : this.#store.put(this.#id, next)
+    ).catch(reportUnsentFailure);
+  }
+}
+
+export function useUnsentText(feature: TextFeature, id: string) {
+  const server = useServerServices()?.owner.id ?? serverViewId ?? "local";
+  const owner = useMemo(
+    () => new UnsentText(server, feature, id),
+    [server, feature, id],
   );
-  const update = useCallback(
-    (next: string | null) => {
-      const previous = current.current.value;
-      current.current.changed = true;
-      current.current.value = next;
-      setValue(next);
-      const operation =
-        next === null
-          ? clear(previous)
-          : unsentStore(server, feature).put(id, next);
-      void operation.catch(reportUnsentFailure);
-    },
-    [identity],
-  );
-  return [value, update, clear] as const;
+  useEffect(() => owner.start(), [owner]);
+  return [owner.value, owner.update, owner.clear] as const;
 }

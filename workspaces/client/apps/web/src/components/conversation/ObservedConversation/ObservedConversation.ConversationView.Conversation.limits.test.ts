@@ -1,3 +1,5 @@
+import { observer } from "mobx-react-lite";
+import { renderMessageRow } from "../ConversationTranscript/ConversationTranscript.tsx";
 import { createNet } from "../../../servers/net/net.ts";
 // @vitest-environment happy-dom
 import type { Agent } from "../../../types.ts";
@@ -129,7 +131,7 @@ vi.mock("../support/useConversationScroll.ts", () => ({
   }),
 }));
 vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDrafts: () => [{}, vi.fn()],
+  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
 }));
 vi.mock("../support/useUploadRecovery.ts", () => ({
   useUploadRecovery: () => ({ pending: [] }),
@@ -150,7 +152,7 @@ vi.mock("../support/useSendingMessageRemoval.ts", () => ({
   useSendingMessageRemoval: () => ({}),
 }));
 vi.mock("../../../wasm/client.ts", () => ({}));
-import { ConversationView as Conversation } from "../ConversationView/ConversationView.tsx";
+import { renderConversationViewFixture as Conversation } from "../ConversationView/ConversationView.fixture.tsx";
 import { ObservedNativeError as NativeError } from "../ObservedNativeError/ObservedNativeError.tsx";
 import PromptComposer from "../prompt-composer/PromptComposer/PromptComposer.tsx";
 import RealtimeVoice from "../RealtimeVoice/RealtimeVoice.tsx";
@@ -402,7 +404,7 @@ it("keeps chat A metadata and recovery while the real Usage dropdown browses B",
   };
   let native: ComponentProps<typeof NativeError> | undefined;
   let usageProps: ComponentProps<typeof Usage> | undefined;
-  function Caller() {
+  const Caller = observer(function Caller() {
     const tree = Conversation();
     const error = elements(tree).find((node) => node.type === NativeError);
     if (!isValidElement<ComponentProps<typeof NativeError>>(error))
@@ -418,9 +420,9 @@ it("keeps chat A metadata and recovery while the real Usage dropdown browses B",
     if (!isValidElement<ComponentProps<typeof TranscriptProvider>>(transcript))
       throw new Error("Expected transcript provider");
     const row = required(transcript.props.value).renderMessage(message);
-    if (!isValidElement<{ render: (item: Message) => ReactNode }>(row))
+    if (!isValidElement<{ item: Message }>(row))
       throw new Error("Expected message row");
-    const article = row.props.render(message);
+    const article = renderMessageRow({ item: message });
     const actions = elements(article).find(
       (node) => node.type === MessageActions,
     );
@@ -432,7 +434,7 @@ it("keeps chat A metadata and recovery while the real Usage dropdown browses B",
       usage,
       createElement(MessageInfo, required(actions.props.info)),
     );
-  }
+  });
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);

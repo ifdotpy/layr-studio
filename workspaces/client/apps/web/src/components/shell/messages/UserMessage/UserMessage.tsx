@@ -172,7 +172,7 @@ function useMessageCache() {
   return cache;
 }
 
-function MessageResponse({
+const MessageResponse = observer(function MessageResponse({
   detail,
   requests,
   scope,
@@ -321,7 +321,7 @@ function MessageResponse({
       <p className="notice">The agent receives your response as a message.</p>
     </form>
   );
-}
+});
 
 function isComplaintDetail(
   complaint: ComplaintSummary | ComplaintDetailResponse,

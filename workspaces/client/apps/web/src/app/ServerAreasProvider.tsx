@@ -1,3 +1,4 @@
+import { AccountsUi } from "../components/accounts/support/AccountsUi.ts";
 import { AppUi } from "../components/shell/App/App.tsx";
 import { SettingsUi } from "./settings/useAppSettings.ts";
 import { observable, observableRef, runInAction } from "mobx";
@@ -24,6 +25,7 @@ import { SelectedConversationOwner } from "./conversation/SelectedConversationOw
 
 /** Stable area references are constructed once by the authenticated server lifetime. */
 export class ServerAreas {
+  readonly accountsUi: AccountsUi;
   readonly scope: AppScope;
   readonly startup: StartupOwner;
   readonly frame;
@@ -67,6 +69,7 @@ export class ServerAreas {
   disposed = false;
   constructor(scope: AppScope) {
     this.scope = scope;
+    this.accountsUi = new AccountsUi(this);
     this.preferenceBridge = createUiPreferenceBridge(
       scope.services.storage,
       scope.services.api.syncPost,
@@ -167,6 +170,7 @@ export class ServerAreas {
   }
   dispose = () => {
     this.disposed = true;
+    this.accountsUi.dispose();
     this.ui.generation++;
     clearTimeout(this.toastTimer);
     runInAction(() => {

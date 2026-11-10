@@ -1,5 +1,6 @@
 import { useServerUploads } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useRef, useState, type SetStateAction } from "react";
+import { useRef, useLayoutEffect, type SetStateAction } from "react";
+import { makeAutoObservable, observableRef } from "mobx";
 import { errorText } from "../../../api.ts";
 import type { Attachment } from "../ComposerAttachments/ComposerAttachments.tsx";
 
@@ -17,28 +18,57 @@ function retained(
   return result;
 }
 
+export class AttachmentDrafts {
+  current: Attachments = {};
+  cancelled: (id: string) => boolean;
+  notify: (message: string) => void;
+  constructor(
+    cancelled: (id: string) => boolean,
+    notify: (message: string) => void,
+  ) {
+    this.cancelled = cancelled;
+    this.notify = notify;
+    makeAutoObservable(
+      this,
+      { current: observableRef, cancelled: false, notify: false },
+      { autoBind: true },
+    );
+  }
+  discardCancelled() {
+    this.current = retained(this.current, this.cancelled);
+  }
+  set(change: SetStateAction<Attachments>): Promise<boolean> {
+    try {
+      const previous = retained(this.current, this.cancelled);
+      this.current = retained(
+        typeof change === "function" ? change(previous) : change,
+        this.cancelled,
+      );
+      return Promise.resolve(true);
+    } catch (error) {
+      this.notify(errorText(error));
+      return Promise.resolve(false);
+    }
+  }
+}
+export function useAttachmentDraftStore(
+  key: string,
+  notify: (message: string) => void,
+) {
+  const { attachmentCancelled } = useServerUploads();
+  const scopes = useRef(new Map<string, AttachmentDrafts>()).current;
+  let store = scopes.get(key);
+  if (!store) {
+    store = new AttachmentDrafts(attachmentCancelled, notify);
+    scopes.set(key, store);
+  }
+  useLayoutEffect(store.discardCancelled);
+  return store;
+}
 export function useAttachmentDrafts(
   key: string,
   notify: (message: string) => void,
 ) {
-  const { attachmentCancelled: cancelled } = useServerUploads();
-  const scopes = useRef(new Map<string, Attachments>());
-  const [, render] = useState(0);
-  const current = retained(scopes.current.get(key) ?? {}, cancelled);
-  scopes.current.set(key, current);
-  const setAttachments = async (
-    change: SetStateAction<Attachments>,
-  ): Promise<boolean> => {
-    try {
-      const previous = retained(scopes.current.get(key) ?? {}, cancelled);
-      const next = typeof change === "function" ? change(previous) : change;
-      scopes.current.set(key, retained(next, cancelled));
-      render((version) => version + 1);
-      return true;
-    } catch (error) {
-      notify(errorText(error));
-      return false;
-    }
-  };
-  return [current, setAttachments] as const;
+  const store = useAttachmentDraftStore(key, notify);
+  return [store.current, store.set] as const;
 }

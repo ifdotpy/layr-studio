@@ -32,8 +32,13 @@ vi.mock("@mantine/core", async (original) => {
     onClick,
     disabled,
     type,
+    "aria-label": label,
   }: ComponentProps<"button">) =>
-    createElement("button", { onClick, disabled, type }, children);
+    createElement(
+      "button",
+      { onClick, disabled, type, "aria-label": label },
+      children,
+    );
   return {
     ...actual,
     Button: Object.assign(button, actual.Button),
@@ -127,5 +132,129 @@ it("deleting a profile reloads the local list without replacing the stream", asy
     host.remove();
     f.store.dispose();
     vi.unstubAllGlobals();
+  }
+});
+
+import {
+  AgentSource,
+  studio_api__agents__models__AgentRole,
+} from "../../../generated/api.ts";
+import type { Agent } from "../../../types.ts";
+import type { ApiReadMetadata, GetResult } from "../../../api.ts";
+
+async function mountPanel(section: string, agent?: Agent) {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const fixture = observableFixture(agent ? [agent] : []);
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  await act(async () =>
+    root.render(
+      createElement(
+        MantineProvider,
+        { env: "test" },
+        createElement(
+          fixture.Provider,
+          null,
+          createElement(Workspace, {
+            opened: true,
+            initialSection: section,
+            agent,
+            onClose() {},
+            onSelect() {},
+            notify() {},
+          }),
+        ),
+      ),
+    ),
+  );
+  return {
+    host,
+    close: async () => {
+      await act(async () => root.unmount());
+      host.remove();
+      fixture.store.dispose();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+it("the capabilities panel renders a deferred tools response without another user action", async () => {
+  const pending = Promise.withResolvers<GetResult<"/api/capabilities">>();
+  api.get.mockReset().mockReturnValueOnce(pending.promise);
+  const panel = await mountPanel("tools", {
+    id: "agent",
+    source: AgentSource.managed,
+  });
+  try {
+    expect(panel.host.querySelector(".workspace-load")).not.toBeNull();
+    await act(async () =>
+      pending.resolve({
+        agent: "agent",
+        at: 1,
+        model: "model",
+        role: studio_api__agents__models__AgentRole.orchestrator,
+        managed: [
+          { name: "deferred-tool", description: "Deferred tool catalog" },
+        ],
+        observed: [],
+        observedNative: [],
+        nativeInventory: "Native tools",
+        skills: [],
+        servers: [],
+        errors: [],
+        mcp: [],
+        mcpSession: null,
+      }),
+    );
+    expect(panel.host.textContent).toContain("deferred-tool");
+    expect(panel.host.querySelector(".workspace-load")).toBeNull();
+    expect(api.get).toHaveBeenCalledTimes(1);
+  } finally {
+    await panel.close();
+  }
+});
+
+it("the resource status shows a rejected panel read, recovery, refresh errors and 304 error clearing", async () => {
+  const pending = Promise.withResolvers<GetResult<"/api/profiles">>();
+  const empty: GetResult<"/api/profiles"> = { profiles: [] };
+  api.get
+    .mockReset()
+    .mockReturnValueOnce(pending.promise)
+    .mockResolvedValueOnce(empty)
+    .mockRejectedValueOnce(new Error("Refresh failed"))
+    .mockImplementationOnce(
+      async (_path, options: { readMetadata: ApiReadMetadata }) => {
+        options.readMetadata.notModified = true;
+        return undefined;
+      },
+    );
+  const panel = await mountPanel("profiles");
+  const refresh = async () => {
+    const button = panel.host.querySelector<HTMLButtonElement>(
+      '[aria-label="Refresh workspace"]',
+    );
+    expect(button).not.toBeNull();
+    await act(async () => button?.click());
+  };
+  try {
+    expect(panel.host.querySelector(".workspace-load")).not.toBeNull();
+    await act(async () => pending.reject(new Error("Initial read failed")));
+    expect(panel.host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Initial read failed",
+    );
+    expect(panel.host.querySelector(".workspace-load")).toBeNull();
+    await refresh();
+    expect(panel.host.textContent).toContain("No saved worker profiles.");
+    expect(panel.host.querySelector('[role="alert"]')).toBeNull();
+    await refresh();
+    expect(panel.host.querySelector('[role="alert"]')?.textContent).toBe(
+      "Refresh failed",
+    );
+    await refresh();
+    expect(panel.host.querySelector('[role="alert"]')).toBeNull();
+    expect(panel.host.textContent).toContain("No saved worker profiles.");
+    expect(api.get).toHaveBeenCalledTimes(4);
+  } finally {
+    await panel.close();
   }
 });

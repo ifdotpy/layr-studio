@@ -2,13 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "../../../api.ts";
 import { createUploads, uploadsChanged } from "../../../sync/uploads.ts";
 import {
-  attemptUploadDelivery,
   createUploadRecoveryRetryScheduler,
   retryableUploadFailure,
   retryableUploadStoreFailure,
   subscribeUploadRecoveryWakeups,
 } from "./useUploadRecovery.ts";
-import type { PendingUpload } from "../../../sync/uploads.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -94,28 +92,12 @@ describe("upload recovery scheduling", () => {
     );
   });
 
-  it("automatically retries a row when its IndexedDB delivery transaction aborts", async () => {
-    const row = {
-      id: "upload-1",
-      workspace: "workspace-1",
-      stateDir: "/state",
-      agent: "lead",
-      name: "notes.txt",
-      size: 12,
-      mime: "text/plain",
-      created: 1,
-    } as PendingUpload;
-    const aborted = new DOMException("Transaction aborted", "AbortError");
-    const attempt = await attemptUploadDelivery(row, async (received) => {
-      expect(received).toBe(row);
-      throw aborted;
-    });
-
-    expect(attempt).toEqual({
-      ok: false,
-      error: aborted,
-      retryable: true,
-    });
+  it("classifies IndexedDB delivery transaction failures for recovery", async () => {
+    expect(
+      retryableUploadStoreFailure(
+        new DOMException("Transaction aborted", "AbortError"),
+      ),
+    ).toBe(true);
     expect(
       retryableUploadStoreFailure(
         new DOMException("Timed out", "TimeoutError"),

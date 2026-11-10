@@ -1,5 +1,4 @@
 import { cacheFixture } from "../cacheFixture.ts";
-import type { GetResult } from "../../src/apiTypes.ts";
 import { installConcurrencyStorageFixture } from "./subagent-concurrency.fixture.ts";
 declare global {
   interface Window {
@@ -12,7 +11,6 @@ import {
   fixturePostBody,
   fixturePostResult,
   fixtureGetResult,
-  legacySyncEntities,
 } from "./helpers.ts";
 import {
   readTestState,
@@ -73,6 +71,7 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     const origin = `http://127.0.0.1:${port}`;
     const snapshot = async () => readTestState(origin);
     const initial = await snapshot();
+    assert(initial.stateDir, "Fixture state directory is required");
     const syncWorkspaceId = (
       await fixtureGetResult(
         await fetch(origin + "/api/sync/identity"),
@@ -101,7 +100,10 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
       viewport: { width: 1280, height: 900 },
       serviceWorkers: "block",
     });
-    await page.addInitScript(installConcurrencyStorageFixture);
+    await page.addInitScript(installConcurrencyStorageFixture, {
+      stateDir: initial.stateDir,
+      workspaceId: syncWorkspaceId,
+    });
     page.setDefaultTimeout(15000);
     const errors: string[] = [],
       writes: components["schemas"]["ConversationRequest"][] = [],
@@ -121,8 +123,7 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     await page.route("**/api/conversation", async (route) => {
       const body: components["schemas"]["ConversationRequest"] =
         fixturePostBody(route, "/api/conversation");
-      if (body.subagent_concurrency === undefined && !body.agent_mode)
-        return route.continue();
+      if (body.subagent_concurrency === undefined) return route.continue();
       writes.push(body);
       if (raceNextRequest) {
         raceNextRequest = false;
@@ -148,7 +149,6 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
           "/api/conversation",
         );
         assert.equal(competingUpdate.concurrency, 8);
-        assert.ok(legacySyncEntities(competingUpdate)?.length);
       }
       if (loseNextReply) {
         loseNextReply = false;
@@ -290,47 +290,13 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
       "PASS lost response, reload, and exact retry without duplicate apply",
     );
 
-    // A durable pending operation from the old two-state UI remains exactly retryable.
-    const legacy = {
-      id: lead.id,
-      agent_mode: "single",
-      expected_mode_revision: 4,
-      request_id: "legacy-mode-request-identity",
-    };
-    await page.evaluate(
-      ({ leadId, legacy }) => {
-        const key = window.concurrencyStorageFixture(leadId);
-        if (!key) throw Error("No scoped setting record");
-        localStorage.setItem(
-          key!,
-          JSON.stringify({
-            confirmed: { mode: "multi", revision: 4 },
-            pending: legacy,
-          }),
-        );
-      },
-      { leadId: lead.id, legacy },
-    );
-    await page.reload();
-    await openSettings(page);
-    await page
-      .getByRole("button", { name: "Retry mode change", exact: true })
-      .click();
-    await page
-      .getByRole("button", { name: "Retry mode change", exact: true })
-      .waitFor({ state: "detached" });
-    assert.deepEqual(writes.at(-1)!, legacy);
-    await waitConcurrency(0);
-    assert.equal((await currentLead()).concurrency, 0);
-    console.log("PASS exact migration retry for a saved legacy mode request");
-
     // Conflict is explicit: discard that request, refresh canonical value, allow editing.
     raceNextRequest = true;
     await input.fill("16");
     await control.getByRole("button", { name: "Apply", exact: true }).click();
     await control.getByRole("alert").waitFor();
     await waitConcurrency(8);
-    await waitRevision(6);
+    await waitRevision(5);
     await page.waitForFunction(
       () =>
         document.querySelector<HTMLInputElement>(
@@ -341,7 +307,7 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     await input.fill("9");
     await control.getByRole("button", { name: "Apply", exact: true }).click();
     await waitConcurrency(9);
-    assert.equal((await currentLead()).agentModeRevision, 7);
+    assert.equal((await currentLead()).agentModeRevision, 6);
     assert.equal((await currentLead()).concurrency, 9);
     console.log(
       "PASS CAS conflict clears rejected request and refreshes canonical setting",
@@ -351,16 +317,15 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     const noOp = {
       id: lead.id,
       subagent_concurrency: 9,
-      expected_mode_revision: 7,
+      expected_mode_revision: 6,
       request_id: "same-revision-no-op",
     };
     await page.evaluate(
       ({ leadId, noOp }) => {
         const key = window.concurrencyStorageFixture(leadId);
         localStorage.setItem(
-          key!,
+          key,
           JSON.stringify({
-            confirmed: { concurrency: 9, revision: 7 },
             pending: noOp,
           }),
         );
@@ -375,7 +340,7 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     await page
       .getByRole("button", { name: "Retry limit change", exact: true })
       .waitFor({ state: "detached" });
-    assert.equal((await currentLead()).agentModeRevision, 7);
+    assert.equal((await currentLead()).agentModeRevision, 6);
     assert.deepEqual(writes.at(-1)!, noOp);
     await waitConcurrency(9);
     console.log("PASS same-revision no-op receipt is accepted");
@@ -405,255 +370,10 @@ test("subagent concurrency ui", async ({ browser: _browser }) => {
     await waitConcurrency(9);
     console.log("PASS settings are isolated per chat");
 
-    // Older projections may expose the legacy mode without numeric concurrency.
-    // The UI must preserve durable request data byte-for-byte until upgraded.
-    const setBackendConcurrency = async (
-      concurrency: number,
-      requestId: string,
-    ) => {
-      const canonical = await currentLead();
-      const response = await fetch(origin + "/api/conversation", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Canvas-Token": initial.token,
-          ...(syncWorkspaceId ? { "X-Canvas-Workspace": syncWorkspaceId } : {}),
-        },
-        body: JSON.stringify({
-          id: lead.id,
-          subagent_concurrency: concurrency,
-          expected_mode_revision: canonical.agentModeRevision,
-          request_id: requestId,
-        }),
-      });
-      assert.equal(response.status, 200);
-      return fixturePostResult(response, "/api/conversation");
-    };
-    const assertRollingUpgrade = async ({
-      mode,
-      baseline,
-      pending,
-      target,
-    }: {
-      mode: components["schemas"]["AgentMode"];
-      baseline: number;
-      pending: Partial<components["schemas"]["ConversationRequest"]>;
-      target: number;
-    }) => {
-      const canonical = await setBackendConcurrency(
-        baseline,
-        `rolling-upgrade-baseline-${mode}`,
-      );
-      const operation = {
-        id: lead.id,
-        ...pending,
-        expected_mode_revision: canonical.agentModeRevision,
-        request_id: `rolling-upgrade-pending-${mode}`,
-      };
-      const saved = JSON.stringify({
-        confirmed: { mode, revision: canonical.agentModeRevision },
-        pending: operation,
-      });
-      const rollingPage = await browser.newPage({
-        viewport: { width: 1280, height: 900 },
-        serviceWorkers: "block",
-      });
-      await rollingPage.addInitScript(installConcurrencyStorageFixture);
-      let oldProjectionResponses = 0;
-      let oldLeadProjectionResponses = 0;
-      const projectionRequests: string[] = [];
-      const rollingWrites: components["schemas"]["ConversationRequest"][] = [];
-      rollingPage.on("request", (request) => {
-        if (request.url().includes("/api/sync/pull"))
-          projectionRequests.push(request.url());
-      });
-      await rollingPage.addInitScript(
-        ({ stateDir, workspaceId, leadId, saved, selection }) => {
-          const scope = JSON.stringify([stateDir, workspaceId, leadId]);
-          localStorage.setItem(`codex-desktop-opened:${stateDir}`, selection);
-          localStorage.setItem(`studio-agent-mode:${scope}`, saved);
-        },
-        {
-          stateDir: initial.stateDir,
-          workspaceId: syncWorkspaceId,
-          leadId: lead.id,
-          selection: cacheFixture(lead.id),
-          saved,
-        },
-      );
-      await rollingPage.route("**/api/sync/pull*", async (route) => {
-        const url = new URL(route.request().url());
-        if (url.searchParams.get("scope") !== "state:entities:v1")
-          return route.continue();
-        const response = await route.fetch();
-        // This fixture response uses the entity-document envelope, never a reset.
-        const projection = (await fixtureGetResult(
-          response,
-          "/api/sync/pull",
-        )) as Extract<GetResult<"/api/sync/pull">, { documents: unknown }> & {
-          documents: Extract<
-            import("../playwright.ts").SyncPullResponse["documents"][number],
-            { payload: string }
-          >[];
-        };
-
-        oldProjectionResponses += 1;
-        for (const document of projection.documents) {
-          if (document.id !== `entity:agent:${lead.id}` || document._deleted)
-            continue;
-          oldLeadProjectionResponses += 1;
-          // This payload was written by the fixture server using the generated legacy entity envelope.
-          const projectedLead: components["schemas"]["SyncAgentEntityPayload"] =
-            JSON.parse(document.payload);
-          assert.equal(projectedLead.collection, "agent");
-          assert.equal(projectedLead.id, lead.id);
-          delete projectedLead.value.subagentConcurrencyVersion;
-          delete projectedLead.value.concurrency;
-          projectedLead.value.agentModeSupported = true;
-          projectedLead.value.agentMode = mode;
-          document.payload = JSON.stringify(projectedLead);
-        }
-        await route.fulfill({ response, json: projection });
-      });
-      await rollingPage.route("**/api/conversation", async (route) => {
-        const body = fixturePostBody(route, "/api/conversation");
-        if (body.subagent_concurrency !== undefined || body.agent_mode)
-          rollingWrites.push(body);
-        await route.continue();
-      });
-      await rollingPage.goto(origin);
-      await openSettings(rollingPage);
-      const oldInput = rollingPage.getByRole("textbox", {
-        name: "Subagent parallelism",
-      });
-      await oldInput.waitFor();
-      assert(
-        oldProjectionResponses > 0,
-        `old projection fixture must be applied; pulls: ${projectionRequests.join(", ")}`,
-      );
-      assert(
-        oldLeadProjectionResponses > 0,
-        "old lead projection must be applied",
-      );
-      assert.equal(await oldInput.inputValue(), "");
-      assert.equal(await oldInput.isDisabled(), true);
-      await expect(
-        rollingPage.locator(".agent-mode-control").getByRole("radio"),
-      ).toHaveCount(0);
-      assert.equal(
-        await rollingPage
-          .getByRole("button", { name: /Retry .* change/ })
-          .count(),
-        0,
-      );
-      await expect(rollingPage.locator(".agent-mode-control")).toHaveAttribute(
-        "data-agent-mode",
-        mode,
-      );
-      await rollingPage
-        .getByText(/does not provide the concurrency setting/, { exact: false })
-        .waitFor();
-      await rollingPage
-        .getByText("Saved change retained. Update the backend to retry it.", {
-          exact: true,
-        })
-        .waitFor();
-      assert.equal(rollingWrites.length, 0);
-      assert.equal(
-        await rollingPage.evaluate((leadId) => {
-          const key = window.concurrencyStorageFixture(leadId);
-          return localStorage.getItem(key!);
-        }, lead.id),
-        saved,
-      );
-
-      await rollingPage.unrouteAll({ behavior: "ignoreErrors" });
-      await rollingPage.close();
-      const upgradedPage = await browser.newPage({
-        viewport: { width: 1280, height: 900 },
-        serviceWorkers: "block",
-      });
-      await upgradedPage.addInitScript(installConcurrencyStorageFixture);
-      await upgradedPage.addInitScript(
-        ({ stateDir, workspaceId, leadId, saved, selection }) => {
-          const scope = JSON.stringify([stateDir, workspaceId, leadId]);
-          localStorage.setItem(`codex-desktop-opened:${stateDir}`, selection);
-          localStorage.setItem(`studio-agent-mode:${scope}`, saved);
-        },
-        {
-          stateDir: initial.stateDir,
-          workspaceId: syncWorkspaceId,
-          leadId: lead.id,
-          selection: cacheFixture(lead.id),
-          saved,
-        },
-      );
-      const upgradedWrites: components["schemas"]["ConversationRequest"][] = [];
-      type UpgradeResponse = {
-        status: number;
-        body: import("../../src/apiTypes.ts").PostResult<"/api/conversation">;
-      };
-      let resolveUpgradeResponse:
-        | ((value: UpgradeResponse) => void)
-        | undefined;
-      const upgradeResponse = new Promise<UpgradeResponse>((resolve) => {
-        resolveUpgradeResponse = resolve;
-      });
-      await upgradedPage.route("**/api/conversation", async (route) => {
-        const body = fixturePostBody(route, "/api/conversation");
-        if (body.subagent_concurrency !== undefined || body.agent_mode) {
-          upgradedWrites.push(body);
-          const response = await route.fetch();
-          const result = {
-            status: response.status(),
-            body: await fixturePostResult(response, "/api/conversation"),
-          };
-          resolveUpgradeResponse!(result);
-          await route.fulfill({ response });
-          return;
-        }
-        await route.continue();
-      });
-      await upgradedPage.goto(origin);
-      await openSettings(upgradedPage);
-      const retryName =
-        "subagent_concurrency" in operation
-          ? "Retry limit change"
-          : "Retry mode change";
-      await upgradedPage.getByRole("button", { name: retryName }).click();
-      const response = await upgradeResponse;
-      assert.equal(response.status, 200, JSON.stringify(response.body));
-      await upgradedPage
-        .getByRole("button", { name: retryName })
-        .waitFor({ state: "detached" });
-      assert.deepEqual(upgradedWrites, [operation]);
-      assert.equal(
-        (await currentLead()).concurrency,
-        target,
-        JSON.stringify(response.body),
-      );
-      await upgradedPage.close();
-    };
-    await assertRollingUpgrade({
-      mode: "single",
-      baseline: 0,
-      pending: { agent_mode: "multi" },
-      target: 32,
-    });
-    await assertRollingUpgrade({
-      mode: "multi",
-      baseline: 64,
-      pending: { subagent_concurrency: 0 },
-      target: 0,
-    });
-    console.log(
-      "PASS old-backend projections preserve both legacy modes and pending requests through upgrade",
-    );
-
     // An unreadable browser record stays visible and can be discarded without a command.
     await page.evaluate((id) => {
       const key = window.concurrencyStorageFixture(id);
-      localStorage.setItem(key!, "{bad json");
+      localStorage.setItem(key, "{bad json");
     }, lead.id);
     await page.reload();
     await openSettings(page);

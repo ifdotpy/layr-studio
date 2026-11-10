@@ -1,5 +1,6 @@
+import { resourceData } from "../../../store/runtime.ts";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { useMemo, useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, type RefObject } from "react";
 import type { Agent, Message } from "../../../types.ts";
 import {
   completed,
@@ -23,43 +24,34 @@ export function useVisibleChatResult(
   latestPage = false,
 ) {
   const state = useServerStore().state().current;
-  const model =
-    (state.status === "live" || state.status === "stale") && agent
-      ? state.data.agents.get(agent.id)
-      : undefined;
+  const model = agent ? resourceData(state)?.agents.get(agent.id) : undefined;
   const proof = model && completed(model);
-  const finalId = useMemo(() => {
-    const candidates = proof
-      ? items.filter(
+  const candidates = proof
+    ? items.filter(
+        (item) =>
+          item.role === "assistant" &&
+          item.turnId === proof.turnId &&
+          (!item.phase || item.phase === "final_answer") &&
+          !item.streamPending &&
+          !item.streaming &&
+          !!item.text?.trim(),
+      )
+    : [];
+  const finalId = (
+    candidates.findLast((item) => item.phase === "final_answer") ||
+    candidates.at(-1)
+  )?.id;
+  const nativeTurnItemIds = proof
+    ? items
+        .filter(
           (item) =>
-            item.role === "assistant" &&
             item.turnId === proof.turnId &&
-            (!item.phase || item.phase === "final_answer") &&
+            item.role !== "user" &&
             !item.streamPending &&
-            !item.streaming &&
-            !!item.text?.trim(),
+            !item.streaming,
         )
-      : [];
-    return (
-      candidates.filter((item) => item.phase === "final_answer").at(-1) ||
-      candidates.at(-1)
-    )?.id;
-  }, [items, proof?.turnId]);
-  const nativeTurnItemIds = useMemo(
-    () =>
-      proof
-        ? items
-            .filter(
-              (item) =>
-                item.turnId === proof.turnId &&
-                item.role !== "user" &&
-                !item.streamPending &&
-                !item.streaming,
-            )
-            .map((item) => item.id)
-        : [],
-    [items, proof?.turnId],
-  );
+        .map((item) => item.id)
+    : [];
   const nativeTurnItemIdsKey = nativeTurnItemIds.join("\u0000");
   const completedTurnVisible =
     latestPage &&

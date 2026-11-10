@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { AgentMode } from "../../../generated/api.ts";
 import type { Agent } from "../../../types.ts";
 import type { UsageAccount } from "../../../app/settings/UsageFixture.tsx";
 import { accountsForRoles } from "./roleAccounts.ts";
@@ -58,15 +57,6 @@ describe("role accounts", () => {
 
   it("shows only the lead with subagents off", () => {
     expect(summary(lead({ concurrency: 0 }))).toEqual(["Lead:default"]);
-    expect(
-      summary(
-        lead({
-          subagentConcurrencyVersion: undefined,
-          agentModeSupported: true,
-          agentMode: AgentMode.single,
-        } as Partial<Agent>),
-      ),
-    ).toEqual(["Lead:default"]);
   });
 
   it("skips accounts the chat excludes for each role", () => {

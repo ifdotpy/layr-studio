@@ -7,14 +7,16 @@ import AccountAddDialog, {
   type AddAccountIntent,
 } from "./AccountAddDialog.tsx";
 import type AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
-import type ClaudeAddSignIn from "../ClaudeAddSignIn/ClaudeAddSignIn.tsx";
+import type ClaudeAddSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
+import { Provider } from "../../../app/ServerAreasProvider.tsx";
+import { accountsFixture } from "../Accounts/Accounts.fixture.ts";
 import { ProviderKind } from "../../../generated/providerKind.ts";
 
 vi.mock("../AccountSignIn/AccountSignIn.tsx", () => ({
   default: ({ label, emailHint }: ComponentProps<typeof AccountSignIn>) =>
     createElement("div", { "data-flow": "codex" }, `${label}|${emailHint}`),
 }));
-vi.mock("../ClaudeAddSignIn/ClaudeAddSignIn.tsx", () => ({
+vi.mock("../ClaudeSignIn/ClaudeSignIn.tsx", () => ({
   default: ({ label, email }: ComponentProps<typeof ClaudeAddSignIn>) =>
     createElement("div", { "data-flow": "claude" }, `${label}|${email}`),
 }));
@@ -25,21 +27,22 @@ it("updates provider and details when intent changes during an open sign-in flow
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  const fixture = accountsFixture();
   const render = async (intent: AddAccountIntent) =>
-    act(async () =>
+    act(async () => {
+      fixture.ui.openAdd(intent);
       root.render(
         createElement(
           MantineProvider,
           null,
-          createElement(AccountAddDialog, {
-            opened: true,
-            intent,
-            scope: "local",
-            onClose: vi.fn(),
-          }),
+          createElement(
+            Provider,
+            { value: fixture.areas },
+            createElement(AccountAddDialog),
+          ),
         ),
-      ),
-    );
+      );
+    });
   try {
     await render({
       provider: ProviderKind.Codex,
@@ -68,6 +71,7 @@ it("updates provider and details when intent changes during an open sign-in flow
     );
   } finally {
     await act(async () => root.unmount());
+    fixture.close();
     host.remove();
     vi.unstubAllGlobals();
   }

@@ -1,3 +1,4 @@
+import { resourceData } from "../../../store/runtime.ts";
 import { computed, makeAutoObservable, type IComputedValue } from "mobx";
 import { useServerStore } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import type { Message } from "../../../types.ts";
@@ -17,14 +18,13 @@ export function createQuestionCards(
   if (!agentId) return (item: Message) => questionCard(item);
   const view = makeAutoObservable({
     get lookup() {
-      const current = store.questionHistory().current;
-      const entries =
-        current.status === "live" || current.status === "stale"
-          ? [...current.data.questionHistory.values()].filter((entry) => {
-              const owner = requests.agents?.get(entry.agent);
-              return (owner?.rootId || entry.agent) === requests.rootId;
-            })
-          : [];
+      const current = resourceData(store.questionHistory().current);
+      const entries = current
+        ? [...current.questionHistory.values()].filter((entry) => {
+            const owner = requests.agents?.get(entry.agent);
+            return (owner?.rootId || entry.agent) === requests.rootId;
+          })
+        : [];
       const pending = requests.familyRequests.filter(isPendingQuestionRequest);
       return {
         agentId,

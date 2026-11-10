@@ -83,6 +83,7 @@ it("resolves an external account action to the account's stored delete identity"
   ];
   const account = accountForExternalCommand(accounts, {
     provider: GeneratedProviderProviderKind.Codex,
+    accountKey: "target-account",
     email: "TARGET@example.invalid",
     label: "Work",
   });
@@ -215,4 +216,27 @@ it("keeps same-account deletion identities and acknowledgements within their own
       () => "next-b",
     ),
   ).toBe("next-b");
+});
+
+it("requires an exact key even when an email or label has only one match", () => {
+  const account = {
+    id: "exact",
+    provider: "claude" as const,
+    email: "a@example.test",
+    label: "Personal",
+  };
+  expect(
+    accountForExternalCommand([account], {
+      provider: account.provider,
+      email: account.email,
+      label: account.label,
+    }),
+  ).toBeUndefined();
+  expect(
+    accountForExternalCommand([{ ...account, email: null }], {
+      provider: account.provider,
+      email: null,
+      label: account.label,
+    }),
+  ).toBeUndefined();
 });

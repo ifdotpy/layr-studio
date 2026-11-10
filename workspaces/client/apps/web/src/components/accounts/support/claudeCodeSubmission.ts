@@ -1,8 +1,7 @@
-import { ApiError, type PostResult } from "../../../api.ts";
-type CodeReceipt = Pick<
-  PostResult<"/api/accounts/claude/login">,
-  "status" | "codeSubmitted"
->;
+import { ApiError } from "../../../api.ts";
+import type { AuthProgressData } from "../../../generated/observableResources.ts";
+type CodeReceipt = Pick<NonNullable<AuthProgressData>, "status"> &
+  Partial<Pick<NonNullable<AuthProgressData>, "codeSubmitted">>;
 
 export function codeVerificationPending(receipt: CodeReceipt | null): boolean {
   return receipt?.status === "pending" && receipt.codeSubmitted === true;

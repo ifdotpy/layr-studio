@@ -9,6 +9,15 @@ export default {
     include: [
       "src/browserPersistence.test.ts",
       "src/useNativeAction.test.ts",
+      // S6 stores
+      "src/components/shell/McpInventory/McpInventory.test.ts",
+      "src/components/shell/Workspace/Workspace.resource.test.ts",
+      "src/components/shell/Workspace/WorkspaceRules.test.ts",
+      "src/components/shell/Workspace/Workspace.useFormDraft.test.ts",
+      // S2 stores: concurrency receipts, locks and stale SSE revisions.
+      "src/components/agents/ExecutionSettings/ExecutionSettings.stores.test.ts",
+      // S5 stores: dictation lifecycle and attempt ownership.
+      "src/components/conversation/Dictation/Dictation.stores.test.ts",
       "src/servers/net/net.test.ts",
       "src/components/conversation/MessageQueue/MessageQueue.render.test.ts",
       "src/components/projects/ProjectAccount/ProjectAccount.render.test.ts",
@@ -289,6 +298,19 @@ export default {
       "src/app/panels/TeamOwner.test.ts",
       "src/app/panels/WorkspaceOwner.test.ts",
       "src/components/shell/ServerAreasProvider/ServerAreasProvider.CreationOwner.test.ts",
+      // S1 stores: account dialog lifetime, retry identity and Claude subscription flows.
+      "src/components/accounts/support/ClaudeAuthFlow.test.ts",
+      "src/components/accounts/Accounts/Accounts.modal.test.ts",
+      // S8 stores
+      "src/components/shell/messages/TeamChats/TeamChatsStore.test.ts",
+      "src/components/settings/FederationSettings/FederationSettings.test.ts",
+      // S3 conversation stores: command identity, paging cleanup, upload recovery.
+      "src/components/conversation/support/ConversationStore.test.ts",
+      "src/components/conversation/support/useUploadRecovery.integration.test.ts",
+      "src/components/conversation/support/useUploadRecovery.test.ts",
+      // S10 stores
+      "src/components/sidebar/support/useProjectSave.test.ts",
+      "src/unsent/useUnsentText.test.ts",
     ],
   },
 };

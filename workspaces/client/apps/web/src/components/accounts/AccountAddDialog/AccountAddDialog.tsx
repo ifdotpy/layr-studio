@@ -1,17 +1,14 @@
 import { observer } from "mobx-react-lite";
-import { runInAction } from "mobx";
 import {
   AccountAddForm,
   AccountAddActionsContext,
-  createAccountAddDraft,
 } from "../AccountAddForm/AccountAddForm.tsx";
 import { Modal, Stack, TextInput } from "@mantine/core";
-import { useEffect, useState } from "react";
+import { useServerAreas } from "../../../app/ServerAreasProvider.tsx";
 import { layerZIndex } from "../../../theme.ts";
 import AccountSignIn from "../AccountSignIn/AccountSignIn.tsx";
-import ClaudeAddSignIn from "../ClaudeAddSignIn/ClaudeAddSignIn.tsx";
+import ClaudeSignIn from "../ClaudeSignIn/ClaudeSignIn.tsx";
 import { ProviderKind } from "../../../generated/providerKind.ts";
-
 export type AddAccountIntent = {
   provider?: ProviderKind;
   email?: string | null;
@@ -19,55 +16,33 @@ export type AddAccountIntent = {
   serverLabel?: string;
 };
 
-export default observer(function AccountAddDialog({
-  opened,
-  intent,
-  scope,
-  onClose,
-}: {
-  opened: boolean;
-  intent: AddAccountIntent | null;
-  scope?: string | undefined;
-  onClose: () => void;
-}) {
-  const [draft] = useState(createAccountAddDraft);
-  const [flow, setFlow] = useState(false);
-  useEffect(() => {
-    if (!opened) return;
-    runInAction(() => {
-      draft.provider = intent?.provider || "";
-      draft.label = intent?.label || "";
-      draft.email = intent?.email || "";
-    });
-    setFlow(!!intent?.provider);
-  }, [intent, opened, draft]);
-  const serverLabel = intent?.serverLabel || "This computer";
-  const close = () => {
-    setFlow(false);
-    onClose();
-  };
+export default observer(function AccountAddDialog() {
+  const ui = useServerAreas().accountsUi,
+    draft = ui.addDraft;
+  const serverLabel = ui.addIntent?.serverLabel || "This device",
+    scope = ui.areas.scope.services.owner.id;
   return (
     <>
       <Modal
-        opened={opened && !flow}
+        opened={!ui.addFlow}
         zIndex={layerZIndex.modalAbovePopover}
-        onClose={close}
+        onClose={ui.close}
         title="Add account"
         centered
       >
         <AccountAddActionsContext
-          value={{ onCancel: close, onContinue: () => setFlow(true) }}
+          value={{ onCancel: ui.close, onContinue: ui.continueAdd }}
         >
           <AccountAddForm model={draft}>
             <TextInput label="Server" value={serverLabel} readOnly />
           </AccountAddForm>
         </AccountAddActionsContext>
       </Modal>
-      {opened && flow && draft.provider === ProviderKind.Codex && (
+      {ui.addFlow && draft.provider === ProviderKind.Codex && (
         <Modal
-          opened={opened}
+          opened
           zIndex={layerZIndex.modalAbovePopover}
-          onClose={close}
+          onClose={ui.close}
           title={`Sign in to Codex · ${draft.label || "Codex"}`}
           centered
         >
@@ -85,14 +60,14 @@ export default observer(function AccountAddDialog({
           </Stack>
         </Modal>
       )}
-      {opened && flow && draft.provider === ProviderKind.Claude && (
-        <ClaudeAddSignIn
+      {ui.addFlow && draft.provider === ProviderKind.Claude && (
+        <ClaudeSignIn
           label={draft.label || "Claude Code"}
           email={draft.email}
           serverLabel={serverLabel}
-          scope={scope || "local"}
-          opened={opened}
-          onClose={close}
+          scope={scope}
+          opened
+          onClose={ui.close}
         />
       )}
     </>

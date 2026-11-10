@@ -3,7 +3,8 @@ import {
   computed,
   observableStruct,
   compareStructural,
-  runInAction,
+  flowResult,
+  reaction,
 } from "mobx";
 import type { DiscoveredServer } from "../../../servers/discoveryModel.ts";
 import { ShellSidebarSource } from "../../../app/startup/ShellSidebarSource.ts";
@@ -64,10 +65,8 @@ import {
   Terminal as TerminalIcon,
 } from "lucide-react";
 import {
-  useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -118,7 +117,7 @@ import { alertsSince } from "../../../desktop/desktopAlerts.ts";
 
 const uiOnly =
   new URLSearchParams(location.search).get("studio-ui-only") === "1";
-class ShellState {
+export class ShellState {
   failure = "";
   newChatDialog: {
     project: LocationProject;
@@ -157,10 +156,6 @@ class ShellState {
   serviceInstances = new Map<string, ServerServices>();
   revived: Record<string, number> = {};
   revivedSeen: Record<string, number> = {};
-  screenOwners = new Map<
-    string,
-    { service: ServerServices; channel: ScreenChannel }
-  >();
   peers: DiscoveredServer[] = [];
   discoveredAliases: Record<string, string> = {};
   readonly server = localServer();
@@ -186,7 +181,6 @@ class ShellState {
         selection: false,
         sidebar: false,
         screens: false,
-        screenOwners: false,
         // Discovery derives fresh objects per render; equal content must not re-render the shell.
         peers: observableStruct,
         discoveredAliases: observableStruct,
@@ -241,22 +235,21 @@ class ShellState {
   get sidebarVisible() {
     return !this.sidebar.hidden;
   }
-  setSettingsOpen(value: boolean) {
-    this.settingsOpen = value;
+
+  set(fields: Partial<ShellState>) {
+    Object.assign(this, fields);
   }
-  setSettingsTab(value: StudioSettingsTab) {
-    this.settingsTab = value;
+  setSettingsOpen(settingsOpen: boolean) {
+    this.settingsOpen = settingsOpen;
+  }
+  setSettingsTab(settingsTab: StudioSettingsTab) {
+    this.settingsTab = settingsTab;
   }
   openManager() {
     this.settingsTab = "servers";
     this.settingsOpen = true;
   }
-  setFailure(value: typeof this.failure) {
-    this.failure = value;
-  }
-  setNewChatDialog(value: typeof this.newChatDialog) {
-    this.newChatDialog = value;
-  }
+
   reread() {
     const paired = this.load();
     this.selection.updateServers(
@@ -267,30 +260,7 @@ class ShellState {
     this.paired = shareServers(this.paired, paired);
     this.registryRevision++;
   }
-  setAccountsByServer(value: typeof this.accountsByServer) {
-    this.accountsByServer = value;
-  }
-  setLastSeen(value: typeof this.lastSeen) {
-    this.lastSeen = value;
-  }
-  setSearchOpen(value: typeof this.searchOpen) {
-    this.searchOpen = value;
-  }
-  setSearchQuery(value: typeof this.searchQuery) {
-    this.searchQuery = value;
-  }
-  setSearchResults(value: typeof this.searchResults) {
-    this.searchResults = value;
-  }
-  setTerminals(value: typeof this.terminals) {
-    this.terminals = value;
-  }
-  setShellSidebar(value: typeof this.shellSidebar) {
-    this.shellSidebar = value;
-  }
-  setRevived(value: typeof this.revived) {
-    this.revived = value;
-  }
+
   publishPreferences(value: unknown) {
     window.dispatchEvent(
       new CustomEvent("studio-shell-preferences", { detail: value }),
@@ -314,7 +284,7 @@ class ShellState {
     else
       void screen
         .execute(command)
-        .catch((error) => this.setFailure(String(error)));
+        .catch((error) => this.set({ failure: String(error) }));
   }
   applyNavigation(id: string, value: ServerNavigation) {
     if (value.ready) this.readyWaiters.get(id)?.forEach((resolve) => resolve());
@@ -366,14 +336,14 @@ class ShellState {
       this.pending.delete(id);
       void screen
         .execute(command)
-        .catch((error) => this.setFailure(String(error)));
+        .catch((error) => this.set({ failure: String(error) }));
     }
   }
-  async executeCommand(owner: string, command: ServerCommand) {
+  *executeCommand(owner: string, command: ServerCommand) {
     const screen = this.screens.get(owner);
     if (!screen) throw new Error("The server is no longer paired.");
     if (!this.readyScreens.has(owner) || !screen.ready) {
-      await new Promise<void>((resolve, reject) => {
+      yield new Promise<void>((resolve, reject) => {
         const waiters = this.readyWaiters.get(owner) || new Set<() => void>();
         const done = () => {
           clearTimeout(timer);
@@ -392,7 +362,7 @@ class ShellState {
       throw new Error(
         "The server connection changed. The action was not sent.",
       );
-    await screen.execute(command);
+    yield screen.execute(command);
   }
   screenEvents(id: string, data: ScreenMessage, channel: ScreenChannel) {
     if (this.screens.get(id) !== channel) return;
@@ -412,36 +382,38 @@ class ShellState {
         view?.chats.find((row) => row.id === view.opened)?.path ||
         (data.path as string) ||
         "";
-      this.setNewChatDialog({
-        server: id,
-        project: {
-          ...project,
-          id: project?.id || directory,
-          path: directory,
-          name: project?.name || directory || "Current folder",
-          locations: project?.locations?.length
-            ? project.locations
-            : [
-                {
-                  serverId: id,
-                  path: directory,
-                  projectId: project?.id || directory,
-                },
-              ],
+      this.set({
+        newChatDialog: {
+          server: id,
+          project: {
+            ...project,
+            id: project?.id || directory,
+            path: directory,
+            name: project?.name || directory || "Current folder",
+            locations: project?.locations?.length
+              ? project.locations
+              : [
+                  {
+                    serverId: id,
+                    path: directory,
+                    projectId: project?.id || directory,
+                  },
+                ],
+          },
+          folder:
+            typeof data.projectFolder === "string"
+              ? data.projectFolder
+              : undefined,
+          // Keep the screen owner's project binding. A folder belongs to that project.
+          binding:
+            typeof data.projectId === "string" &&
+            typeof data.projectServerId === "string"
+              ? {
+                  projectId: data.projectId,
+                  projectServerId: data.projectServerId,
+                }
+              : undefined,
         },
-        folder:
-          typeof data.projectFolder === "string"
-            ? data.projectFolder
-            : undefined,
-        // Keep the screen owner's project binding. A folder belongs to that project.
-        binding:
-          typeof data.projectId === "string" &&
-          typeof data.projectServerId === "string"
-            ? {
-                projectId: data.projectId,
-                projectServerId: data.projectServerId,
-              }
-            : undefined,
       });
     } else if (data.kind === "studio-project-new-chat") {
       const target = this.servers.find((server) => server.id === data.target);
@@ -453,15 +425,17 @@ class ShellState {
       if (data.opened) {
         if (this.settingsOpen) {
           this.restoreManagerAfterAccountDialog = true;
-          this.setSettingsOpen(false);
+          this.set({ settingsOpen: false });
         }
       } else if (this.restoreManagerAfterAccountDialog) {
         this.restoreManagerAfterAccountDialog = false;
-        this.setSettingsOpen(true);
+        this.set({ settingsOpen: true });
       }
     } else if (data.kind === "studio-server-open-settings") {
-      this.setSettingsTab(data.tab === "accounts" ? "accounts" : "servers");
-      this.setSettingsOpen(true);
+      this.set({
+        settingsTab: data.tab === "accounts" ? "accounts" : "servers",
+      });
+      this.set({ settingsOpen: true });
     } else if (data.kind === "studio-server-preferences") {
       try {
         const value = parseStudioPreferences(JSON.stringify(data.preferences));
@@ -484,27 +458,30 @@ class ShellState {
         typeof value.canCreate !== "boolean"
       )
         return;
-      this.setTerminals({
-        ...this.terminals,
-        [id]: {
-          opened: value.opened as boolean,
-          height: height,
-          count: value.count as number,
-          active: value.active as number,
-          canCreate: value.canCreate as boolean,
+      this.set({
+        terminals: {
+          ...this.terminals,
+          [id]: {
+            opened: value.opened as boolean,
+            height: height,
+            count: value.count as number,
+            active: value.active as number,
+            canCreate: value.canCreate as boolean,
+          },
         },
       });
     } else if (data.kind === "studio-server-toggle-sidebar") {
       if (typeof data.opened === "boolean")
         this.sidebar.setMobileOpen(data.opened);
       else this.toggleSidebar();
-    } else if (data.kind === "studio-server-search") this.setSearchOpen(true);
+    } else if (data.kind === "studio-server-search")
+      this.set({ searchOpen: true });
     else if (
       data.kind === "studio-server-search-results" &&
       data.requestId === this.searchRequest
     ) {
       const results = screenSearchResults(data);
-      this.setSearchResults({ ...this.searchResults, [id]: results });
+      this.set({ searchResults: { ...this.searchResults, [id]: results } });
     } else if (data.kind === "studio-server-navigation") {
       const value = data.navigation as ServerNavigation;
       this.publishPreferences(this.sidebar.value);
@@ -519,7 +496,9 @@ class ShellState {
     } else if (data.kind === "studio-server-accounts") {
       const accounts = readServerAccounts(data.accounts);
       if (!accounts) return;
-      this.setAccountsByServer({ ...this.accountsByServer, [id]: accounts });
+      this.set({
+        accountsByServer: { ...this.accountsByServer, [id]: accounts },
+      });
     } else if (
       data.kind === "studio-server-status" &&
       ["connecting", "live", "offline", "degraded", "schema-mismatch"].includes(
@@ -531,9 +510,205 @@ class ShellState {
         [id]: data.status as ConnectionHealth,
       }));
       if (data.status === "live")
-        this.setLastSeen({ ...this.lastSeen, [id]: Date.now() / 1000 });
+        this.set({ lastSeen: { ...this.lastSeen, [id]: Date.now() / 1000 } });
     }
   }
+  applyPreferences() {
+    try {
+      const next = parseStudioPreferences(
+        preferenceMemory.getItem(studioPreferencesStorageKey) || "null",
+      );
+      this.sidebar.setPreferences(next);
+      this.publishPreferences(next);
+    } catch {}
+  }
+  start() {
+    const stored = (event: Event) => {
+      const key = (event as StorageEvent).key;
+      if (key === SERVER_REGISTRY_KEY || key === null) this.reread();
+      this.applyPreferences();
+    };
+    const events: [string, EventListener][] = [
+      ["storage", stored],
+      [SERVER_REGISTRY_EVENT, this.reread],
+      ["focus", this.reviveMatching],
+      ["studio-preferences-change", this.applyPreferences],
+    ];
+    for (const [name, listener] of events)
+      window.addEventListener(name, listener);
+    const stopRevive = reaction(
+      () => [this.settingsOpen, this.settingsTab] as const,
+      ([opened, tab]) => {
+        if (opened && (tab === "servers" || tab === "accounts"))
+          this.reviveMatching();
+      },
+      { fireImmediately: true },
+    );
+    const stopNavigate = onDesktopNavigate((target) => {
+      if (target.serverId)
+        this.send(target.serverId, { action: "notifications", ...target });
+    });
+    return () => {
+      for (const [name, listener] of events)
+        window.removeEventListener(name, listener);
+      stopRevive();
+      stopNavigate();
+      this.close();
+    };
+  }
+  connectServices(
+    localServices: ServerServices | undefined,
+    directScreen: boolean,
+  ) {
+    const services = new Map<string, ServerServices>(),
+      channels = new Map<string, ScreenChannel>();
+    for (const server of this.servers) {
+      const previous = this.serviceInstances.get(server.id);
+      const service =
+        previous &&
+        (this.revived[server.id] || 0) === (this.revivedSeen[server.id] || 0) &&
+        previous.owner.origin === server.origin &&
+        previous.owner.credentialId === server.credentialId
+          ? previous
+          : server.id === "local" && localServices
+            ? localServices
+            : createServerServices(server);
+      service.shellSettings = this;
+      this.revivedSeen[server.id] = this.revived[server.id] || 0;
+      let channel =
+        previous === service ? this.screens.get(server.id) : undefined;
+      if (!channel) {
+        this.readyScreens.delete(server.id);
+        const next = createScreenChannel(server.id, (message) =>
+          this.screenEvents(server.id, message, next),
+        );
+        channel = next;
+      }
+      services.set(server.id, service);
+      channels.set(server.id, channel);
+      service.screen.connect(
+        directScreen ? null : channel,
+        () => this.selection.current === server.id,
+      );
+    }
+    for (const [id, previous] of this.serviceInstances) {
+      const next = services.get(id);
+      if (next !== previous)
+        previous.close(
+          !next ||
+            next.owner.origin !== previous.owner.origin ||
+            next.owner.credentialId !== previous.owner.credentialId,
+        );
+    }
+    for (const [id, channel] of this.screens)
+      if (channels.get(id) !== channel) channel.close();
+    this.screens = channels;
+    this.serviceInstances = services;
+  }
+  close() {
+    for (const channel of this.screens.values()) channel.close();
+    for (const service of this.serviceInstances.values()) service.close();
+    this.screens = new Map();
+    this.serviceInstances = new Map();
+  }
+  *reviveMatching() {
+    const ids: string[] = yield recoverMatchingServers(
+      this.servers.filter((server) => server.id !== "local"),
+      (id) => !!this.serviceInstances.get(id)?.api.isApiSchemaMismatch(),
+      (server) => fetchServerSummary(server, AbortSignal.timeout(10000)),
+    );
+    if (ids.length)
+      this.revived = {
+        ...this.revived,
+        ...Object.fromEntries(
+          ids.map((id) => [id, (this.revived[id] || 0) + 1]),
+        ),
+      };
+  }
+  *refreshSidebarOwner(owner: string) {
+    const service = this.serviceInstances.get(owner);
+    if (!service) throw new Error("The sidebar server is no longer paired.");
+    const value: Awaited<ReturnType<typeof fetchServerSummary>> =
+      yield fetchServerSummary(service.owner, new AbortController().signal);
+    if (this.serviceInstances.get(owner) !== service)
+      throw new Error("The sidebar server connection changed.");
+    return {
+      ...value,
+      opened: this.sidebar.navigation[owner]?.opened || null,
+    };
+  }
+  add(server: StudioServer, focus = true) {
+    if (server.id === "local")
+      throw new Error("The remote server returned an invalid identity.");
+    const old = readServers();
+    const same = old.find((row) => row.id === server.id);
+    if (same && same.origin !== server.origin)
+      throw new Error("This server identity belongs to another address.");
+    writeServers([...old.filter((row) => row.id !== server.id), server]);
+    if (focus) this.select(server.id);
+  }
+  remove(server: StudioServer) {
+    writeServers(readServers().filter((row) => row.id !== server.id));
+    this.pending.delete(server.id);
+    const next = { ...this.accountsByServer };
+    delete next[server.id];
+
+    this.set({ accountsByServer: next });
+  }
+  rememberAccountFocus(
+    serverId: string,
+    command: Extract<
+      ServerCommand,
+      { action: "account-sign-in" | "account-action" }
+    >,
+  ) {
+    const exact = command.accountKey
+      ? serverAccountRows(
+          this.accountsServers,
+          this.managementData.accountsByServer,
+        ).find(
+          (row) => row.byServer[serverId]?.accountKey === command.accountKey,
+        )
+      : undefined;
+    this.restoreAccountActionFocus =
+      exact?.key ||
+      `${command.provider}:${(command.email || command.label).toLocaleLowerCase()}`;
+  }
+  get managementData() {
+    const navigation = { ...this.sidebar.navigation };
+    const accountsByServer = { ...this.accountsByServer };
+    for (const [id, service] of this.serviceInstances) {
+      const state = resourceData(service.store.state().current);
+      if (!state) continue;
+      const agentsRunning = [...state.agents.values()].filter(
+        (agent) => agent.inFlight,
+      ).length;
+      const accounts = state.accountsSummary.get("current");
+      const previous = navigation[id];
+      if (previous)
+        navigation[id] = {
+          ...previous,
+          agentsRunning,
+          busy: agentsRunning > 0,
+        };
+      if (accounts) accountsByServer[id] = frameAccounts(accounts);
+    }
+
+    return { navigation, accountsByServer };
+  }
+  accountAction(
+    id: string,
+    command: Extract<
+      ServerCommand,
+      { action: "account-sign-in" | "account-action" }
+    >,
+  ) {
+    this.restoreManagerAfterAccountDialog = this.settingsOpen;
+    this.rememberAccountFocus(id, command);
+    this.set({ settingsOpen: false });
+    this.send(id, command);
+  }
+
   toggleSidebar() {
     restoreSidebarFocus();
     if (this.sidebar.compact) this.sidebar.setMobileOpen((old) => !old);
@@ -578,165 +753,22 @@ const MultiServerShell = observer(function MultiServerShell({
     );
   }, [discovery.snapshot]);
   useUiPreferenceSync(shell.servers);
-  // A remote scope that latched an API schema mismatch is recreated when the server matches again.
-  const services = useMemo(
-    () =>
-      new Map(
-        shell.servers.map((server) => {
-          const previous = shell.serviceInstances.get(server.id);
-          const instance =
-            previous &&
-            (shell.revived[server.id] || 0) ===
-              (shell.revivedSeen[server.id] || 0) &&
-            previous.owner.origin === server.origin &&
-            previous.owner.credentialId === server.credentialId
-              ? previous
-              : server.id === "local" && localServices
-                ? localServices
-                : createServerServices(server);
-          instance.shellSettings = shell;
-          shell.revivedSeen[server.id] = shell.revived[server.id] || 0;
-          return [server.id, instance] as const;
-        }),
-      ),
-    [shell.servers, localServices, shell.revived],
-  );
-  const reviveMatching = useCallback(() => {
-    void recoverMatchingServers(
-      shell.servers.filter((server) => server.id !== "local"),
-      (id) => !!shell.serviceInstances.get(id)?.api.isApiSchemaMismatch(),
-      (server) => fetchServerSummary(server, AbortSignal.timeout(10000)),
-    ).then((ids) => {
-      if (ids.length)
-        shell.setRevived({
-          ...shell.revived,
-          ...Object.fromEntries(
-            ids.map((id) => [id, (shell.revived[id] || 0) + 1]),
-          ),
-        });
-    });
-  }, []);
-  useEffect(() => {
-    window.addEventListener("focus", reviveMatching);
-    return () => window.removeEventListener("focus", reviveMatching);
-  }, [reviveMatching]);
-  useEffect(() => {
-    if (
-      shell.settingsOpen &&
-      (shell.settingsTab === "servers" || shell.settingsTab === "accounts")
-    )
-      reviveMatching();
-  }, [shell.settingsOpen, shell.settingsTab, reviveMatching]);
+  const services = shell.serviceInstances;
   const directScreen =
     !uiOnly &&
     !shell.paired.length &&
     shell.accountsServers.length === shell.servers.length;
-  const channels = useMemo(
-    () =>
-      new Map(
-        [...services].map(([id, service]) => {
-          const previous = shell.screenOwners.get(id);
-          if (previous?.service === service)
-            return [id, previous.channel] as const;
-          shell.readyScreens.delete(id);
-          const channel = createScreenChannel(id, (message) =>
-            shell.screenEvents(id, message, channel),
-          );
-
-          return [id, channel] as const;
-        }),
-      ),
-    [services],
+  useLayoutEffect(
+    () => shell.connectServices(localServices, directScreen),
+    [shell.servers, shell.revived, localServices, directScreen],
   );
-  shell.screens = channels;
-  useLayoutEffect(() => {
-    for (const [id, service] of services)
-      service.screen.connect(
-        directScreen ? null : channels.get(id)!,
-        () => shell.selection.current === id,
-      );
-    for (const [id, previous] of shell.screenOwners) {
-      if (channels.get(id) !== previous.channel) previous.channel.close();
-    }
-    shell.screenOwners = new Map(
-      [...services].map(([id, service]) => [
-        id,
-        { service, channel: channels.get(id)! },
-      ]),
-    );
-  }, [services, channels, directScreen]);
-  useEffect(
-    () => () => {
-      for (const screen of shell.screens.values()) screen.close();
-    },
-    [],
-  );
-  useLayoutEffect(() => {
-    for (const [id, instance] of shell.serviceInstances) {
-      const next = services.get(id);
-      // A replacement may open the old cache before this cleanup effect runs.
-      if (next !== instance)
-        instance.close(
-          !next ||
-            next.owner.origin !== instance.owner.origin ||
-            next.owner.credentialId !== instance.owner.credentialId,
-        );
-    }
-    runInAction(() => {
-      shell.serviceInstances = services;
-    });
-  }, [services]);
-  useEffect(
-    () => () => {
-      for (const instance of shell.serviceInstances.values()) instance.close();
-      runInAction(() => {
-        shell.serviceInstances = new Map();
-      });
-    },
-    [],
-  );
-  const refreshSidebarOwner = async (owner: string) => {
-    const service = shell.serviceInstances.get(owner);
-    if (!service) throw new Error("The sidebar server is no longer paired.");
-    const value = await fetchServerSummary(
-      service.owner,
-      new AbortController().signal,
-    );
-    if (shell.serviceInstances.get(owner) !== service)
-      throw new Error("The sidebar server connection changed.");
-    return {
-      ...value,
-      opened: shell.sidebar.navigation[owner]?.opened || null,
-    };
-  };
+  useEffect(() => shell.start(), [shell]);
   const mergedSidebar = shell.sidebar.model;
   useEffect(() => {
-    const reread = shell.reread;
-    const stored = (event: StorageEvent) => {
-      if (event.key === SERVER_REGISTRY_KEY || event.key === null) reread();
-    };
-    const changed = reread;
-    window.addEventListener("storage", stored);
-    window.addEventListener(SERVER_REGISTRY_EVENT, changed);
-    return () => {
-      window.removeEventListener("storage", stored);
-      window.removeEventListener(SERVER_REGISTRY_EVENT, changed);
-    };
-  }, []);
-  useEffect(() => {
-    const apply = () => {
-      try {
-        const next = parseStudioPreferences(
-          preferenceMemory.getItem(studioPreferencesStorageKey) || "null",
-        );
-        shell.sidebar.setPreferences(next);
-        shell.publishPreferences(next);
-      } catch {}
-    };
     const key = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        shell.setSearchOpen(true);
+        shell.set({ searchOpen: true });
       }
       const shortcut = parseSidebarShortcut(
         shell.sidebar.value.sidebarShortcut,
@@ -756,13 +788,8 @@ const MultiServerShell = observer(function MultiServerShell({
         shell.toggleSidebar();
       }
     };
-    window.addEventListener("storage", apply);
-    // Local App writes do not emit a storage event in this window.
-    window.addEventListener("studio-preferences-change", apply);
     window.addEventListener("keydown", key);
     return () => {
-      window.removeEventListener("storage", apply);
-      window.removeEventListener("studio-preferences-change", apply);
       window.removeEventListener("keydown", key);
     };
   }, [shell.sidebar.value.sidebarShortcut, shell.toggleSidebar]);
@@ -777,55 +804,12 @@ const MultiServerShell = observer(function MultiServerShell({
       shell.sidebar.value.sidebarFontSize + "px",
     );
   }, [shell.sidebar.value, setColorScheme]);
-  useEffect(
-    () =>
-      onDesktopNavigate((target) => {
-        if (!target.serverId) return;
-        shell.send(target.serverId, { action: "notifications", ...target });
-      }),
-    [shell.select],
-  );
-  const add = (server: StudioServer, focus = true) => {
-    if (server.id === "local")
-      throw new Error("The remote server returned an invalid identity.");
-    const old = readServers();
-    const same = old.find((row) => row.id === server.id);
-    if (same && same.origin !== server.origin)
-      throw new Error("This server identity belongs to another address.");
-    writeServers([...old.filter((row) => row.id !== server.id), server]);
-    if (focus) shell.select(server.id);
-  };
-  const remove = (server: StudioServer) => {
-    writeServers(readServers().filter((row) => row.id !== server.id));
-    shell.pending.delete(server.id);
-    const next = { ...shell.accountsByServer };
-    delete next[server.id];
-
-    shell.setAccountsByServer(next);
-  };
-  const navigation = { ...shell.sidebar.navigation };
-  const accountsByServer = { ...shell.accountsByServer };
-  for (const [id, service] of services) {
-    const state = resourceData(service.store.state().current);
-    if (!state) continue;
-    const agentsRunning = [...state.agents.values()].filter(
-      (agent) => agent.inFlight,
-    ).length;
-    const accounts = state.accountsSummary.get("current");
-    const previous = navigation[id];
-    if (previous)
-      navigation[id] = {
-        ...previous,
-        agentsRunning,
-        busy: agentsRunning > 0,
-      };
-    if (accounts) accountsByServer[id] = frameAccounts(accounts);
-  }
+  const { navigation, accountsByServer } = shell.managementData;
   const management = (
     <ServerManager
       servers={shell.servers}
-      add={add}
-      remove={remove}
+      add={shell.add}
+      remove={shell.remove}
       discovery={discovery}
       localEnabled={
         !uiOnly &&
@@ -837,29 +821,13 @@ const MultiServerShell = observer(function MultiServerShell({
       accountsByServer={accountsByServer}
     />
   );
-  const rememberAccountFocus = (
-    serverId: string,
-    command: Extract<
-      ServerCommand,
-      { action: "account-sign-in" | "account-action" }
-    >,
-  ) => {
-    const exact = command.accountKey
-      ? serverAccountRows(shell.accountsServers, accountsByServer).find(
-          (row) => row.byServer[serverId]?.accountKey === command.accountKey,
-        )
-      : undefined;
-    shell.restoreAccountActionFocus =
-      exact?.key ||
-      `${command.provider}:${(command.email || command.label).toLocaleLowerCase()}`;
-  };
   const settings = (
     <Modal
       opened={shell.settingsOpen}
       transitionProps={{ duration: 0 }}
       onClose={() => {
         shell.restoreAccountActionFocus = null;
-        shell.setSettingsOpen(false);
+        shell.set({ settingsOpen: false });
       }}
       size={modalSizes.settings}
       title="Studio settings"
@@ -872,9 +840,9 @@ const MultiServerShell = observer(function MultiServerShell({
           onChange={(tab) => {
             if (!isStudioSettingsTab(tab)) return;
             if (tab !== "accounts") shell.restoreAccountActionFocus = null;
-            shell.setSettingsTab(tab);
+            shell.set({ settingsTab: tab });
             if (tab === "accounts" || tab === "servers") return;
-            shell.setSettingsOpen(false);
+            shell.set({ settingsOpen: false });
             shell.send(shell.current, { action: "settings", tab });
           }}
         >
@@ -900,18 +868,10 @@ const MultiServerShell = observer(function MultiServerShell({
                 ...shell.sidebar.status,
               }}
               startAccount={(id, command) => {
-                if (!shell.servers.some((server) => server.id === id)) return;
-                shell.restoreManagerAfterAccountDialog = shell.settingsOpen;
-                rememberAccountFocus(id, command);
-                shell.setSettingsOpen(false);
-                shell.send(id, command);
+                if (shell.servers.some((server) => server.id === id))
+                  shell.accountAction(id, command);
               }}
-              accountAction={(id, command) => {
-                shell.restoreManagerAfterAccountDialog = shell.settingsOpen;
-                rememberAccountFocus(id, command);
-                shell.setSettingsOpen(false);
-                shell.send(id, command);
-              }}
+              accountAction={shell.accountAction}
             />
           </Tabs.Panel>
           <Tabs.Panel value="servers" pt="md">
@@ -933,13 +893,14 @@ const MultiServerShell = observer(function MultiServerShell({
             return shell.aliases;
           },
           online: shell.sidebar.online,
-          refreshOwner: refreshSidebarOwner,
-          executeCommand: shell.executeCommand,
+          refreshOwner: (owner) => flowResult(shell.refreshSidebarOwner(owner)),
+          executeCommand: (owner, command) =>
+            flowResult(shell.executeCommand(owner, command)),
           send: shell.send,
           applyNavigation: shell.applyNavigation,
           settings: shell.openManager,
-          search: () => shell.setSearchOpen(true),
-          notify: shell.setFailure,
+          search: () => shell.set({ searchOpen: true }),
+          notify: (failure: ShellState["failure"]) => shell.set({ failure }),
         },
         {
           areas: localServices!.areas,
@@ -974,7 +935,7 @@ const MultiServerShell = observer(function MultiServerShell({
         "--shell-sidebar-width",
         `${width}px`,
       );
-      shell.setShellSidebar(width > 0);
+      shell.set({ shellSidebar: width > 0 });
       const root = document.documentElement;
       if (width > 0 && root.dataset.shellSidebar !== "true")
         root.dataset.shellSidebar = "true";
@@ -1122,14 +1083,15 @@ const MultiServerShell = observer(function MultiServerShell({
         )}
         {shell.servers.map((server) => {
           const service = services.get(server.id)!;
-          const channel = channels.get(server.id)!;
+          const channel = shell.screens.get(server.id);
+          if (!service || !channel) return null;
           return (
             <ServerServicesProvider
               key={JSON.stringify([
                 server.id,
-                server.origin,
-                server.credentialId,
-                shell.revived[server.id] || 0,
+                service.owner.origin,
+                service.owner.credentialId,
+                shell.revivedSeen[server.id] || 0,
               ])}
               services={service}
             >
@@ -1146,7 +1108,7 @@ const MultiServerShell = observer(function MultiServerShell({
       <Modal
         opened={!!newChatDialog}
         closeOnEscape={false}
-        onClose={() => shell.setNewChatDialog(null)}
+        onClose={() => shell.set({ newChatDialog: null })}
         title="New chat"
         aria-label="New chat"
         size="lg"
@@ -1169,14 +1131,14 @@ const MultiServerShell = observer(function MultiServerShell({
               system: shell.sidebar.navigation[row.id]?.system,
             }))}
             lastServer={newChatDialog.server}
-            onCancel={() => shell.setNewChatDialog(null)}
+            onCancel={() => shell.set({ newChatDialog: null })}
             onAdd={(server) => {
               shell.send(newChatDialog.server, {
                 action: "project-folders",
                 projectId: newChatDialog.project.id,
                 server,
               });
-              shell.setNewChatDialog(null);
+              shell.set({ newChatDialog: null });
             }}
             onChoose={(location, settings) => {
               const origin = location.serverId === newChatDialog.server;
@@ -1196,14 +1158,14 @@ const MultiServerShell = observer(function MultiServerShell({
                       }
                     : {}),
               });
-              shell.setNewChatDialog(null);
+              shell.set({ newChatDialog: null });
             }}
           />
         )}
       </Modal>
       <Modal
         opened={shell.searchOpen}
-        onClose={() => shell.setSearchOpen(false)}
+        onClose={() => shell.set({ searchOpen: false })}
         title="Search all servers"
         aria-label="Search all servers"
         size="lg"
@@ -1214,7 +1176,7 @@ const MultiServerShell = observer(function MultiServerShell({
             if (!shell.searchQuery.trim()) return;
             const requestId = randomUUID();
             shell.searchRequest = requestId;
-            shell.setSearchResults({});
+            shell.set({ searchResults: {} });
             for (const [id, service] of services) {
               void service.api
                 .get("/api/search", { query: { q: shell.searchQuery.trim() } })
@@ -1224,9 +1186,11 @@ const MultiServerShell = observer(function MultiServerShell({
                       shell.searchRequest === requestId &&
                       shell.serviceInstances.get(id) === service
                     )
-                      shell.setSearchResults({
-                        ...shell.searchResults,
-                        [id]: { results: value.results },
+                      shell.set({
+                        searchResults: {
+                          ...shell.searchResults,
+                          [id]: { results: value.results },
+                        },
                       });
                   },
                   (error) => {
@@ -1234,9 +1198,11 @@ const MultiServerShell = observer(function MultiServerShell({
                       shell.searchRequest === requestId &&
                       shell.serviceInstances.get(id) === service
                     )
-                      shell.setSearchResults({
-                        ...shell.searchResults,
-                        [id]: { results: [], error: String(error) },
+                      shell.set({
+                        searchResults: {
+                          ...shell.searchResults,
+                          [id]: { results: [], error: String(error) },
+                        },
                       });
                   },
                 );
@@ -1248,7 +1214,7 @@ const MultiServerShell = observer(function MultiServerShell({
             label="Search all messages"
             value={shell.searchQuery}
             onChange={(event) =>
-              shell.setSearchQuery(event.currentTarget.value)
+              shell.set({ searchQuery: event.currentTarget.value })
             }
           />
           <Button type="submit" disabled={!shell.searchQuery.trim()}>
@@ -1275,7 +1241,7 @@ const MultiServerShell = observer(function MultiServerShell({
                       id: result.room || result.agent,
                       messageId: result.id,
                     });
-                    shell.setSearchOpen(false);
+                    shell.set({ searchOpen: false });
                   }}
                 >
                   <small>{result.kind}</small>

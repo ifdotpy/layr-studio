@@ -3,7 +3,14 @@ import { createServerServices } from "../../../servers/serverServices.ts";
 import NewChatModelSettings from "../../settings/NewChatModelSettings/NewChatModelSettings.tsx";
 import type { NewChatSettings } from "../../../app/projects/newChatSettings.ts";
 import { observable, runInAction } from "mobx";
-import { ServerStoreProvider } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
+import {
+  ServerAreasContextProvider,
+  type ServerAreas,
+} from "../../../app/ServerAreasProvider.tsx";
+import {
+  ServerStoreProvider,
+  useServerStore,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { createRoot } from "react-dom/client";
 import { WorkerError } from "../../agents/worker/WorkerError/WorkerError.tsx";
 import { NativeModelActions } from "../../conversation/NativeModelActions/NativeModelActions.tsx";
@@ -18,12 +25,13 @@ import {
   act,
   Profiler,
   Fragment,
+  useState,
   type ComponentProps,
   type ReactNode,
 } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MantineProvider, Menu } from "@mantine/core";
-import { beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import {
   AgentMode,
   AccountStatus,
@@ -46,6 +54,29 @@ import Requests, {
 } from "../../conversation/questions/Requests/Requests.tsx";
 import { approval } from "../../../approvalFixtures.ts";
 import type { AgentSetupPickerProps } from "../../agents/AgentSetupPicker/AgentSetupPicker.tsx";
+
+const ownedAreas: ServerAreas[] = [];
+function OwnedUnifiedAgentSettings(
+  props: ComponentProps<typeof UnifiedAgentSettings>,
+) {
+  const store = useServerStore();
+  const [areas] = useState(() => {
+    const owner = conversationActionsFixture(undefined, store);
+    ownedAreas.push(owner);
+    return owner;
+  });
+  return createElement(
+    ServerAreasContextProvider,
+    { value: areas },
+    createElement(UnifiedAgentSettings, props),
+  );
+}
+afterEach(() => {
+  for (const areas of ownedAreas.splice(0)) {
+    areas.dispose();
+    areas.scope.services.close();
+  }
+});
 
 const h = vi.hoisted(() => ({
   catalog: null as null | {
@@ -256,7 +287,7 @@ it.each([
     const agent = required(f.mirror.current.agents.get("lead"));
     render(
       f,
-      createElement(UnifiedAgentSettings, {
+      createElement(OwnedUnifiedAgentSettings, {
         agent,
         initialRole: role,
         state: accounts,
@@ -572,7 +603,7 @@ it("updates settings, context usage and native actions when the owning detail sl
           createElement(
             ServerStoreProvider,
             { value: store },
-            createElement(UnifiedAgentSettings, {
+            createElement(OwnedUnifiedAgentSettings, {
               agent,
               state: accounts,
               notify: () => {},
@@ -722,7 +753,7 @@ function settingsCaller(
   agent: ComponentProps<typeof UnifiedAgentSettings>["agent"],
   extra: Partial<ComponentProps<typeof UnifiedAgentSettings>> = {},
 ) {
-  return createElement(UnifiedAgentSettings, {
+  return createElement(OwnedUnifiedAgentSettings, {
     agent,
     state: accounts,
     notify: () => {},
@@ -874,12 +905,13 @@ it("reports an in-place settings account mismatch during a save", async () => {
     await screen.close();
   }
 });
-it("shows legacy single-agent mode from generated detail through ChatSettingsDialog", () => {
+it("shows numeric lead-only mode from generated detail through ChatSettingsDialog", () => {
   const f = observableFixture([
     {
       ...record,
-      concurrency: undefined,
-      subagentConcurrencyVersion: undefined,
+      concurrency: 0,
+      subagentConcurrencyVersion: 2,
+      agentModeRevision: 0,
       agentModeSupported: true,
       agentMode: AgentMode.single,
     },

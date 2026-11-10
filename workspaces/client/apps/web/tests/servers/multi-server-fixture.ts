@@ -219,7 +219,10 @@ export async function fixture(
           ...account,
         })),
         archivedAccounts: [],
-        defaultAccountKey: savedAccounts[0]?.id || "default",
+        defaultAccountKey:
+          savedAccounts.find((account) => account.isDefault)?.id ||
+          savedAccounts[0]?.id ||
+          "default",
         defaultAccountGroups: [],
         supportsDelete: true,
         supportsDisconnect: true,

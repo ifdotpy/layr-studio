@@ -116,18 +116,19 @@ export type ServerCommand =
   | { action: "settings"; tab?: StudioSettingsTab }
   | { action: "search"; query: string; requestId: string }
   | { action: "notifications"; agentId: string; itemId?: string }
-  | {
+  | ({
       action: "account-sign-in";
-      accountKey?: string;
       provider: ProviderKind;
       email: string | null;
       label: string;
       serverLabel: string;
-      forceAdd?: boolean;
-    }
+    } & (
+      | { accountKey: string; forceAdd?: false }
+      | { forceAdd: true; accountKey?: never }
+    ))
   | {
       action: "account-action";
-      accountKey?: string;
+      accountKey: string;
       operation:
         | "rename"
         | "default"

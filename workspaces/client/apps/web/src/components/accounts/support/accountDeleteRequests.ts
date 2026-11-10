@@ -62,27 +62,15 @@ function saveDeleteRequest(
   }
 }
 
-export function matchingAccountsForExternalCommand<
-  T extends AccountDeleteTarget,
->(accounts: readonly T[], identity: ExternalAccountIdentity) {
-  return accounts.filter(
-    (candidate) =>
-      candidate.provider === identity.provider &&
-      (identity.accountKey !== undefined
-        ? candidate.id === identity.accountKey
-        : identity.email
-          ? candidate.email?.toLocaleLowerCase() ===
-            identity.email.toLocaleLowerCase()
-          : candidate.label === identity.label),
-  );
-}
-
 export function accountForExternalCommand<T extends AccountDeleteTarget>(
   accounts: readonly T[],
   identity: ExternalAccountIdentity,
 ) {
-  const matches = matchingAccountsForExternalCommand(accounts, identity);
-  return matches.length === 1 ? matches[0] : undefined;
+  return accounts.find(
+    (account) =>
+      account.id === identity.accountKey &&
+      account.provider === identity.provider,
+  );
 }
 
 export function getOrCreateAccountDeleteRequest(

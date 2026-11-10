@@ -1,33 +1,5 @@
-import { resourceData } from "../../../store/runtime.ts";
-import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
-import type { SidebarAgent } from "../../sidebar/support/viewModel.ts";
-import { observer } from "mobx-react-lite";
-import { ApiError } from "../../../api.ts";
-import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
-import {
-  AgentSource as GeneratedApiAgentSource,
-  WorkspaceMode as GeneratedApiWorkspaceMode,
-} from "../../../generated/api.ts";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { McpInventory } from "../McpInventory/McpInventory.tsx";
-import {
-  isModelEnabled,
-  useModelChoices,
-} from "../../settings/models/support/modelChoices.ts";
-import Tasks from "../tasks/Tasks/Tasks.tsx";
-import { providerSupports } from "../../../generated/providerKind.ts";
-import {
-  useServerStore,
-  useServerApi,
-  useServerSync,
-} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { SearchContent } from "../search/SearchContent/SearchContent.tsx";
-import { EmptyState } from "../../ui/EmptyState/EmptyState.tsx";
-import { PanelHeader } from "../../ui/PanelHeader/PanelHeader.tsx";
-import { localDateTime } from "../../../local-time.ts";
-import ErrorDescription from "../ErrorDescription/ErrorDescription.tsx";
-import { useWorkspaceResource as useResource } from "./useWorkspaceResource.ts";
-import { needsAnswer } from "../../../approvals.ts";
+const diffHunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)/;
+const diffPathPattern = / b\/(.*)$/;
 import {
   Badge,
   Button,
@@ -54,40 +26,67 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
+import { observer } from "mobx-react-lite";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
 import {
+  ApiError,
   errorText,
   type ApiPostPath,
   type GetResult,
   type PostBody,
   type PostResult,
 } from "../../../api.ts";
+import { needsAnswer } from "../../../approvals.ts";
+import {
+  AgentSource as GeneratedApiAgentSource,
+  WorkspaceMode as GeneratedApiWorkspaceMode,
+} from "../../../generated/api.ts";
+import { agentId as observableAgentId } from "../../../generated/observableResources.ts";
+import { providerSupports } from "../../../generated/providerKind.ts";
+import { localDateTime } from "../../../local-time.ts";
+import { serverMutationResponseIsUncertain } from "../../../servers/mutationIdentity.ts";
+import { resourceData } from "../../../store/runtime.ts";
 import type { Agent, Json, JsonInput, JsonValue } from "../../../types.ts";
-import { useFormDraft } from "./useFormDraft.ts";
+import { modelProvider } from "../../accounts/support/accountPreference.ts";
+import { useWorkerModels } from "../../agents/support/WorkerModelPicker.tsx";
+import FilePreview, {
+  useFilePreview,
+  type PreviewTarget,
+} from "../../conversation/FilePreview/FilePreview.tsx";
+import {
+  useServerApi,
+  useServerStore,
+  useServerSync,
+} from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
 import { ModelField } from "../../settings/models/ModelField/ModelField.tsx";
+import {
+  isModelEnabled,
+  useModelChoices,
+} from "../../settings/models/support/modelChoices.ts";
 import {
   modelDisplayName,
   modelForValue,
   toModelOptions,
 } from "../../settings/models/support/modelOption.ts";
-import { useWorkerModels } from "../../agents/support/WorkerModelPicker.tsx";
+import type { SidebarAgent } from "../../sidebar/support/viewModel.ts";
+import { EmptyState } from "../../ui/EmptyState/EmptyState.tsx";
+import { PanelHeader } from "../../ui/PanelHeader/PanelHeader.tsx";
+import ErrorDescription from "../ErrorDescription/ErrorDescription.tsx";
+import { McpInventory } from "../McpInventory/McpInventory.tsx";
 import TeamChats from "../messages/TeamChats/TeamChats.tsx";
-import FilePreview, {
-  useFilePreview,
-  type PreviewTarget,
-} from "../../conversation/FilePreview/FilePreview.tsx";
-
-const diffHunkPattern = /^@@ -\d+(?:,\d+)? \+(\d+)/;
-const diffPathPattern = / b\/(.*)$/;
-import {
-  WorkspacePanelHost,
-  type WorkspacePanelPresentationProps,
-} from "../WorkspacePanelHost/WorkspacePanelHost.tsx";
-import { modelProvider } from "../../accounts/support/accountPreference.ts";
+import { SearchContent } from "../search/SearchContent/SearchContent.tsx";
+import Tasks from "../tasks/Tasks/Tasks.tsx";
 import {
   WorkerLaunchDialog,
   type WorkerLaunch,
 } from "../WorkerLaunchDialog/WorkerLaunchDialog.tsx";
+import {
+  WorkspacePanelHost,
+  type WorkspacePanelPresentationProps,
+} from "../WorkspacePanelHost/WorkspacePanelHost.tsx";
+import { useFormDraft } from "./useFormDraft.ts";
+import { useWorkspaceResource as useResource } from "./useWorkspaceResource.ts";
 
 type Props = WorkspacePanelPresentationProps & {
   initialSection?: string;
@@ -140,7 +139,7 @@ const date = (value: number | string | undefined) =>
 function Empty({ children }: { children: React.ReactNode }) {
   return <EmptyState title={children} />;
 }
-function ResourceState({
+const ResourceState = observer(function ResourceState({
   state,
 }: {
   state: { error: string; loading: boolean; data: unknown };
@@ -154,7 +153,7 @@ function ResourceState({
       <Loader size="sm" />
     </div>
   ) : null;
-}
+});
 function Status({ value }: { value: string }) {
   return (
     <Badge
@@ -302,9 +301,7 @@ export const Workspace = observer(function Workspace(props: Props) {
               size="compact-sm"
               className="workspace-messages-refresh"
               aria-label="Refresh messages"
-              onClick={() => {
-                reload();
-              }}
+              onClick={reload}
             >
               <RefreshCw size={16} />
             </Button>
@@ -526,16 +523,9 @@ const Changes = observer(function Changes(c: Context) {
     } | null>(null),
     [saving, setSaving] = useState(false);
   const report = state.data?.scope === "chat" ? state.data : null;
-  const files = (report?.files || []).filter(
-    (file) => typeof file.path === "string" && typeof file.status === "string",
-  );
+  const files = report?.files ?? [];
   const annotations = (comments.data?.annotations || []).filter(
-    (entry) =>
-      entry.agent === c.selected?.id &&
-      typeof entry.id === "string" &&
-      typeof entry.path === "string" &&
-      typeof entry.line === "number" &&
-      typeof entry.text === "string",
+    (entry) => entry.agent === c.selected?.id,
   );
   let line = 0,
     current = "",
@@ -920,16 +910,14 @@ type CheckpointPreview = Omit<
   "checkpoint"
 > & { checkpoint: string; label: string };
 
-function Tools(c: Context) {
+const Tools = observer(function Tools(c: Context) {
   const { get, post } = useServerApi();
   const state = useResource("/api/capabilities", c.revision, {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
     [query, setQuery] = useState("");
   const managedTools = (state.data?.managed ?? []).filter(isRecord);
-  const observedNative = (state.data?.observedNative ?? []).filter(
-    (name): name is string => typeof name === "string",
-  );
+  const observedNative = state.data?.observedNative ?? [];
   return (
     <>
       <ResourceState state={state} />
@@ -992,11 +980,7 @@ function Tools(c: Context) {
               ))}
           </div>
           <h3 className="workspace-section-title">Observed native tools</h3>
-          <p className="workspace-muted">
-            {typeof state.data.nativeInventory === "string"
-              ? state.data.nativeInventory
-              : JSON.stringify(state.data.nativeInventory)}
-          </p>
+          <p className="workspace-muted">{state.data.nativeInventory}</p>
           <div className="workspace-actions">
             {observedNative
               .filter((name) =>
@@ -1036,22 +1020,13 @@ function Tools(c: Context) {
       )}
     </>
   );
-}
-function Inventory({ value, query }: { value: unknown; query: string }) {
-  if (!value || (Array.isArray(value) && !value.length))
+});
+function Inventory({ value, query }: { value: JsonValue[]; query: string }) {
+  if (!value.length)
     return <p className="workspace-muted">No entries returned by Codex.</p>;
-  const entries: unknown[] = Array.isArray(value)
-    ? value
-    : isRecord(value)
-      ? Array.isArray(value.data)
-        ? value.data
-        : Array.isArray(value.servers)
-          ? value.servers
-          : [value]
-      : [value];
   return (
     <div className="workspace-tools">
-      {entries
+      {value
         .filter((entry: unknown) =>
           JSON.stringify(entry)?.toLowerCase().includes(query.toLowerCase()),
         )
@@ -1363,7 +1338,7 @@ const Profiles = observer(function Profiles(c: Context) {
   );
 });
 
-function Rules(c: Context) {
+const Rules = observer(function Rules(c: Context) {
   const state = useResource("/api/rules", c.revision, {
       query: c.selected ? { agent: c.selected.id } : {},
     }),
@@ -1713,7 +1688,7 @@ function Rules(c: Context) {
       </Modal>
     </>
   );
-}
+});
 
 type RuleRecord = GetResult<"/api/rules">["rules"][number];
 type RuleAction = NonNullable<PostBody<"/api/rules">["action"]>;

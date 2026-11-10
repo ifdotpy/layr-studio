@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("react", () => ({
+  useMemo: (create: () => unknown) => create(),
   useEffect: (effect: () => void | (() => void)) => {
     mocks.effects.push(effect);
   },
@@ -63,13 +64,19 @@ vi.mock("../../../sync/readRetry.ts", () => ({
 import { useUploadRecovery } from "./useUploadRecovery.ts";
 import type { PendingUpload } from "../../../sync/uploads.ts";
 
-function mount() {
-  useUploadRecovery("/workspace/state", "workspace-1", async () => true);
+function mountOwner(
+  attach: Parameters<typeof useUploadRecovery>[2] = async () => true,
+) {
+  const store = useUploadRecovery("/workspace/state", "workspace-1", attach);
   const cleanups = mocks.effects.splice(0).flatMap((effect) => {
     const cleanup = effect();
     return cleanup ? [cleanup] : [];
   });
-  return () => cleanups.forEach((cleanup) => cleanup());
+  return { store, unmount: () => cleanups.forEach((cleanup) => cleanup()) };
+}
+
+function mount() {
+  return mountOwner().unmount;
 }
 
 function upload(): PendingUpload {
@@ -177,4 +184,106 @@ describe("useUploadRecovery", () => {
     expect(vi.getTimerCount()).toBe(0);
     unmount();
   });
+});
+
+it("keeps permanent delivery failures pending until an explicit retry", async () => {
+  const row = upload(),
+    asset = {
+      id: row.id,
+      image: false,
+      mime: row.mime,
+      name: row.name,
+      size: row.size,
+    };
+  let rows = [row];
+  mocks.pendingUploads.mockImplementation(async () => rows);
+  mocks.deliverUpload
+    .mockRejectedValueOnce(new Error("invalid file"))
+    .mockResolvedValueOnce(asset);
+  mocks.finishUpload.mockImplementation(async () => {
+    rows = [];
+  });
+  const attach = vi.fn(async () => true),
+    { store, unmount } = mountOwner(attach);
+  try {
+    await flushMicrotasks();
+    expect(store.pending).toEqual([row]);
+    expect(store.error).toContain("invalid file");
+    expect(store.busy).toBe(false);
+    for (const listener of mocks.uploadListeners) listener();
+    await flushMicrotasks();
+    expect(mocks.deliverUpload).toHaveBeenCalledTimes(1);
+    store.retry();
+    await flushMicrotasks();
+    expect(mocks.deliverUpload).toHaveBeenCalledTimes(2);
+    expect(mocks.deliverUpload.mock.calls[1]?.[0]).toEqual(row);
+    expect(attach).toHaveBeenCalledTimes(1);
+    expect(store.pending).toEqual([]);
+    expect(store.error).toBe("");
+  } finally {
+    unmount();
+  }
+});
+it("cancels a delivery on unmount without attaching or finishing its late result", async () => {
+  const row = upload(),
+    pending = Promise.withResolvers<{
+      id: string;
+      image: boolean;
+      mime: string;
+      name: string;
+      size: number;
+    }>();
+  mocks.pendingUploads.mockResolvedValue([row]);
+  mocks.deliverUpload.mockReturnValueOnce(pending.promise);
+  const attach = vi.fn(async () => true),
+    { store, unmount } = mountOwner(attach);
+  await flushMicrotasks();
+  expect(store.busy).toBe(true);
+  unmount();
+  pending.resolve({
+    id: row.id,
+    image: false,
+    mime: row.mime,
+    name: row.name,
+    size: row.size,
+  });
+  await flushMicrotasks();
+  expect(attach).not.toHaveBeenCalled();
+  expect(mocks.finishUpload).not.toHaveBeenCalled();
+  expect(mocks.pendingUploads).toHaveBeenCalledTimes(1);
+});
+it("automatically retries the identical IndexedDB row after a transaction abort", async () => {
+  const row = upload(),
+    asset = {
+      id: row.id,
+      image: false,
+      mime: row.mime,
+      name: row.name,
+      size: row.size,
+    };
+  let rows = [row];
+  mocks.pendingUploads.mockImplementation(async () => rows);
+  mocks.deliverUpload
+    .mockRejectedValueOnce(
+      new DOMException("transaction aborted", "AbortError"),
+    )
+    .mockResolvedValueOnce(asset);
+  mocks.finishUpload.mockImplementation(async () => {
+    rows = [];
+  });
+  const { store, unmount } = mountOwner();
+  try {
+    await flushMicrotasks();
+    expect(store.error).toContain("transaction aborted");
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushMicrotasks();
+    expect(mocks.deliverUpload.mock.calls.map((call) => call[0]?.id)).toEqual([
+      row.id,
+      row.id,
+    ]);
+    expect(store.error).toBe("");
+    expect(store.pending).toEqual([]);
+  } finally {
+    unmount();
+  }
 });

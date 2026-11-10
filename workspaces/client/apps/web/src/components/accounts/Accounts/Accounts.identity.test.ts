@@ -1,169 +1,131 @@
-vi.mock("mobx-react-lite", () => ({
-  observer: <T>(component: T) => component,
-}));
-import {
-  ProviderKind as GeneratedApiProviderKind,
-  AccountStatus as GeneratedApiAccountStatus,
-} from "../../../generated/api.ts";
-import { ProviderKind as GeneratedProviderProviderKind } from "../../../generated/providerKind.ts";
-import { beforeEach, expect, it, vi } from "vitest";
-import type { Account, AccountsState } from "../support/Accounts.tsx";
+import { afterEach, beforeEach, expect, it } from "vitest";
 import type { ServerCommand } from "../../../servers/navigation.ts";
-
-const hooks = vi.hoisted(() => ({
-  effects: [] as (() => void | (() => void))[],
-  writes: [] as unknown[],
-  refresh: vi.fn(),
-  post: vi.fn(async () => ({})),
-}));
-vi.mock("react", async (original) => ({
-  ...(await original<typeof import("react")>()),
-  useEffect: (effect: () => void | (() => void)) => hooks.effects.push(effect),
-  useLayoutEffect: () => {},
-  useCallback: (callback: unknown) => callback,
-  useRef: (current: unknown) => ({ current }),
-  useState: (initial: unknown) => [
-    typeof initial === "function" ? initial() : initial,
-    (value: unknown) => hooks.writes.push(value),
-  ],
-}));
-vi.mock(
-  "../../servers/ServerServicesProvider/ServerServicesProvider.tsx",
-  async (original) => ({
-    ...(await original<
-      typeof import("../../servers/ServerServicesProvider/ServerServicesProvider.tsx")
-    >()),
-    useServerApi: () => ({ post: hooks.post }),
-    useServerStorage: () => ({ getItem: () => null, setItem: vi.fn() }),
-  }),
-);
-import Accounts from "./Accounts.tsx";
-const personal: Account = {
-  id: "personal",
-  provider: GeneratedApiProviderKind.claude,
-  email: "same@example.test",
-  label: "Personal",
-  status: GeneratedApiAccountStatus.ready,
-  home: "/fixture/personal",
-  source: "fixture",
-};
-const team: Account = {
-  id: "team",
-  provider: GeneratedApiProviderKind.claude,
-  email: "same@example.test",
-  label: "Team",
-  status: GeneratedApiAccountStatus.ready,
-  home: "/fixture/team",
-  source: "fixture",
-};
+import { accountsFixture, personal } from "./Accounts.fixture.ts";
+let fixture: ReturnType<typeof accountsFixture>;
 beforeEach(() => {
-  hooks.effects = [];
-  hooks.writes = [];
-  hooks.refresh.mockReset();
-  hooks.post.mockClear();
+  fixture = accountsFixture();
 });
-
-async function receive(
-  command: Extract<
-    ServerCommand,
-    { action: "account-action" | "account-sign-in" }
-  >,
-  replay = false,
-) {
-  const data: AccountsState = {
-    accounts: [personal, team],
-    archivedAccounts: [],
-    defaultAccountKey: "personal",
-    defaultAccountGroups: [],
-    supportsDelete: true,
-    supportsDisconnect: true,
-  };
-  Accounts({
-    state: data,
-    scope: "fixture",
-    onError: vi.fn(),
-    externalCommand: command,
-  });
-  const stops = hooks.effects.map((effect) => effect());
-  for (let step = 0; step < 4; step++) await Promise.resolve();
-  if (replay) {
-    hooks.effects.forEach((effect) => effect());
-    for (let step = 0; step < 4; step++) await Promise.resolve();
-  }
-  for (const stop of stops) stop?.();
-}
-
-it("opens the exact Team profile for a configure command, not the first matching email", async () => {
-  await receive({
+afterEach(() => fixture.close());
+const command = (
+  operation: Extract<ServerCommand, { action: "account-action" }>["operation"],
+  accountKey = "team",
+) =>
+  ({
     action: "account-action",
-    operation: "configure-profile",
-    provider: GeneratedProviderProviderKind.Claude,
-    email: personal.email!,
+    operation,
+    accountKey,
+    provider: "claude",
+    email: personal.email,
     label: "Team",
+  }) satisfies ServerCommand;
+
+it("opens the exact Team profile for a configure command, not the first matching email", () => {
+  fixture.ui.receive(command("configure-profile"));
+  expect(fixture.ui.dialog).toEqual({
+    kind: "configureProfile",
     accountKey: "team",
   });
-  expect(hooks.writes).toContain(team);
-  expect(hooks.writes).not.toContain(personal);
+  expect(fixture.ui.dialogAccount?.id).toBe("team");
 });
-
-it("does not open Add or a guessed profile for an ambiguous legacy sign-in command", async () => {
-  await receive({
+it("does not open Add or a guessed profile for a keyless sign-in command", () => {
+  // @ts-expect-error A malformed external command deliberately violates the exact-key contract.
+  fixture.ui.receive({
     action: "account-sign-in",
-    provider: GeneratedProviderProviderKind.Claude,
-    email: personal.email!,
+    provider: "claude",
+    email: personal.email,
     label: "Personal",
     serverLabel: "Fixture",
   });
-  expect(hooks.writes).not.toContain(true);
-  expect(hooks.writes).not.toContain(personal);
-  expect(hooks.writes).not.toContain(team);
-  expect(hooks.writes).toContain(
-    "Multiple saved accounts match. Select the exact profile.",
+  expect(fixture.ui.dialog).toBeNull();
+  expect(fixture.ui.error).toBe(
+    "This account is no longer saved on this server.",
   );
 });
-
-it("does not open Add or another profile when an exact sign-in key is missing", async () => {
-  await receive({
+it("does not open Add or another profile when an exact sign-in key is missing", () => {
+  fixture.ui.receive({
     action: "account-sign-in",
-    provider: GeneratedProviderProviderKind.Claude,
-    email: personal.email!,
-    label: "Personal",
-    serverLabel: "Fixture",
     accountKey: "deleted",
-  });
-  expect(hooks.writes).not.toContain(true);
-  expect(hooks.writes).not.toContain(personal);
-  expect(hooks.writes).not.toContain(team);
-});
-
-it("preserves an explicit Add request even when the email already has profiles", async () => {
-  await receive({
-    action: "account-sign-in",
-    provider: GeneratedProviderProviderKind.Claude,
-    email: personal.email!,
-    label: "Another",
+    provider: "claude",
+    email: personal.email,
+    label: "Personal",
     serverLabel: "Fixture",
-    forceAdd: true,
   });
-  expect(hooks.writes).toContain(true);
-  expect(hooks.writes).not.toContain(personal);
-  expect(hooks.writes).not.toContain(team);
+  expect(fixture.ui.dialog).toBeNull();
 });
-
-it("resolves an external default command without refreshing accounts and executes it once", async () => {
-  await receive(
-    {
-      action: "account-action",
-      operation: "default",
-      provider: GeneratedProviderProviderKind.Claude,
-      email: personal.email!,
-      label: "Team",
-      accountKey: "team",
-    },
-    true,
-  );
-  expect(hooks.refresh).not.toHaveBeenCalled();
-  expect(hooks.post).toHaveBeenCalledExactlyOnceWith("/api/accounts/default", {
-    account_key: "team",
+it("preserves an explicit cross-server Add request even when the email already has profiles", () => {
+  fixture.ui.receive({
+    action: "account-sign-in",
+    forceAdd: true,
+    provider: "claude",
+    email: personal.email,
+    label: "Another",
+    serverLabel: "Other server",
   });
+  expect(fixture.ui.dialog?.kind).toBe("add");
+  expect(fixture.ui.addDraft.email).toBe(personal.email);
+  expect(fixture.ui.addDraft.label).toBe("Another");
+  expect(fixture.ui.addIntent?.serverLabel).toBe("Other server");
+});
+it("resolves an external default command without refreshing accounts and executes it once", async () => {
+  const next = command("default");
+  fixture.ui.receive(next);
+  fixture.ui.receive(next);
+  await Promise.resolve();
+  await Promise.resolve();
+  fixture.ui.receive(next);
+  expect(fixture.post).toHaveBeenCalledExactlyOnceWith(
+    "/api/accounts/default",
+    { account_key: "team" },
+  );
+});
+it("retries a rename with the identical submitted request after a lost reply", async () => {
+  fixture.post.mockRejectedValueOnce(new Error("Reply lost"));
+  fixture.ui.receive(command("rename"));
+  fixture.ui.setRenameLabel("Renamed");
+  await fixture.ui.saveRename();
+  expect(fixture.ui.error).toBe("Reply lost");
+  fixture.ui.setRenameLabel("Changed after uncertainty");
+  expect(fixture.ui.renameLabel).toBe("Renamed");
+  fixture.ui.close();
+  fixture.ui.receive(command("rename"));
+  await fixture.ui.saveRename();
+  expect(fixture.post).toHaveBeenCalledTimes(2);
+  expect(fixture.post.mock.calls[1]).toEqual(fixture.post.mock.calls[0]);
+  expect(fixture.ui.dialog).toBeNull();
+});
+it("locks synchronous duplicate submits and close while an action is pending", async () => {
+  let reject!: (reason: Error) => void;
+  fixture.post.mockImplementationOnce(
+    () =>
+      new Promise((_resolve, fail) => {
+        reject = fail;
+      }),
+  );
+  fixture.ui.receive(command("rename"));
+  fixture.ui.setRenameLabel("Renamed");
+  const pending = fixture.ui.saveRename();
+  fixture.ui.saveRename();
+  fixture.ui.close();
+  fixture.ui.receive(command("remove"));
+  expect(fixture.ui.dialog?.kind).toBe("rename");
+  expect(fixture.ui.error).toContain("Wait");
+  expect(fixture.post).toHaveBeenCalledOnce();
+  reject(new Error("Lost reply"));
+  await pending;
+  expect(fixture.ui.pending).toBe("");
+});
+it("reads dialog accounts and default replacements directly from generated updates", () => {
+  fixture.ui.receive(command("disconnect", "personal"));
+  expect(fixture.ui.targetsDefault).toBe(true);
+  expect(fixture.ui.replacementAccount?.id).toBe("team");
+  fixture.publish({
+    ...fixture.summary,
+    accounts: fixture.summary.accounts.map((account) => ({
+      ...account,
+      label: "Updated",
+      ...(account.id === "team" ? { disconnected: true } : {}),
+    })),
+  });
+  expect(fixture.ui.dialogAccount?.label).toBe("Updated");
+  expect(fixture.ui.canConfirmRemoval).toBe(false);
 });

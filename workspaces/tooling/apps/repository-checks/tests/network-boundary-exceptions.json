@@ -5,8 +5,6 @@
   "components/accounts/AccountGroup/AccountGroup.tsx": "Account group command still obtains the API from context.",
   "components/accounts/AccountSignIn/AccountSignIn.tsx": "Sign-in commands (start, code submit, retry) still use the context API; progress is a store facade.",
   "components/accounts/AccountStartThrottle/AccountStartThrottle.tsx": "Throttle reset command still uses the context API.",
-  "components/accounts/Accounts/Accounts.tsx": "Account commands (default account, reconnect) still use the context API.",
-  "components/accounts/ClaudeAddSignIn/ClaudeAddSignIn.tsx": "Account sign-in command still uses the context API.",
   "components/accounts/ClaudeSignIn/ClaudeSignIn.tsx": "Sign-in commands and login progress still use transport context.",
   "components/accounts/CodexSignIn/CodexSignIn.tsx": "Sign-in commands still use the context API.",
   "components/accounts/SignInPushSettings/SignInPushSettings.tsx": "Push settings read and commands remain in the component (R13).",

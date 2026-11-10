@@ -1,7 +1,7 @@
 import { projectedLimits } from "../../../usage/accountLimits.fixture.ts";
 import { serializeStateCollections } from "../../../generated/observableResources.ts";
 import { AccountStatus, ProviderKind } from "../../../generated/api.ts";
-import { runInAction } from "mobx";
+import { action, observable } from "mobx";
 // @vitest-environment happy-dom
 import { act, createElement, memo, Profiler } from "react";
 import { createRoot } from "react-dom/client";
@@ -65,7 +65,7 @@ vi.mock("../support/usePromptRecall.ts", () => ({
   usePromptRecall: () => ({}),
 }));
 vi.mock("../support/useAttachmentDrafts.ts", () => ({
-  useAttachmentDrafts: () => [{}, vi.fn()],
+  useAttachmentDraftStore: () => ({ current: {}, set: vi.fn() }),
 }));
 vi.mock("../support/useUploadRecovery.ts", () => ({
   useUploadRecovery: () => ({ pending: h.empty }),
@@ -114,11 +114,16 @@ afterEach(() => {
 vi.mock("../transcript/TurnHistory/TurnHistory.tsx", async () => {
   const { useTranscriptActions } = await import("../support/navigation.ts");
   const Consumer = memo(function Consumer() {
-    useTranscriptActions();
+    const { renderMessage } = useTranscriptActions();
     return createElement(Profiler, {
       id: "transcript-consumer",
       onRender: (_id, phase) => h.commits.push(phase),
-      children: createElement("span", null, "Transcript consumer"),
+      children: createElement(
+        "span",
+        null,
+        "Transcript consumer",
+        ...h.items.filter((item) => item.nativeNotice).map(renderMessage),
+      ),
     });
   });
   return { default: () => createElement(Consumer) };
@@ -173,9 +178,9 @@ it.each(["scroll", "resize"] as const)(
           host
             .querySelector("#messages")
             ?.dispatchEvent(new Event("scroll", { bubbles: true }));
-          runInAction(() => {
+          action(() => {
             actions.selected.history.before = "older-page";
-          });
+          })();
         } else {
           actions.layout.recordResize({
             ...actions.layout.geometry,
@@ -326,5 +331,71 @@ it("an account identity readback with the same plan leaves Conversation idle", a
     host.remove();
     f.store.dispose();
     actions.scope.services.close();
+  }
+});
+
+it("updates an existing transcript notice when SSE changes its fields in place", async () => {
+  const item = observable<Message>({
+    id: "native-notice",
+    role: "system",
+    text: "",
+    nativeNotice: "error",
+    nativeError: "Initial failure",
+    details: "Initial detail",
+    nativeHookQuiet: false,
+  });
+  const previous = h.items;
+  h.items = [item];
+  const f = requestFixture(
+    [],
+    [agentSummaryFixture("lead", { rootId: "lead", isLead: true })],
+    [{ id: "lead", canSend: true }],
+  );
+  const actions = conversationActionsFixture(() => {}, f.store);
+  actions.navigation.selectedId = "lead";
+  actions.selected.history.items = h.items;
+  const host = document.body.appendChild(document.createElement("div"));
+  const root = createRoot(host);
+  try {
+    await act(async () =>
+      root.render(
+        createElement(
+          MantineProvider,
+          null,
+          createElement(
+            ServerStoreProvider,
+            { value: f.store },
+            createElement(
+              ConversationProvider,
+              { value: actions },
+              createElement(Conversation),
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(host.textContent).toContain("Initial failure");
+    expect(host.textContent).toContain("Initial detail");
+    await act(async () =>
+      action(() => {
+        item.nativeError = "Updated failure";
+        item.details = "Updated detail";
+      })(),
+    );
+    expect(host.textContent).toContain("Updated failure");
+    expect(host.textContent).toContain("Updated detail");
+    expect(host.textContent).not.toContain("Initial failure");
+    await act(async () =>
+      action(() => {
+        item.nativeHookQuiet = true;
+      })(),
+    );
+    expect(host.querySelector('[data-message="native-notice"]')).toBeNull();
+  } finally {
+    await act(async () => root.unmount());
+    host.remove();
+    f.store.dispose();
+    actions.scope.services.close();
+    h.items = previous;
   }
 });

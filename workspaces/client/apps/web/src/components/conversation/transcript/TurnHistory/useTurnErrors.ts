@@ -20,7 +20,6 @@ export function failedTurnsNeedingLookup(
       items.flatMap((item) =>
         ["failed", "uncertain"].includes(item.turnStatus || "") &&
         item.turnId &&
-        typeof item.turnId === "string" &&
         !existing.has(item.turnId)
           ? [item.turnId]
           : [],
@@ -41,6 +40,7 @@ function createEmptyLookup(scope = "") {
   };
 }
 const emptyLookup = createEmptyLookup();
+type Lookup = ReturnType<typeof createEmptyLookup>;
 
 export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
   const store = useServerStore();
@@ -64,6 +64,10 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
   const scope = `${workspace}:${agent?.id}:${agent?.threadId}`;
   const [lookupAttempt, setLookupAttempt] = useState(0);
   const [result, setResult] = useState(() => createEmptyLookup(scope));
+  const updateLookup = (update: (old: Lookup) => Lookup) =>
+    setResult((old) =>
+      update(old.scope === scope ? old : createEmptyLookup(scope)),
+    );
   const current = result.scope === scope ? result : emptyLookup;
   const cached = cachedErrors.get(scope);
   const { errors, resolved, existing, turns } = useMemo(
@@ -88,9 +92,7 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
           errors[agent.lastCompletedTurn] = detail?.error;
         const existing = new Set(
           items.flatMap((item) =>
-            item.nativeNotice === "error" && typeof item.turnId === "string"
-              ? [item.turnId]
-              : [],
+            item.nativeNotice === "error" && item.turnId ? [item.turnId] : [],
           ),
         );
         const turns = failedTurnsNeedingLookup(items, existing);
@@ -120,8 +122,8 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     if (!agent?.id || !agent.threadId || !requestKey) return;
     let active = true;
     const requested = requestKey.split(",");
-    setResult((old) => ({
-      ...(old.scope === scope ? old : current),
+    updateLookup((old) => ({
+      ...old,
       scope,
       loading: requested,
     }));
@@ -148,7 +150,7 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
           if (
             turn.agentId === agentId &&
             turn.threadId === threadId &&
-            typeof turn.turnId === "string" &&
+            turn.turnId &&
             requested.includes(turn.turnId) &&
             ["failed", "uncertain"].includes(turn.status || "") &&
             turn.error
@@ -175,27 +177,21 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
     request
       .then((recovered) => {
         if (!active) return;
-        setResult((old) => ({
+        updateLookup((old) => ({
           scope,
-          checked: [...(old.scope === scope ? old.checked : []), ...requested],
-          failed:
-            old.scope === scope
-              ? old.failed.filter((turn) => !requested.includes(turn))
-              : [],
-          errors: { ...(old.scope === scope ? old.errors : {}), ...recovered },
+          checked: [...old.checked, ...requested],
+          failed: old.failed.filter((turn) => !requested.includes(turn)),
+          errors: { ...old.errors, ...recovered },
           loading: [],
         }));
       })
       .catch(() => {
         if (active)
-          setResult((old) => ({
+          updateLookup((old) => ({
             scope,
-            checked: [
-              ...(old.scope === scope ? old.checked : []),
-              ...requested,
-            ],
-            failed: [...(old.scope === scope ? old.failed : []), ...requested],
-            errors: old.scope === scope ? old.errors : {},
+            checked: [...old.checked, ...requested],
+            failed: [...old.failed, ...requested],
+            errors: old.errors,
             loading: [],
           }));
       });
@@ -213,13 +209,12 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
             .map((item) => item.turnId),
         );
         items.forEach((item, index) => {
-          if (item.turnId && typeof item.turnId === "string")
-            last.set(item.turnId, index);
+          if (item.turnId) last.set(item.turnId, index);
         });
         if (!Object.keys(errors).length) return items;
         return items.flatMap((item, index): Message[] => {
           const turnId = item.turnId;
-          if (!turnId || typeof turnId !== "string") return [item];
+          if (!turnId) return [item];
           const error = errors[turnId];
           if (!error || existing.has(turnId) || last.get(turnId) !== index)
             return [item];
@@ -249,13 +244,11 @@ export function useTurnErrors(items: Message[], agent?: Agent, workspace = "") {
   ).get();
   const retry = useCallback(
     (turn: string) => {
-      setResult((old) => ({
+      updateLookup((old) => ({
         scope,
-        errors: old.scope === scope ? old.errors : {},
-        checked:
-          old.scope === scope ? old.checked.filter((id) => id !== turn) : [],
-        failed:
-          old.scope === scope ? old.failed.filter((id) => id !== turn) : [],
+        errors: old.errors,
+        checked: old.checked.filter((id) => id !== turn),
+        failed: old.failed.filter((id) => id !== turn),
         loading: [],
       }));
       setLookupAttempt((value) => value + 1);

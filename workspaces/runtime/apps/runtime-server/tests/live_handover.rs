@@ -66,27 +66,32 @@ async fn site() -> Site {
 }
 
 fn server(site: &Site, name: &str, extra: &[&str]) -> Child {
+    let binary = PathBuf::from(
+        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server").expect("server binary"),
+    );
+    server_at(site, name, extra, &binary)
+}
+
+fn server_at(site: &Site, name: &str, extra: &[&str], binary: &std::path::Path) -> Child {
     let log = fs::File::create(site.home.join(format!("{name}.log"))).unwrap();
-    Command::new(
-        std::env::var_os("CARGO_BIN_EXE_studio-runtime-server")
-            .expect("cargo sets CARGO_BIN_EXE_studio-runtime-server"),
-    )
-    .args(["--port", "0"])
-    .args(extra)
-    .current_dir(&site.home)
-    .env_clear()
-    .env("HOME", &site.home)
-    .env("PATH", "/usr/bin:/bin")
-    .env("XDG_STATE_HOME", site.home.join("xdg-state"))
-    .env("XDG_CACHE_HOME", site.home.join("cache"))
-    .env("TMPDIR", &site.home)
-    .env("CODEX_AGENTS_STATE_DIR", &site.state)
-    .stdout(Stdio::piped())
-    .stderr(log)
-    .stdin(Stdio::null())
-    .kill_on_drop(true)
-    .spawn()
-    .unwrap()
+    Command::new(binary)
+        .args(["--port", "0"])
+        .args(extra)
+        .current_dir(&site.home)
+        .env_clear()
+        .env("HOME", &site.home)
+        .env("CARGO_MANIFEST_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env("PATH", "/usr/bin:/bin")
+        .env("XDG_STATE_HOME", site.home.join("xdg-state"))
+        .env("XDG_CACHE_HOME", site.home.join("cache"))
+        .env("TMPDIR", &site.home)
+        .env("CODEX_AGENTS_STATE_DIR", &site.state)
+        .stdout(Stdio::piped())
+        .stderr(log)
+        .stdin(Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap()
 }
 
 /// The port from the readiness line of a started server.
@@ -402,4 +407,104 @@ async fn a_new_server_serves_when_the_old_one_is_killed_during_the_drain() {
     assert_eq!(new_port, port);
     assert_eq!(serving_pid(port).await, new.id().unwrap());
     new.kill().await.unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn unlinked_running_executable_hands_off_to_a_standby() {
+    let site = site().await;
+    let binary = site.home.join("old-runtime");
+    fs::copy(env!("CARGO_BIN_EXE_studio-runtime-server"), &binary).unwrap();
+    let mut old = server_at(&site, "old", &[], &binary);
+    let port = served_port(&mut old).await;
+    fs::remove_file(&binary).unwrap();
+    let state = site.state.clone();
+    let mut taken =
+        tokio::task::spawn_blocking(move || handover::take(&state, Duration::from_secs(10)))
+            .await
+            .unwrap()
+            .unwrap();
+    let standby_present = taken.line.is_some();
+    if let Some(mut line) = taken.line.take() {
+        line.ready().unwrap();
+        line.close();
+    }
+    assert_eq!(taken.listener.local_addr().unwrap().port(), port);
+    drop(taken);
+    let status = timeout(Duration::from_secs(10), old.wait())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(status.success(), "old server failed handing off: {status}");
+    assert!(
+        standby_present,
+        "an unlinked executable must still start its standby"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[tokio::test]
+async fn standby_recovers_after_its_executable_is_unlinked() {
+    use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
+    use std::io::{BufRead, IoSlice, Read};
+    use std::mem::MaybeUninit;
+    use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+
+    let site = site().await;
+    let binary = site.home.join("standby-runtime");
+    fs::copy(env!("CARGO_BIN_EXE_studio-runtime-server"), &binary).unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (mut parent, input) = UnixStream::pair().unwrap();
+    parent
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut standby = Command::new(&binary)
+        .arg(handover::STANDBY_ARG)
+        .arg(&site.state)
+        .env_clear()
+        .env("HOME", &site.home)
+        .env("PATH", site.home.join("empty-path"))
+        .env("CARGO_MANIFEST_DIR", env!("CARGO_MANIFEST_DIR"))
+        .env("CODEX_AGENTS_STATE_DIR", &site.state)
+        .stdin(Stdio::from(std::os::fd::OwnedFd::from(input)))
+        .stdout(Stdio::piped())
+        .stderr(fs::File::create(site.home.join("old.log")).unwrap())
+        .kill_on_drop(true)
+        .spawn()
+        .unwrap();
+    let mut space = [MaybeUninit::uninit(); rustix::cmsg_space!(ScmRights(1))];
+    let mut control = SendAncillaryBuffer::new(&mut space);
+    let descriptors = [listener.as_fd()];
+    control.push(SendAncillaryMessage::ScmRights(&descriptors));
+    sendmsg(
+        &parent,
+        &[IoSlice::new(b"F")],
+        &mut control,
+        SendFlags::empty(),
+    )
+    .unwrap();
+    let mut bound = [0_u8; 1];
+    parent.read_exact(&mut bound).unwrap();
+    assert_eq!(&bound, b"B");
+    fs::remove_file(&binary).unwrap();
+    drop(parent);
+    let takeover = UnixStream::connect(site.state.join("handover-standby.sock")).unwrap();
+    takeover
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let mut drained = String::new();
+    std::io::BufReader::new(&takeover)
+        .read_line(&mut drained)
+        .unwrap();
+    assert_eq!(drained, "DRAINED\n");
+    // A failed new server closes the line before OPEN, so the same standby process
+    // must exec its retained old build and serve again.
+    drop(takeover);
+    drop(listener);
+    assert_eq!(served_port(&mut standby).await, port);
+    assert_eq!(serving_pid(port).await, standby.id().unwrap());
+    standby.kill().await.unwrap();
+    standby.wait().await.unwrap();
 }

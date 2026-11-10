@@ -1,233 +1,84 @@
 import { observer } from "mobx-react-lite";
-import { requestId as resourceRequestId } from "../../../generated/observableResources.ts";
-import { resourceData } from "../../../store/runtime.ts";
+import { useEffect, useRef, useState } from "react";
+import { Button, Group, Modal, Stack, TextInput } from "@mantine/core";
 import {
+  useServerApi,
   useServerStore,
   useServerResources,
 } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
-import { useServerApi } from "../../servers/ServerServicesProvider/ServerServicesProvider.tsx";
-import { Button, Group, Modal, Stack } from "@mantine/core";
-import { useEffect, useRef, useState } from "react";
-import { errorText, type PostResult } from "../../../api.ts";
-import { copyText } from "../../../clipboard/clipboard.ts";
 import type { Account } from "../support/Accounts.tsx";
+import { ClaudeAuthFlow } from "../support/ClaudeAuthFlow.ts";
 import { ClaudeAuthorizationCodeForm } from "../ClaudeAuthorizationCodeForm/ClaudeAuthorizationCodeForm.tsx";
-import {
-  codeSubmissionNotApplied,
-  codeSubmissionResolved,
-  codeVerificationPending,
-} from "../support/claudeCodeSubmission.ts";
 
-type Receipt = PostResult<"/api/accounts/claude/login">;
-type LoginAction = "start" | "code" | "cancel";
-const active = (receipt: Receipt | null) =>
-  !receipt || ["starting", "pending"].includes(receipt.status);
-function authUrl(value?: string | null): string | null {
-  try {
-    const url = new URL(value || "");
-    if (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      !url.port &&
-      ["claude.ai", "claude.com"].includes(url.hostname) &&
-      ["/oauth/authorize", "/cai/oauth/authorize"].includes(url.pathname)
-    )
-      return url.href;
-  } catch {
-    /* The login may not have a URL yet. */
-  }
-  return null;
-}
-
+/** New-profile and saved-profile Claude sign-ins share one concrete subscription flow. */
 export default observer(function ClaudeSignIn({
   account,
-  scope,
+  scope = "local",
+  label = account?.label || "Claude Code",
+  email = account?.email || "",
+  serverLabel,
+  opened = true,
   onClose,
   onReady,
-  serverLabel,
 }: {
-  account: Account;
+  account?: Account | undefined;
   scope?: string | undefined;
-  onClose: () => void;
-  onReady: () => unknown;
+  label?: string;
+  email?: string;
   serverLabel?: string | undefined;
+  opened?: boolean;
+  onClose: () => void;
+  onReady?: () => unknown;
 }) {
-  const { clearStableRequestId, post, save, saved, stableRequestId } =
-    useServerApi();
-
-  const storageKey = `claude-sign-in:${scope || "local"}:${account.id}`;
-  const [requestId, setRequestId] = useState(() =>
-    saved<string>(storageKey, ""),
-  );
-  const uncertaintyKey = `${storageKey}:code-submission-uncertain`;
-  const storeView = useServerStore();
-  const resources = useServerResources();
-  const observed = requestId
-    ? storeView.authProgress(resourceRequestId(requestId)).current
-    : undefined;
-  const observedReceipt = observed ? resourceData(observed) : undefined;
-  const receipt =
-    observedReceipt?.requestId === requestId &&
-    observedReceipt.accountKey === account.id &&
-    observedReceipt.status !== "duplicate" &&
-    observedReceipt.status !== "uncertain"
-      ? (observedReceipt as Receipt)
-      : null;
-  const publishReceipt = (result: Receipt) => {
-    resources.publish(
-      { kind: "auth-progress", requestId: result.requestId },
-      result,
-    );
-  };
-  const [code, setCode] = useState("");
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [codeSubmissionUncertain, setCodeSubmissionUncertain] = useState(() =>
-    saved<boolean>(uncertaintyKey, false),
-  );
-  const lock = useRef(false);
-  const preflightRejected = useRef(false);
-  const refreshed = useRef("");
+  const api = useServerApi(),
+    store = useServerStore(),
+    resources = useServerResources();
   const ready = useRef(onReady);
   ready.current = onReady;
-  const setCodeSubmissionUnknown = (value: boolean) => {
-    save(uncertaintyKey, value);
-    setCodeSubmissionUncertain(value);
-  };
-  const store = (result: Receipt, id: string) => {
-    if (result.requestId !== id || result.accountKey !== account.id)
-      throw new Error(
-        "The sign-in response belongs to another account or request.",
-      );
-    publishReceipt(result);
-    preflightRejected.current = false;
-    setError("");
-    if (codeSubmissionResolved(result)) setCodeSubmissionUnknown(false);
-    if (result.status === "ready" && refreshed.current !== id) {
-      refreshed.current = id;
-      void Promise.resolve(ready.current()).catch((failure) =>
-        setError(errorText(failure)),
-      );
-    }
-  };
-  useEffect(() => {
-    if (observed?.status === "error") setError(errorText(observed.error));
-    if (receipt && codeSubmissionResolved(receipt))
-      setCodeSubmissionUnknown(false);
-  }, [observed, receipt]);
-  useEffect(() => {
-    if (
-      receipt?.status === "ready" &&
-      refreshed.current !== receipt.requestId
-    ) {
-      refreshed.current = receipt.requestId;
-      void Promise.resolve(ready.current()).catch((failure) =>
-        setError(errorText(failure)),
-      );
-    }
-  }, [receipt]);
-  const run = async (action: LoginAction) => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(action);
-    setError("");
-    try {
-      const id =
-        action === "start" && (!requestId || !active(receipt))
-          ? randomUUID()
-          : requestId;
-      if (action === "start") {
-        if (id !== requestId) {
-          setCodeSubmissionUnknown(false);
-          preflightRejected.current = false;
-        }
-        save(storageKey, id);
-        setRequestId(id);
-      }
-      const submittedCode = code.trim();
-      if (action === "code") preflightRejected.current = false;
-      if (action === "code") setCodeSubmissionUnknown(true);
-      const mutationKey = `${storageKey}:${id}:${action}`;
-      const requestOptions = {
-        timeoutMs: 30000,
-        requestId: stableRequestId(mutationKey),
-      };
-      const result =
-        action === "start"
-          ? await post(
-              "/api/accounts/claude/login",
-              { login_id: id, account_key: account.id },
-              requestOptions,
-            )
-          : action === "code"
-            ? await post(
-                "/api/accounts/claude/login/code",
-                { login_id: id, code: submittedCode },
-                requestOptions,
-              )
-            : await post(
-                "/api/accounts/claude/login/cancel",
-                { login_id: id },
-                requestOptions,
-              );
-      clearStableRequestId(mutationKey);
-      if (action === "code") {
-        setCode("");
-        setCodeSubmissionUnknown(!codeSubmissionResolved(result));
-      }
-      store(result, id);
-    } catch (failure) {
-      if (action === "code") {
-        if (codeSubmissionNotApplied(failure)) {
-          setCodeSubmissionUnknown(false);
-          preflightRejected.current = true;
-        } else {
-          setCodeSubmissionUnknown(true);
-          preflightRejected.current = false;
-          setCode("");
-        }
-      }
-      setError(errorText(failure));
-    } finally {
-      lock.current = false;
-      setBusy("");
-    }
-  };
-  const url = authUrl(receipt?.verificationUrl);
-  const pending = !!requestId && active(receipt);
+  const [flow] = useState(
+    () =>
+      new ClaudeAuthFlow(api, store, resources, {
+        scope,
+        ...(account ? { accountKey: account.id } : {}),
+        label,
+        email,
+        onReady: () => ready.current?.(),
+      }),
+  );
+  useEffect(flow.startWatching, [flow]);
+  const { receipt, busy, requestId, url } = flow;
   return (
     <Modal
-      opened
+      opened={opened}
       onClose={onClose}
-      title={`Sign in to Claude · ${account.label}${serverLabel ? ` · ${serverLabel}` : ""}`}
+      title={`Sign in to Claude · ${flow.displayLabel}${account && serverLabel ? ` · ${serverLabel}` : ""}`}
       centered
     >
       <Stack gap="sm">
-        {serverLabel && <p>Server: {serverLabel}</p>}
-        <p>
-          Use your Claude subscription for{" "}
-          <strong>{account.email || account.label}</strong>.
-        </p>
+        {serverLabel &&
+          (account ? (
+            <p>Server: {serverLabel}</p>
+          ) : (
+            <TextInput label="Server" value={serverLabel} readOnly />
+          ))}
+        {account ? (
+          <p>
+            Use your Claude subscription for{" "}
+            <strong>{account.email || account.label}</strong>.
+          </p>
+        ) : (
+          flow.displayEmail && <p>Sign in as {flow.displayEmail}.</p>
+        )}
         {receipt?.status === "ready" ? (
           <p role="status">
-            Signed in{receipt.email ? ` as ${receipt.email}` : ""}. You can
-            retry the message.
+            {account
+              ? `Signed in${receipt.email ? ` as ${receipt.email}` : ""}. You can retry the message.`
+              : `Signed in as ${receipt.email || email || "Claude account"}.`}
           </p>
         ) : (
           <>
-            {pending && (
-              <p role="status">
-                {codeSubmissionUncertain
-                  ? "Studio could not confirm whether Claude received the authorization response. Check sign-in status or cancel this request; do not submit it again."
-                  : codeVerificationPending(receipt)
-                    ? "The full authorization response was submitted. Waiting for Claude to verify it; do not submit it again."
-                    : receipt?.status === "pending"
-                      ? "Complete sign-in in your browser."
-                      : "Waiting for the sign-in request."}
-              </p>
+            {receipt?.status === "cancelled" && (
+              <p role="status">Sign-in cancelled.</p>
             )}
             {url && (
               <Group>
@@ -237,102 +88,106 @@ export default observer(function ClaudeSignIn({
                   target="_blank"
                   rel="noopener noreferrer"
                 >
-                  Open Claude sign-in
+                  {account ? "Open Claude sign-in" : "Open sign-in page"}
                 </Button>
-                <Button
-                  variant="default"
-                  disabled={!!busy}
-                  onClick={() =>
-                    void (async () => {
-                      try {
-                        await copyText(url);
-                        setCopied(true);
-                      } catch (failure) {
-                        setError(errorText(failure));
-                      }
-                    })()
-                  }
-                >
-                  {copied ? "Link copied" : "Copy link"}
+                <Button variant="default" disabled={!!busy} onClick={flow.copy}>
+                  {flow.copied ? "Link copied" : "Copy link"}
                 </Button>
               </Group>
             )}
             {receipt?.verificationUrl && !url && (
-              <p role="alert">Claude returned an unsupported sign-in URL.</p>
+              <p role="alert">
+                Claude returned an unsupported sign-in{" "}
+                {account ? "URL" : "link"}.
+              </p>
             )}
-            {receipt?.status === "pending" &&
-              !codeVerificationPending(receipt) &&
-              !codeSubmissionUncertain && (
-                <ClaudeAuthorizationCodeForm
-                  value={code}
-                  onChange={(value) => {
-                    setCode(value);
-                    if (preflightRejected.current) {
-                      preflightRejected.current = false;
-                      setError("");
-                    }
-                  }}
-                  onSubmit={() => void run("code")}
-                  disabled={!!busy}
-                  loading={busy === "code"}
-                  submitLabel="Submit authorization response"
-                />
-              )}
-            {receipt?.status === "cancelled" && (
-              <p role="status">Sign-in cancelled.</p>
+            {flow.statusMessage && <p role="status">{flow.statusMessage}</p>}
+            {flow.canSubmitCode && (
+              <ClaudeAuthorizationCodeForm
+                value={flow.code}
+                onChange={flow.setCode}
+                onSubmit={() => void flow.run("code")}
+                disabled={!!busy}
+                loading={busy === "code"}
+                submitLabel="Submit authorization response"
+              />
             )}
             <Group>
-              {!requestId ? (
+              {(!requestId || (flow.terminal && !account)) && (
                 <Button
-                  onClick={() => void run("start")}
-                  disabled={!!busy}
+                  onClick={() => void flow.start(flow.displayEmail)}
                   loading={busy === "start"}
+                  disabled={!!busy}
                 >
-                  Start sign-in
+                  {receipt ? "Start again" : "Start sign-in"}
                 </Button>
-              ) : pending ? (
-                <Button onClick={() => resources.retryNow()} disabled={!!busy}>
+              )}
+              {flow.pending && (
+                <Button
+                  variant="default"
+                  disabled={!!busy}
+                  onClick={flow.check}
+                >
                   Check sign-in status
                 </Button>
-              ) : null}
-              {requestId && !receipt && !codeSubmissionUncertain && (
+              )}
+              {requestId && !receipt && !flow.codeSubmissionUncertain && (
                 <Button
-                  onClick={() => void run("start")}
+                  onClick={() => void flow.start(flow.displayEmail)}
                   disabled={!!busy}
                   loading={busy === "start"}
                 >
                   Retry sign-in
                 </Button>
               )}
-              {pending && requestId && (
+              {flow.pending && (
                 <Button
                   variant="subtle"
                   disabled={!!busy}
-                  onClick={() => void run("cancel")}
                   loading={busy === "cancel"}
+                  onClick={() => void flow.run("cancel")}
                 >
-                  Cancel sign-in
+                  {account ? "Cancel sign-in" : "Cancel"}
+                </Button>
+              )}
+              {flow.unknownTooLong && !flow.codeSubmissionUncertain && (
+                <Button
+                  variant="default"
+                  disabled={!!busy}
+                  onClick={() => void flow.start(flow.displayEmail, true)}
+                >
+                  Start again
                 </Button>
               )}
             </Group>
+            {flow.unknownTooLong && !flow.codeSubmissionUncertain && (
+              <p role="status">
+                The server has not found this request. Retry it, start again, or
+                cancel.
+              </p>
+            )}
+            {!account && flow.wrong && receipt?.email && (
+              <Button
+                variant="default"
+                disabled={!!busy}
+                onClick={() => void flow.start(receipt.email || "", true)}
+              >
+                Keep {receipt.email}
+              </Button>
+            )}
           </>
         )}
-        {Boolean(error || receipt?.error) && (
-          <p role="alert">{error || errorText(receipt?.error)}</p>
-        )}
-        {receipt?.status === "ready" && (
-          <Button disabled={!!busy} onClick={() => void run("start")}>
+        {flow.displayError && <p role="alert">{flow.displayError}</p>}
+        {account && flow.terminal && (
+          <Button disabled={!!busy} onClick={() => void flow.start()}>
             Start new sign-in
           </Button>
         )}
-        {(receipt?.status === "error" || receipt?.status === "cancelled") && (
-          <Button disabled={!!busy} onClick={() => void run("start")}>
-            Start new sign-in
+        <Group justify="flex-end">
+          <Button variant="subtle" onClick={onClose}>
+            Close
           </Button>
-        )}
-        <Button variant="subtle" onClick={onClose}>
-          Close
-        </Button>
+        </Group>
       </Stack>
     </Modal>
   );

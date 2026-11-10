@@ -229,7 +229,7 @@ mod unix {
         listener: TcpListener,
     ) -> std::io::Result<(oneshot::Receiver<Handed>, Kept)> {
         // The open file keeps this build's executable, whatever replaces it on disk.
-        let exe = File::open(std::env::current_exe()?)?;
+        let exe = studio_runtime_process::current_executable_file()?;
         let path = state_dir.join(SOCKET_FILE);
         match std::fs::remove_file(&path) {
             Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
@@ -279,8 +279,8 @@ mod unix {
         Some(listener)
     }
 
-    /// The path of the executable file that this process runs, even after a swap replaced
-    /// the path it started from.
+    /// An execution path for the retained file. Linux resolves the descriptor itself,
+    /// so unlinking or replacing the original name cannot change the executable.
     fn executable_path(exe: &File) -> std::io::Result<PathBuf> {
         #[cfg(target_vendor = "apple")]
         {
@@ -290,10 +290,15 @@ mod unix {
         }
         #[cfg(not(target_vendor = "apple"))]
         {
-            std::fs::read_link(format!(
-                "/proc/self/fd/{}",
-                std::os::fd::AsRawFd::as_raw_fd(exe)
-            ))
+            let path = format!("/proc/self/fd/{}", std::os::fd::AsRawFd::as_raw_fd(exe));
+            #[cfg(target_os = "linux")]
+            {
+                Ok(PathBuf::from(path))
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                std::fs::read_link(path)
+            }
         }
     }
 
@@ -408,7 +413,7 @@ mod unix {
     }
 
     fn standby() -> std::io::Result<()> {
-        let me = std::env::current_exe()?;
+        let me = studio_runtime_process::current_executable_file()?;
         let state_dir = std::env::args_os()
             .nth(2)
             .map(PathBuf::from)
@@ -464,7 +469,7 @@ mod unix {
             return Ok(());
         }
         eprintln!("live handover failed: the old build resumes");
-        Err(Command::new(me)
+        Err(Command::new(executable_path(&me)?)
             .arg(RESUME_ARG)
             .stdin(Stdio::from(listener))
             .exec())

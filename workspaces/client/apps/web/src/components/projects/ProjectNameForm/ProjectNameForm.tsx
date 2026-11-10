@@ -4,12 +4,13 @@ import {
   folderLabel,
 } from "../../../app/projects/ProjectOrganization.tsx";
 import { requestId as randomUUID } from "studio-claude-bridge/request-id.ts";
+import { observer } from "mobx-react-lite";
 import { Button, TextInput } from "@mantine/core";
 import { useId, useRef, useState } from "react";
 import { useProjectSave } from "../support/useProjectSave.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
-export function ProjectNameForm({
+export const ProjectNameForm = observer(function ProjectNameForm({
   project,
   folder,
   parentId,
@@ -81,4 +82,4 @@ export function ProjectNameForm({
       </Button>
     </form>
   );
-}
+});

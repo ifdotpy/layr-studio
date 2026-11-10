@@ -2,13 +2,14 @@ import {
   type Project,
   folderLabel,
 } from "../../../app/projects/ProjectOrganization.tsx";
+import { observer } from "mobx-react-lite";
 import { Button, NativeSelect } from "@mantine/core";
 import { useId, useRef, useState } from "react";
 import { useProjectSave } from "../support/useProjectSave.ts";
 import type { Agent } from "../../../types.ts";
 import { SettingsRow } from "../../ui/SettingsRow/SettingsRow.tsx";
 
-export function MoveChatForm({
+export const MoveChatForm = observer(function MoveChatForm({
   project,
   agent,
   saved,
@@ -19,10 +20,7 @@ export function MoveChatForm({
 }) {
   const [folder, setFolder] = useState(agent.projectFolder || "");
   const folderId = useId();
-  const save = useProjectSave("/api/organization", saved, (result) => {
-    if ((result.projectFolder || "") !== folder)
-      throw new Error("Restart Studio to use project folders.");
-  });
+  const save = useProjectSave("/api/organization", saved);
   const expected = useRef({
     folder: agent.projectFolder || null,
     revision: agent.projectFolderRevision || 0,
@@ -64,4 +62,4 @@ export function MoveChatForm({
       </Button>
     </form>
   );
-}
+});
