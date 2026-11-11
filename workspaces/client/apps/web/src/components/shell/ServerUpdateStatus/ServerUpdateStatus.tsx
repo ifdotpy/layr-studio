@@ -8,14 +8,16 @@ export const StartupStatus = observer(function StartupStatus() {
     <main
       className="startup"
       aria-label="Studio startup"
-      data-connecting={!startup.error || undefined}
+      data-connecting={(startup.connecting && !startup.error) || undefined}
     >
-      <p
-        role={startup.error ? "alert" : "status"}
-        className={startup.error ? "studio-recovery-banner" : undefined}
-      >
-        {startup.error || "Connecting to LAYR Studio…"}
-      </p>
+      {(startup.error || startup.connecting) && (
+        <p
+          role={startup.error ? "alert" : "status"}
+          className={startup.error ? "studio-recovery-banner" : undefined}
+        >
+          {startup.error || "Connecting to LAYR Studio…"}
+        </p>
+      )}
       {startup.error && <a href="/">Reload Studio</a>}
     </main>
   );

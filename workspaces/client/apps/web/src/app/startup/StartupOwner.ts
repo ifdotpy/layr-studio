@@ -1,5 +1,5 @@
 import { serverViewId, serverParentOrigin } from "../../servers/environment.ts";
-import { autorun, makeAutoObservable, reaction } from "mobx";
+import { action, autorun, makeAutoObservable, reaction } from "mobx";
 import { errorText } from "../../api.ts";
 import { resourceData } from "../../store/runtime.ts";
 import type { UiPreferenceProjection } from "../../sync/entityContracts.ts";
@@ -15,6 +15,9 @@ export interface StartupInputs {
   rendererBusy(): boolean;
   acceptUiPreferences(preferences: UiPreferenceProjection): void;
 }
+
+/** Time for cached state to paint before showing connection progress, in milliseconds. */
+const STARTUP_CONNECTING_DELAY_MS = 800;
 
 /** Authentication, projection recovery and renderer compatibility share the server lifetime. */
 export class StartupOwner {
@@ -41,6 +44,8 @@ export class StartupOwner {
   databaseRecovery = new ReadRecoveryBudget();
   initialized = false;
   running = false;
+  connecting = false;
+  connectingTimer: ReturnType<typeof setTimeout> | undefined;
   credentialRetry: ReturnType<typeof setTimeout> | undefined;
   databaseRetry: ReturnType<typeof setTimeout> | undefined;
   stops: Disposer[] = [];
@@ -69,6 +74,7 @@ export class StartupOwner {
         startupExhausted: false,
         initialized: false,
         running: false,
+        connectingTimer: false,
       },
       { autoBind: true },
     );
@@ -199,6 +205,12 @@ export class StartupOwner {
   }
   start(): Disposer {
     this.running = true;
+    this.connectingTimer = setTimeout(
+      action(() => {
+        this.connecting = true;
+      }),
+      STARTUP_CONNECTING_DELAY_MS,
+    );
     const { api, resources } = this.scope.services;
     let interrupted = false;
     this.stops.push(
@@ -290,6 +302,7 @@ export class StartupOwner {
   }
   dispose() {
     this.running = false;
+    clearTimeout(this.connectingTimer);
     this.generation++;
     [this.credentialRetry, this.databaseRetry].forEach(clearTimeout);
     for (const stop of this.stops.splice(0).reverse()) stop();

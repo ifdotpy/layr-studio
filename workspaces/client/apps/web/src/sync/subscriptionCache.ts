@@ -339,6 +339,9 @@ export function createSubscriptionCache(
       if (previous) return previous;
       const result: Promise<Cursor | undefined> = (async () => {
         try {
+          // The shell needs state first; other resource reads follow its hydration.
+          if (ref.kind !== "state") await loaded.get(key({ kind: "state" }));
+          if (!isCurrent()) return undefined;
           const raw = await storage.get(id);
           if (!isCurrent() || raw === undefined) return undefined;
           const value = decode(raw, ref, workspace);
@@ -346,7 +349,10 @@ export function createSubscriptionCache(
             await storage.delete(id);
             return undefined;
           }
-          const cursorId = await cursorDocumentId(ref);
+          const cursorId =
+            ref.kind === "state"
+              ? "state:entities:complete"
+              : await cursorDocumentId(ref);
           if (!isCurrent()) return undefined;
           const markers: Row[] =
             ref.kind === "state"
@@ -380,7 +386,7 @@ export function createSubscriptionCache(
               isCurrent() &&
               loaded.get(id) === result &&
               policies.get(id) !== SubscriptionCachePolicy.noCache,
-            ref.kind === "state" ? "state:entities:complete" : cursorId,
+            cursorId,
           );
           if (!isCurrent()) return undefined;
           if (applied) await touch(id, byteLength(raw)).catch(() => {});

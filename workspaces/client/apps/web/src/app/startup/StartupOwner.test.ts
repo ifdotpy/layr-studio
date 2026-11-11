@@ -15,7 +15,7 @@ import {
 import { LocalCollection } from "../../sync/localCollection.ts";
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from "vitest";
-import { reaction, makeAutoObservable } from "mobx";
+import { reaction, makeAutoObservable, runInAction } from "mobx";
 import { createServerServices } from "../../servers/serverServices.ts";
 import { componentSnapshot as snapshotFixture } from "../../components/conversation/ComposerAttachments/componentTestFixtures.ts";
 import { READ_RECOVERY_MAX_ATTEMPTS } from "../../sync/readRetry.ts";
@@ -252,63 +252,92 @@ it("composes separate selection and dialogs for colliding server identities and 
   expect(second.scope.services.owner.credentialId).toBe("b");
 });
 
-it("renders cached state before a live baseline and keeps the loader for a cold start", async () => {
-  const { act, createElement } = await import("react");
-  const { createRoot } = await import("react-dom/client");
-  const { MantineProvider } = await import("@mantine/core");
-  const { default: App } = await import("../../components/shell/App/App.tsx");
-  const { ServerAreas } = await import("../ServerAreasProvider.tsx");
-  const {
-    ServerServicesProvider,
-    ServerStoreProvider,
-    ServerAreasContextProvider,
-  } =
-    await import("../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx");
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  const f = fixture();
-  const areas = new ServerAreas({
-    services: f.services,
-    store: f.models.store,
-    screen: { active: true, channel: null },
-  });
-  const host = document.body.appendChild(document.createElement("div"));
-  const root = createRoot(host);
-  try {
-    await act(async () =>
-      root.render(
-        createElement(MantineProvider, {
-          children: createElement(ServerServicesProvider, {
-            services: f.services,
-            children: createElement(ServerStoreProvider, {
-              value: f.models.store,
-              children: createElement(ServerAreasContextProvider, {
-                value: areas,
-                children: createElement(App),
+it.each(["cached", "cold"])(
+  "delays Connecting while %s startup reads state",
+  async (kind) => {
+    const { act, createElement } = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { MantineProvider } = await import("@mantine/core");
+    const { default: App } = await import("../../components/shell/App/App.tsx");
+    const { ServerAreas } = await import("../ServerAreasProvider.tsx");
+    const {
+      ServerServicesProvider,
+      ServerStoreProvider,
+      ServerAreasContextProvider,
+    } =
+      await import("../../components/servers/ServerServicesProvider/ServerServicesProvider.tsx");
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    vi.useFakeTimers();
+    const f = fixture();
+    const areas = new ServerAreas({
+      services: f.services,
+      store: f.models.store,
+      screen: { active: true, channel: null },
+    });
+    const host = document.body.appendChild(document.createElement("div"));
+    const root = createRoot(host);
+    try {
+      areas.startup.start();
+      await act(async () =>
+        root.render(
+          createElement(MantineProvider, {
+            children: createElement(ServerServicesProvider, {
+              services: f.services,
+              children: createElement(ServerStoreProvider, {
+                value: f.models.store,
+                children: createElement(ServerAreasContextProvider, {
+                  value: areas,
+                  children: createElement(App),
+                }),
               }),
             }),
           }),
-        }),
-      ),
-    );
-    expect(host.querySelector('[aria-label="Studio startup"]')).not.toBeNull();
-    await act(async () => {
-      setStartupFixture(
-        areas,
-        Object.assign(snapshotFixture(), { token: "", stateDir: "/cached" }),
+        ),
       );
-      vi.spyOn(f.models.store, "state").mockReturnValue({
-        current: { status: "stale", data: f.models.mirror.current },
+      expect(
+        host.querySelector('[aria-label="Studio startup"]'),
+      ).not.toBeNull();
+      expect(host.textContent).not.toContain("Connecting");
+      await act(async () => vi.advanceTimersByTime(799));
+      expect(host.textContent).not.toContain("Connecting");
+      if (kind === "cold") {
+        await act(async () => vi.advanceTimersByTime(1));
+        expect(host.textContent).toContain("Connecting to LAYR Studio");
+        return;
+      }
+      await act(async () =>
+        runInAction(() => {
+          areas.startup.startupError = "Access revoked";
+        }),
+      );
+      expect(host.querySelector('[role="alert"]')?.textContent).toBe(
+        "Access revoked",
+      );
+      await act(async () => {
+        runInAction(() => {
+          areas.startup.startupError = "";
+        });
+        setStartupFixture(
+          areas,
+          Object.assign(snapshotFixture(), { token: "", stateDir: "/cached" }),
+        );
+        vi.spyOn(f.models.store, "state").mockReturnValue({
+          current: { status: "stale", data: f.models.mirror.current },
+        });
       });
-    });
-    expect(host.querySelector('[aria-label="Studio startup"]')).toBeNull();
-    expect(host.querySelector('[aria-label="Projection sync"]')).not.toBeNull();
-  } finally {
-    act(() => root.unmount());
-    areas.dispose();
-    host.remove();
-    vi.unstubAllGlobals();
-  }
-});
+      expect(host.querySelector('[aria-label="Studio startup"]')).toBeNull();
+      expect(host.textContent).not.toContain("Connecting");
+      expect(
+        host.querySelector('[aria-label="Projection sync"]'),
+      ).not.toBeNull();
+    } finally {
+      act(() => root.unmount());
+      areas.dispose();
+      host.remove();
+      vi.unstubAllGlobals();
+    }
+  },
+);
 
 it("shows a generated state query failure before its first value and reload recovers the real App", async () => {
   const { act, createElement } = await import("react");

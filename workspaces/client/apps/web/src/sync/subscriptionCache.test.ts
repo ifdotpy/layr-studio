@@ -204,6 +204,51 @@ it("hydrates the cached data before returning its resume cursor", async () => {
   cache.stop();
 });
 
+it("applies state before reading other cached resources", async () => {
+  const state = { kind: "state" } as const;
+  const held = Promise.withResolvers<unknown>();
+  const collection = new LocalCollection("state-first");
+  const storage = {
+    get: vi.fn(async (key: string) => {
+      if (key === JSON.stringify(["workspace", subscriptionKey(state)]))
+        return held.promise;
+      if (key === JSON.stringify(["workspace", subscriptionKey(ref)])) {
+        expect(
+          collection.all().some((row) => row.id === "state:entities:ready"),
+        ).toBe(true);
+        return {
+          version: SUBSCRIPTION_CACHE_VERSION,
+          contractHash: API_SCHEMA_HASH,
+          subscription: subscriptionKey(ref),
+          cursor,
+          data: [cachedRow],
+        };
+      }
+      return undefined;
+    }),
+    put: vi.fn(),
+    delete: vi.fn(),
+  };
+  const cache = createSubscriptionCache(storage, collection, "workspace");
+  const loadingState = cache.load(state);
+  const loadingTranscript = cache.load(ref);
+  try {
+    await vi.waitFor(() => expect(storage.get).toHaveBeenCalled());
+    expect(storage.get).toHaveBeenCalledTimes(1);
+  } finally {
+    held.resolve({
+      version: SUBSCRIPTION_CACHE_VERSION,
+      contractHash: API_SCHEMA_HASH,
+      subscription: subscriptionKey(state),
+      cursor,
+      data: [],
+    });
+    await loadingState;
+  }
+  expect(await loadingTranscript).toEqual(cursor);
+  cache.stop();
+});
+
 it("drops an entity outside the selected scope before exposing a resume cursor", async () => {
   const selected = { kind: "agentDetail", agentId: "agent" } as const;
   const storage = {

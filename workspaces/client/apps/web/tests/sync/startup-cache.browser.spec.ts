@@ -252,6 +252,15 @@ test("a direct view paints the cached shell while its initial stream is held; a 
     new MutationObserver(() => {
       if (document.querySelector(".startup, .multi-server-shell, .workspace"))
         times.react ??= performance.now();
+      if (document.querySelector(".startup[data-connecting]"))
+        times.connecting ??= performance.now();
+      if (
+        document.querySelector("#sidebar") &&
+        document.querySelector("#message")
+      )
+        requestAnimationFrame(() => {
+          times.shell ??= performance.now();
+        });
       if (
         document.querySelector("#sidebar") &&
         document.body?.textContent?.includes("Saved startup conversation")
@@ -335,6 +344,7 @@ test("a direct view paints the cached shell while its initial stream is held; a 
       "warm startup shell and conversation",
       JSON.stringify(warmTimes),
     );
+    expect(warmTimes.connecting).toBeUndefined();
     release();
     blocked = false;
     await expect(
@@ -353,6 +363,9 @@ test("a direct view paints the cached shell while its initial stream is held; a 
       server.origin + "/?studio-server=local&studio-navigation=classic",
     );
     await expect(coldPage.getByLabel("Studio startup")).toBeVisible();
+    await expect(coldPage.getByRole("status")).toHaveText(
+      "Connecting to LAYR Studio…",
+    );
     await expect(coldPage.locator("#message")).toHaveCount(0);
     releaseCold();
     await cold.close();
