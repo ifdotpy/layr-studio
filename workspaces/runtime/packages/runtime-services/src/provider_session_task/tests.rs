@@ -13,6 +13,159 @@ pub(super) fn panic_at(point: u8) {
 }
 struct Factory(std::sync::Mutex<Option<ProviderAttachment>>);
 
+#[tokio::test(start_paused = true)]
+async fn native_codec_is_used_by_session_admission_and_result_correlation() {
+    use studio_runtime_providers::codex;
+    let stop = Shutdown::default();
+    let mut stopped = stop.subscribe();
+    let (commands, mut inbox) = mpsc::channel::<AdapterCommand>(16);
+    let (entries, journal) = mpsc::channel(16);
+    let (written, mut writes) = mpsc::channel(4);
+    let handle = ProviderHandle::for_account("typed-session");
+    let (status, observed) = watch::channel(AttachmentStatus {
+        handle: handle.clone(),
+        open_attempted: true,
+        info: None,
+        initialization: InitializationStatus::AwaitingReply,
+    });
+    let task = tokio::spawn(async move {
+        let _status = status;
+        loop {
+            let command = tokio::select! {
+                _ = Shutdown::cancelled(&mut stopped) => break,
+                command = inbox.recv() => match command { Some(command) => command, None => break },
+            };
+            match command {
+                AdapterCommand::Write {
+                    write,
+                    reply,
+                    observed,
+                } => {
+                    written.send(write.frame().clone()).await.unwrap();
+                    let receipt = if write.frame().method() == Some(Method::Initialize.as_str()) {
+                        CommandReceipt::CachedCodexInitialize(codex::InitializeResponse {
+                            codex_home: "/fixture".into(),
+                            platform_family: "fixture".into(),
+                            platform_os: "fixture".into(),
+                            user_agent: "fixture/1".into(),
+                        })
+                    } else {
+                        CommandReceipt::Written {
+                            remote_id: None,
+                            duplicate: false,
+                            written_at: None,
+                        }
+                    };
+                    reply.send(receipt).ok().unwrap();
+                    observed.await.unwrap();
+                }
+                AdapterCommand::Ack { cursor, reply } => {
+                    reply
+                        .send(CommandReceipt::Acknowledged(cursor))
+                        .ok()
+                        .unwrap();
+                }
+            }
+        }
+        TaskExit {
+            result: Ok(()),
+            cleanup_error: None,
+            recovery_needed: None,
+            provider_retained: false,
+        }
+    });
+    let factory = Arc::new(Factory(std::sync::Mutex::new(Some(
+        ProviderAttachment::from_task(commands, journal, observed, stop, task),
+    ))));
+    let mut launch = studio_runtime_process::ProviderLaunchSpec::new(
+        vec!["fixture".into()],
+        BTreeMap::new(),
+        "/fixture".into(),
+    );
+    launch.codec = ProviderCodec::codex();
+    let mut session = SessionHandle::open(
+        factory,
+        handle,
+        OpenOptions {
+            clock: SessionClock::default(),
+            launch,
+            expected_generation: None,
+        },
+        SessionTaskConfig {
+            initialize_params: studio_runtime_providers::initialize_params(
+                studio_runtime_providers::ClientName::AccountSession,
+            ),
+            generation: Generation(1),
+            wire: studio_runtime_providers::ProviderKind::Codex.wire(),
+            timeout_ms: 1000,
+            initialize_operation: OperationId("typed:init".into()),
+            request_id_prefix: None,
+            recovered: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    while session.status.borrow().initialization != InitializationStatus::Ready {
+        session.status.changed().await.unwrap();
+    }
+    assert!(matches!(
+        writes.recv().await.unwrap(),
+        Frame::CodexClientRequest(_)
+    ));
+    assert!(matches!(
+        writes.recv().await.unwrap(),
+        Frame::CodexClientNotification(_)
+    ));
+    let prepare = SessionControl::prepare;
+    let prepared = prepare(
+        &session.control,
+        RequestSpec {
+            id: RequestId::Number(2),
+            operation_id: OperationId("typed:models".into()),
+            method: Method::ModelList,
+            params: studio_json::json!({}),
+            thread_id: None,
+            lightweight: false,
+            timeout_ms: 1000,
+        },
+    )
+    .await
+    .unwrap();
+    let ticket = session.control.submit(prepared).await.unwrap();
+    assert!(
+        matches!(writes.recv().await.unwrap(), Frame::CodexClientRequest(request) if request.method() == codex::ClientRequestMethod::ModelList)
+    );
+    let response = Frame::Response {
+        id: ticket.id.clone(),
+        fields: Map::new(),
+        body: ResponseBody::CodexResult(codex::ClientRequestResult::ModelList(Box::new(
+            codex::ModelListResponse {
+                data: vec![],
+                next_cursor: Some(None),
+            },
+        ))),
+    };
+    let frame =
+        (ProviderCodec::codex().decode)(&studio_runtime_providers::encode_line(&response).unwrap())
+            .unwrap();
+    entries
+        .send(JournalEntry {
+            received_at_ms: 0,
+            boundary_at: None,
+            cursor: EventCursor(1),
+            generation: Generation(1),
+            payload: JournalPayload::Frame(frame),
+        })
+        .await
+        .unwrap();
+    loop {
+        let event = session.events.recv().await.unwrap();
+        if event.outcomes.iter().any(|outcome| matches!(outcome, SessionOutcome::Resolved { ticket: result_ticket, outcome: RequestOutcome::Reply { body: ResponseBody::CodexResult(codex::ClientRequestResult::ModelList(_)), .. } } if result_ticket == &ticket)) { break; }
+    }
+    session.control.settled(EventCursor(1)).await.unwrap();
+    assert!(session.checked_shutdown().await.result.is_ok());
+}
+
 #[test]
 fn queued_input_keeps_admission_boundary() {
     use studio_runtime_schema::provider_timing::{BoundaryStamp, ProviderBoundaryTiming};

@@ -33,7 +33,7 @@ test for a provider name to show or hide a control.
 
 `edit(turn)` serves every provider: the server hides the items after the turn,
 snapshots and restores the files of the turn, and forks the provider thread
-through `ProviderAdapter::edit_thread_request`
+through `ProviderAdapter::encode(ProviderCommand::EditThread)`
 (`runtime-services/src/edit_turn.rs`). The bridge keeps no rollback of its own.
 
 To add a provider, extend the identity owner and its adapter, regenerate contracts,

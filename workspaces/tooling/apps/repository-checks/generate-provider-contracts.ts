@@ -518,6 +518,19 @@ export function renderFullCodexDefinitions(
   const rendered = new Map<string, string>();
   const derive =
     "#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]";
+  const walkers = new Map<string, string>();
+  const openSchemas = new WeakSet<object>();
+  const visitor = (name: string, body: string) =>
+    `impl VisitUnknown for ${name} { fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) { ${body.replaceAll(/\bvisitor\b/g, "_visitor")} } }\n`;
+  const fieldNames = (schema: ObjectValue, excluded?: string) => [
+    ...Object.keys(object(schema.properties ?? {}))
+      .filter((field) => field !== excluded)
+      .map(fieldName),
+    ...(schema.additionalProperties !== undefined &&
+    schema.additionalProperties !== false
+      ? ["additional_properties"]
+      : []),
+  ];
   // Only edges in a recursive type require allocation. Vec/map already break
   // layout cycles, but including them here merely boxes the recursive edge.
   const edges = new Map<string, Set<string>>();
@@ -669,6 +682,7 @@ export function renderFullCodexDefinitions(
       const variants = enumValues.map(typeName);
       if (new Set(variants).size !== variants.length)
         throw new Error(`Vendor enum collision ${name}`);
+      walkers.set(name, visitor(name, ""));
       return `${derive}\npub enum ${name} {\n${enumValues.map((wire, index) => `    #[serde(rename = ${JSON.stringify(wire)})]\n    ${variants[index]},`).join("\n")}\n}\n`;
     }
     const union = schema.oneOf ?? schema.anyOf;
@@ -714,11 +728,14 @@ export function renderFullCodexDefinitions(
         : undefined;
       if (common) {
         const seenVariants = new Set<string>();
+        const arms: string[] = [];
+        const tags: string[] = [];
         const variants = values.map((entry, index) => {
           const wire = strings(
             object(object(entry.properties)[common]).enum,
           )[0];
           if (!wire) throw new Error(`Missing vendor tag ${name}`);
+          tags.push(wire);
           const fields = fieldsFull(
             entry,
             `${name}${typeName(wire)}`,
@@ -728,10 +745,37 @@ export function renderFullCodexDefinitions(
           if (seenVariants.has(variantName))
             variantName += `Variant${index + 1}`;
           seenVariants.add(variantName);
+          const names = fieldNames(entry, common);
+          arms.push(
+            `Self::${variantName}${names.length ? ` { ${names.join(", ")} }` : ""} => { ${names.map((field) => `VisitUnknown::visit_unknowns(${field}, visitor);`).join(" ")} }`,
+          );
           return `    #[serde(rename = ${JSON.stringify(wire)})]\n    ${variantName}${fields ? ` {\n${fields}\n    }` : ""},`;
         });
-        return `${derive}\n#[serde(tag = ${JSON.stringify(common)})]\npub enum ${name} {\n${variants.join("\n")}\n}\n`;
+        const open = !protocolKinds.includes(
+          name as (typeof protocolKinds)[number],
+        );
+        if (open) openSchemas.add(schema);
+        // 2026-11-11 release benchmark: Codex 5.0 -> 6.8 us/frame (+36%),
+        // allocations 75.5 -> 51.4/frame. Untagged fallback buffers known fields.
+        // Keep this simpler form; if profiling warrants it, generate raw-token
+        // tag-first decoding rather than adding handwritten runtime visitors.
+        if (open)
+          arms.push(
+            `Self::UnknownVendorVariant(value) => visitor(${JSON.stringify(name)}, value.variant())`,
+          );
+        walkers.set(name, visitor(name, `match self { ${arms.join(",\n")} }`));
+        const unknown = open
+          ? `\n#[derive(Clone, Debug, PartialEq, serde::Serialize)]\n#[serde(transparent)]\npub struct Unknown${name}(std::collections::BTreeMap<String, studio_json::Value>);\nimpl Unknown${name} { pub fn variant(&self) -> &str { self.0[${JSON.stringify(common)}].as_str().expect("validated unknown discriminator") } }\nimpl<'de> serde::Deserialize<'de> for Unknown${name} {\n    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {\n        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;\n        let variant = fields.get(${JSON.stringify(common)}).and_then(studio_json::Value::as_str).ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;\n        if matches!(variant, ${tags.map((tag) => JSON.stringify(tag)).join(" | ")}) { return Err(serde::de::Error::custom("malformed known vendor variant")); }\n        Ok(Self(fields))\n    }\n}\n`
+          : "";
+        return `${derive}\n#[serde(tag = ${JSON.stringify(common)})]\npub enum ${name} {\n${variants.join("\n")}\n${open ? `    #[serde(untagged)]\n    UnknownVendorVariant(Unknown${name}),` : ""}\n}\n${unknown}`;
       }
+      walkers.set(
+        name,
+        visitor(
+          name,
+          `match self { ${values.map((_entry, index) => `Self::Variant${index + 1}(value) => VisitUnknown::visit_unknowns(value, visitor)`).join(", ")} }`,
+        ),
+      );
       return `${derive}\n#[serde(untagged)]\npub enum ${name} {\n${values.map((entry, index) => `    Variant${index + 1}(Box<${rust(entry, `${name}Variant${index + 1}`, name)}>),`).join("\n")}\n}\n`;
     }
     if (schema.type === "object") {
@@ -742,7 +786,32 @@ export function renderFullCodexDefinitions(
               additionalProperties: schema.additionalProperties ?? true,
             }
           : schema;
-      return `${derive}\n${schema.additionalProperties === false ? "#[serde(deny_unknown_fields)]\n" : ""}pub struct ${name} {\n${fieldsFull(shape, name)}\n}\n`;
+      walkers.set(
+        name,
+        visitor(
+          name,
+          fieldNames(shape)
+            .map(
+              (field) =>
+                `VisitUnknown::visit_unknowns(&self.${field}, visitor);`,
+            )
+            .join(" "),
+        ),
+      );
+      const fields = [
+        "ThreadStartParams",
+        "ThreadResumeParams",
+        "TurnStartParams",
+        "ThreadForkParams",
+      ].includes(name)
+        ? `impl ${name} {\n${Object.keys(object(schema.properties ?? {}))
+            .map(
+              (field) =>
+                `    pub const FIELD_${snake(field).toUpperCase()}: &'static str = ${JSON.stringify(field)};`,
+            )
+            .join("\n")}\n}\n`
+        : "";
+      return `${derive}\n${schema.additionalProperties === false ? "#[serde(deny_unknown_fields)]\n" : ""}pub struct ${name} {\n${fieldsFull(shape, name)}\n}\n${fields}`;
     }
     return `pub type ${name} = ${rust(schema, `${name}Value`, name)};\n`;
   }
@@ -750,10 +819,24 @@ export function renderFullCodexDefinitions(
     identifier(name);
     rendered.set(name, named(name, schema));
   }
+  function containsUnknown(name: string, visited = new Set<string>()): boolean {
+    if (visited.has(name)) return false;
+    visited.add(name);
+    const schema = pending.get(name);
+    const inline = (value: unknown): boolean =>
+      value !== null &&
+      typeof value === "object" &&
+      (openSchemas.has(value) || Object.values(value).some(inline));
+    return (
+      inline(schema) ||
+      [...references(schema)].some((target) => containsUnknown(target, visited))
+    );
+  }
   let rustText =
     header +
     `\n// Generated vendor layouts preserve optional/nullable fields and large unions.\n#![allow(clippy::all, clippy::option_option, clippy::struct_excessive_bools)]\npub const CLI_VERSION: &str = ${JSON.stringify(source.version)};\npub const SCHEMA_SHA256: &str = ${JSON.stringify(source.schemaSha256)};\n\n// A required nullable field must still reject an absent member.\nfn required<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(d: D) -> Result<T, D::Error> { T::deserialize(d) }\nfn optional<'de, D: serde::Deserializer<'de>, T: serde::Deserialize<'de>>(d: D) -> Result<Option<T>, D::Error> { T::deserialize(d).map(Some) }\n\n` +
     [...rendered.values()].join("\n");
+  rustText += `\npub trait VisitUnknown { fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {} }\nmacro_rules! leaves { ($($ty:ty),*) => { $(impl VisitUnknown for $ty {})* }; }\nleaves!(String, bool, i64, i32, u64, u32, u16, f64, (), studio_json::Value);\nimpl<T: VisitUnknown> VisitUnknown for Option<T> { fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) { if let Some(value) = self { value.visit_unknowns(visitor); } } }\nimpl<T: VisitUnknown> VisitUnknown for Vec<T> { fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) { for value in self { value.visit_unknowns(visitor); } } }\nimpl<T: VisitUnknown> VisitUnknown for Box<T> { fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) { (**self).visit_unknowns(visitor); } }\nimpl<T: VisitUnknown> VisitUnknown for std::collections::BTreeMap<String, T> { fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) { for value in self.values() { value.visit_unknowns(visitor); } } }\n${[...walkers].map(([name, code]) => (containsUnknown(name) ? code : `impl VisitUnknown for ${name} {}`)).join("\n")}\n`;
   let tsText = header + "\n";
   function ts(value: unknown): string {
     if (value === true) return "unknown";
@@ -825,6 +908,23 @@ export function renderFullCodexDefinitions(
       throw new Error(`Vendor method collision ${kind}`);
     rustText += `#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]\npub enum ${name} {\n${methods.map(({ method }, index) => `    #[serde(rename = ${JSON.stringify(method)})]\n    ${variants[index]},`).join("\n")}\n}\nimpl ${name} {\n    pub fn from_wire(value: &str) -> Option<Self> { match value {\n${methods.map(({ method }, index) => `        ${JSON.stringify(method)} => Some(Self::${variants[index]}),`).join("\n")}\n        _ => None,\n    }}\n    pub const fn as_str(self) -> &'static str { match self {\n${methods.map(({ method }, index) => `        Self::${variants[index]} => ${JSON.stringify(method)},`).join("\n")}\n    }}\n    pub const fn all() -> &'static [Self] { &[${variants.map((variant) => `Self::${variant}`).join(", ")}] }\n}\n`;
     tsText += `export type ${name} = ${methods.map(({ method }) => JSON.stringify(method)).join(" | ")};\n`;
+    const request = kind === "ClientRequest" || kind === "ServerRequest";
+    rustText += `impl ${kind} {\n    pub const fn method(&self) -> ${name} { match self {\n${methods.map(({ method, schema }) => `        Self::${typeName(method)}${Object.keys(object(schema.properties)).length > 1 ? " { .. }" : ""} => ${name}::${typeName(method)},`).join("\n")}\n    }}\n`;
+    if (kind !== "ClientNotification") {
+      rustText += `    pub fn from_params(${request ? "id: RequestId, " : ""}method: ${name}, params: Option<&str>${kind === "ServerNotification" ? ", emitted_at_ms: Option<i64>" : ""}) -> Result<Self, studio_json::Error> {\n        Ok(match method {\n${methods
+        .map(({ method, schema }) => {
+          const required = strings(schema.required ?? []).includes("params");
+          const param = required
+            ? `studio_json::from_str(params.ok_or_else(|| <studio_json::Error as serde::de::Error>::custom("missing vendor params"))?)?`
+            : "params.map(studio_json::from_str).transpose()?";
+          return `            ${name}::${typeName(method)} => Self::${typeName(method)} { ${request ? "id, " : ""}params: ${param}${kind === "ServerNotification" ? ", emitted_at_ms" : ""} },`;
+        })
+        .join("\n")}\n        })\n    }\n`;
+    }
+    if (request) {
+      rustText += `    pub const fn id(&self) -> &RequestId { match self {\n${variants.map((variant) => `        Self::${variant} { r#id, .. } => r#id,`).join("\n")}\n    }}\n    pub fn set_id(&mut self, new_id: RequestId) { match self {\n${variants.map((variant) => `        Self::${variant} { r#id, .. } => *r#id = new_id,`).join("\n")}\n    }}\n    pub fn from_method_params(id: RequestId, method: ${name}, params: &impl serde::Serialize) -> Result<Self, studio_json::Error> {\n        #[derive(serde::Serialize)]\n        struct Wire<'a, T> { id: RequestId, method: ${name}, params: &'a T }\n        studio_json::from_slice(&studio_json::to_vec(&Wire { id, method, params })?)\n    }\n`;
+    }
+    rustText += `}\n`;
     if (kind === "ClientRequest" || kind === "ServerRequest") {
       const results = methods.map(({ method, schema }) => ({
         method,
@@ -835,9 +935,22 @@ export function renderFullCodexDefinitions(
         ),
       }));
       rustText += `${derive}\n#[serde(tag = "method", content = "result")]\npub enum ${kind}Result {\n${results.map(({ method, result }) => `    #[serde(rename = ${JSON.stringify(method)})]\n    ${typeName(method)}(Box<${result}>),`).join("\n")}\n}\n`;
+      rustText += visitor(
+        `${kind}Result`,
+        `match self { ${variants.map((variant) => `Self::${variant}(value) => VisitUnknown::visit_unknowns(value, visitor)`).join(", ")} }`,
+      );
+      rustText += `impl ${kind}Result {\n    pub const fn method(&self) -> ${name} { match self {\n${variants.map((variant) => `        Self::${variant}(_) => ${name}::${variant},`).join("\n")}\n    }}\n    pub fn decode(method: ${name}, result: &str) -> Result<Self, studio_json::Error> { match method {\n${variants.map((variant) => `        ${name}::${variant} => studio_json::from_str(result).map(|result| Self::${variant}(Box::new(result))),`).join("\n")}\n    }}\n    pub fn serialize_payload<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> { match self {\n${variants.map((variant) => `        Self::${variant}(result) => serde::Serialize::serialize(result, serializer),`).join("\n")}\n    }}\n}\n`;
       tsText += `export type ${kind}Results = { ${results.map(({ method, result }) => `${JSON.stringify(method)}: ${result}`).join("; ")} };\n`;
     }
   }
+  const allMethods = [
+    ...new Set(
+      protocolKinds.flatMap((kind) =>
+        protocolMethods(definitions, kind).map(({ method }) => method),
+      ),
+    ),
+  ];
+  rustText += `\n/// Expand the vendor method inventory into a consumer's method definition.\n#[macro_export]\nmacro_rules! codex_methods {\n    ($consumer:ident) => { $consumer! {\n${allMethods.map((method) => `        ${method === "error" ? "ProtocolError" : method === "project/import" ? "CodexProjectImport" : typeName(method)} => ${JSON.stringify(method)},`).join("\n")}\n    }};\n}\n`;
   rustText += `\n#[cfg(test)]\nmod generated_fixtures {\n    use super::*;\n    #[derive(serde::Deserialize)]\n    #[serde(rename_all = "PascalCase")]\n    struct Samples {\n        client_request: Vec<ClientRequest>,\n        client_notification: Vec<ClientNotification>,\n        server_notification: Vec<ServerNotification>,\n        server_request: Vec<ServerRequest>,\n    }\n    #[test]\n    fn every_vendor_method_sample_decodes() {\n        let samples: Samples = studio_json::from_str(include_str!("fixtures.json")).unwrap();\n        assert_eq!(samples.client_request.len(), ClientRequestMethod::all().len());\n        assert_eq!(samples.client_notification.len(), ClientNotificationMethod::all().len());\n        assert_eq!(samples.server_notification.len(), ServerNotificationMethod::all().len());\n        assert_eq!(samples.server_request.len(), ServerRequestMethod::all().len());\n    }\n}\n`;
   const output: Rendered[] = [
     {

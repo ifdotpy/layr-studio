@@ -22,7 +22,7 @@ use studio_runtime_services::{
     account_driver::{AccountDriver, AccountStatus, ProviderAuthReader},
     account_worker::{WorkerError, preparation::PreparationResources},
     native_runtime::{NativeExecutableLease, NativeRuntime},
-    provider_adapter::{HostLaunch, ProviderKind, ProviderLaunch, adapter},
+    provider_adapter::{CheckedLaunch, ProviderKind, ProviderLaunch, adapter},
     provider_session_task::SessionTaskConfig,
     thread_prepare::{CatalogSnapshot, CatalogSource},
 };
@@ -407,7 +407,7 @@ impl AccountLauncher for HostLauncher {
             // The selected native bundle is a Codex executable; keep its lease
             // for as long as the retained session can launch from it.
             let lease = match &self.native_runtime {
-                Some(runtime) if kind == ProviderKind::Codex => {
+                Some(runtime) if adapter(kind).descriptor().supports(studio_runtime_services::provider_adapter::ProviderFeature::BundledExecutable) => {
                     let status = runtime.read_state().map_err(|_| {
                         WorkerError::PreparationRefused("native-runtime/status-read".into())
                     })?;
@@ -429,7 +429,7 @@ impl AccountLauncher for HostLauncher {
             let ProviderLaunch {
                 spec: launch,
                 executable,
-            } = adapter(kind).host_launch(HostLaunch {
+            } = adapter(kind).launch(CheckedLaunch {
                 profile: profile.as_ref(),
                 home,
                 isolated,
@@ -1715,7 +1715,11 @@ pub fn account_home<R: ProviderAuthReader>(
         .iter()
         .find(|profile| profile.id.as_str() == Some(key))
         .ok_or_else(|| WorkerError::PreparationRefused("account-driver/unavailable".into()))?;
-    if initial_profile.provider_kind().map(ProviderKind::key) != Some(ProviderKind::Codex.key()) {
+    if !initial_profile.provider_kind().is_some_and(|kind| {
+        adapter(kind).descriptor().supports(
+            studio_runtime_services::provider_adapter::ProviderFeature::AccountSessionLogin,
+        )
+    }) {
         return Err(WorkerError::PreparationRefused(
             "provider-session/claude-runtime-launch".into(),
         ));
@@ -1737,7 +1741,11 @@ pub fn account_home<R: ProviderAuthReader>(
         .iter()
         .find(|profile| profile.id.as_str() == Some(key))
         .ok_or_else(|| WorkerError::PreparationRefused("account-driver/unavailable".into()))?;
-    if profile.provider_kind().map(ProviderKind::key) != Some(ProviderKind::Codex.key()) {
+    if !profile.provider_kind().is_some_and(|kind| {
+        adapter(kind).descriptor().supports(
+            studio_runtime_services::provider_adapter::ProviderFeature::AccountSessionLogin,
+        )
+    }) {
         return Err(WorkerError::PreparationRefused(
             "provider-session/claude-runtime-launch".into(),
         ));
@@ -1799,7 +1807,10 @@ fn selected_account(
             })?
         }
     };
-    if kind == ProviderKind::Codex {
+    if !adapter(kind)
+        .descriptor()
+        .supports(studio_runtime_services::provider_adapter::ProviderFeature::PinnedAccountLaunch)
+    {
         let (home, isolated) = account_home(accounts, key)?;
         return Ok((kind, home, isolated, None));
     }

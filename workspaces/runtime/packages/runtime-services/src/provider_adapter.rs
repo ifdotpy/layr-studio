@@ -19,12 +19,14 @@ use std::{
 };
 use studio_json::{Map, Value, json};
 use studio_runtime_process::ProviderLaunchSpec;
+pub use studio_runtime_providers::Frame as ProviderEvent;
 use studio_runtime_providers::Method;
+use studio_runtime_providers::codex;
 pub use studio_runtime_providers::{ProviderCapability, ProviderKind};
 use studio_runtime_store::path_identity::CanonicalPath;
 
 /// Inputs for launching the retained provider session of one host account.
-pub struct HostLaunch<'a> {
+pub struct CheckedLaunch<'a> {
     /// The account's registry profile (Claude reads its pinned identity and options).
     pub profile: Option<&'a ClaudeLaunchProfile>,
     /// Provider home (`CODEX_HOME` for Codex).
@@ -48,104 +50,101 @@ pub struct ProviderLaunch {
     pub executable: Option<String>,
 }
 
-/// Closed, typed provider capabilities that preparation reads instead of
-/// testing for a provider.
+/// Provider operations and runtime policies. Missing entries grant no behavior.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(
-    clippy::struct_excessive_bools,
-    reason = "Provider capabilities are independent protocol flags"
-)]
-pub struct Capabilities {
-    /// The provider writes a native rollout per thread that Studio can read
-    /// and repair; otherwise history is the live transcript only.
-    pub native_history: bool,
-    /// `dynamicTools` is resent on every resume and turn, not only on thread start.
-    pub tools_on_every_turn: bool,
-    /// `orchestration_speak` is offered.
-    pub voice_tools: bool,
-    /// Daybreak cyber-access grants apply.
-    pub daybreak: bool,
-    /// An unready image workspace gets a writable temporary sandbox root
-    /// (otherwise it runs read-only).
-    pub writable_sandbox_roots: bool,
-    /// The turn takes no `turn/steer` input after the time it reports as its
-    /// `completedAt`: every steer it took is recorded in that turn, and a later
-    /// steer is refused (`expectedTurnId`). A steer written after that time was
-    /// never applied.
-    pub turn_end_closes_steer: bool,
+pub enum ProviderFeature {
+    StartThread,
+    StartTurn,
+    SetTitle,
+    EditThread,
+    NativeHistory,
+    ToolsOnEveryTurn,
+    VoiceTools,
+    Daybreak,
+    WritableSandboxRoots,
+    TurnEndClosesSteer,
+    FrozenReasoningConfig,
+    PreserveContextOnReattach,
+    UnsubmittedInspection,
+    SteerCompletionReceipts,
+    NativeMcpConfiguration,
+    BrowserConfiguration,
+    HostWorktreeFence,
+    IdleSummaryReturn,
+    PinnedAccountLaunch,
+    BundledExecutable,
+    AccountSessionLogin,
+    TurnCommitGuard,
+    AttributedInput,
+    NativeRelease,
 }
 
+/// Provider-neutral request preparation. Runtime traffic stays on this boundary.
+pub enum ProviderCommand<'a> {
+    StartThread {
+        snapshot: &'a Snapshot,
+        method: crate::thread_prepare::Method,
+        params: Map<String, Value>,
+        instructions: String,
+    },
+    StartTurn {
+        input: &'a TurnInput,
+        params: Map<String, Value>,
+    },
+    SetTitle {
+        params: Map<String, Value>,
+    },
+    EditThread {
+        agent: &'a Value,
+        checkpoint: &'a Value,
+    },
+}
+
+impl ProviderCommand<'_> {
+    fn feature(&self) -> ProviderFeature {
+        match self {
+            Self::StartThread { .. } => ProviderFeature::StartThread,
+            Self::StartTurn { .. } => ProviderFeature::StartTurn,
+            Self::SetTitle { .. } => ProviderFeature::SetTitle,
+            Self::EditThread { .. } => ProviderFeature::EditThread,
+        }
+    }
+}
+
+/// Static metadata and local policy. Wire shaping belongs to encode.
+pub struct ProviderDescriptor {
+    pub kind: ProviderKind,
+    pub controls: &'static [ProviderCapability],
+    pub features: &'static [ProviderFeature],
+    pub default_model: &'static str,
+    pub pricing_vendor: &'static str,
+    pub sign_in_message: &'static str,
+    pub account_changed_message: &'static str,
+    pub diagnostics: fn() -> ThreadRequest,
+    pub project_diagnostics: fn(Value, u64) -> (Value, u64),
+    pub configured_binary:
+        fn(&crate::account_policy::PublicAccount, Option<String>) -> Option<Option<String>>,
+    pub owns_model: fn(&str) -> bool,
+    pub classify_error: fn(&Value) -> Option<UsageCause>,
+    pub is_busy_error: fn(&Value) -> bool,
+    pub read_auth: fn(&AuthProfile) -> AuthMetadata,
+    pub credential_location: fn(&AuthProfile) -> CredentialLocation,
+    pub credential_identity_matches: fn(&Value, &Value) -> bool,
+}
+
+impl ProviderDescriptor {
+    #[must_use]
+    pub fn supports(&self, feature: ProviderFeature) -> bool {
+        self.features.contains(&feature)
+    }
+}
+
+/// One boundary for provider launch, native requests and native events.
 pub trait ProviderAdapter: Send + Sync + 'static {
-    fn kind(&self) -> ProviderKind;
-
-    fn capabilities(&self) -> Capabilities;
-
-    /// The controls that this adapter supports. The UI shows only these. The
-    /// list has one owner, `ProviderKind::capabilities`, so a new provider
-    /// must declare it.
-    fn supported_controls(&self) -> &'static [ProviderCapability] {
-        self.kind().capabilities()
-    }
-
-    /// The provider request that gives `edit(turn)` its new thread: a fork from the
-    /// turn of `checkpoint`, or a new thread when the checkpoint has no turn.
-    /// Each adapter owns this call, so a provider can change its request without
-    /// a branch in the caller. Both peers take `thread/fork` today.
-    fn edit_thread_request(&self, agent: &Value, checkpoint: &Value) -> ThreadRequest {
-        fork_from_checkpoint(agent, checkpoint)
-    }
-
-    /// Provider-specific parts of `thread/start` and `thread/resume` params.
-    fn shape_thread_params(
-        &self,
-        s: &Snapshot,
-        params: &mut Map<String, Value>,
-        instructions: &mut String,
-    );
-
-    /// Provider-specific parts of the `thread/start` params of an ephemeral title thread.
-    fn shape_title_thread_params(&self, params: &mut Map<String, Value>);
-
-    /// Native request that reports the provider session's loaded state for diagnostics.
-    fn diagnostics_method(&self) -> Method;
-
-    /// Params of `diagnostics_method`, in the exact shape the retained-request
-    /// validator accepts for that method.
-    fn diagnostics_params(&self) -> Value;
-
-    /// Provider-specific parts of `turn/start` params.
-    fn shape_turn_params(&self, input: &TurnInput, params: &mut Map<String, Value>);
-
-    /// Launch spec for the retained session of one host account.
-    fn host_launch(&self, input: HostLaunch<'_>) -> Result<ProviderLaunch, WorkerError>;
-
-    /// Usage, rate-limit or auth cause of a provider turn error, if any.
-    fn classify_error(&self, error: &Value) -> Option<UsageCause>;
-
-    /// The peer refused a request because the thread is still running a turn.
-    fn is_busy_error(&self, error: &Value) -> bool;
-
-    /// The model id or alias belongs to this provider's model family.
-    fn owns_model(&self, model: &str) -> bool;
-
-    /// Model of a new agent when nothing selects one.
-    fn default_model(&self) -> &'static str;
-
-    /// Vendor key of this provider's models in the pricing catalog.
-    fn pricing_vendor(&self) -> &'static str;
-
-    /// Auth status of one account profile from the provider's local source,
-    /// through the shared per-account status cache. It never mutates the registry.
-    fn read_auth(&self, profile: &AuthProfile) -> AuthMetadata;
-
-    /// Credential files whose change ends the cached status of `profile`.
-    fn credential_location(&self, profile: &AuthProfile) -> CredentialLocation;
-
-    /// Hold reason of a start blocked because the account is not signed in.
-    fn sign_in_message(&self) -> &'static str;
-
-    /// Hold reason of a start whose account identity changed under the session.
-    fn account_changed_message(&self) -> &'static str;
+    fn descriptor(&self) -> &'static ProviderDescriptor;
+    fn launch(&self, input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError>;
+    fn encode(&self, command: ProviderCommand<'_>) -> Result<ThreadRequest, WorkerError>;
+    fn decode(&self, bytes: &[u8]) -> Result<ProviderEvent, studio_runtime_providers::CodecError>;
 }
 
 /// A native thread request: the method and its params.
@@ -153,14 +152,20 @@ pub trait ProviderAdapter: Send + Sync + 'static {
 pub struct ThreadRequest {
     pub method: Method,
     pub params: Value,
+    /// Session instructions returned alongside a prepared thread request.
+    pub instructions: Option<String>,
 }
 
 /// `thread/fork` from the checkpoint's turn. The params keep the fields that every
 /// thread of the agent carries: folder, service tier, model, config and, for a fork,
 /// the approval policy and sandbox. `model` is omitted when the agent has none,
 /// because a null model differs from a missing one.
+fn checkpoint_turn(checkpoint: &Value) -> Option<&str> {
+    checkpoint.get("turnId").and_then(Value::as_str)
+}
+
 fn fork_from_checkpoint(agent: &Value, checkpoint: &Value) -> ThreadRequest {
-    let fork = checkpoint.get("turnId").is_some_and(Value::is_string);
+    let fork = checkpoint_turn(checkpoint).is_some();
     let config = agent
         .get("threadConfig")
         .cloned()
@@ -181,10 +186,11 @@ fn fork_from_checkpoint(agent: &Value, checkpoint: &Value) -> ThreadRequest {
         return ThreadRequest {
             method: Method::ThreadStart,
             params,
+            instructions: None,
         };
     }
     params["threadId"] = checkpoint.get("threadId").cloned().unwrap_or(Value::Null);
-    params["lastTurnId"] = checkpoint.get("turnId").cloned().unwrap_or(Value::Null);
+    params["lastTurnId"] = json!(checkpoint_turn(checkpoint));
     for key in ["approvalPolicy", "sandbox"] {
         if let Some(value) = agent.get(key) {
             params[key] = value.clone();
@@ -193,14 +199,108 @@ fn fork_from_checkpoint(agent: &Value, checkpoint: &Value) -> ThreadRequest {
     ThreadRequest {
         method: Method::ThreadFork,
         params,
+        instructions: None,
     }
+}
+
+fn read_params<T: serde::de::DeserializeOwned>(
+    params: &Map<String, Value>,
+) -> Result<T, WorkerError> {
+    T::deserialize(Value::Object(params.clone())).map_err(|_| refused("provider/invalid-request"))
+}
+
+/// The store consumes JSON projections; native protocol parsing remains typed.
+pub(crate) fn project_frame(
+    frame: studio_runtime_providers::Frame,
+) -> Result<studio_runtime_providers::Frame, studio_runtime_providers::CodecError> {
+    use studio_runtime_providers::{Frame, ResponseBody};
+    let mut unknown_variant = false;
+    frame.visit_unknown_variants(&mut |_, _| unknown_variant = true);
+    if (matches!(frame, Frame::KnownMethodUnparsed(_)) || unknown_variant)
+        && matches!(
+            &frame,
+            Frame::KnownMethodUnparsed(_) | Frame::CodexServerRequest(_)
+        )
+        && frame.id().is_some()
+    {
+        let method = frame.method().expect("native request method").to_owned();
+        let fields = serde::Serialize::serialize(&frame, studio_json::value::Serializer).map_err(
+            |error| studio_runtime_providers::CodecError::Serialization(error.to_string()),
+        )?;
+        let Value::Object(fields) = fields else {
+            unreachable!("request object");
+        };
+        return Ok(Frame::KnownMethodUnparsed(
+            studio_runtime_providers::UnknownMethodFrame { method, fields },
+        ));
+    }
+    match &frame {
+        Frame::Request(_)
+        | Frame::Notification(_)
+        | Frame::UnknownMethod(_)
+        | Frame::Response {
+            body: ResponseBody::Result(_) | ResponseBody::Error(_),
+            ..
+        } => Ok(frame),
+        Frame::KnownMethodUnparsed(_)
+        | Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Response { .. } => {
+            studio_runtime_providers::decode_frame(&studio_runtime_providers::encode_line(&frame)?)
+        }
+    }
+}
+
+pub(crate) fn project_entry(
+    entry: studio_runtime_process::provider_seam::JournalEntry,
+) -> Result<studio_runtime_process::provider_seam::JournalEntry, WorkerError> {
+    use studio_runtime_process::provider_seam::{JournalEntry, JournalPayload};
+    let JournalEntry {
+        received_at_ms,
+        boundary_at,
+        cursor,
+        generation,
+        payload,
+    } = entry;
+    let payload = match payload {
+        JournalPayload::Frame(frame) => JournalPayload::Frame(
+            project_frame(frame).map_err(|_| refused("provider/invalid-event-projection"))?,
+        ),
+        other @ JournalPayload::RawStdout { .. }
+        | other @ JournalPayload::Stderr(_)
+        | other @ JournalPayload::Exit(_)
+        | other @ JournalPayload::Other { .. } => other,
+    };
+    Ok(JournalEntry {
+        received_at_ms,
+        boundary_at,
+        cursor,
+        generation,
+        payload,
+    })
+}
+
+fn write_params(params: &impl serde::Serialize) -> Result<Map<String, Value>, WorkerError> {
+    let Value::Object(params) = serde::Serialize::serialize(params, studio_json::value::Serializer)
+        .map_err(|_| refused("provider/invalid-request"))?
+    else {
+        unreachable!("generated request params are structs");
+    };
+    Ok(params)
 }
 
 /// The agent's provider keeps a native rollout history. An unknown provider
 /// does not: its history is never read or repaired.
 #[must_use]
 pub fn native_history(agent: &Value) -> bool {
-    ProviderKind::of_record(agent).is_ok_and(|kind| adapter(kind).capabilities().native_history)
+    supports_record(agent, ProviderFeature::NativeHistory)
+}
+
+#[must_use]
+pub fn supports_record(record: &Value, feature: ProviderFeature) -> bool {
+    ProviderKind::of_record(record).is_ok_and(|kind| adapter(kind).descriptor().supports(feature))
 }
 
 /// The provider whose model family contains `model`, if any.
@@ -208,13 +308,13 @@ pub fn native_history(agent: &Value) -> bool {
 pub fn model_provider(model: &str) -> Option<ProviderKind> {
     ProviderKind::ALL
         .into_iter()
-        .find(|kind| adapter(*kind).owns_model(model))
+        .find(|kind| (adapter(*kind).descriptor().owns_model)(model))
 }
 
 /// Default model of a provider.
 #[must_use]
 pub fn default_model(provider: ProviderKind) -> &'static str {
-    adapter(provider).default_model()
+    adapter(provider).descriptor().default_model
 }
 
 struct CodexAdapter;
@@ -269,43 +369,82 @@ const CLAUDE_DEFAULT_MODEL: &str = "default";
 /// Claude Code model aliases (besides `claude-*` ids).
 const CLAUDE_MODEL_ALIASES: [&str; 4] = [CLAUDE_DEFAULT_MODEL, "sonnet", "opus", "haiku"];
 
-impl ProviderAdapter for CodexAdapter {
-    fn kind(&self) -> ProviderKind {
-        ProviderKind::Codex
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            native_history: true,
-            tools_on_every_turn: false,
-            voice_tools: true,
-            daybreak: true,
-            writable_sandbox_roots: true,
-            turn_end_closes_steer: true,
+impl CodexAdapter {
+    fn shape_thread_params(
+        s: &Snapshot,
+        method: crate::thread_prepare::Method,
+        params: &mut Map<String, Value>,
+        _: &mut String,
+    ) -> Result<(), WorkerError> {
+        match method {
+            crate::thread_prepare::Method::Start => {
+                let mut native: codex::ThreadStartParams = read_params(params)?;
+                native.cwd = Some(Some(s.actor.cwd.clone()));
+                params.extend(write_params(&native)?);
+            }
+            crate::thread_prepare::Method::Resume => {
+                let mut template = Map::new();
+                template.insert(
+                    codex::ThreadResumeParams::FIELD_THREAD_ID.into(),
+                    json!(s.actor.thread_id.as_deref().unwrap_or_default()),
+                );
+                let mut native: codex::ThreadResumeParams = read_params(&template)?;
+                native.cwd = Some(Some(s.actor.cwd.clone()));
+                let mut fields = write_params(&native)?;
+                fields.remove(codex::ThreadResumeParams::FIELD_THREAD_ID);
+                params.extend(fields);
+            }
         }
+        Ok(())
     }
 
-    fn shape_thread_params(&self, _: &Snapshot, _: &mut Map<String, Value>, _: &mut String) {}
-
-    fn shape_title_thread_params(&self, params: &mut Map<String, Value>) {
-        params.insert("approvalPolicy".into(), json!("never"));
-        params.insert("sandbox".into(), json!("read-only"));
+    fn shape_title_thread_params(params: &mut Map<String, Value>) -> Result<(), WorkerError> {
+        let mut native: codex::ThreadStartParams = read_params(params)?;
+        native.approval_policy = Some(Some(codex::AskForApproval::Variant1(Box::new(
+            codex::AskForApprovalVariant1::Never,
+        ))));
+        native.sandbox = Some(Some(codex::SandboxMode::ReadOnly));
+        params.extend(write_params(&native)?);
+        Ok(())
     }
 
-    fn diagnostics_method(&self) -> Method {
-        Method::ThreadLoadedList
+    fn shape_turn_params(
+        _input: &TurnInput,
+        params: &mut Map<String, Value>,
+    ) -> Result<(), WorkerError> {
+        // Input and thread identity are filled by shared preparation after these
+        // overrides. The template is never sent or persisted.
+        let template = Map::from_iter([
+            (codex::TurnStartParams::FIELD_THREAD_ID.into(), json!("")),
+            (codex::TurnStartParams::FIELD_INPUT.into(), json!([])),
+        ]);
+        let mut native: codex::TurnStartParams = read_params(&template)?;
+        native.cyber_access_program = Some(Some(codex::CyberAccessProgram::Standard));
+        let mut fields = write_params(&native)?;
+        fields.remove(codex::TurnStartParams::FIELD_THREAD_ID);
+        fields.remove(codex::TurnStartParams::FIELD_INPUT);
+        params.extend(fields);
+        Ok(())
     }
 
-    fn diagnostics_params(&self) -> Value {
-        json!({"limit": 100})
+    fn edit_thread(agent: &Value, checkpoint: &Value) -> Result<ThreadRequest, WorkerError> {
+        let mut request = fork_from_checkpoint(agent, checkpoint);
+        request.params = if let Some(turn) = checkpoint_turn(checkpoint) {
+            let mut native: codex::ThreadForkParams =
+                serde::Deserialize::deserialize(request.params)
+                    .map_err(|_| refused("provider/invalid-request"))?;
+            native.last_turn_id = Some(Some(turn.to_owned()));
+            Value::Object(write_params(&native)?)
+        } else {
+            let native: codex::ThreadStartParams = serde::Deserialize::deserialize(request.params)
+                .map_err(|_| refused("provider/invalid-request"))?;
+            Value::Object(write_params(&native)?)
+        };
+        Ok(request)
     }
 
-    fn shape_turn_params(&self, _input: &TurnInput, params: &mut Map<String, Value>) {
-        params.insert("cyberAccessProgram".into(), json!("standard"));
-    }
-
-    fn host_launch(&self, input: HostLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
-        let HostLaunch {
+    fn host_launch(input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
+        let CheckedLaunch {
             home,
             isolated,
             codex_executable,
@@ -341,66 +480,27 @@ impl ProviderAdapter for CodexAdapter {
         })
     }
 
-    fn classify_error(&self, error: &Value) -> Option<UsageCause> {
+    fn classify_error(error: &Value) -> Option<UsageCause> {
         classify_usage_failure(error, None)
     }
 
     /// Codex queues or steers input into a running turn; it has no busy refusal.
-    fn is_busy_error(&self, _error: &Value) -> bool {
+    fn is_busy_error(_error: &Value) -> bool {
         false
     }
 
-    fn owns_model(&self, model: &str) -> bool {
+    fn owns_model(model: &str) -> bool {
         model.starts_with("gpt-")
-    }
-
-    fn default_model(&self) -> &'static str {
-        studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL
-    }
-
-    fn pricing_vendor(&self) -> &'static str {
-        "openai"
-    }
-
-    fn read_auth(&self, profile: &AuthProfile) -> AuthMetadata {
-        crate::account_driver::read_codex_auth_cached(profile)
-    }
-
-    fn credential_location(&self, profile: &AuthProfile) -> CredentialLocation {
-        crate::account_driver::codex_location(profile)
-    }
-
-    fn sign_in_message(&self) -> &'static str {
-        "Sign in to this Codex account first"
-    }
-
-    fn account_changed_message(&self) -> &'static str {
-        "The Codex account changed during authentication"
     }
 }
 
-impl ProviderAdapter for ClaudeAdapter {
-    fn kind(&self) -> ProviderKind {
-        ProviderKind::Claude
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            native_history: false,
-            tools_on_every_turn: true,
-            voice_tools: false,
-            daybreak: false,
-            writable_sandbox_roots: false,
-            turn_end_closes_steer: false,
-        }
-    }
-
+impl ClaudeAdapter {
     fn shape_thread_params(
-        &self,
         s: &Snapshot,
+        _: crate::thread_prepare::Method,
         params: &mut Map<String, Value>,
         instructions: &mut String,
-    ) {
+    ) -> Result<(), WorkerError> {
         instructions.push_str(CLAUDE_SESSION_INSTRUCTIONS);
         let mut options = s.settings.claude_options.clone();
         if s.settings.role == crate::thread_prepare::Role::Reviewer {
@@ -455,20 +555,18 @@ impl ProviderAdapter for ClaudeAdapter {
             };
             params.extend(wire);
         }
+        Ok(())
     }
 
-    fn shape_title_thread_params(&self, _: &mut Map<String, Value>) {}
-
-    fn diagnostics_method(&self) -> Method {
-        Method::ClaudeDiagnostics
-    }
-
-    fn diagnostics_params(&self) -> Value {
-        json!({})
+    fn shape_title_thread_params(_: &mut Map<String, Value>) -> Result<(), WorkerError> {
+        Ok(())
     }
 
     /// A single-line `/` or `$` user message is passed to Claude Code as a command.
-    fn shape_turn_params(&self, input: &TurnInput, params: &mut Map<String, Value>) {
+    fn shape_turn_params(
+        input: &TurnInput,
+        params: &mut Map<String, Value>,
+    ) -> Result<(), WorkerError> {
         if let [event] = input.events.as_slice()
             && event.kind == "user"
             && !input.has_assets
@@ -479,9 +577,14 @@ impl ProviderAdapter for ClaudeAdapter {
                 params.insert("claudeCommand".into(), json!(command));
             }
         }
+        Ok(())
     }
 
-    fn host_launch(&self, input: HostLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
+    fn edit_thread(agent: &Value, checkpoint: &Value) -> Result<ThreadRequest, WorkerError> {
+        Ok(fork_from_checkpoint(agent, checkpoint))
+    }
+
+    fn host_launch(input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
         // The bridge runs in the account's server directory, as in Python, because
         // its session snapshots there let an agent that Python started resume.
         let bridge_root = account_server_root(&input.root, input.account);
@@ -508,7 +611,7 @@ impl ProviderAdapter for ClaudeAdapter {
     /// notification, can fail at a subscription limit with only the notice
     /// that Claude Code shows as its error: "You've hit your session limit ·
     /// resets 3:40am (UTC)". The names are Claude Code's limit names.
-    fn classify_error(&self, error: &Value) -> Option<UsageCause> {
+    fn classify_error(error: &Value) -> Option<UsageCause> {
         static AUTH: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
         static LIMIT: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
         let auth = AUTH.get_or_init(|| {
@@ -530,38 +633,196 @@ impl ProviderAdapter for ClaudeAdapter {
         })
     }
 
-    fn is_busy_error(&self, error: &Value) -> bool {
+    fn is_busy_error(error: &Value) -> bool {
         *error == studio_json::json!({"code": CLAUDE_BUSY_CODE, "message": CLAUDE_BUSY_MESSAGE})
     }
 
-    fn owns_model(&self, model: &str) -> bool {
+    fn owns_model(model: &str) -> bool {
         model.starts_with("claude-") || CLAUDE_MODEL_ALIASES.contains(&model)
     }
-
-    fn default_model(&self) -> &'static str {
-        CLAUDE_DEFAULT_MODEL
-    }
-
-    fn pricing_vendor(&self) -> &'static str {
-        "anthropic"
-    }
-
-    fn read_auth(&self, profile: &AuthProfile) -> AuthMetadata {
-        crate::account_driver::read_claude_auth_cached(profile)
-    }
-
-    fn credential_location(&self, profile: &AuthProfile) -> CredentialLocation {
-        crate::account_driver::claude_location(profile)
-    }
-
-    fn sign_in_message(&self) -> &'static str {
-        studio_runtime_store::account_state::CLAUDE_SIGN_IN_MESSAGE
-    }
-
-    fn account_changed_message(&self) -> &'static str {
-        "The Claude account changed during authentication"
-    }
 }
+
+macro_rules! provider_adapter {
+    ($adapter:ident, $descriptor:ident, $decoder:path, $codec:path) => {
+        impl ProviderAdapter for $adapter {
+            fn descriptor(&self) -> &'static ProviderDescriptor {
+                &$descriptor
+            }
+            fn launch(&self, input: CheckedLaunch<'_>) -> Result<ProviderLaunch, WorkerError> {
+                let mut launch = Self::host_launch(input)?;
+                launch.spec.codec = $codec();
+                launch.spec.codec.decode = |bytes| $adapter.decode(bytes);
+                Ok(launch)
+            }
+            fn encode(&self, command: ProviderCommand<'_>) -> Result<ThreadRequest, WorkerError> {
+                if !self.descriptor().supports(command.feature()) {
+                    return Err(refused("provider/unsupported-command"));
+                }
+                let (method, params, instructions) = match command {
+                    ProviderCommand::StartThread {
+                        snapshot,
+                        method,
+                        mut params,
+                        mut instructions,
+                    } => {
+                        Self::shape_thread_params(
+                            snapshot,
+                            method,
+                            &mut params,
+                            &mut instructions,
+                        )?;
+                        (
+                            match method {
+                                crate::thread_prepare::Method::Start => Method::ThreadStart,
+                                crate::thread_prepare::Method::Resume => Method::ThreadResume,
+                            },
+                            params,
+                            Some(instructions),
+                        )
+                    }
+                    ProviderCommand::StartTurn { input, mut params } => {
+                        Self::shape_turn_params(input, &mut params)?;
+                        (Method::TurnStart, params, None)
+                    }
+                    ProviderCommand::SetTitle { mut params } => {
+                        Self::shape_title_thread_params(&mut params)?;
+                        (Method::ThreadStart, params, None)
+                    }
+                    ProviderCommand::EditThread { agent, checkpoint } => {
+                        return Self::edit_thread(agent, checkpoint);
+                    }
+                };
+                Ok(ThreadRequest {
+                    method,
+                    params: Value::Object(params),
+                    instructions,
+                })
+            }
+            fn decode(
+                &self,
+                bytes: &[u8],
+            ) -> Result<ProviderEvent, studio_runtime_providers::CodecError> {
+                $decoder(bytes)
+            }
+        }
+    };
+}
+
+static CODEX_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
+    kind: ProviderKind::Codex,
+    controls: ProviderKind::Codex.capabilities(),
+    features: &[
+        ProviderFeature::StartThread,
+        ProviderFeature::StartTurn,
+        ProviderFeature::SetTitle,
+        ProviderFeature::EditThread,
+        ProviderFeature::NativeHistory,
+        ProviderFeature::NativeRelease,
+        ProviderFeature::VoiceTools,
+        ProviderFeature::Daybreak,
+        ProviderFeature::WritableSandboxRoots,
+        ProviderFeature::TurnEndClosesSteer,
+        ProviderFeature::FrozenReasoningConfig,
+        ProviderFeature::UnsubmittedInspection,
+        ProviderFeature::NativeMcpConfiguration,
+        ProviderFeature::BrowserConfiguration,
+        ProviderFeature::BundledExecutable,
+        ProviderFeature::AccountSessionLogin,
+    ],
+    default_model: studio_runtime_schema::provider_kind::CODEX_INITIAL_MODEL,
+    pricing_vendor: "openai",
+    sign_in_message: "Sign in to this Codex account first",
+    account_changed_message: "The Codex account changed during authentication",
+    diagnostics: || ThreadRequest {
+        method: Method::ThreadLoadedList,
+        params: json!({"limit":100}),
+        instructions: None,
+    },
+    project_diagnostics: |value, _| {
+        let count = value
+            .get("data")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len) as u64;
+        (
+            json!({"provider": ProviderKind::Codex.key(), "loadedThreads":count}),
+            count,
+        )
+    },
+    configured_binary: |_, launched| Some(launched),
+    owns_model: CodexAdapter::owns_model,
+    classify_error: CodexAdapter::classify_error,
+    is_busy_error: CodexAdapter::is_busy_error,
+    read_auth: crate::account_driver::read_codex_auth_cached,
+    credential_location: crate::account_driver::codex_location,
+    credential_identity_matches: |old, new| old == new,
+};
+static CLAUDE_DESCRIPTOR: ProviderDescriptor = ProviderDescriptor {
+    kind: ProviderKind::Claude,
+    controls: ProviderKind::Claude.capabilities(),
+    features: &[
+        ProviderFeature::StartThread,
+        ProviderFeature::StartTurn,
+        ProviderFeature::SetTitle,
+        ProviderFeature::EditThread,
+        ProviderFeature::ToolsOnEveryTurn,
+        ProviderFeature::PreserveContextOnReattach,
+        ProviderFeature::SteerCompletionReceipts,
+        ProviderFeature::HostWorktreeFence,
+        ProviderFeature::IdleSummaryReturn,
+        ProviderFeature::PinnedAccountLaunch,
+        ProviderFeature::TurnCommitGuard,
+        ProviderFeature::AttributedInput,
+    ],
+    default_model: CLAUDE_DEFAULT_MODEL,
+    pricing_vendor: "anthropic",
+    sign_in_message: studio_runtime_store::account_state::CLAUDE_SIGN_IN_MESSAGE,
+    account_changed_message: "The Claude account changed during authentication",
+    diagnostics: || ThreadRequest {
+        method: Method::ClaudeDiagnostics,
+        params: json!({}),
+        instructions: None,
+    },
+    project_diagnostics: |value, idle_limit| {
+        let mut row = Map::new();
+        row.insert("provider".into(), json!(ProviderKind::Claude.key()));
+        if let Some(fields) = value.as_object() {
+            row.extend(fields.clone());
+        }
+        row.insert("idleLimitSeconds".into(), json!(idle_limit));
+        (Value::Object(row), 0)
+    },
+    configured_binary: |profile, launched| {
+        launched.as_ref()?;
+        Some(crate::account_driver::claude::resolve_public_claude_binary(
+            profile,
+        ))
+    },
+    owns_model: ClaudeAdapter::owns_model,
+    classify_error: ClaudeAdapter::classify_error,
+    is_busy_error: ClaudeAdapter::is_busy_error,
+    read_auth: crate::account_driver::read_claude_auth_cached,
+    credential_location: crate::account_driver::claude_location,
+    credential_identity_matches: |old, new| {
+        old == new
+            || old
+                .as_str()
+                .zip(new.as_str())
+                .is_some_and(|(old, new)| crate::account_driver::claude_identity::accepts(old, new))
+    },
+};
+
+provider_adapter!(
+    CodexAdapter,
+    CODEX_DESCRIPTOR,
+    studio_runtime_providers::decode_codex_frame,
+    studio_runtime_process::provider_seam::ProviderCodec::codex
+);
+provider_adapter!(
+    ClaudeAdapter,
+    CLAUDE_DESCRIPTOR,
+    studio_runtime_providers::decode_frame,
+    studio_runtime_process::provider_seam::ProviderCodec::default
+);
 
 /// Refusal code of a Claude launch whose account row has no saved identity.
 /// `claude auth status` writes that identity once it reads the login, so an
@@ -722,13 +983,59 @@ mod tests {
     use studio_json::json;
 
     #[test]
+    fn commands_are_declared_and_title_encoding_preserves_the_caller_fields() {
+        use super::{ProviderCommand, ProviderFeature};
+        for kind in ProviderKind::ALL {
+            let adapter = adapter(kind);
+            for feature in [
+                ProviderFeature::StartThread,
+                ProviderFeature::StartTurn,
+                ProviderFeature::SetTitle,
+                ProviderFeature::EditThread,
+            ] {
+                assert!(adapter.descriptor().supports(feature));
+            }
+            let params = super::Map::from_iter([
+                (
+                    super::codex::ThreadStartParams::FIELD_CWD.into(),
+                    json!("/work"),
+                ),
+                (
+                    super::codex::ThreadStartParams::FIELD_MODEL.into(),
+                    json!("chosen"),
+                ),
+                (
+                    super::codex::ThreadStartParams::FIELD_EPHEMERAL.into(),
+                    json!(true),
+                ),
+            ]);
+            let request = adapter
+                .encode(ProviderCommand::SetTitle { params })
+                .expect("title command");
+            assert_eq!(request.method, super::Method::ThreadStart);
+            assert_eq!(request.params["cwd"], "/work");
+            assert_eq!(request.params["model"], "chosen");
+            assert_eq!(request.params["ephemeral"], true);
+            assert!(request.instructions.is_none());
+        }
+        assert!(!super::supports_record(
+            &json!({"provider":"future"}),
+            ProviderFeature::StartThread
+        ));
+        assert!(!super::supports_record(
+            &json!({}),
+            ProviderFeature::StartThread
+        ));
+    }
+
+    #[test]
     fn each_adapter_reports_its_typed_control_list() {
         use super::ProviderCapability::{
             Approvals, Compaction, Effort, Fork, ModelChange, Rewind, Steer,
         };
         for kind in ProviderKind::ALL {
             assert_eq!(
-                adapter(kind).supported_controls(),
+                adapter(kind).descriptor().controls,
                 [
                     Steer,
                     Rewind,
@@ -752,7 +1059,12 @@ mod tests {
         });
         let checkpoint = json!({"threadId": "t1", "turnId": "u2"});
         for kind in ProviderKind::ALL {
-            let request = adapter(kind).edit_thread_request(&agent, &checkpoint);
+            let request = adapter(kind)
+                .encode(super::ProviderCommand::EditThread {
+                    agent: &agent,
+                    checkpoint: &checkpoint,
+                })
+                .expect("edit command");
             assert_eq!(request.method, Method::ThreadFork, "{kind}");
             assert_eq!(
                 request.params,
@@ -770,8 +1082,12 @@ mod tests {
     fn a_checkpoint_without_a_turn_starts_a_new_thread() {
         use super::Method;
         let agent = json!({"cwd": "/work", "model": ""});
-        let request =
-            adapter(ProviderKind::Codex).edit_thread_request(&agent, &json!({"turnId": null}));
+        let request = adapter(ProviderKind::Codex)
+            .encode(super::ProviderCommand::EditThread {
+                agent: &agent,
+                checkpoint: &json!({"turnId": null}),
+            })
+            .expect("edit command");
         assert_eq!(request.method, Method::ThreadStart);
         assert_eq!(
             request.params,
@@ -785,18 +1101,21 @@ mod tests {
         let claude_only = json!({"message": "OAuth session expired"});
         let busy = json!({"code": -32000, "message": "Claude is still working"});
         for kind in ProviderKind::ALL {
-            assert_eq!(adapter(kind).kind(), kind);
+            assert_eq!(adapter(kind).descriptor().kind, kind);
             assert_eq!(
-                adapter(kind).classify_error(&shared),
+                (adapter(kind).descriptor().classify_error)(&shared),
                 Some(UsageCause::Auth)
             );
         }
         let codex = adapter(ProviderKind::Codex);
         let claude = adapter(ProviderKind::Claude);
-        assert_eq!(codex.classify_error(&claude_only), None);
-        assert_eq!(claude.classify_error(&claude_only), Some(UsageCause::Auth));
-        assert!(!codex.is_busy_error(&busy));
-        assert!(claude.is_busy_error(&busy));
+        assert_eq!((codex.descriptor().classify_error)(&claude_only), None);
+        assert_eq!(
+            (claude.descriptor().classify_error)(&claude_only),
+            Some(UsageCause::Auth)
+        );
+        assert!(!(codex.descriptor().is_busy_error)(&busy));
+        assert!((claude.descriptor().is_busy_error)(&busy));
     }
 
     #[test]
@@ -814,7 +1133,7 @@ mod tests {
             assert_eq!(model_provider(model), owner, "{model}");
         }
         for kind in ProviderKind::ALL {
-            let default = adapter(kind).default_model();
+            let default = adapter(kind).descriptor().default_model;
             assert_eq!(model_provider(default), Some(kind));
             assert_eq!(super::default_model(kind), default);
         }
@@ -831,12 +1150,15 @@ mod tests {
             home: home.path().to_path_buf(),
             claude_options: Some(studio_json::json!({"configDir": home.path()})),
         };
-        let codex = adapter(ProviderKind::Codex).credential_location(&profile(ProviderKind::Codex));
+        let codex = (adapter(ProviderKind::Codex)
+            .descriptor()
+            .credential_location)(&profile(ProviderKind::Codex));
         assert_eq!(codex.directories, vec![home.path().to_path_buf()]);
         assert_eq!(codex.credential_files.len(), 1);
         assert_eq!(codex.credential_files[0].name, "auth.json");
-        let claude =
-            adapter(ProviderKind::Claude).credential_location(&profile(ProviderKind::Claude));
+        let claude = (adapter(ProviderKind::Claude)
+            .descriptor()
+            .credential_location)(&profile(ProviderKind::Claude));
         assert_eq!(claude.directories, vec![home.path().to_path_buf()]);
         assert!(
             claude
@@ -846,8 +1168,7 @@ mod tests {
         );
         assert_ne!(codex.identity, claude.identity);
         assert_eq!(
-            adapter(ProviderKind::Codex)
-                .read_auth(&profile(ProviderKind::Codex))
+            (adapter(ProviderKind::Codex).descriptor().read_auth)(&profile(ProviderKind::Codex))
                 .status,
             AuthStatus::SignedOut
         );
@@ -888,7 +1209,7 @@ mod tests {
             ),
         ]);
         let spec = adapter(ProviderKind::Claude)
-            .host_launch(super::HostLaunch {
+            .launch(super::CheckedLaunch {
                 profile: Some(&profile),
                 home: dir.path().to_string_lossy().into_owned(),
                 isolated: false,
@@ -1036,7 +1357,7 @@ mod tests {
         ]);
         let codex = |isolated: bool| {
             adapter(ProviderKind::Codex)
-                .host_launch(super::HostLaunch {
+                .launch(super::CheckedLaunch {
                     profile: None,
                     home: format!("{}/codex", dir.path().display()),
                     isolated,

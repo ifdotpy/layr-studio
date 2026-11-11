@@ -16,6 +16,38 @@ use crate::{EventCursor, Generation, OperationId, ProviderHandle, ProviderLaunch
 /// Decoded JSON has proportional allocation overhead. No replay batch is retained.
 pub const LANE_CAPACITY: usize = 16;
 
+/// Provider-owned framing functions, selected by the application adapter.
+#[derive(Clone, Copy)]
+pub struct ProviderCodec {
+    pub normalize: fn(&Frame) -> Result<Frame, CodecError>,
+    pub encode: fn(&Frame) -> Result<Vec<u8>, CodecError>,
+    pub decode: fn(&[u8]) -> Result<Frame, CodecError>,
+    pub decode_with_metadata:
+        fn(&[u8]) -> Result<studio_runtime_providers::DecodedFrame, CodecError>,
+}
+
+impl Default for ProviderCodec {
+    fn default() -> Self {
+        Self {
+            normalize: |frame| Ok(frame.clone()),
+            encode: encode_line,
+            decode: studio_runtime_providers::decode_frame,
+            decode_with_metadata: studio_runtime_providers::decode_frame_with_metadata,
+        }
+    }
+}
+
+impl ProviderCodec {
+    pub const fn codex() -> Self {
+        Self {
+            normalize: studio_runtime_providers::normalize_codex_frame,
+            encode: studio_runtime_providers::encode_codex_line,
+            decode: studio_runtime_providers::decode_codex_frame,
+            decode_with_metadata: studio_runtime_providers::decode_codex_frame_with_metadata,
+        }
+    }
+}
+
 /// Shared monotonic epoch, injected into an attachment and its session.
 /// Tokio's clock makes arrival/deadline tests independent of wall time.
 #[derive(Clone)]
@@ -67,11 +99,17 @@ pub enum JournalPayload {
 /// Submitted marker). Private fields prevent arbitrarily large queued writes.
 pub struct PreparedWrite {
     pub(crate) operation_id: OperationId,
-    pub(crate) message: Value,
+    pub(crate) message: Frame,
+    pub(crate) encode: fn(&Frame) -> Result<Vec<u8>, CodecError>,
 }
 
 impl PreparedWrite {
-    pub fn message(&self) -> &Value {
+    /// JSON view for external fixture factories. Production transports carry Frame.
+    pub fn message(&self) -> Value {
+        studio_json::to_value(&self.message).expect("validated provider frame serializes")
+    }
+
+    pub fn frame(&self) -> &Frame {
         &self.message
     }
 
@@ -80,12 +118,19 @@ impl PreparedWrite {
     }
 
     pub fn new(operation_id: OperationId, frame: &Frame) -> Result<Self, AdapterError> {
-        let bytes = encode_line(frame).map_err(|_| AdapterError::InvalidConfiguration)?;
-        let message =
-            studio_json::from_slice(&bytes).map_err(|_| AdapterError::InvalidConfiguration)?;
+        Self::new_with_codec(operation_id, frame, ProviderCodec::default())
+    }
+
+    pub fn new_with_codec(
+        operation_id: OperationId,
+        frame: &Frame,
+        codec: ProviderCodec,
+    ) -> Result<Self, AdapterError> {
+        let bytes = (codec.encode)(frame).map_err(|_| AdapterError::InvalidConfiguration)?;
         let prepared = Self {
             operation_id,
-            message,
+            message: frame.clone(),
+            encode: codec.encode,
         };
         // Leave space for the supervisor handle, request ID and envelope.
         if prepared.operation_id.0.is_empty()
@@ -182,6 +227,8 @@ pub enum CommandReceipt {
     Acknowledged(EventCursor),
     /// Reserved control result: never sits behind the replay channel.
     CachedInitialize(Value),
+    CachedCodexInitialize(studio_runtime_providers::codex::InitializeResponse),
+    CachedCodexUnparsedInitialize(studio_json::OwnedRawJson),
     NotSent,
     /// The stdio writer was interrupted while its adapter finishes draining.
     /// Counts bytes accepted by the OS stdin pipe, not bytes the child read.
@@ -195,7 +242,10 @@ pub enum CommandReceipt {
 impl CommandReceipt {
     pub fn requires_observation(&self) -> bool {
         match self {
-            Self::Written { .. } | Self::CachedInitialize(_) => true,
+            Self::Written { .. }
+            | Self::CachedInitialize(_)
+            | Self::CachedCodexInitialize(_)
+            | Self::CachedCodexUnparsedInitialize(_) => true,
             Self::Acknowledged(_)
             | Self::NotSent
             | Self::WriteInterrupted { .. }

@@ -987,7 +987,7 @@ fn capacity_failure(error: &Value) -> Option<CapacityFailure> {
 }
 
 /// Shared usage-failure classifier. `provider_auth` is the provider adapter's
-/// extra auth-message pattern; callers go through `ProviderAdapter::classify_error`.
+/// extra auth-message pattern; callers use the adapter descriptor's classifier.
 pub(crate) fn classify_usage_failure(
     error: &Value,
     provider_auth: Option<&regex::Regex>,
@@ -1051,7 +1051,11 @@ fn classifier_patterns() -> &'static (regex::Regex, regex::Regex, regex::Regex) 
 fn usage_failure(error: &Value, agent: &Value) -> Option<UsageCause> {
     studio_runtime_providers::ProviderKind::of_record(agent)
         .ok()
-        .and_then(|kind| crate::provider_adapter::adapter(kind).classify_error(error))
+        .and_then(|kind| {
+            (crate::provider_adapter::adapter(kind)
+                .descriptor()
+                .classify_error)(error)
+        })
 }
 
 #[cfg(test)]

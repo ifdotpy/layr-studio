@@ -746,15 +746,14 @@ async fn production_classifier_matches_python_word_boundaries_and_bounded_eviden
     let actual: Vec<Option<String>> = cases
         .iter()
         .map(|(error, provider)| {
-            adapter(provider.parse().expect("test provider"))
-                .classify_error(error)
-                .map(|cause| match cause {
-                    studio_runtime_services::usage_resume::Cause::UsageLimit => {
-                        "usage_limit".into()
-                    }
-                    studio_runtime_services::usage_resume::Cause::RateLimit => "rate_limit".into(),
-                    studio_runtime_services::usage_resume::Cause::Auth => "auth".into(),
-                })
+            (adapter(provider.parse().expect("test provider"))
+                .descriptor()
+                .classify_error)(error)
+            .map(|cause| match cause {
+                studio_runtime_services::usage_resume::Cause::UsageLimit => "usage_limit".into(),
+                studio_runtime_services::usage_resume::Cause::RateLimit => "rate_limit".into(),
+                studio_runtime_services::usage_resume::Cause::Auth => "auth".into(),
+            })
         })
         .collect();
     assert_eq!(actual, expected);

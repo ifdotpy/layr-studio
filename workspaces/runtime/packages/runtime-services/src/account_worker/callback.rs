@@ -529,10 +529,15 @@ fn tool_call_failure_body(message: &str) -> ResponseBody {
 pub(super) fn response(frame: &Frame) -> Option<Frame> {
     let id = match frame {
         Frame::Request(request) => request.id.clone(),
-        Frame::UnknownMethod(request) => {
+        Frame::UnknownMethod(request) | Frame::KnownMethodUnparsed(request) => {
             studio_json::from_value(request.fields.get("id")?.clone()).ok()?
         }
-        Frame::Notification(_) | Frame::Response { .. } => return None,
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Notification(_)
+        | Frame::Response { .. } => return None,
     };
     let body = match dispatch(frame) {
         CallbackDecision::Answer(body) => body,

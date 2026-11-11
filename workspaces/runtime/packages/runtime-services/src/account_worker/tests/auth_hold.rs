@@ -104,7 +104,9 @@ impl Account {
     }
 
     fn sign_in_message(&self) -> &'static str {
-        crate::provider_adapter::adapter(self.kind).sign_in_message()
+        crate::provider_adapter::adapter(self.kind)
+            .descriptor()
+            .sign_in_message
     }
 
     /// Release held turns once, as `account_auth_gate::run_release` does.
@@ -522,7 +524,9 @@ async fn held_start_wakes_nothing_until_an_account_change() {
                 })
             }),
         };
-        let location = crate::provider_adapter::adapter(kind).credential_location(&profile);
+        let location = (crate::provider_adapter::adapter(kind)
+            .descriptor()
+            .credential_location)(&profile);
         let cache = crate::account_driver::auth_cache::shared();
         // Finish the initial sign-in before changing the identity again.
         tokio::time::resume();

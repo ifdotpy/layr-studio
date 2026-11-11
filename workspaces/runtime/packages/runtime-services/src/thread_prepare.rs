@@ -393,7 +393,9 @@ fn capability_matrix(
         });
     (
         !reviewer,
-        adapter(provider).capabilities().voice_tools,
+        adapter(provider)
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::VoiceTools),
         layr,
     )
 }
@@ -614,7 +616,18 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         None => {}
     }
     let provider = adapter(s.account.provider);
-    provider.shape_thread_params(s, &mut params, &mut instructions);
+    let prepared = provider
+        .encode(crate::provider_adapter::ProviderCommand::StartThread {
+            snapshot: s,
+            method,
+            params,
+            instructions,
+        })
+        .expect("thread preparation is a declared provider capability");
+    let Value::Object(mut params) = prepared.params else {
+        unreachable!("thread params are an object");
+    };
+    let mut instructions = prepared.instructions.expect("thread instructions");
     if let Some(text) = s
         .guidance
         .browser
@@ -630,7 +643,9 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         params.insert("baseInstructions".into(), frozen.base_instructions.clone());
         developer_instructions = frozen.developer_instructions.clone();
         params.insert("model".into(), frozen.model.clone());
-        if s.account.provider != ProviderKind::Claude
+        if provider
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::FrozenReasoningConfig)
             && let Some(config) = params.get_mut("config").and_then(Value::as_object_mut)
         {
             for (key, value) in [
@@ -657,7 +672,11 @@ pub fn plan(s: &Snapshot, next_attempt_id: &str, transport_ticket: &str) -> Outc
         });
     }
     params.insert("developerInstructions".into(), developer_instructions);
-    let tool_catalog = if method == Method::Start || provider.capabilities().tools_on_every_turn {
+    let tool_catalog = if method == Method::Start
+        || provider
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::ToolsOnEveryTurn)
+    {
         params.insert("dynamicTools".into(), json!(tools));
         Some(tools)
     } else {
@@ -799,10 +818,18 @@ pub fn turn_params(s: &Snapshot, input: &TurnInput) -> Result<Map<String, Value>
         params.insert("sandboxPolicy".into(), sandbox);
     }
     let provider = adapter(s.account.provider);
-    if provider.capabilities().tools_on_every_turn {
+    if provider
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::ToolsOnEveryTurn)
+    {
         params.insert("dynamicTools".into(), json!(tool_definitions(s)?));
     }
-    provider.shape_turn_params(input, &mut params);
+    let prepared = provider
+        .encode(crate::provider_adapter::ProviderCommand::StartTurn { input, params })
+        .expect("turn preparation is a declared provider capability");
+    let Value::Object(params) = prepared.params else {
+        unreachable!("turn params are an object");
+    };
     Ok(params)
 }
 
@@ -966,7 +993,11 @@ pub fn reduce_receipt(
             receipt.fields.get(source).cloned().unwrap_or(Value::Null),
         );
     }
-    if !(current.account.provider == ProviderKind::Claude && receipt.reattached) {
+    if !(adapter(current.account.provider)
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::PreserveContextOnReattach)
+        && receipt.reattached)
+    {
         set.insert("preparedContext".into(), json!({"epoch":[thread_id,current.actor.compactions],"versions":attempt.context_versions}));
     }
     if let Some(mut release) = current.actor.native_release.clone() {
@@ -1071,7 +1102,9 @@ fn unsubmitted_inspection(s: &Snapshot, thread_id: Option<&str>) -> bool {
         return false;
     };
     let phase = release.get("phase").and_then(Value::as_str);
-    s.account.provider == ProviderKind::Codex
+    adapter(s.account.provider)
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::UnsubmittedInspection)
         && s.actor.auto_wake
         && s.account.available
         && !s.closed

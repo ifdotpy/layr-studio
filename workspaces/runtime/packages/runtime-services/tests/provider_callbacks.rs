@@ -108,7 +108,12 @@ fn reply(value: CallbackDecision) -> Reply {
 fn body(reply: &Reply) -> &Value {
     match &reply.body {
         ResponseBody::Result(v) => v,
-        ResponseBody::Error(_) => panic!("expected result"),
+        ResponseBody::CodexUnparsedResult { .. }
+        | ResponseBody::Error(_)
+        | ResponseBody::Uncorrelated(_)
+        | ResponseBody::CodexResult(_)
+        | ResponseBody::CodexServerResult(_)
+        | ResponseBody::CodexError(_) => panic!("expected generic projected result"),
     }
 }
 fn tool_value(reply: &Reply) -> Value {

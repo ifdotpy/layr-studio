@@ -1,5 +1,11 @@
 #!/usr/bin/env node
 import fs from "node:fs";
+import type {
+  ClientRequestResults,
+  ServerNotification,
+  ThreadResumeResponse,
+} from "../../../../../providers/apps/claude-bridge/codex-generated/protocol.ts";
+
 import type { JsonValue } from "../../../../../client/apps/web/src/generated/api.ts";
 import net from "node:net";
 import os from "node:os";
@@ -24,6 +30,31 @@ type FixtureRequest = Record<string, JsonValue> & { id?: JsonValue } & (
   );
 function parseFixtureRequest(line: string) {
   return JSON.parse(line) as FixtureRequest;
+}
+function resumedThread(threadId: string): ThreadResumeResponse {
+  return {
+    thread: {
+      id: threadId,
+      sessionId: "fixture-session",
+      preview: "",
+      modelProvider: "openai",
+      createdAt: 0,
+      updatedAt: 0,
+      cwd: process.cwd(),
+      cliVersion: "fixture",
+      ephemeral: false,
+      projectId: null,
+      source: "appServer",
+      status: { type: "idle" },
+      turns: [],
+    },
+    model: "fake-model",
+    modelProvider: "openai",
+    cwd: process.cwd(),
+    approvalPolicy: "never",
+    approvalsReviewer: "user",
+    sandbox: { type: "dangerFullAccess" },
+  };
 }
 const root = import.meta.dirname;
 let turnCount = 0;
@@ -52,7 +83,10 @@ function increment(name: string) {
   fs.writeFileSync(file, String(count));
   return count;
 }
-function notify(method: string, params: JsonValue) {
+function notify<M extends ServerNotification["method"]>(
+  method: M,
+  params: Extract<ServerNotification, { method: M }>["params"],
+) {
   console.log(JSON.stringify({ method, params }));
 }
 if (process.env.FIXTURE_CWD_SOCKET) {
@@ -73,9 +107,16 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
       process.exit(17);
   }
   if (!Object.hasOwn(request, "id")) continue;
-  let result = {};
-  if (method === "thread/resume")
-    result = { thread: { id: request.params.threadId } };
+  let result: unknown = {};
+  if (method === "initialize")
+    result = {
+      codexHome: process.env.CODEX_HOME ?? root,
+      platformFamily: "fixture",
+      platformOs: "fixture",
+      userAgent: "fixture",
+    } satisfies ClientRequestResults["initialize"];
+  else if (method === "thread/resume")
+    result = resumedThread(request.params.threadId);
   else if (method === "turn/start") {
     turnCount = increment("turn-count");
     await report("turn", {
@@ -88,7 +129,9 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     if (turnCount === 1 && fs.existsSync(path.join(root, "hang-first-turn"))) {
       await new Promise(() => {});
     }
-    result = { turn: { id: "fixture-turn" } };
+    result = {
+      turn: { id: "fixture-turn", status: "inProgress", items: [] },
+    } satisfies ClientRequestResults["turn/start"];
   } else if (method === "fixture/barrier") {
     await reportSocket(path.join(root, "turn.sock"), {
       method,
@@ -102,11 +145,14 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
           id: "fake-model",
           model: "fake-model",
           displayName: "Fixture",
+          description: "Scripted fixture model",
+          hidden: false,
+          isDefault: true,
           supportedReasoningEfforts: [],
           defaultReasoningEffort: "medium",
         },
       ],
-    };
+    } satisfies ClientRequestResults["model/list"];
   }
   console.log(JSON.stringify({ id: request.id, result }));
   if (
@@ -114,7 +160,12 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     accountProvider &&
     fs.existsSync(path.join(root, "emit-generation-notification"))
   ) {
-    notify("fixture/generation", { pid: process.pid });
+    console.log(
+      JSON.stringify({
+        method: "fixture/generation",
+        params: { pid: process.pid },
+      }),
+    );
   }
   if (
     method === "turn/start" &&
@@ -125,9 +176,10 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
       itemId = "fixture-assistant-item";
     notify("turn/started", {
       threadId,
-      turn: { id: turnId, status: "inProgress" },
+      turn: { id: turnId, status: "inProgress", items: [] },
     });
     notify("item/started", {
+      startedAtMs: Date.now(),
       threadId,
       turnId,
       item: { id: itemId, type: "agentMessage", text: "" },
@@ -139,6 +191,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
       delta: "fixture assistant response",
     });
     notify("item/completed", {
+      completedAtMs: Date.now(),
       threadId,
       turnId,
       item: {
@@ -149,7 +202,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     });
     notify("turn/completed", {
       threadId,
-      turn: { id: turnId, status: "completed" },
+      turn: { id: turnId, status: "completed", items: [] },
     });
   }
 }

@@ -1368,7 +1368,16 @@ async fn managed_monitor_create_persists_one_start_intent_and_replays_exactly() 
     .unwrap();
     let arguments = match &frame {
         Frame::Request(request) => request.params.as_ref().unwrap()["arguments"].clone(),
-        Frame::Notification(_) | Frame::UnknownMethod(_) | Frame::Response { .. } => unreachable!(),
+        Frame::Notification(_)
+        | Frame::UnknownMethod(_)
+        | Frame::KnownMethodUnparsed(_)
+        | Frame::Response { .. }
+        | Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_) => {
+            unreachable!("the fixture contains a generic request")
+        }
     };
     let monitor_create = runtime.ports().monitor_create.unwrap();
     FAIL_MANAGED_WORKSPACE_PREPARATION.with(|fail| fail.set(true));
@@ -4886,7 +4895,8 @@ async fn null_and_absent_model_select_the_same_provider_default() {
     assert_eq!(
         choices[0],
         crate::provider_adapter::adapter(studio_runtime_providers::ProviderKind::Claude)
-            .default_model()
+            .descriptor()
+            .default_model
     );
 }
 

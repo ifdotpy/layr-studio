@@ -1701,6 +1701,32 @@ pub enum FileChange {
         #[serde(rename = "unified_diff", deserialize_with = "required")]
         r#unified_diff: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownFileChange),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownFileChange(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownFileChange {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownFileChange {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "add" | "delete" | "update") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2590,6 +2616,37 @@ pub enum McpServerElicitationRequestParams {
         #[serde(rename = "url", deserialize_with = "required")]
         r#url: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownMcpServerElicitationRequestParams),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownMcpServerElicitationRequestParams(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownMcpServerElicitationRequestParams {
+    pub fn variant(&self) -> &str {
+        self.0["mode"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownMcpServerElicitationRequestParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("mode")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "openai/userVerification" | "form" | "openai/form" | "openaiForm" | "url"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -2684,6 +2741,32 @@ pub enum ParsedCommand {
         #[serde(rename = "cmd", deserialize_with = "required")]
         r#cmd: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownParsedCommand),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownParsedCommand(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownParsedCommand {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownParsedCommand {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "read" | "list_files" | "search" | "unknown") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -4004,6 +4087,32 @@ pub enum Account {
     },
     #[serde(rename = "gcp")]
     Gcp,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownAccount),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownAccount(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownAccount {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownAccount {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "apiKey" | "chatgpt" | "amazonBedrock" | "gcp") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -4368,6 +4477,32 @@ pub enum AgentMessageInputContent {
         #[serde(rename = "encrypted_content", deserialize_with = "required")]
         r#encrypted_content: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownAgentMessageInputContent),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownAgentMessageInputContent(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownAgentMessageInputContent {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownAgentMessageInputContent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "input_text" | "encrypted_content") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 pub type AgentPath = String;
@@ -5253,6 +5388,32 @@ pub enum BedrockSetupParams {
         #[serde(rename = "region", deserialize_with = "required")]
         r#region: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownBedrockSetupParams),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownBedrockSetupParams(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownBedrockSetupParams {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownBedrockSetupParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "profile" | "environment") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -5481,6 +5642,32 @@ pub enum CapabilityRootLocation {
         #[serde(rename = "path", deserialize_with = "required")]
         r#path: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownCapabilityRootLocation),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownCapabilityRootLocation(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownCapabilityRootLocation {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownCapabilityRootLocation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "environment") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -5677,6 +5864,32 @@ pub enum CommandAction {
         #[serde(rename = "command", deserialize_with = "required")]
         r#command: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownCommandAction),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownCommandAction(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownCommandAction {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownCommandAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "read" | "listFiles" | "search" | "unknown") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -6366,6 +6579,43 @@ pub enum ConfigLayerSource {
     },
     #[serde(rename = "legacyManagedConfigTomlFromMdm")]
     LegacyManagedConfigTomlFromMdm,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownConfigLayerSource),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownConfigLayerSource(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownConfigLayerSource {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownConfigLayerSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "packagedDefaults"
+                | "mdm"
+                | "system"
+                | "enterpriseManaged"
+                | "user"
+                | "project"
+                | "sessionFlags"
+                | "legacyManagedConfigTomlFromFile"
+                | "legacyManagedConfigTomlFromMdm"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -6801,6 +7051,32 @@ pub enum ConfiguredHookHandler {
     Prompt,
     #[serde(rename = "agent")]
     Agent,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownConfiguredHookHandler),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownConfiguredHookHandler(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownConfiguredHookHandler {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownConfiguredHookHandler {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "command" | "mcp_tool" | "prompt" | "agent") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -6940,6 +7216,35 @@ pub enum ContentItem {
         #[serde(rename = "text", deserialize_with = "required")]
         r#text: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownContentItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownContentItem(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownContentItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownContentItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "input_text" | "input_image" | "input_audio" | "output_text"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -7022,6 +7327,34 @@ pub enum DynamicToolCallOutputContentItem {
         #[serde(rename = "audioUrl", deserialize_with = "required")]
         r#audio_url: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownDynamicToolCallOutputContentItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownDynamicToolCallOutputContentItem(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownDynamicToolCallOutputContentItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownDynamicToolCallOutputContentItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "inputText" | "inputImage" | "inputAudio") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -7053,6 +7386,32 @@ pub enum DynamicToolNamespaceTool {
         #[serde(rename = "name", deserialize_with = "required")]
         r#name: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownDynamicToolNamespaceTool),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownDynamicToolNamespaceTool(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownDynamicToolNamespaceTool {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownDynamicToolNamespaceTool {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "function") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -7083,6 +7442,32 @@ pub enum DynamicToolSpec {
         #[serde(rename = "tools", deserialize_with = "required")]
         r#tools: Vec<DynamicToolNamespaceTool>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownDynamicToolSpec),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownDynamicToolSpec(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownDynamicToolSpec {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownDynamicToolSpec {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "function" | "namespace") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -7836,6 +8221,32 @@ pub enum FileSystemPath {
         #[serde(rename = "value", deserialize_with = "required")]
         r#value: FileSystemSpecialPath,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownFileSystemPath),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownFileSystemPath(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownFileSystemPath {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownFileSystemPath {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "path" | "glob_pattern" | "special") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -7879,6 +8290,35 @@ pub enum FileSystemSpecialPath {
         )]
         r#subpath: Option<Option<LegacyAppPathString>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownFileSystemSpecialPath),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownFileSystemSpecialPath(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownFileSystemSpecialPath {
+    pub fn variant(&self) -> &str {
+        self.0["kind"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownFileSystemSpecialPath {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("kind")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "root" | "minimal" | "project_roots" | "tmpdir" | "slash_tmp" | "unknown"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -8109,6 +8549,37 @@ pub enum FunctionCallOutputContentItem {
         #[serde(rename = "encrypted_content", deserialize_with = "required")]
         r#encrypted_content: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownFunctionCallOutputContentItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownFunctionCallOutputContentItem(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownFunctionCallOutputContentItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownFunctionCallOutputContentItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "input_text" | "input_image" | "input_audio" | "encrypted_content"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -8481,6 +8952,43 @@ pub enum GuardianApprovalReviewAction {
         )]
         r#reason: Option<Option<String>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownGuardianApprovalReviewAction),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownGuardianApprovalReviewAction(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownGuardianApprovalReviewAction {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownGuardianApprovalReviewAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "command"
+                | "execve"
+                | "writeStdin"
+                | "applyPatch"
+                | "networkAccess"
+                | "mcpToolCall"
+                | "requestPermissions"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -8868,6 +9376,32 @@ pub enum HookMetadata {
         #[serde(rename = "trustStatus", deserialize_with = "required")]
         r#trust_status: HookTrustStatus,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownHookMetadata),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownHookMetadata(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownHookMetadata {
+    pub fn variant(&self) -> &str {
+        self.0["handlerType"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownHookMetadata {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("handlerType")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "command" | "mcpTool" | "prompt" | "agent") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -9096,6 +9630,32 @@ pub enum ImageGenerationFailure {
         )]
         r#resets_at: Option<Option<i64>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownImageGenerationFailure),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownImageGenerationFailure(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownImageGenerationFailure {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownImageGenerationFailure {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "usageLimitExceeded") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -9317,6 +9877,32 @@ pub enum LocalShellAction {
         )]
         r#working_directory: Option<Option<String>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownLocalShellAction),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownLocalShellAction(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownLocalShellAction {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownLocalShellAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "exec") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -9400,6 +9986,40 @@ pub enum LoginAccountParams {
         )]
         r#session_token: Option<Option<String>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownLoginAccountParams),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownLoginAccountParams(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownLoginAccountParams {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownLoginAccountParams {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "apiKey"
+                | "chatgpt"
+                | "chatgptDeviceCode"
+                | "chatgptAuthTokens"
+                | "amazonBedrock"
+                | "amazonBedrockAccessKeys"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -9427,6 +10047,35 @@ pub enum LoginAccountResponse {
     ChatgptAuthTokens,
     #[serde(rename = "amazonBedrock")]
     AmazonBedrock,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownLoginAccountResponse),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownLoginAccountResponse(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownLoginAccountResponse {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownLoginAccountResponse {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "apiKey" | "chatgpt" | "chatgptDeviceCode" | "chatgptAuthTokens" | "amazonBedrock"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -10523,6 +11172,35 @@ pub enum ModelProviderError {
         #[serde(rename = "requiredModelProvider", deserialize_with = "required")]
         r#required_model_provider: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownModelProviderError),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownModelProviderError(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownModelProviderError {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownModelProviderError {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "modelProviderMismatch" | "modelProviderNotConfigured" | "modelProviderPolicyConflict"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -11025,6 +11703,32 @@ pub enum PatchChangeKind {
         )]
         r#move_path: Option<Option<String>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownPatchChangeKind),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownPatchChangeKind(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownPatchChangeKind {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownPatchChangeKind {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "add" | "delete" | "update") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 pub type PathUri = String;
@@ -11986,6 +12690,32 @@ pub enum PluginSource {
     },
     #[serde(rename = "remote")]
     Remote,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownPluginSource),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownPluginSource(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownPluginSource {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownPluginSource {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "local" | "git" | "npm" | "remote") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -12860,6 +13590,32 @@ pub enum ReasoningItemContent {
         #[serde(rename = "text", deserialize_with = "required")]
         r#text: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownReasoningItemContent),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownReasoningItemContent(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownReasoningItemContent {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownReasoningItemContent {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "reasoning_text" | "text") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -12870,6 +13626,34 @@ pub enum ReasoningItemReasoningSummary {
         #[serde(rename = "text", deserialize_with = "required")]
         r#text: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownReasoningItemReasoningSummary),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownReasoningItemReasoningSummary(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownReasoningItemReasoningSummary {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownReasoningItemReasoningSummary {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "summary_text") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -13847,6 +14631,52 @@ pub enum ResponseItem {
     },
     #[serde(rename = "other")]
     Other,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownResponseItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownResponseItem(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownResponseItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownResponseItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "additional_tools"
+                | "message"
+                | "agent_message"
+                | "reasoning"
+                | "local_shell_call"
+                | "function_call"
+                | "tool_search_call"
+                | "function_call_output"
+                | "custom_tool_call"
+                | "custom_tool_call_output"
+                | "tool_search_output"
+                | "web_search_call"
+                | "image_generation_call"
+                | "compaction"
+                | "configuration_update"
+                | "compaction_trigger"
+                | "context_compaction"
+                | "other"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -13916,6 +14746,34 @@ pub enum ResponsesApiWebSearchAction {
     },
     #[serde(rename = "other")]
     Other,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownResponsesApiWebSearchAction),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownResponsesApiWebSearchAction(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownResponsesApiWebSearchAction {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownResponsesApiWebSearchAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "search" | "open_page" | "find_in_page" | "other") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -13974,6 +14832,35 @@ pub enum ReviewTarget {
         #[serde(rename = "instructions", deserialize_with = "required")]
         r#instructions: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownReviewTarget),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownReviewTarget(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownReviewTarget {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownReviewTarget {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "uncommittedChanges" | "baseBranch" | "commit" | "custom"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -14048,6 +14935,35 @@ pub enum SandboxPolicy {
         )]
         r#writable_roots: Option<Vec<AbsolutePathBuf>>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownSandboxPolicy),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownSandboxPolicy(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownSandboxPolicy {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownSandboxPolicy {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "dangerFullAccess" | "readOnly" | "externalSandbox" | "workspaceWrite"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -14114,6 +15030,32 @@ pub enum ScheduledTaskSchedule {
         #[serde(rename = "time", deserialize_with = "required")]
         r#time: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownScheduledTaskSchedule),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownScheduledTaskSchedule(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownScheduledTaskSchedule {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownScheduledTaskSchedule {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "hourly" | "daily" | "weekdays" | "weekly") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -15320,6 +16262,32 @@ pub struct ThreadForkParams {
     )]
     pub r#thread_source: Option<Option<ThreadSource>>,
 }
+impl ThreadForkParams {
+    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
+    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
+    pub const FIELD_ATTACH_TO_SOURCE: &'static str = "attachToSource";
+    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
+    pub const FIELD_BEFORE_TURN_ID: &'static str = "beforeTurnId";
+    pub const FIELD_CONFIG: &'static str = "config";
+    pub const FIELD_CWD: &'static str = "cwd";
+    pub const FIELD_DEFER_GOAL_CONTINUATION: &'static str = "deferGoalContinuation";
+    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
+    pub const FIELD_EPHEMERAL: &'static str = "ephemeral";
+    pub const FIELD_EXCLUDE_TURNS: &'static str = "excludeTurns";
+    pub const FIELD_EXPERIMENTAL_DISABLE_PREDICTION_MCP: &'static str =
+        "experimentalDisablePredictionMcp";
+    pub const FIELD_EXPERIMENTAL_PREDICTION_MODE: &'static str = "experimentalPredictionMode";
+    pub const FIELD_LAST_TURN_ID: &'static str = "lastTurnId";
+    pub const FIELD_MODEL: &'static str = "model";
+    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
+    pub const FIELD_PATH: &'static str = "path";
+    pub const FIELD_PERMISSIONS: &'static str = "permissions";
+    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
+    pub const FIELD_SANDBOX: &'static str = "sandbox";
+    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
+    pub const FIELD_THREAD_ID: &'static str = "threadId";
+    pub const FIELD_THREAD_SOURCE: &'static str = "threadSource";
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ThreadForkResponse {
@@ -16313,6 +17281,53 @@ pub enum ThreadItem {
         #[serde(rename = "id", deserialize_with = "required")]
         r#id: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadItem(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "userMessage"
+                | "hookPrompt"
+                | "agentMessage"
+                | "functionCallOutput"
+                | "plan"
+                | "reasoning"
+                | "commandExecution"
+                | "fileChange"
+                | "mcpToolCall"
+                | "dynamicToolCall"
+                | "collabAgentToolCall"
+                | "subAgentActivity"
+                | "webSearch"
+                | "imageView"
+                | "sleep"
+                | "imageGeneration"
+                | "enteredReviewMode"
+                | "exitedReviewMode"
+                | "contextCompaction"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -16345,6 +17360,32 @@ pub enum ThreadItemsListAnchor {
         #[serde(rename = "itemId", deserialize_with = "required")]
         r#item_id: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadItemsListAnchor),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadItemsListAnchor(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadItemsListAnchor {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadItemsListAnchor {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "item") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -16751,6 +17792,32 @@ pub enum ThreadPredictionResult {
     },
     #[serde(rename = "failed")]
     Failed,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadPredictionResult),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadPredictionResult(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadPredictionResult {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadPredictionResult {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "completed" | "failed") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -16943,6 +18010,32 @@ pub enum ThreadReadStateOperation {
     Read,
     #[serde(rename = "unread")]
     Unread,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadReadStateOperation),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadReadStateOperation(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadReadStateOperation {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadReadStateOperation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "read" | "unread") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17046,6 +18139,37 @@ pub enum ThreadRealtimeBemItemPresentation {
         #[serde(rename = "index", deserialize_with = "required")]
         r#index: u32,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadRealtimeBemItemPresentation),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadRealtimeBemItemPresentation(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownThreadRealtimeBemItemPresentation {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadRealtimeBemItemPresentation {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "wholeItem" | "inlineMarkdown" | "inlineVisualization"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17120,6 +18244,38 @@ pub enum ThreadRealtimeItem {
         #[serde(rename = "outcome", deserialize_with = "required")]
         r#outcome: ThreadRealtimeSessionOutcome,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadRealtimeItem),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadRealtimeItem(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadRealtimeItem {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadRealtimeItem {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "realtimeSessionStarted"
+                | "transcriptSegment"
+                | "bemItemPromoted"
+                | "realtimeSessionClosed"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17355,6 +18511,34 @@ pub enum ThreadRealtimeStartTransport {
         #[serde(rename = "callId", deserialize_with = "required")]
         r#call_id: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadRealtimeStartTransport),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadRealtimeStartTransport(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownThreadRealtimeStartTransport {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadRealtimeStartTransport {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "websocket" | "webrtc" | "existingCall") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -17560,6 +18744,26 @@ pub struct ThreadResumeParams {
     pub r#service_tier: Option<Option<String>>,
     #[serde(rename = "threadId", deserialize_with = "required")]
     pub r#thread_id: String,
+}
+impl ThreadResumeParams {
+    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
+    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
+    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
+    pub const FIELD_CONFIG: &'static str = "config";
+    pub const FIELD_CWD: &'static str = "cwd";
+    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
+    pub const FIELD_EXCLUDE_TURNS: &'static str = "excludeTurns";
+    pub const FIELD_HISTORY: &'static str = "history";
+    pub const FIELD_INITIAL_TURNS_PAGE: &'static str = "initialTurnsPage";
+    pub const FIELD_MODEL: &'static str = "model";
+    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
+    pub const FIELD_PATH: &'static str = "path";
+    pub const FIELD_PERMISSIONS: &'static str = "permissions";
+    pub const FIELD_PERSONALITY: &'static str = "personality";
+    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
+    pub const FIELD_SANDBOX: &'static str = "sandbox";
+    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
+    pub const FIELD_THREAD_ID: &'static str = "threadId";
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18523,6 +19727,35 @@ pub struct ThreadStartParams {
     )]
     pub r#thread_source: Option<Option<ThreadSource>>,
 }
+impl ThreadStartParams {
+    pub const FIELD_ALLOW_PROVIDER_MODEL_FALLBACK: &'static str = "allowProviderModelFallback";
+    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
+    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
+    pub const FIELD_BASE_INSTRUCTIONS: &'static str = "baseInstructions";
+    pub const FIELD_CONFIG: &'static str = "config";
+    pub const FIELD_CWD: &'static str = "cwd";
+    pub const FIELD_DAYBREAK_ENABLED: &'static str = "daybreakEnabled";
+    pub const FIELD_DEVELOPER_INSTRUCTIONS: &'static str = "developerInstructions";
+    pub const FIELD_DYNAMIC_TOOLS: &'static str = "dynamicTools";
+    pub const FIELD_ENVIRONMENTS: &'static str = "environments";
+    pub const FIELD_EPHEMERAL: &'static str = "ephemeral";
+    pub const FIELD_EXPERIMENTAL_RAW_EVENTS: &'static str = "experimentalRawEvents";
+    pub const FIELD_HISTORY_MODE: &'static str = "historyMode";
+    pub const FIELD_MOCK_EXPERIMENTAL_FIELD: &'static str = "mockExperimentalField";
+    pub const FIELD_MODEL: &'static str = "model";
+    pub const FIELD_MODEL_PROVIDER: &'static str = "modelProvider";
+    pub const FIELD_MULTI_AGENT_MODE: &'static str = "multiAgentMode";
+    pub const FIELD_PERMISSIONS: &'static str = "permissions";
+    pub const FIELD_PERSONALITY: &'static str = "personality";
+    pub const FIELD_PROJECT_ID: &'static str = "projectId";
+    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
+    pub const FIELD_SANDBOX: &'static str = "sandbox";
+    pub const FIELD_SELECTED_CAPABILITY_ROOTS: &'static str = "selectedCapabilityRoots";
+    pub const FIELD_SERVICE_NAME: &'static str = "serviceName";
+    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
+    pub const FIELD_SESSION_START_SOURCE: &'static str = "sessionStartSource";
+    pub const FIELD_THREAD_SOURCE: &'static str = "threadSource";
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ThreadStartResponse {
@@ -18619,6 +19852,32 @@ pub enum ThreadStatus {
         #[serde(rename = "activeFlags", deserialize_with = "required")]
         r#active_flags: Vec<ThreadActiveFlag>,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadStatus),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadStatus(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadStatus {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadStatus {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "notLoaded" | "idle" | "systemError" | "active") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18699,6 +19958,35 @@ pub enum ThreadTimelineEntry {
         #[serde(rename = "turn_id", deserialize_with = "required")]
         r#turn_id: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadTimelineEntry),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadTimelineEntry(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadTimelineEntry {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadTimelineEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "item" | "realtime" | "turnStarted" | "turnCompleted"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18848,6 +20136,32 @@ pub enum ThreadUnreadPosition {
         #[serde(rename = "turnId", deserialize_with = "required")]
         r#turn_id: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownThreadUnreadPosition),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownThreadUnreadPosition(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownThreadUnreadPosition {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownThreadUnreadPosition {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "threadStart" | "turn") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19475,6 +20789,37 @@ pub struct TurnStartParams {
     )]
     pub r#turn_trigger: Option<Option<String>>,
 }
+impl TurnStartParams {
+    pub const FIELD_ADDITIONAL_CONTEXT: &'static str = "additionalContext";
+    pub const FIELD_APPROVAL_POLICY: &'static str = "approvalPolicy";
+    pub const FIELD_APPROVALS_REVIEWER: &'static str = "approvalsReviewer";
+    pub const FIELD_CLIENT_USER_MESSAGE_ID: &'static str = "clientUserMessageId";
+    pub const FIELD_COLLABORATION_MODE: &'static str = "collaborationMode";
+    pub const FIELD_CWD: &'static str = "cwd";
+    pub const FIELD_CYBER_ACCESS_PROGRAM: &'static str = "cyberAccessProgram";
+    pub const FIELD_DISABLED_PLUGIN_IDS: &'static str = "disabledPluginIds";
+    pub const FIELD_EFFORT: &'static str = "effort";
+    pub const FIELD_ENVIRONMENTS: &'static str = "environments";
+    pub const FIELD_INPUT: &'static str = "input";
+    pub const FIELD_MODEL: &'static str = "model";
+    pub const FIELD_MULTI_AGENT_MODE: &'static str = "multiAgentMode";
+    pub const FIELD_OUTPUT_SCHEMA: &'static str = "outputSchema";
+    pub const FIELD_PARENT_TURN_ID: &'static str = "parentTurnId";
+    pub const FIELD_PERMISSIONS: &'static str = "permissions";
+    pub const FIELD_PERSONALITY: &'static str = "personality";
+    pub const FIELD_RESPONSESAPI_CLIENT_METADATA: &'static str = "responsesapiClientMetadata";
+    pub const FIELD_RESPONSESAPI_CLIENT_METADATA_PATCH: &'static str =
+        "responsesapiClientMetadataPatch";
+    pub const FIELD_ROOT_TURN_ID: &'static str = "rootTurnId";
+    pub const FIELD_RUNTIME_WORKSPACE_ROOTS: &'static str = "runtimeWorkspaceRoots";
+    pub const FIELD_SANDBOX_POLICY: &'static str = "sandboxPolicy";
+    pub const FIELD_SERVICE_TIER: &'static str = "serviceTier";
+    pub const FIELD_SERVICE_TIER_FOR_TURN: &'static str = "serviceTierForTurn";
+    pub const FIELD_SUMMARY: &'static str = "summary";
+    pub const FIELD_THREAD_ID: &'static str = "threadId";
+    pub const FIELD_TOOL_OUTPUT: &'static str = "toolOutput";
+    pub const FIELD_TURN_TRIGGER: &'static str = "turnTrigger";
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct TurnStartResponse {
@@ -19648,6 +20993,35 @@ pub enum UserInput {
         #[serde(rename = "path", deserialize_with = "required")]
         r#path: String,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownUserInput),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownUserInput(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownUserInput {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownUserInput {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "text" | "image" | "localImage" | "audio" | "localAudio" | "skill" | "mention"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19728,6 +21102,37 @@ pub enum UserVerificationErrorDetails {
         #[serde(rename = "reason", deserialize_with = "required")]
         r#reason: UserVerificationFailureReason,
     },
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownUserVerificationErrorDetails),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownUserVerificationErrorDetails(
+    std::collections::BTreeMap<String, studio_json::Value>,
+);
+impl UnknownUserVerificationErrorDetails {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownUserVerificationErrorDetails {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(
+            variant,
+            "invalidRequest" | "unavailable" | "cancelled" | "failed"
+        ) {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -19896,6 +21301,32 @@ pub enum WebSearchAction {
     },
     #[serde(rename = "other")]
     Other,
+    #[serde(untagged)]
+    UnknownVendorVariant(UnknownWebSearchAction),
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(transparent)]
+pub struct UnknownWebSearchAction(std::collections::BTreeMap<String, studio_json::Value>);
+impl UnknownWebSearchAction {
+    pub fn variant(&self) -> &str {
+        self.0["type"]
+            .as_str()
+            .expect("validated unknown discriminator")
+    }
+}
+impl<'de> serde::Deserialize<'de> for UnknownWebSearchAction {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let fields = <std::collections::BTreeMap<String, studio_json::Value> as serde::Deserialize>::deserialize(deserializer)?;
+        let variant = fields
+            .get("type")
+            .and_then(studio_json::Value::as_str)
+            .ok_or_else(|| serde::de::Error::custom("missing vendor discriminator"))?;
+        if matches!(variant, "search" | "openPage" | "findInPage" | "other") {
+            return Err(serde::de::Error::custom("malformed known vendor variant"));
+        }
+        Ok(Self(fields))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -20948,6 +22379,5188 @@ pub struct SubAgentSourceVariant2ThreadSpawn {
     #[serde(rename = "parent_thread_id", deserialize_with = "required")]
     pub r#parent_thread_id: ThreadId,
 }
+
+pub trait VisitUnknown {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {}
+}
+macro_rules! leaves { ($($ty:ty),*) => { $(impl VisitUnknown for $ty {})* }; }
+leaves!(
+    String,
+    bool,
+    i64,
+    i32,
+    u64,
+    u32,
+    u16,
+    f64,
+    (),
+    studio_json::Value
+);
+impl<T: VisitUnknown> VisitUnknown for Option<T> {
+    fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) {
+        if let Some(value) = self {
+            value.visit_unknowns(visitor);
+        }
+    }
+}
+impl<T: VisitUnknown> VisitUnknown for Vec<T> {
+    fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) {
+        for value in self {
+            value.visit_unknowns(visitor);
+        }
+    }
+}
+impl<T: VisitUnknown> VisitUnknown for Box<T> {
+    fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) {
+        (**self).visit_unknowns(visitor);
+    }
+}
+impl<T: VisitUnknown> VisitUnknown for std::collections::BTreeMap<String, T> {
+    fn visit_unknowns(&self, visitor: &mut dyn FnMut(&'static str, &str)) {
+        for value in self.values() {
+            value.visit_unknowns(visitor);
+        }
+    }
+}
+impl VisitUnknown for AdditionalPermissionProfile {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#file_system, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#network, _visitor);
+    }
+}
+
+impl VisitUnknown for ApplyPatchApprovalParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#call_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#conversation_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#file_changes, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#grant_root, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reason, _visitor);
+    }
+}
+
+impl VisitUnknown for ApplyPatchApprovalResponse {}
+impl VisitUnknown for AttestationGenerateParams {}
+impl VisitUnknown for AttestationGenerateResponse {}
+impl VisitUnknown for ChatgptAuthTokensRefreshParams {}
+impl VisitUnknown for ChatgptAuthTokensRefreshReason {}
+impl VisitUnknown for ChatgptAuthTokensRefreshResponse {}
+impl VisitUnknown for ClientInfo {}
+impl VisitUnknown for ClientNotification {}
+impl VisitUnknown for ClientRequest {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Initialize { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ServerDiagnostics { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::UserVerificationStatus { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::UserVerificationEnroll { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::UserVerificationDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::UserVerificationVerify { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::UserVerificationCancel { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadResume { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadFork { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSample { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSampleCancel { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadArchive { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadUnsubscribe { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadIncrementElicitation { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadDecrementElicitation { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadNameSet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadPredictionRequest { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGoalSet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGoalGet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGoalClear { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueAdd { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueReorder { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadMetadataUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadAttachmentAdd { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadAttachmentList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadAttachmentOwnerList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadAttachmentRemove { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionMove { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSettingsUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadMemoryModeSet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadMemoryRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MemoryStatus { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MemoryReset { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RolloutCompress { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadUnarchive { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadCompactStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadShellCommand { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadApproveGuardianDeniedAction { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadBackgroundTerminalsClean { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadBackgroundTerminalsList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadBackgroundTerminalsTerminate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRevert { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectCreate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectImport { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectMove { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionCreate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSearch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSearchOccurrences { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadLoadedList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadReadStateUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadTurnsList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadItemsList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadItemsRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGuardianReview { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadInjectItems { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::SkillsList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::SkillsExtraRootsSet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::HooksList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MarketplaceAdd { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MarketplaceRemove { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MarketplaceUpgrade { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginSearch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginInstalled { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginReconcile { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginSkillRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginShareSave { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginShareUpdateTargets { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginShareList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginShareCheckout { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginShareDelete { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AppRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AppList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AppInstalled { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsReadFile { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsWriteFile { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsCreateDirectory { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsGetMetadata { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsReadDirectory { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsRemove { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsCopy { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsWatch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsUnwatch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::SkillsConfigWrite { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginInstall { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PluginUninstall { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnSettingsUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnSteer { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnInterrupt { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeAppendAudio { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeAppendText { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeAppendSpeech { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeStop { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadTimelineList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeListVoices { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ReviewStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountGatewayOAuthRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountGatewayOAuthLogin { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountGatewayOAuthCancel { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelProviderCapabilitiesRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExperimentalFeatureList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::PermissionProfileList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExperimentalFeatureEnablementSet { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlEnable { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlDisable { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlStatusRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlPairingStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlPairingStatus { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlClientList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlClientRevoke { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CollaborationModeList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::MockExperimentalMethod { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::EnvironmentAdd { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::EnvironmentInfo { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::EnvironmentStatus { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerOauthLogin { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigMcpServerReload { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerStatusList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerResourceRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerEventStreamStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerEventStreamStop { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerToolCall { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::WindowsSandboxSetupStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::WindowsSandboxReadiness { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountLoginStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountBedrockDiscover { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountBedrockSetup { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountGcpSetup { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountBedrockCheckGovCloudRequirements { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountLoginCancel { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountSessionList { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountSessionSwitch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountLogout { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountRateLimitsRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountRateLimitResetCreditConsume { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountUsageRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountWorkspaceMessagesRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountSendAddCreditsNudgeEmail { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FeedbackUpload { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FeedbackSave { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CommandExec { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CommandExecWrite { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CommandExecTerminate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CommandExecResize { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessSpawn { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessWriteStdin { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessKill { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessResizePty { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigDetect { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigImport { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigImportRecordHistory { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigImportReadHistories { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigValueWrite { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigBatchWrite { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigRequirementsRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearch { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearchSessionStart { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearchSessionUpdate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearchSessionStop { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+        }
+    }
+}
+
+impl VisitUnknown for CommandExecutionApprovalDecision {}
+impl VisitUnknown for CommandExecutionApprovalKind {}
+impl VisitUnknown for CommandExecutionRequestApprovalParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#additional_permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#available_decisions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#command, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#command_actions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#environment_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#item_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#kind, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#network_approval_context, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#proposed_execpolicy_amendment, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#proposed_network_policy_amendments, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reason, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for CommandExecutionRequestApprovalResponse {}
+impl VisitUnknown for CurrentTimeReadParams {}
+impl VisitUnknown for CurrentTimeReadResponse {}
+impl VisitUnknown for DynamicToolCallParams {}
+impl VisitUnknown for DynamicToolCallResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#content_items, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#success, _visitor);
+    }
+}
+
+impl VisitUnknown for ExecCommandApprovalParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#approval_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#call_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#command, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#conversation_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#parsed_cmd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reason, _visitor);
+    }
+}
+
+impl VisitUnknown for ExecCommandApprovalResponse {}
+impl VisitUnknown for FileChange {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Add { r#content } => {
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+            }
+            Self::Delete { r#content } => {
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+            }
+            Self::Update {
+                r#move_path,
+                r#unified_diff,
+            } => {
+                VisitUnknown::visit_unknowns(r#move_path, _visitor);
+                VisitUnknown::visit_unknowns(r#unified_diff, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("FileChange", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for FileChangeApprovalDecision {}
+impl VisitUnknown for FileChangeRequestApprovalParams {}
+impl VisitUnknown for FileChangeRequestApprovalResponse {}
+impl VisitUnknown for FuzzyFileSearchMatchType {}
+impl VisitUnknown for FuzzyFileSearchParams {}
+impl VisitUnknown for FuzzyFileSearchResponse {}
+impl VisitUnknown for FuzzyFileSearchResult {}
+impl VisitUnknown for FuzzyFileSearchSessionCompletedNotification {}
+impl VisitUnknown for FuzzyFileSearchSessionStartParams {}
+impl VisitUnknown for FuzzyFileSearchSessionStartResponse {}
+impl VisitUnknown for FuzzyFileSearchSessionStopParams {}
+impl VisitUnknown for FuzzyFileSearchSessionStopResponse {}
+impl VisitUnknown for FuzzyFileSearchSessionUpdateParams {}
+impl VisitUnknown for FuzzyFileSearchSessionUpdateResponse {}
+impl VisitUnknown for FuzzyFileSearchSessionUpdatedNotification {}
+impl VisitUnknown for GrantedPermissionProfile {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#file_system, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#network, _visitor);
+    }
+}
+
+impl VisitUnknown for InitializeCapabilities {}
+impl VisitUnknown for InitializeParams {}
+impl VisitUnknown for InitializeResponse {}
+impl VisitUnknown for JSONRPCError {}
+impl VisitUnknown for JSONRPCErrorError {}
+impl VisitUnknown for JSONRPCMessage {}
+impl VisitUnknown for JSONRPCNotification {}
+impl VisitUnknown for JSONRPCRequest {}
+impl VisitUnknown for JSONRPCResponse {}
+impl VisitUnknown for McpElicitationArrayType {}
+impl VisitUnknown for McpElicitationBooleanSchema {}
+impl VisitUnknown for McpElicitationBooleanType {}
+impl VisitUnknown for McpElicitationConstOption {}
+impl VisitUnknown for McpElicitationEnumSchema {}
+impl VisitUnknown for McpElicitationLegacyTitledEnumSchema {}
+impl VisitUnknown for McpElicitationMultiSelectEnumSchema {}
+impl VisitUnknown for McpElicitationNumberSchema {}
+impl VisitUnknown for McpElicitationNumberType {}
+impl VisitUnknown for McpElicitationObjectType {}
+impl VisitUnknown for McpElicitationPrimitiveSchema {}
+impl VisitUnknown for McpElicitationSchema {}
+impl VisitUnknown for McpElicitationSingleSelectEnumSchema {}
+impl VisitUnknown for McpElicitationStringFormat {}
+impl VisitUnknown for McpElicitationStringSchema {}
+impl VisitUnknown for McpElicitationStringType {}
+impl VisitUnknown for McpElicitationTitledEnumItems {}
+impl VisitUnknown for McpElicitationTitledMultiSelectEnumSchema {}
+impl VisitUnknown for McpElicitationTitledSingleSelectEnumSchema {}
+impl VisitUnknown for McpElicitationUntitledEnumItems {}
+impl VisitUnknown for McpElicitationUntitledMultiSelectEnumSchema {}
+impl VisitUnknown for McpElicitationUntitledSingleSelectEnumSchema {}
+impl VisitUnknown for McpServerElicitationAction {}
+impl VisitUnknown for McpServerElicitationRequestParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::OpenaiUserVerification {
+                r#server_name,
+                r#thread_id,
+                r#turn_id,
+                r#_meta,
+                r#challenge,
+                r#description,
+                r#title,
+            } => {
+                VisitUnknown::visit_unknowns(r#server_name, _visitor);
+                VisitUnknown::visit_unknowns(r#thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+                VisitUnknown::visit_unknowns(r#_meta, _visitor);
+                VisitUnknown::visit_unknowns(r#challenge, _visitor);
+                VisitUnknown::visit_unknowns(r#description, _visitor);
+                VisitUnknown::visit_unknowns(r#title, _visitor);
+            }
+            Self::Form {
+                r#server_name,
+                r#thread_id,
+                r#turn_id,
+                r#_meta,
+                r#message,
+                r#requested_schema,
+            } => {
+                VisitUnknown::visit_unknowns(r#server_name, _visitor);
+                VisitUnknown::visit_unknowns(r#thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+                VisitUnknown::visit_unknowns(r#_meta, _visitor);
+                VisitUnknown::visit_unknowns(r#message, _visitor);
+                VisitUnknown::visit_unknowns(r#requested_schema, _visitor);
+            }
+            Self::OpenaiForm {
+                r#server_name,
+                r#thread_id,
+                r#turn_id,
+                r#_meta,
+                r#message,
+                r#requested_schema,
+            } => {
+                VisitUnknown::visit_unknowns(r#server_name, _visitor);
+                VisitUnknown::visit_unknowns(r#thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+                VisitUnknown::visit_unknowns(r#_meta, _visitor);
+                VisitUnknown::visit_unknowns(r#message, _visitor);
+                VisitUnknown::visit_unknowns(r#requested_schema, _visitor);
+            }
+            Self::OpenaiFormVariant4 {
+                r#server_name,
+                r#thread_id,
+                r#turn_id,
+                r#_meta,
+                r#message,
+                r#requested_schema,
+            } => {
+                VisitUnknown::visit_unknowns(r#server_name, _visitor);
+                VisitUnknown::visit_unknowns(r#thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+                VisitUnknown::visit_unknowns(r#_meta, _visitor);
+                VisitUnknown::visit_unknowns(r#message, _visitor);
+                VisitUnknown::visit_unknowns(r#requested_schema, _visitor);
+            }
+            Self::Url {
+                r#server_name,
+                r#thread_id,
+                r#turn_id,
+                r#_meta,
+                r#elicitation_id,
+                r#message,
+                r#url,
+            } => {
+                VisitUnknown::visit_unknowns(r#server_name, _visitor);
+                VisitUnknown::visit_unknowns(r#thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+                VisitUnknown::visit_unknowns(r#_meta, _visitor);
+                VisitUnknown::visit_unknowns(r#elicitation_id, _visitor);
+                VisitUnknown::visit_unknowns(r#message, _visitor);
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("McpServerElicitationRequestParams", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for McpServerElicitationRequestResponse {}
+impl VisitUnknown for NetworkApprovalContext {}
+impl VisitUnknown for NetworkPolicyAmendment {}
+impl VisitUnknown for NetworkPolicyRuleAction {}
+impl VisitUnknown for ParsedCommand {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Read {
+                r#cmd,
+                r#name,
+                r#path,
+            } => {
+                VisitUnknown::visit_unknowns(r#cmd, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::ListFiles { r#cmd, r#path } => {
+                VisitUnknown::visit_unknowns(r#cmd, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Search {
+                r#cmd,
+                r#path,
+                r#query,
+            } => {
+                VisitUnknown::visit_unknowns(r#cmd, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+                VisitUnknown::visit_unknowns(r#query, _visitor);
+            }
+            Self::Unknown { r#cmd } => {
+                VisitUnknown::visit_unknowns(r#cmd, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ParsedCommand", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for PermissionGrantScope {}
+impl VisitUnknown for PermissionsRequestApprovalParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#environment_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#item_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reason, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for PermissionsRequestApprovalResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#scope, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#strict_auto_review, _visitor);
+    }
+}
+
+impl VisitUnknown for RequestId {}
+impl VisitUnknown for ReviewDecision {}
+impl VisitUnknown for ServerNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Error {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadStatusChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadReadStateChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadArchived {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadDeleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadUnarchived {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadClosed {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadReverted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::SkillsChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadNameUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSectionChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadAttachmentUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGoalUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadPredictionUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadGoalCleared {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadQueueChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProjectChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadProjectUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadEnvironmentConnected {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadEnvironmentDisconnected {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadSettingsUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadTokenUsageUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::HookStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::HookCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnDiffUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnPlanUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemAutoApprovalReviewStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemAutoApprovalReviewCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AutoApprovalReviewStrictReviewRequired {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemAgentMessageDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemPlanDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CommandExecOutputDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessOutputDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ProcessExited {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemCommandExecutionOutputDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemCommandExecutionTerminalInteraction {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemFileChangeOutputDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemFileChangePatchUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ServerRequestResolved {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemMcpToolCallProgress {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerOauthLoginCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerStartupStatusUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerEventStreamNotification {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountGatewayOAuthChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountRateLimitsUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AppListUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::RemoteControlStatusChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigImportProgress {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExternalAgentConfigImportCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FsChanged {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemReasoningSummaryTextDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemReasoningSummaryPartAdded {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemReasoningTextDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadCompacted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelRerouted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelVerification {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelProviderAuthRecoveryStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelProviderAuthRecoveryCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::TurnModerationMetadata {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ModelSafetyBufferingUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::Warning {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::GuardianWarning {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::DeprecationNotice {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ConfigWarning {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearchSessionUpdated {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::FuzzyFileSearchSessionCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeItemAdded {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeItemStarted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeItemTranscriptDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeItemCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeTranscriptDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeTranscriptDone {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeOutputAudioDelta {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeSdp {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeError {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ThreadRealtimeClosed {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::WindowsWorldWritableWarning {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::WindowsSandboxSetupCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountLoginCompleted {
+                r#emitted_at_ms,
+                r#params,
+            } => {
+                VisitUnknown::visit_unknowns(r#emitted_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ServerRequest {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ItemCommandExecutionRequestApproval { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemFileChangeRequestApproval { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemToolRequestUserInput { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::McpServerElicitationRequest { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemPermissionsRequestApproval { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ItemToolCall { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AccountChatgptAuthTokensRefresh { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::AttestationGenerate { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::CurrentTimeRead { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ApplyPatchApproval { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+            Self::ExecCommandApproval { r#id, r#params } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#params, _visitor);
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ToolRequestUserInputAnswer {}
+impl VisitUnknown for ToolRequestUserInputOption {}
+impl VisitUnknown for ToolRequestUserInputParams {}
+impl VisitUnknown for ToolRequestUserInputQuestion {}
+impl VisitUnknown for ToolRequestUserInputResponse {}
+impl VisitUnknown for W3cTraceContext {}
+impl VisitUnknown for Account {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ApiKey => {}
+            Self::Chatgpt {
+                r#email,
+                r#plan_type,
+                r#workspace_name,
+            } => {
+                VisitUnknown::visit_unknowns(r#email, _visitor);
+                VisitUnknown::visit_unknowns(r#plan_type, _visitor);
+                VisitUnknown::visit_unknowns(r#workspace_name, _visitor);
+            }
+            Self::AmazonBedrock {
+                r#uses_codex_managed_credentials,
+            } => {
+                VisitUnknown::visit_unknowns(r#uses_codex_managed_credentials, _visitor);
+            }
+            Self::Gcp => {}
+            Self::UnknownVendorVariant(value) => _visitor("Account", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for AccountLoginCompletedNotification {}
+impl VisitUnknown for AccountRateLimitsUpdatedNotification {}
+impl VisitUnknown for AccountRoutingOverride {}
+impl VisitUnknown for AccountSession {}
+impl VisitUnknown for AccountSessionWorkspace {}
+impl VisitUnknown for AccountSessionWorkspaceKind {}
+impl VisitUnknown for AccountSessionsListParams {}
+impl VisitUnknown for AccountSessionsResponse {}
+impl VisitUnknown for AccountSessionsSwitchParams {}
+impl VisitUnknown for AccountSessionsSwitchResponse {}
+impl VisitUnknown for AccountTokenUsageDailyBucket {}
+impl VisitUnknown for AccountTokenUsageSummary {}
+impl VisitUnknown for AccountUpdatedNotification {}
+impl VisitUnknown for ActivePermissionProfile {}
+impl VisitUnknown for AddCreditsNudgeCreditType {}
+impl VisitUnknown for AddCreditsNudgeEmailStatus {}
+impl VisitUnknown for AdditionalContextEntry {}
+impl VisitUnknown for AdditionalContextKind {}
+impl VisitUnknown for AdditionalFileSystemPermissions {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#entries, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#glob_scan_max_depth, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#read, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#write, _visitor);
+    }
+}
+
+impl VisitUnknown for AdditionalNetworkPermissions {}
+impl VisitUnknown for AgentMessageDelivery {}
+impl VisitUnknown for AgentMessageDeltaNotification {}
+impl VisitUnknown for AgentMessageInputContent {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::InputText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::EncryptedContent {
+                r#encrypted_content,
+            } => {
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("AgentMessageInputContent", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for AllowDenyRequirement {}
+impl VisitUnknown for AnalyticsConfig {}
+impl VisitUnknown for AppBranding {}
+impl VisitUnknown for AppConfig {}
+impl VisitUnknown for AppInfo {}
+impl VisitUnknown for AppLinkConfig {}
+impl VisitUnknown for AppLinksConfig {}
+impl VisitUnknown for AppListUpdatedNotification {}
+impl VisitUnknown for AppMetadata {}
+impl VisitUnknown for AppReview {}
+impl VisitUnknown for AppScreenshot {}
+impl VisitUnknown for AppSummary {}
+impl VisitUnknown for AppTemplateSummary {}
+impl VisitUnknown for AppTemplateUnavailableReason {}
+impl VisitUnknown for AppToolApproval {}
+impl VisitUnknown for AppToolConfig {}
+impl VisitUnknown for AppToolSummary {}
+impl VisitUnknown for AppToolsConfig {}
+impl VisitUnknown for ApplicationNetworkRequirements {}
+impl VisitUnknown for ApplicationRequirements {}
+impl VisitUnknown for ApplicationStorageRequirements {}
+impl VisitUnknown for ApprovalsReviewer {}
+impl VisitUnknown for AppsConfig {}
+impl VisitUnknown for AppsDefaultConfig {}
+impl VisitUnknown for AppsInstalledParams {}
+impl VisitUnknown for AppsInstalledResponse {}
+impl VisitUnknown for AppsListParams {}
+impl VisitUnknown for AppsListResponse {}
+impl VisitUnknown for AppsReadParams {}
+impl VisitUnknown for AppsReadResponse {}
+impl VisitUnknown for AskForApproval {}
+impl VisitUnknown for AsyncUserInputQuestion {}
+impl VisitUnknown for AuthMode {}
+impl VisitUnknown for AuthRecoveryNotification {}
+impl VisitUnknown for AutoCompactTokenLimitScope {}
+impl VisitUnknown for AutoReviewDecisionSource {}
+impl VisitUnknown for AutoReviewRequirements {}
+impl VisitUnknown for AwsCredentialType {}
+impl VisitUnknown for BedrockAwsProfile {}
+impl VisitUnknown for BedrockCheckGovCloudRequirementsParams {}
+impl VisitUnknown for BedrockCheckGovCloudRequirementsResponse {}
+impl VisitUnknown for BedrockDiscoverParams {}
+impl VisitUnknown for BedrockDiscoverResponse {}
+impl VisitUnknown for BedrockEnvironmentCredential {}
+impl VisitUnknown for BedrockSetupParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Profile {
+                r#profile,
+                r#region,
+            } => {
+                VisitUnknown::visit_unknowns(r#profile, _visitor);
+                VisitUnknown::visit_unknowns(r#region, _visitor);
+            }
+            Self::Environment { r#region } => {
+                VisitUnknown::visit_unknowns(r#region, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("BedrockSetupParams", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for BedrockSetupResponse {}
+impl VisitUnknown for BrowserUseAccessApprovalLifetime {}
+impl VisitUnknown for BrowserUseConfig {}
+impl VisitUnknown for BrowserUseExtensionRequirements {}
+impl VisitUnknown for BrowserUseOriginPolicy {}
+impl VisitUnknown for BrowserUseOriginPolicyConfig {}
+impl VisitUnknown for BrowserUseRequirements {}
+impl VisitUnknown for ByteRange {}
+impl VisitUnknown for CancelLoginAccountParams {}
+impl VisitUnknown for CancelLoginAccountResponse {}
+impl VisitUnknown for CancelLoginAccountStatus {}
+impl VisitUnknown for CapabilityRootLocation {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Environment {
+                r#environment_id,
+                r#path,
+            } => {
+                VisitUnknown::visit_unknowns(r#environment_id, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("CapabilityRootLocation", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for CliAuthCredentialsStoreMode {}
+impl VisitUnknown for CodexErrorInfo {}
+impl VisitUnknown for CodexResponseHandoffMode {}
+impl VisitUnknown for CollabAgentState {}
+impl VisitUnknown for CollabAgentStatus {}
+impl VisitUnknown for CollabAgentTool {}
+impl VisitUnknown for CollabAgentToolCallStatus {}
+impl VisitUnknown for CollaborationMode {}
+impl VisitUnknown for CollaborationModeListParams {}
+impl VisitUnknown for CollaborationModeListResponse {}
+impl VisitUnknown for CollaborationModeMask {}
+impl VisitUnknown for CommandAction {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Read {
+                r#command,
+                r#name,
+                r#path,
+            } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::ListFiles { r#command, r#path } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Search {
+                r#command,
+                r#path,
+                r#query,
+            } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+                VisitUnknown::visit_unknowns(r#query, _visitor);
+            }
+            Self::Unknown { r#command } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("CommandAction", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for CommandExecOutputDeltaNotification {}
+impl VisitUnknown for CommandExecOutputStream {}
+impl VisitUnknown for CommandExecParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#command, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disable_output_cap, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disable_timeout, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#env, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#output_bytes_cap, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permission_profile, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#process_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#size, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#stream_stdin, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#stream_stdout_stderr, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#timeout_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#tty, _visitor);
+    }
+}
+
+impl VisitUnknown for CommandExecResizeParams {}
+impl VisitUnknown for CommandExecResizeResponse {}
+impl VisitUnknown for CommandExecResponse {}
+impl VisitUnknown for CommandExecTerminalSize {}
+impl VisitUnknown for CommandExecTerminateParams {}
+impl VisitUnknown for CommandExecTerminateResponse {}
+impl VisitUnknown for CommandExecWriteParams {}
+impl VisitUnknown for CommandExecWriteResponse {}
+impl VisitUnknown for CommandExecutionOutputDeltaNotification {}
+impl VisitUnknown for CommandExecutionSource {}
+impl VisitUnknown for CommandExecutionStatus {}
+impl VisitUnknown for CommandMigration {}
+impl VisitUnknown for ComputerUseConfig {}
+impl VisitUnknown for ComputerUseMacosConfig {}
+impl VisitUnknown for ComputerUseMacosRequirements {}
+impl VisitUnknown for ComputerUseRequirements {}
+impl VisitUnknown for ComputerUseWindowsConfig {}
+impl VisitUnknown for ComputerUseWindowsExeConfig {}
+impl VisitUnknown for ComputerUseWindowsExeRequirement {}
+impl VisitUnknown for ComputerUseWindowsRequirements {}
+impl VisitUnknown for Config {}
+impl VisitUnknown for ConfigBatchWriteParams {}
+impl VisitUnknown for ConfigEdit {}
+impl VisitUnknown for ConfigLayer {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#config, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_reason, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#version, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigLayerMetadata {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#version, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigLayerSource {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::PackagedDefaults { r#file } => {
+                VisitUnknown::visit_unknowns(r#file, _visitor);
+            }
+            Self::Mdm { r#domain, r#key } => {
+                VisitUnknown::visit_unknowns(r#domain, _visitor);
+                VisitUnknown::visit_unknowns(r#key, _visitor);
+            }
+            Self::System { r#file } => {
+                VisitUnknown::visit_unknowns(r#file, _visitor);
+            }
+            Self::EnterpriseManaged { r#id, r#name } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+            }
+            Self::User { r#file, r#profile } => {
+                VisitUnknown::visit_unknowns(r#file, _visitor);
+                VisitUnknown::visit_unknowns(r#profile, _visitor);
+            }
+            Self::Project { r#dot_codex_folder } => {
+                VisitUnknown::visit_unknowns(r#dot_codex_folder, _visitor);
+            }
+            Self::SessionFlags => {}
+            Self::LegacyManagedConfigTomlFromFile { r#file } => {
+                VisitUnknown::visit_unknowns(r#file, _visitor);
+            }
+            Self::LegacyManagedConfigTomlFromMdm => {}
+            Self::UnknownVendorVariant(value) => _visitor("ConfigLayerSource", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ConfigReadParams {}
+impl VisitUnknown for ConfigReadResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#config, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#layers, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#origins, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigRequirements {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#additional_developer_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allow_appshots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allow_browser_and_computer_use, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allow_login_shell, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allow_managed_hooks_only, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allow_remote_control, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_approval_policies, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_approvals_reviewers, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_login_methods, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_permission_profiles, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_sandbox_modes, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_web_search_modes, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#allowed_windows_sandbox_implementations, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#application, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#auto_review, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#browser_use, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#chatgpt_base_url, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#check_for_update_on_startup, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cli_auth_credentials_store, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#computer_use, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#default_permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#enforce_residency, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#feature_requirements, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#feedback, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#hooks, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#in_app_browser, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#log_dir, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_catalog_json, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_providers, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#models, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#network, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#otel, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sqlite_home, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigRequirementsReadResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#requirements, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#supports_independent_speed_modes, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigValueWriteParams {}
+impl VisitUnknown for ConfigWarningNotification {}
+impl VisitUnknown for ConfigWriteResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#file_path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#overridden_metadata, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#status, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#version, _visitor);
+    }
+}
+
+impl VisitUnknown for ConfigurationReasoning {}
+impl VisitUnknown for ConfiguredHookHandler {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Command {
+                r#additional_context_limit,
+                r#async,
+                r#command,
+                r#command_windows,
+                r#status_message,
+                r#timeout_sec,
+            } => {
+                VisitUnknown::visit_unknowns(r#additional_context_limit, _visitor);
+                VisitUnknown::visit_unknowns(r#async, _visitor);
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#command_windows, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+            }
+            Self::McpTool {
+                r#input,
+                r#server,
+                r#status_message,
+                r#timeout_sec,
+                r#tool,
+            } => {
+                VisitUnknown::visit_unknowns(r#input, _visitor);
+                VisitUnknown::visit_unknowns(r#server, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+                VisitUnknown::visit_unknowns(r#tool, _visitor);
+            }
+            Self::Prompt => {}
+            Self::Agent => {}
+            Self::UnknownVendorVariant(value) => _visitor("ConfiguredHookHandler", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ConfiguredHookMatcherGroup {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#hooks, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#matcher, _visitor);
+    }
+}
+
+impl VisitUnknown for ConnectorMetadata {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditOutcome {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditParams {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditResponse {}
+impl VisitUnknown for ContentItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::InputText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::InputImage { r#detail } => {
+                VisitUnknown::visit_unknowns(r#detail, _visitor);
+            }
+            Self::InputAudio => {}
+            Self::OutputText {
+                r#annotations,
+                r#logprobs,
+                r#text,
+            } => {
+                VisitUnknown::visit_unknowns(r#annotations, _visitor);
+                VisitUnknown::visit_unknowns(r#logprobs, _visitor);
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ContentItem", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ContextCompactedNotification {}
+impl VisitUnknown for ConversationTextRole {}
+impl VisitUnknown for CreditsSnapshot {}
+impl VisitUnknown for CyberAccessProgram {}
+impl VisitUnknown for DeprecationNoticeNotification {}
+impl VisitUnknown for DesktopOnboardingEntrypoint {}
+impl VisitUnknown for DynamicToolCallOutputContentItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::InputText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::InputImage { r#image_url } => {
+                VisitUnknown::visit_unknowns(r#image_url, _visitor);
+            }
+            Self::InputAudio { r#audio_url } => {
+                VisitUnknown::visit_unknowns(r#audio_url, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("DynamicToolCallOutputContentItem", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for DynamicToolCallStatus {}
+impl VisitUnknown for DynamicToolNamespaceTool {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Function {
+                r#defer_loading,
+                r#description,
+                r#input_schema,
+                r#name,
+            } => {
+                VisitUnknown::visit_unknowns(r#defer_loading, _visitor);
+                VisitUnknown::visit_unknowns(r#description, _visitor);
+                VisitUnknown::visit_unknowns(r#input_schema, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("DynamicToolNamespaceTool", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for DynamicToolSpec {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Function {
+                r#defer_loading,
+                r#description,
+                r#input_schema,
+                r#name,
+            } => {
+                VisitUnknown::visit_unknowns(r#defer_loading, _visitor);
+                VisitUnknown::visit_unknowns(r#description, _visitor);
+                VisitUnknown::visit_unknowns(r#input_schema, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+            }
+            Self::Namespace {
+                r#description,
+                r#name,
+                r#tools,
+            } => {
+                VisitUnknown::visit_unknowns(r#description, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#tools, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("DynamicToolSpec", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for EnvironmentAddParams {}
+impl VisitUnknown for EnvironmentAddResponse {}
+impl VisitUnknown for EnvironmentConnectionNotification {}
+impl VisitUnknown for EnvironmentInfoParams {}
+impl VisitUnknown for EnvironmentInfoResponse {}
+impl VisitUnknown for EnvironmentShellInfo {}
+impl VisitUnknown for EnvironmentSkillsParams {}
+impl VisitUnknown for EnvironmentStatusKind {}
+impl VisitUnknown for EnvironmentStatusParams {}
+impl VisitUnknown for EnvironmentStatusResponse {}
+impl VisitUnknown for ErrorNotification {}
+impl VisitUnknown for ExperimentalFeature {}
+impl VisitUnknown for ExperimentalFeatureEnablementSetParams {}
+impl VisitUnknown for ExperimentalFeatureEnablementSetResponse {}
+impl VisitUnknown for ExperimentalFeatureListParams {}
+impl VisitUnknown for ExperimentalFeatureListResponse {}
+impl VisitUnknown for ExperimentalFeatureStage {}
+impl VisitUnknown for ExternalAgentConfigDetectParams {}
+impl VisitUnknown for ExternalAgentConfigDetectResponse {}
+impl VisitUnknown for ExternalAgentConfigImportCompletedNotification {}
+impl VisitUnknown for ExternalAgentConfigImportHistoriesReadResponse {}
+impl VisitUnknown for ExternalAgentConfigImportHistory {}
+impl VisitUnknown for ExternalAgentConfigImportHistoryRecordParams {}
+impl VisitUnknown for ExternalAgentConfigImportHistoryRecordResponse {}
+impl VisitUnknown for ExternalAgentConfigImportHistoryRecordSuccessParams {}
+impl VisitUnknown for ExternalAgentConfigImportHistoryRecordTypeResultParams {}
+impl VisitUnknown for ExternalAgentConfigImportItemTypeFailure {}
+impl VisitUnknown for ExternalAgentConfigImportItemTypeSuccess {}
+impl VisitUnknown for ExternalAgentConfigImportParams {}
+impl VisitUnknown for ExternalAgentConfigImportProgressNotification {}
+impl VisitUnknown for ExternalAgentConfigImportResponse {}
+impl VisitUnknown for ExternalAgentConfigImportTypeResult {}
+impl VisitUnknown for ExternalAgentConfigMigrationItem {}
+impl VisitUnknown for ExternalAgentConfigMigrationItemType {}
+impl VisitUnknown for ExternalAgentDetectedConnectorCandidate {}
+impl VisitUnknown for ExternalAgentDetectedConnectorSource {}
+impl VisitUnknown for ExternalAgentImportedConnectorCandidate {}
+impl VisitUnknown for ExternalAgentImportedConnectorSource {}
+impl VisitUnknown for FeedbackRequirements {}
+impl VisitUnknown for FeedbackSaveParams {}
+impl VisitUnknown for FeedbackSaveResponse {}
+impl VisitUnknown for FeedbackUploadParams {}
+impl VisitUnknown for FeedbackUploadResponse {}
+impl VisitUnknown for FileChangeOutputDeltaNotification {}
+impl VisitUnknown for FileChangePatchUpdatedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#changes, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#item_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for FileSystemAccessMode {}
+impl VisitUnknown for FileSystemPath {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Path { r#path } => {
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::GlobPattern { r#pattern } => {
+                VisitUnknown::visit_unknowns(r#pattern, _visitor);
+            }
+            Self::Special { r#value } => {
+                VisitUnknown::visit_unknowns(r#value, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("FileSystemPath", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for FileSystemSandboxEntry {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#access, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#path, _visitor);
+    }
+}
+
+impl VisitUnknown for FileSystemSpecialPath {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Root => {}
+            Self::Minimal => {}
+            Self::ProjectRoots { r#subpath } => {
+                VisitUnknown::visit_unknowns(r#subpath, _visitor);
+            }
+            Self::Tmpdir => {}
+            Self::SlashTmp => {}
+            Self::Unknown { r#path, r#subpath } => {
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+                VisitUnknown::visit_unknowns(r#subpath, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("FileSystemSpecialPath", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for FileUpdateChange {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#diff, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#kind, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#path, _visitor);
+    }
+}
+
+impl VisitUnknown for ForcedChatgptWorkspaceIds {}
+impl VisitUnknown for ForcedLoginMethod {}
+impl VisitUnknown for FsChangedNotification {}
+impl VisitUnknown for FsCopyParams {}
+impl VisitUnknown for FsCopyResponse {}
+impl VisitUnknown for FsCreateDirectoryParams {}
+impl VisitUnknown for FsCreateDirectoryResponse {}
+impl VisitUnknown for FsGetMetadataParams {}
+impl VisitUnknown for FsGetMetadataResponse {}
+impl VisitUnknown for FsReadDirectoryEntry {}
+impl VisitUnknown for FsReadDirectoryParams {}
+impl VisitUnknown for FsReadDirectoryResponse {}
+impl VisitUnknown for FsReadFileParams {}
+impl VisitUnknown for FsReadFileResponse {}
+impl VisitUnknown for FsRemoveParams {}
+impl VisitUnknown for FsRemoveResponse {}
+impl VisitUnknown for FsUnwatchParams {}
+impl VisitUnknown for FsUnwatchResponse {}
+impl VisitUnknown for FsWatchParams {}
+impl VisitUnknown for FsWatchResponse {}
+impl VisitUnknown for FsWriteFileParams {}
+impl VisitUnknown for FsWriteFileResponse {}
+impl VisitUnknown for FunctionCallOutputBody {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Variant1(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::Variant2(value) => VisitUnknown::visit_unknowns(value, _visitor),
+        }
+    }
+}
+
+impl VisitUnknown for FunctionCallOutputContentItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::InputText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::InputImage { r#detail } => {
+                VisitUnknown::visit_unknowns(r#detail, _visitor);
+            }
+            Self::InputAudio { r#audio_url } => {
+                VisitUnknown::visit_unknowns(r#audio_url, _visitor);
+            }
+            Self::EncryptedContent {
+                r#encrypted_content,
+            } => {
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("FunctionCallOutputContentItem", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for GatewayOAuthCancelResponse {}
+impl VisitUnknown for GatewayOAuthChangedNotification {}
+impl VisitUnknown for GatewayOAuthLoginResponse {}
+impl VisitUnknown for GatewayOAuthReadResponse {}
+impl VisitUnknown for GatewayOAuthStatus {}
+impl VisitUnknown for GcpSetupParams {}
+impl VisitUnknown for GcpSetupResponse {}
+impl VisitUnknown for GetAccountParams {}
+impl VisitUnknown for GetAccountRateLimitsParams {}
+impl VisitUnknown for GetAccountRateLimitsResponse {}
+impl VisitUnknown for GetAccountResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#account, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#requires_openai_auth, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#workspace_routing, _visitor);
+    }
+}
+
+impl VisitUnknown for GetAccountTokenUsageParams {}
+impl VisitUnknown for GetAccountTokenUsageResponse {}
+impl VisitUnknown for GetWorkspaceMessagesResponse {}
+impl VisitUnknown for GitInfo {}
+impl VisitUnknown for GuardianApprovalReview {}
+impl VisitUnknown for GuardianApprovalReviewAction {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Command {
+                r#command,
+                r#cwd,
+                r#source,
+            } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#cwd, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+            }
+            Self::Execve {
+                r#argv,
+                r#cwd,
+                r#program,
+                r#source,
+            } => {
+                VisitUnknown::visit_unknowns(r#argv, _visitor);
+                VisitUnknown::visit_unknowns(r#cwd, _visitor);
+                VisitUnknown::visit_unknowns(r#program, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+            }
+            Self::WriteStdin {
+                r#approval_id,
+                r#cwd,
+                r#process_id,
+                r#stdin,
+            } => {
+                VisitUnknown::visit_unknowns(r#approval_id, _visitor);
+                VisitUnknown::visit_unknowns(r#cwd, _visitor);
+                VisitUnknown::visit_unknowns(r#process_id, _visitor);
+                VisitUnknown::visit_unknowns(r#stdin, _visitor);
+            }
+            Self::ApplyPatch { r#cwd, r#files } => {
+                VisitUnknown::visit_unknowns(r#cwd, _visitor);
+                VisitUnknown::visit_unknowns(r#files, _visitor);
+            }
+            Self::NetworkAccess {
+                r#host,
+                r#port,
+                r#protocol,
+                r#target,
+            } => {
+                VisitUnknown::visit_unknowns(r#host, _visitor);
+                VisitUnknown::visit_unknowns(r#port, _visitor);
+                VisitUnknown::visit_unknowns(r#protocol, _visitor);
+                VisitUnknown::visit_unknowns(r#target, _visitor);
+            }
+            Self::McpToolCall {
+                r#connector_id,
+                r#connector_name,
+                r#server,
+                r#tool_name,
+                r#tool_title,
+            } => {
+                VisitUnknown::visit_unknowns(r#connector_id, _visitor);
+                VisitUnknown::visit_unknowns(r#connector_name, _visitor);
+                VisitUnknown::visit_unknowns(r#server, _visitor);
+                VisitUnknown::visit_unknowns(r#tool_name, _visitor);
+                VisitUnknown::visit_unknowns(r#tool_title, _visitor);
+            }
+            Self::RequestPermissions {
+                r#permissions,
+                r#reason,
+            } => {
+                VisitUnknown::visit_unknowns(r#permissions, _visitor);
+                VisitUnknown::visit_unknowns(r#reason, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("GuardianApprovalReviewAction", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for GuardianApprovalReviewStatus {}
+impl VisitUnknown for GuardianAssessmentOutcome {}
+impl VisitUnknown for GuardianCommandSource {}
+impl VisitUnknown for GuardianRiskLevel {}
+impl VisitUnknown for GuardianUserAuthorization {}
+impl VisitUnknown for GuardianWarningNotification {}
+impl VisitUnknown for HookCompletedNotification {}
+impl VisitUnknown for HookErrorInfo {}
+impl VisitUnknown for HookEventName {}
+impl VisitUnknown for HookExecutionMode {}
+impl VisitUnknown for HookHandlerType {}
+impl VisitUnknown for HookMetadata {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Command {
+                r#additional_context_limit,
+                r#current_hash,
+                r#display_order,
+                r#enabled,
+                r#environment_id,
+                r#event_name,
+                r#is_managed,
+                r#key,
+                r#matcher,
+                r#plugin_id,
+                r#source,
+                r#source_path,
+                r#status_message,
+                r#timeout_sec,
+                r#trust_status,
+                r#async,
+                r#command,
+            } => {
+                VisitUnknown::visit_unknowns(r#additional_context_limit, _visitor);
+                VisitUnknown::visit_unknowns(r#current_hash, _visitor);
+                VisitUnknown::visit_unknowns(r#display_order, _visitor);
+                VisitUnknown::visit_unknowns(r#enabled, _visitor);
+                VisitUnknown::visit_unknowns(r#environment_id, _visitor);
+                VisitUnknown::visit_unknowns(r#event_name, _visitor);
+                VisitUnknown::visit_unknowns(r#is_managed, _visitor);
+                VisitUnknown::visit_unknowns(r#key, _visitor);
+                VisitUnknown::visit_unknowns(r#matcher, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+                VisitUnknown::visit_unknowns(r#source_path, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+                VisitUnknown::visit_unknowns(r#trust_status, _visitor);
+                VisitUnknown::visit_unknowns(r#async, _visitor);
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+            }
+            Self::McpTool {
+                r#additional_context_limit,
+                r#current_hash,
+                r#display_order,
+                r#enabled,
+                r#environment_id,
+                r#event_name,
+                r#is_managed,
+                r#key,
+                r#matcher,
+                r#plugin_id,
+                r#source,
+                r#source_path,
+                r#status_message,
+                r#timeout_sec,
+                r#trust_status,
+                r#server,
+                r#tool,
+            } => {
+                VisitUnknown::visit_unknowns(r#additional_context_limit, _visitor);
+                VisitUnknown::visit_unknowns(r#current_hash, _visitor);
+                VisitUnknown::visit_unknowns(r#display_order, _visitor);
+                VisitUnknown::visit_unknowns(r#enabled, _visitor);
+                VisitUnknown::visit_unknowns(r#environment_id, _visitor);
+                VisitUnknown::visit_unknowns(r#event_name, _visitor);
+                VisitUnknown::visit_unknowns(r#is_managed, _visitor);
+                VisitUnknown::visit_unknowns(r#key, _visitor);
+                VisitUnknown::visit_unknowns(r#matcher, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+                VisitUnknown::visit_unknowns(r#source_path, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+                VisitUnknown::visit_unknowns(r#trust_status, _visitor);
+                VisitUnknown::visit_unknowns(r#server, _visitor);
+                VisitUnknown::visit_unknowns(r#tool, _visitor);
+            }
+            Self::Prompt {
+                r#additional_context_limit,
+                r#current_hash,
+                r#display_order,
+                r#enabled,
+                r#environment_id,
+                r#event_name,
+                r#is_managed,
+                r#key,
+                r#matcher,
+                r#plugin_id,
+                r#source,
+                r#source_path,
+                r#status_message,
+                r#timeout_sec,
+                r#trust_status,
+            } => {
+                VisitUnknown::visit_unknowns(r#additional_context_limit, _visitor);
+                VisitUnknown::visit_unknowns(r#current_hash, _visitor);
+                VisitUnknown::visit_unknowns(r#display_order, _visitor);
+                VisitUnknown::visit_unknowns(r#enabled, _visitor);
+                VisitUnknown::visit_unknowns(r#environment_id, _visitor);
+                VisitUnknown::visit_unknowns(r#event_name, _visitor);
+                VisitUnknown::visit_unknowns(r#is_managed, _visitor);
+                VisitUnknown::visit_unknowns(r#key, _visitor);
+                VisitUnknown::visit_unknowns(r#matcher, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+                VisitUnknown::visit_unknowns(r#source_path, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+                VisitUnknown::visit_unknowns(r#trust_status, _visitor);
+            }
+            Self::Agent {
+                r#additional_context_limit,
+                r#current_hash,
+                r#display_order,
+                r#enabled,
+                r#environment_id,
+                r#event_name,
+                r#is_managed,
+                r#key,
+                r#matcher,
+                r#plugin_id,
+                r#source,
+                r#source_path,
+                r#status_message,
+                r#timeout_sec,
+                r#trust_status,
+            } => {
+                VisitUnknown::visit_unknowns(r#additional_context_limit, _visitor);
+                VisitUnknown::visit_unknowns(r#current_hash, _visitor);
+                VisitUnknown::visit_unknowns(r#display_order, _visitor);
+                VisitUnknown::visit_unknowns(r#enabled, _visitor);
+                VisitUnknown::visit_unknowns(r#environment_id, _visitor);
+                VisitUnknown::visit_unknowns(r#event_name, _visitor);
+                VisitUnknown::visit_unknowns(r#is_managed, _visitor);
+                VisitUnknown::visit_unknowns(r#key, _visitor);
+                VisitUnknown::visit_unknowns(r#matcher, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+                VisitUnknown::visit_unknowns(r#source_path, _visitor);
+                VisitUnknown::visit_unknowns(r#status_message, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_sec, _visitor);
+                VisitUnknown::visit_unknowns(r#trust_status, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("HookMetadata", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for HookMigration {}
+impl VisitUnknown for HookOutputEntry {}
+impl VisitUnknown for HookOutputEntryKind {}
+impl VisitUnknown for HookPromptFragment {}
+impl VisitUnknown for HookRunStatus {}
+impl VisitUnknown for HookRunSummary {}
+impl VisitUnknown for HookScope {}
+impl VisitUnknown for HookSource {}
+impl VisitUnknown for HookStartedNotification {}
+impl VisitUnknown for HookTrustStatus {}
+impl VisitUnknown for HooksListEntry {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#errors, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#hooks, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#warnings, _visitor);
+    }
+}
+
+impl VisitUnknown for HooksListParams {}
+impl VisitUnknown for HooksListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+    }
+}
+
+impl VisitUnknown for ImageDetail {}
+impl VisitUnknown for ImageGenerationFailure {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::UsageLimitExceeded {
+                r#limit_id,
+                r#resets_at,
+            } => {
+                VisitUnknown::visit_unknowns(r#limit_id, _visitor);
+                VisitUnknown::visit_unknowns(r#resets_at, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ImageGenerationFailure", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ImageGenerationInputImage {}
+impl VisitUnknown for InAppBrowserRequirements {}
+impl VisitUnknown for InputModality {}
+impl VisitUnknown for InstalledApp {}
+impl VisitUnknown for InternalChatMessageMetadataPassthrough {}
+impl VisitUnknown for ItemCompletedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#completed_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ItemGuardianApprovalReviewCompletedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#action, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#completed_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#decision_source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#review, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#review_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#target_item_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ItemGuardianApprovalReviewStartedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#action, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#review, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#review_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#target_item_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ItemStartedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ListMcpServerStatusParams {}
+impl VisitUnknown for ListMcpServerStatusResponse {}
+impl VisitUnknown for LocalShellAction {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Exec {
+                r#command,
+                r#env,
+                r#timeout_ms,
+                r#user,
+                r#working_directory,
+            } => {
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#env, _visitor);
+                VisitUnknown::visit_unknowns(r#timeout_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#user, _visitor);
+                VisitUnknown::visit_unknowns(r#working_directory, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("LocalShellAction", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for LocalShellStatus {}
+impl VisitUnknown for LoginAccountParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ApiKey { r#api_key } => {
+                VisitUnknown::visit_unknowns(r#api_key, _visitor);
+            }
+            Self::Chatgpt {
+                r#app_brand,
+                r#codex_streamlined_login,
+                r#use_hosted_login_success_page,
+            } => {
+                VisitUnknown::visit_unknowns(r#app_brand, _visitor);
+                VisitUnknown::visit_unknowns(r#codex_streamlined_login, _visitor);
+                VisitUnknown::visit_unknowns(r#use_hosted_login_success_page, _visitor);
+            }
+            Self::ChatgptDeviceCode => {}
+            Self::ChatgptAuthTokens {
+                r#access_token,
+                r#chatgpt_account_id,
+                r#chatgpt_plan_type,
+            } => {
+                VisitUnknown::visit_unknowns(r#access_token, _visitor);
+                VisitUnknown::visit_unknowns(r#chatgpt_account_id, _visitor);
+                VisitUnknown::visit_unknowns(r#chatgpt_plan_type, _visitor);
+            }
+            Self::AmazonBedrock {
+                r#api_key,
+                r#region,
+            } => {
+                VisitUnknown::visit_unknowns(r#api_key, _visitor);
+                VisitUnknown::visit_unknowns(r#region, _visitor);
+            }
+            Self::AmazonBedrockAccessKeys {
+                r#access_key_id,
+                r#region,
+                r#secret_access_key,
+                r#session_token,
+            } => {
+                VisitUnknown::visit_unknowns(r#access_key_id, _visitor);
+                VisitUnknown::visit_unknowns(r#region, _visitor);
+                VisitUnknown::visit_unknowns(r#secret_access_key, _visitor);
+                VisitUnknown::visit_unknowns(r#session_token, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("LoginAccountParams", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for LoginAccountResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ApiKey => {}
+            Self::Chatgpt {
+                r#auth_url,
+                r#login_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#auth_url, _visitor);
+                VisitUnknown::visit_unknowns(r#login_id, _visitor);
+            }
+            Self::ChatgptDeviceCode {
+                r#login_id,
+                r#user_code,
+                r#verification_url,
+            } => {
+                VisitUnknown::visit_unknowns(r#login_id, _visitor);
+                VisitUnknown::visit_unknowns(r#user_code, _visitor);
+                VisitUnknown::visit_unknowns(r#verification_url, _visitor);
+            }
+            Self::ChatgptAuthTokens => {}
+            Self::AmazonBedrock => {}
+            Self::UnknownVendorVariant(value) => _visitor("LoginAccountResponse", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for LoginAppBrand {}
+impl VisitUnknown for LogoutAccountResponse {}
+impl VisitUnknown for ManagedHooksRequirements {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#interrupt, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permission_request, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#post_compact, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#post_model_request, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#post_tool_use, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#pre_compact, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#pre_model_request, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#pre_tool_use, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#session_end, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#session_start, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#stop, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#subagent_start, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#subagent_stop, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#user_prompt_submit, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#managed_dir, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#windows_managed_dir, _visitor);
+    }
+}
+
+impl VisitUnknown for MarketplaceAddParams {}
+impl VisitUnknown for MarketplaceAddResponse {}
+impl VisitUnknown for MarketplaceInterface {}
+impl VisitUnknown for MarketplaceLoadErrorInfo {}
+impl VisitUnknown for MarketplaceRemoveParams {}
+impl VisitUnknown for MarketplaceRemoveResponse {}
+impl VisitUnknown for MarketplaceUpgradeErrorInfo {}
+impl VisitUnknown for MarketplaceUpgradeParams {}
+impl VisitUnknown for MarketplaceUpgradeResponse {}
+impl VisitUnknown for McpAppDisplayMode {}
+impl VisitUnknown for McpAppUi {}
+impl VisitUnknown for McpAuthStatus {}
+impl VisitUnknown for McpResourceReadParams {}
+impl VisitUnknown for McpResourceReadResponse {}
+impl VisitUnknown for McpResourceReadTarget {}
+impl VisitUnknown for McpServerConnectionStatus {}
+impl VisitUnknown for McpServerEventNotification {}
+impl VisitUnknown for McpServerEventStreamNotification {}
+impl VisitUnknown for McpServerEventStreamStartParams {}
+impl VisitUnknown for McpServerEventStreamStartResponse {}
+impl VisitUnknown for McpServerEventStreamStopParams {}
+impl VisitUnknown for McpServerEventStreamStopResponse {}
+impl VisitUnknown for McpServerInfo {}
+impl VisitUnknown for McpServerMigration {}
+impl VisitUnknown for McpServerOauthClientRegistration {}
+impl VisitUnknown for McpServerOauthLoginCompletedNotification {}
+impl VisitUnknown for McpServerOauthLoginParams {}
+impl VisitUnknown for McpServerOauthLoginResponse {}
+impl VisitUnknown for McpServerRefreshResponse {}
+impl VisitUnknown for McpServerStartupFailureReason {}
+impl VisitUnknown for McpServerStartupState {}
+impl VisitUnknown for McpServerStatus {}
+impl VisitUnknown for McpServerStatusDetail {}
+impl VisitUnknown for McpServerStatusUpdatedNotification {}
+impl VisitUnknown for McpServerToolCallParams {}
+impl VisitUnknown for McpServerToolCallResponse {}
+impl VisitUnknown for McpToolCallAppContext {}
+impl VisitUnknown for McpToolCallError {}
+impl VisitUnknown for McpToolCallProgressNotification {}
+impl VisitUnknown for McpToolCallResult {}
+impl VisitUnknown for McpToolCallStatus {}
+impl VisitUnknown for MemoryCitation {}
+impl VisitUnknown for MemoryCitationEntry {}
+impl VisitUnknown for MemoryResetResponse {}
+impl VisitUnknown for MemoryStatusParams {}
+impl VisitUnknown for MemoryStatusResponse {}
+impl VisitUnknown for MergeStrategy {}
+impl VisitUnknown for MessagePhase {}
+impl VisitUnknown for MigrationDetails {}
+impl VisitUnknown for MisalignmentErrorDetails {}
+impl VisitUnknown for MisalignmentSteer {}
+impl VisitUnknown for MockExperimentalMethodParams {}
+impl VisitUnknown for MockExperimentalMethodResponse {}
+impl VisitUnknown for ModeKind {}
+impl VisitUnknown for Model {}
+impl VisitUnknown for ModelAccessPrograms {}
+impl VisitUnknown for ModelAvailabilityNux {}
+impl VisitUnknown for ModelListParams {}
+impl VisitUnknown for ModelListResponse {}
+impl VisitUnknown for ModelProviderCapabilitiesReadParams {}
+impl VisitUnknown for ModelProviderCapabilitiesReadResponse {}
+impl VisitUnknown for ModelProviderError {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ModelProviderMismatch {
+                r#current_model_provider,
+                r#model_provider,
+            } => {
+                VisitUnknown::visit_unknowns(r#current_model_provider, _visitor);
+                VisitUnknown::visit_unknowns(r#model_provider, _visitor);
+            }
+            Self::ModelProviderNotConfigured { r#model_provider } => {
+                VisitUnknown::visit_unknowns(r#model_provider, _visitor);
+            }
+            Self::ModelProviderPolicyConflict {
+                r#model_provider,
+                r#required_model_provider,
+            } => {
+                VisitUnknown::visit_unknowns(r#model_provider, _visitor);
+                VisitUnknown::visit_unknowns(r#required_model_provider, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ModelProviderError", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ModelRerouteReason {}
+impl VisitUnknown for ModelReroutedNotification {}
+impl VisitUnknown for ModelSafetyBufferingUpdatedNotification {}
+impl VisitUnknown for ModelServiceTier {}
+impl VisitUnknown for ModelUpgradeInfo {}
+impl VisitUnknown for ModelVerification {}
+impl VisitUnknown for ModelVerificationNotification {}
+impl VisitUnknown for ModelsRequirements {}
+impl VisitUnknown for MultiAgentMode {}
+impl VisitUnknown for MultiAgentVersion {}
+impl VisitUnknown for NetworkAccess {}
+impl VisitUnknown for NetworkApprovalProtocol {}
+impl VisitUnknown for NetworkDomainPermission {}
+impl VisitUnknown for NetworkRequirements {}
+impl VisitUnknown for NetworkUnixSocketPermission {}
+impl VisitUnknown for NewThreadModelDefaults {}
+impl VisitUnknown for NonSteerableTurnKind {}
+impl VisitUnknown for NullableGetAccountRateLimitsParams {}
+impl VisitUnknown for NullableGetAccountTokenUsageParams {}
+impl VisitUnknown for NullableRemoteControlDisableParams {}
+impl VisitUnknown for NullableRemoteControlEnableParams {}
+impl VisitUnknown for OtelExporter {}
+impl VisitUnknown for OtelHttpProtocol {}
+impl VisitUnknown for OtelRequirements {}
+impl VisitUnknown for OtelTlsConfig {}
+impl VisitUnknown for OtelToolResultLogConfig {}
+impl VisitUnknown for OverriddenMetadata {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#effective_value, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#message, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#overriding_layer, _visitor);
+    }
+}
+
+impl VisitUnknown for PatchApplyStatus {}
+impl VisitUnknown for PatchChangeKind {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Add => {}
+            Self::Delete => {}
+            Self::Update { r#move_path } => {
+                VisitUnknown::visit_unknowns(r#move_path, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("PatchChangeKind", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for PermissionProfileListParams {}
+impl VisitUnknown for PermissionProfileListResponse {}
+impl VisitUnknown for PermissionProfileSummary {}
+impl VisitUnknown for Personality {}
+impl VisitUnknown for PlanDeltaNotification {}
+impl VisitUnknown for PlanType {}
+impl VisitUnknown for PluginAuthPolicy {}
+impl VisitUnknown for PluginAvailability {}
+impl VisitUnknown for PluginDetail {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#app_templates, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#apps, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#description, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#hooks, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplace_name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplace_path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#mcp_servers, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#onboarding_skill, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#scheduled_tasks, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#share_url, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#skills, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#summary, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginDisabledReason {}
+impl VisitUnknown for PluginHookSummary {}
+impl VisitUnknown for PluginInstallParams {}
+impl VisitUnknown for PluginInstallPolicy {}
+impl VisitUnknown for PluginInstallPolicySource {}
+impl VisitUnknown for PluginInstallResponse {}
+impl VisitUnknown for PluginInstalledParams {}
+impl VisitUnknown for PluginInstalledResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#marketplace_load_errors, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplaces, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginInterface {}
+impl VisitUnknown for PluginListMarketplaceKind {}
+impl VisitUnknown for PluginListParams {}
+impl VisitUnknown for PluginListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#featured_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplace_load_errors, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplaces, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginMarketplaceEntry {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#interface, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#plugins, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginReadParams {}
+impl VisitUnknown for PluginReadResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#plugin, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginReconcileChangedPlugin {}
+impl VisitUnknown for PluginReconcileParams {}
+impl VisitUnknown for PluginReconcileResponse {}
+impl VisitUnknown for PluginSearchParams {}
+impl VisitUnknown for PluginSearchResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginSearchResult {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#marketplace_name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#marketplace_path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#plugin, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginSearchScope {}
+impl VisitUnknown for PluginShareCheckoutParams {}
+impl VisitUnknown for PluginShareCheckoutResponse {}
+impl VisitUnknown for PluginShareContext {}
+impl VisitUnknown for PluginShareDeleteParams {}
+impl VisitUnknown for PluginShareDeleteResponse {}
+impl VisitUnknown for PluginShareDiscoverability {}
+impl VisitUnknown for PluginShareListItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#local_plugin_path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#plugin, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginShareListParams {}
+impl VisitUnknown for PluginShareListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginSharePrincipal {}
+impl VisitUnknown for PluginSharePrincipalRole {}
+impl VisitUnknown for PluginSharePrincipalType {}
+impl VisitUnknown for PluginShareSaveParams {}
+impl VisitUnknown for PluginShareSaveResponse {}
+impl VisitUnknown for PluginShareTarget {}
+impl VisitUnknown for PluginShareTargetRole {}
+impl VisitUnknown for PluginShareUpdateDiscoverability {}
+impl VisitUnknown for PluginShareUpdateTargetsParams {}
+impl VisitUnknown for PluginShareUpdateTargetsResponse {}
+impl VisitUnknown for PluginSkillReadParams {}
+impl VisitUnknown for PluginSkillReadResponse {}
+impl VisitUnknown for PluginSource {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Local { r#path } => {
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Git {
+                r#path,
+                r#ref_name,
+                r#sha,
+                r#url,
+            } => {
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+                VisitUnknown::visit_unknowns(r#ref_name, _visitor);
+                VisitUnknown::visit_unknowns(r#sha, _visitor);
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::Npm {
+                r#package,
+                r#registry,
+                r#version,
+            } => {
+                VisitUnknown::visit_unknowns(r#package, _visitor);
+                VisitUnknown::visit_unknowns(r#registry, _visitor);
+                VisitUnknown::visit_unknowns(r#version, _visitor);
+            }
+            Self::Remote => {}
+            Self::UnknownVendorVariant(value) => _visitor("PluginSource", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for PluginSummary {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#auth_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#availability, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_reason, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#eligible_plan_types, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#enabled, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#install_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#install_policy_source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#installed, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#installed_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#interface, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#keywords, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#local_version, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#must_show_installation_interstitial, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#remote_plugin_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#share_context, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#version, _visitor);
+    }
+}
+
+impl VisitUnknown for PluginUninstallParams {}
+impl VisitUnknown for PluginUninstallResponse {}
+impl VisitUnknown for PluginsMigration {}
+impl VisitUnknown for ProcessExitedNotification {}
+impl VisitUnknown for ProcessKillParams {}
+impl VisitUnknown for ProcessKillResponse {}
+impl VisitUnknown for ProcessOutputDeltaNotification {}
+impl VisitUnknown for ProcessOutputStream {}
+impl VisitUnknown for ProcessResizePtyParams {}
+impl VisitUnknown for ProcessResizePtyResponse {}
+impl VisitUnknown for ProcessSpawnParams {}
+impl VisitUnknown for ProcessSpawnResponse {}
+impl VisitUnknown for ProcessTerminalSize {}
+impl VisitUnknown for ProcessWriteStdinParams {}
+impl VisitUnknown for ProcessWriteStdinResponse {}
+impl VisitUnknown for Project {}
+impl VisitUnknown for ProjectChangeType {}
+impl VisitUnknown for ProjectChangedNotification {}
+impl VisitUnknown for ProjectCreateParams {}
+impl VisitUnknown for ProjectCreateResponse {}
+impl VisitUnknown for ProjectDeleteParams {}
+impl VisitUnknown for ProjectDeleteResponse {}
+impl VisitUnknown for ProjectImportParams {}
+impl VisitUnknown for ProjectImportResponse {}
+impl VisitUnknown for ProjectListParams {}
+impl VisitUnknown for ProjectListResponse {}
+impl VisitUnknown for ProjectMoveParams {}
+impl VisitUnknown for ProjectMoveResponse {}
+impl VisitUnknown for ProjectReadParams {}
+impl VisitUnknown for ProjectReadResponse {}
+impl VisitUnknown for ProjectRoot {}
+impl VisitUnknown for ProjectSortKey {}
+impl VisitUnknown for ProjectUpdateParams {}
+impl VisitUnknown for ProjectUpdateResponse {}
+impl VisitUnknown for QueuedSubmission {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#client_user_message_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#input, _visitor);
+    }
+}
+
+impl VisitUnknown for RateLimitReachedType {}
+impl VisitUnknown for RateLimitResetCredit {}
+impl VisitUnknown for RateLimitResetCreditStatus {}
+impl VisitUnknown for RateLimitResetCreditsSummary {}
+impl VisitUnknown for RateLimitResetType {}
+impl VisitUnknown for RateLimitSnapshot {}
+impl VisitUnknown for RateLimitWindow {}
+impl VisitUnknown for RawResponseCompletedNotification {}
+impl VisitUnknown for RawResponseItemCompletedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for RealtimeConversationVersion {}
+impl VisitUnknown for RealtimeOutputModality {}
+impl VisitUnknown for RealtimeVoice {}
+impl VisitUnknown for RealtimeVoicesList {}
+impl VisitUnknown for ReasoningEffortOption {}
+impl VisitUnknown for ReasoningItemContent {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ReasoningText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::Text { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ReasoningItemContent", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ReasoningItemReasoningSummary {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::SummaryText { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ReasoningItemReasoningSummary", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ReasoningSummary {}
+impl VisitUnknown for ReasoningSummaryPartAddedNotification {}
+impl VisitUnknown for ReasoningSummaryTextDeltaNotification {}
+impl VisitUnknown for ReasoningTextDeltaNotification {}
+impl VisitUnknown for RemoteControlClient {}
+impl VisitUnknown for RemoteControlClientsListOrder {}
+impl VisitUnknown for RemoteControlClientsListParams {}
+impl VisitUnknown for RemoteControlClientsListResponse {}
+impl VisitUnknown for RemoteControlClientsRevokeParams {}
+impl VisitUnknown for RemoteControlClientsRevokeResponse {}
+impl VisitUnknown for RemoteControlConnectionStatus {}
+impl VisitUnknown for RemoteControlDisableParams {}
+impl VisitUnknown for RemoteControlDisableResponse {}
+impl VisitUnknown for RemoteControlEnableParams {}
+impl VisitUnknown for RemoteControlEnableResponse {}
+impl VisitUnknown for RemoteControlPairingStartParams {}
+impl VisitUnknown for RemoteControlPairingStartResponse {}
+impl VisitUnknown for RemoteControlPairingStatusParams {}
+impl VisitUnknown for RemoteControlPairingStatusResponse {}
+impl VisitUnknown for RemoteControlStatusChangedNotification {}
+impl VisitUnknown for RemoteControlStatusReadResponse {}
+impl VisitUnknown for RequestHeader {}
+impl VisitUnknown for RequestPermissionProfile {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#file_system, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#network, _visitor);
+    }
+}
+
+impl VisitUnknown for ResidencyRequirement {}
+impl VisitUnknown for Resource {}
+impl VisitUnknown for ResourceContent {}
+impl VisitUnknown for ResourceTemplate {}
+impl VisitUnknown for ResponseItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::AdditionalTools {
+                r#id,
+                r#role,
+                r#tools,
+            } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#role, _visitor);
+                VisitUnknown::visit_unknowns(r#tools, _visitor);
+            }
+            Self::Message {
+                r#content,
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#phase,
+                r#role,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#phase, _visitor);
+                VisitUnknown::visit_unknowns(r#role, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::AgentMessage {
+                r#author,
+                r#content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#recipient,
+            } => {
+                VisitUnknown::visit_unknowns(r#author, _visitor);
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#recipient, _visitor);
+            }
+            Self::Reasoning {
+                r#content,
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#summary,
+            } => {
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#summary, _visitor);
+            }
+            Self::LocalShellCall {
+                r#action,
+                r#call_id,
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#action, _visitor);
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::FunctionCall {
+                r#arguments,
+                r#call_id,
+                r#encrypted_content,
+                r#encrypted_function_args,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#name,
+                r#namespace,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#arguments, _visitor);
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_function_args, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#namespace, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::ToolSearchCall {
+                r#arguments,
+                r#call_id,
+                r#encrypted_content,
+                r#execution,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#arguments, _visitor);
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#execution, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::FunctionCallOutput {
+                r#call_id,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#name,
+                r#namespace,
+                r#output,
+            } => {
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#namespace, _visitor);
+                VisitUnknown::visit_unknowns(r#output, _visitor);
+            }
+            Self::CustomToolCall {
+                r#call_id,
+                r#encrypted_content,
+                r#id,
+                r#input,
+                r#internal_chat_message_metadata_passthrough,
+                r#name,
+                r#namespace,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#input, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#namespace, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::CustomToolCallOutput {
+                r#call_id,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#name,
+                r#output,
+            } => {
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#output, _visitor);
+            }
+            Self::ToolSearchOutput {
+                r#call_id,
+                r#execution,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#status,
+                r#tools,
+            } => {
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+                VisitUnknown::visit_unknowns(r#execution, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#tools, _visitor);
+            }
+            Self::WebSearchCall {
+                r#action,
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#action, _visitor);
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::ImageGenerationCall {
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+                r#result,
+                r#revised_prompt,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+                VisitUnknown::visit_unknowns(r#result, _visitor);
+                VisitUnknown::visit_unknowns(r#revised_prompt, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::Compaction {
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+            } => {
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+            }
+            Self::ConfigurationUpdate { r#reasoning } => {
+                VisitUnknown::visit_unknowns(r#reasoning, _visitor);
+            }
+            Self::CompactionTrigger => {}
+            Self::ContextCompaction {
+                r#encrypted_content,
+                r#id,
+                r#internal_chat_message_metadata_passthrough,
+            } => {
+                VisitUnknown::visit_unknowns(r#encrypted_content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(
+                    r#internal_chat_message_metadata_passthrough,
+                    _visitor,
+                );
+            }
+            Self::Other => {}
+            Self::UnknownVendorVariant(value) => _visitor("ResponseItem", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ResponseUsageMetadata {}
+impl VisitUnknown for ResponsesApiWebSearchAction {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Search { r#queries, r#query } => {
+                VisitUnknown::visit_unknowns(r#queries, _visitor);
+                VisitUnknown::visit_unknowns(r#query, _visitor);
+            }
+            Self::OpenPage { r#url } => {
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::FindInPage { r#pattern, r#url } => {
+                VisitUnknown::visit_unknowns(r#pattern, _visitor);
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::Other => {}
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ResponsesApiWebSearchAction", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ReviewDelivery {}
+impl VisitUnknown for ReviewStartParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#delivery, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#target, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ReviewStartResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#review_thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn, _visitor);
+    }
+}
+
+impl VisitUnknown for ReviewTarget {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::UncommittedChanges => {}
+            Self::BaseBranch { r#branch } => {
+                VisitUnknown::visit_unknowns(r#branch, _visitor);
+            }
+            Self::Commit { r#sha, r#title } => {
+                VisitUnknown::visit_unknowns(r#sha, _visitor);
+                VisitUnknown::visit_unknowns(r#title, _visitor);
+            }
+            Self::Custom { r#instructions } => {
+                VisitUnknown::visit_unknowns(r#instructions, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ReviewTarget", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for RolloutCompressResponse {}
+impl VisitUnknown for SandboxMode {}
+impl VisitUnknown for SandboxPolicy {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::DangerFullAccess => {}
+            Self::ReadOnly { r#network_access } => {
+                VisitUnknown::visit_unknowns(r#network_access, _visitor);
+            }
+            Self::ExternalSandbox { r#network_access } => {
+                VisitUnknown::visit_unknowns(r#network_access, _visitor);
+            }
+            Self::WorkspaceWrite {
+                r#exclude_slash_tmp,
+                r#exclude_tmpdir_env_var,
+                r#network_access,
+                r#writable_roots,
+            } => {
+                VisitUnknown::visit_unknowns(r#exclude_slash_tmp, _visitor);
+                VisitUnknown::visit_unknowns(r#exclude_tmpdir_env_var, _visitor);
+                VisitUnknown::visit_unknowns(r#network_access, _visitor);
+                VisitUnknown::visit_unknowns(r#writable_roots, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("SandboxPolicy", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for SandboxWorkspaceWrite {}
+impl VisitUnknown for ScheduledTaskSchedule {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Hourly {
+                r#days,
+                r#interval_hours,
+            } => {
+                VisitUnknown::visit_unknowns(r#days, _visitor);
+                VisitUnknown::visit_unknowns(r#interval_hours, _visitor);
+            }
+            Self::Daily { r#time } => {
+                VisitUnknown::visit_unknowns(r#time, _visitor);
+            }
+            Self::Weekdays { r#time } => {
+                VisitUnknown::visit_unknowns(r#time, _visitor);
+            }
+            Self::Weekly { r#days, r#time } => {
+                VisitUnknown::visit_unknowns(r#days, _visitor);
+                VisitUnknown::visit_unknowns(r#time, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ScheduledTaskSchedule", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ScheduledTaskSummary {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#key, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#prompt, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#schedule, _visitor);
+    }
+}
+
+impl VisitUnknown for ScheduledTaskWeekday {}
+impl VisitUnknown for SelectedCapabilityRoot {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#location, _visitor);
+    }
+}
+
+impl VisitUnknown for SendAddCreditsNudgeEmailParams {}
+impl VisitUnknown for SendAddCreditsNudgeEmailResponse {}
+impl VisitUnknown for ServerDiagnosticsGauge {}
+impl VisitUnknown for ServerDiagnosticsParams {}
+impl VisitUnknown for ServerDiagnosticsProcess {}
+impl VisitUnknown for ServerDiagnosticsResponse {}
+impl VisitUnknown for ServerRequestResolvedNotification {}
+impl VisitUnknown for SessionMigration {}
+impl VisitUnknown for SessionSource {}
+impl VisitUnknown for Settings {}
+impl VisitUnknown for SkillDependencies {}
+impl VisitUnknown for SkillErrorInfo {}
+impl VisitUnknown for SkillInterface {}
+impl VisitUnknown for SkillMetadata {}
+impl VisitUnknown for SkillMigration {}
+impl VisitUnknown for SkillScope {}
+impl VisitUnknown for SkillSummary {}
+impl VisitUnknown for SkillToolDependency {}
+impl VisitUnknown for SkillsChangedNotification {}
+impl VisitUnknown for SkillsConfigWriteParams {}
+impl VisitUnknown for SkillsConfigWriteResponse {}
+impl VisitUnknown for SkillsExtraRootsSetParams {}
+impl VisitUnknown for SkillsExtraRootsSetResponse {}
+impl VisitUnknown for SkillsListEntry {}
+impl VisitUnknown for SkillsListParams {}
+impl VisitUnknown for SkillsListResponse {}
+impl VisitUnknown for SortDirection {}
+impl VisitUnknown for SpendControlLimitSnapshot {}
+impl VisitUnknown for StrictReviewRequiredNotification {}
+impl VisitUnknown for SubAgentActivityKind {}
+impl VisitUnknown for SubAgentSource {}
+impl VisitUnknown for SubagentMigration {}
+impl VisitUnknown for TerminalInteractionNotification {}
+impl VisitUnknown for TextElement {}
+impl VisitUnknown for TextPosition {}
+impl VisitUnknown for TextRange {}
+impl VisitUnknown for Thread {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#agent_nickname, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#agent_role, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#can_accept_direct_input, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cli_version, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#created_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#daybreak_enabled, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#environments, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#ephemeral, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#extra, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#forked_from_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#git_info, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#history_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#originator, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#parent_thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#preview, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#project_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reasoning_effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#recency_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#section, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#section_entered_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#session_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#status, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turns, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#updated_at, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadActiveFlag {}
+impl VisitUnknown for ThreadApproveGuardianDeniedActionParams {}
+impl VisitUnknown for ThreadApproveGuardianDeniedActionResponse {}
+impl VisitUnknown for ThreadArchiveParams {}
+impl VisitUnknown for ThreadArchiveResponse {}
+impl VisitUnknown for ThreadArchivedNotification {}
+impl VisitUnknown for ThreadAttachment {}
+impl VisitUnknown for ThreadAttachmentAddOutcome {}
+impl VisitUnknown for ThreadAttachmentAddParams {}
+impl VisitUnknown for ThreadAttachmentAddResponse {}
+impl VisitUnknown for ThreadAttachmentListParams {}
+impl VisitUnknown for ThreadAttachmentListResponse {}
+impl VisitUnknown for ThreadAttachmentOperation {}
+impl VisitUnknown for ThreadAttachmentOwner {}
+impl VisitUnknown for ThreadAttachmentOwnerListParams {}
+impl VisitUnknown for ThreadAttachmentOwnerListResponse {}
+impl VisitUnknown for ThreadAttachmentRemoveParams {}
+impl VisitUnknown for ThreadAttachmentRemoveResponse {}
+impl VisitUnknown for ThreadAttachmentUpdatedNotification {}
+impl VisitUnknown for ThreadBackgroundTerminal {}
+impl VisitUnknown for ThreadBackgroundTerminalsCleanParams {}
+impl VisitUnknown for ThreadBackgroundTerminalsCleanResponse {}
+impl VisitUnknown for ThreadBackgroundTerminalsListParams {}
+impl VisitUnknown for ThreadBackgroundTerminalsListResponse {}
+impl VisitUnknown for ThreadBackgroundTerminalsTerminateParams {}
+impl VisitUnknown for ThreadBackgroundTerminalsTerminateResponse {}
+impl VisitUnknown for ThreadClosedNotification {}
+impl VisitUnknown for ThreadCompactStartParams {}
+impl VisitUnknown for ThreadCompactStartResponse {}
+impl VisitUnknown for ThreadDecrementElicitationParams {}
+impl VisitUnknown for ThreadDecrementElicitationResponse {}
+impl VisitUnknown for ThreadDeleteParams {}
+impl VisitUnknown for ThreadDeleteResponse {}
+impl VisitUnknown for ThreadDeletedNotification {}
+impl VisitUnknown for ThreadEnvironment {}
+impl VisitUnknown for ThreadExtra {}
+impl VisitUnknown for ThreadForkParams {}
+impl VisitUnknown for ThreadForkResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#active_permission_profile, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#instruction_sources, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reasoning_effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadGoal {}
+impl VisitUnknown for ThreadGoalClearParams {}
+impl VisitUnknown for ThreadGoalClearResponse {}
+impl VisitUnknown for ThreadGoalClearedNotification {}
+impl VisitUnknown for ThreadGoalGetParams {}
+impl VisitUnknown for ThreadGoalGetResponse {}
+impl VisitUnknown for ThreadGoalMutationOrigin {}
+impl VisitUnknown for ThreadGoalSetParams {}
+impl VisitUnknown for ThreadGoalSetResponse {}
+impl VisitUnknown for ThreadGoalStatus {}
+impl VisitUnknown for ThreadGoalUpdatedNotification {}
+impl VisitUnknown for ThreadGuardianAssessment {}
+impl VisitUnknown for ThreadGuardianReviewParams {}
+impl VisitUnknown for ThreadGuardianReviewResponse {}
+impl VisitUnknown for ThreadHistoryMode {}
+impl VisitUnknown for ThreadIncrementElicitationParams {}
+impl VisitUnknown for ThreadIncrementElicitationResponse {}
+impl VisitUnknown for ThreadInjectItemsParams {}
+impl VisitUnknown for ThreadInjectItemsResponse {}
+impl VisitUnknown for ThreadItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::UserMessage {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#client_id,
+                r#content,
+                r#id,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#client_id, _visitor);
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+            }
+            Self::HookPrompt {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#fragments,
+                r#id,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#fragments, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+            }
+            Self::AgentMessage {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#delivery,
+                r#id,
+                r#memory_citation,
+                r#phase,
+                r#questions,
+                r#text,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#delivery, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#memory_citation, _visitor);
+                VisitUnknown::visit_unknowns(r#phase, _visitor);
+                VisitUnknown::visit_unknowns(r#questions, _visitor);
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::FunctionCallOutput {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+                r#name,
+                r#namespace,
+                r#output,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#namespace, _visitor);
+                VisitUnknown::visit_unknowns(r#output, _visitor);
+            }
+            Self::Plan {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+                r#text,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::Reasoning {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#content,
+                r#id,
+                r#summary,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#content, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#summary, _visitor);
+            }
+            Self::CommandExecution {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#aggregated_output,
+                r#command,
+                r#command_actions,
+                r#cwd,
+                r#duration_ms,
+                r#exit_code,
+                r#id,
+                r#plugin_id,
+                r#process_id,
+                r#script_path,
+                r#source,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#aggregated_output, _visitor);
+                VisitUnknown::visit_unknowns(r#command, _visitor);
+                VisitUnknown::visit_unknowns(r#command_actions, _visitor);
+                VisitUnknown::visit_unknowns(r#cwd, _visitor);
+                VisitUnknown::visit_unknowns(r#duration_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#exit_code, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#process_id, _visitor);
+                VisitUnknown::visit_unknowns(r#script_path, _visitor);
+                VisitUnknown::visit_unknowns(r#source, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::FileChange {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#changes,
+                r#id,
+                r#status,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#changes, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+            }
+            Self::McpToolCall {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#app_context,
+                r#arguments,
+                r#duration_ms,
+                r#error,
+                r#id,
+                r#mcp_app_resource_uri,
+                r#mcp_app_ui,
+                r#plugin_id,
+                r#read_only_hint,
+                r#result,
+                r#server,
+                r#status,
+                r#tool,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#app_context, _visitor);
+                VisitUnknown::visit_unknowns(r#arguments, _visitor);
+                VisitUnknown::visit_unknowns(r#duration_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#error, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#mcp_app_resource_uri, _visitor);
+                VisitUnknown::visit_unknowns(r#mcp_app_ui, _visitor);
+                VisitUnknown::visit_unknowns(r#plugin_id, _visitor);
+                VisitUnknown::visit_unknowns(r#read_only_hint, _visitor);
+                VisitUnknown::visit_unknowns(r#result, _visitor);
+                VisitUnknown::visit_unknowns(r#server, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#tool, _visitor);
+            }
+            Self::DynamicToolCall {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#arguments,
+                r#content_items,
+                r#duration_ms,
+                r#id,
+                r#namespace,
+                r#status,
+                r#success,
+                r#tool,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#arguments, _visitor);
+                VisitUnknown::visit_unknowns(r#content_items, _visitor);
+                VisitUnknown::visit_unknowns(r#duration_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#namespace, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#success, _visitor);
+                VisitUnknown::visit_unknowns(r#tool, _visitor);
+            }
+            Self::CollabAgentToolCall {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#agents_states,
+                r#id,
+                r#model,
+                r#prompt,
+                r#reasoning_effort,
+                r#receiver_thread_ids,
+                r#sender_thread_id,
+                r#status,
+                r#tool,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#agents_states, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#model, _visitor);
+                VisitUnknown::visit_unknowns(r#prompt, _visitor);
+                VisitUnknown::visit_unknowns(r#reasoning_effort, _visitor);
+                VisitUnknown::visit_unknowns(r#receiver_thread_ids, _visitor);
+                VisitUnknown::visit_unknowns(r#sender_thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#tool, _visitor);
+            }
+            Self::SubAgentActivity {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#agent_path,
+                r#agent_thread_id,
+                r#id,
+                r#kind,
+                r#model,
+                r#reasoning_effort,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#agent_path, _visitor);
+                VisitUnknown::visit_unknowns(r#agent_thread_id, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#kind, _visitor);
+                VisitUnknown::visit_unknowns(r#model, _visitor);
+                VisitUnknown::visit_unknowns(r#reasoning_effort, _visitor);
+            }
+            Self::WebSearch {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#action,
+                r#id,
+                r#query,
+                r#results,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#action, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#query, _visitor);
+                VisitUnknown::visit_unknowns(r#results, _visitor);
+            }
+            Self::ImageView {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+                r#path,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Sleep {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#duration_ms,
+                r#id,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#duration_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+            }
+            Self::ImageGeneration {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#failure,
+                r#generation_id,
+                r#id,
+                r#input_images,
+                r#revised_prompt,
+                r#saved_path,
+                r#status,
+                r#transparent_background,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#failure, _visitor);
+                VisitUnknown::visit_unknowns(r#generation_id, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#input_images, _visitor);
+                VisitUnknown::visit_unknowns(r#revised_prompt, _visitor);
+                VisitUnknown::visit_unknowns(r#saved_path, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#transparent_background, _visitor);
+            }
+            Self::EnteredReviewMode {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+                r#review,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#review, _visitor);
+            }
+            Self::ExitedReviewMode {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+                r#review,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#review, _visitor);
+            }
+            Self::ContextCompaction {
+                r#completed_at_ms,
+                r#started_at_ms,
+                r#id,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadItem", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadItemEntry {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#completed_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadItemsListAnchor {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Item { r#item_id } => {
+                VisitUnknown::visit_unknowns(r#item_id, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadItemsListAnchor", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadItemsListCursor {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Variant1(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::Variant2(value) => VisitUnknown::visit_unknowns(value, _visitor),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadItemsListParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#limit, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sort_direction, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadItemsListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadItemsReadParams {}
+impl VisitUnknown for ThreadItemsReadResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadListCwdFilter {}
+impl VisitUnknown for ThreadListParams {}
+impl VisitUnknown for ThreadListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#read_states, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadLoadedListParams {}
+impl VisitUnknown for ThreadLoadedListResponse {}
+impl VisitUnknown for ThreadMemoryMode {}
+impl VisitUnknown for ThreadMemoryModeSetParams {}
+impl VisitUnknown for ThreadMemoryModeSetResponse {}
+impl VisitUnknown for ThreadMemoryReadParams {}
+impl VisitUnknown for ThreadMemoryReadResponse {}
+impl VisitUnknown for ThreadMetadataGitInfoUpdateParams {}
+impl VisitUnknown for ThreadMetadataUpdateParams {}
+impl VisitUnknown for ThreadMetadataUpdateResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadNameUpdatedNotification {}
+impl VisitUnknown for ThreadPredictionRequestParams {}
+impl VisitUnknown for ThreadPredictionRequestResponse {}
+impl VisitUnknown for ThreadPredictionResult {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Completed { r#text } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::Failed => {}
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ThreadPredictionResult", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ThreadPredictionUpdatedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#result, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#source_turn_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadProjectUpdatedNotification {}
+impl VisitUnknown for ThreadQueueAddParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#client_user_message_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#input, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadQueueAddResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#queued_submission, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadQueueChangedNotification {}
+impl VisitUnknown for ThreadQueueDeleteParams {}
+impl VisitUnknown for ThreadQueueDeleteResponse {}
+impl VisitUnknown for ThreadQueueListParams {}
+impl VisitUnknown for ThreadQueueListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadQueueReorderParams {}
+impl VisitUnknown for ThreadQueueReorderResponse {}
+impl VisitUnknown for ThreadQueueStartParams {}
+impl VisitUnknown for ThreadQueueStartResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#turn, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadQueueUpdateParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#input, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#queued_submission_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadQueueUpdateResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#queued_submission, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadReadParams {}
+impl VisitUnknown for ThreadReadResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#read_state, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadReadState {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#first_unread, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#revision, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadReadStateChangedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#read_state, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadReadStateOperation {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Read => {}
+            Self::Unread => {}
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ThreadReadStateOperation", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ThreadReadStateUpdateParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#expected_revision, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#operation, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadReadStateUpdateResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#read_state, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeAppendAudioParams {}
+impl VisitUnknown for ThreadRealtimeAppendAudioResponse {}
+impl VisitUnknown for ThreadRealtimeAppendSpeechParams {}
+impl VisitUnknown for ThreadRealtimeAppendSpeechResponse {}
+impl VisitUnknown for ThreadRealtimeAppendTextParams {}
+impl VisitUnknown for ThreadRealtimeAppendTextResponse {}
+impl VisitUnknown for ThreadRealtimeAudioChunk {}
+impl VisitUnknown for ThreadRealtimeBemItemPresentation {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::WholeItem => {}
+            Self::InlineMarkdown => {}
+            Self::InlineVisualization { r#index } => {
+                VisitUnknown::visit_unknowns(r#index, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ThreadRealtimeBemItemPresentation", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeClosedNotification {}
+impl VisitUnknown for ThreadRealtimeErrorNotification {}
+impl VisitUnknown for ThreadRealtimeInitialItem {}
+impl VisitUnknown for ThreadRealtimeItem {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::RealtimeSessionStarted {
+                r#id,
+                r#realtime_session_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#realtime_session_id, _visitor);
+            }
+            Self::TranscriptSegment {
+                r#id,
+                r#realtime_session_id,
+                r#role,
+                r#text,
+            } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#realtime_session_id, _visitor);
+                VisitUnknown::visit_unknowns(r#role, _visitor);
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+            }
+            Self::BemItemPromoted {
+                r#id,
+                r#realtime_session_id,
+                r#item_id,
+                r#presentation,
+                r#turn_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#realtime_session_id, _visitor);
+                VisitUnknown::visit_unknowns(r#item_id, _visitor);
+                VisitUnknown::visit_unknowns(r#presentation, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+            }
+            Self::RealtimeSessionClosed {
+                r#id,
+                r#realtime_session_id,
+                r#outcome,
+            } => {
+                VisitUnknown::visit_unknowns(r#id, _visitor);
+                VisitUnknown::visit_unknowns(r#realtime_session_id, _visitor);
+                VisitUnknown::visit_unknowns(r#outcome, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadRealtimeItem", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeItemAddedNotification {}
+impl VisitUnknown for ThreadRealtimeItemCompletedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeItemStartedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#item, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeItemTranscriptDeltaNotification {}
+impl VisitUnknown for ThreadRealtimeListVoicesParams {}
+impl VisitUnknown for ThreadRealtimeListVoicesResponse {}
+impl VisitUnknown for ThreadRealtimeOutputAudioDeltaNotification {}
+impl VisitUnknown for ThreadRealtimeSdpNotification {}
+impl VisitUnknown for ThreadRealtimeSessionOutcome {}
+impl VisitUnknown for ThreadRealtimeStartParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backend_reasoning_status, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#client_managed_handoffs, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#codex_response_handoff_channel_prefixes, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#codex_response_handoff_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#codex_response_item_prefix, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#codex_responses_as_items, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#delegation_ack_filler, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#flush_transcript_tail_on_session_end, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#include_startup_context, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#initial_items, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#output_modality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#prompt, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#realtime_end_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#realtime_session_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#realtime_start_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#transport, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#version, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#voice, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#voice_session_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeStartResponse {}
+impl VisitUnknown for ThreadRealtimeStartTransport {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Websocket => {}
+            Self::Webrtc { r#sdp } => {
+                VisitUnknown::visit_unknowns(r#sdp, _visitor);
+            }
+            Self::ExistingCall { r#call_id } => {
+                VisitUnknown::visit_unknowns(r#call_id, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("ThreadRealtimeStartTransport", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for ThreadRealtimeStartedNotification {}
+impl VisitUnknown for ThreadRealtimeStopParams {}
+impl VisitUnknown for ThreadRealtimeStopResponse {}
+impl VisitUnknown for ThreadRealtimeTranscriptDeltaNotification {}
+impl VisitUnknown for ThreadRealtimeTranscriptDoneNotification {}
+impl VisitUnknown for ThreadRealtimeTranscriptRole {}
+impl VisitUnknown for ThreadResumeInitialTurnsPageParams {}
+impl VisitUnknown for ThreadResumeParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#base_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#config, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#developer_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#exclude_turns, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#history, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#initial_turns_page, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#path, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#personality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadResumeResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#active_permission_profile, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#collaboration_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#initial_turns_page, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#instruction_sources, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#items_backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reasoning_effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turns_backwards_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRevertParams {}
+impl VisitUnknown for ThreadRevertResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#items_backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turns_backwards_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadRevertedNotification {}
+impl VisitUnknown for ThreadSampleCancelParams {}
+impl VisitUnknown for ThreadSampleCancelResponse {}
+impl VisitUnknown for ThreadSampleParams {}
+impl VisitUnknown for ThreadSampleResponse {}
+impl VisitUnknown for ThreadSearchOccurrence {}
+impl VisitUnknown for ThreadSearchOccurrencesParams {}
+impl VisitUnknown for ThreadSearchOccurrencesResponse {}
+impl VisitUnknown for ThreadSearchParams {}
+impl VisitUnknown for ThreadSearchResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadSearchResult {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#snippet, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadSearchSortKey {}
+impl VisitUnknown for ThreadSearchTextRange {}
+impl VisitUnknown for ThreadSection {}
+impl VisitUnknown for ThreadSectionAppearance {}
+impl VisitUnknown for ThreadSectionChangedNotification {}
+impl VisitUnknown for ThreadSectionCreateParams {}
+impl VisitUnknown for ThreadSectionCreateResponse {}
+impl VisitUnknown for ThreadSectionDeleteParams {}
+impl VisitUnknown for ThreadSectionDeleteResponse {}
+impl VisitUnknown for ThreadSectionListParams {}
+impl VisitUnknown for ThreadSectionListResponse {}
+impl VisitUnknown for ThreadSectionMoveParams {}
+impl VisitUnknown for ThreadSectionMoveResponse {}
+impl VisitUnknown for ThreadSectionUpdateParams {}
+impl VisitUnknown for ThreadSectionUpdateResponse {}
+impl VisitUnknown for ThreadSetNameParams {}
+impl VisitUnknown for ThreadSetNameResponse {}
+impl VisitUnknown for ThreadSettings {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#active_permission_profile, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#collaboration_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#personality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#summary, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadSettingsUpdateParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#collaboration_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#personality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#summary, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadSettingsUpdateResponse {}
+impl VisitUnknown for ThreadSettingsUpdatedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_settings, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadShellCommandParams {}
+impl VisitUnknown for ThreadShellCommandResponse {}
+impl VisitUnknown for ThreadSortKey {}
+impl VisitUnknown for ThreadSourceKind {}
+impl VisitUnknown for ThreadStartParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#allow_provider_model_fallback, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#base_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#config, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#daybreak_enabled, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#developer_instructions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#dynamic_tools, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#environments, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#ephemeral, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#experimental_raw_events, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#history_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#mock_experimental_field, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#personality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#project_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#selected_capability_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#session_start_source, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_source, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadStartResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#active_permission_profile, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#instruction_sources, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model_provider, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#reasoning_effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadStartSource {}
+impl VisitUnknown for ThreadStartedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadStatus {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::NotLoaded => {}
+            Self::Idle => {}
+            Self::SystemError => {}
+            Self::Active { r#active_flags } => {
+                VisitUnknown::visit_unknowns(r#active_flags, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadStatus", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadStatusChangedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#status, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadTimelineEntry {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Item {
+                r#item,
+                r#position,
+                r#turn_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#item, _visitor);
+                VisitUnknown::visit_unknowns(r#position, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+            }
+            Self::Realtime { r#item, r#position } => {
+                VisitUnknown::visit_unknowns(r#item, _visitor);
+                VisitUnknown::visit_unknowns(r#position, _visitor);
+            }
+            Self::TurnStarted {
+                r#position,
+                r#started_at,
+                r#turn_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#position, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+            }
+            Self::TurnCompleted {
+                r#completed_at,
+                r#duration_ms,
+                r#error,
+                r#position,
+                r#started_at,
+                r#status,
+                r#turn_id,
+            } => {
+                VisitUnknown::visit_unknowns(r#completed_at, _visitor);
+                VisitUnknown::visit_unknowns(r#duration_ms, _visitor);
+                VisitUnknown::visit_unknowns(r#error, _visitor);
+                VisitUnknown::visit_unknowns(r#position, _visitor);
+                VisitUnknown::visit_unknowns(r#started_at, _visitor);
+                VisitUnknown::visit_unknowns(r#status, _visitor);
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadTimelineEntry", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadTimelineListParams {}
+impl VisitUnknown for ThreadTimelineListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#active_realtime_session_at_page_start, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadTokenUsage {}
+impl VisitUnknown for ThreadTokenUsageUpdatedNotification {}
+impl VisitUnknown for ThreadTurnsListParams {}
+impl VisitUnknown for ThreadTurnsListResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadUnarchiveParams {}
+impl VisitUnknown for ThreadUnarchiveResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread, _visitor);
+    }
+}
+
+impl VisitUnknown for ThreadUnarchivedNotification {}
+impl VisitUnknown for ThreadUnreadPosition {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ThreadStart => {}
+            Self::Turn { r#turn_id } => {
+                VisitUnknown::visit_unknowns(r#turn_id, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("ThreadUnreadPosition", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for ThreadUnsubscribeParams {}
+impl VisitUnknown for ThreadUnsubscribeResponse {}
+impl VisitUnknown for ThreadUnsubscribeStatus {}
+impl VisitUnknown for ThreadUsage {}
+impl VisitUnknown for ThreadUsageBreakdownGroup {}
+impl VisitUnknown for TokenUsageBreakdown {}
+impl VisitUnknown for Tool {}
+impl VisitUnknown for ToolExposureSurface {}
+impl VisitUnknown for ToolsV2 {}
+impl VisitUnknown for Turn {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#completed_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#duration_ms, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#error, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#items, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#items_view, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#root_turn_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#started_at, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#status, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnCompletedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnDiffUpdatedNotification {}
+impl VisitUnknown for TurnEnvironmentParams {}
+impl VisitUnknown for TurnError {}
+impl VisitUnknown for TurnInterruptParams {}
+impl VisitUnknown for TurnInterruptResponse {}
+impl VisitUnknown for TurnItemsView {}
+impl VisitUnknown for TurnModerationMetadataNotification {}
+impl VisitUnknown for TurnPlanStep {}
+impl VisitUnknown for TurnPlanStepStatus {}
+impl VisitUnknown for TurnPlanUpdatedNotification {}
+impl VisitUnknown for TurnSettingsUpdateParams {}
+impl VisitUnknown for TurnSettingsUpdateResponse {}
+impl VisitUnknown for TurnSettingsUpdateStatus {}
+impl VisitUnknown for TurnStartParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#additional_context, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approval_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#approvals_reviewer, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#client_user_message_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#collaboration_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cwd, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#cyber_access_program, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#disabled_plugin_ids, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#effort, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#environments, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#input, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#model, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#multi_agent_mode, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#output_schema, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#parent_turn_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#permissions, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#personality, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#responsesapi_client_metadata, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#responsesapi_client_metadata_patch, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#root_turn_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#runtime_workspace_roots, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#sandbox_policy, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#service_tier_for_turn, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#summary, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#tool_output, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn_trigger, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnStartResponse {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#turn, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnStartedNotification {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#turn, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnStatus {}
+impl VisitUnknown for TurnSteerParams {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#additional_context, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#client_user_message_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#expected_turn_id, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#input, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#responsesapi_client_metadata, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#responsesapi_client_metadata_patch, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#thread_id, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnSteerResponse {}
+impl VisitUnknown for TurnToolOutput {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#name, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#namespace, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#output, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#retain, _visitor);
+    }
+}
+
+impl VisitUnknown for TurnsPage {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#backwards_cursor, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#next_cursor, _visitor);
+    }
+}
+
+impl VisitUnknown for UserInput {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Text {
+                r#text,
+                r#text_elements,
+            } => {
+                VisitUnknown::visit_unknowns(r#text, _visitor);
+                VisitUnknown::visit_unknowns(r#text_elements, _visitor);
+            }
+            Self::Image { r#detail } => {
+                VisitUnknown::visit_unknowns(r#detail, _visitor);
+            }
+            Self::LocalImage { r#detail, r#path } => {
+                VisitUnknown::visit_unknowns(r#detail, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Audio => {}
+            Self::LocalAudio { r#path } => {
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Skill { r#name, r#path } => {
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::Mention { r#name, r#path } => {
+                VisitUnknown::visit_unknowns(r#name, _visitor);
+                VisitUnknown::visit_unknowns(r#path, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => _visitor("UserInput", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for UserVerificationCancelParams {}
+impl VisitUnknown for UserVerificationCancelResponse {}
+impl VisitUnknown for UserVerificationCancellationReason {}
+impl VisitUnknown for UserVerificationDeleteParams {}
+impl VisitUnknown for UserVerificationDeleteResponse {}
+impl VisitUnknown for UserVerificationEnrollParams {}
+impl VisitUnknown for UserVerificationEnrollResponse {}
+impl VisitUnknown for UserVerificationErrorDetails {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::InvalidRequest { r#reason } => {
+                VisitUnknown::visit_unknowns(r#reason, _visitor);
+            }
+            Self::Unavailable { r#reason } => {
+                VisitUnknown::visit_unknowns(r#reason, _visitor);
+            }
+            Self::Cancelled { r#reason } => {
+                VisitUnknown::visit_unknowns(r#reason, _visitor);
+            }
+            Self::Failed { r#reason } => {
+                VisitUnknown::visit_unknowns(r#reason, _visitor);
+            }
+            Self::UnknownVendorVariant(value) => {
+                _visitor("UserVerificationErrorDetails", value.variant())
+            }
+        }
+    }
+}
+
+impl VisitUnknown for UserVerificationFailureReason {}
+impl VisitUnknown for UserVerificationInvalidRequestReason {}
+impl VisitUnknown for UserVerificationProof {}
+impl VisitUnknown for UserVerificationRpcError {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        VisitUnknown::visit_unknowns(&self.r#code, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#data, _visitor);
+        VisitUnknown::visit_unknowns(&self.r#message, _visitor);
+    }
+}
+
+impl VisitUnknown for UserVerificationStatusParams {}
+impl VisitUnknown for UserVerificationStatusResponse {}
+impl VisitUnknown for UserVerificationUnavailableReason {}
+impl VisitUnknown for UserVerificationVerifyParams {}
+impl VisitUnknown for UserVerificationVerifyResponse {}
+impl VisitUnknown for Verbosity {}
+impl VisitUnknown for WarningNotification {}
+impl VisitUnknown for WebSearchAction {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Search { r#queries, r#query } => {
+                VisitUnknown::visit_unknowns(r#queries, _visitor);
+                VisitUnknown::visit_unknowns(r#query, _visitor);
+            }
+            Self::OpenPage { r#url } => {
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::FindInPage { r#pattern, r#url } => {
+                VisitUnknown::visit_unknowns(r#pattern, _visitor);
+                VisitUnknown::visit_unknowns(r#url, _visitor);
+            }
+            Self::Other => {}
+            Self::UnknownVendorVariant(value) => _visitor("WebSearchAction", value.variant()),
+        }
+    }
+}
+
+impl VisitUnknown for WebSearchContextSize {}
+impl VisitUnknown for WebSearchLocation {}
+impl VisitUnknown for WebSearchMode {}
+impl VisitUnknown for WebSearchToolConfig {}
+impl VisitUnknown for WindowsSandboxImplementation {}
+impl VisitUnknown for WindowsSandboxReadiness {}
+impl VisitUnknown for WindowsSandboxReadinessResponse {}
+impl VisitUnknown for WindowsSandboxSetupCompletedNotification {}
+impl VisitUnknown for WindowsSandboxSetupMode {}
+impl VisitUnknown for WindowsSandboxSetupStartParams {}
+impl VisitUnknown for WindowsSandboxSetupStartResponse {}
+impl VisitUnknown for WindowsWorldWritableWarningNotification {}
+impl VisitUnknown for WorkspaceMessage {}
+impl VisitUnknown for WorkspaceMessageType {}
+impl VisitUnknown for WorkspaceRouting {}
+impl VisitUnknown for WriteStatus {}
+impl VisitUnknown for ChatgptAuthTokensRefreshReasonVariant1 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant1 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant2 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant3 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant4 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant5 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant6 {}
+impl VisitUnknown for CommandExecutionApprovalKindVariant1 {}
+impl VisitUnknown for CommandExecutionApprovalKindVariant2 {}
+impl VisitUnknown for FileChangeApprovalDecisionVariant1 {}
+impl VisitUnknown for FileChangeApprovalDecisionVariant2 {}
+impl VisitUnknown for FileChangeApprovalDecisionVariant3 {}
+impl VisitUnknown for FileChangeApprovalDecisionVariant4 {}
+impl VisitUnknown for ReviewDecisionVariant1 {}
+impl VisitUnknown for ReviewDecisionVariant2 {}
+impl VisitUnknown for ReviewDecisionVariant3 {}
+impl VisitUnknown for ReviewDecisionVariant4 {}
+impl VisitUnknown for ReviewDecisionVariant5 {}
+impl VisitUnknown for ReviewDecisionVariant6 {}
+impl VisitUnknown for ReviewDecisionVariant7 {}
+impl VisitUnknown for ReviewDecisionVariant8 {}
+impl VisitUnknown for AccountSessionsSwitchResponseVariant1 {}
+impl VisitUnknown for AccountSessionsSwitchResponseVariant2 {}
+impl VisitUnknown for AskForApprovalVariant1 {}
+impl VisitUnknown for AskForApprovalVariant2 {}
+impl VisitUnknown for AuthModeVariant1 {}
+impl VisitUnknown for AuthModeVariant2 {}
+impl VisitUnknown for AuthModeVariant3 {}
+impl VisitUnknown for AuthModeVariant4 {}
+impl VisitUnknown for AuthModeVariant5 {}
+impl VisitUnknown for AuthModeVariant6 {}
+impl VisitUnknown for AuthModeVariant7 {}
+impl VisitUnknown for AuthModeVariant8 {}
+impl VisitUnknown for AutoCompactTokenLimitScopeVariant1 {}
+impl VisitUnknown for AutoCompactTokenLimitScopeVariant2 {}
+impl VisitUnknown for CodexErrorInfoVariant1 {}
+impl VisitUnknown for CodexErrorInfoVariant2 {}
+impl VisitUnknown for CodexErrorInfoVariant3 {}
+impl VisitUnknown for CodexErrorInfoVariant4 {}
+impl VisitUnknown for CodexErrorInfoVariant5 {}
+impl VisitUnknown for CodexErrorInfoVariant6 {}
+impl VisitUnknown for CodexErrorInfoVariant7 {}
+impl VisitUnknown for CommandExecOutputStreamVariant1 {}
+impl VisitUnknown for CommandExecOutputStreamVariant2 {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditOutcomeVariant1 {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditOutcomeVariant2 {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditOutcomeVariant3 {}
+impl VisitUnknown for ConsumeAccountRateLimitResetCreditOutcomeVariant4 {}
+impl VisitUnknown for EnvironmentStatusKindVariant1 {}
+impl VisitUnknown for EnvironmentStatusKindVariant2 {}
+impl VisitUnknown for EnvironmentStatusKindVariant3 {}
+impl VisitUnknown for EnvironmentStatusKindVariant4 {}
+impl VisitUnknown for ExperimentalFeatureStageVariant1 {}
+impl VisitUnknown for ExperimentalFeatureStageVariant2 {}
+impl VisitUnknown for ExperimentalFeatureStageVariant3 {}
+impl VisitUnknown for ExperimentalFeatureStageVariant4 {}
+impl VisitUnknown for ExperimentalFeatureStageVariant5 {}
+impl VisitUnknown for InputModalityVariant1 {}
+impl VisitUnknown for InputModalityVariant2 {}
+impl VisitUnknown for InputModalityVariant3 {}
+impl VisitUnknown for MessagePhaseVariant1 {}
+impl VisitUnknown for MessagePhaseVariant2 {}
+impl VisitUnknown for MessagePhaseVariant3 {}
+impl VisitUnknown for MultiAgentModeVariant1 {}
+impl VisitUnknown for MultiAgentModeVariant2 {}
+impl VisitUnknown for OtelExporterVariant1 {}
+impl VisitUnknown for OtelExporterVariant2 {}
+impl VisitUnknown for OtelExporterVariant3 {}
+impl VisitUnknown for PluginAvailabilityVariant1 {}
+impl VisitUnknown for PluginAvailabilityVariant2 {}
+impl VisitUnknown for ProcessOutputStreamVariant1 {}
+impl VisitUnknown for ProcessOutputStreamVariant2 {}
+impl VisitUnknown for ReasoningSummaryVariant1 {}
+impl VisitUnknown for ReasoningSummaryVariant2 {}
+impl VisitUnknown for ResourceContentVariant1 {}
+impl VisitUnknown for ResourceContentVariant2 {}
+impl VisitUnknown for SessionSourceVariant1 {}
+impl VisitUnknown for SessionSourceVariant2 {}
+impl VisitUnknown for SessionSourceVariant3 {}
+impl VisitUnknown for SubAgentSourceVariant1 {}
+impl VisitUnknown for SubAgentSourceVariant2 {}
+impl VisitUnknown for SubAgentSourceVariant3 {}
+impl VisitUnknown for ToolExposureSurfaceVariant1 {}
+impl VisitUnknown for ToolExposureSurfaceVariant2 {}
+impl VisitUnknown for ToolExposureSurfaceVariant3 {}
+impl VisitUnknown for TurnItemsViewVariant1 {}
+impl VisitUnknown for TurnItemsViewVariant2 {}
+impl VisitUnknown for TurnItemsViewVariant3 {}
+impl VisitUnknown for TurnSettingsUpdateStatusVariant1 {}
+impl VisitUnknown for TurnSettingsUpdateStatusVariant2 {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant3AcceptWithExecpolicyAmendment {}
+impl VisitUnknown for CommandExecutionApprovalDecisionVariant4ApplyNetworkPolicyAmendment {}
+impl VisitUnknown for ReviewDecisionVariant2ApprovedExecpolicyAmendment {}
+impl VisitUnknown for ReviewDecisionVariant5NetworkPolicyAmendment {}
+impl VisitUnknown for ReviewDecisionVariant6Denied {}
+impl VisitUnknown for AskForApprovalVariant2Granular {}
+impl VisitUnknown for CodexErrorInfoVariant2HttpConnectionFailed {}
+impl VisitUnknown for CodexErrorInfoVariant3ResponseStreamConnectionFailed {}
+impl VisitUnknown for CodexErrorInfoVariant4ResponseStreamDisconnected {}
+impl VisitUnknown for CodexErrorInfoVariant5ResponseTooManyFailedAttempts {}
+impl VisitUnknown for CodexErrorInfoVariant6ActiveTurnNotSteerable {}
+impl VisitUnknown for OtelExporterVariant2OtlpHttp {}
+impl VisitUnknown for OtelExporterVariant3OtlpGrpc {}
+impl VisitUnknown for SubAgentSourceVariant2ThreadSpawn {}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ClientRequestMethod {
     #[serde(rename = "initialize")]
@@ -21882,6 +28495,1709 @@ impl ClientRequestMethod {
         ]
     }
 }
+impl ClientRequest {
+    pub const fn method(&self) -> ClientRequestMethod {
+        match self {
+            Self::Initialize { .. } => ClientRequestMethod::Initialize,
+            Self::ServerDiagnostics { .. } => ClientRequestMethod::ServerDiagnostics,
+            Self::UserVerificationStatus { .. } => ClientRequestMethod::UserVerificationStatus,
+            Self::UserVerificationEnroll { .. } => ClientRequestMethod::UserVerificationEnroll,
+            Self::UserVerificationDelete { .. } => ClientRequestMethod::UserVerificationDelete,
+            Self::UserVerificationVerify { .. } => ClientRequestMethod::UserVerificationVerify,
+            Self::UserVerificationCancel { .. } => ClientRequestMethod::UserVerificationCancel,
+            Self::ThreadStart { .. } => ClientRequestMethod::ThreadStart,
+            Self::ThreadResume { .. } => ClientRequestMethod::ThreadResume,
+            Self::ThreadFork { .. } => ClientRequestMethod::ThreadFork,
+            Self::ThreadSample { .. } => ClientRequestMethod::ThreadSample,
+            Self::ThreadSampleCancel { .. } => ClientRequestMethod::ThreadSampleCancel,
+            Self::ThreadArchive { .. } => ClientRequestMethod::ThreadArchive,
+            Self::ThreadDelete { .. } => ClientRequestMethod::ThreadDelete,
+            Self::ThreadUnsubscribe { .. } => ClientRequestMethod::ThreadUnsubscribe,
+            Self::ThreadIncrementElicitation { .. } => {
+                ClientRequestMethod::ThreadIncrementElicitation
+            }
+            Self::ThreadDecrementElicitation { .. } => {
+                ClientRequestMethod::ThreadDecrementElicitation
+            }
+            Self::ThreadNameSet { .. } => ClientRequestMethod::ThreadNameSet,
+            Self::ThreadPredictionRequest { .. } => ClientRequestMethod::ThreadPredictionRequest,
+            Self::ThreadGoalSet { .. } => ClientRequestMethod::ThreadGoalSet,
+            Self::ThreadGoalGet { .. } => ClientRequestMethod::ThreadGoalGet,
+            Self::ThreadGoalClear { .. } => ClientRequestMethod::ThreadGoalClear,
+            Self::ThreadQueueAdd { .. } => ClientRequestMethod::ThreadQueueAdd,
+            Self::ThreadQueueList { .. } => ClientRequestMethod::ThreadQueueList,
+            Self::ThreadQueueUpdate { .. } => ClientRequestMethod::ThreadQueueUpdate,
+            Self::ThreadQueueDelete { .. } => ClientRequestMethod::ThreadQueueDelete,
+            Self::ThreadQueueReorder { .. } => ClientRequestMethod::ThreadQueueReorder,
+            Self::ThreadQueueStart { .. } => ClientRequestMethod::ThreadQueueStart,
+            Self::ThreadMetadataUpdate { .. } => ClientRequestMethod::ThreadMetadataUpdate,
+            Self::ThreadAttachmentAdd { .. } => ClientRequestMethod::ThreadAttachmentAdd,
+            Self::ThreadAttachmentList { .. } => ClientRequestMethod::ThreadAttachmentList,
+            Self::ThreadAttachmentOwnerList { .. } => {
+                ClientRequestMethod::ThreadAttachmentOwnerList
+            }
+            Self::ThreadAttachmentRemove { .. } => ClientRequestMethod::ThreadAttachmentRemove,
+            Self::ThreadSectionMove { .. } => ClientRequestMethod::ThreadSectionMove,
+            Self::ThreadSettingsUpdate { .. } => ClientRequestMethod::ThreadSettingsUpdate,
+            Self::ThreadMemoryModeSet { .. } => ClientRequestMethod::ThreadMemoryModeSet,
+            Self::ThreadMemoryRead { .. } => ClientRequestMethod::ThreadMemoryRead,
+            Self::MemoryStatus { .. } => ClientRequestMethod::MemoryStatus,
+            Self::MemoryReset { .. } => ClientRequestMethod::MemoryReset,
+            Self::RolloutCompress { .. } => ClientRequestMethod::RolloutCompress,
+            Self::ThreadUnarchive { .. } => ClientRequestMethod::ThreadUnarchive,
+            Self::ThreadCompactStart { .. } => ClientRequestMethod::ThreadCompactStart,
+            Self::ThreadShellCommand { .. } => ClientRequestMethod::ThreadShellCommand,
+            Self::ThreadApproveGuardianDeniedAction { .. } => {
+                ClientRequestMethod::ThreadApproveGuardianDeniedAction
+            }
+            Self::ThreadBackgroundTerminalsClean { .. } => {
+                ClientRequestMethod::ThreadBackgroundTerminalsClean
+            }
+            Self::ThreadBackgroundTerminalsList { .. } => {
+                ClientRequestMethod::ThreadBackgroundTerminalsList
+            }
+            Self::ThreadBackgroundTerminalsTerminate { .. } => {
+                ClientRequestMethod::ThreadBackgroundTerminalsTerminate
+            }
+            Self::ThreadRevert { .. } => ClientRequestMethod::ThreadRevert,
+            Self::ThreadList { .. } => ClientRequestMethod::ThreadList,
+            Self::ProjectList { .. } => ClientRequestMethod::ProjectList,
+            Self::ProjectRead { .. } => ClientRequestMethod::ProjectRead,
+            Self::ProjectCreate { .. } => ClientRequestMethod::ProjectCreate,
+            Self::ProjectImport { .. } => ClientRequestMethod::ProjectImport,
+            Self::ProjectUpdate { .. } => ClientRequestMethod::ProjectUpdate,
+            Self::ProjectMove { .. } => ClientRequestMethod::ProjectMove,
+            Self::ProjectDelete { .. } => ClientRequestMethod::ProjectDelete,
+            Self::ThreadSectionList { .. } => ClientRequestMethod::ThreadSectionList,
+            Self::ThreadSectionCreate { .. } => ClientRequestMethod::ThreadSectionCreate,
+            Self::ThreadSectionUpdate { .. } => ClientRequestMethod::ThreadSectionUpdate,
+            Self::ThreadSectionDelete { .. } => ClientRequestMethod::ThreadSectionDelete,
+            Self::ThreadSearch { .. } => ClientRequestMethod::ThreadSearch,
+            Self::ThreadSearchOccurrences { .. } => ClientRequestMethod::ThreadSearchOccurrences,
+            Self::ThreadLoadedList { .. } => ClientRequestMethod::ThreadLoadedList,
+            Self::ThreadRead { .. } => ClientRequestMethod::ThreadRead,
+            Self::ThreadReadStateUpdate { .. } => ClientRequestMethod::ThreadReadStateUpdate,
+            Self::ThreadTurnsList { .. } => ClientRequestMethod::ThreadTurnsList,
+            Self::ThreadItemsList { .. } => ClientRequestMethod::ThreadItemsList,
+            Self::ThreadItemsRead { .. } => ClientRequestMethod::ThreadItemsRead,
+            Self::ThreadGuardianReview { .. } => ClientRequestMethod::ThreadGuardianReview,
+            Self::ThreadInjectItems { .. } => ClientRequestMethod::ThreadInjectItems,
+            Self::SkillsList { .. } => ClientRequestMethod::SkillsList,
+            Self::SkillsExtraRootsSet { .. } => ClientRequestMethod::SkillsExtraRootsSet,
+            Self::HooksList { .. } => ClientRequestMethod::HooksList,
+            Self::MarketplaceAdd { .. } => ClientRequestMethod::MarketplaceAdd,
+            Self::MarketplaceRemove { .. } => ClientRequestMethod::MarketplaceRemove,
+            Self::MarketplaceUpgrade { .. } => ClientRequestMethod::MarketplaceUpgrade,
+            Self::PluginList { .. } => ClientRequestMethod::PluginList,
+            Self::PluginSearch { .. } => ClientRequestMethod::PluginSearch,
+            Self::PluginInstalled { .. } => ClientRequestMethod::PluginInstalled,
+            Self::PluginReconcile { .. } => ClientRequestMethod::PluginReconcile,
+            Self::PluginRead { .. } => ClientRequestMethod::PluginRead,
+            Self::PluginSkillRead { .. } => ClientRequestMethod::PluginSkillRead,
+            Self::PluginShareSave { .. } => ClientRequestMethod::PluginShareSave,
+            Self::PluginShareUpdateTargets { .. } => ClientRequestMethod::PluginShareUpdateTargets,
+            Self::PluginShareList { .. } => ClientRequestMethod::PluginShareList,
+            Self::PluginShareCheckout { .. } => ClientRequestMethod::PluginShareCheckout,
+            Self::PluginShareDelete { .. } => ClientRequestMethod::PluginShareDelete,
+            Self::AppRead { .. } => ClientRequestMethod::AppRead,
+            Self::AppList { .. } => ClientRequestMethod::AppList,
+            Self::AppInstalled { .. } => ClientRequestMethod::AppInstalled,
+            Self::FsReadFile { .. } => ClientRequestMethod::FsReadFile,
+            Self::FsWriteFile { .. } => ClientRequestMethod::FsWriteFile,
+            Self::FsCreateDirectory { .. } => ClientRequestMethod::FsCreateDirectory,
+            Self::FsGetMetadata { .. } => ClientRequestMethod::FsGetMetadata,
+            Self::FsReadDirectory { .. } => ClientRequestMethod::FsReadDirectory,
+            Self::FsRemove { .. } => ClientRequestMethod::FsRemove,
+            Self::FsCopy { .. } => ClientRequestMethod::FsCopy,
+            Self::FsWatch { .. } => ClientRequestMethod::FsWatch,
+            Self::FsUnwatch { .. } => ClientRequestMethod::FsUnwatch,
+            Self::SkillsConfigWrite { .. } => ClientRequestMethod::SkillsConfigWrite,
+            Self::PluginInstall { .. } => ClientRequestMethod::PluginInstall,
+            Self::PluginUninstall { .. } => ClientRequestMethod::PluginUninstall,
+            Self::TurnStart { .. } => ClientRequestMethod::TurnStart,
+            Self::TurnSettingsUpdate { .. } => ClientRequestMethod::TurnSettingsUpdate,
+            Self::TurnSteer { .. } => ClientRequestMethod::TurnSteer,
+            Self::TurnInterrupt { .. } => ClientRequestMethod::TurnInterrupt,
+            Self::ThreadRealtimeStart { .. } => ClientRequestMethod::ThreadRealtimeStart,
+            Self::ThreadRealtimeAppendAudio { .. } => {
+                ClientRequestMethod::ThreadRealtimeAppendAudio
+            }
+            Self::ThreadRealtimeAppendText { .. } => ClientRequestMethod::ThreadRealtimeAppendText,
+            Self::ThreadRealtimeAppendSpeech { .. } => {
+                ClientRequestMethod::ThreadRealtimeAppendSpeech
+            }
+            Self::ThreadRealtimeStop { .. } => ClientRequestMethod::ThreadRealtimeStop,
+            Self::ThreadTimelineList { .. } => ClientRequestMethod::ThreadTimelineList,
+            Self::ThreadRealtimeListVoices { .. } => ClientRequestMethod::ThreadRealtimeListVoices,
+            Self::ReviewStart { .. } => ClientRequestMethod::ReviewStart,
+            Self::ModelList { .. } => ClientRequestMethod::ModelList,
+            Self::AccountGatewayOAuthRead { .. } => ClientRequestMethod::AccountGatewayOAuthRead,
+            Self::AccountGatewayOAuthLogin { .. } => ClientRequestMethod::AccountGatewayOAuthLogin,
+            Self::AccountGatewayOAuthCancel { .. } => {
+                ClientRequestMethod::AccountGatewayOAuthCancel
+            }
+            Self::ModelProviderCapabilitiesRead { .. } => {
+                ClientRequestMethod::ModelProviderCapabilitiesRead
+            }
+            Self::ExperimentalFeatureList { .. } => ClientRequestMethod::ExperimentalFeatureList,
+            Self::PermissionProfileList { .. } => ClientRequestMethod::PermissionProfileList,
+            Self::ExperimentalFeatureEnablementSet { .. } => {
+                ClientRequestMethod::ExperimentalFeatureEnablementSet
+            }
+            Self::RemoteControlEnable { .. } => ClientRequestMethod::RemoteControlEnable,
+            Self::RemoteControlDisable { .. } => ClientRequestMethod::RemoteControlDisable,
+            Self::RemoteControlStatusRead { .. } => ClientRequestMethod::RemoteControlStatusRead,
+            Self::RemoteControlPairingStart { .. } => {
+                ClientRequestMethod::RemoteControlPairingStart
+            }
+            Self::RemoteControlPairingStatus { .. } => {
+                ClientRequestMethod::RemoteControlPairingStatus
+            }
+            Self::RemoteControlClientList { .. } => ClientRequestMethod::RemoteControlClientList,
+            Self::RemoteControlClientRevoke { .. } => {
+                ClientRequestMethod::RemoteControlClientRevoke
+            }
+            Self::CollaborationModeList { .. } => ClientRequestMethod::CollaborationModeList,
+            Self::MockExperimentalMethod { .. } => ClientRequestMethod::MockExperimentalMethod,
+            Self::EnvironmentAdd { .. } => ClientRequestMethod::EnvironmentAdd,
+            Self::EnvironmentInfo { .. } => ClientRequestMethod::EnvironmentInfo,
+            Self::EnvironmentStatus { .. } => ClientRequestMethod::EnvironmentStatus,
+            Self::McpServerOauthLogin { .. } => ClientRequestMethod::McpServerOauthLogin,
+            Self::ConfigMcpServerReload { .. } => ClientRequestMethod::ConfigMcpServerReload,
+            Self::McpServerStatusList { .. } => ClientRequestMethod::McpServerStatusList,
+            Self::McpServerResourceRead { .. } => ClientRequestMethod::McpServerResourceRead,
+            Self::McpServerEventStreamStart { .. } => {
+                ClientRequestMethod::McpServerEventStreamStart
+            }
+            Self::McpServerEventStreamStop { .. } => ClientRequestMethod::McpServerEventStreamStop,
+            Self::McpServerToolCall { .. } => ClientRequestMethod::McpServerToolCall,
+            Self::WindowsSandboxSetupStart { .. } => ClientRequestMethod::WindowsSandboxSetupStart,
+            Self::WindowsSandboxReadiness { .. } => ClientRequestMethod::WindowsSandboxReadiness,
+            Self::AccountLoginStart { .. } => ClientRequestMethod::AccountLoginStart,
+            Self::AccountBedrockDiscover { .. } => ClientRequestMethod::AccountBedrockDiscover,
+            Self::AccountBedrockSetup { .. } => ClientRequestMethod::AccountBedrockSetup,
+            Self::AccountGcpSetup { .. } => ClientRequestMethod::AccountGcpSetup,
+            Self::AccountBedrockCheckGovCloudRequirements { .. } => {
+                ClientRequestMethod::AccountBedrockCheckGovCloudRequirements
+            }
+            Self::AccountLoginCancel { .. } => ClientRequestMethod::AccountLoginCancel,
+            Self::AccountSessionList { .. } => ClientRequestMethod::AccountSessionList,
+            Self::AccountSessionSwitch { .. } => ClientRequestMethod::AccountSessionSwitch,
+            Self::AccountLogout { .. } => ClientRequestMethod::AccountLogout,
+            Self::AccountRateLimitsRead { .. } => ClientRequestMethod::AccountRateLimitsRead,
+            Self::AccountRateLimitResetCreditConsume { .. } => {
+                ClientRequestMethod::AccountRateLimitResetCreditConsume
+            }
+            Self::AccountUsageRead { .. } => ClientRequestMethod::AccountUsageRead,
+            Self::AccountWorkspaceMessagesRead { .. } => {
+                ClientRequestMethod::AccountWorkspaceMessagesRead
+            }
+            Self::AccountSendAddCreditsNudgeEmail { .. } => {
+                ClientRequestMethod::AccountSendAddCreditsNudgeEmail
+            }
+            Self::FeedbackUpload { .. } => ClientRequestMethod::FeedbackUpload,
+            Self::FeedbackSave { .. } => ClientRequestMethod::FeedbackSave,
+            Self::CommandExec { .. } => ClientRequestMethod::CommandExec,
+            Self::CommandExecWrite { .. } => ClientRequestMethod::CommandExecWrite,
+            Self::CommandExecTerminate { .. } => ClientRequestMethod::CommandExecTerminate,
+            Self::CommandExecResize { .. } => ClientRequestMethod::CommandExecResize,
+            Self::ProcessSpawn { .. } => ClientRequestMethod::ProcessSpawn,
+            Self::ProcessWriteStdin { .. } => ClientRequestMethod::ProcessWriteStdin,
+            Self::ProcessKill { .. } => ClientRequestMethod::ProcessKill,
+            Self::ProcessResizePty { .. } => ClientRequestMethod::ProcessResizePty,
+            Self::ConfigRead { .. } => ClientRequestMethod::ConfigRead,
+            Self::ExternalAgentConfigDetect { .. } => {
+                ClientRequestMethod::ExternalAgentConfigDetect
+            }
+            Self::ExternalAgentConfigImport { .. } => {
+                ClientRequestMethod::ExternalAgentConfigImport
+            }
+            Self::ExternalAgentConfigImportRecordHistory { .. } => {
+                ClientRequestMethod::ExternalAgentConfigImportRecordHistory
+            }
+            Self::ExternalAgentConfigImportReadHistories { .. } => {
+                ClientRequestMethod::ExternalAgentConfigImportReadHistories
+            }
+            Self::ConfigValueWrite { .. } => ClientRequestMethod::ConfigValueWrite,
+            Self::ConfigBatchWrite { .. } => ClientRequestMethod::ConfigBatchWrite,
+            Self::ConfigRequirementsRead { .. } => ClientRequestMethod::ConfigRequirementsRead,
+            Self::AccountRead { .. } => ClientRequestMethod::AccountRead,
+            Self::FuzzyFileSearch { .. } => ClientRequestMethod::FuzzyFileSearch,
+            Self::FuzzyFileSearchSessionStart { .. } => {
+                ClientRequestMethod::FuzzyFileSearchSessionStart
+            }
+            Self::FuzzyFileSearchSessionUpdate { .. } => {
+                ClientRequestMethod::FuzzyFileSearchSessionUpdate
+            }
+            Self::FuzzyFileSearchSessionStop { .. } => {
+                ClientRequestMethod::FuzzyFileSearchSessionStop
+            }
+        }
+    }
+    pub fn from_params(
+        id: RequestId,
+        method: ClientRequestMethod,
+        params: Option<&str>,
+    ) -> Result<Self, studio_json::Error> {
+        Ok(match method {
+            ClientRequestMethod::Initialize => Self::Initialize {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ServerDiagnostics => Self::ServerDiagnostics {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::UserVerificationStatus => Self::UserVerificationStatus {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::UserVerificationEnroll => Self::UserVerificationEnroll {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::UserVerificationDelete => Self::UserVerificationDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::UserVerificationVerify => Self::UserVerificationVerify {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::UserVerificationCancel => Self::UserVerificationCancel {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadStart => Self::ThreadStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadResume => Self::ThreadResume {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadFork => Self::ThreadFork {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSample => Self::ThreadSample {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSampleCancel => Self::ThreadSampleCancel {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadArchive => Self::ThreadArchive {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadDelete => Self::ThreadDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadUnsubscribe => Self::ThreadUnsubscribe {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadIncrementElicitation => Self::ThreadIncrementElicitation {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadDecrementElicitation => Self::ThreadDecrementElicitation {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadNameSet => Self::ThreadNameSet {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadPredictionRequest => Self::ThreadPredictionRequest {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadGoalSet => Self::ThreadGoalSet {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadGoalGet => Self::ThreadGoalGet {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadGoalClear => Self::ThreadGoalClear {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueAdd => Self::ThreadQueueAdd {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueList => Self::ThreadQueueList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueUpdate => Self::ThreadQueueUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueDelete => Self::ThreadQueueDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueReorder => Self::ThreadQueueReorder {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadQueueStart => Self::ThreadQueueStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadMetadataUpdate => Self::ThreadMetadataUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadAttachmentAdd => Self::ThreadAttachmentAdd {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadAttachmentList => Self::ThreadAttachmentList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadAttachmentOwnerList => Self::ThreadAttachmentOwnerList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadAttachmentRemove => Self::ThreadAttachmentRemove {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSectionMove => Self::ThreadSectionMove {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSettingsUpdate => Self::ThreadSettingsUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadMemoryModeSet => Self::ThreadMemoryModeSet {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadMemoryRead => Self::ThreadMemoryRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MemoryStatus => Self::MemoryStatus {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MemoryReset => Self::MemoryReset {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::RolloutCompress => Self::RolloutCompress {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::ThreadUnarchive => Self::ThreadUnarchive {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadCompactStart => Self::ThreadCompactStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadShellCommand => Self::ThreadShellCommand {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadApproveGuardianDeniedAction => {
+                Self::ThreadApproveGuardianDeniedAction {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsClean => {
+                Self::ThreadBackgroundTerminalsClean {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsList => {
+                Self::ThreadBackgroundTerminalsList {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ThreadBackgroundTerminalsTerminate => {
+                Self::ThreadBackgroundTerminalsTerminate {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ThreadRevert => Self::ThreadRevert {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadList => Self::ThreadList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectList => Self::ProjectList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectRead => Self::ProjectRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectCreate => Self::ProjectCreate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectImport => Self::ProjectImport {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectUpdate => Self::ProjectUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectMove => Self::ProjectMove {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProjectDelete => Self::ProjectDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSectionList => Self::ThreadSectionList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSectionCreate => Self::ThreadSectionCreate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSectionUpdate => Self::ThreadSectionUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSectionDelete => Self::ThreadSectionDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSearch => Self::ThreadSearch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadSearchOccurrences => Self::ThreadSearchOccurrences {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadLoadedList => Self::ThreadLoadedList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRead => Self::ThreadRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadReadStateUpdate => Self::ThreadReadStateUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadTurnsList => Self::ThreadTurnsList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadItemsList => Self::ThreadItemsList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadItemsRead => Self::ThreadItemsRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadGuardianReview => Self::ThreadGuardianReview {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadInjectItems => Self::ThreadInjectItems {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::SkillsList => Self::SkillsList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::SkillsExtraRootsSet => Self::SkillsExtraRootsSet {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::HooksList => Self::HooksList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MarketplaceAdd => Self::MarketplaceAdd {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MarketplaceRemove => Self::MarketplaceRemove {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MarketplaceUpgrade => Self::MarketplaceUpgrade {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginList => Self::PluginList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginSearch => Self::PluginSearch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginInstalled => Self::PluginInstalled {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginReconcile => Self::PluginReconcile {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginRead => Self::PluginRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginSkillRead => Self::PluginSkillRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginShareSave => Self::PluginShareSave {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginShareUpdateTargets => Self::PluginShareUpdateTargets {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginShareList => Self::PluginShareList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginShareCheckout => Self::PluginShareCheckout {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginShareDelete => Self::PluginShareDelete {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AppRead => Self::AppRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AppList => Self::AppList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AppInstalled => Self::AppInstalled {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsReadFile => Self::FsReadFile {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsWriteFile => Self::FsWriteFile {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsCreateDirectory => Self::FsCreateDirectory {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsGetMetadata => Self::FsGetMetadata {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsReadDirectory => Self::FsReadDirectory {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsRemove => Self::FsRemove {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsCopy => Self::FsCopy {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsWatch => Self::FsWatch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FsUnwatch => Self::FsUnwatch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::SkillsConfigWrite => Self::SkillsConfigWrite {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginInstall => Self::PluginInstall {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PluginUninstall => Self::PluginUninstall {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::TurnStart => Self::TurnStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::TurnSettingsUpdate => Self::TurnSettingsUpdate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::TurnSteer => Self::TurnSteer {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::TurnInterrupt => Self::TurnInterrupt {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeStart => Self::ThreadRealtimeStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendAudio => Self::ThreadRealtimeAppendAudio {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendText => Self::ThreadRealtimeAppendText {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeAppendSpeech => Self::ThreadRealtimeAppendSpeech {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeStop => Self::ThreadRealtimeStop {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadTimelineList => Self::ThreadTimelineList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ThreadRealtimeListVoices => Self::ThreadRealtimeListVoices {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ReviewStart => Self::ReviewStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ModelList => Self::ModelList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthRead => Self::AccountGatewayOAuthRead {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthLogin => Self::AccountGatewayOAuthLogin {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountGatewayOAuthCancel => Self::AccountGatewayOAuthCancel {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::ModelProviderCapabilitiesRead => {
+                Self::ModelProviderCapabilitiesRead {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ExperimentalFeatureList => Self::ExperimentalFeatureList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::PermissionProfileList => Self::PermissionProfileList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ExperimentalFeatureEnablementSet => {
+                Self::ExperimentalFeatureEnablementSet {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::RemoteControlEnable => Self::RemoteControlEnable {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::RemoteControlDisable => Self::RemoteControlDisable {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::RemoteControlStatusRead => Self::RemoteControlStatusRead {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::RemoteControlPairingStart => Self::RemoteControlPairingStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::RemoteControlPairingStatus => Self::RemoteControlPairingStatus {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::RemoteControlClientList => Self::RemoteControlClientList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::RemoteControlClientRevoke => Self::RemoteControlClientRevoke {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::CollaborationModeList => Self::CollaborationModeList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::MockExperimentalMethod => Self::MockExperimentalMethod {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::EnvironmentAdd => Self::EnvironmentAdd {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::EnvironmentInfo => Self::EnvironmentInfo {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::EnvironmentStatus => Self::EnvironmentStatus {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::McpServerOauthLogin => Self::McpServerOauthLogin {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ConfigMcpServerReload => Self::ConfigMcpServerReload {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::McpServerStatusList => Self::McpServerStatusList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::McpServerResourceRead => Self::McpServerResourceRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::McpServerEventStreamStart => Self::McpServerEventStreamStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::McpServerEventStreamStop => Self::McpServerEventStreamStop {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::McpServerToolCall => Self::McpServerToolCall {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::WindowsSandboxSetupStart => Self::WindowsSandboxSetupStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::WindowsSandboxReadiness => Self::WindowsSandboxReadiness {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountLoginStart => Self::AccountLoginStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountBedrockDiscover => Self::AccountBedrockDiscover {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountBedrockSetup => Self::AccountBedrockSetup {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountGcpSetup => Self::AccountGcpSetup {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountBedrockCheckGovCloudRequirements => {
+                Self::AccountBedrockCheckGovCloudRequirements {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::AccountLoginCancel => Self::AccountLoginCancel {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountSessionList => Self::AccountSessionList {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountSessionSwitch => Self::AccountSessionSwitch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::AccountLogout => Self::AccountLogout {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountRateLimitsRead => Self::AccountRateLimitsRead {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountRateLimitResetCreditConsume => {
+                Self::AccountRateLimitResetCreditConsume {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::AccountUsageRead => Self::AccountUsageRead {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountWorkspaceMessagesRead => {
+                Self::AccountWorkspaceMessagesRead {
+                    id,
+                    params: params.map(studio_json::from_str).transpose()?,
+                }
+            }
+            ClientRequestMethod::AccountSendAddCreditsNudgeEmail => {
+                Self::AccountSendAddCreditsNudgeEmail {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::FeedbackUpload => Self::FeedbackUpload {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FeedbackSave => Self::FeedbackSave {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::CommandExec => Self::CommandExec {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::CommandExecWrite => Self::CommandExecWrite {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::CommandExecTerminate => Self::CommandExecTerminate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::CommandExecResize => Self::CommandExecResize {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProcessSpawn => Self::ProcessSpawn {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProcessWriteStdin => Self::ProcessWriteStdin {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProcessKill => Self::ProcessKill {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ProcessResizePty => Self::ProcessResizePty {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ConfigRead => Self::ConfigRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigDetect => Self::ExternalAgentConfigDetect {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigImport => Self::ExternalAgentConfigImport {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ExternalAgentConfigImportRecordHistory => {
+                Self::ExternalAgentConfigImportRecordHistory {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::ExternalAgentConfigImportReadHistories => {
+                Self::ExternalAgentConfigImportReadHistories {
+                    id,
+                    params: params.map(studio_json::from_str).transpose()?,
+                }
+            }
+            ClientRequestMethod::ConfigValueWrite => Self::ConfigValueWrite {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ConfigBatchWrite => Self::ConfigBatchWrite {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::ConfigRequirementsRead => Self::ConfigRequirementsRead {
+                id,
+                params: params.map(studio_json::from_str).transpose()?,
+            },
+            ClientRequestMethod::AccountRead => Self::AccountRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FuzzyFileSearch => Self::FuzzyFileSearch {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FuzzyFileSearchSessionStart => Self::FuzzyFileSearchSessionStart {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ClientRequestMethod::FuzzyFileSearchSessionUpdate => {
+                Self::FuzzyFileSearchSessionUpdate {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ClientRequestMethod::FuzzyFileSearchSessionStop => Self::FuzzyFileSearchSessionStop {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+        })
+    }
+    pub const fn id(&self) -> &RequestId {
+        match self {
+            Self::Initialize { r#id, .. } => r#id,
+            Self::ServerDiagnostics { r#id, .. } => r#id,
+            Self::UserVerificationStatus { r#id, .. } => r#id,
+            Self::UserVerificationEnroll { r#id, .. } => r#id,
+            Self::UserVerificationDelete { r#id, .. } => r#id,
+            Self::UserVerificationVerify { r#id, .. } => r#id,
+            Self::UserVerificationCancel { r#id, .. } => r#id,
+            Self::ThreadStart { r#id, .. } => r#id,
+            Self::ThreadResume { r#id, .. } => r#id,
+            Self::ThreadFork { r#id, .. } => r#id,
+            Self::ThreadSample { r#id, .. } => r#id,
+            Self::ThreadSampleCancel { r#id, .. } => r#id,
+            Self::ThreadArchive { r#id, .. } => r#id,
+            Self::ThreadDelete { r#id, .. } => r#id,
+            Self::ThreadUnsubscribe { r#id, .. } => r#id,
+            Self::ThreadIncrementElicitation { r#id, .. } => r#id,
+            Self::ThreadDecrementElicitation { r#id, .. } => r#id,
+            Self::ThreadNameSet { r#id, .. } => r#id,
+            Self::ThreadPredictionRequest { r#id, .. } => r#id,
+            Self::ThreadGoalSet { r#id, .. } => r#id,
+            Self::ThreadGoalGet { r#id, .. } => r#id,
+            Self::ThreadGoalClear { r#id, .. } => r#id,
+            Self::ThreadQueueAdd { r#id, .. } => r#id,
+            Self::ThreadQueueList { r#id, .. } => r#id,
+            Self::ThreadQueueUpdate { r#id, .. } => r#id,
+            Self::ThreadQueueDelete { r#id, .. } => r#id,
+            Self::ThreadQueueReorder { r#id, .. } => r#id,
+            Self::ThreadQueueStart { r#id, .. } => r#id,
+            Self::ThreadMetadataUpdate { r#id, .. } => r#id,
+            Self::ThreadAttachmentAdd { r#id, .. } => r#id,
+            Self::ThreadAttachmentList { r#id, .. } => r#id,
+            Self::ThreadAttachmentOwnerList { r#id, .. } => r#id,
+            Self::ThreadAttachmentRemove { r#id, .. } => r#id,
+            Self::ThreadSectionMove { r#id, .. } => r#id,
+            Self::ThreadSettingsUpdate { r#id, .. } => r#id,
+            Self::ThreadMemoryModeSet { r#id, .. } => r#id,
+            Self::ThreadMemoryRead { r#id, .. } => r#id,
+            Self::MemoryStatus { r#id, .. } => r#id,
+            Self::MemoryReset { r#id, .. } => r#id,
+            Self::RolloutCompress { r#id, .. } => r#id,
+            Self::ThreadUnarchive { r#id, .. } => r#id,
+            Self::ThreadCompactStart { r#id, .. } => r#id,
+            Self::ThreadShellCommand { r#id, .. } => r#id,
+            Self::ThreadApproveGuardianDeniedAction { r#id, .. } => r#id,
+            Self::ThreadBackgroundTerminalsClean { r#id, .. } => r#id,
+            Self::ThreadBackgroundTerminalsList { r#id, .. } => r#id,
+            Self::ThreadBackgroundTerminalsTerminate { r#id, .. } => r#id,
+            Self::ThreadRevert { r#id, .. } => r#id,
+            Self::ThreadList { r#id, .. } => r#id,
+            Self::ProjectList { r#id, .. } => r#id,
+            Self::ProjectRead { r#id, .. } => r#id,
+            Self::ProjectCreate { r#id, .. } => r#id,
+            Self::ProjectImport { r#id, .. } => r#id,
+            Self::ProjectUpdate { r#id, .. } => r#id,
+            Self::ProjectMove { r#id, .. } => r#id,
+            Self::ProjectDelete { r#id, .. } => r#id,
+            Self::ThreadSectionList { r#id, .. } => r#id,
+            Self::ThreadSectionCreate { r#id, .. } => r#id,
+            Self::ThreadSectionUpdate { r#id, .. } => r#id,
+            Self::ThreadSectionDelete { r#id, .. } => r#id,
+            Self::ThreadSearch { r#id, .. } => r#id,
+            Self::ThreadSearchOccurrences { r#id, .. } => r#id,
+            Self::ThreadLoadedList { r#id, .. } => r#id,
+            Self::ThreadRead { r#id, .. } => r#id,
+            Self::ThreadReadStateUpdate { r#id, .. } => r#id,
+            Self::ThreadTurnsList { r#id, .. } => r#id,
+            Self::ThreadItemsList { r#id, .. } => r#id,
+            Self::ThreadItemsRead { r#id, .. } => r#id,
+            Self::ThreadGuardianReview { r#id, .. } => r#id,
+            Self::ThreadInjectItems { r#id, .. } => r#id,
+            Self::SkillsList { r#id, .. } => r#id,
+            Self::SkillsExtraRootsSet { r#id, .. } => r#id,
+            Self::HooksList { r#id, .. } => r#id,
+            Self::MarketplaceAdd { r#id, .. } => r#id,
+            Self::MarketplaceRemove { r#id, .. } => r#id,
+            Self::MarketplaceUpgrade { r#id, .. } => r#id,
+            Self::PluginList { r#id, .. } => r#id,
+            Self::PluginSearch { r#id, .. } => r#id,
+            Self::PluginInstalled { r#id, .. } => r#id,
+            Self::PluginReconcile { r#id, .. } => r#id,
+            Self::PluginRead { r#id, .. } => r#id,
+            Self::PluginSkillRead { r#id, .. } => r#id,
+            Self::PluginShareSave { r#id, .. } => r#id,
+            Self::PluginShareUpdateTargets { r#id, .. } => r#id,
+            Self::PluginShareList { r#id, .. } => r#id,
+            Self::PluginShareCheckout { r#id, .. } => r#id,
+            Self::PluginShareDelete { r#id, .. } => r#id,
+            Self::AppRead { r#id, .. } => r#id,
+            Self::AppList { r#id, .. } => r#id,
+            Self::AppInstalled { r#id, .. } => r#id,
+            Self::FsReadFile { r#id, .. } => r#id,
+            Self::FsWriteFile { r#id, .. } => r#id,
+            Self::FsCreateDirectory { r#id, .. } => r#id,
+            Self::FsGetMetadata { r#id, .. } => r#id,
+            Self::FsReadDirectory { r#id, .. } => r#id,
+            Self::FsRemove { r#id, .. } => r#id,
+            Self::FsCopy { r#id, .. } => r#id,
+            Self::FsWatch { r#id, .. } => r#id,
+            Self::FsUnwatch { r#id, .. } => r#id,
+            Self::SkillsConfigWrite { r#id, .. } => r#id,
+            Self::PluginInstall { r#id, .. } => r#id,
+            Self::PluginUninstall { r#id, .. } => r#id,
+            Self::TurnStart { r#id, .. } => r#id,
+            Self::TurnSettingsUpdate { r#id, .. } => r#id,
+            Self::TurnSteer { r#id, .. } => r#id,
+            Self::TurnInterrupt { r#id, .. } => r#id,
+            Self::ThreadRealtimeStart { r#id, .. } => r#id,
+            Self::ThreadRealtimeAppendAudio { r#id, .. } => r#id,
+            Self::ThreadRealtimeAppendText { r#id, .. } => r#id,
+            Self::ThreadRealtimeAppendSpeech { r#id, .. } => r#id,
+            Self::ThreadRealtimeStop { r#id, .. } => r#id,
+            Self::ThreadTimelineList { r#id, .. } => r#id,
+            Self::ThreadRealtimeListVoices { r#id, .. } => r#id,
+            Self::ReviewStart { r#id, .. } => r#id,
+            Self::ModelList { r#id, .. } => r#id,
+            Self::AccountGatewayOAuthRead { r#id, .. } => r#id,
+            Self::AccountGatewayOAuthLogin { r#id, .. } => r#id,
+            Self::AccountGatewayOAuthCancel { r#id, .. } => r#id,
+            Self::ModelProviderCapabilitiesRead { r#id, .. } => r#id,
+            Self::ExperimentalFeatureList { r#id, .. } => r#id,
+            Self::PermissionProfileList { r#id, .. } => r#id,
+            Self::ExperimentalFeatureEnablementSet { r#id, .. } => r#id,
+            Self::RemoteControlEnable { r#id, .. } => r#id,
+            Self::RemoteControlDisable { r#id, .. } => r#id,
+            Self::RemoteControlStatusRead { r#id, .. } => r#id,
+            Self::RemoteControlPairingStart { r#id, .. } => r#id,
+            Self::RemoteControlPairingStatus { r#id, .. } => r#id,
+            Self::RemoteControlClientList { r#id, .. } => r#id,
+            Self::RemoteControlClientRevoke { r#id, .. } => r#id,
+            Self::CollaborationModeList { r#id, .. } => r#id,
+            Self::MockExperimentalMethod { r#id, .. } => r#id,
+            Self::EnvironmentAdd { r#id, .. } => r#id,
+            Self::EnvironmentInfo { r#id, .. } => r#id,
+            Self::EnvironmentStatus { r#id, .. } => r#id,
+            Self::McpServerOauthLogin { r#id, .. } => r#id,
+            Self::ConfigMcpServerReload { r#id, .. } => r#id,
+            Self::McpServerStatusList { r#id, .. } => r#id,
+            Self::McpServerResourceRead { r#id, .. } => r#id,
+            Self::McpServerEventStreamStart { r#id, .. } => r#id,
+            Self::McpServerEventStreamStop { r#id, .. } => r#id,
+            Self::McpServerToolCall { r#id, .. } => r#id,
+            Self::WindowsSandboxSetupStart { r#id, .. } => r#id,
+            Self::WindowsSandboxReadiness { r#id, .. } => r#id,
+            Self::AccountLoginStart { r#id, .. } => r#id,
+            Self::AccountBedrockDiscover { r#id, .. } => r#id,
+            Self::AccountBedrockSetup { r#id, .. } => r#id,
+            Self::AccountGcpSetup { r#id, .. } => r#id,
+            Self::AccountBedrockCheckGovCloudRequirements { r#id, .. } => r#id,
+            Self::AccountLoginCancel { r#id, .. } => r#id,
+            Self::AccountSessionList { r#id, .. } => r#id,
+            Self::AccountSessionSwitch { r#id, .. } => r#id,
+            Self::AccountLogout { r#id, .. } => r#id,
+            Self::AccountRateLimitsRead { r#id, .. } => r#id,
+            Self::AccountRateLimitResetCreditConsume { r#id, .. } => r#id,
+            Self::AccountUsageRead { r#id, .. } => r#id,
+            Self::AccountWorkspaceMessagesRead { r#id, .. } => r#id,
+            Self::AccountSendAddCreditsNudgeEmail { r#id, .. } => r#id,
+            Self::FeedbackUpload { r#id, .. } => r#id,
+            Self::FeedbackSave { r#id, .. } => r#id,
+            Self::CommandExec { r#id, .. } => r#id,
+            Self::CommandExecWrite { r#id, .. } => r#id,
+            Self::CommandExecTerminate { r#id, .. } => r#id,
+            Self::CommandExecResize { r#id, .. } => r#id,
+            Self::ProcessSpawn { r#id, .. } => r#id,
+            Self::ProcessWriteStdin { r#id, .. } => r#id,
+            Self::ProcessKill { r#id, .. } => r#id,
+            Self::ProcessResizePty { r#id, .. } => r#id,
+            Self::ConfigRead { r#id, .. } => r#id,
+            Self::ExternalAgentConfigDetect { r#id, .. } => r#id,
+            Self::ExternalAgentConfigImport { r#id, .. } => r#id,
+            Self::ExternalAgentConfigImportRecordHistory { r#id, .. } => r#id,
+            Self::ExternalAgentConfigImportReadHistories { r#id, .. } => r#id,
+            Self::ConfigValueWrite { r#id, .. } => r#id,
+            Self::ConfigBatchWrite { r#id, .. } => r#id,
+            Self::ConfigRequirementsRead { r#id, .. } => r#id,
+            Self::AccountRead { r#id, .. } => r#id,
+            Self::FuzzyFileSearch { r#id, .. } => r#id,
+            Self::FuzzyFileSearchSessionStart { r#id, .. } => r#id,
+            Self::FuzzyFileSearchSessionUpdate { r#id, .. } => r#id,
+            Self::FuzzyFileSearchSessionStop { r#id, .. } => r#id,
+        }
+    }
+    pub fn set_id(&mut self, new_id: RequestId) {
+        match self {
+            Self::Initialize { r#id, .. } => *r#id = new_id,
+            Self::ServerDiagnostics { r#id, .. } => *r#id = new_id,
+            Self::UserVerificationStatus { r#id, .. } => *r#id = new_id,
+            Self::UserVerificationEnroll { r#id, .. } => *r#id = new_id,
+            Self::UserVerificationDelete { r#id, .. } => *r#id = new_id,
+            Self::UserVerificationVerify { r#id, .. } => *r#id = new_id,
+            Self::UserVerificationCancel { r#id, .. } => *r#id = new_id,
+            Self::ThreadStart { r#id, .. } => *r#id = new_id,
+            Self::ThreadResume { r#id, .. } => *r#id = new_id,
+            Self::ThreadFork { r#id, .. } => *r#id = new_id,
+            Self::ThreadSample { r#id, .. } => *r#id = new_id,
+            Self::ThreadSampleCancel { r#id, .. } => *r#id = new_id,
+            Self::ThreadArchive { r#id, .. } => *r#id = new_id,
+            Self::ThreadDelete { r#id, .. } => *r#id = new_id,
+            Self::ThreadUnsubscribe { r#id, .. } => *r#id = new_id,
+            Self::ThreadIncrementElicitation { r#id, .. } => *r#id = new_id,
+            Self::ThreadDecrementElicitation { r#id, .. } => *r#id = new_id,
+            Self::ThreadNameSet { r#id, .. } => *r#id = new_id,
+            Self::ThreadPredictionRequest { r#id, .. } => *r#id = new_id,
+            Self::ThreadGoalSet { r#id, .. } => *r#id = new_id,
+            Self::ThreadGoalGet { r#id, .. } => *r#id = new_id,
+            Self::ThreadGoalClear { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueAdd { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueList { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueUpdate { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueDelete { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueReorder { r#id, .. } => *r#id = new_id,
+            Self::ThreadQueueStart { r#id, .. } => *r#id = new_id,
+            Self::ThreadMetadataUpdate { r#id, .. } => *r#id = new_id,
+            Self::ThreadAttachmentAdd { r#id, .. } => *r#id = new_id,
+            Self::ThreadAttachmentList { r#id, .. } => *r#id = new_id,
+            Self::ThreadAttachmentOwnerList { r#id, .. } => *r#id = new_id,
+            Self::ThreadAttachmentRemove { r#id, .. } => *r#id = new_id,
+            Self::ThreadSectionMove { r#id, .. } => *r#id = new_id,
+            Self::ThreadSettingsUpdate { r#id, .. } => *r#id = new_id,
+            Self::ThreadMemoryModeSet { r#id, .. } => *r#id = new_id,
+            Self::ThreadMemoryRead { r#id, .. } => *r#id = new_id,
+            Self::MemoryStatus { r#id, .. } => *r#id = new_id,
+            Self::MemoryReset { r#id, .. } => *r#id = new_id,
+            Self::RolloutCompress { r#id, .. } => *r#id = new_id,
+            Self::ThreadUnarchive { r#id, .. } => *r#id = new_id,
+            Self::ThreadCompactStart { r#id, .. } => *r#id = new_id,
+            Self::ThreadShellCommand { r#id, .. } => *r#id = new_id,
+            Self::ThreadApproveGuardianDeniedAction { r#id, .. } => *r#id = new_id,
+            Self::ThreadBackgroundTerminalsClean { r#id, .. } => *r#id = new_id,
+            Self::ThreadBackgroundTerminalsList { r#id, .. } => *r#id = new_id,
+            Self::ThreadBackgroundTerminalsTerminate { r#id, .. } => *r#id = new_id,
+            Self::ThreadRevert { r#id, .. } => *r#id = new_id,
+            Self::ThreadList { r#id, .. } => *r#id = new_id,
+            Self::ProjectList { r#id, .. } => *r#id = new_id,
+            Self::ProjectRead { r#id, .. } => *r#id = new_id,
+            Self::ProjectCreate { r#id, .. } => *r#id = new_id,
+            Self::ProjectImport { r#id, .. } => *r#id = new_id,
+            Self::ProjectUpdate { r#id, .. } => *r#id = new_id,
+            Self::ProjectMove { r#id, .. } => *r#id = new_id,
+            Self::ProjectDelete { r#id, .. } => *r#id = new_id,
+            Self::ThreadSectionList { r#id, .. } => *r#id = new_id,
+            Self::ThreadSectionCreate { r#id, .. } => *r#id = new_id,
+            Self::ThreadSectionUpdate { r#id, .. } => *r#id = new_id,
+            Self::ThreadSectionDelete { r#id, .. } => *r#id = new_id,
+            Self::ThreadSearch { r#id, .. } => *r#id = new_id,
+            Self::ThreadSearchOccurrences { r#id, .. } => *r#id = new_id,
+            Self::ThreadLoadedList { r#id, .. } => *r#id = new_id,
+            Self::ThreadRead { r#id, .. } => *r#id = new_id,
+            Self::ThreadReadStateUpdate { r#id, .. } => *r#id = new_id,
+            Self::ThreadTurnsList { r#id, .. } => *r#id = new_id,
+            Self::ThreadItemsList { r#id, .. } => *r#id = new_id,
+            Self::ThreadItemsRead { r#id, .. } => *r#id = new_id,
+            Self::ThreadGuardianReview { r#id, .. } => *r#id = new_id,
+            Self::ThreadInjectItems { r#id, .. } => *r#id = new_id,
+            Self::SkillsList { r#id, .. } => *r#id = new_id,
+            Self::SkillsExtraRootsSet { r#id, .. } => *r#id = new_id,
+            Self::HooksList { r#id, .. } => *r#id = new_id,
+            Self::MarketplaceAdd { r#id, .. } => *r#id = new_id,
+            Self::MarketplaceRemove { r#id, .. } => *r#id = new_id,
+            Self::MarketplaceUpgrade { r#id, .. } => *r#id = new_id,
+            Self::PluginList { r#id, .. } => *r#id = new_id,
+            Self::PluginSearch { r#id, .. } => *r#id = new_id,
+            Self::PluginInstalled { r#id, .. } => *r#id = new_id,
+            Self::PluginReconcile { r#id, .. } => *r#id = new_id,
+            Self::PluginRead { r#id, .. } => *r#id = new_id,
+            Self::PluginSkillRead { r#id, .. } => *r#id = new_id,
+            Self::PluginShareSave { r#id, .. } => *r#id = new_id,
+            Self::PluginShareUpdateTargets { r#id, .. } => *r#id = new_id,
+            Self::PluginShareList { r#id, .. } => *r#id = new_id,
+            Self::PluginShareCheckout { r#id, .. } => *r#id = new_id,
+            Self::PluginShareDelete { r#id, .. } => *r#id = new_id,
+            Self::AppRead { r#id, .. } => *r#id = new_id,
+            Self::AppList { r#id, .. } => *r#id = new_id,
+            Self::AppInstalled { r#id, .. } => *r#id = new_id,
+            Self::FsReadFile { r#id, .. } => *r#id = new_id,
+            Self::FsWriteFile { r#id, .. } => *r#id = new_id,
+            Self::FsCreateDirectory { r#id, .. } => *r#id = new_id,
+            Self::FsGetMetadata { r#id, .. } => *r#id = new_id,
+            Self::FsReadDirectory { r#id, .. } => *r#id = new_id,
+            Self::FsRemove { r#id, .. } => *r#id = new_id,
+            Self::FsCopy { r#id, .. } => *r#id = new_id,
+            Self::FsWatch { r#id, .. } => *r#id = new_id,
+            Self::FsUnwatch { r#id, .. } => *r#id = new_id,
+            Self::SkillsConfigWrite { r#id, .. } => *r#id = new_id,
+            Self::PluginInstall { r#id, .. } => *r#id = new_id,
+            Self::PluginUninstall { r#id, .. } => *r#id = new_id,
+            Self::TurnStart { r#id, .. } => *r#id = new_id,
+            Self::TurnSettingsUpdate { r#id, .. } => *r#id = new_id,
+            Self::TurnSteer { r#id, .. } => *r#id = new_id,
+            Self::TurnInterrupt { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeStart { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeAppendAudio { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeAppendText { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeAppendSpeech { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeStop { r#id, .. } => *r#id = new_id,
+            Self::ThreadTimelineList { r#id, .. } => *r#id = new_id,
+            Self::ThreadRealtimeListVoices { r#id, .. } => *r#id = new_id,
+            Self::ReviewStart { r#id, .. } => *r#id = new_id,
+            Self::ModelList { r#id, .. } => *r#id = new_id,
+            Self::AccountGatewayOAuthRead { r#id, .. } => *r#id = new_id,
+            Self::AccountGatewayOAuthLogin { r#id, .. } => *r#id = new_id,
+            Self::AccountGatewayOAuthCancel { r#id, .. } => *r#id = new_id,
+            Self::ModelProviderCapabilitiesRead { r#id, .. } => *r#id = new_id,
+            Self::ExperimentalFeatureList { r#id, .. } => *r#id = new_id,
+            Self::PermissionProfileList { r#id, .. } => *r#id = new_id,
+            Self::ExperimentalFeatureEnablementSet { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlEnable { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlDisable { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlStatusRead { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlPairingStart { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlPairingStatus { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlClientList { r#id, .. } => *r#id = new_id,
+            Self::RemoteControlClientRevoke { r#id, .. } => *r#id = new_id,
+            Self::CollaborationModeList { r#id, .. } => *r#id = new_id,
+            Self::MockExperimentalMethod { r#id, .. } => *r#id = new_id,
+            Self::EnvironmentAdd { r#id, .. } => *r#id = new_id,
+            Self::EnvironmentInfo { r#id, .. } => *r#id = new_id,
+            Self::EnvironmentStatus { r#id, .. } => *r#id = new_id,
+            Self::McpServerOauthLogin { r#id, .. } => *r#id = new_id,
+            Self::ConfigMcpServerReload { r#id, .. } => *r#id = new_id,
+            Self::McpServerStatusList { r#id, .. } => *r#id = new_id,
+            Self::McpServerResourceRead { r#id, .. } => *r#id = new_id,
+            Self::McpServerEventStreamStart { r#id, .. } => *r#id = new_id,
+            Self::McpServerEventStreamStop { r#id, .. } => *r#id = new_id,
+            Self::McpServerToolCall { r#id, .. } => *r#id = new_id,
+            Self::WindowsSandboxSetupStart { r#id, .. } => *r#id = new_id,
+            Self::WindowsSandboxReadiness { r#id, .. } => *r#id = new_id,
+            Self::AccountLoginStart { r#id, .. } => *r#id = new_id,
+            Self::AccountBedrockDiscover { r#id, .. } => *r#id = new_id,
+            Self::AccountBedrockSetup { r#id, .. } => *r#id = new_id,
+            Self::AccountGcpSetup { r#id, .. } => *r#id = new_id,
+            Self::AccountBedrockCheckGovCloudRequirements { r#id, .. } => *r#id = new_id,
+            Self::AccountLoginCancel { r#id, .. } => *r#id = new_id,
+            Self::AccountSessionList { r#id, .. } => *r#id = new_id,
+            Self::AccountSessionSwitch { r#id, .. } => *r#id = new_id,
+            Self::AccountLogout { r#id, .. } => *r#id = new_id,
+            Self::AccountRateLimitsRead { r#id, .. } => *r#id = new_id,
+            Self::AccountRateLimitResetCreditConsume { r#id, .. } => *r#id = new_id,
+            Self::AccountUsageRead { r#id, .. } => *r#id = new_id,
+            Self::AccountWorkspaceMessagesRead { r#id, .. } => *r#id = new_id,
+            Self::AccountSendAddCreditsNudgeEmail { r#id, .. } => *r#id = new_id,
+            Self::FeedbackUpload { r#id, .. } => *r#id = new_id,
+            Self::FeedbackSave { r#id, .. } => *r#id = new_id,
+            Self::CommandExec { r#id, .. } => *r#id = new_id,
+            Self::CommandExecWrite { r#id, .. } => *r#id = new_id,
+            Self::CommandExecTerminate { r#id, .. } => *r#id = new_id,
+            Self::CommandExecResize { r#id, .. } => *r#id = new_id,
+            Self::ProcessSpawn { r#id, .. } => *r#id = new_id,
+            Self::ProcessWriteStdin { r#id, .. } => *r#id = new_id,
+            Self::ProcessKill { r#id, .. } => *r#id = new_id,
+            Self::ProcessResizePty { r#id, .. } => *r#id = new_id,
+            Self::ConfigRead { r#id, .. } => *r#id = new_id,
+            Self::ExternalAgentConfigDetect { r#id, .. } => *r#id = new_id,
+            Self::ExternalAgentConfigImport { r#id, .. } => *r#id = new_id,
+            Self::ExternalAgentConfigImportRecordHistory { r#id, .. } => *r#id = new_id,
+            Self::ExternalAgentConfigImportReadHistories { r#id, .. } => *r#id = new_id,
+            Self::ConfigValueWrite { r#id, .. } => *r#id = new_id,
+            Self::ConfigBatchWrite { r#id, .. } => *r#id = new_id,
+            Self::ConfigRequirementsRead { r#id, .. } => *r#id = new_id,
+            Self::AccountRead { r#id, .. } => *r#id = new_id,
+            Self::FuzzyFileSearch { r#id, .. } => *r#id = new_id,
+            Self::FuzzyFileSearchSessionStart { r#id, .. } => *r#id = new_id,
+            Self::FuzzyFileSearchSessionUpdate { r#id, .. } => *r#id = new_id,
+            Self::FuzzyFileSearchSessionStop { r#id, .. } => *r#id = new_id,
+        }
+    }
+    pub fn from_method_params(
+        id: RequestId,
+        method: ClientRequestMethod,
+        params: &impl serde::Serialize,
+    ) -> Result<Self, studio_json::Error> {
+        #[derive(serde::Serialize)]
+        struct Wire<'a, T> {
+            id: RequestId,
+            method: ClientRequestMethod,
+            params: &'a T,
+        }
+        studio_json::from_slice(&studio_json::to_vec(&Wire { id, method, params })?)
+    }
+}
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "method", content = "result")]
 pub enum ClientRequestResult {
@@ -22246,6 +30562,1165 @@ pub enum ClientRequestResult {
     #[serde(rename = "fuzzyFileSearch/sessionStop")]
     FuzzyFileSearchSessionStop(Box<FuzzyFileSearchSessionStopResponse>),
 }
+impl VisitUnknown for ClientRequestResult {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::Initialize(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ServerDiagnostics(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::UserVerificationStatus(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::UserVerificationEnroll(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::UserVerificationDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::UserVerificationVerify(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::UserVerificationCancel(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadResume(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadFork(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSample(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSampleCancel(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadArchive(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadUnsubscribe(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadIncrementElicitation(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadDecrementElicitation(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadNameSet(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadPredictionRequest(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadGoalSet(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadGoalGet(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadGoalClear(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueAdd(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueReorder(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadQueueStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadMetadataUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadAttachmentAdd(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadAttachmentList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadAttachmentOwnerList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadAttachmentRemove(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSectionMove(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSettingsUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadMemoryModeSet(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadMemoryRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MemoryStatus(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MemoryReset(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RolloutCompress(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadUnarchive(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadCompactStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadShellCommand(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadApproveGuardianDeniedAction(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadBackgroundTerminalsClean(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadBackgroundTerminalsList(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadBackgroundTerminalsTerminate(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadRevert(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectCreate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectImport(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectMove(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProjectDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSectionList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSectionCreate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSectionUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSectionDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSearch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadSearchOccurrences(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadLoadedList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadReadStateUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadTurnsList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadItemsList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadItemsRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadGuardianReview(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadInjectItems(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::SkillsList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::SkillsExtraRootsSet(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::HooksList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MarketplaceAdd(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MarketplaceRemove(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MarketplaceUpgrade(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginSearch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginInstalled(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginReconcile(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginSkillRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginShareSave(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginShareUpdateTargets(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginShareList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginShareCheckout(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginShareDelete(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AppRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AppList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AppInstalled(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsReadFile(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsWriteFile(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsCreateDirectory(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsGetMetadata(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsReadDirectory(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsRemove(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsCopy(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsWatch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FsUnwatch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::SkillsConfigWrite(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginInstall(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PluginUninstall(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::TurnStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::TurnSettingsUpdate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::TurnSteer(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::TurnInterrupt(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRealtimeStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRealtimeAppendAudio(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRealtimeAppendText(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRealtimeAppendSpeech(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ThreadRealtimeStop(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadTimelineList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ThreadRealtimeListVoices(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ReviewStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ModelList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountGatewayOAuthRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountGatewayOAuthLogin(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountGatewayOAuthCancel(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ModelProviderCapabilitiesRead(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ExperimentalFeatureList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::PermissionProfileList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ExperimentalFeatureEnablementSet(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::RemoteControlEnable(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RemoteControlDisable(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RemoteControlStatusRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RemoteControlPairingStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RemoteControlPairingStatus(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::RemoteControlClientList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::RemoteControlClientRevoke(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CollaborationModeList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::MockExperimentalMethod(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::EnvironmentAdd(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::EnvironmentInfo(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::EnvironmentStatus(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerOauthLogin(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ConfigMcpServerReload(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerStatusList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerResourceRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerEventStreamStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerEventStreamStop(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerToolCall(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::WindowsSandboxSetupStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::WindowsSandboxReadiness(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountLoginStart(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountBedrockDiscover(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountBedrockSetup(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountGcpSetup(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountBedrockCheckGovCloudRequirements(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::AccountLoginCancel(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountSessionList(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountSessionSwitch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountLogout(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountRateLimitsRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountRateLimitResetCreditConsume(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::AccountUsageRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountWorkspaceMessagesRead(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::AccountSendAddCreditsNudgeEmail(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::FeedbackUpload(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FeedbackSave(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CommandExec(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CommandExecWrite(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CommandExecTerminate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CommandExecResize(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProcessSpawn(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProcessWriteStdin(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProcessKill(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ProcessResizePty(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ConfigRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ExternalAgentConfigDetect(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ExternalAgentConfigImport(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ExternalAgentConfigImportRecordHistory(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ExternalAgentConfigImportReadHistories(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ConfigValueWrite(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ConfigBatchWrite(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ConfigRequirementsRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FuzzyFileSearch(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::FuzzyFileSearchSessionStart(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::FuzzyFileSearchSessionUpdate(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::FuzzyFileSearchSessionStop(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+        }
+    }
+}
+impl ClientRequestResult {
+    pub const fn method(&self) -> ClientRequestMethod {
+        match self {
+            Self::Initialize(_) => ClientRequestMethod::Initialize,
+            Self::ServerDiagnostics(_) => ClientRequestMethod::ServerDiagnostics,
+            Self::UserVerificationStatus(_) => ClientRequestMethod::UserVerificationStatus,
+            Self::UserVerificationEnroll(_) => ClientRequestMethod::UserVerificationEnroll,
+            Self::UserVerificationDelete(_) => ClientRequestMethod::UserVerificationDelete,
+            Self::UserVerificationVerify(_) => ClientRequestMethod::UserVerificationVerify,
+            Self::UserVerificationCancel(_) => ClientRequestMethod::UserVerificationCancel,
+            Self::ThreadStart(_) => ClientRequestMethod::ThreadStart,
+            Self::ThreadResume(_) => ClientRequestMethod::ThreadResume,
+            Self::ThreadFork(_) => ClientRequestMethod::ThreadFork,
+            Self::ThreadSample(_) => ClientRequestMethod::ThreadSample,
+            Self::ThreadSampleCancel(_) => ClientRequestMethod::ThreadSampleCancel,
+            Self::ThreadArchive(_) => ClientRequestMethod::ThreadArchive,
+            Self::ThreadDelete(_) => ClientRequestMethod::ThreadDelete,
+            Self::ThreadUnsubscribe(_) => ClientRequestMethod::ThreadUnsubscribe,
+            Self::ThreadIncrementElicitation(_) => ClientRequestMethod::ThreadIncrementElicitation,
+            Self::ThreadDecrementElicitation(_) => ClientRequestMethod::ThreadDecrementElicitation,
+            Self::ThreadNameSet(_) => ClientRequestMethod::ThreadNameSet,
+            Self::ThreadPredictionRequest(_) => ClientRequestMethod::ThreadPredictionRequest,
+            Self::ThreadGoalSet(_) => ClientRequestMethod::ThreadGoalSet,
+            Self::ThreadGoalGet(_) => ClientRequestMethod::ThreadGoalGet,
+            Self::ThreadGoalClear(_) => ClientRequestMethod::ThreadGoalClear,
+            Self::ThreadQueueAdd(_) => ClientRequestMethod::ThreadQueueAdd,
+            Self::ThreadQueueList(_) => ClientRequestMethod::ThreadQueueList,
+            Self::ThreadQueueUpdate(_) => ClientRequestMethod::ThreadQueueUpdate,
+            Self::ThreadQueueDelete(_) => ClientRequestMethod::ThreadQueueDelete,
+            Self::ThreadQueueReorder(_) => ClientRequestMethod::ThreadQueueReorder,
+            Self::ThreadQueueStart(_) => ClientRequestMethod::ThreadQueueStart,
+            Self::ThreadMetadataUpdate(_) => ClientRequestMethod::ThreadMetadataUpdate,
+            Self::ThreadAttachmentAdd(_) => ClientRequestMethod::ThreadAttachmentAdd,
+            Self::ThreadAttachmentList(_) => ClientRequestMethod::ThreadAttachmentList,
+            Self::ThreadAttachmentOwnerList(_) => ClientRequestMethod::ThreadAttachmentOwnerList,
+            Self::ThreadAttachmentRemove(_) => ClientRequestMethod::ThreadAttachmentRemove,
+            Self::ThreadSectionMove(_) => ClientRequestMethod::ThreadSectionMove,
+            Self::ThreadSettingsUpdate(_) => ClientRequestMethod::ThreadSettingsUpdate,
+            Self::ThreadMemoryModeSet(_) => ClientRequestMethod::ThreadMemoryModeSet,
+            Self::ThreadMemoryRead(_) => ClientRequestMethod::ThreadMemoryRead,
+            Self::MemoryStatus(_) => ClientRequestMethod::MemoryStatus,
+            Self::MemoryReset(_) => ClientRequestMethod::MemoryReset,
+            Self::RolloutCompress(_) => ClientRequestMethod::RolloutCompress,
+            Self::ThreadUnarchive(_) => ClientRequestMethod::ThreadUnarchive,
+            Self::ThreadCompactStart(_) => ClientRequestMethod::ThreadCompactStart,
+            Self::ThreadShellCommand(_) => ClientRequestMethod::ThreadShellCommand,
+            Self::ThreadApproveGuardianDeniedAction(_) => {
+                ClientRequestMethod::ThreadApproveGuardianDeniedAction
+            }
+            Self::ThreadBackgroundTerminalsClean(_) => {
+                ClientRequestMethod::ThreadBackgroundTerminalsClean
+            }
+            Self::ThreadBackgroundTerminalsList(_) => {
+                ClientRequestMethod::ThreadBackgroundTerminalsList
+            }
+            Self::ThreadBackgroundTerminalsTerminate(_) => {
+                ClientRequestMethod::ThreadBackgroundTerminalsTerminate
+            }
+            Self::ThreadRevert(_) => ClientRequestMethod::ThreadRevert,
+            Self::ThreadList(_) => ClientRequestMethod::ThreadList,
+            Self::ProjectList(_) => ClientRequestMethod::ProjectList,
+            Self::ProjectRead(_) => ClientRequestMethod::ProjectRead,
+            Self::ProjectCreate(_) => ClientRequestMethod::ProjectCreate,
+            Self::ProjectImport(_) => ClientRequestMethod::ProjectImport,
+            Self::ProjectUpdate(_) => ClientRequestMethod::ProjectUpdate,
+            Self::ProjectMove(_) => ClientRequestMethod::ProjectMove,
+            Self::ProjectDelete(_) => ClientRequestMethod::ProjectDelete,
+            Self::ThreadSectionList(_) => ClientRequestMethod::ThreadSectionList,
+            Self::ThreadSectionCreate(_) => ClientRequestMethod::ThreadSectionCreate,
+            Self::ThreadSectionUpdate(_) => ClientRequestMethod::ThreadSectionUpdate,
+            Self::ThreadSectionDelete(_) => ClientRequestMethod::ThreadSectionDelete,
+            Self::ThreadSearch(_) => ClientRequestMethod::ThreadSearch,
+            Self::ThreadSearchOccurrences(_) => ClientRequestMethod::ThreadSearchOccurrences,
+            Self::ThreadLoadedList(_) => ClientRequestMethod::ThreadLoadedList,
+            Self::ThreadRead(_) => ClientRequestMethod::ThreadRead,
+            Self::ThreadReadStateUpdate(_) => ClientRequestMethod::ThreadReadStateUpdate,
+            Self::ThreadTurnsList(_) => ClientRequestMethod::ThreadTurnsList,
+            Self::ThreadItemsList(_) => ClientRequestMethod::ThreadItemsList,
+            Self::ThreadItemsRead(_) => ClientRequestMethod::ThreadItemsRead,
+            Self::ThreadGuardianReview(_) => ClientRequestMethod::ThreadGuardianReview,
+            Self::ThreadInjectItems(_) => ClientRequestMethod::ThreadInjectItems,
+            Self::SkillsList(_) => ClientRequestMethod::SkillsList,
+            Self::SkillsExtraRootsSet(_) => ClientRequestMethod::SkillsExtraRootsSet,
+            Self::HooksList(_) => ClientRequestMethod::HooksList,
+            Self::MarketplaceAdd(_) => ClientRequestMethod::MarketplaceAdd,
+            Self::MarketplaceRemove(_) => ClientRequestMethod::MarketplaceRemove,
+            Self::MarketplaceUpgrade(_) => ClientRequestMethod::MarketplaceUpgrade,
+            Self::PluginList(_) => ClientRequestMethod::PluginList,
+            Self::PluginSearch(_) => ClientRequestMethod::PluginSearch,
+            Self::PluginInstalled(_) => ClientRequestMethod::PluginInstalled,
+            Self::PluginReconcile(_) => ClientRequestMethod::PluginReconcile,
+            Self::PluginRead(_) => ClientRequestMethod::PluginRead,
+            Self::PluginSkillRead(_) => ClientRequestMethod::PluginSkillRead,
+            Self::PluginShareSave(_) => ClientRequestMethod::PluginShareSave,
+            Self::PluginShareUpdateTargets(_) => ClientRequestMethod::PluginShareUpdateTargets,
+            Self::PluginShareList(_) => ClientRequestMethod::PluginShareList,
+            Self::PluginShareCheckout(_) => ClientRequestMethod::PluginShareCheckout,
+            Self::PluginShareDelete(_) => ClientRequestMethod::PluginShareDelete,
+            Self::AppRead(_) => ClientRequestMethod::AppRead,
+            Self::AppList(_) => ClientRequestMethod::AppList,
+            Self::AppInstalled(_) => ClientRequestMethod::AppInstalled,
+            Self::FsReadFile(_) => ClientRequestMethod::FsReadFile,
+            Self::FsWriteFile(_) => ClientRequestMethod::FsWriteFile,
+            Self::FsCreateDirectory(_) => ClientRequestMethod::FsCreateDirectory,
+            Self::FsGetMetadata(_) => ClientRequestMethod::FsGetMetadata,
+            Self::FsReadDirectory(_) => ClientRequestMethod::FsReadDirectory,
+            Self::FsRemove(_) => ClientRequestMethod::FsRemove,
+            Self::FsCopy(_) => ClientRequestMethod::FsCopy,
+            Self::FsWatch(_) => ClientRequestMethod::FsWatch,
+            Self::FsUnwatch(_) => ClientRequestMethod::FsUnwatch,
+            Self::SkillsConfigWrite(_) => ClientRequestMethod::SkillsConfigWrite,
+            Self::PluginInstall(_) => ClientRequestMethod::PluginInstall,
+            Self::PluginUninstall(_) => ClientRequestMethod::PluginUninstall,
+            Self::TurnStart(_) => ClientRequestMethod::TurnStart,
+            Self::TurnSettingsUpdate(_) => ClientRequestMethod::TurnSettingsUpdate,
+            Self::TurnSteer(_) => ClientRequestMethod::TurnSteer,
+            Self::TurnInterrupt(_) => ClientRequestMethod::TurnInterrupt,
+            Self::ThreadRealtimeStart(_) => ClientRequestMethod::ThreadRealtimeStart,
+            Self::ThreadRealtimeAppendAudio(_) => ClientRequestMethod::ThreadRealtimeAppendAudio,
+            Self::ThreadRealtimeAppendText(_) => ClientRequestMethod::ThreadRealtimeAppendText,
+            Self::ThreadRealtimeAppendSpeech(_) => ClientRequestMethod::ThreadRealtimeAppendSpeech,
+            Self::ThreadRealtimeStop(_) => ClientRequestMethod::ThreadRealtimeStop,
+            Self::ThreadTimelineList(_) => ClientRequestMethod::ThreadTimelineList,
+            Self::ThreadRealtimeListVoices(_) => ClientRequestMethod::ThreadRealtimeListVoices,
+            Self::ReviewStart(_) => ClientRequestMethod::ReviewStart,
+            Self::ModelList(_) => ClientRequestMethod::ModelList,
+            Self::AccountGatewayOAuthRead(_) => ClientRequestMethod::AccountGatewayOAuthRead,
+            Self::AccountGatewayOAuthLogin(_) => ClientRequestMethod::AccountGatewayOAuthLogin,
+            Self::AccountGatewayOAuthCancel(_) => ClientRequestMethod::AccountGatewayOAuthCancel,
+            Self::ModelProviderCapabilitiesRead(_) => {
+                ClientRequestMethod::ModelProviderCapabilitiesRead
+            }
+            Self::ExperimentalFeatureList(_) => ClientRequestMethod::ExperimentalFeatureList,
+            Self::PermissionProfileList(_) => ClientRequestMethod::PermissionProfileList,
+            Self::ExperimentalFeatureEnablementSet(_) => {
+                ClientRequestMethod::ExperimentalFeatureEnablementSet
+            }
+            Self::RemoteControlEnable(_) => ClientRequestMethod::RemoteControlEnable,
+            Self::RemoteControlDisable(_) => ClientRequestMethod::RemoteControlDisable,
+            Self::RemoteControlStatusRead(_) => ClientRequestMethod::RemoteControlStatusRead,
+            Self::RemoteControlPairingStart(_) => ClientRequestMethod::RemoteControlPairingStart,
+            Self::RemoteControlPairingStatus(_) => ClientRequestMethod::RemoteControlPairingStatus,
+            Self::RemoteControlClientList(_) => ClientRequestMethod::RemoteControlClientList,
+            Self::RemoteControlClientRevoke(_) => ClientRequestMethod::RemoteControlClientRevoke,
+            Self::CollaborationModeList(_) => ClientRequestMethod::CollaborationModeList,
+            Self::MockExperimentalMethod(_) => ClientRequestMethod::MockExperimentalMethod,
+            Self::EnvironmentAdd(_) => ClientRequestMethod::EnvironmentAdd,
+            Self::EnvironmentInfo(_) => ClientRequestMethod::EnvironmentInfo,
+            Self::EnvironmentStatus(_) => ClientRequestMethod::EnvironmentStatus,
+            Self::McpServerOauthLogin(_) => ClientRequestMethod::McpServerOauthLogin,
+            Self::ConfigMcpServerReload(_) => ClientRequestMethod::ConfigMcpServerReload,
+            Self::McpServerStatusList(_) => ClientRequestMethod::McpServerStatusList,
+            Self::McpServerResourceRead(_) => ClientRequestMethod::McpServerResourceRead,
+            Self::McpServerEventStreamStart(_) => ClientRequestMethod::McpServerEventStreamStart,
+            Self::McpServerEventStreamStop(_) => ClientRequestMethod::McpServerEventStreamStop,
+            Self::McpServerToolCall(_) => ClientRequestMethod::McpServerToolCall,
+            Self::WindowsSandboxSetupStart(_) => ClientRequestMethod::WindowsSandboxSetupStart,
+            Self::WindowsSandboxReadiness(_) => ClientRequestMethod::WindowsSandboxReadiness,
+            Self::AccountLoginStart(_) => ClientRequestMethod::AccountLoginStart,
+            Self::AccountBedrockDiscover(_) => ClientRequestMethod::AccountBedrockDiscover,
+            Self::AccountBedrockSetup(_) => ClientRequestMethod::AccountBedrockSetup,
+            Self::AccountGcpSetup(_) => ClientRequestMethod::AccountGcpSetup,
+            Self::AccountBedrockCheckGovCloudRequirements(_) => {
+                ClientRequestMethod::AccountBedrockCheckGovCloudRequirements
+            }
+            Self::AccountLoginCancel(_) => ClientRequestMethod::AccountLoginCancel,
+            Self::AccountSessionList(_) => ClientRequestMethod::AccountSessionList,
+            Self::AccountSessionSwitch(_) => ClientRequestMethod::AccountSessionSwitch,
+            Self::AccountLogout(_) => ClientRequestMethod::AccountLogout,
+            Self::AccountRateLimitsRead(_) => ClientRequestMethod::AccountRateLimitsRead,
+            Self::AccountRateLimitResetCreditConsume(_) => {
+                ClientRequestMethod::AccountRateLimitResetCreditConsume
+            }
+            Self::AccountUsageRead(_) => ClientRequestMethod::AccountUsageRead,
+            Self::AccountWorkspaceMessagesRead(_) => {
+                ClientRequestMethod::AccountWorkspaceMessagesRead
+            }
+            Self::AccountSendAddCreditsNudgeEmail(_) => {
+                ClientRequestMethod::AccountSendAddCreditsNudgeEmail
+            }
+            Self::FeedbackUpload(_) => ClientRequestMethod::FeedbackUpload,
+            Self::FeedbackSave(_) => ClientRequestMethod::FeedbackSave,
+            Self::CommandExec(_) => ClientRequestMethod::CommandExec,
+            Self::CommandExecWrite(_) => ClientRequestMethod::CommandExecWrite,
+            Self::CommandExecTerminate(_) => ClientRequestMethod::CommandExecTerminate,
+            Self::CommandExecResize(_) => ClientRequestMethod::CommandExecResize,
+            Self::ProcessSpawn(_) => ClientRequestMethod::ProcessSpawn,
+            Self::ProcessWriteStdin(_) => ClientRequestMethod::ProcessWriteStdin,
+            Self::ProcessKill(_) => ClientRequestMethod::ProcessKill,
+            Self::ProcessResizePty(_) => ClientRequestMethod::ProcessResizePty,
+            Self::ConfigRead(_) => ClientRequestMethod::ConfigRead,
+            Self::ExternalAgentConfigDetect(_) => ClientRequestMethod::ExternalAgentConfigDetect,
+            Self::ExternalAgentConfigImport(_) => ClientRequestMethod::ExternalAgentConfigImport,
+            Self::ExternalAgentConfigImportRecordHistory(_) => {
+                ClientRequestMethod::ExternalAgentConfigImportRecordHistory
+            }
+            Self::ExternalAgentConfigImportReadHistories(_) => {
+                ClientRequestMethod::ExternalAgentConfigImportReadHistories
+            }
+            Self::ConfigValueWrite(_) => ClientRequestMethod::ConfigValueWrite,
+            Self::ConfigBatchWrite(_) => ClientRequestMethod::ConfigBatchWrite,
+            Self::ConfigRequirementsRead(_) => ClientRequestMethod::ConfigRequirementsRead,
+            Self::AccountRead(_) => ClientRequestMethod::AccountRead,
+            Self::FuzzyFileSearch(_) => ClientRequestMethod::FuzzyFileSearch,
+            Self::FuzzyFileSearchSessionStart(_) => {
+                ClientRequestMethod::FuzzyFileSearchSessionStart
+            }
+            Self::FuzzyFileSearchSessionUpdate(_) => {
+                ClientRequestMethod::FuzzyFileSearchSessionUpdate
+            }
+            Self::FuzzyFileSearchSessionStop(_) => ClientRequestMethod::FuzzyFileSearchSessionStop,
+        }
+    }
+    pub fn decode(method: ClientRequestMethod, result: &str) -> Result<Self, studio_json::Error> {
+        match method {
+            ClientRequestMethod::Initialize => {
+                studio_json::from_str(result).map(|result| Self::Initialize(Box::new(result)))
+            }
+            ClientRequestMethod::ServerDiagnostics => studio_json::from_str(result)
+                .map(|result| Self::ServerDiagnostics(Box::new(result))),
+            ClientRequestMethod::UserVerificationStatus => studio_json::from_str(result)
+                .map(|result| Self::UserVerificationStatus(Box::new(result))),
+            ClientRequestMethod::UserVerificationEnroll => studio_json::from_str(result)
+                .map(|result| Self::UserVerificationEnroll(Box::new(result))),
+            ClientRequestMethod::UserVerificationDelete => studio_json::from_str(result)
+                .map(|result| Self::UserVerificationDelete(Box::new(result))),
+            ClientRequestMethod::UserVerificationVerify => studio_json::from_str(result)
+                .map(|result| Self::UserVerificationVerify(Box::new(result))),
+            ClientRequestMethod::UserVerificationCancel => studio_json::from_str(result)
+                .map(|result| Self::UserVerificationCancel(Box::new(result))),
+            ClientRequestMethod::ThreadStart => {
+                studio_json::from_str(result).map(|result| Self::ThreadStart(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadResume => {
+                studio_json::from_str(result).map(|result| Self::ThreadResume(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadFork => {
+                studio_json::from_str(result).map(|result| Self::ThreadFork(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadSample => {
+                studio_json::from_str(result).map(|result| Self::ThreadSample(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadSampleCancel => studio_json::from_str(result)
+                .map(|result| Self::ThreadSampleCancel(Box::new(result))),
+            ClientRequestMethod::ThreadArchive => {
+                studio_json::from_str(result).map(|result| Self::ThreadArchive(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadDelete => {
+                studio_json::from_str(result).map(|result| Self::ThreadDelete(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadUnsubscribe => studio_json::from_str(result)
+                .map(|result| Self::ThreadUnsubscribe(Box::new(result))),
+            ClientRequestMethod::ThreadIncrementElicitation => studio_json::from_str(result)
+                .map(|result| Self::ThreadIncrementElicitation(Box::new(result))),
+            ClientRequestMethod::ThreadDecrementElicitation => studio_json::from_str(result)
+                .map(|result| Self::ThreadDecrementElicitation(Box::new(result))),
+            ClientRequestMethod::ThreadNameSet => {
+                studio_json::from_str(result).map(|result| Self::ThreadNameSet(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadPredictionRequest => studio_json::from_str(result)
+                .map(|result| Self::ThreadPredictionRequest(Box::new(result))),
+            ClientRequestMethod::ThreadGoalSet => {
+                studio_json::from_str(result).map(|result| Self::ThreadGoalSet(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadGoalGet => {
+                studio_json::from_str(result).map(|result| Self::ThreadGoalGet(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadGoalClear => {
+                studio_json::from_str(result).map(|result| Self::ThreadGoalClear(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadQueueAdd => {
+                studio_json::from_str(result).map(|result| Self::ThreadQueueAdd(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadQueueList => {
+                studio_json::from_str(result).map(|result| Self::ThreadQueueList(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadQueueUpdate => studio_json::from_str(result)
+                .map(|result| Self::ThreadQueueUpdate(Box::new(result))),
+            ClientRequestMethod::ThreadQueueDelete => studio_json::from_str(result)
+                .map(|result| Self::ThreadQueueDelete(Box::new(result))),
+            ClientRequestMethod::ThreadQueueReorder => studio_json::from_str(result)
+                .map(|result| Self::ThreadQueueReorder(Box::new(result))),
+            ClientRequestMethod::ThreadQueueStart => {
+                studio_json::from_str(result).map(|result| Self::ThreadQueueStart(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadMetadataUpdate => studio_json::from_str(result)
+                .map(|result| Self::ThreadMetadataUpdate(Box::new(result))),
+            ClientRequestMethod::ThreadAttachmentAdd => studio_json::from_str(result)
+                .map(|result| Self::ThreadAttachmentAdd(Box::new(result))),
+            ClientRequestMethod::ThreadAttachmentList => studio_json::from_str(result)
+                .map(|result| Self::ThreadAttachmentList(Box::new(result))),
+            ClientRequestMethod::ThreadAttachmentOwnerList => studio_json::from_str(result)
+                .map(|result| Self::ThreadAttachmentOwnerList(Box::new(result))),
+            ClientRequestMethod::ThreadAttachmentRemove => studio_json::from_str(result)
+                .map(|result| Self::ThreadAttachmentRemove(Box::new(result))),
+            ClientRequestMethod::ThreadSectionMove => studio_json::from_str(result)
+                .map(|result| Self::ThreadSectionMove(Box::new(result))),
+            ClientRequestMethod::ThreadSettingsUpdate => studio_json::from_str(result)
+                .map(|result| Self::ThreadSettingsUpdate(Box::new(result))),
+            ClientRequestMethod::ThreadMemoryModeSet => studio_json::from_str(result)
+                .map(|result| Self::ThreadMemoryModeSet(Box::new(result))),
+            ClientRequestMethod::ThreadMemoryRead => {
+                studio_json::from_str(result).map(|result| Self::ThreadMemoryRead(Box::new(result)))
+            }
+            ClientRequestMethod::MemoryStatus => {
+                studio_json::from_str(result).map(|result| Self::MemoryStatus(Box::new(result)))
+            }
+            ClientRequestMethod::MemoryReset => {
+                studio_json::from_str(result).map(|result| Self::MemoryReset(Box::new(result)))
+            }
+            ClientRequestMethod::RolloutCompress => {
+                studio_json::from_str(result).map(|result| Self::RolloutCompress(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadUnarchive => {
+                studio_json::from_str(result).map(|result| Self::ThreadUnarchive(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadCompactStart => studio_json::from_str(result)
+                .map(|result| Self::ThreadCompactStart(Box::new(result))),
+            ClientRequestMethod::ThreadShellCommand => studio_json::from_str(result)
+                .map(|result| Self::ThreadShellCommand(Box::new(result))),
+            ClientRequestMethod::ThreadApproveGuardianDeniedAction => studio_json::from_str(result)
+                .map(|result| Self::ThreadApproveGuardianDeniedAction(Box::new(result))),
+            ClientRequestMethod::ThreadBackgroundTerminalsClean => studio_json::from_str(result)
+                .map(|result| Self::ThreadBackgroundTerminalsClean(Box::new(result))),
+            ClientRequestMethod::ThreadBackgroundTerminalsList => studio_json::from_str(result)
+                .map(|result| Self::ThreadBackgroundTerminalsList(Box::new(result))),
+            ClientRequestMethod::ThreadBackgroundTerminalsTerminate => {
+                studio_json::from_str(result)
+                    .map(|result| Self::ThreadBackgroundTerminalsTerminate(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadRevert => {
+                studio_json::from_str(result).map(|result| Self::ThreadRevert(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadList => {
+                studio_json::from_str(result).map(|result| Self::ThreadList(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectList => {
+                studio_json::from_str(result).map(|result| Self::ProjectList(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectRead => {
+                studio_json::from_str(result).map(|result| Self::ProjectRead(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectCreate => {
+                studio_json::from_str(result).map(|result| Self::ProjectCreate(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectImport => {
+                studio_json::from_str(result).map(|result| Self::ProjectImport(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectUpdate => {
+                studio_json::from_str(result).map(|result| Self::ProjectUpdate(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectMove => {
+                studio_json::from_str(result).map(|result| Self::ProjectMove(Box::new(result)))
+            }
+            ClientRequestMethod::ProjectDelete => {
+                studio_json::from_str(result).map(|result| Self::ProjectDelete(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadSectionList => studio_json::from_str(result)
+                .map(|result| Self::ThreadSectionList(Box::new(result))),
+            ClientRequestMethod::ThreadSectionCreate => studio_json::from_str(result)
+                .map(|result| Self::ThreadSectionCreate(Box::new(result))),
+            ClientRequestMethod::ThreadSectionUpdate => studio_json::from_str(result)
+                .map(|result| Self::ThreadSectionUpdate(Box::new(result))),
+            ClientRequestMethod::ThreadSectionDelete => studio_json::from_str(result)
+                .map(|result| Self::ThreadSectionDelete(Box::new(result))),
+            ClientRequestMethod::ThreadSearch => {
+                studio_json::from_str(result).map(|result| Self::ThreadSearch(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadSearchOccurrences => studio_json::from_str(result)
+                .map(|result| Self::ThreadSearchOccurrences(Box::new(result))),
+            ClientRequestMethod::ThreadLoadedList => {
+                studio_json::from_str(result).map(|result| Self::ThreadLoadedList(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadRead => {
+                studio_json::from_str(result).map(|result| Self::ThreadRead(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadReadStateUpdate => studio_json::from_str(result)
+                .map(|result| Self::ThreadReadStateUpdate(Box::new(result))),
+            ClientRequestMethod::ThreadTurnsList => {
+                studio_json::from_str(result).map(|result| Self::ThreadTurnsList(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadItemsList => {
+                studio_json::from_str(result).map(|result| Self::ThreadItemsList(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadItemsRead => {
+                studio_json::from_str(result).map(|result| Self::ThreadItemsRead(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadGuardianReview => studio_json::from_str(result)
+                .map(|result| Self::ThreadGuardianReview(Box::new(result))),
+            ClientRequestMethod::ThreadInjectItems => studio_json::from_str(result)
+                .map(|result| Self::ThreadInjectItems(Box::new(result))),
+            ClientRequestMethod::SkillsList => {
+                studio_json::from_str(result).map(|result| Self::SkillsList(Box::new(result)))
+            }
+            ClientRequestMethod::SkillsExtraRootsSet => studio_json::from_str(result)
+                .map(|result| Self::SkillsExtraRootsSet(Box::new(result))),
+            ClientRequestMethod::HooksList => {
+                studio_json::from_str(result).map(|result| Self::HooksList(Box::new(result)))
+            }
+            ClientRequestMethod::MarketplaceAdd => {
+                studio_json::from_str(result).map(|result| Self::MarketplaceAdd(Box::new(result)))
+            }
+            ClientRequestMethod::MarketplaceRemove => studio_json::from_str(result)
+                .map(|result| Self::MarketplaceRemove(Box::new(result))),
+            ClientRequestMethod::MarketplaceUpgrade => studio_json::from_str(result)
+                .map(|result| Self::MarketplaceUpgrade(Box::new(result))),
+            ClientRequestMethod::PluginList => {
+                studio_json::from_str(result).map(|result| Self::PluginList(Box::new(result)))
+            }
+            ClientRequestMethod::PluginSearch => {
+                studio_json::from_str(result).map(|result| Self::PluginSearch(Box::new(result)))
+            }
+            ClientRequestMethod::PluginInstalled => {
+                studio_json::from_str(result).map(|result| Self::PluginInstalled(Box::new(result)))
+            }
+            ClientRequestMethod::PluginReconcile => {
+                studio_json::from_str(result).map(|result| Self::PluginReconcile(Box::new(result)))
+            }
+            ClientRequestMethod::PluginRead => {
+                studio_json::from_str(result).map(|result| Self::PluginRead(Box::new(result)))
+            }
+            ClientRequestMethod::PluginSkillRead => {
+                studio_json::from_str(result).map(|result| Self::PluginSkillRead(Box::new(result)))
+            }
+            ClientRequestMethod::PluginShareSave => {
+                studio_json::from_str(result).map(|result| Self::PluginShareSave(Box::new(result)))
+            }
+            ClientRequestMethod::PluginShareUpdateTargets => studio_json::from_str(result)
+                .map(|result| Self::PluginShareUpdateTargets(Box::new(result))),
+            ClientRequestMethod::PluginShareList => {
+                studio_json::from_str(result).map(|result| Self::PluginShareList(Box::new(result)))
+            }
+            ClientRequestMethod::PluginShareCheckout => studio_json::from_str(result)
+                .map(|result| Self::PluginShareCheckout(Box::new(result))),
+            ClientRequestMethod::PluginShareDelete => studio_json::from_str(result)
+                .map(|result| Self::PluginShareDelete(Box::new(result))),
+            ClientRequestMethod::AppRead => {
+                studio_json::from_str(result).map(|result| Self::AppRead(Box::new(result)))
+            }
+            ClientRequestMethod::AppList => {
+                studio_json::from_str(result).map(|result| Self::AppList(Box::new(result)))
+            }
+            ClientRequestMethod::AppInstalled => {
+                studio_json::from_str(result).map(|result| Self::AppInstalled(Box::new(result)))
+            }
+            ClientRequestMethod::FsReadFile => {
+                studio_json::from_str(result).map(|result| Self::FsReadFile(Box::new(result)))
+            }
+            ClientRequestMethod::FsWriteFile => {
+                studio_json::from_str(result).map(|result| Self::FsWriteFile(Box::new(result)))
+            }
+            ClientRequestMethod::FsCreateDirectory => studio_json::from_str(result)
+                .map(|result| Self::FsCreateDirectory(Box::new(result))),
+            ClientRequestMethod::FsGetMetadata => {
+                studio_json::from_str(result).map(|result| Self::FsGetMetadata(Box::new(result)))
+            }
+            ClientRequestMethod::FsReadDirectory => {
+                studio_json::from_str(result).map(|result| Self::FsReadDirectory(Box::new(result)))
+            }
+            ClientRequestMethod::FsRemove => {
+                studio_json::from_str(result).map(|result| Self::FsRemove(Box::new(result)))
+            }
+            ClientRequestMethod::FsCopy => {
+                studio_json::from_str(result).map(|result| Self::FsCopy(Box::new(result)))
+            }
+            ClientRequestMethod::FsWatch => {
+                studio_json::from_str(result).map(|result| Self::FsWatch(Box::new(result)))
+            }
+            ClientRequestMethod::FsUnwatch => {
+                studio_json::from_str(result).map(|result| Self::FsUnwatch(Box::new(result)))
+            }
+            ClientRequestMethod::SkillsConfigWrite => studio_json::from_str(result)
+                .map(|result| Self::SkillsConfigWrite(Box::new(result))),
+            ClientRequestMethod::PluginInstall => {
+                studio_json::from_str(result).map(|result| Self::PluginInstall(Box::new(result)))
+            }
+            ClientRequestMethod::PluginUninstall => {
+                studio_json::from_str(result).map(|result| Self::PluginUninstall(Box::new(result)))
+            }
+            ClientRequestMethod::TurnStart => {
+                studio_json::from_str(result).map(|result| Self::TurnStart(Box::new(result)))
+            }
+            ClientRequestMethod::TurnSettingsUpdate => studio_json::from_str(result)
+                .map(|result| Self::TurnSettingsUpdate(Box::new(result))),
+            ClientRequestMethod::TurnSteer => {
+                studio_json::from_str(result).map(|result| Self::TurnSteer(Box::new(result)))
+            }
+            ClientRequestMethod::TurnInterrupt => {
+                studio_json::from_str(result).map(|result| Self::TurnInterrupt(Box::new(result)))
+            }
+            ClientRequestMethod::ThreadRealtimeStart => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeStart(Box::new(result))),
+            ClientRequestMethod::ThreadRealtimeAppendAudio => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeAppendAudio(Box::new(result))),
+            ClientRequestMethod::ThreadRealtimeAppendText => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeAppendText(Box::new(result))),
+            ClientRequestMethod::ThreadRealtimeAppendSpeech => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeAppendSpeech(Box::new(result))),
+            ClientRequestMethod::ThreadRealtimeStop => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeStop(Box::new(result))),
+            ClientRequestMethod::ThreadTimelineList => studio_json::from_str(result)
+                .map(|result| Self::ThreadTimelineList(Box::new(result))),
+            ClientRequestMethod::ThreadRealtimeListVoices => studio_json::from_str(result)
+                .map(|result| Self::ThreadRealtimeListVoices(Box::new(result))),
+            ClientRequestMethod::ReviewStart => {
+                studio_json::from_str(result).map(|result| Self::ReviewStart(Box::new(result)))
+            }
+            ClientRequestMethod::ModelList => {
+                studio_json::from_str(result).map(|result| Self::ModelList(Box::new(result)))
+            }
+            ClientRequestMethod::AccountGatewayOAuthRead => studio_json::from_str(result)
+                .map(|result| Self::AccountGatewayOAuthRead(Box::new(result))),
+            ClientRequestMethod::AccountGatewayOAuthLogin => studio_json::from_str(result)
+                .map(|result| Self::AccountGatewayOAuthLogin(Box::new(result))),
+            ClientRequestMethod::AccountGatewayOAuthCancel => studio_json::from_str(result)
+                .map(|result| Self::AccountGatewayOAuthCancel(Box::new(result))),
+            ClientRequestMethod::ModelProviderCapabilitiesRead => studio_json::from_str(result)
+                .map(|result| Self::ModelProviderCapabilitiesRead(Box::new(result))),
+            ClientRequestMethod::ExperimentalFeatureList => studio_json::from_str(result)
+                .map(|result| Self::ExperimentalFeatureList(Box::new(result))),
+            ClientRequestMethod::PermissionProfileList => studio_json::from_str(result)
+                .map(|result| Self::PermissionProfileList(Box::new(result))),
+            ClientRequestMethod::ExperimentalFeatureEnablementSet => studio_json::from_str(result)
+                .map(|result| Self::ExperimentalFeatureEnablementSet(Box::new(result))),
+            ClientRequestMethod::RemoteControlEnable => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlEnable(Box::new(result))),
+            ClientRequestMethod::RemoteControlDisable => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlDisable(Box::new(result))),
+            ClientRequestMethod::RemoteControlStatusRead => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlStatusRead(Box::new(result))),
+            ClientRequestMethod::RemoteControlPairingStart => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlPairingStart(Box::new(result))),
+            ClientRequestMethod::RemoteControlPairingStatus => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlPairingStatus(Box::new(result))),
+            ClientRequestMethod::RemoteControlClientList => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlClientList(Box::new(result))),
+            ClientRequestMethod::RemoteControlClientRevoke => studio_json::from_str(result)
+                .map(|result| Self::RemoteControlClientRevoke(Box::new(result))),
+            ClientRequestMethod::CollaborationModeList => studio_json::from_str(result)
+                .map(|result| Self::CollaborationModeList(Box::new(result))),
+            ClientRequestMethod::MockExperimentalMethod => studio_json::from_str(result)
+                .map(|result| Self::MockExperimentalMethod(Box::new(result))),
+            ClientRequestMethod::EnvironmentAdd => {
+                studio_json::from_str(result).map(|result| Self::EnvironmentAdd(Box::new(result)))
+            }
+            ClientRequestMethod::EnvironmentInfo => {
+                studio_json::from_str(result).map(|result| Self::EnvironmentInfo(Box::new(result)))
+            }
+            ClientRequestMethod::EnvironmentStatus => studio_json::from_str(result)
+                .map(|result| Self::EnvironmentStatus(Box::new(result))),
+            ClientRequestMethod::McpServerOauthLogin => studio_json::from_str(result)
+                .map(|result| Self::McpServerOauthLogin(Box::new(result))),
+            ClientRequestMethod::ConfigMcpServerReload => studio_json::from_str(result)
+                .map(|result| Self::ConfigMcpServerReload(Box::new(result))),
+            ClientRequestMethod::McpServerStatusList => studio_json::from_str(result)
+                .map(|result| Self::McpServerStatusList(Box::new(result))),
+            ClientRequestMethod::McpServerResourceRead => studio_json::from_str(result)
+                .map(|result| Self::McpServerResourceRead(Box::new(result))),
+            ClientRequestMethod::McpServerEventStreamStart => studio_json::from_str(result)
+                .map(|result| Self::McpServerEventStreamStart(Box::new(result))),
+            ClientRequestMethod::McpServerEventStreamStop => studio_json::from_str(result)
+                .map(|result| Self::McpServerEventStreamStop(Box::new(result))),
+            ClientRequestMethod::McpServerToolCall => studio_json::from_str(result)
+                .map(|result| Self::McpServerToolCall(Box::new(result))),
+            ClientRequestMethod::WindowsSandboxSetupStart => studio_json::from_str(result)
+                .map(|result| Self::WindowsSandboxSetupStart(Box::new(result))),
+            ClientRequestMethod::WindowsSandboxReadiness => studio_json::from_str(result)
+                .map(|result| Self::WindowsSandboxReadiness(Box::new(result))),
+            ClientRequestMethod::AccountLoginStart => studio_json::from_str(result)
+                .map(|result| Self::AccountLoginStart(Box::new(result))),
+            ClientRequestMethod::AccountBedrockDiscover => studio_json::from_str(result)
+                .map(|result| Self::AccountBedrockDiscover(Box::new(result))),
+            ClientRequestMethod::AccountBedrockSetup => studio_json::from_str(result)
+                .map(|result| Self::AccountBedrockSetup(Box::new(result))),
+            ClientRequestMethod::AccountGcpSetup => {
+                studio_json::from_str(result).map(|result| Self::AccountGcpSetup(Box::new(result)))
+            }
+            ClientRequestMethod::AccountBedrockCheckGovCloudRequirements => {
+                studio_json::from_str(result)
+                    .map(|result| Self::AccountBedrockCheckGovCloudRequirements(Box::new(result)))
+            }
+            ClientRequestMethod::AccountLoginCancel => studio_json::from_str(result)
+                .map(|result| Self::AccountLoginCancel(Box::new(result))),
+            ClientRequestMethod::AccountSessionList => studio_json::from_str(result)
+                .map(|result| Self::AccountSessionList(Box::new(result))),
+            ClientRequestMethod::AccountSessionSwitch => studio_json::from_str(result)
+                .map(|result| Self::AccountSessionSwitch(Box::new(result))),
+            ClientRequestMethod::AccountLogout => {
+                studio_json::from_str(result).map(|result| Self::AccountLogout(Box::new(result)))
+            }
+            ClientRequestMethod::AccountRateLimitsRead => studio_json::from_str(result)
+                .map(|result| Self::AccountRateLimitsRead(Box::new(result))),
+            ClientRequestMethod::AccountRateLimitResetCreditConsume => {
+                studio_json::from_str(result)
+                    .map(|result| Self::AccountRateLimitResetCreditConsume(Box::new(result)))
+            }
+            ClientRequestMethod::AccountUsageRead => {
+                studio_json::from_str(result).map(|result| Self::AccountUsageRead(Box::new(result)))
+            }
+            ClientRequestMethod::AccountWorkspaceMessagesRead => studio_json::from_str(result)
+                .map(|result| Self::AccountWorkspaceMessagesRead(Box::new(result))),
+            ClientRequestMethod::AccountSendAddCreditsNudgeEmail => studio_json::from_str(result)
+                .map(|result| Self::AccountSendAddCreditsNudgeEmail(Box::new(result))),
+            ClientRequestMethod::FeedbackUpload => {
+                studio_json::from_str(result).map(|result| Self::FeedbackUpload(Box::new(result)))
+            }
+            ClientRequestMethod::FeedbackSave => {
+                studio_json::from_str(result).map(|result| Self::FeedbackSave(Box::new(result)))
+            }
+            ClientRequestMethod::CommandExec => {
+                studio_json::from_str(result).map(|result| Self::CommandExec(Box::new(result)))
+            }
+            ClientRequestMethod::CommandExecWrite => {
+                studio_json::from_str(result).map(|result| Self::CommandExecWrite(Box::new(result)))
+            }
+            ClientRequestMethod::CommandExecTerminate => studio_json::from_str(result)
+                .map(|result| Self::CommandExecTerminate(Box::new(result))),
+            ClientRequestMethod::CommandExecResize => studio_json::from_str(result)
+                .map(|result| Self::CommandExecResize(Box::new(result))),
+            ClientRequestMethod::ProcessSpawn => {
+                studio_json::from_str(result).map(|result| Self::ProcessSpawn(Box::new(result)))
+            }
+            ClientRequestMethod::ProcessWriteStdin => studio_json::from_str(result)
+                .map(|result| Self::ProcessWriteStdin(Box::new(result))),
+            ClientRequestMethod::ProcessKill => {
+                studio_json::from_str(result).map(|result| Self::ProcessKill(Box::new(result)))
+            }
+            ClientRequestMethod::ProcessResizePty => {
+                studio_json::from_str(result).map(|result| Self::ProcessResizePty(Box::new(result)))
+            }
+            ClientRequestMethod::ConfigRead => {
+                studio_json::from_str(result).map(|result| Self::ConfigRead(Box::new(result)))
+            }
+            ClientRequestMethod::ExternalAgentConfigDetect => studio_json::from_str(result)
+                .map(|result| Self::ExternalAgentConfigDetect(Box::new(result))),
+            ClientRequestMethod::ExternalAgentConfigImport => studio_json::from_str(result)
+                .map(|result| Self::ExternalAgentConfigImport(Box::new(result))),
+            ClientRequestMethod::ExternalAgentConfigImportRecordHistory => {
+                studio_json::from_str(result)
+                    .map(|result| Self::ExternalAgentConfigImportRecordHistory(Box::new(result)))
+            }
+            ClientRequestMethod::ExternalAgentConfigImportReadHistories => {
+                studio_json::from_str(result)
+                    .map(|result| Self::ExternalAgentConfigImportReadHistories(Box::new(result)))
+            }
+            ClientRequestMethod::ConfigValueWrite => {
+                studio_json::from_str(result).map(|result| Self::ConfigValueWrite(Box::new(result)))
+            }
+            ClientRequestMethod::ConfigBatchWrite => {
+                studio_json::from_str(result).map(|result| Self::ConfigBatchWrite(Box::new(result)))
+            }
+            ClientRequestMethod::ConfigRequirementsRead => studio_json::from_str(result)
+                .map(|result| Self::ConfigRequirementsRead(Box::new(result))),
+            ClientRequestMethod::AccountRead => {
+                studio_json::from_str(result).map(|result| Self::AccountRead(Box::new(result)))
+            }
+            ClientRequestMethod::FuzzyFileSearch => {
+                studio_json::from_str(result).map(|result| Self::FuzzyFileSearch(Box::new(result)))
+            }
+            ClientRequestMethod::FuzzyFileSearchSessionStart => studio_json::from_str(result)
+                .map(|result| Self::FuzzyFileSearchSessionStart(Box::new(result))),
+            ClientRequestMethod::FuzzyFileSearchSessionUpdate => studio_json::from_str(result)
+                .map(|result| Self::FuzzyFileSearchSessionUpdate(Box::new(result))),
+            ClientRequestMethod::FuzzyFileSearchSessionStop => studio_json::from_str(result)
+                .map(|result| Self::FuzzyFileSearchSessionStop(Box::new(result))),
+        }
+    }
+    pub fn serialize_payload<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Initialize(result) => serde::Serialize::serialize(result, serializer),
+            Self::ServerDiagnostics(result) => serde::Serialize::serialize(result, serializer),
+            Self::UserVerificationStatus(result) => serde::Serialize::serialize(result, serializer),
+            Self::UserVerificationEnroll(result) => serde::Serialize::serialize(result, serializer),
+            Self::UserVerificationDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::UserVerificationVerify(result) => serde::Serialize::serialize(result, serializer),
+            Self::UserVerificationCancel(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadResume(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadFork(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSample(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSampleCancel(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadArchive(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadUnsubscribe(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadIncrementElicitation(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadDecrementElicitation(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadNameSet(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadPredictionRequest(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadGoalSet(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadGoalGet(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadGoalClear(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueAdd(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueReorder(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadQueueStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadMetadataUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadAttachmentAdd(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadAttachmentList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadAttachmentOwnerList(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadAttachmentRemove(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSectionMove(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSettingsUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadMemoryModeSet(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadMemoryRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::MemoryStatus(result) => serde::Serialize::serialize(result, serializer),
+            Self::MemoryReset(result) => serde::Serialize::serialize(result, serializer),
+            Self::RolloutCompress(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadUnarchive(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadCompactStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadShellCommand(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadApproveGuardianDeniedAction(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadBackgroundTerminalsClean(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadBackgroundTerminalsList(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadBackgroundTerminalsTerminate(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadRevert(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectCreate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectImport(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectMove(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProjectDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSectionList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSectionCreate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSectionUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSectionDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSearch(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadSearchOccurrences(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadLoadedList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadReadStateUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadTurnsList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadItemsList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadItemsRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadGuardianReview(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadInjectItems(result) => serde::Serialize::serialize(result, serializer),
+            Self::SkillsList(result) => serde::Serialize::serialize(result, serializer),
+            Self::SkillsExtraRootsSet(result) => serde::Serialize::serialize(result, serializer),
+            Self::HooksList(result) => serde::Serialize::serialize(result, serializer),
+            Self::MarketplaceAdd(result) => serde::Serialize::serialize(result, serializer),
+            Self::MarketplaceRemove(result) => serde::Serialize::serialize(result, serializer),
+            Self::MarketplaceUpgrade(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginList(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginSearch(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginInstalled(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginReconcile(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginSkillRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginShareSave(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginShareUpdateTargets(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::PluginShareList(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginShareCheckout(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginShareDelete(result) => serde::Serialize::serialize(result, serializer),
+            Self::AppRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::AppList(result) => serde::Serialize::serialize(result, serializer),
+            Self::AppInstalled(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsReadFile(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsWriteFile(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsCreateDirectory(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsGetMetadata(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsReadDirectory(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsRemove(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsCopy(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsWatch(result) => serde::Serialize::serialize(result, serializer),
+            Self::FsUnwatch(result) => serde::Serialize::serialize(result, serializer),
+            Self::SkillsConfigWrite(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginInstall(result) => serde::Serialize::serialize(result, serializer),
+            Self::PluginUninstall(result) => serde::Serialize::serialize(result, serializer),
+            Self::TurnStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::TurnSettingsUpdate(result) => serde::Serialize::serialize(result, serializer),
+            Self::TurnSteer(result) => serde::Serialize::serialize(result, serializer),
+            Self::TurnInterrupt(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadRealtimeStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadRealtimeAppendAudio(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadRealtimeAppendText(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadRealtimeAppendSpeech(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ThreadRealtimeStop(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadTimelineList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ThreadRealtimeListVoices(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ReviewStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::ModelList(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountGatewayOAuthRead(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountGatewayOAuthLogin(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountGatewayOAuthCancel(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ModelProviderCapabilitiesRead(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ExperimentalFeatureList(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::PermissionProfileList(result) => serde::Serialize::serialize(result, serializer),
+            Self::ExperimentalFeatureEnablementSet(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::RemoteControlEnable(result) => serde::Serialize::serialize(result, serializer),
+            Self::RemoteControlDisable(result) => serde::Serialize::serialize(result, serializer),
+            Self::RemoteControlStatusRead(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::RemoteControlPairingStart(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::RemoteControlPairingStatus(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::RemoteControlClientList(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::RemoteControlClientRevoke(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::CollaborationModeList(result) => serde::Serialize::serialize(result, serializer),
+            Self::MockExperimentalMethod(result) => serde::Serialize::serialize(result, serializer),
+            Self::EnvironmentAdd(result) => serde::Serialize::serialize(result, serializer),
+            Self::EnvironmentInfo(result) => serde::Serialize::serialize(result, serializer),
+            Self::EnvironmentStatus(result) => serde::Serialize::serialize(result, serializer),
+            Self::McpServerOauthLogin(result) => serde::Serialize::serialize(result, serializer),
+            Self::ConfigMcpServerReload(result) => serde::Serialize::serialize(result, serializer),
+            Self::McpServerStatusList(result) => serde::Serialize::serialize(result, serializer),
+            Self::McpServerResourceRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::McpServerEventStreamStart(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::McpServerEventStreamStop(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::McpServerToolCall(result) => serde::Serialize::serialize(result, serializer),
+            Self::WindowsSandboxSetupStart(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::WindowsSandboxReadiness(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountLoginStart(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountBedrockDiscover(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountBedrockSetup(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountGcpSetup(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountBedrockCheckGovCloudRequirements(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountLoginCancel(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountSessionList(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountSessionSwitch(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountLogout(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountRateLimitsRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountRateLimitResetCreditConsume(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountUsageRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountWorkspaceMessagesRead(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AccountSendAddCreditsNudgeEmail(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::FeedbackUpload(result) => serde::Serialize::serialize(result, serializer),
+            Self::FeedbackSave(result) => serde::Serialize::serialize(result, serializer),
+            Self::CommandExec(result) => serde::Serialize::serialize(result, serializer),
+            Self::CommandExecWrite(result) => serde::Serialize::serialize(result, serializer),
+            Self::CommandExecTerminate(result) => serde::Serialize::serialize(result, serializer),
+            Self::CommandExecResize(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProcessSpawn(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProcessWriteStdin(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProcessKill(result) => serde::Serialize::serialize(result, serializer),
+            Self::ProcessResizePty(result) => serde::Serialize::serialize(result, serializer),
+            Self::ConfigRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::ExternalAgentConfigDetect(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ExternalAgentConfigImport(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ExternalAgentConfigImportRecordHistory(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ExternalAgentConfigImportReadHistories(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ConfigValueWrite(result) => serde::Serialize::serialize(result, serializer),
+            Self::ConfigBatchWrite(result) => serde::Serialize::serialize(result, serializer),
+            Self::ConfigRequirementsRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::FuzzyFileSearch(result) => serde::Serialize::serialize(result, serializer),
+            Self::FuzzyFileSearchSessionStart(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::FuzzyFileSearchSessionUpdate(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::FuzzyFileSearchSessionStop(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ClientNotificationMethod {
     #[serde(rename = "initialized")]
@@ -22265,6 +31740,13 @@ impl ClientNotificationMethod {
     }
     pub const fn all() -> &'static [Self] {
         &[Self::Initialized]
+    }
+}
+impl ClientNotification {
+    pub const fn method(&self) -> ClientNotificationMethod {
+        match self {
+            Self::Initialized => ClientNotificationMethod::Initialized,
+        }
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
@@ -22727,6 +32209,758 @@ impl ServerNotificationMethod {
         ]
     }
 }
+impl ServerNotification {
+    pub const fn method(&self) -> ServerNotificationMethod {
+        match self {
+            Self::Error { .. } => ServerNotificationMethod::Error,
+            Self::ThreadStarted { .. } => ServerNotificationMethod::ThreadStarted,
+            Self::ThreadStatusChanged { .. } => ServerNotificationMethod::ThreadStatusChanged,
+            Self::ThreadReadStateChanged { .. } => ServerNotificationMethod::ThreadReadStateChanged,
+            Self::ThreadArchived { .. } => ServerNotificationMethod::ThreadArchived,
+            Self::ThreadDeleted { .. } => ServerNotificationMethod::ThreadDeleted,
+            Self::ThreadUnarchived { .. } => ServerNotificationMethod::ThreadUnarchived,
+            Self::ThreadClosed { .. } => ServerNotificationMethod::ThreadClosed,
+            Self::ThreadReverted { .. } => ServerNotificationMethod::ThreadReverted,
+            Self::SkillsChanged { .. } => ServerNotificationMethod::SkillsChanged,
+            Self::ThreadNameUpdated { .. } => ServerNotificationMethod::ThreadNameUpdated,
+            Self::ThreadSectionChanged { .. } => ServerNotificationMethod::ThreadSectionChanged,
+            Self::ThreadAttachmentUpdated { .. } => {
+                ServerNotificationMethod::ThreadAttachmentUpdated
+            }
+            Self::ThreadGoalUpdated { .. } => ServerNotificationMethod::ThreadGoalUpdated,
+            Self::ThreadPredictionUpdated { .. } => {
+                ServerNotificationMethod::ThreadPredictionUpdated
+            }
+            Self::ThreadGoalCleared { .. } => ServerNotificationMethod::ThreadGoalCleared,
+            Self::ThreadQueueChanged { .. } => ServerNotificationMethod::ThreadQueueChanged,
+            Self::ProjectChanged { .. } => ServerNotificationMethod::ProjectChanged,
+            Self::ThreadProjectUpdated { .. } => ServerNotificationMethod::ThreadProjectUpdated,
+            Self::ThreadEnvironmentConnected { .. } => {
+                ServerNotificationMethod::ThreadEnvironmentConnected
+            }
+            Self::ThreadEnvironmentDisconnected { .. } => {
+                ServerNotificationMethod::ThreadEnvironmentDisconnected
+            }
+            Self::ThreadSettingsUpdated { .. } => ServerNotificationMethod::ThreadSettingsUpdated,
+            Self::ThreadTokenUsageUpdated { .. } => {
+                ServerNotificationMethod::ThreadTokenUsageUpdated
+            }
+            Self::TurnStarted { .. } => ServerNotificationMethod::TurnStarted,
+            Self::HookStarted { .. } => ServerNotificationMethod::HookStarted,
+            Self::TurnCompleted { .. } => ServerNotificationMethod::TurnCompleted,
+            Self::HookCompleted { .. } => ServerNotificationMethod::HookCompleted,
+            Self::TurnDiffUpdated { .. } => ServerNotificationMethod::TurnDiffUpdated,
+            Self::TurnPlanUpdated { .. } => ServerNotificationMethod::TurnPlanUpdated,
+            Self::ItemStarted { .. } => ServerNotificationMethod::ItemStarted,
+            Self::ItemAutoApprovalReviewStarted { .. } => {
+                ServerNotificationMethod::ItemAutoApprovalReviewStarted
+            }
+            Self::ItemAutoApprovalReviewCompleted { .. } => {
+                ServerNotificationMethod::ItemAutoApprovalReviewCompleted
+            }
+            Self::AutoApprovalReviewStrictReviewRequired { .. } => {
+                ServerNotificationMethod::AutoApprovalReviewStrictReviewRequired
+            }
+            Self::ItemCompleted { .. } => ServerNotificationMethod::ItemCompleted,
+            Self::ItemAgentMessageDelta { .. } => ServerNotificationMethod::ItemAgentMessageDelta,
+            Self::ItemPlanDelta { .. } => ServerNotificationMethod::ItemPlanDelta,
+            Self::CommandExecOutputDelta { .. } => ServerNotificationMethod::CommandExecOutputDelta,
+            Self::ProcessOutputDelta { .. } => ServerNotificationMethod::ProcessOutputDelta,
+            Self::ProcessExited { .. } => ServerNotificationMethod::ProcessExited,
+            Self::ItemCommandExecutionOutputDelta { .. } => {
+                ServerNotificationMethod::ItemCommandExecutionOutputDelta
+            }
+            Self::ItemCommandExecutionTerminalInteraction { .. } => {
+                ServerNotificationMethod::ItemCommandExecutionTerminalInteraction
+            }
+            Self::ItemFileChangeOutputDelta { .. } => {
+                ServerNotificationMethod::ItemFileChangeOutputDelta
+            }
+            Self::ItemFileChangePatchUpdated { .. } => {
+                ServerNotificationMethod::ItemFileChangePatchUpdated
+            }
+            Self::ServerRequestResolved { .. } => ServerNotificationMethod::ServerRequestResolved,
+            Self::ItemMcpToolCallProgress { .. } => {
+                ServerNotificationMethod::ItemMcpToolCallProgress
+            }
+            Self::McpServerOauthLoginCompleted { .. } => {
+                ServerNotificationMethod::McpServerOauthLoginCompleted
+            }
+            Self::McpServerStartupStatusUpdated { .. } => {
+                ServerNotificationMethod::McpServerStartupStatusUpdated
+            }
+            Self::McpServerEventStreamNotification { .. } => {
+                ServerNotificationMethod::McpServerEventStreamNotification
+            }
+            Self::AccountUpdated { .. } => ServerNotificationMethod::AccountUpdated,
+            Self::AccountGatewayOAuthChanged { .. } => {
+                ServerNotificationMethod::AccountGatewayOAuthChanged
+            }
+            Self::AccountRateLimitsUpdated { .. } => {
+                ServerNotificationMethod::AccountRateLimitsUpdated
+            }
+            Self::AppListUpdated { .. } => ServerNotificationMethod::AppListUpdated,
+            Self::RemoteControlStatusChanged { .. } => {
+                ServerNotificationMethod::RemoteControlStatusChanged
+            }
+            Self::ExternalAgentConfigImportProgress { .. } => {
+                ServerNotificationMethod::ExternalAgentConfigImportProgress
+            }
+            Self::ExternalAgentConfigImportCompleted { .. } => {
+                ServerNotificationMethod::ExternalAgentConfigImportCompleted
+            }
+            Self::FsChanged { .. } => ServerNotificationMethod::FsChanged,
+            Self::ItemReasoningSummaryTextDelta { .. } => {
+                ServerNotificationMethod::ItemReasoningSummaryTextDelta
+            }
+            Self::ItemReasoningSummaryPartAdded { .. } => {
+                ServerNotificationMethod::ItemReasoningSummaryPartAdded
+            }
+            Self::ItemReasoningTextDelta { .. } => ServerNotificationMethod::ItemReasoningTextDelta,
+            Self::ThreadCompacted { .. } => ServerNotificationMethod::ThreadCompacted,
+            Self::ModelRerouted { .. } => ServerNotificationMethod::ModelRerouted,
+            Self::ModelVerification { .. } => ServerNotificationMethod::ModelVerification,
+            Self::ModelProviderAuthRecoveryStarted { .. } => {
+                ServerNotificationMethod::ModelProviderAuthRecoveryStarted
+            }
+            Self::ModelProviderAuthRecoveryCompleted { .. } => {
+                ServerNotificationMethod::ModelProviderAuthRecoveryCompleted
+            }
+            Self::TurnModerationMetadata { .. } => ServerNotificationMethod::TurnModerationMetadata,
+            Self::ModelSafetyBufferingUpdated { .. } => {
+                ServerNotificationMethod::ModelSafetyBufferingUpdated
+            }
+            Self::Warning { .. } => ServerNotificationMethod::Warning,
+            Self::GuardianWarning { .. } => ServerNotificationMethod::GuardianWarning,
+            Self::DeprecationNotice { .. } => ServerNotificationMethod::DeprecationNotice,
+            Self::ConfigWarning { .. } => ServerNotificationMethod::ConfigWarning,
+            Self::FuzzyFileSearchSessionUpdated { .. } => {
+                ServerNotificationMethod::FuzzyFileSearchSessionUpdated
+            }
+            Self::FuzzyFileSearchSessionCompleted { .. } => {
+                ServerNotificationMethod::FuzzyFileSearchSessionCompleted
+            }
+            Self::ThreadRealtimeStarted { .. } => ServerNotificationMethod::ThreadRealtimeStarted,
+            Self::ThreadRealtimeItemAdded { .. } => {
+                ServerNotificationMethod::ThreadRealtimeItemAdded
+            }
+            Self::ThreadRealtimeItemStarted { .. } => {
+                ServerNotificationMethod::ThreadRealtimeItemStarted
+            }
+            Self::ThreadRealtimeItemTranscriptDelta { .. } => {
+                ServerNotificationMethod::ThreadRealtimeItemTranscriptDelta
+            }
+            Self::ThreadRealtimeItemCompleted { .. } => {
+                ServerNotificationMethod::ThreadRealtimeItemCompleted
+            }
+            Self::ThreadRealtimeTranscriptDelta { .. } => {
+                ServerNotificationMethod::ThreadRealtimeTranscriptDelta
+            }
+            Self::ThreadRealtimeTranscriptDone { .. } => {
+                ServerNotificationMethod::ThreadRealtimeTranscriptDone
+            }
+            Self::ThreadRealtimeOutputAudioDelta { .. } => {
+                ServerNotificationMethod::ThreadRealtimeOutputAudioDelta
+            }
+            Self::ThreadRealtimeSdp { .. } => ServerNotificationMethod::ThreadRealtimeSdp,
+            Self::ThreadRealtimeError { .. } => ServerNotificationMethod::ThreadRealtimeError,
+            Self::ThreadRealtimeClosed { .. } => ServerNotificationMethod::ThreadRealtimeClosed,
+            Self::WindowsWorldWritableWarning { .. } => {
+                ServerNotificationMethod::WindowsWorldWritableWarning
+            }
+            Self::WindowsSandboxSetupCompleted { .. } => {
+                ServerNotificationMethod::WindowsSandboxSetupCompleted
+            }
+            Self::AccountLoginCompleted { .. } => ServerNotificationMethod::AccountLoginCompleted,
+        }
+    }
+    pub fn from_params(
+        method: ServerNotificationMethod,
+        params: Option<&str>,
+        emitted_at_ms: Option<i64>,
+    ) -> Result<Self, studio_json::Error> {
+        Ok(match method {
+            ServerNotificationMethod::Error => Self::Error {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadStarted => Self::ThreadStarted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadStatusChanged => Self::ThreadStatusChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadReadStateChanged => Self::ThreadReadStateChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadArchived => Self::ThreadArchived {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadDeleted => Self::ThreadDeleted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadUnarchived => Self::ThreadUnarchived {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadClosed => Self::ThreadClosed {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadReverted => Self::ThreadReverted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::SkillsChanged => Self::SkillsChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadNameUpdated => Self::ThreadNameUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadSectionChanged => Self::ThreadSectionChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadAttachmentUpdated => Self::ThreadAttachmentUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadGoalUpdated => Self::ThreadGoalUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadPredictionUpdated => Self::ThreadPredictionUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadGoalCleared => Self::ThreadGoalCleared {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadQueueChanged => Self::ThreadQueueChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ProjectChanged => Self::ProjectChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadProjectUpdated => Self::ThreadProjectUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadEnvironmentConnected => {
+                Self::ThreadEnvironmentConnected {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadEnvironmentDisconnected => {
+                Self::ThreadEnvironmentDisconnected {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadSettingsUpdated => Self::ThreadSettingsUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadTokenUsageUpdated => Self::ThreadTokenUsageUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::TurnStarted => Self::TurnStarted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::HookStarted => Self::HookStarted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::TurnCompleted => Self::TurnCompleted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::HookCompleted => Self::HookCompleted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::TurnDiffUpdated => Self::TurnDiffUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::TurnPlanUpdated => Self::TurnPlanUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemStarted => Self::ItemStarted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemAutoApprovalReviewStarted => {
+                Self::ItemAutoApprovalReviewStarted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemAutoApprovalReviewCompleted => {
+                Self::ItemAutoApprovalReviewCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::AutoApprovalReviewStrictReviewRequired => {
+                Self::AutoApprovalReviewStrictReviewRequired {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemCompleted => Self::ItemCompleted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemAgentMessageDelta => Self::ItemAgentMessageDelta {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemPlanDelta => Self::ItemPlanDelta {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::CommandExecOutputDelta => Self::CommandExecOutputDelta {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ProcessOutputDelta => Self::ProcessOutputDelta {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ProcessExited => Self::ProcessExited {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemCommandExecutionOutputDelta => {
+                Self::ItemCommandExecutionOutputDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemCommandExecutionTerminalInteraction => {
+                Self::ItemCommandExecutionTerminalInteraction {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemFileChangeOutputDelta => {
+                Self::ItemFileChangeOutputDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemFileChangePatchUpdated => {
+                Self::ItemFileChangePatchUpdated {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ServerRequestResolved => Self::ServerRequestResolved {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemMcpToolCallProgress => Self::ItemMcpToolCallProgress {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::McpServerOauthLoginCompleted => {
+                Self::McpServerOauthLoginCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::McpServerStartupStatusUpdated => {
+                Self::McpServerStartupStatusUpdated {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::McpServerEventStreamNotification => {
+                Self::McpServerEventStreamNotification {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::AccountUpdated => Self::AccountUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::AccountGatewayOAuthChanged => {
+                Self::AccountGatewayOAuthChanged {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::AccountRateLimitsUpdated => Self::AccountRateLimitsUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::AppListUpdated => Self::AppListUpdated {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::RemoteControlStatusChanged => {
+                Self::RemoteControlStatusChanged {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ExternalAgentConfigImportProgress => {
+                Self::ExternalAgentConfigImportProgress {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ExternalAgentConfigImportCompleted => {
+                Self::ExternalAgentConfigImportCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::FsChanged => Self::FsChanged {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ItemReasoningSummaryTextDelta => {
+                Self::ItemReasoningSummaryTextDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemReasoningSummaryPartAdded => {
+                Self::ItemReasoningSummaryPartAdded {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ItemReasoningTextDelta => Self::ItemReasoningTextDelta {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadCompacted => Self::ThreadCompacted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ModelRerouted => Self::ModelRerouted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ModelVerification => Self::ModelVerification {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ModelProviderAuthRecoveryStarted => {
+                Self::ModelProviderAuthRecoveryStarted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ModelProviderAuthRecoveryCompleted => {
+                Self::ModelProviderAuthRecoveryCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::TurnModerationMetadata => Self::TurnModerationMetadata {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ModelSafetyBufferingUpdated => {
+                Self::ModelSafetyBufferingUpdated {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::Warning => Self::Warning {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::GuardianWarning => Self::GuardianWarning {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::DeprecationNotice => Self::DeprecationNotice {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ConfigWarning => Self::ConfigWarning {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::FuzzyFileSearchSessionUpdated => {
+                Self::FuzzyFileSearchSessionUpdated {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::FuzzyFileSearchSessionCompleted => {
+                Self::FuzzyFileSearchSessionCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeStarted => Self::ThreadRealtimeStarted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadRealtimeItemAdded => Self::ThreadRealtimeItemAdded {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadRealtimeItemStarted => {
+                Self::ThreadRealtimeItemStarted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeItemTranscriptDelta => {
+                Self::ThreadRealtimeItemTranscriptDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeItemCompleted => {
+                Self::ThreadRealtimeItemCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeTranscriptDelta => {
+                Self::ThreadRealtimeTranscriptDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeTranscriptDone => {
+                Self::ThreadRealtimeTranscriptDone {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeOutputAudioDelta => {
+                Self::ThreadRealtimeOutputAudioDelta {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::ThreadRealtimeSdp => Self::ThreadRealtimeSdp {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadRealtimeError => Self::ThreadRealtimeError {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::ThreadRealtimeClosed => Self::ThreadRealtimeClosed {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+            ServerNotificationMethod::WindowsWorldWritableWarning => {
+                Self::WindowsWorldWritableWarning {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::WindowsSandboxSetupCompleted => {
+                Self::WindowsSandboxSetupCompleted {
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                    emitted_at_ms,
+                }
+            }
+            ServerNotificationMethod::AccountLoginCompleted => Self::AccountLoginCompleted {
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+                emitted_at_ms,
+            },
+        })
+    }
+}
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ServerRequestMethod {
     #[serde(rename = "item/commandExecution/requestApproval")]
@@ -22802,6 +33036,158 @@ impl ServerRequestMethod {
         ]
     }
 }
+impl ServerRequest {
+    pub const fn method(&self) -> ServerRequestMethod {
+        match self {
+            Self::ItemCommandExecutionRequestApproval { .. } => {
+                ServerRequestMethod::ItemCommandExecutionRequestApproval
+            }
+            Self::ItemFileChangeRequestApproval { .. } => {
+                ServerRequestMethod::ItemFileChangeRequestApproval
+            }
+            Self::ItemToolRequestUserInput { .. } => ServerRequestMethod::ItemToolRequestUserInput,
+            Self::McpServerElicitationRequest { .. } => {
+                ServerRequestMethod::McpServerElicitationRequest
+            }
+            Self::ItemPermissionsRequestApproval { .. } => {
+                ServerRequestMethod::ItemPermissionsRequestApproval
+            }
+            Self::ItemToolCall { .. } => ServerRequestMethod::ItemToolCall,
+            Self::AccountChatgptAuthTokensRefresh { .. } => {
+                ServerRequestMethod::AccountChatgptAuthTokensRefresh
+            }
+            Self::AttestationGenerate { .. } => ServerRequestMethod::AttestationGenerate,
+            Self::CurrentTimeRead { .. } => ServerRequestMethod::CurrentTimeRead,
+            Self::ApplyPatchApproval { .. } => ServerRequestMethod::ApplyPatchApproval,
+            Self::ExecCommandApproval { .. } => ServerRequestMethod::ExecCommandApproval,
+        }
+    }
+    pub fn from_params(
+        id: RequestId,
+        method: ServerRequestMethod,
+        params: Option<&str>,
+    ) -> Result<Self, studio_json::Error> {
+        Ok(match method {
+            ServerRequestMethod::ItemCommandExecutionRequestApproval => {
+                Self::ItemCommandExecutionRequestApproval {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ServerRequestMethod::ItemFileChangeRequestApproval => {
+                Self::ItemFileChangeRequestApproval {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ServerRequestMethod::ItemToolRequestUserInput => Self::ItemToolRequestUserInput {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::McpServerElicitationRequest => Self::McpServerElicitationRequest {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::ItemPermissionsRequestApproval => {
+                Self::ItemPermissionsRequestApproval {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ServerRequestMethod::ItemToolCall => Self::ItemToolCall {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::AccountChatgptAuthTokensRefresh => {
+                Self::AccountChatgptAuthTokensRefresh {
+                    id,
+                    params: studio_json::from_str(params.ok_or_else(|| {
+                        <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                    })?)?,
+                }
+            }
+            ServerRequestMethod::AttestationGenerate => Self::AttestationGenerate {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::CurrentTimeRead => Self::CurrentTimeRead {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::ApplyPatchApproval => Self::ApplyPatchApproval {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+            ServerRequestMethod::ExecCommandApproval => Self::ExecCommandApproval {
+                id,
+                params: studio_json::from_str(params.ok_or_else(|| {
+                    <studio_json::Error as serde::de::Error>::custom("missing vendor params")
+                })?)?,
+            },
+        })
+    }
+    pub const fn id(&self) -> &RequestId {
+        match self {
+            Self::ItemCommandExecutionRequestApproval { r#id, .. } => r#id,
+            Self::ItemFileChangeRequestApproval { r#id, .. } => r#id,
+            Self::ItemToolRequestUserInput { r#id, .. } => r#id,
+            Self::McpServerElicitationRequest { r#id, .. } => r#id,
+            Self::ItemPermissionsRequestApproval { r#id, .. } => r#id,
+            Self::ItemToolCall { r#id, .. } => r#id,
+            Self::AccountChatgptAuthTokensRefresh { r#id, .. } => r#id,
+            Self::AttestationGenerate { r#id, .. } => r#id,
+            Self::CurrentTimeRead { r#id, .. } => r#id,
+            Self::ApplyPatchApproval { r#id, .. } => r#id,
+            Self::ExecCommandApproval { r#id, .. } => r#id,
+        }
+    }
+    pub fn set_id(&mut self, new_id: RequestId) {
+        match self {
+            Self::ItemCommandExecutionRequestApproval { r#id, .. } => *r#id = new_id,
+            Self::ItemFileChangeRequestApproval { r#id, .. } => *r#id = new_id,
+            Self::ItemToolRequestUserInput { r#id, .. } => *r#id = new_id,
+            Self::McpServerElicitationRequest { r#id, .. } => *r#id = new_id,
+            Self::ItemPermissionsRequestApproval { r#id, .. } => *r#id = new_id,
+            Self::ItemToolCall { r#id, .. } => *r#id = new_id,
+            Self::AccountChatgptAuthTokensRefresh { r#id, .. } => *r#id = new_id,
+            Self::AttestationGenerate { r#id, .. } => *r#id = new_id,
+            Self::CurrentTimeRead { r#id, .. } => *r#id = new_id,
+            Self::ApplyPatchApproval { r#id, .. } => *r#id = new_id,
+            Self::ExecCommandApproval { r#id, .. } => *r#id = new_id,
+        }
+    }
+    pub fn from_method_params(
+        id: RequestId,
+        method: ServerRequestMethod,
+        params: &impl serde::Serialize,
+    ) -> Result<Self, studio_json::Error> {
+        #[derive(serde::Serialize)]
+        struct Wire<'a, T> {
+            id: RequestId,
+            method: ServerRequestMethod,
+            params: &'a T,
+        }
+        studio_json::from_slice(&studio_json::to_vec(&Wire { id, method, params })?)
+    }
+}
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "method", content = "result")]
 pub enum ServerRequestResult {
@@ -22827,6 +33213,407 @@ pub enum ServerRequestResult {
     ApplyPatchApproval(Box<ApplyPatchApprovalResponse>),
     #[serde(rename = "execCommandApproval")]
     ExecCommandApproval(Box<ExecCommandApprovalResponse>),
+}
+impl VisitUnknown for ServerRequestResult {
+    fn visit_unknowns(&self, _visitor: &mut dyn FnMut(&'static str, &str)) {
+        match self {
+            Self::ItemCommandExecutionRequestApproval(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ItemFileChangeRequestApproval(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ItemToolRequestUserInput(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::McpServerElicitationRequest(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ItemPermissionsRequestApproval(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::ItemToolCall(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::AccountChatgptAuthTokensRefresh(value) => {
+                VisitUnknown::visit_unknowns(value, _visitor)
+            }
+            Self::AttestationGenerate(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::CurrentTimeRead(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ApplyPatchApproval(value) => VisitUnknown::visit_unknowns(value, _visitor),
+            Self::ExecCommandApproval(value) => VisitUnknown::visit_unknowns(value, _visitor),
+        }
+    }
+}
+impl ServerRequestResult {
+    pub const fn method(&self) -> ServerRequestMethod {
+        match self {
+            Self::ItemCommandExecutionRequestApproval(_) => {
+                ServerRequestMethod::ItemCommandExecutionRequestApproval
+            }
+            Self::ItemFileChangeRequestApproval(_) => {
+                ServerRequestMethod::ItemFileChangeRequestApproval
+            }
+            Self::ItemToolRequestUserInput(_) => ServerRequestMethod::ItemToolRequestUserInput,
+            Self::McpServerElicitationRequest(_) => {
+                ServerRequestMethod::McpServerElicitationRequest
+            }
+            Self::ItemPermissionsRequestApproval(_) => {
+                ServerRequestMethod::ItemPermissionsRequestApproval
+            }
+            Self::ItemToolCall(_) => ServerRequestMethod::ItemToolCall,
+            Self::AccountChatgptAuthTokensRefresh(_) => {
+                ServerRequestMethod::AccountChatgptAuthTokensRefresh
+            }
+            Self::AttestationGenerate(_) => ServerRequestMethod::AttestationGenerate,
+            Self::CurrentTimeRead(_) => ServerRequestMethod::CurrentTimeRead,
+            Self::ApplyPatchApproval(_) => ServerRequestMethod::ApplyPatchApproval,
+            Self::ExecCommandApproval(_) => ServerRequestMethod::ExecCommandApproval,
+        }
+    }
+    pub fn decode(method: ServerRequestMethod, result: &str) -> Result<Self, studio_json::Error> {
+        match method {
+            ServerRequestMethod::ItemCommandExecutionRequestApproval => {
+                studio_json::from_str(result)
+                    .map(|result| Self::ItemCommandExecutionRequestApproval(Box::new(result)))
+            }
+            ServerRequestMethod::ItemFileChangeRequestApproval => studio_json::from_str(result)
+                .map(|result| Self::ItemFileChangeRequestApproval(Box::new(result))),
+            ServerRequestMethod::ItemToolRequestUserInput => studio_json::from_str(result)
+                .map(|result| Self::ItemToolRequestUserInput(Box::new(result))),
+            ServerRequestMethod::McpServerElicitationRequest => studio_json::from_str(result)
+                .map(|result| Self::McpServerElicitationRequest(Box::new(result))),
+            ServerRequestMethod::ItemPermissionsRequestApproval => studio_json::from_str(result)
+                .map(|result| Self::ItemPermissionsRequestApproval(Box::new(result))),
+            ServerRequestMethod::ItemToolCall => {
+                studio_json::from_str(result).map(|result| Self::ItemToolCall(Box::new(result)))
+            }
+            ServerRequestMethod::AccountChatgptAuthTokensRefresh => studio_json::from_str(result)
+                .map(|result| Self::AccountChatgptAuthTokensRefresh(Box::new(result))),
+            ServerRequestMethod::AttestationGenerate => studio_json::from_str(result)
+                .map(|result| Self::AttestationGenerate(Box::new(result))),
+            ServerRequestMethod::CurrentTimeRead => {
+                studio_json::from_str(result).map(|result| Self::CurrentTimeRead(Box::new(result)))
+            }
+            ServerRequestMethod::ApplyPatchApproval => studio_json::from_str(result)
+                .map(|result| Self::ApplyPatchApproval(Box::new(result))),
+            ServerRequestMethod::ExecCommandApproval => studio_json::from_str(result)
+                .map(|result| Self::ExecCommandApproval(Box::new(result))),
+        }
+    }
+    pub fn serialize_payload<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::ItemCommandExecutionRequestApproval(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ItemFileChangeRequestApproval(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ItemToolRequestUserInput(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::McpServerElicitationRequest(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ItemPermissionsRequestApproval(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::ItemToolCall(result) => serde::Serialize::serialize(result, serializer),
+            Self::AccountChatgptAuthTokensRefresh(result) => {
+                serde::Serialize::serialize(result, serializer)
+            }
+            Self::AttestationGenerate(result) => serde::Serialize::serialize(result, serializer),
+            Self::CurrentTimeRead(result) => serde::Serialize::serialize(result, serializer),
+            Self::ApplyPatchApproval(result) => serde::Serialize::serialize(result, serializer),
+            Self::ExecCommandApproval(result) => serde::Serialize::serialize(result, serializer),
+        }
+    }
+}
+
+/// Expand the vendor method inventory into a consumer's method definition.
+#[macro_export]
+macro_rules! codex_methods {
+    ($consumer:ident) => {
+        $consumer! {
+            Initialize => "initialize",
+            ServerDiagnostics => "server/diagnostics",
+            UserVerificationStatus => "userVerification/status",
+            UserVerificationEnroll => "userVerification/enroll",
+            UserVerificationDelete => "userVerification/delete",
+            UserVerificationVerify => "userVerification/verify",
+            UserVerificationCancel => "userVerification/cancel",
+            ThreadStart => "thread/start",
+            ThreadResume => "thread/resume",
+            ThreadFork => "thread/fork",
+            ThreadSample => "thread/sample",
+            ThreadSampleCancel => "thread/sample/cancel",
+            ThreadArchive => "thread/archive",
+            ThreadDelete => "thread/delete",
+            ThreadUnsubscribe => "thread/unsubscribe",
+            ThreadIncrementElicitation => "thread/increment_elicitation",
+            ThreadDecrementElicitation => "thread/decrement_elicitation",
+            ThreadNameSet => "thread/name/set",
+            ThreadPredictionRequest => "thread/prediction/request",
+            ThreadGoalSet => "thread/goal/set",
+            ThreadGoalGet => "thread/goal/get",
+            ThreadGoalClear => "thread/goal/clear",
+            ThreadQueueAdd => "thread/queue/add",
+            ThreadQueueList => "thread/queue/list",
+            ThreadQueueUpdate => "thread/queue/update",
+            ThreadQueueDelete => "thread/queue/delete",
+            ThreadQueueReorder => "thread/queue/reorder",
+            ThreadQueueStart => "thread/queue/start",
+            ThreadMetadataUpdate => "thread/metadata/update",
+            ThreadAttachmentAdd => "thread/attachment/add",
+            ThreadAttachmentList => "thread/attachment/list",
+            ThreadAttachmentOwnerList => "thread/attachmentOwner/list",
+            ThreadAttachmentRemove => "thread/attachment/remove",
+            ThreadSectionMove => "thread/section/move",
+            ThreadSettingsUpdate => "thread/settings/update",
+            ThreadMemoryModeSet => "thread/memoryMode/set",
+            ThreadMemoryRead => "thread/memory/read",
+            MemoryStatus => "memory/status",
+            MemoryReset => "memory/reset",
+            RolloutCompress => "rollout/compress",
+            ThreadUnarchive => "thread/unarchive",
+            ThreadCompactStart => "thread/compact/start",
+            ThreadShellCommand => "thread/shellCommand",
+            ThreadApproveGuardianDeniedAction => "thread/approveGuardianDeniedAction",
+            ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean",
+            ThreadBackgroundTerminalsList => "thread/backgroundTerminals/list",
+            ThreadBackgroundTerminalsTerminate => "thread/backgroundTerminals/terminate",
+            ThreadRevert => "thread/revert",
+            ThreadList => "thread/list",
+            ProjectList => "project/list",
+            ProjectRead => "project/read",
+            ProjectCreate => "project/create",
+            CodexProjectImport => "project/import",
+            ProjectUpdate => "project/update",
+            ProjectMove => "project/move",
+            ProjectDelete => "project/delete",
+            ThreadSectionList => "threadSection/list",
+            ThreadSectionCreate => "threadSection/create",
+            ThreadSectionUpdate => "threadSection/update",
+            ThreadSectionDelete => "threadSection/delete",
+            ThreadSearch => "thread/search",
+            ThreadSearchOccurrences => "thread/searchOccurrences",
+            ThreadLoadedList => "thread/loaded/list",
+            ThreadRead => "thread/read",
+            ThreadReadStateUpdate => "thread/readState/update",
+            ThreadTurnsList => "thread/turns/list",
+            ThreadItemsList => "thread/items/list",
+            ThreadItemsRead => "thread/items/read",
+            ThreadGuardianReview => "thread/guardianReview",
+            ThreadInjectItems => "thread/inject_items",
+            SkillsList => "skills/list",
+            SkillsExtraRootsSet => "skills/extraRoots/set",
+            HooksList => "hooks/list",
+            MarketplaceAdd => "marketplace/add",
+            MarketplaceRemove => "marketplace/remove",
+            MarketplaceUpgrade => "marketplace/upgrade",
+            PluginList => "plugin/list",
+            PluginSearch => "plugin/search",
+            PluginInstalled => "plugin/installed",
+            PluginReconcile => "plugin/reconcile",
+            PluginRead => "plugin/read",
+            PluginSkillRead => "plugin/skill/read",
+            PluginShareSave => "plugin/share/save",
+            PluginShareUpdateTargets => "plugin/share/updateTargets",
+            PluginShareList => "plugin/share/list",
+            PluginShareCheckout => "plugin/share/checkout",
+            PluginShareDelete => "plugin/share/delete",
+            AppRead => "app/read",
+            AppList => "app/list",
+            AppInstalled => "app/installed",
+            FsReadFile => "fs/readFile",
+            FsWriteFile => "fs/writeFile",
+            FsCreateDirectory => "fs/createDirectory",
+            FsGetMetadata => "fs/getMetadata",
+            FsReadDirectory => "fs/readDirectory",
+            FsRemove => "fs/remove",
+            FsCopy => "fs/copy",
+            FsWatch => "fs/watch",
+            FsUnwatch => "fs/unwatch",
+            SkillsConfigWrite => "skills/config/write",
+            PluginInstall => "plugin/install",
+            PluginUninstall => "plugin/uninstall",
+            TurnStart => "turn/start",
+            TurnSettingsUpdate => "turn/settings/update",
+            TurnSteer => "turn/steer",
+            TurnInterrupt => "turn/interrupt",
+            ThreadRealtimeStart => "thread/realtime/start",
+            ThreadRealtimeAppendAudio => "thread/realtime/appendAudio",
+            ThreadRealtimeAppendText => "thread/realtime/appendText",
+            ThreadRealtimeAppendSpeech => "thread/realtime/appendSpeech",
+            ThreadRealtimeStop => "thread/realtime/stop",
+            ThreadTimelineList => "thread/timeline/list",
+            ThreadRealtimeListVoices => "thread/realtime/listVoices",
+            ReviewStart => "review/start",
+            ModelList => "model/list",
+            AccountGatewayOAuthRead => "account/gatewayOAuth/read",
+            AccountGatewayOAuthLogin => "account/gatewayOAuth/login",
+            AccountGatewayOAuthCancel => "account/gatewayOAuth/cancel",
+            ModelProviderCapabilitiesRead => "modelProvider/capabilities/read",
+            ExperimentalFeatureList => "experimentalFeature/list",
+            PermissionProfileList => "permissionProfile/list",
+            ExperimentalFeatureEnablementSet => "experimentalFeature/enablement/set",
+            RemoteControlEnable => "remoteControl/enable",
+            RemoteControlDisable => "remoteControl/disable",
+            RemoteControlStatusRead => "remoteControl/status/read",
+            RemoteControlPairingStart => "remoteControl/pairing/start",
+            RemoteControlPairingStatus => "remoteControl/pairing/status",
+            RemoteControlClientList => "remoteControl/client/list",
+            RemoteControlClientRevoke => "remoteControl/client/revoke",
+            CollaborationModeList => "collaborationMode/list",
+            MockExperimentalMethod => "mock/experimentalMethod",
+            EnvironmentAdd => "environment/add",
+            EnvironmentInfo => "environment/info",
+            EnvironmentStatus => "environment/status",
+            McpServerOauthLogin => "mcpServer/oauth/login",
+            ConfigMcpServerReload => "config/mcpServer/reload",
+            McpServerStatusList => "mcpServerStatus/list",
+            McpServerResourceRead => "mcpServer/resource/read",
+            McpServerEventStreamStart => "mcpServer/event/stream/start",
+            McpServerEventStreamStop => "mcpServer/event/stream/stop",
+            McpServerToolCall => "mcpServer/tool/call",
+            WindowsSandboxSetupStart => "windowsSandbox/setupStart",
+            WindowsSandboxReadiness => "windowsSandbox/readiness",
+            AccountLoginStart => "account/login/start",
+            AccountBedrockDiscover => "account/bedrock/discover",
+            AccountBedrockSetup => "account/bedrock/setup",
+            AccountGcpSetup => "account/gcp/setup",
+            AccountBedrockCheckGovCloudRequirements => "account/bedrock/checkGovCloudRequirements",
+            AccountLoginCancel => "account/login/cancel",
+            AccountSessionList => "accountSession/list",
+            AccountSessionSwitch => "accountSession/switch",
+            AccountLogout => "account/logout",
+            AccountRateLimitsRead => "account/rateLimits/read",
+            AccountRateLimitResetCreditConsume => "account/rateLimitResetCredit/consume",
+            AccountUsageRead => "account/usage/read",
+            AccountWorkspaceMessagesRead => "account/workspaceMessages/read",
+            AccountSendAddCreditsNudgeEmail => "account/sendAddCreditsNudgeEmail",
+            FeedbackUpload => "feedback/upload",
+            FeedbackSave => "feedback/save",
+            CommandExec => "command/exec",
+            CommandExecWrite => "command/exec/write",
+            CommandExecTerminate => "command/exec/terminate",
+            CommandExecResize => "command/exec/resize",
+            ProcessSpawn => "process/spawn",
+            ProcessWriteStdin => "process/writeStdin",
+            ProcessKill => "process/kill",
+            ProcessResizePty => "process/resizePty",
+            ConfigRead => "config/read",
+            ExternalAgentConfigDetect => "externalAgentConfig/detect",
+            ExternalAgentConfigImport => "externalAgentConfig/import",
+            ExternalAgentConfigImportRecordHistory => "externalAgentConfig/import/recordHistory",
+            ExternalAgentConfigImportReadHistories => "externalAgentConfig/import/readHistories",
+            ConfigValueWrite => "config/value/write",
+            ConfigBatchWrite => "config/batchWrite",
+            ConfigRequirementsRead => "configRequirements/read",
+            AccountRead => "account/read",
+            FuzzyFileSearch => "fuzzyFileSearch",
+            FuzzyFileSearchSessionStart => "fuzzyFileSearch/sessionStart",
+            FuzzyFileSearchSessionUpdate => "fuzzyFileSearch/sessionUpdate",
+            FuzzyFileSearchSessionStop => "fuzzyFileSearch/sessionStop",
+            Initialized => "initialized",
+            ProtocolError => "error",
+            ThreadStarted => "thread/started",
+            ThreadStatusChanged => "thread/status/changed",
+            ThreadReadStateChanged => "thread/readState/changed",
+            ThreadArchived => "thread/archived",
+            ThreadDeleted => "thread/deleted",
+            ThreadUnarchived => "thread/unarchived",
+            ThreadClosed => "thread/closed",
+            ThreadReverted => "thread/reverted",
+            SkillsChanged => "skills/changed",
+            ThreadNameUpdated => "thread/name/updated",
+            ThreadSectionChanged => "thread/section/changed",
+            ThreadAttachmentUpdated => "thread/attachment/updated",
+            ThreadGoalUpdated => "thread/goal/updated",
+            ThreadPredictionUpdated => "thread/prediction/updated",
+            ThreadGoalCleared => "thread/goal/cleared",
+            ThreadQueueChanged => "thread/queue/changed",
+            ProjectChanged => "project/changed",
+            ThreadProjectUpdated => "thread/project/updated",
+            ThreadEnvironmentConnected => "thread/environment/connected",
+            ThreadEnvironmentDisconnected => "thread/environment/disconnected",
+            ThreadSettingsUpdated => "thread/settings/updated",
+            ThreadTokenUsageUpdated => "thread/tokenUsage/updated",
+            TurnStarted => "turn/started",
+            HookStarted => "hook/started",
+            TurnCompleted => "turn/completed",
+            HookCompleted => "hook/completed",
+            TurnDiffUpdated => "turn/diff/updated",
+            TurnPlanUpdated => "turn/plan/updated",
+            ItemStarted => "item/started",
+            ItemAutoApprovalReviewStarted => "item/autoApprovalReview/started",
+            ItemAutoApprovalReviewCompleted => "item/autoApprovalReview/completed",
+            AutoApprovalReviewStrictReviewRequired => "autoApprovalReview/strictReviewRequired",
+            ItemCompleted => "item/completed",
+            ItemAgentMessageDelta => "item/agentMessage/delta",
+            ItemPlanDelta => "item/plan/delta",
+            CommandExecOutputDelta => "command/exec/outputDelta",
+            ProcessOutputDelta => "process/outputDelta",
+            ProcessExited => "process/exited",
+            ItemCommandExecutionOutputDelta => "item/commandExecution/outputDelta",
+            ItemCommandExecutionTerminalInteraction => "item/commandExecution/terminalInteraction",
+            ItemFileChangeOutputDelta => "item/fileChange/outputDelta",
+            ItemFileChangePatchUpdated => "item/fileChange/patchUpdated",
+            ServerRequestResolved => "serverRequest/resolved",
+            ItemMcpToolCallProgress => "item/mcpToolCall/progress",
+            McpServerOauthLoginCompleted => "mcpServer/oauthLogin/completed",
+            McpServerStartupStatusUpdated => "mcpServer/startupStatus/updated",
+            McpServerEventStreamNotification => "mcpServer/event/stream/notification",
+            AccountUpdated => "account/updated",
+            AccountGatewayOAuthChanged => "account/gatewayOAuth/changed",
+            AccountRateLimitsUpdated => "account/rateLimits/updated",
+            AppListUpdated => "app/list/updated",
+            RemoteControlStatusChanged => "remoteControl/status/changed",
+            ExternalAgentConfigImportProgress => "externalAgentConfig/import/progress",
+            ExternalAgentConfigImportCompleted => "externalAgentConfig/import/completed",
+            FsChanged => "fs/changed",
+            ItemReasoningSummaryTextDelta => "item/reasoning/summaryTextDelta",
+            ItemReasoningSummaryPartAdded => "item/reasoning/summaryPartAdded",
+            ItemReasoningTextDelta => "item/reasoning/textDelta",
+            ThreadCompacted => "thread/compacted",
+            ModelRerouted => "model/rerouted",
+            ModelVerification => "model/verification",
+            ModelProviderAuthRecoveryStarted => "modelProvider/authRecoveryStarted",
+            ModelProviderAuthRecoveryCompleted => "modelProvider/authRecoveryCompleted",
+            TurnModerationMetadata => "turn/moderationMetadata",
+            ModelSafetyBufferingUpdated => "model/safetyBuffering/updated",
+            Warning => "warning",
+            GuardianWarning => "guardianWarning",
+            DeprecationNotice => "deprecationNotice",
+            ConfigWarning => "configWarning",
+            FuzzyFileSearchSessionUpdated => "fuzzyFileSearch/sessionUpdated",
+            FuzzyFileSearchSessionCompleted => "fuzzyFileSearch/sessionCompleted",
+            ThreadRealtimeStarted => "thread/realtime/started",
+            ThreadRealtimeItemAdded => "thread/realtime/itemAdded",
+            ThreadRealtimeItemStarted => "thread/realtime/item/started",
+            ThreadRealtimeItemTranscriptDelta => "thread/realtime/item/transcript/delta",
+            ThreadRealtimeItemCompleted => "thread/realtime/item/completed",
+            ThreadRealtimeTranscriptDelta => "thread/realtime/transcript/delta",
+            ThreadRealtimeTranscriptDone => "thread/realtime/transcript/done",
+            ThreadRealtimeOutputAudioDelta => "thread/realtime/outputAudio/delta",
+            ThreadRealtimeSdp => "thread/realtime/sdp",
+            ThreadRealtimeError => "thread/realtime/error",
+            ThreadRealtimeClosed => "thread/realtime/closed",
+            WindowsWorldWritableWarning => "windows/worldWritableWarning",
+            WindowsSandboxSetupCompleted => "windowsSandbox/setupCompleted",
+            AccountLoginCompleted => "account/login/completed",
+            ItemCommandExecutionRequestApproval => "item/commandExecution/requestApproval",
+            ItemFileChangeRequestApproval => "item/fileChange/requestApproval",
+            ItemToolRequestUserInput => "item/tool/requestUserInput",
+            McpServerElicitationRequest => "mcpServer/elicitation/request",
+            ItemPermissionsRequestApproval => "item/permissions/requestApproval",
+            ItemToolCall => "item/tool/call",
+            AccountChatgptAuthTokensRefresh => "account/chatgptAuthTokens/refresh",
+            AttestationGenerate => "attestation/generate",
+            CurrentTimeRead => "currentTime/read",
+            ApplyPatchApproval => "applyPatchApproval",
+            ExecCommandApproval => "execCommandApproval",
+        }
+    };
 }
 
 #[cfg(test)]

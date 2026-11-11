@@ -1759,6 +1759,10 @@ mod tests {
                 Ok(self.current_scope(account).expect("fixture scope"))
             })
         }
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+        )]
         fn provider_request<'a>(
             &'a self,
             request: ProviderRequest,
@@ -1800,146 +1804,7 @@ mod tests {
                             .insert(request.operation.clone());
                         return Err(AccountSessionError::Unknown);
                     }
-                    other @ Method::Initialize
-                    | other @ Method::Initialized
-                    | other @ Method::Ack
-                    | other @ Method::AccountLoginCancel
-                    | other @ Method::AccountLoginStart
-                    | other @ Method::AccountRateLimitResetCreditConsume
-                    | other @ Method::ThreadLoadedList
-                    | other @ Method::ConfigRead
-                    | other @ Method::SkillsExtraRootsSet
-                    | other @ Method::AccountRead
-                    | other @ Method::AccountRateLimitsRead
-                    | other @ Method::ThreadRealtimeStart
-                    | other @ Method::ThreadRealtimeStop
-                    | other @ Method::ThreadRealtimeAppendSpeech
-                    | other @ Method::ThreadRealtimeItemStarted
-                    | other @ Method::ThreadRealtimeTranscriptDelta
-                    | other @ Method::ThreadRealtimeTranscriptDone
-                    | other @ Method::ThreadRealtimeSdp
-                    | other @ Method::ThreadRealtimeError
-                    | other @ Method::ThreadRealtimeClosed
-                    | other @ Method::ThreadResume
-                    | other @ Method::ThreadRead
-                    | other @ Method::TurnStart
-                    | other @ Method::TurnSteer
-                    | other @ Method::TurnInterrupt
-                    | other @ Method::ThreadList
-                    | other @ Method::ThreadArchive
-                    | other @ Method::ThreadNameSet
-                    | other @ Method::ThreadMetadataUpdate
-                    | other @ Method::ThreadSettingsUpdate
-                    | other @ Method::ThreadCompactStart
-                    | other @ Method::ThreadRollback
-                    | other @ Method::ThreadItemsList
-                    | other @ Method::ThreadGoalSet
-                    | other @ Method::ThreadGoalUpdated
-                    | other @ Method::ThreadUnarchive
-                    | other @ Method::ThreadUnsubscribe
-                    | other @ Method::ProcessSpawn
-                    | other @ Method::ProcessWriteStdin
-                    | other @ Method::ProcessKill
-                    | other @ Method::ProcessResizePty
-                    | other @ Method::CommandExec
-                    | other @ Method::CommandExecWrite
-                    | other @ Method::CommandExecResize
-                    | other @ Method::CommandExecTerminate
-                    | other @ Method::ThreadBackgroundTerminalsList
-                    | other @ Method::ThreadBackgroundTerminalsTerminate
-                    | other @ Method::ThreadBackgroundTerminalsClean
-                    | other @ Method::ThreadCommandExecutionBackground
-                    | other @ Method::ThreadQueueList
-                    | other @ Method::ClaudeState
-                    | other @ Method::ClaudeRepairReport
-                    | other @ Method::ClaudeFileBackups
-                    | other @ Method::ClaudeSettings
-                    | other @ Method::ClaudeActivity
-                    | other @ Method::ClaudeStopTask
-                    | other @ Method::ClaudeShellPolicy
-                    | other @ Method::ClaudeDiagnostics
-                    | other @ Method::ClaudeMoveVersions
-                    | other @ Method::McpServerReconnect
-                    | other @ Method::McpServerStatusList
-                    | other @ Method::SkillsList
-                    | other @ Method::OperationStatus
-                    | other @ Method::ReviewStart
-                    | other @ Method::BrowserAnswer
-                    | other @ Method::BrowserCallback
-                    | other @ Method::BrowserClose
-                    | other @ Method::BrowserWait
-                    | other @ Method::ClaudeCommands
-                    | other @ Method::ClaudeMoveExport
-                    | other @ Method::ClaudeMoveImport
-                    | other @ Method::ClaudeMoveIdentity
-                    | other @ Method::ClaudeMovePreflight
-                    | other @ Method::ClaudeMoveProof
-                    | other @ Method::Detach
-                    | other @ Method::EventRead
-                    | other @ Method::Exec
-                    | other @ Method::Generate
-                    | other @ Method::Health
-                    | other @ Method::Info
-                    | other @ Method::LayrHealth
-                    | other @ Method::Next
-                    | other @ Method::Open
-                    | other @ Method::ProjectEnsure
-                    | other @ Method::ProjectExec
-                    | other @ Method::ProjectImport
-                    | other @ Method::ProviderList
-                    | other @ Method::Replay
-                    | other @ Method::ResponseStatus
-                    | other @ Method::RetireCommand
-                    | other @ Method::SecretsList
-                    | other @ Method::SecretsRemove
-                    | other @ Method::SecretsSet
-                    | other @ Method::ShareConfigure
-                    | other @ Method::ShareName
-                    | other @ Method::ShareStatus
-                    | other @ Method::Sign
-                    | other @ Method::Status
-                    | other @ Method::SyncMacApply
-                    | other @ Method::SyncMacHandoff
-                    | other @ Method::SyncMacHashes
-                    | other @ Method::SyncMacHead
-                    | other @ Method::SyncMacRead
-                    | other @ Method::SyncMacWorktree
-                    | other @ Method::VaultConfigure
-                    | other @ Method::VaultPush
-                    | other @ Method::VaultStatus
-                    | other @ Method::UploadBegin
-                    | other @ Method::UploadChunk
-                    | other @ Method::UploadCommit
-                    | other @ Method::Verify
-                    | other @ Method::Write
-                    | other @ Method::CurrentTimeRead
-                    | other @ Method::ItemToolCall
-                    | other @ Method::ItemCommandExecutionRequestApproval
-                    | other @ Method::ItemFileChangeRequestApproval
-                    | other @ Method::ItemPermissionsRequestApproval
-                    | other @ Method::McpServerElicitationRequest
-                    | other @ Method::ItemToolRequestUserInput
-                    | other @ Method::ItemStarted
-                    | other @ Method::ItemCompleted
-                    | other @ Method::ItemAgentMessageDelta
-                    | other @ Method::ItemReasoningTextDelta
-                    | other @ Method::ItemCommandExecutionOutputDelta
-                    | other @ Method::CommandExecOutputDelta
-                    | other @ Method::TurnStarted
-                    | other @ Method::TurnCompleted
-                    | other @ Method::TurnPlanUpdated
-                    | other @ Method::TurnDiffUpdated
-                    | other @ Method::ThreadClosed
-                    | other @ Method::ThreadStatusChanged
-                    | other @ Method::ThreadTokenUsageUpdated
-                    | other @ Method::ThreadShellPolicyUpdated
-                    | other @ Method::ThreadIdleCompactionUpdated
-                    | other @ Method::AccountLoginCompleted
-                    | other @ Method::AccountUpdated
-                    | other @ Method::AccountRateLimitsUpdated
-                    | other @ Method::ModelSafetyBufferingUpdated
-                    | other @ Method::ProviderGenerationStarted
-                    | other @ Method::ProtocolError => panic!("unexpected method {other:?}"),
+                    other => panic!("unexpected method {other:?}"),
                 };
                 Ok(SessionReceipt {
                     scope: self.current_scope(&request.account).expect("scope"),

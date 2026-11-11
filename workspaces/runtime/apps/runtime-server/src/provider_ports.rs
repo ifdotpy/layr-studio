@@ -253,13 +253,15 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
             let deadline = Instant::now() + DIAGNOSTICS_ACCOUNT_DEADLINE;
             let account_reads =
                 futures_util::future::join_all(active.iter().map(|(_, provider, scope)| {
-                    let adapter = studio_runtime_services::provider_adapter::adapter(*provider);
+                    let request = (studio_runtime_services::provider_adapter::adapter(*provider)
+                        .descriptor()
+                        .diagnostics)();
                     provider_read(
                         self.session.as_ref(),
                         scope,
                         None,
-                        adapter.diagnostics_method(),
-                        adapter.diagnostics_params(),
+                        request.method,
+                        request.params,
                         deadline,
                     )
                 }));
@@ -295,29 +297,18 @@ impl studio_runtime_services::diagnostics::ProviderDiagnosticsPort for ProviderD
             for (index, ((_, provider, _), result)) in active.iter().zip(account_reads).enumerate()
             {
                 let alias = format!("account{}", index + 1);
-                match (result, *provider) {
-                    (Some(value), ProviderKind::Claude) => {
-                        let mut row = studio_json::Map::new();
-                        row.insert("provider".to_owned(), json!(ProviderKind::Claude.key()));
-                        if let Some(fields) = value.as_object() {
-                            row.extend(fields.clone());
-                        }
-                        // The server's idle sweep closes idle sessions; 0 never closes them.
-                        row.insert("idleLimitSeconds".to_owned(), json!(idle_limit_seconds));
-                        native_accounts.insert(alias.clone(), Value::Object(row));
+                match result {
+                    Some(value) => {
+                        let (row, count) =
+                            (studio_runtime_services::provider_adapter::adapter(*provider)
+                                .descriptor()
+                                .project_diagnostics)(
+                                value, idle_limit_seconds
+                            );
+                        loaded_threads = loaded_threads.saturating_add(count);
+                        native_accounts.insert(alias.clone(), row);
                     }
-                    (Some(value), ProviderKind::Codex) => {
-                        let count = value
-                            .get("data")
-                            .and_then(Value::as_array)
-                            .map_or(0, Vec::len);
-                        loaded_threads = loaded_threads.saturating_add(count as u64);
-                        native_accounts.insert(
-                            alias.clone(),
-                            json!({"provider":ProviderKind::Codex.key(), "loadedThreads":count}),
-                        );
-                    }
-                    (None, ProviderKind::Codex | ProviderKind::Claude) => {
+                    None => {
                         native_accounts.insert(
                             alias.clone(),
                             json!({"error":"ProviderDiagnosticsUnavailable"}),
@@ -462,18 +453,10 @@ impl ActiveProviderConnections for LiveProviderConnections {
                     scope.generation,
                     kind,
                 );
-                let configured_binary = match kind {
-                    studio_runtime_providers::ProviderKind::Codex => launched_binary.clone(),
-                    // A Claude account without launch-time executable metadata is
-                    // not a probeable retained session; never substitute today's
-                    // profile setting for the binary used by that session.
-                    studio_runtime_providers::ProviderKind::Claude => {
-                        launched_binary.as_ref()?;
-                        studio_runtime_services::account_driver::claude::resolve_public_claude_binary(
-                            account,
-                        )
-                    }
-                };
+                let configured_binary =
+                    (studio_runtime_services::provider_adapter::adapter(kind)
+                        .descriptor()
+                        .configured_binary)(account, launched_binary.clone())?;
                 let provider = kind.key().to_owned();
                 Some(ProviderProfile {
                     account_key,
@@ -535,10 +518,10 @@ impl TitleRequestPort for ProviderTitleRequestPort {
                 agent: request.agent_id.clone(),
                 epoch: request.epoch,
             };
-            let Ok(provider) = request
+            let Some(provider) = request
                 .provider
                 .as_deref()
-                .map_or(Ok(ProviderKind::Codex), str::parse::<ProviderKind>)
+                .and_then(|provider| provider.parse::<ProviderKind>().ok())
             else {
                 return title_receipt(&request, WriteOutcome::NotSent, None);
             };
@@ -551,15 +534,20 @@ impl TitleRequestPort for ProviderTitleRequestPort {
             thread_params.insert("cwd".into(), json!(home.path()));
             thread_params.insert("model".into(), json!(request.model));
             thread_params.insert("ephemeral".into(), json!(true));
-            studio_runtime_services::provider_adapter::adapter(provider)
-                .shape_title_thread_params(&mut thread_params);
+            let Ok(prepared) = studio_runtime_services::provider_adapter::adapter(provider).encode(
+                studio_runtime_services::provider_adapter::ProviderCommand::SetTitle {
+                    params: thread_params,
+                },
+            ) else {
+                return title_receipt(&request, WriteOutcome::NotSent, None);
+            };
             let started = self
                 .call(
                     &request,
                     &start_operation,
                     Some(actor.clone()),
-                    Method::ThreadStart,
-                    Value::Object(thread_params),
+                    prepared.method,
+                    prepared.params,
                     deadline,
                     None,
                 )
@@ -954,6 +942,10 @@ mod tests {
             })
         }
 
+        #[expect(
+            clippy::wildcard_enum_match_arm,
+            reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+        )]
         fn provider_request<'a>(
             &'a self,
             request: ProviderRequest,
@@ -1002,148 +994,7 @@ mod tests {
                             }]}),
                         }))
                     }
-                    Method::ThreadTurnsItemsList
-                    | Method::Initialize
-                    | Method::Initialized
-                    | Method::Ack
-                    | Method::AccountLoginCancel
-                    | Method::AccountLoginStart
-                    | Method::AccountRateLimitResetCreditConsume
-                    | Method::ThreadLoadedList
-                    | Method::ConfigRead
-                    | Method::SkillsExtraRootsSet
-                    | Method::ModelList
-                    | Method::AccountRead
-                    | Method::AccountRateLimitsRead
-                    | Method::ThreadRealtimeStart
-                    | Method::ThreadRealtimeStop
-                    | Method::ThreadRealtimeAppendSpeech
-                    | Method::ThreadRealtimeItemStarted
-                    | Method::ThreadRealtimeTranscriptDelta
-                    | Method::ThreadRealtimeTranscriptDone
-                    | Method::ThreadRealtimeSdp
-                    | Method::ThreadRealtimeError
-                    | Method::ThreadRealtimeClosed
-                    | Method::ThreadResume
-                    | Method::ThreadRead
-                    | Method::TurnSteer
-                    | Method::TurnInterrupt
-                    | Method::ThreadList
-                    | Method::ThreadArchive
-                    | Method::ThreadFork
-                    | Method::ThreadNameSet
-                    | Method::ThreadMetadataUpdate
-                    | Method::ThreadSettingsUpdate
-                    | Method::ThreadCompactStart
-                    | Method::ThreadRollback
-                    | Method::ThreadItemsList
-                    | Method::ThreadGoalSet
-                    | Method::ThreadGoalUpdated
-                    | Method::ThreadUnarchive
-                    | Method::ThreadUnsubscribe
-                    | Method::ProcessSpawn
-                    | Method::ProcessWriteStdin
-                    | Method::ProcessKill
-                    | Method::ProcessResizePty
-                    | Method::CommandExec
-                    | Method::CommandExecWrite
-                    | Method::CommandExecResize
-                    | Method::CommandExecTerminate
-                    | Method::ThreadBackgroundTerminalsList
-                    | Method::ThreadBackgroundTerminalsTerminate
-                    | Method::ThreadBackgroundTerminalsClean
-                    | Method::ThreadCommandExecutionBackground
-                    | Method::ThreadQueueList
-                    | Method::ClaudeState
-                    | Method::ClaudeRepairReport
-                    | Method::ClaudeFileBackups
-                    | Method::ClaudeSettings
-                    | Method::ClaudeActivity
-                    | Method::ClaudeStopTask
-                    | Method::ClaudeShellPolicy
-                    | Method::ClaudeDiagnostics
-                    | Method::ClaudeMoveVersions
-                    | Method::McpServerReconnect
-                    | Method::McpServerStatusList
-                    | Method::SkillsList
-                    | Method::OperationStatus
-                    | Method::ReviewStart
-                    | Method::BrowserAnswer
-                    | Method::BrowserCallback
-                    | Method::BrowserClose
-                    | Method::BrowserWait
-                    | Method::ClaudeCommands
-                    | Method::ClaudeMoveExport
-                    | Method::ClaudeMoveImport
-                    | Method::ClaudeMoveIdentity
-                    | Method::ClaudeMovePreflight
-                    | Method::ClaudeMoveProof
-                    | Method::Detach
-                    | Method::EventRead
-                    | Method::Exec
-                    | Method::Generate
-                    | Method::Health
-                    | Method::Info
-                    | Method::LayrHealth
-                    | Method::Next
-                    | Method::Open
-                    | Method::ProjectEnsure
-                    | Method::ProjectExec
-                    | Method::ProjectImport
-                    | Method::ProviderList
-                    | Method::Replay
-                    | Method::ResponseStatus
-                    | Method::RetireCommand
-                    | Method::SecretsList
-                    | Method::SecretsRemove
-                    | Method::SecretsSet
-                    | Method::ShareConfigure
-                    | Method::ShareName
-                    | Method::ShareStatus
-                    | Method::Sign
-                    | Method::Status
-                    | Method::SyncMacApply
-                    | Method::SyncMacHandoff
-                    | Method::SyncMacHashes
-                    | Method::SyncMacHead
-                    | Method::SyncMacRead
-                    | Method::SyncMacWorktree
-                    | Method::VaultConfigure
-                    | Method::VaultPush
-                    | Method::VaultStatus
-                    | Method::UploadBegin
-                    | Method::UploadChunk
-                    | Method::UploadCommit
-                    | Method::Verify
-                    | Method::Write
-                    | Method::CurrentTimeRead
-                    | Method::ItemToolCall
-                    | Method::ItemCommandExecutionRequestApproval
-                    | Method::ItemFileChangeRequestApproval
-                    | Method::ItemPermissionsRequestApproval
-                    | Method::McpServerElicitationRequest
-                    | Method::ItemToolRequestUserInput
-                    | Method::ItemStarted
-                    | Method::ItemCompleted
-                    | Method::ItemAgentMessageDelta
-                    | Method::ItemReasoningTextDelta
-                    | Method::ItemCommandExecutionOutputDelta
-                    | Method::CommandExecOutputDelta
-                    | Method::TurnStarted
-                    | Method::TurnCompleted
-                    | Method::TurnPlanUpdated
-                    | Method::TurnDiffUpdated
-                    | Method::ThreadClosed
-                    | Method::ThreadStatusChanged
-                    | Method::ThreadTokenUsageUpdated
-                    | Method::ThreadShellPolicyUpdated
-                    | Method::ThreadIdleCompactionUpdated
-                    | Method::AccountLoginCompleted
-                    | Method::AccountUpdated
-                    | Method::AccountRateLimitsUpdated
-                    | Method::ModelSafetyBufferingUpdated
-                    | Method::ProviderGenerationStarted
-                    | Method::ProtocolError => None,
+                    _ => None,
                 };
                 Ok(SessionReceipt {
                     outcome: {
@@ -1183,6 +1034,51 @@ mod tests {
                     replayed: false,
                 })
             })
+        }
+    }
+
+    #[tokio::test]
+    async fn title_missing_or_unknown_provider_is_not_sent() {
+        use studio_runtime_services::title_generation::{
+            TitleRequest, TitleRequestPort, WriteOutcome,
+        };
+        let root = tempfile::tempdir().expect("title state");
+        let store = Arc::new(
+            studio_runtime_store::RuntimeStore::open(Some(root.path()))
+                .await
+                .expect("store"),
+        );
+        let session = Arc::new(Session {
+            requests: Mutex::new(Vec::new()),
+            scenario: ReplyScenario::Ready,
+        });
+        let port = ProviderTitleRequestPort::new(session.clone(), store);
+        for provider in [None, Some("future-provider".to_owned())] {
+            let id = studio_runtime_schema::persistence::RequestIdentity::issue_root();
+            let receipt = port
+                .request(TitleRequest {
+                    root_request_id: id.clone(),
+                    admitted_request:
+                        studio_runtime_schema::persistence::AdmittedRequest::from_persisted_fields(
+                            id.clone(),
+                            "signature".into(),
+                            0,
+                        ),
+                    request_id: id.clone(),
+                    agent_id: "agent".into(),
+                    epoch: 1,
+                    account_key: "default".into(),
+                    provider,
+                    model: "gpt-mini".into(),
+                    effort: None,
+                    prompt: "Title".into(),
+                    deadline: SystemTime::now() + Duration::from_secs(30),
+                })
+                .await;
+            // Clean the stable home even on the old fallback's Unknown path.
+            drop(TitleHome::new(&id).expect("title home"));
+            assert_eq!(receipt.outcome, WriteOutcome::NotSent);
+            assert!(session.requests.lock().unwrap().is_empty());
         }
     }
 

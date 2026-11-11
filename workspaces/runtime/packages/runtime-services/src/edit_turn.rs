@@ -2,7 +2,7 @@
 //!
 //! The steps, in order (decision 2026-10-28, "One command path"):
 //! 1. Check that the target checkpoint is valid and fork the provider thread from
-//!    it through the provider adapter ([`crate::provider_adapter::ProviderAdapter::edit_thread_request`]).
+//!    it through [`crate::provider_adapter::ProviderCommand::EditThread`].
 //! 2. Snapshot the current files, then restore the files of the turn
 //!    ([`snapshot_then_restore`]). The snapshot always comes first, so a restore
 //!    cannot lose work.

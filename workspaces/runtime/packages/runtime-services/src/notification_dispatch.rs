@@ -25,10 +25,10 @@ mod questions;
 #[path = "notification_dispatch/snapshot.rs"]
 mod snapshot;
 pub use effects::{
-    NotificationAgent, NotificationDependency, NotificationEffects, NotificationHourMetrics,
-    NotificationObservation, NotificationPostCommit, NotificationPublicationBatch,
-    NotificationStreamMetrics, ObservationTime, RecoveredNotificationObservation, SharedJson,
-    UnavailableNotificationEffects,
+    NotificationAgent, NotificationClock, NotificationDependency, NotificationEffects,
+    NotificationHourMetrics, NotificationObservation, NotificationPostCommit,
+    NotificationPublicationBatch, NotificationStreamMetrics, ObservationTime,
+    RecoveredNotificationObservation, SharedJson, UnavailableNotificationEffects,
 };
 
 #[path = "notification_dispatch/stream.rs"]
@@ -437,11 +437,16 @@ pub(crate) fn dispatch_checked_notification(
             }
             let canonical_frame = canonical_frame.filter(|_| match notification {
                 Frame::Notification(frame) => !frame.params.as_ref().is_some_and(Value::is_null),
-                Frame::UnknownMethod(frame) => {
+                Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame) => {
                     frame.fields.get("method").and_then(Value::as_str)
                         == Some(frame.method.as_str())
                 }
-                Frame::Request(_) | Frame::Response { .. } => false,
+                Frame::CodexClientRequest(_)
+                | Frame::CodexServerRequest(_)
+                | Frame::CodexNotification(_)
+                | Frame::CodexClientNotification(_)
+                | Frame::Request(_)
+                | Frame::Response { .. } => false,
             });
             let content_signature = match canonical_frame {
                 Some(bytes) => notification_signature_from_bytes(agent_id, bytes)?,
@@ -565,8 +570,11 @@ pub(crate) fn dispatch_checked_notification(
                     Some(&effect_agent),
                     &notification_payload(notification),
                     delivery,
-                    ObservationTime::new(observed_at)
-                        .ok_or_else(NotificationDispatchError::invalid)?,
+                    effects::NotificationClock {
+                        observed_at: ObservationTime::new(observed_at)
+                            .ok_or_else(NotificationDispatchError::invalid)?,
+                        boundary_at,
+                    },
                     &DispatchOutcome::Written,
                 ) {
                     if let NotificationPostCommit::Analytics {
@@ -914,7 +922,11 @@ pub(crate) fn dispatch_checked_notification(
                 },
                 &notification_payload(notification),
                 delivery,
-                ObservationTime::new(observed_at).ok_or_else(NotificationDispatchError::invalid)?,
+                effects::NotificationClock {
+                    observed_at: ObservationTime::new(observed_at)
+                        .ok_or_else(NotificationDispatchError::invalid)?,
+                    boundary_at,
+                },
                 &outcome,
             );
             if command_output_monitor_present == Some(false) {
@@ -1200,11 +1212,16 @@ fn notification_parts(notification: &Frame) -> Result<(&str, &Value), Notificati
             frame.method.as_str(),
             frame.params.as_ref().unwrap_or(&NULL),
         ),
-        Frame::UnknownMethod(frame) => (
+        Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame) => (
             frame.method.as_str(),
             frame.fields.get("params").unwrap_or(&NULL),
         ),
-        Frame::Request(_) | Frame::Response { .. } => {
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Request(_)
+        | Frame::Response { .. } => {
             return Err(NotificationDispatchError::invalid());
         }
     };
@@ -1219,13 +1236,18 @@ fn notification_payload(notification: &Frame) -> Value {
             frame.fields.clone(),
             true,
         ),
-        Frame::UnknownMethod(frame) => (
+        Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame) => (
             frame.method.as_str(),
             frame.fields.get("params"),
             frame.fields.clone(),
             false,
         ),
-        Frame::Request(_) | Frame::Response { .. } => return Value::Null,
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Request(_)
+        | Frame::Response { .. } => return Value::Null,
     };
     fields.insert("method".to_owned(), Value::String(method.to_owned()));
     if include_params && let Some(params) = params.filter(|params| !params.is_null()) {
@@ -1264,12 +1286,17 @@ impl<'a> BorrowedNotification<'a> {
                 frame.method.as_str(),
                 frame.params.as_ref().filter(|value| !value.is_null()),
             ),
-            Frame::UnknownMethod(frame) => (
+            Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame) => (
                 &frame.fields,
                 frame.method.as_str(),
                 frame.fields.get("params").filter(|value| !value.is_null()),
             ),
-            Frame::Request(_) | Frame::Response { .. } => return None,
+            Frame::CodexClientRequest(_)
+            | Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Request(_)
+            | Frame::Response { .. } => return None,
         };
         let mut entries = fields
             .iter()

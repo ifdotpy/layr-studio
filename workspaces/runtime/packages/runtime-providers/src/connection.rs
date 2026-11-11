@@ -91,10 +91,16 @@ pub enum SessionError {
 struct Pending {
     ticket: RequestTicket,
     /// Owns the body only until its first write; emitted requests keep `Null`.
-    params: Value,
+    params: PendingParams,
     deadline_ms: u64,
     thread_id: Option<String>,
     serialized: bool,
+}
+
+enum PendingParams {
+    Generic(Value),
+    Codex(Box<crate::codex::ClientRequest>),
+    Written,
 }
 
 /// Session decisions are independent of threads and byte I/O. Call `submit`,
@@ -120,6 +126,111 @@ pub struct SessionState {
 }
 
 impl SessionState {
+    /// Admit the provider adapter's native request without provider-name dispatch.
+    pub fn submit_frame_with_id(
+        &mut self,
+        id: RequestId,
+        frame: Frame,
+        now_ms: u64,
+        timeout_ms: u64,
+        thread_id: Option<String>,
+        lightweight_read: bool,
+    ) -> Result<(RequestTicket, Vec<Action>), SessionError> {
+        match frame {
+            Frame::CodexClientRequest(request) => {
+                self.submit_codex_with_id(id, *request, now_ms, timeout_ms, thread_id)
+            }
+            Frame::Request(request) => self.submit_with_id(
+                id,
+                request.method,
+                request.params.unwrap_or(Value::Null),
+                now_ms,
+                timeout_ms,
+                thread_id,
+                lightweight_read,
+            ),
+            Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Notification(_)
+            | Frame::Response { .. }
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_) => {
+                Err(CodecError::MalformedFrame("expected an outgoing client request").into())
+            }
+        }
+    }
+
+    pub fn preflight_frame_with_id(
+        &self,
+        id: RequestId,
+        frame: &Frame,
+        thread_id: Option<&str>,
+        lightweight_read: bool,
+    ) -> Result<(), SessionError> {
+        match frame {
+            Frame::CodexClientRequest(request) => self.preflight_codex_with_id(&id, request),
+            Frame::Request(request) => self.preflight_with_id(
+                id,
+                request.method,
+                request.params.as_ref().unwrap_or(&Value::Null),
+                thread_id,
+                lightweight_read,
+            ),
+            Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Notification(_)
+            | Frame::Response { .. }
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_) => {
+                Err(CodecError::MalformedFrame("expected an outgoing client request").into())
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_initial_frame(
+        generation: u64,
+        wire: WireProfile,
+        now_ms: u64,
+        timeout_ms: u64,
+        frame: Frame,
+        recovered: Vec<(RequestId, Method, Option<String>)>,
+        request_id_prefix: Option<String>,
+    ) -> Result<(Self, Vec<Action>), SessionError> {
+        let params = match frame {
+            Frame::CodexClientRequest(request)
+                if request.method() == crate::codex::ClientRequestMethod::Initialize =>
+            {
+                PendingParams::Codex(request)
+            }
+            Frame::Request(request) if request.method == Method::Initialize => {
+                PendingParams::Generic(request.params.unwrap_or(Value::Null))
+            }
+            Frame::CodexClientRequest(_)
+            | Frame::Request(_)
+            | Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Notification(_)
+            | Frame::Response { .. }
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_) => {
+                return Err(CodecError::MalformedFrame("expected initialize request").into());
+            }
+        };
+        Self::new_inner(
+            generation,
+            wire,
+            now_ms,
+            timeout_ms,
+            params,
+            recovered,
+            request_id_prefix,
+        )
+    }
+
     pub fn new(
         generation: u64,
         wire: WireProfile,
@@ -168,6 +279,51 @@ impl SessionState {
         request_id_prefix: Option<String>,
     ) -> Result<(Self, Vec<Action>), SessionError> {
         validate_initialize_params(&initialize_params)?;
+        Self::new_inner(
+            generation,
+            wire,
+            now_ms,
+            timeout_ms,
+            PendingParams::Generic(initialize_params),
+            recovered,
+            request_id_prefix,
+        )
+    }
+
+    /// Start a Codex session with vendor-owned initialization parameters.
+    pub fn new_codex_with_recovered_and_prefix(
+        generation: u64,
+        now_ms: u64,
+        timeout_ms: u64,
+        initialize_params: crate::codex::InitializeParams,
+        recovered: Vec<(RequestId, Method, Option<String>)>,
+        request_id_prefix: Option<String>,
+    ) -> Result<(Self, Vec<Action>), SessionError> {
+        let request = crate::codex::ClientRequest::Initialize {
+            id: crate::vendor_request_id(&RequestId::Number(1))?,
+            params: initialize_params,
+        };
+        Self::new_inner(
+            generation,
+            crate::ProviderKind::Codex.wire(),
+            now_ms,
+            timeout_ms,
+            PendingParams::Codex(Box::new(request)),
+            recovered,
+            request_id_prefix,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn new_inner(
+        generation: u64,
+        wire: WireProfile,
+        now_ms: u64,
+        timeout_ms: u64,
+        initialize_params: PendingParams,
+        recovered: Vec<(RequestId, Method, Option<String>)>,
+        request_id_prefix: Option<String>,
+    ) -> Result<(Self, Vec<Action>), SessionError> {
         let mut state = Self {
             generation,
             wire,
@@ -265,7 +421,7 @@ impl SessionState {
         };
         self.insert_pending(Pending {
             ticket: ticket.clone(),
-            params: Value::Null,
+            params: PendingParams::Written,
             deadline_ms,
             thread_id,
             serialized: false,
@@ -328,6 +484,68 @@ impl SessionState {
             thread_id,
             lightweight_read,
         )
+    }
+
+    /// Submit a vendor request, allocating its session identity exactly once.
+    pub fn submit_codex(
+        &mut self,
+        request: crate::codex::ClientRequest,
+        now_ms: u64,
+        timeout_ms: u64,
+        thread_id: Option<String>,
+    ) -> Result<(RequestTicket, Vec<Action>), SessionError> {
+        self.submit_codex_inner(None, request, now_ms, timeout_ms, thread_id)
+    }
+
+    pub fn submit_codex_with_id(
+        &mut self,
+        id: RequestId,
+        request: crate::codex::ClientRequest,
+        now_ms: u64,
+        timeout_ms: u64,
+        thread_id: Option<String>,
+    ) -> Result<(RequestTicket, Vec<Action>), SessionError> {
+        self.submit_codex_inner(Some(id), request, now_ms, timeout_ms, thread_id)
+    }
+
+    pub fn preflight_codex_with_id(
+        &self,
+        id: &RequestId,
+        request: &crate::codex::ClientRequest,
+    ) -> Result<(), SessionError> {
+        if self.lifecycle != Lifecycle::Ready {
+            return Err(SessionError::NotReady);
+        }
+        let mut request = request.clone();
+        request.set_id(crate::vendor_request_id(id)?);
+        encode_line(&Frame::CodexClientRequest(Box::new(request)))?;
+        Ok(())
+    }
+
+    fn submit_codex_inner(
+        &mut self,
+        id: Option<RequestId>,
+        request: crate::codex::ClientRequest,
+        now_ms: u64,
+        timeout_ms: u64,
+        thread_id: Option<String>,
+    ) -> Result<(RequestTicket, Vec<Action>), SessionError> {
+        if self.lifecycle != Lifecycle::Ready {
+            return Err(SessionError::NotReady);
+        }
+        let method = Method::from_wire(request.method().as_str())
+            .ok_or(CodecError::MalformedFrame("missing generated Codex method"))?;
+        let ticket = self.register(
+            method,
+            PendingParams::Codex(Box::new(request)),
+            now_ms,
+            timeout_ms,
+            thread_id,
+            false,
+            id,
+        )?;
+        let actions = self.write_request(&ticket)?;
+        Ok((ticket, actions))
     }
 
     /// Submit a request with a durable caller allocated identity.
@@ -395,7 +613,13 @@ impl SessionState {
             return Err(SessionError::MissingThreadId);
         }
         let ticket = self.register(
-            method, params, now_ms, timeout_ms, thread_id, serialized, request_id,
+            method,
+            PendingParams::Generic(params),
+            now_ms,
+            timeout_ms,
+            thread_id,
+            serialized,
+            request_id,
         )?;
         let mut actions = Vec::new();
         let pending = self
@@ -425,7 +649,7 @@ impl SessionState {
     fn register(
         &mut self,
         method: Method,
-        params: Value,
+        params: PendingParams,
         now_ms: u64,
         timeout_ms: u64,
         thread_id: Option<String>,
@@ -433,7 +657,7 @@ impl SessionState {
         request_id: Option<RequestId>,
     ) -> Result<RequestTicket, SessionError> {
         let id = if let Some(id) = request_id {
-            validate_request_encoding(id.clone(), method, &params)?;
+            validate_pending_encoding(id.clone(), method, &params)?;
             self.book.register(id.clone(), method)?;
             id
         } else if let Some(prefix) = &self.request_id_prefix {
@@ -442,7 +666,7 @@ impl SessionState {
                 .next_request_sequence
                 .checked_add(1)
                 .ok_or(BookError::IdExhausted)?;
-            validate_request_encoding(id.clone(), method, &params)?;
+            validate_pending_encoding(id.clone(), method, &params)?;
             self.book.register(id.clone(), method)?;
             id
         } else if let RequestIdScheme::PrefixedHex(prefix) = self.wire.ids {
@@ -451,13 +675,13 @@ impl SessionState {
                 .next_prefixed_id
                 .checked_add(1)
                 .ok_or(BookError::IdExhausted)?;
-            validate_request_encoding(id.clone(), method, &params)?;
+            validate_pending_encoding(id.clone(), method, &params)?;
             self.book.register(id.clone(), method)?;
             self.next_prefixed_id = next_id;
             id
         } else {
             let id = self.book.next_numeric_candidate()?;
-            validate_request_encoding(id.clone(), method, &params)?;
+            validate_pending_encoding(id.clone(), method, &params)?;
             let allocated = self.book.allocate_numeric(method)?;
             debug_assert_eq!(allocated, id);
             allocated
@@ -500,12 +724,11 @@ impl SessionState {
             .pending
             .get_mut(&ticket.id)
             .ok_or(SessionError::MissingRequest)?;
-        let frame = Frame::Request(RequestFrame {
-            id: ticket.id.clone(),
-            method: ticket.method,
-            params: Some(std::mem::take(&mut pending.params)),
-            fields: Map::new(),
-        });
+        let frame = pending_frame(
+            ticket.id.clone(),
+            ticket.method,
+            std::mem::replace(&mut pending.params, PendingParams::Written),
+        )?;
         Ok(vec![Action::Write(frame)])
     }
 
@@ -533,6 +756,42 @@ impl SessionState {
         }
         match frame {
             Frame::Response { id, body, .. } => {
+                // Correlate before settlement. Incompatible results remain explicit
+                // evidence for generic projection rather than hanging the request.
+                let body = match body {
+                    ResponseBody::Uncorrelated(raw) => {
+                        let Some(pending) = self.pending.get(&id) else {
+                            return Ok(Vec::new());
+                        };
+                        match crate::correlate_codex_result(pending.ticket.method, &raw) {
+                            Ok(result) => ResponseBody::CodexResult(result),
+                            Err(_) => ResponseBody::CodexUnparsedResult {
+                                method: crate::codex::ClientRequestMethod::from_wire(
+                                    pending.ticket.method.as_str(),
+                                )
+                                .ok_or(
+                                    CodecError::MalformedFrame("missing Codex request method"),
+                                )?,
+                                result: raw,
+                            },
+                        }
+                    }
+                    body @ ResponseBody::Result(_)
+                    | body @ ResponseBody::Error(_)
+                    | body @ ResponseBody::CodexUnparsedResult { .. }
+                    | body @ ResponseBody::CodexResult(_)
+                    | body @ ResponseBody::CodexServerResult(_)
+                    | body @ ResponseBody::CodexError(_) => body,
+                };
+                if let ResponseBody::CodexResult(result) = &body
+                    && let Some(pending) = self.pending.get(&id)
+                    && result.method().as_str() != pending.ticket.method.as_str()
+                {
+                    return Err(CodecError::MalformedFrame(
+                        "Codex result does not match request method",
+                    )
+                    .into());
+                }
                 let matched = match self.book.observe_response(&id) {
                     Ok(matched) => matched,
                     Err(BookError::UnknownId | BookError::DuplicateResponse) => {
@@ -549,7 +808,13 @@ impl SessionState {
                 );
                 let initialization_failed = pending.ticket.method == Method::Initialize
                     && self.lifecycle == Lifecycle::Initializing
-                    && matches!(&body, ResponseBody::Error(_));
+                    && matches!(&body, ResponseBody::Error(_) | ResponseBody::CodexError(_));
+                let codex = matches!(
+                    &body,
+                    ResponseBody::CodexResult(_)
+                        | ResponseBody::CodexError(_)
+                        | ResponseBody::CodexUnparsedResult { .. }
+                );
                 let mut actions = vec![Action::Resolve {
                     ticket: pending.ticket.clone(),
                     outcome: RequestOutcome::Reply { body, late },
@@ -566,13 +831,17 @@ impl SessionState {
                         actions.extend(self.mark_unknown(Lifecycle::Lost));
                     } else {
                         self.lifecycle = Lifecycle::Ready;
-                        actions.push(Action::Write(Frame::Notification(
-                            crate::NotificationFrame {
+                        actions.push(Action::Write(if codex {
+                            Frame::CodexClientNotification(Box::new(
+                                crate::codex::ClientNotification::Initialized,
+                            ))
+                        } else {
+                            Frame::Notification(crate::NotificationFrame {
                                 method: Method::Initialized,
                                 params: None,
                                 fields: Map::new(),
-                            },
-                        )));
+                            })
+                        }));
                     }
                 }
                 if pending.serialized
@@ -584,7 +853,12 @@ impl SessionState {
             }
             other @ Frame::Request(_)
             | other @ Frame::Notification(_)
-            | other @ Frame::UnknownMethod(_) => Ok(vec![Action::Dispatch(other)]),
+            | other @ Frame::UnknownMethod(_)
+            | other @ Frame::KnownMethodUnparsed(_) => Ok(vec![Action::Dispatch(other)]),
+            other @ Frame::CodexClientRequest(_)
+            | other @ Frame::CodexServerRequest(_)
+            | other @ Frame::CodexNotification(_)
+            | other @ Frame::CodexClientNotification(_) => Ok(vec![Action::Dispatch(other)]),
         }
     }
 
@@ -746,6 +1020,42 @@ impl SessionState {
     }
 }
 
+fn pending_frame(
+    id: RequestId,
+    method: Method,
+    params: PendingParams,
+) -> Result<Frame, SessionError> {
+    match params {
+        PendingParams::Generic(params) => Ok(Frame::Request(RequestFrame {
+            id,
+            method,
+            params: Some(params),
+            fields: Map::new(),
+        })),
+        PendingParams::Codex(mut request) => {
+            request.set_id(crate::vendor_request_id(&id)?);
+            Ok(Frame::CodexClientRequest(request))
+        }
+        PendingParams::Written => Err(SessionError::MissingRequest),
+    }
+}
+
+fn validate_pending_encoding(
+    id: RequestId,
+    method: Method,
+    params: &PendingParams,
+) -> Result<(), SessionError> {
+    match params {
+        PendingParams::Generic(params) => validate_request_encoding(id, method, params),
+        PendingParams::Codex(request) => {
+            let frame = pending_frame(id, method, PendingParams::Codex(request.clone()))?;
+            encode_line(&frame)?;
+            Ok(())
+        }
+        PendingParams::Written => Err(SessionError::MissingRequest),
+    }
+}
+
 fn validate_request_encoding(
     id: RequestId,
     method: Method,
@@ -815,6 +1125,13 @@ mod request_body_tests {
         json!({"threadId": "t", "input": [{"type": "text", "text": "owned request body".repeat(64)}]})
     }
 
+    fn pending_text_allocation(params: &PendingParams) -> *const u8 {
+        let PendingParams::Generic(params) = params else {
+            panic!("queued generic params");
+        };
+        text_allocation(params)
+    }
+
     fn text_allocation(params: &Value) -> *const u8 {
         params["input"][0]["text"]
             .as_str()
@@ -839,7 +1156,7 @@ mod request_body_tests {
             "the write owns the original body allocation"
         );
         assert!(
-            session.pending[&ticket.id].params.is_null(),
+            matches!(session.pending[&ticket.id].params, PendingParams::Written),
             "correlation metadata must not retain an emitted body"
         );
     }
@@ -866,7 +1183,10 @@ mod request_body_tests {
                 allocation,
                 "initialize transfers the original allocation to its write"
             );
-            assert!(session.pending[&request.id].params.is_null());
+            assert!(matches!(
+                session.pending[&request.id].params,
+                PendingParams::Written
+            ));
             assert_eq!(session.next_deadline_ms(), Some(100));
         }
     }
@@ -907,10 +1227,15 @@ mod request_body_tests {
             .submit(Method::TurnSteer, params, 2, 20, Some("t".into()), false)
             .expect("queued turn");
         assert!(actions.is_empty());
-        assert!(session.pending[&active.id].params.is_null());
-        assert_eq!(session.pending[&queued.id].params, expected);
+        assert!(matches!(
+            session.pending[&active.id].params,
+            PendingParams::Written
+        ));
+        assert!(
+            matches!(&session.pending[&queued.id].params, PendingParams::Generic(params) if params == &expected)
+        );
         assert_eq!(
-            text_allocation(&session.pending[&queued.id].params),
+            pending_text_allocation(&session.pending[&queued.id].params),
             allocation
         );
         let released = session.receive(reply(&active)).expect("release successor");
@@ -965,7 +1290,10 @@ mod request_body_tests {
                         .any(|action| matches!(action, Action::Write(_)))
                 );
                 assert_eq!(session.pending[&ticket.id].ticket, ticket);
-                assert!(session.pending[&ticket.id].params.is_null());
+                assert!(matches!(
+                    session.pending[&ticket.id].params,
+                    PendingParams::Written
+                ));
                 assert_eq!(session.next_deadline_ms(), None);
                 let late = session.receive(reply(&ticket)).expect("late reply");
                 assert!(matches!(
@@ -1005,7 +1333,7 @@ mod request_body_tests {
                 .expect("queued turn");
             assert!(writes.is_empty());
             assert_eq!(
-                text_allocation(&session.pending[&queued.id].params),
+                pending_text_allocation(&session.pending[&queued.id].params),
                 allocation
             );
             let removed = if cancel {

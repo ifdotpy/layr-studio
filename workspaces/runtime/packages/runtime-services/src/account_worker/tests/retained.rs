@@ -1633,8 +1633,9 @@ async fn diagnostics_probe_of_each_provider_replies_without_a_receipt() {
         call.operation = format!("{DIAGNOSTICS_OPERATION_PREFIX}{wire_method}");
         call.actor = None;
         call.expected_scope = Some(port.scope().clone());
-        call.method = provider.diagnostics_method();
-        call.params = provider.diagnostics_params();
+        let diagnostics = (provider.descriptor().diagnostics)();
+        call.method = diagnostics.method;
+        call.params = diagnostics.params;
         let sender = port.clone();
         let task = tokio::spawn(async move { sender.request(call).await });
         let wire = peer.write(wire_method).await;

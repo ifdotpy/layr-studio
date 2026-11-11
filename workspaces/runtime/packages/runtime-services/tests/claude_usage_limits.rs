@@ -205,11 +205,10 @@ fn unknown_models_and_buckets_keep_the_latest_reset() {
 
 #[test]
 fn plain_429_typed_error_schedules_a_rate_limit_resume() {
-    let cause = adapter(ProviderKind::Claude)
-        .classify_error(&json!({
-            "message":"429 Too Many Requests", "codexErrorInfo":"rateLimitExceeded"
-        }))
-        .expect("typed cause");
+    let cause = (adapter(ProviderKind::Claude).descriptor().classify_error)(&json!({
+        "message":"429 Too Many Requests", "codexErrorInfo":"rateLimitExceeded"
+    }))
+    .expect("typed cause");
     assert_eq!(cause, Cause::RateLimit);
     let limits = observation(data(100.0));
     let decision = usage_resume::record_failure(

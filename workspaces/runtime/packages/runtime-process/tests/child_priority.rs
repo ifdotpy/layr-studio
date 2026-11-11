@@ -6,7 +6,7 @@ use std::process::{Command, Stdio};
 use process_wrap::std::{CommandWrap, ProcessGroup};
 use rustix::process::getpriority_process;
 use studio_runtime_process::child_priority::{
-    CHILD_PRIORITY_ENV, ChildPriority, priority_diagnostics,
+    BACKGROUND_NICE, CHILD_PRIORITY_ENV, ChildPriority, priority_diagnostics,
 };
 
 // A pipe handshake makes reporting deterministic without delaying the parent.
@@ -49,6 +49,18 @@ fn inherited_report() -> String {
     format!("{nice}\n{}\n{nice}\n{}", io.trim(), io.trim())
 }
 
+// Raising inherited priority is advisory and can be denied to an unprivileged runner.
+fn background_nice() -> i32 {
+    getpriority_process(None)
+        .expect("parent nice")
+        .max(BACKGROUND_NICE)
+}
+
+fn background_report() -> String {
+    let nice = background_nice();
+    format!("{nice}\nbest-effort: prio 7\n{nice}\nbest-effort: prio 7")
+}
+
 fn normalized(report: &str) -> String {
     report.lines().map(str::trim).collect::<Vec<_>>().join("\n")
 }
@@ -58,7 +70,7 @@ fn background_child_and_grandchild_report_mild_cpu_and_best_effort_io() {
     let before = inherited_report();
     assert_eq!(
         normalized(&report(ChildPriority::Background, true)),
-        "5\nbest-effort: prio 7\n5\nbest-effort: prio 7"
+        background_report()
     );
     assert_eq!(inherited_report(), before, "backend scheduling unchanged");
 }
@@ -166,7 +178,10 @@ fn group_priority_includes_a_grandchild_forked_before_application() {
         .read_to_string(&mut output)
         .expect("grandchild report");
     assert!(child.wait().expect("child reaped").success());
-    assert_eq!(normalized(&output), "5\nbest-effort: prio 7");
+    assert_eq!(
+        normalized(&output),
+        format!("{}\nbest-effort: prio 7", background_nice())
+    );
 }
 
 #[test]
@@ -279,7 +294,7 @@ fn stream_priority_probe() {
     let expected = if std::env::var(CHILD_PRIORITY_ENV).as_deref() == Ok("normal") {
         before.clone()
     } else {
-        "5\nbest-effort: prio 7\n5\nbest-effort: prio 7".into()
+        background_report()
     };
     assert_eq!(normalized(&report), expected);
     assert_eq!(inherited_report(), before, "backend priorities unchanged");

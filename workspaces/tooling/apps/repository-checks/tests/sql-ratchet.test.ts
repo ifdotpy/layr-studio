@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import {
   checkSqlRatchet,
+  REVIEWED_CALLBACK_SQL_ALLOWANCES,
   fingerprint,
   formatSqlBaseline,
   ownerFor,
@@ -26,6 +27,94 @@ import {
   constructorErrors,
   QUERY_CONSTRUCTOR_OWNER,
 } from "../sql-ratchet.ts";
+
+test("reviewed callback SQL remains limited to its exact sites and counts", () => {
+  for (const allowance of REVIEWED_CALLBACK_SQL_ALLOWANCES) {
+    const site = { ...allowance, symbol: "reviewed callback lookup" };
+    assert.deepEqual(checkSqlRatchet([site], []), []);
+    assert.equal(checkSqlRatchet([site, site], []).length, 1);
+    assert.equal(
+      checkSqlRatchet([{ ...site, file: "other.rs" }], []).length,
+      1,
+    );
+    assert.equal(
+      checkSqlRatchet([{ ...site, fingerprint: "changed" }], []).length,
+      1,
+    );
+  }
+});
+
+test("scanner rejects additional SQL in the reviewed callback file", () => {
+  const directory = mkdtempSync(
+    path.join(tmpdir(), "studio-callback-sql-ratchet-"),
+  );
+  try {
+    const file =
+      "workspaces/runtime/packages/runtime-services/src/callback_reply.rs";
+    const target = path.join(directory, file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    const allowed = readFileSync(file, "utf8")
+      .split("\n")
+      .find((line) => line.startsWith("const IMMEDIATE:"));
+    assert.ok(allowed);
+    const sites = () => {
+      const nodes = scanRustNodes([target], directory);
+      return nodes
+        .filter((node) => node.ruleId !== "symbol")
+        .map((node) => {
+          const owner = nodes.find(
+            (candidate) =>
+              candidate.ruleId === "symbol" &&
+              candidate.start <= node.start &&
+              candidate.end >= node.end,
+          );
+          const symbol =
+            owner?.text.match(/(?:fn|const)\s+(\w+)/)?.[1] ?? "<module>";
+          const api =
+            node.ruleId === "call"
+              ? "rust::unresolved-sql-candidate"
+              : node.ruleId === "boundary"
+                ? "rust::persistence-boundary"
+                : "rust::sql-template";
+          return {
+            file,
+            symbol,
+            api,
+            fingerprint: fingerprint(node.text, symbol),
+          };
+        });
+    };
+    writeFileSync(target, allowed + "\n");
+    assert.equal(sites().length, 1, "the real reviewed query is scanned");
+    assert.deepEqual(checkSqlRatchet(sites(), []), []);
+    const execute = ["exec", "ute"].join("");
+    const query = ["DELETE", "FROM", "unexpected_callback_rows"].join(" ");
+    writeFileSync(
+      target,
+      `${allowed}\nuse rusqlite::Connection;
+fn unexpected() { db.${execute}("${query}", []); }
+`,
+    );
+    const errors = checkSqlRatchet(sites(), []);
+    assert.equal(
+      errors.length,
+      3,
+      "extra import, executor and SQL string are all rejected",
+    );
+    for (const api of [
+      "rust::persistence-boundary",
+      "rust::unresolved-sql-candidate",
+      "rust::sql-template",
+    ]) {
+      assert.ok(
+        errors.some((error) => error.includes(`(${api})`)),
+        api,
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("SQL ratchet rejects additions and duplicate calls and permits removals", () => {
   const site = {
@@ -468,8 +557,70 @@ fn call(argument: studio_json::Value) { consume(studio_json::Value::Null); db.${
     writeFileSync(vendor, source);
     writeFileSync(sibling, source);
     writeFileSync(ordinary, source);
+    const unknownQuery = [
+      "SELECT",
+      "unknown_payload",
+      "FROM",
+      "vendor_wire",
+    ].join(" ");
+    const unknown = `impl<'de> serde::Deserialize<'de> for UnknownPayload {
+fn deserialize() { let value: studio_json::Value = studio_json::Value::Null; db.${execute}("${unknownQuery}", []); }
+}
+`;
+    writeFileSync(vendor, source + unknown);
+    writeFileSync(sibling, source + unknown);
+    writeFileSync(ordinary, source + unknown);
+    const codec = path.join(
+      directory,
+      "workspaces/runtime/packages/runtime-providers/src/codex_codec.rs",
+    );
+    mkdirSync(path.dirname(codec), { recursive: true });
+    writeFileSync(
+      codec,
+      `use studio_json::Value;
+fn unparsed_known() { let value: studio_json::Value = studio_json::Value::Null; db.${execute}("${query}", []); }
+fn ordinary() { let value: studio_json::Value; }
+`,
+    );
+    const codecNodes = scanRustNodes([codec], directory);
+    assert.equal(
+      codecNodes.filter((node) => node.ruleId === "boundary").length,
+      3,
+    );
+    assert.ok(
+      codecNodes.some(
+        (node) => node.ruleId === "call" && node.text.includes("execute"),
+      ),
+    );
+    assert.ok(
+      codecNodes.some(
+        (node) => node.ruleId === "sql" && node.text.includes("SELECT"),
+      ),
+    );
     const nodes = scanRustNodes([vendor], directory);
     assert.equal(nodes.filter((node) => node.ruleId === "boundary").length, 4);
+    const unknownOwner = nodes.find(
+      (node) =>
+        node.ruleId === "symbol" &&
+        node.text.startsWith(
+          "impl<'de> serde::Deserialize<'de> for UnknownPayload",
+        ),
+    );
+    assert.ok(unknownOwner);
+    for (const ruleId of ["call", "sql"]) {
+      const insideUnknown: typeof nodes = nodes.filter(
+        (node) =>
+          node.ruleId === ruleId &&
+          node.start >= unknownOwner.start &&
+          node.end <= unknownOwner.end,
+      );
+      assert.equal(
+        insideUnknown.length,
+        1,
+        `the Unknown serde owner retains its ${ruleId} node`,
+      );
+      assert.ok(insideUnknown[0]?.text.includes(unknownQuery));
+    }
     assert.ok(
       nodes.some(
         (node) =>
@@ -491,13 +642,13 @@ fn call(argument: studio_json::Value) { consume(studio_json::Value::Null); db.${
       scanRustNodes([sibling], directory).filter(
         (node) => node.ruleId === "boundary",
       ).length,
-      7,
+      9,
     );
     assert.equal(
       scanRustNodes([ordinary], directory).filter(
         (node) => node.ruleId === "boundary",
       ).length,
-      7,
+      9,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });

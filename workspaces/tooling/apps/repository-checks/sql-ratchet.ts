@@ -103,7 +103,71 @@ export function constructorErrors(
         `Forbidden generated-query constructor spelling in ${file}; only ${QUERY_CONSTRUCTOR_OWNER} owns constructors`,
     );
 }
-function counts(rows: Allowance[]): Map<string, number> {
+// Reviewed indexed JSON-reference joins; exact sites also cover their EXPLAIN witnesses.
+export const REVIEWED_CALLBACK_SQL_ALLOWANCES: readonly Allowance[] = [
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "f46d8b484989ade0",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::sql-template",
+    fingerprint: "97866a57d2b39efa",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::sql-template",
+    fingerprint: "8e939bcd56960c3c",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "404e0c74994c9e20",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rusqlite::Connection::query_row",
+    fingerprint: "404e0c74994c9e20",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "fc5e0b33ea422002",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rusqlite::Connection::query_row",
+    fingerprint: "fc5e0b33ea422002",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::persistence-boundary",
+    fingerprint: "07b98577ce7e0c88",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "f1717bf0c84dd623",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rusqlite::Connection::prepare",
+    fingerprint: "f1717bf0c84dd623",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rust::unresolved-sql-candidate",
+    fingerprint: "68f0f5130534805a",
+  },
+  {
+    file: "workspaces/runtime/packages/runtime-services/src/callback_reply.rs",
+    api: "rusqlite::Statement::query_map",
+    fingerprint: "68f0f5130534805a",
+  },
+];
+
+function counts(rows: readonly Allowance[]): Map<string, number> {
   const found = new Map<string, number>();
   for (const row of rows)
     found.set(identity(row), (found.get(identity(row)) ?? 0) + 1);
@@ -120,8 +184,9 @@ export function checkSqlRatchet(
   baseline: Allowance[],
 ): string[] {
   const remaining = counts(baseline);
+  const reviewed = counts(REVIEWED_CALLBACK_SQL_ALLOWANCES);
   return actual
-    .filter((site) => !consume(remaining, site))
+    .filter((site) => !consume(remaining, site) && !consume(reviewed, site))
     .map(
       (site) =>
         `New raw SQL: ${site.file}::${site.symbol} (${site.api}). Use a typed adapter; infrastructure additions require an explicit reviewed allowance.`,
@@ -410,9 +475,34 @@ export function scanRustNodes(paths: string[], directory = root): Node[] {
       )
       .map(key),
   );
+  // Unknown vendor wire objects deliberately retain JSON. This exemption covers
+  // only the Value type at the two codec owners; executor calls remain audited.
+  const vendorWireValue = (node: Node): boolean => {
+    if (node.ruleId !== "boundary" || node.text !== "studio_json::Value")
+      return false;
+    const file = path
+      .relative(directory, path.resolve(root, node.file))
+      .replaceAll(path.sep, "/");
+    return result.some(
+      (owner) =>
+        owner.file === node.file &&
+        owner.ruleId === "symbol" &&
+        owner.start <= node.start &&
+        owner.end >= node.end &&
+        ((file ===
+          "workspaces/runtime/packages/codex-protocol/src/generated/mod.rs" &&
+          /^impl<'de> serde::Deserialize<'de> for Unknown[A-Z][A-Za-z0-9_]*\s*\{/.test(
+            owner.text,
+          )) ||
+          (file ===
+            "workspaces/runtime/packages/runtime-providers/src/codex_codec.rs" &&
+            owner.text.startsWith("fn unparsed_known("))),
+    );
+  };
   return result.filter(
     (node) =>
       node.ruleId !== "vendor-open-json-field" &&
+      !vendorWireValue(node) &&
       !(node.ruleId === "boundary" && vendorFields.has(key(node))) &&
       (node.ruleId !== "sql" || !declared.has(key(node))),
   );

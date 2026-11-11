@@ -40,6 +40,21 @@ impl From<&ResponseBody> for CallbackBody {
         match body {
             ResponseBody::Result(value) => Self::Result(value.clone()),
             ResponseBody::Error(value) => Self::Error(value.clone()),
+            ResponseBody::CodexResult(value) => Self::Result(
+                value
+                    .serialize_payload(studio_json::value::Serializer)
+                    .expect("typed result payload serializes"),
+            ),
+            ResponseBody::CodexServerResult(value) => Self::Result(
+                value
+                    .serialize_payload(studio_json::value::Serializer)
+                    .expect("typed callback payload serializes"),
+            ),
+            ResponseBody::CodexError(value) => Self::Error(json!(value)),
+            ResponseBody::Uncorrelated(value)
+            | ResponseBody::CodexUnparsedResult { result: value, .. } => {
+                Self::Result(studio_json::from_str(value.as_str()).expect("validated raw result"))
+            }
         }
     }
 }
@@ -899,7 +914,19 @@ pub fn admit_callback_request(
     context: &CallbackContext,
     frame: &Frame,
 ) -> Result<String, CallbackError> {
-    let input = Input::from_frame(frame)?
+    // An incompatible request can own an error reply, but cannot enter an SDK handler.
+    let provenance = match frame {
+        Frame::KnownMethodUnparsed(raw) => Some(Frame::UnknownMethod(raw.clone())),
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Request(_)
+        | Frame::Notification(_)
+        | Frame::UnknownMethod(_)
+        | Frame::Response { .. } => None,
+    };
+    let input = Input::from_frame(provenance.as_ref().unwrap_or(frame))?
         .ok_or(CallbackError::Invalid("Expected callback request frame"))?;
     input.check_context(context)?;
     Ok(admit_owner(
@@ -961,6 +988,34 @@ fn owner_by_root(db: &Connection, root: &str) -> Result<Option<Owner>, CallbackE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_result_projection_exposes_the_payload_without_an_enum_envelope() {
+        use studio_runtime_providers::codex;
+        let result = ResponseBody::CodexResult(codex::ClientRequestResult::Initialize(Box::new(
+            codex::InitializeResponse {
+                codex_home: "/fixture".into(),
+                platform_family: "fixture".into(),
+                platform_os: "fixture".into(),
+                user_agent: "fixture/1".into(),
+            },
+        )));
+        let CallbackBody::Result(result) = CallbackBody::from(&result) else {
+            panic!("result projection");
+        };
+        assert_eq!(result["userAgent"], "fixture/1");
+        assert_eq!(result["codexHome"], "/fixture");
+        assert!(result.get("Initialize").is_none());
+        let callback =
+            ResponseBody::CodexServerResult(codex::ServerRequestResult::CurrentTimeRead(Box::new(
+                codex::CurrentTimeReadResponse { current_time_at: 7 },
+            )));
+        let CallbackBody::Result(callback) = CallbackBody::from(&callback) else {
+            panic!("callback projection");
+        };
+        assert_eq!(callback["currentTimeAt"], 7);
+        assert!(callback.get("CurrentTimeRead").is_none());
+    }
     fn database() -> Connection {
         let db = Connection::open_in_memory().expect("database");
         studio_runtime_store::receipt_schema::create(&db).expect("receipt schema");

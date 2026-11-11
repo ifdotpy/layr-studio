@@ -1257,7 +1257,11 @@ pub fn compile(
     if rows.iter().map(|r| r.metadata.assets.len()).sum::<usize>() > MAX_TURN_ATTACHMENTS {
         return Err(PrepareError::TooManyAttachments);
     }
-    let attributed = s.provider == Some(ProviderKind::Claude);
+    let attributed = s.provider.is_some_and(|kind| {
+        crate::provider_adapter::adapter(kind)
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::AttributedInput)
+    });
     let mut provider_assets = Vec::new();
     let mut all_assets = Vec::new();
     let mut inputs = Vec::new();

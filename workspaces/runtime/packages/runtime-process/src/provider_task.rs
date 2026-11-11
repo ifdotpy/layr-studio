@@ -8,7 +8,6 @@ use std::{collections::BTreeMap, future::Future, path::PathBuf, time::Duration};
 use studio_json::Value;
 use studio_runtime_providers::{
     DecodedJournalPayload, Frame, ProviderKind, RequestId, ResponseBody,
-    decode_journal_entry_borrowed,
 };
 use studio_runtime_store::supervisor_journal::launch_signature;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -199,6 +198,7 @@ impl SupervisorProviderTaskFactory {
                 initialization: InitializationStatus::AwaitingReply,
             });
             let actor = AdapterTask {
+                codec: options.launch.codec,
                 provider: options.launch.provider,
                 codex_diagnostics: CodexMethodDiagnostics::default(),
                 activation,
@@ -462,6 +462,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> Rpc<S> {
 }
 
 struct AdapterTask {
+    codec: ProviderCodec,
     provider: Option<ProviderKind>,
     codex_diagnostics: CodexMethodDiagnostics,
     account_store: Option<Arc<studio_runtime_store::RuntimeStore>>,
@@ -488,7 +489,7 @@ struct AdapterTask {
     info: Option<AttachmentInfo>,
     initialization: InitializationStatus,
     initialize_id: Option<RequestId>,
-    cached_initialize: Option<Value>,
+    cached_initialize: Option<ResponseBody>,
     open_attempted: bool,
     /// The supervisor reported the end of the attached child (`nextBatch`
     /// with its return code and closed output readers).
@@ -640,21 +641,34 @@ impl AdapterTask {
         self.open_attempted = true;
         self.publish();
         let open = open_wire_request(&self.open, self.inherit_cwd);
-        let opened: OpenResult = rpc
+        let opened: OpenResult<studio_json::OwnedRawJson> = rpc
             .call(SupervisorAction::Open, open, &mut self.stop)
             .await?;
         // Any uncertain response or identity change preserves a recovery result;
         // it never reconnects or guesses that a second open is safe.
         self.cached_initialize = if opened.resumed {
-            opened.init_result
+            opened
+                .init_result
+                .map(|value| match self.provider {
+                    Some(ProviderKind::Codex) => Ok(match studio_runtime_providers::codex::ClientRequestResult::decode(studio_runtime_providers::codex::ClientRequestMethod::Initialize, value.as_str()) {
+                        Ok(result) => ResponseBody::CodexResult(result),
+                        Err(_) => ResponseBody::CodexUnparsedResult { method: studio_runtime_providers::codex::ClientRequestMethod::Initialize, result: value },
+                    }),
+                    Some(ProviderKind::Claude) | None => studio_json::from_str(value.as_str())
+                        .map(ResponseBody::Result)
+                        .map_err(SupervisorError::from),
+                })
+                .transpose()?
         } else {
             None
         };
         match self.provider {
             Some(ProviderKind::Codex) => {
-                if let Some(result) = &self.cached_initialize {
-                    self.codex_diagnostics
-                        .initialize(result.get("userAgent").and_then(|value| value.as_str()));
+                if let Some(ResponseBody::CodexResult(
+                    studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
+                )) = &self.cached_initialize
+                {
+                    self.codex_diagnostics.initialize(Some(&result.user_agent));
                 }
             }
             Some(ProviderKind::Claude) | None => {}
@@ -1025,7 +1039,7 @@ impl AdapterTask {
         if *self.stop.borrow() {
             return Ok(CommandReceipt::NotSent);
         }
-        let method = write.message.get("method").and_then(Value::as_str);
+        let method = write.frame().method();
         let initialize = method == Some("initialize");
         let initialized = method == Some("initialized");
         if initialized
@@ -1044,17 +1058,36 @@ impl AdapterTask {
         }
         if initialize {
             if let Some(cached) = self.cached_initialize.take() {
-                self.initialize_id = local_request_id(&write.message);
-                return Ok(CommandReceipt::CachedInitialize(cached));
+                self.initialize_id = write.frame().id();
+                return match cached {
+                    ResponseBody::CodexResult(
+                        studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
+                    ) => Ok(CommandReceipt::CachedCodexInitialize(*result)),
+                    ResponseBody::Result(value) => Ok(CommandReceipt::CachedInitialize(value)),
+                    ResponseBody::CodexUnparsedResult {
+                        method: studio_runtime_providers::codex::ClientRequestMethod::Initialize,
+                        result,
+                    } => Ok(CommandReceipt::CachedCodexUnparsedInitialize(result)),
+                    ResponseBody::CodexResult(_)
+                    | ResponseBody::CodexServerResult(_)
+                    | ResponseBody::CodexError(_)
+                    | ResponseBody::Error(_)
+                    | ResponseBody::CodexUnparsedResult { .. }
+                    | ResponseBody::Uncorrelated(_) => Err(AdapterError::InvalidConfiguration),
+                };
             }
             if self.initialize_id.is_some() {
                 return Ok(CommandReceipt::NotSent);
             }
         }
-        let native_id = provider_native_id(&write.message)
+        let native_id = method
+            .and_then(|_| match write.frame().id() {
+                Some(RequestId::Number(id)) => i64::try_from(id).ok().map(NativeId::Integer),
+                Some(RequestId::String(_)) | None => None,
+            })
             .or_else(|| initialize.then_some(NativeId::Integer(1)));
         let rpc_request = native_id.is_some();
-        let local_id = method.and_then(|_| local_request_id(&write.message));
+        let local_id = method.and_then(|_| write.frame().id());
         if rpc_request && local_id.is_none() {
             return Ok(CommandReceipt::NotSent);
         }
@@ -1062,7 +1095,14 @@ impl AdapterTask {
             handle: self.open.handle.clone(),
             operation_id: write.operation_id,
             native_id,
-            message: write.message,
+            message: studio_json::OwnedRawJson::from_string(
+                String::from_utf8(
+                    (write.encode)(&write.message)
+                        .map_err(|_| AdapterError::InvalidConfiguration)?,
+                )
+                .map_err(|_| AdapterError::InvalidConfiguration)?,
+            )
+            .map_err(|_| AdapterError::InvalidConfiguration)?,
             extra: Default::default(),
         };
         // Serialization failures happen before send, so they are definitely unsent.
@@ -1120,7 +1160,7 @@ impl AdapterTask {
         let mut boundary_at = None;
         let payload = match event.kind {
             EventKind::Stdout => {
-                let decoded = decode_stdout(raw);
+                let decoded = decode_stdout_with(raw, self.codec);
                 boundary_at = decoded.boundary_at;
                 match decoded.payload {
                     DecodedJournalPayload::Frame(mut frame) => {
@@ -1168,8 +1208,16 @@ impl AdapterTask {
         }
         if current && self.initialize_id.as_ref() == Some(id) {
             self.initialization = match body {
-                ResponseBody::Error(_) => InitializationStatus::Refused,
-                ResponseBody::Result(_) => InitializationStatus::InitializedWritePending,
+                ResponseBody::Error(_) | ResponseBody::CodexError(_) => {
+                    InitializationStatus::Refused
+                }
+                ResponseBody::Result(_)
+                | ResponseBody::CodexUnparsedResult { .. }
+                | ResponseBody::Uncorrelated(_)
+                | ResponseBody::CodexResult(_)
+                | ResponseBody::CodexServerResult(_) => {
+                    InitializationStatus::InitializedWritePending
+                }
             };
             self.publish();
         }
@@ -1186,12 +1234,25 @@ struct SupervisorRawStdout<'a> {
     boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
 }
 
-fn decode_stdout(raw: &str) -> studio_runtime_providers::DecodedJournalEntry {
-    let decoded = decode_journal_entry_borrowed(0, 0, raw.as_bytes());
+fn decode_stdout_with(
+    raw: &str,
+    codec: ProviderCodec,
+) -> studio_runtime_providers::DecodedJournalEntry {
+    let decoded = studio_runtime_providers::decode_journal_with(
+        0,
+        0,
+        raw.as_bytes(),
+        codec.decode_with_metadata,
+    );
     if let DecodedJournalPayload::RawStdout { .. } = decoded.payload
         && let Ok(wrapped) = studio_json::from_str::<SupervisorRawStdout<'_>>(raw)
     {
-        let mut decoded = decode_journal_entry_borrowed(0, 0, wrapped.raw.as_bytes());
+        let mut decoded = studio_runtime_providers::decode_journal_with(
+            0,
+            0,
+            wrapped.raw.as_bytes(),
+            codec.decode_with_metadata,
+        );
         decoded.boundary_at = wrapped.boundary_at;
         return decoded;
     }
@@ -1200,13 +1261,6 @@ fn decode_stdout(raw: &str) -> studio_runtime_providers::DecodedJournalEntry {
 
 fn parse_payload(raw: &str) -> Result<Value, AdapterError> {
     studio_json::from_str(raw).map_err(|error| SupervisorError::from(error).into())
-}
-
-/// The local ID of an outbound request, when it is a valid wire request ID.
-fn local_request_id(message: &Value) -> Option<RequestId> {
-    message
-        .get("id")
-        .and_then(|id| RequestId::deserialize(id).ok())
 }
 
 struct EventPump {

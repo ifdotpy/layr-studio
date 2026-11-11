@@ -1041,7 +1041,8 @@ async fn unrelated_request_in_flight(
 ) {
     use crate::account_worker::retained::{DIAGNOSTICS_OPERATION_PREFIX, SessionRequest};
     let adapter = crate::provider_adapter::adapter(provider);
-    let method = adapter.diagnostics_method();
+    let diagnostics = (adapter.descriptor().diagnostics)();
+    let method = diagnostics.method;
     let port = worker.retained_session();
     let call = SessionRequest {
         root_request_id: String::new(),
@@ -1053,7 +1054,7 @@ async fn unrelated_request_in_flight(
         transfer: None,
         deleted_actor_session: None,
         method,
-        params: adapter.diagnostics_params(),
+        params: diagnostics.params,
         deadline: (tokio::time::Instant::now() + Duration::from_secs(600)).into_std(),
     };
     let task = tokio::spawn(async move { port.request(call).await });

@@ -273,6 +273,7 @@ fn actor(
         initialization: InitializationStatus::AwaitingReply,
     };
     let actor = AdapterTask {
+        codec: ProviderCodec::default(),
         provider: None,
         codex_diagnostics: CodexMethodDiagnostics::default(),
         account_store: None,
@@ -643,8 +644,10 @@ async fn cancellation_before_send_is_not_sent_and_missing_receipt_is_unknown() {
             &mut rpc,
             AdapterCommand::Write {
                 write: PreparedWrite {
+                    encode: studio_runtime_providers::encode_line,
                     operation_id: OperationId("owned".into()),
-                    message: studio_json::json!({"method":"notice"}),
+                    message: studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#)
+                        .unwrap(),
                 },
                 reply: sender,
                 observed: oneshot::channel().1,
@@ -709,8 +712,9 @@ async fn abandoned_buffered_write_receipt_or_receive_future_fences_attachment() 
         let (socket, server) = tokio::io::duplex(4096);
         let mut server = BufReader::new(server);
         let (command, mut receipt) = AdapterCommand::write(PreparedWrite {
+            encode: studio_runtime_providers::encode_line,
             operation_id: OperationId("once".into()),
-            message: studio_json::json!({"method":"notice"}),
+            message: studio_runtime_providers::decode_frame(br#"{"method":"notice"}"#).unwrap(),
         });
         let task = tokio::spawn(async move {
             let mut rpc = Rpc {
@@ -833,8 +837,12 @@ async fn response_mapping_prunes_all_settled_entries() {
                 .write(
                     &mut rpc,
                     PreparedWrite {
+                        encode: studio_runtime_providers::encode_line,
                         operation_id: OperationId(format!("request:{id}")),
-                        message: studio_json::json!({"id":id,"method":"model/list"}),
+                        message: studio_runtime_providers::decode_frame(
+                            format!(r#"{{"id":{id},"method":"model/list"}}"#).as_bytes(),
+                        )
+                        .unwrap(),
                     },
                 )
                 .await
@@ -863,8 +871,12 @@ async fn response_mapping_prunes_all_settled_entries() {
                 .write(
                     &mut rpc,
                     PreparedWrite {
+                        encode: studio_runtime_providers::encode_line,
                         operation_id: OperationId("after-prune".into()),
-                        message: studio_json::json!({"id":99,"method":"model/list"})
+                        message: studio_runtime_providers::decode_frame(
+                            br#"{"id":99,"method":"model/list"}"#
+                        )
+                        .unwrap()
                     }
                 )
                 .await

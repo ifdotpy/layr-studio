@@ -28,6 +28,7 @@ mod missing_session;
 mod native_requests;
 mod native_review;
 mod orphan_thread_receipt;
+mod provider_drift;
 #[cfg(unix)]
 mod provider_started_turn;
 mod publication_drain;
@@ -390,6 +391,7 @@ struct Wire {
     receipt: oneshot::Sender<CommandReceipt>,
 }
 struct Peer {
+    codec: studio_runtime_process::provider_seam::ProviderCodec,
     trace: Arc<std::sync::atomic::AtomicBool>,
     wire: studio_runtime_providers::WireProfile,
     account: String,
@@ -397,6 +399,7 @@ struct Peer {
     factory: Arc<dyn ProviderTaskFactory>,
     entries: mpsc::Sender<JournalEntry>,
     writes: mpsc::Receiver<Wire>,
+    write_observed: watch::Receiver<Value>,
     acks: mpsc::Receiver<EventCursor>,
     stop: Shutdown,
     clock: SessionClock,
@@ -499,6 +502,7 @@ impl Peer {
         let (commands, mut inbox) = mpsc::channel::<AdapterCommand>(16);
         let (entries, journal) = mpsc::channel(PEER_JOURNAL_CAPACITY);
         let (out, writes) = mpsc::channel(16);
+        let (write_observed_tx, write_observed) = watch::channel(Value::Null);
         let (ack, acks) = mpsc::channel(16);
         let (status, observed) = watch::channel(AttachmentStatus {
             handle: ProviderHandle::for_account(account),
@@ -534,7 +538,16 @@ impl Peer {
                                 if let Some(gate) = gate.take() {
                                     gate.await.unwrap();
                                 }
-                                CommandReceipt::CachedInitialize(initialize_result.clone())
+                                if matches!(write.frame(), Frame::CodexClientRequest(_)) {
+                                    CommandReceipt::CachedCodexUnparsedInitialize(
+                                        studio_json::OwnedRawJson::from_string(
+                                            initialize_result.to_string(),
+                                        )
+                                        .unwrap(),
+                                    )
+                                } else {
+                                    CommandReceipt::CachedInitialize(initialize_result.clone())
+                                }
                             }
                             Some("initialized") => CommandReceipt::Written {
                                 written_at: None,
@@ -563,6 +576,7 @@ impl Peer {
                         };
                         let _ignored = reply.send(result);
                         tokio::select! {biased; _=Shutdown::cancelled(&mut stopped)=>break, _=observed=>{}}
+                        write_observed_tx.send_replace(write.message()["id"].clone());
                         if initialized {
                             _status.send_modify(|status| {
                                 status.initialization = InitializationStatus::Ready
@@ -596,12 +610,14 @@ impl Peer {
         let factory = Arc::new(Factory(std::sync::Mutex::new(Some(provider))));
         Self {
             trace,
+            codec: studio_runtime_process::provider_seam::ProviderCodec::default(),
             wire: studio_runtime_providers::ProviderKind::Codex.wire(),
             account: account.into(),
             generation,
             factory,
             entries,
             writes,
+            write_observed,
             acks,
             stop,
             clock: SessionClock::default(),
@@ -639,21 +655,22 @@ impl Peer {
         resources: preparation::PreparationResources,
         sink: Arc<dyn crate::notification_runtime_effects::NotificationPostCommitSink>,
     ) -> AccountHandle {
+        let mut launch =
+            ProviderLaunchSpec::new(vec!["fake".into()], BTreeMap::new(), std::env::temp_dir());
+        launch.codec = self.codec;
         start_account_worker_with_publication_sink(
             bridge,
             self.account.clone(),
             self.factory.clone(),
             OpenOptions {
                 clock: self.clock.clone(),
-                launch: ProviderLaunchSpec::new(
-                    vec!["fake".into()],
-                    BTreeMap::new(),
-                    "/var/tmp".into(),
-                ),
+                launch,
                 expected_generation: Some(self.generation),
             },
             SessionTaskConfig {
-                initialize_params: json!({}),
+                initialize_params: studio_runtime_providers::initialize_params(
+                    studio_runtime_providers::ClientName::AccountSession,
+                ),
                 generation: self.generation,
                 wire: self.wire,
                 timeout_ms: 60_000,
@@ -783,6 +800,15 @@ impl Peer {
             .frame(json!({"id":request["id"],"result":result}))
             .await;
         self.acknowledged(cursor).await;
+    }
+    /// Order a fixture response after the session has observed its write receipt.
+    async fn wait_for_write_receipt(&mut self, request: &Value) {
+        while *self.write_observed.borrow_and_update() != request["id"] {
+            self.write_observed
+                .changed()
+                .await
+                .expect("write receipt observer");
+        }
     }
     async fn accepted(&mut self, request: &Value) {
         self.reply(request, json!({"turn":{"id":"turn"}})).await;

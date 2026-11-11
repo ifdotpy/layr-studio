@@ -1,3 +1,4 @@
+import type { CommandExecutionRequestApprovalParams } from "../../../../../providers/apps/claude-bridge/codex-generated/protocol.ts";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -34,9 +35,14 @@ test("approval with a long command keeps its card and actions in view", async ({
                 method: "item/commandExecution/requestApproval",
                 params: {
                   command: COMMAND,
+                  itemId: "long-command",
+                  startedAtMs: Date.now(),
                   reason: "Approve the long command",
                   cwd: "/Users/someone/Projects/some-very-long-project-name/workspaces/client/apps/web",
-                },
+                } satisfies Omit<
+                  CommandExecutionRequestApprovalParams,
+                  "threadId" | "turnId"
+                >,
               },
             },
           ],

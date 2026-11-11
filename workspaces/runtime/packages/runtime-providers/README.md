@@ -14,9 +14,12 @@
 The journal decoders accept one complete stdout record and preserve its cursor,
 generation, and raw bytes on malformed input. `encode_line` emits one JSON object
 and a trailing LF. Replies require exactly one of `result` or `error`; an explicit
-`result: null` is valid. Unknown methods and extension fields
-survive a decode/encode round trip. Request parameters and response bodies
-remain `serde_json::Value`; the codec validates their envelopes.
+`result: null` is a valid envelope. The Codex adapter decodes vendor-owned
+request and notification unions, and the pending book correlates raw replies to
+the generated result union before settlement. Malformed known payloads are
+rejected. One unknown-method variant retains newer messages. The generated
+protocol owns the Codex method inventory and ID accessors; bridge and helper
+frames keep their extensible JSON payloads and extension fields.
 
 [`PendingBook`](src/session.rs) distinguishes matched, late, duplicate, and
 unknown response IDs. Transport loss closes the book and marks unresolved

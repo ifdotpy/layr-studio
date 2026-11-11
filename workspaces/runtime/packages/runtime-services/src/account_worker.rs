@@ -1386,8 +1386,9 @@ impl Worker {
                             .is_none()
                             .then(|| self.session.status.borrow().clone())
                     });
+                    let codec = self.control.codec();
                     self.db("callback_receipt_expired", move |store| async move {
-                        callback_record::expired(&store, &operation, status).await
+                        callback_record::expired(&store, &operation, status, codec).await
                     })
                     .await?;
                 }
@@ -2360,7 +2361,9 @@ impl Worker {
         turn: String,
         compiled: preparation::PreparedSteer,
     ) -> Result<(), WorkerError> {
-        if intent.provider == studio_runtime_providers::ProviderKind::Claude
+        if crate::provider_adapter::adapter(intent.provider)
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::SteerCompletionReceipts)
             && !self.session.status.borrow().has_capability(
                 &ProviderHandle::for_account(&self.account),
                 self.generation,
@@ -2527,7 +2530,7 @@ impl Worker {
         };
         match outcome {
             Ok(Some(RequestOutcome::Reply {
-                body: ResponseBody::Result(_),
+                body: ResponseBody::Result(_) | ResponseBody::CodexResult(_),
                 ..
             })) => {
                 self.browser_skill_roots = Some(roots);
@@ -2743,7 +2746,7 @@ impl Worker {
                             ..
                         } | SessionOutcome::Resolved {
                             outcome: RequestOutcome::Reply {
-                                body: ResponseBody::Result(_),
+                                body: ResponseBody::Result(_) | ResponseBody::CodexResult(_),
                                 ..
                             },
                             ..
@@ -3156,11 +3159,9 @@ impl Worker {
             JournalPayload::Frame(Frame::Notification(frame)) => {
                 frame.method.as_str() == "turn/completed"
             }
-            JournalPayload::Frame(Frame::UnknownMethod(frame))
-                if !frame.fields.contains_key("id") =>
-            {
-                frame.method.as_str() == "turn/completed"
-            }
+            JournalPayload::Frame(
+                Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame),
+            ) if !frame.fields.contains_key("id") => frame.method.as_str() == "turn/completed",
             JournalPayload::Frame(_)
             | JournalPayload::RawStdout { .. }
             | JournalPayload::Stderr(_)
@@ -3254,7 +3255,7 @@ impl Worker {
             }
             if record.submitted.is_some() {
                 let status = self.session.status.borrow().clone();
-                match record.saved_response(&status) {
+                match record.saved_response(&status, self.control.codec()) {
                     Ok(Some(frame)) => {
                         self.managed_callback_cursors.insert(key);
                         self.push(Effect::Callback(cursor, origin, frame, actor, epoch));
@@ -3282,7 +3283,7 @@ impl Worker {
     fn start_callback(&mut self, record: callback_record::Accepted) -> Result<(), WorkerError> {
         let cursor = studio_runtime_process::EventCursor(record.cursor);
         let origin = Generation(record.generation);
-        let frame = record.frame()?;
+        let frame = record.dispatch_frame(self.control.codec())?;
         let actor = record.actor;
         let actor_epoch = record.epoch;
         if let Frame::Request(request) = &frame
@@ -3476,7 +3477,6 @@ impl Worker {
         }
         let control = self.control.clone();
         let operation = callback_record::operation(&self.account, self.generation.0, cursor.0);
-        let prepared = control.prepare_callback_reply(OperationId(operation.clone()), &frame)?;
         let key = operation.clone();
         let saved_reply = Some(callback_record::SavedReply::new(
             &frame,
@@ -3488,9 +3488,11 @@ impl Worker {
                 self.session.status.borrow().supervisor_write_deduplication,
             )
         });
-        let no_write = self
+        let preparation_control = control.clone();
+        let (no_write, prepared) = self
             .db("callback_admission", move |store| async move {
-                callback_record::admit_reply(&store, &key, submission).await
+                callback_record::admit_reply(&store, &key, submission, frame, preparation_control)
+                    .await
             })
             .await?;
         if no_write {
@@ -3538,8 +3540,9 @@ impl Worker {
             } else if matches!(error, WorkerError::CallbackUnknown) {
                 let operation = operation.clone();
                 let status = Some(self.session.status.borrow().clone());
+                let codec = self.control.codec();
                 self.db("callback_admission_expired", move |store| async move {
-                    callback_record::expired(&store, &operation, status).await
+                    callback_record::expired(&store, &operation, status, codec).await
                 })
                 .await?;
             }

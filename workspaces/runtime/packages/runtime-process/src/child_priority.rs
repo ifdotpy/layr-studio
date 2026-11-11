@@ -9,8 +9,9 @@ use process_wrap::std::{CommandWrap, CommandWrapper};
 use serde::{Deserialize, Serialize};
 
 pub const CHILD_PRIORITY_ENV: &str = "CODEX_AGENT_CHILD_PRIORITY";
+/// Absolute Unix nice target for owned child groups; inherited lower priority may remain.
 #[cfg(unix)]
-const BACKGROUND_NICE: i32 = 5;
+pub const BACKGROUND_NICE: i32 = 5;
 static FAILURE_COUNT: AtomicU64 = AtomicU64::new(0);
 static FIRST_FAILURE: OnceLock<PriorityFailure> = OnceLock::new();
 static CONFIGURED: OnceLock<ChildPriority> = OnceLock::new();
@@ -245,6 +246,12 @@ mod tests {
         use rustix::process::{Pid, WaitId, WaitIdOptions, waitid};
         use std::os::unix::process::CommandExt;
 
+        if rustix::process::getpriority_process(None).expect("parent nice") > BACKGROUND_NICE {
+            eprintln!(
+                "skipped: inherited nice exceeds the background target; permission to raise a zombie's priority cannot be assumed"
+            );
+            return;
+        }
         let mut child = Command::new("/bin/sh")
             .args(["-c", "exit 0"])
             .process_group(0)

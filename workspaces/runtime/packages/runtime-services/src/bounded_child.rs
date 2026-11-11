@@ -631,6 +631,7 @@ mod tests {
         .expect("probe script");
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700))
             .expect("executable");
+        let inherited_priority = rustix::process::getpriority_process(None).expect("parent nice");
         let output = run(Request {
             program: program.as_os_str(),
             git_directory: None,
@@ -642,16 +643,21 @@ mod tests {
             timeout: Duration::from_secs(30),
         })
         .expect("bounded caller completes");
+        assert_eq!(
+            rustix::process::getpriority_process(None).expect("parent nice after launch"),
+            inherited_priority,
+            "bounded caller leaves parent priority unchanged"
+        );
         let text = String::from_utf8(output.stdout.bytes).expect("probe output");
         let lines = text.lines().map(str::trim).collect::<Vec<_>>();
         match ChildPriority::from_environment() {
-            ChildPriority::Background => assert_eq!(lines, ["5", "best-effort: prio 7"]),
-            ChildPriority::Normal => assert_eq!(
-                lines[0],
-                rustix::process::getpriority_process(None)
-                    .expect("parent nice")
-                    .to_string()
-            ),
+            ChildPriority::Background => {
+                let expected = inherited_priority
+                    .max(studio_runtime_process::child_priority::BACKGROUND_NICE)
+                    .to_string();
+                assert_eq!(lines, [expected.as_str(), "best-effort: prio 7"]);
+            }
+            ChildPriority::Normal => assert_eq!(lines[0], inherited_priority.to_string()),
         }
     }
 

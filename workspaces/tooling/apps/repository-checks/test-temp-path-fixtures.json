@@ -106,9 +106,6 @@
   "workspaces/runtime/packages/runtime-services/src/account_worker/preparation/pipeline.rs": [
     "cwd: \"/tmp/project\".into(),"
   ],
-  "workspaces/runtime/packages/runtime-services/src/account_worker/tests.rs": [
-    "\"/var/tmp\".into(),"
-  ],
   "workspaces/runtime/packages/runtime-services/src/provider_session_task/tests.rs": [
     "\"/var/tmp\".into(),",
     "\"/var/tmp\".into(),"

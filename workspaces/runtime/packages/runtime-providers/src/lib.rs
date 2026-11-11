@@ -4,6 +4,13 @@
 
 mod callback_queue_limit;
 mod codec;
+mod codex_codec;
+pub use codex_codec::{
+    codex_request_id, correlate_codex_result, decode_codex_frame, decode_codex_frame_with_metadata,
+    decode_codex_line, decode_probe_response, encode_codex_line, normalize_codex_frame,
+    vendor_request_id,
+};
+pub use studio_codex_protocol as codex;
 pub mod codex_disposition;
 mod connection;
 mod initialize;
@@ -13,17 +20,18 @@ pub mod supervisor_protocol;
 
 pub use callback_queue_limit::CALLBACK_QUEUE_LIMIT;
 pub use codec::{
-    CodecError, CodexIncomingMethod, DecodedJournalEntry, DecodedJournalPayload, Frame,
-    MAX_FRAME_BYTES, MAX_FRAME_DELIMITER_BYTES, Method, NotificationFrame, RequestFrame, RequestId,
-    ResponseBody, UnknownMethodFrame, decode_journal_entry, decode_journal_entry_borrowed,
-    decode_journal_value, decode_probe_response, encode_line, encode_line_into,
-    frame_payload_bytes, frame_prefix_payload_bytes, validate_initialize_params,
+    CodecError, CodexIncomingMethod, DecodedFrame, DecodedJournalEntry, DecodedJournalPayload,
+    Frame, MAX_FRAME_BYTES, MAX_FRAME_DELIMITER_BYTES, Method, NotificationFrame, RequestFrame,
+    RequestId, ResponseBody, UnknownMethodFrame, decode_frame, decode_frame_with_metadata,
+    decode_journal_entry, decode_journal_entry_borrowed, decode_journal_value, decode_journal_with,
+    encode_line, encode_line_into, frame_payload_bytes, frame_prefix_payload_bytes,
+    validate_initialize_params,
 };
 pub use connection::{
     Action, Inbound, InitializationStatus, Lifecycle, RequestOutcome, RequestTicket, SessionError,
     SessionState,
 };
-pub use initialize::{ClientName, initialize_params};
+pub use initialize::{ClientName, codex_initialize_params, initialize_params};
 pub use provider_kind::{
     ProviderCapability, ProviderKind, RequestIdScheme, UnknownProvider, WireProfile,
     stop_terminals_method,

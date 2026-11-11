@@ -13,6 +13,7 @@ use std::{
 
 use serde::{Deserialize, de::IgnoredAny};
 use studio_json::{Value, json};
+use studio_runtime_providers::codex;
 use studio_runtime_schema::json_object::JsonObject;
 use studio_runtime_services::{
     native_runtime::{
@@ -96,25 +97,6 @@ struct CompanionReady {
     selected_version: f64,
     #[serde(rename = "capabilities")]
     _capabilities: Vec<IgnoredAny>,
-}
-#[derive(Deserialize)]
-struct InitializeResult {
-    #[serde(rename = "userAgent")]
-    _user_agent: String,
-}
-#[derive(Deserialize)]
-struct ConfigResult {
-    config: BTreeMap<String, IgnoredAny>,
-}
-#[derive(Deserialize)]
-struct LoadedResult {
-    data: Vec<IgnoredAny>,
-}
-fn probe_result<T: serde::de::DeserializeOwned>(value: Value) -> Result<T, ()> {
-    if !value.is_object() {
-        return Err(());
-    }
-    T::deserialize(value).map_err(|_| ())
 }
 fn companion_ready(bytes: &[u8]) -> Result<(), ()> {
     let JsonObject(ready): JsonObject<CompanionReady> =
@@ -294,25 +276,60 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
     let mut reader = BufReader::new(output);
     let deadline = tokio::time::Instant::now() + SMOKE_TIMEOUT;
     let result = async {
-        let initialize = request(
-            1,
-            "initialize",
-            studio_runtime_providers::initialize_params(
+        let initialize = codex::ClientRequest::Initialize {
+            id: codex::RequestId::Variant2(Box::new(1)),
+            params: studio_runtime_providers::codex_initialize_params(
                 studio_runtime_providers::ClientName::UpdateProbe,
             ),
-        );
+        };
         write_frame(&mut input, &initialize).await?;
-        let _: InitializeResult = probe_result(response(&mut reader, 1, deadline).await?)?;
-        write_frame(&mut input, &json!({"method":"initialized"})).await?;
-        write_frame(
-            &mut input,
-            &request(2, "config/read", json!({"includeLayers":false})),
+        let codex::ClientRequestResult::Initialize(_) = response(
+            &mut reader,
+            1,
+            codex::ClientRequestMethod::Initialize,
+            deadline,
         )
-        .await?;
-        let config: ConfigResult = probe_result(response(&mut reader, 2, deadline).await?)?;
-        let _config = config.config;
-        write_frame(&mut input, &request(3, "thread/loaded/list", json!({}))).await?;
-        let loaded: LoadedResult = probe_result(response(&mut reader, 3, deadline).await?)?;
+        .await?
+        else {
+            return Err(());
+        };
+        write_frame(&mut input, &codex::ClientNotification::Initialized).await?;
+        let config = codex::ClientRequest::ConfigRead {
+            id: codex::RequestId::Variant2(Box::new(2)),
+            params: codex::ConfigReadParams {
+                cwd: None,
+                include_layers: Some(false),
+            },
+        };
+        write_frame(&mut input, &config).await?;
+        let codex::ClientRequestResult::ConfigRead(_) = response(
+            &mut reader,
+            2,
+            codex::ClientRequestMethod::ConfigRead,
+            deadline,
+        )
+        .await?
+        else {
+            return Err(());
+        };
+        let loaded = codex::ClientRequest::ThreadLoadedList {
+            id: codex::RequestId::Variant2(Box::new(3)),
+            params: codex::ThreadLoadedListParams {
+                cursor: None,
+                limit: None,
+            },
+        };
+        write_frame(&mut input, &loaded).await?;
+        let codex::ClientRequestResult::ThreadLoadedList(loaded) = response(
+            &mut reader,
+            3,
+            codex::ClientRequestMethod::ThreadLoadedList,
+            deadline,
+        )
+        .await?
+        else {
+            return Err(());
+        };
         if !loaded.data.is_empty() {
             return Err(());
         }
@@ -325,11 +342,10 @@ async fn smoke(executable: &Path, home: &Path) -> Result<(), ()> {
     result
 }
 
-fn request(id: u64, method: &str, params: Value) -> Value {
-    json!({"id":id,"method":method,"params":params})
-}
-
-async fn write_frame(input: &mut tokio::process::ChildStdin, value: &Value) -> Result<(), ()> {
+async fn write_frame(
+    input: &mut tokio::process::ChildStdin,
+    value: &impl serde::Serialize,
+) -> Result<(), ()> {
     let mut bytes = studio_json::to_vec(value).map_err(|_| ())?;
     if bytes.len() > MAX_FRAME_BYTES {
         return Err(());
@@ -342,14 +358,15 @@ async fn write_frame(input: &mut tokio::process::ChildStdin, value: &Value) -> R
 async fn response<R: AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     id: u64,
+    method: codex::ClientRequestMethod,
     deadline: tokio::time::Instant,
-) -> Result<Value, ()> {
+) -> Result<codex::ClientRequestResult, ()> {
     loop {
         let line = tokio::time::timeout_at(deadline, bounded_line(reader, MAX_FRAME_BYTES))
             .await
             .map_err(|_| ())??;
         if let Some(result) =
-            studio_runtime_providers::decode_probe_response(&line, id).map_err(|_| ())?
+            studio_runtime_providers::decode_probe_response(&line, id, method).map_err(|_| ())?
         {
             return Ok(result);
         }
@@ -546,83 +563,62 @@ mod tests {
     };
 
     #[test]
-    fn probe_response_admission_matches_legacy_value_handling() {
-        fn legacy(line: &[u8]) -> Result<Option<studio_json::Value>, ()> {
-            let value: studio_json::Value = studio_json::from_slice(line).map_err(|_| ())?;
-            if value.get("method").is_some() {
-                return if value.get("id").is_some() {
-                    Err(())
-                } else {
-                    Ok(None)
-                };
-            }
-            if value.get("id") != Some(&json!(1)) || value.get("error").is_some() {
-                return Err(());
-            }
-            value.get("result").cloned().map(Some).ok_or(())
-        }
-        for line in [
-            r#"{"method":false,"params":3}"#,
-            r#"{"method":null,"error":null}"#,
-            r#"{"method":false,"id":null}"#,
-            r#"{"id":1,"result":{"error":{"message":"opaque"}}}"#,
-            r#"{"id":1,"result":null}"#,
-            r#"{"id":1,"result":0,"error":null}"#,
-            r#"{"id":1.0,"result":0}"#,
-            r#"{"id":"1","result":0}"#,
-            r#"{"id":2,"id":1,"result":1,"result":2}"#,
-            r#"{"method":"x","method":null,"id":null}"#,
-            r#"[null,1,null,2,null,{}]"#,
-            r#"{"id":1}"#,
-            "{",
+    fn probe_results_use_the_pinned_vendor_contract() {
+        use studio_runtime_providers::{codex::ClientRequestMethod, decode_probe_response};
+        for method in [
+            ClientRequestMethod::Initialize,
+            ClientRequestMethod::ConfigRead,
+            ClientRequestMethod::ThreadLoadedList,
         ] {
-            assert_eq!(
-                studio_runtime_providers::decode_probe_response(line.as_bytes(), 1).map_err(|_| ()),
-                legacy(line.as_bytes()),
-                "{line}"
+            assert!(
+                decode_probe_response(br#"{"method":false,"params":3}"#, 1, method)
+                    .unwrap()
+                    .is_none()
             );
+            for raw in [
+                br#"{"id":1,"result":null}"#.as_slice(),
+                br#"{"id":1,"result":{}}"#,
+                br#"{"id":1,"error":{"code":1,"message":"refused"}}"#,
+                br#"{"id":2,"result":{"data":[]}}"#,
+            ] {
+                assert!(decode_probe_response(raw, 1, method).is_err());
+            }
         }
+        let result = decode_probe_response(
+            br#"{"id":1,"result":{"data":[]}}"#,
+            1,
+            ClientRequestMethod::ThreadLoadedList,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            matches!(result, super::codex::ClientRequestResult::ThreadLoadedList(result) if result.data.is_empty())
+        );
+        assert!(
+            decode_probe_response(
+                br#"{"id":1,"result":{"data":[1]}}"#,
+                1,
+                ClientRequestMethod::ThreadLoadedList
+            )
+            .is_err()
+        );
     }
 
     #[test]
-    fn probe_payload_views_match_legacy_admission() {
-        use super::{ConfigResult, InitializeResult, LoadedResult, companion_ready, probe_result};
-        use studio_json::Value;
-        for raw in [
-            r#"{"type":"connection/ready","selectedVersion":1,"capabilities":[null,{},1]}"#,
-            r#"{"type":"connection/ready","selectedVersion":1.0,"capabilities":[]}"#,
-            r#"{"type":"connection/ready","selectedVersion":1,"capabilities":{}}"#,
-            r#"{"userAgent":"","config":{"anything":[null,1]},"data":[]}"#,
-            r#"{"userAgent":null,"config":[],"data":[null]}"#,
-            "null",
-            "[]",
-            "5",
-            "{}",
-            r#"{"unknown":1e400}"#,
-            "{",
-        ] {
-            let parsed: Result<Value, _> = studio_json::from_str(raw);
-            if let Ok(value) = parsed {
-                let ready = value.get("type").and_then(Value::as_str) == Some("connection/ready")
-                    && value.get("selectedVersion").and_then(Value::as_f64) == Some(1.0)
-                    && value.get("capabilities").is_some_and(Value::is_array);
-                assert_eq!(companion_ready(raw.as_bytes()).is_ok(), ready, "{raw}");
-                assert_eq!(
-                    probe_result::<InitializeResult>(value.clone()).is_ok(),
-                    value.get("userAgent").and_then(Value::as_str).is_some(),
-                    "{raw}"
-                );
-                assert_eq!(
-                    probe_result::<ConfigResult>(value.clone()).is_ok(),
-                    value.get("config").is_some_and(Value::is_object),
-                    "{raw}"
-                );
-                let loaded = probe_result::<LoadedResult>(value.clone())
-                    .is_ok_and(|row| row.data.is_empty());
-                assert_eq!(loaded, value.get("data") == Some(&json!([])), "{raw}");
-            }
-        }
-        assert!(companion_ready(br#"{"type":"bad","type":"connection/ready","selectedVersion":1,"capabilities":[]}"#).is_err());
+    fn companion_ready_validates_the_separate_handshake() {
+        assert!(
+            super::companion_ready(
+                br#"{"type":"connection/ready","selectedVersion":1,"capabilities":[null,{},1]}"#
+            )
+            .is_ok()
+        );
+        assert!(
+            super::companion_ready(
+                br#"{"type":"connection/ready","selectedVersion":1,"capabilities":{}}"#
+            )
+            .is_err()
+        );
+        assert!(super::companion_ready(br#"{"type":"bad","type":"connection/ready","selectedVersion":1,"capabilities":[]}"#).is_err());
     }
 
     #[tokio::test]
@@ -631,26 +627,26 @@ mod tests {
         let program = root.path().join("fake");
         for (initialize, config, loaded, valid) in [
             (
-                r#"{"userAgent":""}"#,
-                r#"{"config":{"future":null}}"#,
+                r#"{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":""}"#,
+                r#"{"config":{"future":null},"origins":{}}"#,
                 r#"{"data":[]}"#,
                 true,
             ),
             (
-                r#"{"userAgent":null}"#,
-                r#"{"config":{}}"#,
+                r#"{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":null}"#,
+                r#"{"config":{},"origins":{}}"#,
                 r#"{"data":[]}"#,
                 false,
             ),
             (
-                r#"{"userAgent":"x"}"#,
-                r#"{"config":[]}"#,
+                r#"{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":"x"}"#,
+                r#"{"config":[],"origins":{}}"#,
                 r#"{"data":[]}"#,
                 false,
             ),
             (
-                r#"{"userAgent":"x"}"#,
-                r#"{"config":{}}"#,
+                r#"{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":"x"}"#,
+                r#"{"config":{},"origins":{}}"#,
                 r#"{"data":[1]}"#,
                 false,
             ),
@@ -675,21 +671,34 @@ printf '%s\n' '{{"id":3,"result":{loaded}}}'
     async fn probe_response_skips_notifications_and_keeps_bounded_input() {
         use tokio::io::BufReader;
         let mut reader =
-            BufReader::new(&b"{\"method\":false}\n{\"id\":1,\"result\":{\"x\":1}}\n"[..]);
+            BufReader::new(&b"{\"method\":false}\n{\"id\":1,\"result\":{\"data\":[]}}\n"[..]);
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
-        assert_eq!(
-            super::response(&mut reader, 1, deadline).await,
-            Ok(json!({"x":1}))
+        assert!(
+            matches!(super::response(&mut reader, 1, super::codex::ClientRequestMethod::ThreadLoadedList, deadline).await, Ok(super::codex::ClientRequestResult::ThreadLoadedList(result)) if result.data.is_empty())
         );
         let oversized = vec![b'x'; super::MAX_FRAME_BYTES + 1];
         let mut reader = BufReader::new(oversized.as_slice());
-        assert!(super::response(&mut reader, 1, deadline).await.is_err());
+        assert!(
+            super::response(
+                &mut reader,
+                1,
+                super::codex::ClientRequestMethod::ThreadLoadedList,
+                deadline
+            )
+            .await
+            .is_err()
+        );
         let (_writer, reader) = tokio::io::duplex(1);
         let mut reader = BufReader::new(reader);
         assert!(
-            super::response(&mut reader, 1, tokio::time::Instant::now())
-                .await
-                .is_err()
+            super::response(
+                &mut reader,
+                1,
+                super::codex::ClientRequestMethod::ThreadLoadedList,
+                tokio::time::Instant::now()
+            )
+            .await
+            .is_err()
         );
     }
 
@@ -892,8 +901,8 @@ if (process.argv.includes('--version')) {
     readline.createInterface({input: process.stdin}).on('line', line => {
         const frame = JSON.parse(line);
         if (frame.method === 'initialized') return;
-        const result = {'initialize': {userAgent: 'fixture'},
-            'config/read': {config: {}}, 'thread/loaded/list': {data: []}}[frame.method];
+        const result = {'initialize': {userAgent: 'fixture', codexHome: '/codex-home', platformFamily: 'unix', platformOs: 'test'},
+            'config/read': {config: {}, origins: {}}, 'thread/loaded/list': {data: []}}[frame.method];
         console.log(JSON.stringify({id: frame.id, result}));
     });
 }

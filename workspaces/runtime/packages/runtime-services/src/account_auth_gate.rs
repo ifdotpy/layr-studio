@@ -43,12 +43,12 @@ fn hold_reason(
     match status {
         AccountStatus::Changed => Some(CHANGED_ERROR),
         AccountStatus::Ready if same_selected_account(selected, current) => None,
-        AccountStatus::Ready => Some(adapter(kind).account_changed_message()),
+        AccountStatus::Ready => Some(adapter(kind).descriptor().account_changed_message),
         AccountStatus::SignedOut
         | AccountStatus::Pending
         | AccountStatus::Error
         | AccountStatus::Duplicate
-        | AccountStatus::Unavailable => Some(adapter(kind).sign_in_message()),
+        | AccountStatus::Unavailable => Some(adapter(kind).descriptor().sign_in_message),
     }
 }
 
@@ -57,8 +57,8 @@ fn hold_reasons() -> Vec<&'static str> {
     let mut reasons = vec![CHANGED_ERROR];
     for kind in ProviderKind::ALL {
         reasons.extend([
-            adapter(kind).sign_in_message(),
-            adapter(kind).account_changed_message(),
+            adapter(kind).descriptor().sign_in_message,
+            adapter(kind).descriptor().account_changed_message,
         ]);
     }
     reasons
@@ -73,13 +73,10 @@ fn same_selected_account(selected: &Value, current: &Value) -> bool {
     PIN_FIELDS.iter().all(|key| {
         let old = selected.get(*key).unwrap_or(&Value::Null);
         let new = current.get(*key).unwrap_or(&Value::Null);
-        if *key == "_credentialIdentity"
-            && selected.get("provider") == Some(&json!(ProviderKind::Claude.key()))
-        {
-            old == new
-                || old.as_str().zip(new.as_str()).is_some_and(|(old, new)| {
-                    crate::account_driver::claude_identity::accepts(old, new)
-                })
+        if *key == "_credentialIdentity" {
+            ProviderKind::of_record(selected).map_or(old == new, |kind| {
+                (adapter(kind).descriptor().credential_identity_matches)(old, new)
+            })
         } else {
             old == new
         }
@@ -133,7 +130,7 @@ pub fn launch_hold_reason(error: &crate::account_worker::WorkerError) -> Option<
         crate::account_worker::WorkerError::PreparationRefused(code)
             if code == crate::provider_adapter::CLAUDE_ACCOUNT_IDENTITY_REFUSAL =>
         {
-            Some(adapter(ProviderKind::Claude).sign_in_message())
+            Some(adapter(ProviderKind::Claude).descriptor().sign_in_message)
         }
         crate::account_worker::WorkerError::Expired
         | crate::account_worker::WorkerError::Recovery(_)
@@ -477,7 +474,11 @@ mod tests {
                 current[field] = json!("changed");
                 assert_eq!(
                     hold_reason(kind, AccountStatus::Ready, &selected, &current),
-                    Some(crate::provider_adapter::adapter(kind).account_changed_message()),
+                    Some(
+                        crate::provider_adapter::adapter(kind)
+                            .descriptor()
+                            .account_changed_message
+                    ),
                     "{field}"
                 );
             }
@@ -494,7 +495,11 @@ mod tests {
             ] {
                 assert_eq!(
                     hold_reason(kind, status, &selected, &selected),
-                    Some(crate::provider_adapter::adapter(kind).sign_in_message())
+                    Some(
+                        crate::provider_adapter::adapter(kind)
+                            .descriptor()
+                            .sign_in_message
+                    )
                 );
             }
         }

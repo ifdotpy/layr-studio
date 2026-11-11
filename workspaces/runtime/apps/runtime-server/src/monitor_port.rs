@@ -2874,6 +2874,10 @@ mod tests {
                     Ok(self.current_scope(account).expect("ensured session"))
                 })
             }
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+            )]
             fn provider_request<'a>(
                 &'a self,
                 request: ProviderRequest,
@@ -2897,149 +2901,7 @@ mod tests {
                             self.executions.fetch_add(1, Ordering::SeqCst);
                             (json!({"exitCode":0}), false)
                         }
-                        Method::Initialize
-                        | Method::Initialized
-                        | Method::Ack
-                        | Method::AccountLoginCancel
-                        | Method::AccountLoginStart
-                        | Method::AccountRateLimitResetCreditConsume
-                        | Method::ThreadLoadedList
-                        | Method::SkillsExtraRootsSet
-                        | Method::ModelList
-                        | Method::AccountRead
-                        | Method::AccountRateLimitsRead
-                        | Method::ThreadStart
-                        | Method::ThreadRealtimeStart
-                        | Method::ThreadRealtimeStop
-                        | Method::ThreadRealtimeAppendSpeech
-                        | Method::ThreadRealtimeItemStarted
-                        | Method::ThreadRealtimeTranscriptDelta
-                        | Method::ThreadRealtimeTranscriptDone
-                        | Method::ThreadRealtimeSdp
-                        | Method::ThreadRealtimeError
-                        | Method::ThreadRealtimeClosed
-                        | Method::ThreadResume
-                        | Method::ThreadRead
-                        | Method::ThreadTurnsList
-                        | Method::ThreadTurnsItemsList
-                        | Method::TurnStart
-                        | Method::TurnSteer
-                        | Method::TurnInterrupt
-                        | Method::ThreadList
-                        | Method::ThreadArchive
-                        | Method::ThreadFork
-                        | Method::ThreadNameSet
-                        | Method::ThreadMetadataUpdate
-                        | Method::ThreadSettingsUpdate
-                        | Method::ThreadCompactStart
-                        | Method::ThreadRollback
-                        | Method::ThreadItemsList
-                        | Method::ThreadGoalSet
-                        | Method::ThreadGoalUpdated
-                        | Method::ThreadUnarchive
-                        | Method::ThreadUnsubscribe
-                        | Method::ProcessSpawn
-                        | Method::ProcessWriteStdin
-                        | Method::ProcessKill
-                        | Method::ProcessResizePty
-                        | Method::CommandExecWrite
-                        | Method::CommandExecResize
-                        | Method::CommandExecTerminate
-                        | Method::ThreadBackgroundTerminalsList
-                        | Method::ThreadBackgroundTerminalsTerminate
-                        | Method::ThreadBackgroundTerminalsClean
-                        | Method::ThreadCommandExecutionBackground
-                        | Method::ThreadQueueList
-                        | Method::ClaudeState
-                        | Method::ClaudeRepairReport
-                        | Method::ClaudeFileBackups
-                        | Method::ClaudeSettings
-                        | Method::ClaudeActivity
-                        | Method::ClaudeStopTask
-                        | Method::ClaudeShellPolicy
-                        | Method::ClaudeDiagnostics
-                        | Method::ClaudeMoveVersions
-                        | Method::McpServerReconnect
-                        | Method::McpServerStatusList
-                        | Method::SkillsList
-                        | Method::OperationStatus
-                        | Method::ReviewStart
-                        | Method::BrowserAnswer
-                        | Method::BrowserCallback
-                        | Method::BrowserClose
-                        | Method::BrowserWait
-                        | Method::ClaudeCommands
-                        | Method::ClaudeMoveExport
-                        | Method::ClaudeMoveImport
-                        | Method::ClaudeMoveIdentity
-                        | Method::ClaudeMovePreflight
-                        | Method::ClaudeMoveProof
-                        | Method::Detach
-                        | Method::EventRead
-                        | Method::Exec
-                        | Method::Generate
-                        | Method::Health
-                        | Method::Info
-                        | Method::LayrHealth
-                        | Method::Next
-                        | Method::Open
-                        | Method::ProjectEnsure
-                        | Method::ProjectExec
-                        | Method::ProjectImport
-                        | Method::ProviderList
-                        | Method::Replay
-                        | Method::ResponseStatus
-                        | Method::RetireCommand
-                        | Method::SecretsList
-                        | Method::SecretsRemove
-                        | Method::SecretsSet
-                        | Method::ShareConfigure
-                        | Method::ShareName
-                        | Method::ShareStatus
-                        | Method::Sign
-                        | Method::Status
-                        | Method::SyncMacApply
-                        | Method::SyncMacHandoff
-                        | Method::SyncMacHashes
-                        | Method::SyncMacHead
-                        | Method::SyncMacRead
-                        | Method::SyncMacWorktree
-                        | Method::VaultConfigure
-                        | Method::VaultPush
-                        | Method::VaultStatus
-                        | Method::UploadBegin
-                        | Method::UploadChunk
-                        | Method::UploadCommit
-                        | Method::Verify
-                        | Method::Write
-                        | Method::CurrentTimeRead
-                        | Method::ItemToolCall
-                        | Method::ItemCommandExecutionRequestApproval
-                        | Method::ItemFileChangeRequestApproval
-                        | Method::ItemPermissionsRequestApproval
-                        | Method::McpServerElicitationRequest
-                        | Method::ItemToolRequestUserInput
-                        | Method::ItemStarted
-                        | Method::ItemCompleted
-                        | Method::ItemAgentMessageDelta
-                        | Method::ItemReasoningTextDelta
-                        | Method::ItemCommandExecutionOutputDelta
-                        | Method::CommandExecOutputDelta
-                        | Method::TurnStarted
-                        | Method::TurnCompleted
-                        | Method::TurnPlanUpdated
-                        | Method::TurnDiffUpdated
-                        | Method::ThreadClosed
-                        | Method::ThreadStatusChanged
-                        | Method::ThreadTokenUsageUpdated
-                        | Method::ThreadShellPolicyUpdated
-                        | Method::ThreadIdleCompactionUpdated
-                        | Method::AccountLoginCompleted
-                        | Method::AccountUpdated
-                        | Method::AccountRateLimitsUpdated
-                        | Method::ModelSafetyBufferingUpdated
-                        | Method::ProviderGenerationStarted
-                        | Method::ProtocolError => panic!("unexpected monitor preparation request"),
+                        _ => panic!("unexpected monitor preparation request"),
                     };
                     Ok(SessionReceipt {
                         outcome: ReceiptOutcome::Written {
@@ -3698,6 +3560,10 @@ mod tests {
                     },
                 )
             }
+            #[expect(
+                clippy::wildcard_enum_match_arm,
+                reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+            )]
             fn provider_request<'a>(
                 &'a self,
                 request: ProviderRequest,
@@ -3715,149 +3581,7 @@ mod tests {
                                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                             json!({})
                         }
-                        Method::Initialize
-                        | Method::Initialized
-                        | Method::Ack
-                        | Method::AccountLoginCancel
-                        | Method::AccountLoginStart
-                        | Method::AccountRateLimitResetCreditConsume
-                        | Method::ThreadLoadedList
-                        | Method::ConfigRead
-                        | Method::SkillsExtraRootsSet
-                        | Method::ModelList
-                        | Method::AccountRead
-                        | Method::AccountRateLimitsRead
-                        | Method::ThreadStart
-                        | Method::ThreadRealtimeStart
-                        | Method::ThreadRealtimeStop
-                        | Method::ThreadRealtimeAppendSpeech
-                        | Method::ThreadRealtimeItemStarted
-                        | Method::ThreadRealtimeTranscriptDelta
-                        | Method::ThreadRealtimeTranscriptDone
-                        | Method::ThreadRealtimeSdp
-                        | Method::ThreadRealtimeError
-                        | Method::ThreadRealtimeClosed
-                        | Method::ThreadResume
-                        | Method::ThreadRead
-                        | Method::ThreadTurnsList
-                        | Method::ThreadTurnsItemsList
-                        | Method::TurnStart
-                        | Method::TurnSteer
-                        | Method::TurnInterrupt
-                        | Method::ThreadList
-                        | Method::ThreadArchive
-                        | Method::ThreadFork
-                        | Method::ThreadNameSet
-                        | Method::ThreadMetadataUpdate
-                        | Method::ThreadSettingsUpdate
-                        | Method::ThreadCompactStart
-                        | Method::ThreadRollback
-                        | Method::ThreadItemsList
-                        | Method::ThreadGoalSet
-                        | Method::ThreadGoalUpdated
-                        | Method::ThreadUnarchive
-                        | Method::ThreadUnsubscribe
-                        | Method::ProcessSpawn
-                        | Method::ProcessWriteStdin
-                        | Method::ProcessKill
-                        | Method::ProcessResizePty
-                        | Method::CommandExec
-                        | Method::CommandExecWrite
-                        | Method::CommandExecResize
-                        | Method::ThreadBackgroundTerminalsList
-                        | Method::ThreadBackgroundTerminalsTerminate
-                        | Method::ThreadBackgroundTerminalsClean
-                        | Method::ThreadCommandExecutionBackground
-                        | Method::ThreadQueueList
-                        | Method::ClaudeState
-                        | Method::ClaudeRepairReport
-                        | Method::ClaudeFileBackups
-                        | Method::ClaudeSettings
-                        | Method::ClaudeActivity
-                        | Method::ClaudeStopTask
-                        | Method::ClaudeShellPolicy
-                        | Method::ClaudeDiagnostics
-                        | Method::ClaudeMoveVersions
-                        | Method::McpServerReconnect
-                        | Method::McpServerStatusList
-                        | Method::SkillsList
-                        | Method::ReviewStart
-                        | Method::BrowserAnswer
-                        | Method::BrowserCallback
-                        | Method::BrowserClose
-                        | Method::BrowserWait
-                        | Method::ClaudeCommands
-                        | Method::ClaudeMoveExport
-                        | Method::ClaudeMoveImport
-                        | Method::ClaudeMoveIdentity
-                        | Method::ClaudeMovePreflight
-                        | Method::ClaudeMoveProof
-                        | Method::Detach
-                        | Method::EventRead
-                        | Method::Exec
-                        | Method::Generate
-                        | Method::Health
-                        | Method::Info
-                        | Method::LayrHealth
-                        | Method::Next
-                        | Method::Open
-                        | Method::ProjectEnsure
-                        | Method::ProjectExec
-                        | Method::ProjectImport
-                        | Method::ProviderList
-                        | Method::Replay
-                        | Method::ResponseStatus
-                        | Method::RetireCommand
-                        | Method::SecretsList
-                        | Method::SecretsRemove
-                        | Method::SecretsSet
-                        | Method::ShareConfigure
-                        | Method::ShareName
-                        | Method::ShareStatus
-                        | Method::Sign
-                        | Method::Status
-                        | Method::SyncMacApply
-                        | Method::SyncMacHandoff
-                        | Method::SyncMacHashes
-                        | Method::SyncMacHead
-                        | Method::SyncMacRead
-                        | Method::SyncMacWorktree
-                        | Method::VaultConfigure
-                        | Method::VaultPush
-                        | Method::VaultStatus
-                        | Method::UploadBegin
-                        | Method::UploadChunk
-                        | Method::UploadCommit
-                        | Method::Verify
-                        | Method::Write
-                        | Method::CurrentTimeRead
-                        | Method::ItemToolCall
-                        | Method::ItemCommandExecutionRequestApproval
-                        | Method::ItemFileChangeRequestApproval
-                        | Method::ItemPermissionsRequestApproval
-                        | Method::McpServerElicitationRequest
-                        | Method::ItemToolRequestUserInput
-                        | Method::ItemStarted
-                        | Method::ItemCompleted
-                        | Method::ItemAgentMessageDelta
-                        | Method::ItemReasoningTextDelta
-                        | Method::ItemCommandExecutionOutputDelta
-                        | Method::CommandExecOutputDelta
-                        | Method::TurnStarted
-                        | Method::TurnCompleted
-                        | Method::TurnPlanUpdated
-                        | Method::TurnDiffUpdated
-                        | Method::ThreadClosed
-                        | Method::ThreadStatusChanged
-                        | Method::ThreadTokenUsageUpdated
-                        | Method::ThreadShellPolicyUpdated
-                        | Method::ThreadIdleCompactionUpdated
-                        | Method::AccountLoginCompleted
-                        | Method::AccountUpdated
-                        | Method::AccountRateLimitsUpdated
-                        | Method::ModelSafetyBufferingUpdated
-                        | Method::ProviderGenerationStarted
-                        | Method::ProtocolError => {
+                        _ => {
                             panic!("inactive owner must never start or resume a command")
                         }
                     };

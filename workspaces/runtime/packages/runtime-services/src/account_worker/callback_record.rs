@@ -157,11 +157,17 @@ impl Accepted {
     pub(super) fn saved_response(
         &self,
         status: &SessionStatus,
+        codec: studio_runtime_process::provider_seam::ProviderCodec,
     ) -> Result<Option<Frame>, WorkerError> {
         let Some(saved) = &self.submitted else {
             return Ok(None);
         };
-        if self.managed_frame()?.is_some() && saved.authority.is_none() {
+        if matches!(self.dispatch_frame(codec)?, Frame::KnownMethodUnparsed(_)) {
+            return Err(WorkerError::PreparationRefused(
+                "callback-reply/unparsed-authority".into(),
+            ));
+        }
+        if self.managed_frame(codec)?.is_some() && saved.authority.is_none() {
             return Err(WorkerError::CallbackUnknown);
         }
         if self.actor.is_some()
@@ -175,8 +181,11 @@ impl Accepted {
     pub(super) fn operation(&self) -> String {
         operation(&self.journal_scope, self.generation, self.cursor)
     }
-    fn managed_frame(&self) -> Result<Option<Frame>, WorkerError> {
-        let frame = self.frame()?;
+    fn managed_frame(
+        &self,
+        codec: studio_runtime_process::provider_seam::ProviderCodec,
+    ) -> Result<Option<Frame>, WorkerError> {
+        let frame = self.dispatch_frame(codec)?;
         Ok(
             matches!(&frame,Frame::Request(request) if request.method.as_str()=="item/tool/call")
                 .then_some(frame),
@@ -193,6 +202,15 @@ impl Accepted {
             DecodedJournalPayload::Frame(frame) => Ok(frame),
             DecodedJournalPayload::RawStdout { .. } => Err(invalid(&self.operation())),
         }
+    }
+
+    /// Reapply the pinned parser before a retained request can reach an authority handler.
+    pub(super) fn dispatch_frame(
+        &self,
+        codec: studio_runtime_process::provider_seam::ProviderCodec,
+    ) -> Result<Frame, WorkerError> {
+        let frame = (codec.normalize)(&self.frame()?).map_err(|_| invalid(&self.operation()))?;
+        crate::provider_adapter::project_frame(frame).map_err(|_| invalid(&self.operation()))
     }
 }
 
@@ -247,8 +265,15 @@ pub(super) fn accept(
     };
     let method = match frame {
         Frame::Request(request) => request.method.as_str().to_owned(),
-        Frame::UnknownMethod(request) => request.method.clone(),
-        Frame::Notification(_) | Frame::Response { .. } => return Ok(()),
+        Frame::UnknownMethod(request) | Frame::KnownMethodUnparsed(request) => {
+            request.method.clone()
+        }
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Notification(_)
+        | Frame::Response { .. } => return Ok(()),
     };
     let operation = operation(scope, entry.generation.0, entry.cursor.0);
     let bytes = encode_line(frame).map_err(|_| invalid(&operation))?;
@@ -355,8 +380,15 @@ fn accepted_context(
     let frame = accepted.frame()?;
     let params = match &frame {
         Frame::Request(request) => request.params.as_ref(),
-        Frame::UnknownMethod(request) => request.fields.get("params"),
-        Frame::Notification(_) | Frame::Response { .. } => None,
+        Frame::UnknownMethod(request) | Frame::KnownMethodUnparsed(request) => {
+            request.fields.get("params")
+        }
+        Frame::CodexClientRequest(_)
+        | Frame::CodexServerRequest(_)
+        | Frame::CodexNotification(_)
+        | Frame::CodexClientNotification(_)
+        | Frame::Notification(_)
+        | Frame::Response { .. } => None,
     };
     let thread = params
         .and_then(|params| params["threadId"].as_str())
@@ -391,9 +423,14 @@ pub(super) async fn admit_reply(
     store: &RuntimeStore,
     operation: &str,
     reply: Option<(SavedReply, bool)>,
-) -> Result<bool, WorkerError> {
+    frame: Frame,
+    control: crate::provider_session_task::SessionControl,
+) -> Result<(bool, crate::provider_session_task::PreparedFrame), WorkerError> {
     let operation = operation.to_owned();
     store.transaction_with(move|tx| {
+        let wire = crate::callback_reply::prepare_reply(tx, &operation, crate::callback_reply::CallbackReference::Immediate, &frame, control.codec())?;
+        let prepared = control.prepare_callback_reply(studio_runtime_process::OperationId(operation.clone()), &wire)?;
+        let no_write = (|| {
         let Some(mut task)=task(tx,&operation)? else { return Ok(true); };
         if task.status==ToolRequestStatus::Completed { return Ok(true); }
         if task.status==ToolRequestStatus::Unknown { return Err(WorkerError::CallbackUnknown); }
@@ -405,7 +442,7 @@ pub(super) async fn admit_reply(
         if accepted.operation()!=operation || accepted.actor.is_some() { return Err(WorkerError::CallbackUnknown); }
         let frame=saved.response(accepted)?;
         let refusal=matches!(&frame,Frame::Response{body:ResponseBody::Error(_),..}) || matches!(&frame,Frame::Response{body:ResponseBody::Result(value),..} if value.get("success").and_then(|value|value.as_bool())==Some(false));
-        let managed=accepted.managed_frame()?;
+        let managed=accepted.managed_frame(control.codec())?;
         let authority=managed.as_ref().map(|frame|super::callback::managed_reply_authority_in(tx,&accepted.account,accepted.generation,frame)).transpose()?.flatten();
         if let Some(original)=&task.payload.submitted {
             if managed.is_some() && !original.authority.as_ref().is_some_and(|old|authority.as_ref().is_some_and(|current|old.same_actor(current))) {
@@ -434,6 +471,8 @@ pub(super) async fn admit_reply(
         task.status=if missing && !refusal { ToolRequestStatus::Unknown } else { ToolRequestStatus::Running };
         put(tx,&task)?;
         Ok(missing && !refusal)
+        })()?;
+        Ok((no_write, prepared))
     }).await
 }
 
@@ -441,6 +480,7 @@ pub(super) async fn expired(
     store: &RuntimeStore,
     operation: &str,
     status: Option<SessionStatus>,
+    codec: studio_runtime_process::provider_seam::ProviderCodec,
 ) -> Result<(), WorkerError> {
     let operation = operation.to_owned();
     store
@@ -461,7 +501,7 @@ pub(super) async fn expired(
                 && !task.payload.recovery_attempted
                 && status.as_ref().is_some_and(|status| {
                     accepted
-                        .saved_response(status)
+                        .saved_response(status, codec)
                         .is_ok_and(|frame| frame.is_some())
                 });
             task.payload.recovery_authorized = recoverable;

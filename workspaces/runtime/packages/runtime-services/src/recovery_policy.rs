@@ -481,7 +481,9 @@ fn eligibility(a: &Value, typed: &RecoveryAgentRecord) -> Eligibility {
             .and_then(|s| studio_json::from_str::<Value>(s).ok())
             .zip(studio_runtime_providers::ProviderKind::of_record(a).ok())
             .is_some_and(|(error, kind)| {
-                crate::provider_adapter::adapter(kind).is_busy_error(&error)
+                (crate::provider_adapter::adapter(kind)
+                    .descriptor()
+                    .is_busy_error)(&error)
             });
     let preparation = typed.status == "failed"
         && typed.auto_wake.unwrap_or(false)

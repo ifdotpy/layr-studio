@@ -415,6 +415,9 @@ async fn probe_delivered_receipts_are_deleted_by_the_next_journal_commit() {
         ready.changed().await.unwrap();
     }
     let start = state.start(&mut peer, &worker).await;
+    // A response can overtake its receipt. Settle startup's write first so its
+    // legitimate late-written transaction cannot enter the journal-only count.
+    peer.wait_for_write_receipt(&start).await;
     peer.accepted(&start).await;
     worker_barrier(&worker).await;
     state

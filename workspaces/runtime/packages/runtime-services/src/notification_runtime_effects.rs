@@ -47,21 +47,23 @@ impl NotificationEffects for RuntimeNotificationEffects {
         after: Option<&NotificationAgent<'_>>,
         frame: &Value,
         identity: &ProviderDeliveryIdentity,
-        at: ObservationTime,
+        clock: crate::notification_dispatch::NotificationClock,
         outcome: &DispatchOutcome,
     ) -> Vec<NotificationPostCommit> {
+        let at = clock.observed_at;
         let method = frame["method"].as_str().unwrap_or_default();
         let params = SharedJson::new(frame["params"].clone());
         let before_observation = before.map(SharedJson::agent_projection);
         let after_observation = after.map(SharedJson::agent_projection);
         let observation = |agent: Option<&SharedJson>| NotificationObservation {
-            boundary_at: None,
+            boundary_at: clock.boundary_at,
             agent: agent.cloned(),
             method: method.into(),
             params: params.clone(),
             delivery: identity.clone(),
             observed_at: at,
             provider_at: event_time(frame)
+                .or_else(|| clock.boundary_at.map(|stamp| stamp.unix_seconds))
                 .filter(|time| *time != 0.0)
                 .and_then(ObservationTime::new)
                 .unwrap_or(at),
@@ -309,7 +311,6 @@ fn event_time(frame: &Value) -> Option<f64> {
         }
     }
     for field in [
-        "_studioSupervisorReceivedAt",
         "_studioSupervisorTime",
         "_studioSequenceAt",
         "_studioReceivedAt",
@@ -325,6 +326,53 @@ fn event_time(frame: &Value) -> Option<f64> {
 mod tests {
     use super::*;
     use studio_runtime_store::AgentRecord;
+
+    #[test]
+    fn transport_boundary_replaces_the_duplicate_supervisor_timestamp() {
+        let boundary = studio_runtime_schema::provider_timing::BoundaryStamp {
+            boot_id: None,
+            unix_seconds: 123.456,
+            monotonic_ns: 7,
+        };
+        let identity = ProviderDeliveryIdentity {
+            provider_handle: "account:test".into(),
+            generation: 1,
+            cursor: 1,
+        };
+        for (params, boundary, expected) in [
+            (studio_json::json!({}), Some(boundary), 123.456),
+            (
+                studio_json::json!({"createdAt":120.0}),
+                Some(boundary),
+                120.0,
+            ),
+            (studio_json::json!({}), None, 200.0),
+        ] {
+            let effects = RuntimeNotificationEffects.post_commit(
+                None,
+                None,
+                &studio_json::json!({"method":"item/agentMessage/delta", "params":params}),
+                &identity,
+                crate::notification_dispatch::NotificationClock {
+                    observed_at: ObservationTime::new(200.0).unwrap(),
+                    boundary_at: boundary,
+                },
+                &DispatchOutcome::Written,
+            );
+            let [NotificationPostCommit::TokenRateStream(observation)] = effects.as_slice() else {
+                panic!("one stream observation");
+            };
+            assert_eq!(
+                observation.provider_at,
+                ObservationTime::new(expected).unwrap()
+            );
+            assert_eq!(
+                observation.observed_at,
+                ObservationTime::new(200.0).unwrap()
+            );
+            assert_eq!(observation.boundary_at, boundary);
+        }
+    }
 
     #[test]
     fn agent_observation_projection_preserves_frozen_bytes() {
@@ -370,7 +418,10 @@ mod tests {
             Some(&view),
             &frame,
             &identity,
-            ObservationTime::new(12.0).unwrap(),
+            crate::notification_dispatch::NotificationClock {
+                observed_at: ObservationTime::new(12.0).unwrap(),
+                boundary_at: None,
+            },
             &DispatchOutcome::Written,
         );
         let observations = effects

@@ -160,13 +160,15 @@ pub struct SystemProviderAuthReader;
 
 impl ProviderAuthReader for SystemProviderAuthReader {
     fn read(&self, profile: &AuthProfile) -> AuthMetadata {
-        crate::provider_adapter::adapter(profile.provider).read_auth(profile)
+        (crate::provider_adapter::adapter(profile.provider)
+            .descriptor()
+            .read_auth)(profile)
     }
 
     fn invalidate(&self, profile: &AuthProfile) {
-        auth_cache::shared().invalidate(
-            &crate::provider_adapter::adapter(profile.provider).credential_location(profile),
-        );
+        auth_cache::shared().invalidate(&(crate::provider_adapter::adapter(profile.provider)
+            .descriptor()
+            .credential_location)(profile));
     }
 
     fn codex_credentials_written_at(&self, profile: &AuthProfile) -> Option<f64> {
@@ -180,7 +182,9 @@ impl ProviderAuthReader for SystemProviderAuthReader {
             profiles
                 .iter()
                 .map(|profile| {
-                    crate::provider_adapter::adapter(profile.provider).credential_location(profile)
+                    (crate::provider_adapter::adapter(profile.provider)
+                        .descriptor()
+                        .credential_location)(profile)
                 })
                 .collect(),
         );

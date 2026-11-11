@@ -363,6 +363,12 @@ pub struct NotificationHourMetrics {
 /// Transactional effects only: no provider call, blocking IO, or await here.
 /// The worker supplies agent_move::capture_cache; it must commit with the
 /// notification receipt.
+#[derive(Clone, Copy)]
+pub struct NotificationClock {
+    pub observed_at: ObservationTime,
+    pub boundary_at: Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+}
+
 pub trait NotificationEffects {
     /// Pure staging only. A receipt replay never calls this method.
     fn post_commit(
@@ -371,7 +377,7 @@ pub trait NotificationEffects {
         _after: Option<&NotificationAgent<'_>>,
         _frame: &Value,
         _identity: &ProviderDeliveryIdentity,
-        _at: ObservationTime,
+        _clock: NotificationClock,
         _outcome: &DispatchOutcome,
     ) -> Vec<NotificationPostCommit> {
         Vec::new()

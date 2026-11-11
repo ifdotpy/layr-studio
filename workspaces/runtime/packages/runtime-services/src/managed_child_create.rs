@@ -375,9 +375,9 @@ pub(crate) async fn resolve_worker_settings(
         && default_model.is_none()
         && profile_model.is_none()
         && spec.model.value().is_none()
-        && !adapter.owns_model(requested_model)
+        && !(adapter.descriptor().owns_model)(requested_model)
     {
-        adapter.default_model()
+        adapter.descriptor().default_model
     } else {
         requested_model
     };

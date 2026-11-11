@@ -94,7 +94,7 @@ impl ProviderTaskFactory for Factory {
                             reply,
                             observed,
                         } => {
-                            let method = write.message()["method"].as_str().unwrap_or("");
+                            let method = write.frame().method().unwrap_or("");
                             if method == "initialize" {
                                 drop(reply.send(CommandReceipt::CachedInitialize(json!({}))));
                             } else {
@@ -106,7 +106,7 @@ impl ProviderTaskFactory for Factory {
                                 if method == "initialized" {
                                     native.ready.notify_one();
                                 } else {
-                                    let response = native.response(write.message());
+                                    let response = native.response(&write.message());
                                     cursor += 1;
                                     entries
                                         .send(JournalEntry {

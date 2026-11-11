@@ -519,7 +519,7 @@ pub(super) fn completion_thread(entry: &JournalEntry) -> Option<&str> {
         {
             frame.params.as_ref()?
         }
-        JournalPayload::Frame(Frame::UnknownMethod(frame))
+        JournalPayload::Frame(Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame))
             if frame.method.as_str() == "turn/completed" && !frame.fields.contains_key("id") =>
         {
             frame.fields.get("params")?

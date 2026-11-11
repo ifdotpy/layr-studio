@@ -279,8 +279,14 @@ async fn restore_owned(
     };
     // The adapter of the agent's provider builds the new thread request.
     let agent_value = snapshot.agent.value();
-    let ThreadRequest { method, params } =
-        adapter(provider).edit_thread_request(&agent_value, &checkpoint.record);
+    let ThreadRequest { method, params, .. } = adapter(provider)
+        .encode(
+            studio_runtime_services::provider_adapter::ProviderCommand::EditThread {
+                agent: &agent_value,
+                checkpoint: &checkpoint.record,
+            },
+        )
+        .map_err(|_| ApiError::dependency("provider-session/encode"))?;
     let provider_operation = format!("{operation_id}:provider");
     let receipt = {
         let port = port.clone();

@@ -38,3 +38,25 @@ pub fn initialize_params(client: ClientName) -> Value {
         "capabilities": {"experimentalApi": true}
     })
 }
+
+/// Codex initialization uses the vendor-owned fields through construction.
+#[must_use]
+pub fn codex_initialize_params(client: ClientName) -> studio_codex_protocol::InitializeParams {
+    use studio_codex_protocol::{ClientInfo, InitializeCapabilities, InitializeParams};
+    InitializeParams {
+        client_info: ClientInfo {
+            name: client.name().into(),
+            title: None,
+            version: CLIENT_VERSION.into(),
+        },
+        capabilities: Some(Some(InitializeCapabilities {
+            experimental_api: Some(true),
+            explicit_gateway_oauth: None,
+            extensions: None,
+            mcp_server_openai_form_elicitation: None,
+            opt_out_notification_methods: None,
+            request_attestation: None,
+            required_human_approval: None,
+        })),
+    }
+}

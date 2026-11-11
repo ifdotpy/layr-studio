@@ -24,6 +24,7 @@ impl ProviderHandle {
 /// This intentionally has no `Debug` implementation because it contains secrets.
 #[derive(Clone)]
 pub struct ProviderLaunchSpec {
+    pub codec: crate::provider_seam::ProviderCodec,
     /// Protocol identity for typed ingress; generic helper processes leave this absent.
     pub provider: Option<studio_runtime_providers::ProviderKind>,
     pub command: Vec<String>,
@@ -78,6 +79,7 @@ impl ProviderLaunchSpec {
     #[must_use]
     pub fn new(command: Vec<String>, environment: BTreeMap<String, String>, cwd: PathBuf) -> Self {
         Self {
+            codec: crate::provider_seam::ProviderCodec::default(),
             provider: None,
             command,
             environment,

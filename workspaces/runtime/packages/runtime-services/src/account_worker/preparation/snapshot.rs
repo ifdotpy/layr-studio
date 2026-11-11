@@ -681,7 +681,11 @@ pub(super) fn guidance(
     let mut thread_config = resources.thread_config.clone();
     // A managed host worker runs without the host account's user MCP servers.
     // (Claude workers get the same rule from the adapter's `userMcp` param.)
-    if record["parentId"].is_string() && ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
+    if record["parentId"].is_string()
+        && crate::provider_adapter::supports_record(
+            record,
+            crate::provider_adapter::ProviderFeature::NativeMcpConfiguration,
+        )
     {
         let servers: Map<String, Value> = resources
             .filesystem_inputs
@@ -701,8 +705,10 @@ pub(super) fn guidance(
     let browser = browser_guidance(resources, record, &mut thread_config);
     // Python `codex_browser_host.thread_environment`, at the same call site as
     // `configure_browser`: host Codex threads send their sign-in links to Studio.
-    if ProviderKind::of_record(record) == Ok(ProviderKind::Codex)
-        && let Some(agent_id) = record["id"].as_str()
+    if crate::provider_adapter::supports_record(
+        record,
+        crate::provider_adapter::ProviderFeature::BrowserConfiguration,
+    ) && let Some(agent_id) = record["id"].as_str()
     {
         thread_config.extend(
             crate::browser_environment::thread_environment(state_root, agent_id)
@@ -743,8 +749,10 @@ fn browser_guidance(
     record: &Value,
     thread_config: &mut Map<String, Value>,
 ) -> Option<thread::BrowserGuidance> {
-    if ProviderKind::of_record(record) != Ok(ProviderKind::Codex)
-        || resources.account_home.is_empty()
+    if !crate::provider_adapter::supports_record(
+        record,
+        crate::provider_adapter::ProviderFeature::BrowserConfiguration,
+    ) || resources.account_home.is_empty()
         || resources.shared_home.is_empty()
     {
         return None;
@@ -852,8 +860,8 @@ fn catalog_definitions<'a>(
             && !crate::provider_adapter::adapter(
                 ProviderKind::of_record(record).map_err(|_| invalid("agent/provider"))?,
             )
-            .capabilities()
-            .tools_on_every_turn
+            .descriptor()
+            .supports(crate::provider_adapter::ProviderFeature::ToolsOnEveryTurn)
         {
             &resources.legacy_tools
         } else {
@@ -1026,8 +1034,10 @@ fn host_worktree(
     role: thread::Role,
     lead: bool,
 ) -> Result<Option<thread::HostWorktree>, WorkerError> {
-    if record["provider"] != ProviderKind::Claude.key()
-        || lead
+    if !crate::provider_adapter::supports_record(
+        record,
+        crate::provider_adapter::ProviderFeature::HostWorktreeFence,
+    ) || lead
         || role != thread::Role::Implementer
         || record["parentId"].as_str().is_none()
         || !((record["worktree"] == true && record["worktreeReady"] == true)
@@ -1424,7 +1434,9 @@ pub(super) fn submission_snapshot(
         text(record, "threadId")?,
         optional(record, "compactions")?.unwrap_or(0),
     );
-    let idle_summary_return = intent.provider == ProviderKind::Claude
+    let idle_summary_return = crate::provider_adapter::adapter(intent.provider)
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::IdleSummaryReturn)
         && record["idleSummaryPrepared"]
             .as_str()
             .is_some_and(|request| !request.is_empty())

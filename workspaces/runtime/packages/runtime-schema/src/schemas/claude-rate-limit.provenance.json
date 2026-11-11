@@ -5,7 +5,7 @@
     "workspaces/providers/apps/claude-bridge/usage-policy.ts": "14a8801a4e371cf576bfcdf78a8341f29f101f6cc5c98f3c640d0abfd886fb72",
     "workspaces/providers/apps/claude-bridge/package.json": "f9a1b2c9100b4a5d4ca699a309bcf1a43919dad3dd0b0df1423a11b1739c9780",
     "pnpm-lock.yaml": "a9912236e4c1fa7cdf0a1679bb28630fbc54c3ee8c5b90ace387b1e92a7a484e",
-    "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts": "b9b804227248fb310ac793470665ce45ea0ca6195913aafc3d4735e91cb04edd"
+    "workspaces/tooling/apps/repository-checks/generate-provider-contracts.ts": "da9676106c26c1cae5e6536af6b7ebc5cd748119dd82b3072dd0013eae5befac"
   },
   "sdk": {
     "version": "0.3.308",

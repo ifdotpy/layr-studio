@@ -14,8 +14,8 @@ use studio_runtime_process::{
     provider_seam::{
         AdapterCommand, AdapterError, AttachmentInfo, AttachmentStatus, CommandReceipt,
         InitializationStatus, JournalEntry, JournalPayload, LANE_CAPACITY, OpenOptions,
-        PreparedWrite, ProviderAttachment, ProviderTaskFactory, SessionClock, Shutdown, TaskExit,
-        initialized_operation,
+        PreparedWrite, ProviderAttachment, ProviderCodec, ProviderTaskFactory, SessionClock,
+        Shutdown, TaskExit, initialized_operation,
     },
 };
 use studio_runtime_providers::{
@@ -259,6 +259,12 @@ pub enum SessionTaskError {
     Adapter(#[from] AdapterError),
 }
 
+impl From<studio_runtime_providers::CodecError> for SessionTaskError {
+    fn from(error: studio_runtime_providers::CodecError) -> Self {
+        Self::Protocol(error.into())
+    }
+}
+
 /// Completion is outside the bounded event lane. The account must persist
 /// adapter.recovery_needed and settle these final outcomes itself.
 pub struct SessionExit {
@@ -281,6 +287,7 @@ pub struct SessionHandle {
 /// futures alongside the separately owned bounded event receiver.
 #[derive(Clone)]
 pub struct SessionControl {
+    codec: ProviderCodec,
     clock: SessionClock,
     factory: Arc<dyn ProviderTaskFactory>,
     handle: ProviderHandle,
@@ -325,12 +332,19 @@ impl SessionHandle {
             return Err(SessionTaskError::Invalid);
         }
         let clock = options.clock.clone();
-        let (mut state, initial) = SessionState::new_with_recovered_and_prefix(
+        let codec = options.launch.codec;
+        let initial_frame = (codec.normalize)(&Frame::Request(RequestFrame {
+            id: RequestId::Number(0),
+            method: Method::Initialize,
+            params: Some(config.initialize_params),
+            fields: Map::new(),
+        }))?;
+        let (mut state, initial) = SessionState::new_with_initial_frame(
             config.generation.0,
             config.wire,
             clock.now_ms(),
             config.timeout_ms,
-            config.initialize_params,
+            initial_frame,
             vec![],
             config.request_id_prefix,
         )?;
@@ -338,13 +352,11 @@ impl SessionHandle {
             return Err(SessionTaskError::Invalid);
         };
         // Validate the stricter supervisor envelope limit before factory.open.
-        let initialize = PreparedWrite::new(config.initialize_operation.clone(), &frame)?;
-        let Frame::Request(initialize_frame) = frame else {
-            return Err(SessionTaskError::Invalid);
-        };
+        let initialize =
+            PreparedWrite::new_with_codec(config.initialize_operation.clone(), &frame, codec)?;
         let ticket = RequestTicket {
             generation: config.generation.0,
-            id: initialize_frame.id.clone(),
+            id: frame.id().ok_or(SessionTaskError::Invalid)?,
             method: Method::Initialize,
         };
         let mut records = BTreeMap::new();
@@ -421,6 +433,7 @@ impl SessionHandle {
         let query_handle = handle.clone();
         let query_factory = Arc::clone(&factory);
         let actor = SessionTask {
+            codec,
             state,
             clock: clock.clone(),
             handle,
@@ -442,6 +455,7 @@ impl SessionHandle {
         Ok(Self {
             events: receiver,
             control: SessionControl {
+                codec,
                 clock,
                 factory: query_factory,
                 handle: query_handle,
@@ -483,6 +497,9 @@ impl SessionHandle {
     }
 }
 impl SessionControl {
+    pub(crate) fn codec(&self) -> ProviderCodec {
+        self.codec
+    }
     pub async fn operation_status(
         &self,
         operation: OperationId,
@@ -522,13 +539,13 @@ impl SessionControl {
         {
             return Err(SessionTaskError::Invalid);
         }
-        let frame = Frame::Request(RequestFrame {
+        let frame = (self.codec.normalize)(&Frame::Request(RequestFrame {
             id: spec.id.clone(),
             method: spec.method,
             params: Some(spec.params.clone()),
             fields: Map::new(),
-        });
-        let write = PreparedWrite::new(spec.operation_id.clone(), &frame)?;
+        }))?;
+        let write = PreparedWrite::new_with_codec(spec.operation_id.clone(), &frame, self.codec)?;
         let spec_method = spec.method;
         let boundary_timing = (spec_method == Method::TurnStart).then(|| {
             let status = self.status.borrow();
@@ -593,8 +610,9 @@ impl SessionControl {
         {
             return Err(SessionTaskError::Invalid);
         }
+        let frame = (self.codec.normalize)(frame)?;
         Ok(PreparedFrame {
-            write: PreparedWrite::new(operation.clone(), frame)?,
+            write: PreparedWrite::new_with_codec(operation.clone(), &frame, self.codec)?,
             operation,
             callback_reply: false,
         })
@@ -769,6 +787,7 @@ enum Flight {
 }
 type InFlight = Pin<Box<dyn Future<Output = (Flight, CommandReceipt)> + Send>>;
 struct SessionTask {
+    codec: ProviderCodec,
     state: SessionState,
     clock: SessionClock,
     handle: ProviderHandle,
@@ -1267,10 +1286,13 @@ impl SessionTask {
                 let spec = &prepared.spec;
                 let result = self
                     .state
-                    .preflight_with_id(
+                    .preflight_frame_with_id(
                         spec.id.clone(),
-                        spec.method,
-                        &spec.params,
+                        prepared
+                            .write
+                            .as_ref()
+                            .ok_or(SessionTaskError::Invalid)?
+                            .frame(),
                         spec.thread_id.as_deref(),
                         spec.lightweight,
                     )
@@ -1332,10 +1354,14 @@ impl SessionTask {
         {
             return Err(SessionTaskError::Invalid);
         }
-        let (ticket, actions) = self.state.submit_with_id(
+        let (ticket, actions) = self.state.submit_frame_with_id(
             spec.id,
-            spec.method,
-            spec.params,
+            prepared
+                .write
+                .as_ref()
+                .ok_or(SessionTaskError::Invalid)?
+                .frame()
+                .clone(),
             prepared.prepared_at_ms,
             spec.timeout_ms,
             spec.thread_id.clone(),
@@ -1373,19 +1399,20 @@ impl SessionTask {
         while let Some(action) = self.retained.actions.front() {
             match action {
                 Action::Write(frame) => match frame {
-                    Frame::Request(request) => {
-                        if let Some(record) = self.records.get_mut(&request.id) {
+                    Frame::Request(_) | Frame::CodexClientRequest(_) => {
+                        if let Some(record) = frame.id().and_then(|id| self.records.get_mut(&id)) {
                             record.ready = true;
                         }
                     }
-                    Frame::Notification(notification)
-                        if notification.method == Method::Initialized =>
+                    Frame::Notification(_) | Frame::CodexClientNotification(_)
+                        if frame.method() == Some(Method::Initialized.as_str()) =>
                     {
                         let operation = initialized_operation(
                             &self.handle,
                             Generation(self.state.generation()),
                         );
-                        let write = PreparedWrite::new(operation.clone(), frame)?;
+                        let write =
+                            PreparedWrite::new_with_codec(operation.clone(), frame, self.codec)?;
                         self.retained.initialized = Some(PendingWrite {
                             write,
                             operation,
@@ -1394,7 +1421,13 @@ impl SessionTask {
                             callback_reply: false,
                         });
                     }
-                    Frame::Notification(_) | Frame::UnknownMethod(_) | Frame::Response { .. } => {
+                    Frame::Notification(_)
+                    | Frame::CodexClientNotification(_)
+                    | Frame::CodexServerRequest(_)
+                    | Frame::CodexNotification(_)
+                    | Frame::UnknownMethod(_)
+                    | Frame::KnownMethodUnparsed(_)
+                    | Frame::Response { .. } => {
                         return Err(SessionTaskError::Invalid);
                     }
                 },
@@ -1410,6 +1443,7 @@ impl SessionTask {
                                     body: ResponseBody::Result(value),
                                     ..
                                 } => Some(Arc::new(value.clone())),
+                                RequestOutcome::Reply { body: ResponseBody::CodexResult(studio_runtime_providers::codex::ClientRequestResult::Initialize(value)), .. } => Some(Arc::new(studio_json::json!(value))),
                                 RequestOutcome::Reply { .. } | RequestOutcome::Unknown => None,
                             };
                         });
@@ -1547,7 +1581,9 @@ impl SessionTask {
             }
             CommandReceipt::Unknown
             | CommandReceipt::Acknowledged(_)
-            | CommandReceipt::CachedInitialize(_) => WriteOutcome::Unknown,
+            | CommandReceipt::CachedInitialize(_)
+            | CommandReceipt::CachedCodexInitialize(_)
+            | CommandReceipt::CachedCodexUnparsedInitialize(_) => WriteOutcome::Unknown,
         };
         let recovery = if let CommandReceipt::Written {
             remote_id,
@@ -1609,6 +1645,8 @@ impl SessionTask {
                 | CommandReceipt::WriteInterrupted { .. }
                 | CommandReceipt::Acknowledged(_)
                 | CommandReceipt::CachedInitialize(_)
+                | CommandReceipt::CachedCodexInitialize(_)
+                | CommandReceipt::CachedCodexUnparsedInitialize(_)
                 | CommandReceipt::NotSent
                 | CommandReceipt::Unknown => Err(SessionTaskError::Closed),
             },
@@ -1617,7 +1655,31 @@ impl SessionTask {
                 initialized,
                 ..
             } => {
-                if let CommandReceipt::CachedInitialize(value) = receipt {
+                let cached = match &receipt {
+                    CommandReceipt::CachedInitialize(value) => {
+                        Some(ResponseBody::Result(value.clone()))
+                    }
+                    CommandReceipt::CachedCodexInitialize(value) => {
+                        Some(ResponseBody::CodexResult(
+                            studio_runtime_providers::codex::ClientRequestResult::Initialize(
+                                Box::new(value.clone()),
+                            ),
+                        ))
+                    }
+                    CommandReceipt::CachedCodexUnparsedInitialize(result) => {
+                        Some(ResponseBody::CodexUnparsedResult {
+                            method:
+                                studio_runtime_providers::codex::ClientRequestMethod::Initialize,
+                            result: result.clone(),
+                        })
+                    }
+                    CommandReceipt::Written { .. }
+                    | CommandReceipt::Acknowledged(_)
+                    | CommandReceipt::NotSent
+                    | CommandReceipt::WriteInterrupted { .. }
+                    | CommandReceipt::Unknown => None,
+                };
+                if let Some(body) = cached {
                     let ticket = ticket.ok_or(SessionTaskError::Invalid)?;
                     if ticket.method != Method::Initialize {
                         return Err(SessionTaskError::Invalid);
@@ -1627,7 +1689,7 @@ impl SessionTask {
                         .receive_at(
                             Frame::Response {
                                 id: ticket.id,
-                                body: ResponseBody::Result(value),
+                                body,
                                 fields: Map::new(),
                             },
                             self.clock.now_ms(),

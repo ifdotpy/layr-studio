@@ -277,7 +277,14 @@ impl Input {
                 request.method.clone(),
                 request.fields.get("params").cloned(),
             ),
-            Frame::Notification(_) | Frame::UnknownMethod(_) | Frame::Response { .. } => {
+            Frame::CodexClientRequest(_)
+            | Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Notification(_)
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_)
+            | Frame::Response { .. } => {
                 return Ok(None);
             }
         };

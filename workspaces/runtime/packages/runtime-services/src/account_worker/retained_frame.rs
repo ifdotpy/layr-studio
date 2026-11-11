@@ -138,27 +138,53 @@ impl Worker {
             return Ok(());
         }
         let key = operation.clone();
-        let prepared = match self.control.prepare_frame(OperationId(key.clone()), &frame) {
-            Ok(prepared) => prepared,
-            Err(_) => {
-                let _ignored = reply.send(Err(PortError::Invalid));
-                return Ok(());
-            }
-        };
+        let control = self.control.clone();
         let stream = self.account.clone();
         let generation = self.generation.0;
-        let replay = self
+        let preparation = self
             .db("retained_frame_intent", move |store| async move {
                 store
                     .transaction_with(move |tx| {
-                        crate::provider_callbacks::begin_frame(
+                        let wire = if matches!(frame, Frame::Response { .. }) {
+                            let (origin, _) = operation.rsplit_once(':').ok_or_else(|| {
+                                WorkerError::PreparationRefused(
+                                    "callback-reply/missing-owner".into(),
+                                )
+                            })?;
+                            crate::callback_reply::prepare_reply(
+                                tx,
+                                origin,
+                                crate::callback_reply::CallbackReference::Managed,
+                                &frame,
+                                control.codec(),
+                            )?
+                        } else {
+                            frame.clone()
+                        };
+                        let prepared =
+                            control.prepare_frame(OperationId(operation.clone()), &wire)?;
+                        let replay = crate::provider_callbacks::begin_frame(
                             tx, &stream, generation, &operation, &frame,
                         )
-                        .map_err(|error| WorkerError::PreparationRefused(error.to_string()))
+                        .map_err(|error| WorkerError::PreparationRefused(error.to_string()))?;
+                        Ok((replay, prepared))
                     })
                     .await
             })
-            .await?;
+            .await;
+        let (replay, prepared) = match preparation {
+            Ok(prepared) => prepared,
+            Err(WorkerError::PreparationRefused(reason)) => {
+                eprintln!("Callback reply was not sent: {reason}");
+                let _ignored = reply.send(Err(PortError::NotSent(reason)));
+                return Ok(());
+            }
+            Err(WorkerError::Session(_)) => {
+                let _ignored = reply.send(Err(PortError::Invalid));
+                return Ok(());
+            }
+            Err(error) => return Err(error),
+        };
         match replay {
             crate::provider_callbacks::FrameAdmission::Send => {}
             crate::provider_callbacks::FrameAdmission::Written => {

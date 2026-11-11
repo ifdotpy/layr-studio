@@ -32,7 +32,7 @@ use studio_runtime_store::{RuntimeStore, StoreError};
 use tokio::sync::{Notify, mpsc, watch};
 
 use std::path::Path;
-use studio_runtime_services::provider_adapter::{HostLaunch, ProviderKind, adapter};
+use studio_runtime_services::provider_adapter::{CheckedLaunch, ProviderKind, adapter};
 fn codex_launch(
     native_path: Option<&str>,
     environment: BTreeMap<String, String>,
@@ -41,7 +41,7 @@ fn codex_launch(
     root: PathBuf,
 ) -> ProviderLaunchSpec {
     adapter(ProviderKind::Codex)
-        .host_launch(HostLaunch {
+        .launch(CheckedLaunch {
             profile: None,
             home,
             isolated,
@@ -69,7 +69,7 @@ fn claude_launch(
             )
         })?;
     adapter(ProviderKind::Claude)
-        .host_launch(HostLaunch {
+        .launch(CheckedLaunch {
             profile: Some(&profile),
             home: String::new(),
             isolated: false,
@@ -4103,6 +4103,18 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
         );
         return;
     }
+    let parent_priority = || {
+        let output = std::process::Command::new("ps")
+            .args(["-o", "ni=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("backend priority");
+        assert!(output.status.success());
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<i64>()
+            .expect("numeric backend priority")
+    };
+    let inherited_priority = parent_priority();
     let fixture = Fixture::new().await;
     let (accounts, home) = account_driver(fixture._root.path());
     std::fs::write(
@@ -4172,20 +4184,18 @@ async fn direct_launch_mode_completes_http_turn_and_reaps_child() {
     let pid = started["pid"].as_u64().unwrap() as u32;
     assert_eq!(started["request"]["method"], "turn/start");
     assert_eq!(started["count"], 1);
+    assert_eq!(
+        parent_priority(),
+        inherited_priority,
+        "direct caller leaves parent priority unchanged"
+    );
     let expected_priority =
         match studio_runtime_process::child_priority::ChildPriority::from_environment() {
-            studio_runtime_process::child_priority::ChildPriority::Background => 5,
-            studio_runtime_process::child_priority::ChildPriority::Normal => {
-                let output = std::process::Command::new("ps")
-                    .args(["-o", "ni=", "-p", &std::process::id().to_string()])
-                    .output()
-                    .expect("backend priority");
-                assert!(output.status.success());
-                String::from_utf8_lossy(&output.stdout)
-                    .trim()
-                    .parse::<i64>()
-                    .expect("numeric backend priority")
-            }
+            studio_runtime_process::child_priority::ChildPriority::Background => inherited_priority
+                .max(i64::from(
+                    studio_runtime_process::child_priority::BACKGROUND_NICE,
+                )),
+            studio_runtime_process::child_priority::ChildPriority::Normal => inherited_priority,
         };
     assert_eq!(
         started["priority"].as_i64(),

@@ -8,7 +8,7 @@ pub const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 /// Maximum wire bytes occupied by a frame's LF or CRLF delimiter.
 pub const MAX_FRAME_DELIMITER_BYTES: usize = 2;
 /// Reserved bytes for the transport stamp member, including its key and comma.
-const MAX_BOUNDARY_METADATA_BYTES: usize = 256;
+pub(crate) const MAX_BOUNDARY_METADATA_BYTES: usize = 256;
 
 /// Count payload bytes in a complete wire frame, excluding LF or CRLF when present.
 #[must_use]
@@ -81,62 +81,14 @@ impl<'de> Deserialize<'de> for Method {
     }
 }
 
-define_methods! {
-    Initialize => "initialize",
-    Initialized => "initialized",
+macro_rules! runtime_methods {
+    ($( $variant:ident => $wire_name:literal, )+) => {
+        define_methods! {
+            $( $variant => $wire_name, )+
     Ack => "ack",
-    AccountLoginCancel => "account/login/cancel",
-    AccountLoginStart => "account/login/start",
-    AccountRateLimitResetCreditConsume => "account/rateLimitResetCredit/consume",
-    ThreadLoadedList => "thread/loaded/list",
-    ConfigRead => "config/read",
-    SkillsExtraRootsSet => "skills/extraRoots/set",
-    ModelList => "model/list",
-    AccountRead => "account/read",
-    AccountRateLimitsRead => "account/rateLimits/read",
-    ThreadStart => "thread/start",
-    ThreadRealtimeStart => "thread/realtime/start",
-    ThreadRealtimeStop => "thread/realtime/stop",
-    ThreadRealtimeAppendSpeech => "thread/realtime/appendSpeech",
-    ThreadRealtimeItemStarted => "thread/realtime/item/started",
-    ThreadRealtimeTranscriptDelta => "thread/realtime/transcript/delta",
-    ThreadRealtimeTranscriptDone => "thread/realtime/transcript/done",
-    ThreadRealtimeSdp => "thread/realtime/sdp",
-    ThreadRealtimeError => "thread/realtime/error",
-    ThreadRealtimeClosed => "thread/realtime/closed",
-    ThreadResume => "thread/resume",
-    ThreadRead => "thread/read",
-    ThreadTurnsList => "thread/turns/list",
     ThreadTurnsItemsList => "thread/turns/items/list",
-    TurnStart => "turn/start",
-    TurnSteer => "turn/steer",
-    TurnInterrupt => "turn/interrupt",
-    ThreadList => "thread/list",
-    ThreadArchive => "thread/archive",
-    ThreadFork => "thread/fork",
-    ThreadNameSet => "thread/name/set",
-    ThreadMetadataUpdate => "thread/metadata/update",
-    ThreadSettingsUpdate => "thread/settings/update",
-    ThreadCompactStart => "thread/compact/start",
     ThreadRollback => "thread/rollback",
-    ThreadItemsList => "thread/items/list",
-    ThreadGoalSet => "thread/goal/set",
-    ThreadGoalUpdated => "thread/goal/updated",
-    ThreadUnarchive => "thread/unarchive",
-    ThreadUnsubscribe => "thread/unsubscribe",
-    ProcessSpawn => "process/spawn",
-    ProcessWriteStdin => "process/writeStdin",
-    ProcessKill => "process/kill",
-    ProcessResizePty => "process/resizePty",
-    CommandExec => "command/exec",
-    CommandExecWrite => "command/exec/write",
-    CommandExecResize => "command/exec/resize",
-    CommandExecTerminate => "command/exec/terminate",
-    ThreadBackgroundTerminalsList => "thread/backgroundTerminals/list",
-    ThreadBackgroundTerminalsTerminate => "thread/backgroundTerminals/terminate",
-    ThreadBackgroundTerminalsClean => "thread/backgroundTerminals/clean",
     ThreadCommandExecutionBackground => "thread/commandExecution/background",
-    ThreadQueueList => "thread/queue/list",
     ClaudeState => "claude/state",
     ClaudeRepairReport => "claude/repairReport",
     ClaudeFileBackups => "claude/fileBackups",
@@ -147,10 +99,7 @@ define_methods! {
     ClaudeDiagnostics => "claude/diagnostics",
     ClaudeMoveVersions => "claude/moveVersions",
     McpServerReconnect => "mcpServer/reconnect",
-    McpServerStatusList => "mcpServerStatus/list",
-    SkillsList => "skills/list",
     OperationStatus => "operationStatus",
-    ReviewStart => "review/start",
     BrowserAnswer => "browser.answer",
     BrowserCallback => "browser.callback",
     BrowserClose => "browser.close",
@@ -199,40 +148,27 @@ define_methods! {
     UploadCommit => "upload.commit",
     Verify => "verify",
     Write => "write",
-    CurrentTimeRead => "currentTime/read",
-    ItemToolCall => "item/tool/call",
-    ItemCommandExecutionRequestApproval => "item/commandExecution/requestApproval",
-    ItemFileChangeRequestApproval => "item/fileChange/requestApproval",
-    ItemPermissionsRequestApproval => "item/permissions/requestApproval",
-    McpServerElicitationRequest => "mcpServer/elicitation/request",
-    ItemToolRequestUserInput => "item/tool/requestUserInput",
-    ItemStarted => "item/started",
-    ItemCompleted => "item/completed",
-    ItemAgentMessageDelta => "item/agentMessage/delta",
-    ItemReasoningTextDelta => "item/reasoning/textDelta",
-    ItemCommandExecutionOutputDelta => "item/commandExecution/outputDelta",
-    CommandExecOutputDelta => "command/exec/outputDelta",
-    TurnStarted => "turn/started",
-    TurnCompleted => "turn/completed",
-    TurnPlanUpdated => "turn/plan/updated",
-    TurnDiffUpdated => "turn/diff/updated",
-    ThreadClosed => "thread/closed",
-    ThreadStatusChanged => "thread/status/changed",
-    ThreadTokenUsageUpdated => "thread/tokenUsage/updated",
     ThreadIdleCompactionUpdated => "thread/idleCompaction/updated",
     ThreadShellPolicyUpdated => "thread/shellPolicy/updated",
-    AccountLoginCompleted => "account/login/completed",
-    AccountUpdated => "account/updated",
-    AccountRateLimitsUpdated => "account/rateLimits/updated",
-    ModelSafetyBufferingUpdated => "model/safetyBuffering/updated",
     ProviderGenerationStarted => "provider/generationStarted",
-    ProtocolError => "error",
+        }
+    };
 }
+studio_codex_protocol::codex_methods!(runtime_methods);
 
 /// Provider response payload. Error bodies are kept as JSON because provider
 /// error fields vary by CLI release.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ResponseBody {
+    /// A Codex result awaiting the request book's method correlation.
+    Uncorrelated(studio_json::OwnedRawJson),
+    CodexResult(studio_codex_protocol::ClientRequestResult),
+    CodexServerResult(studio_codex_protocol::ServerRequestResult),
+    CodexError(studio_codex_protocol::JSONRPCErrorError),
+    CodexUnparsedResult {
+        method: studio_codex_protocol::ClientRequestMethod,
+        result: studio_json::OwnedRawJson,
+    },
     Result(Value),
     Error(Value),
 }
@@ -266,6 +202,12 @@ pub struct UnknownMethodFrame {
 /// One decoded JSON-RPC line.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Frame {
+    /// A known method with an incompatible payload; never typed authority.
+    KnownMethodUnparsed(UnknownMethodFrame),
+    CodexClientRequest(Box<studio_codex_protocol::ClientRequest>),
+    CodexServerRequest(Box<studio_codex_protocol::ServerRequest>),
+    CodexNotification(Box<studio_codex_protocol::ServerNotification>),
+    CodexClientNotification(Box<studio_codex_protocol::ClientNotification>),
     Request(RequestFrame),
     Notification(NotificationFrame),
     UnknownMethod(UnknownMethodFrame),
@@ -307,31 +249,6 @@ pub enum CodecError {
     FrameTooLarge { limit: usize },
     #[error("cannot serialize protocol frame: {0}")]
     Serialization(String),
-}
-
-/// Decode a compatibility probe reply, retaining its historical permissive
-/// notification handling and last-duplicate JSON semantics.
-pub fn decode_probe_response(line: &[u8], expected: u64) -> Result<Option<Value>, CodecError> {
-    let value: Value = studio_json::from_slice(line)
-        .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
-    if !value.is_object() {
-        return Err(CodecError::MalformedFrame("expected object"));
-    }
-    if value.get("method").is_some() {
-        return if value.get("id").is_some() {
-            Err(CodecError::MalformedFrame("unexpected incoming request"))
-        } else {
-            Ok(None)
-        };
-    }
-    let wire = WireObject::deserialize(value)
-        .map_err(|error| CodecError::MalformedJson(error.to_string()))?;
-    if wire.id != Some(RequestId::Number(expected)) || wire.error.is_some() {
-        return Err(CodecError::MalformedFrame("unexpected probe response"));
-    }
-    wire.result
-        .map(Some)
-        .ok_or(CodecError::MalformedFrame("missing probe result"))
 }
 
 /// One provider wire object. Serde splits the envelope from the extension
@@ -494,7 +411,10 @@ fn check_journal_size(payload: &Value, wire_bytes: usize) -> Result<(), CodecErr
     check_journal_byte_sizes(wire_bytes, metadata_bytes)
 }
 
-fn check_journal_byte_sizes(wire_bytes: usize, metadata_bytes: usize) -> Result<(), CodecError> {
+pub(crate) fn check_journal_byte_sizes(
+    wire_bytes: usize,
+    metadata_bytes: usize,
+) -> Result<(), CodecError> {
     if metadata_bytes > MAX_BOUNDARY_METADATA_BYTES
         || wire_bytes > MAX_FRAME_BYTES + MAX_BOUNDARY_METADATA_BYTES
         || wire_bytes.saturating_sub(metadata_bytes) > MAX_FRAME_BYTES
@@ -509,7 +429,7 @@ fn check_journal_byte_sizes(wire_bytes: usize, metadata_bytes: usize) -> Result<
 /// Decode a complete supervisor stdout journal record without losing its
 /// cursor when its payload is not valid protocol JSON.
 pub fn decode_journal_entry(cursor: u64, generation: u64, bytes: Vec<u8>) -> DecodedJournalEntry {
-    let decoded = decode_journal_frame(&bytes);
+    let decoded = decode_frame_with_metadata(&bytes);
     let (payload, boundary_at) = match decoded {
         Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
         Err(error) => raw_journal_payload(bytes, error),
@@ -529,7 +449,7 @@ pub fn decode_journal_entry_borrowed(
     generation: u64,
     bytes: &[u8],
 ) -> DecodedJournalEntry {
-    let (payload, boundary_at) = match decode_journal_frame(bytes) {
+    let (payload, boundary_at) = match decode_frame_with_metadata(bytes) {
         Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
         Err(error) => raw_journal_payload(bytes.to_vec(), error),
     };
@@ -539,6 +459,37 @@ pub fn decode_journal_entry_borrowed(
         payload,
         boundary_at,
     }
+}
+
+/// A frame and its transport boundary stamp, decoded together.
+pub type DecodedFrame = (
+    Frame,
+    Option<studio_runtime_schema::provider_timing::BoundaryStamp>,
+);
+
+/// Provider-selected ingress, retaining transport metadata and malformed bytes.
+pub fn decode_journal_with(
+    cursor: u64,
+    generation: u64,
+    bytes: &[u8],
+    decode: fn(&[u8]) -> Result<DecodedFrame, CodecError>,
+) -> DecodedJournalEntry {
+    let result = decode(bytes);
+    let (payload, boundary_at) = match result {
+        Ok((frame, stamp)) => (DecodedJournalPayload::Frame(frame), stamp),
+        Err(error) => raw_journal_payload(bytes.to_vec(), error),
+    };
+    DecodedJournalEntry {
+        cursor,
+        generation,
+        payload,
+        boundary_at,
+    }
+}
+
+/// Generic helper/Claude decoder. Codex callers select `decode_codex_frame`.
+pub fn decode_frame(bytes: &[u8]) -> Result<Frame, CodecError> {
+    decode_frame_with_metadata(bytes).map(|(frame, _)| frame)
 }
 
 /// A supervisor can timestamp a JSON object that is not a valid provider frame.
@@ -565,7 +516,7 @@ fn raw_journal_payload(
     )
 }
 
-fn decode_journal_frame(
+pub fn decode_frame_with_metadata(
     bytes: &[u8],
 ) -> Result<
     (
@@ -757,6 +708,10 @@ enum FrameValue<'a> {
     Json(&'a Value),
     Id(&'a RequestId),
     Text(&'a str),
+    Raw(&'a studio_json::OwnedRawJson),
+    CodexResult(&'a studio_codex_protocol::ClientRequestResult),
+    CodexServerResult(&'a studio_codex_protocol::ServerRequestResult),
+    CodexError(&'a studio_codex_protocol::JSONRPCErrorError),
 }
 
 impl Serialize for FrameValue<'_> {
@@ -768,17 +723,35 @@ impl Serialize for FrameValue<'_> {
             Self::Json(value) => value.serialize(serializer),
             Self::Id(value) => value.serialize(serializer),
             Self::Text(value) => serializer.serialize_str(value),
+            Self::Raw(value) => value.serialize(serializer),
+            Self::CodexResult(value) => {
+                crate::codex_codec::ResultPayload(value).serialize(serializer)
+            }
+            Self::CodexError(value) => value.serialize(serializer),
+            Self::CodexServerResult(value) => {
+                crate::codex_codec::ServerResultPayload(value).serialize(serializer)
+            }
         }
     }
 }
 
-struct FrameView<'a> {
-    entries: Vec<(&'a str, FrameValue<'a>)>,
+enum FrameView<'a> {
+    Entries(Vec<(&'a str, FrameValue<'a>)>),
+    ClientRequest(&'a studio_codex_protocol::ClientRequest),
+    ServerRequest(&'a studio_codex_protocol::ServerRequest),
+    Notification(&'a studio_codex_protocol::ServerNotification),
+    ClientNotification(&'a studio_codex_protocol::ClientNotification),
 }
 
 impl<'a> FrameView<'a> {
     fn new(frame: &'a Frame) -> Self {
         let (fields, overrides): (&Map<String, Value>, Vec<(&str, FrameValue<'a>)>) = match frame {
+            Frame::CodexClientRequest(request) => return Self::ClientRequest(request),
+            Frame::CodexServerRequest(request) => return Self::ServerRequest(request),
+            Frame::CodexNotification(notification) => return Self::Notification(notification),
+            Frame::CodexClientNotification(notification) => {
+                return Self::ClientNotification(notification);
+            }
             Frame::Request(method) => {
                 let mut overrides = vec![
                     ("id", FrameValue::Id(&method.id)),
@@ -796,10 +769,27 @@ impl<'a> FrameView<'a> {
                 }
                 (&method.fields, overrides)
             }
-            Frame::UnknownMethod(unknown) => (&unknown.fields, Vec::new()),
+            Frame::UnknownMethod(unknown) | Frame::KnownMethodUnparsed(unknown) => {
+                (&unknown.fields, Vec::new())
+            }
             Frame::Response { id, body, fields } => {
                 let mut overrides = vec![("id", FrameValue::Id(id))];
                 match body {
+                    ResponseBody::CodexUnparsedResult { result, .. } => {
+                        overrides.push(("result", FrameValue::Raw(result)))
+                    }
+                    ResponseBody::Uncorrelated(value) => {
+                        overrides.push(("result", FrameValue::Raw(value)))
+                    }
+                    ResponseBody::CodexResult(value) => {
+                        overrides.push(("result", FrameValue::CodexResult(value)))
+                    }
+                    ResponseBody::CodexError(value) => {
+                        overrides.push(("error", FrameValue::CodexError(value)))
+                    }
+                    ResponseBody::CodexServerResult(value) => {
+                        overrides.push(("result", FrameValue::CodexServerResult(value)))
+                    }
                     ResponseBody::Result(value) => {
                         overrides.push(("result", FrameValue::Json(value)))
                     }
@@ -820,7 +810,7 @@ impl<'a> FrameView<'a> {
                 Err(index) => entries.insert(index, (key, value)),
             }
         }
-        Self { entries }
+        Self::Entries(entries)
     }
 }
 
@@ -829,11 +819,25 @@ impl Serialize for FrameView<'_> {
     where
         S: Serializer,
     {
-        let mut map = serializer.serialize_map(Some(self.entries.len()))?;
-        for (key, value) in &self.entries {
-            map.serialize_entry(key, value)?;
+        match self {
+            Self::ClientRequest(value) => value.serialize(serializer),
+            Self::ServerRequest(value) => value.serialize(serializer),
+            Self::Notification(value) => value.serialize(serializer),
+            Self::ClientNotification(value) => value.serialize(serializer),
+            Self::Entries(entries) => {
+                let mut map = serializer.serialize_map(Some(entries.len()))?;
+                for (key, value) in entries {
+                    map.serialize_entry(key, value)?;
+                }
+                map.end()
+            }
         }
-        map.end()
+    }
+}
+
+impl Serialize for Frame {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        FrameView::new(self).serialize(serializer)
     }
 }
 
@@ -893,11 +897,74 @@ impl CodexIncomingMethod {
 }
 
 impl Frame {
+    /// Visit only generated open-union fallbacks; known fields stay strongly typed.
+    pub fn visit_unknown_variants(&self, visitor: &mut dyn FnMut(&'static str, &str)) {
+        use studio_codex_protocol::VisitUnknown;
+        match self {
+            Self::CodexClientRequest(value) => value.visit_unknowns(visitor),
+            Self::CodexServerRequest(value) => value.visit_unknowns(visitor),
+            Self::CodexNotification(value) => value.visit_unknowns(visitor),
+            Self::CodexClientNotification(value) => value.visit_unknowns(visitor),
+            Self::Response { body, .. } => match body {
+                ResponseBody::CodexResult(value) => value.visit_unknowns(visitor),
+                ResponseBody::CodexServerResult(value) => value.visit_unknowns(visitor),
+                ResponseBody::CodexError(_)
+                | ResponseBody::CodexUnparsedResult { .. }
+                | ResponseBody::Uncorrelated(_)
+                | ResponseBody::Result(_)
+                | ResponseBody::Error(_) => {}
+            },
+            Self::Request(_)
+            | Self::Notification(_)
+            | Self::UnknownMethod(_)
+            | Self::KnownMethodUnparsed(_) => {}
+        }
+    }
+
+    /// Wire identity, shared by transport receipts and request correlation.
+    #[must_use]
+    pub fn id(&self) -> Option<RequestId> {
+        match self {
+            Self::CodexClientRequest(request) => crate::codex_request_id(request.id()).ok(),
+            Self::CodexServerRequest(request) => crate::codex_request_id(request.id()).ok(),
+            Self::Request(request) => Some(request.id.clone()),
+            Self::Response { id, .. } => Some(id.clone()),
+            Self::UnknownMethod(frame) | Self::KnownMethodUnparsed(frame) => frame
+                .fields
+                .get("id")
+                .and_then(|id| RequestId::deserialize(id).ok()),
+            Self::Notification(_)
+            | Self::CodexNotification(_)
+            | Self::CodexClientNotification(_) => None,
+        }
+    }
+
+    /// Method identity without projecting typed payloads through JSON.
+    #[must_use]
+    pub fn method(&self) -> Option<&str> {
+        match self {
+            Self::CodexClientRequest(request) => Some(request.method().as_str()),
+            Self::CodexServerRequest(request) => Some(request.method().as_str()),
+            Self::CodexNotification(notification) => Some(notification.method().as_str()),
+            Self::CodexClientNotification(notification) => Some(notification.method().as_str()),
+            Self::Request(request) => Some(request.method.as_str()),
+            Self::Notification(notification) => Some(notification.method.as_str()),
+            Self::UnknownMethod(unknown) | Self::KnownMethodUnparsed(unknown) => {
+                Some(&unknown.method)
+            }
+            Self::Response { .. } => None,
+        }
+    }
+
     /// Compatibility view for consumers awaiting typed payload migration.
     #[must_use]
     pub fn method_and_params(&self) -> Option<(&str, &Value)> {
         static NULL: Value = Value::Null;
         match self {
+            Self::CodexClientRequest(_)
+            | Self::CodexServerRequest(_)
+            | Self::CodexNotification(_)
+            | Self::CodexClientNotification(_) => None,
             Self::Notification(frame) => Some((
                 frame.method.as_str(),
                 frame.params.as_ref().unwrap_or(&NULL),
@@ -906,7 +973,7 @@ impl Frame {
                 frame.method.as_str(),
                 frame.params.as_ref().unwrap_or(&NULL),
             )),
-            Self::UnknownMethod(frame) => {
+            Self::UnknownMethod(frame) | Self::KnownMethodUnparsed(frame) => {
                 Some((&frame.method, frame.fields.get("params").unwrap_or(&NULL)))
             }
             Self::Response {
@@ -921,16 +988,36 @@ impl Frame {
     /// identity; the Claude bridge's extensions do not enter this decoder.
     #[must_use]
     pub fn codex_incoming_method(&self) -> Option<CodexIncomingMethod> {
+        match self {
+            Self::CodexNotification(notification) => {
+                return Some(CodexIncomingMethod::Notification(notification.method()));
+            }
+            Self::CodexServerRequest(request) => {
+                return Some(CodexIncomingMethod::Request(request.method()));
+            }
+            Self::CodexClientRequest(_) | Self::CodexClientNotification(_) => return None,
+            Self::Request(_)
+            | Self::Notification(_)
+            | Self::UnknownMethod(_)
+            | Self::KnownMethodUnparsed(_)
+            | Self::Response { .. } => {}
+        }
         let (method, _) = self.method_and_params()?;
         let is_request = match self {
             Self::Request(_) => true,
             Self::Notification(_) => false,
-            Self::UnknownMethod(frame) => frame.fields.contains_key("id"),
+            Self::UnknownMethod(frame) | Self::KnownMethodUnparsed(frame) => {
+                frame.fields.contains_key("id")
+            }
             Self::Response {
                 id: _,
                 body: _,
                 fields: _,
             } => return None,
+            Self::CodexClientRequest(_)
+            | Self::CodexServerRequest(_)
+            | Self::CodexNotification(_)
+            | Self::CodexClientNotification(_) => return None,
         };
         Some(if is_request {
             studio_codex_protocol::ServerRequestMethod::from_wire(method)
@@ -1012,7 +1099,7 @@ mod codex_protocol_tests {
         assert!(ServerRequest::deserialize(&missing).is_err());
         let mut unknown = valid;
         unknown["params"]["mode"] = json!("futureForm");
-        assert!(ServerRequest::deserialize(&unknown).is_err());
+        assert!(ServerRequest::deserialize(&unknown).is_ok());
         assert!(
             studio_codex_protocol::ThreadStatus::deserialize(json!({"type":"active"})).is_err()
         );

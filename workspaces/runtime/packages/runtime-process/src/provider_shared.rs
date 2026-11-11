@@ -277,20 +277,6 @@ pub(crate) fn parse_process_environment(raw: &[u8]) -> io::Result<BTreeMap<Strin
     Ok(environment)
 }
 
-/// The `nativeId` of a Studio write: the id of a request with an integer id, which the
-/// supervisor renumbers. A request with a string id (Claude connections use `claude:<hex>`)
-/// and a reply to a provider request (the bridge uses `claude:<uuid>`) send none. Their
-/// receipts are found by operation id, and the provider sees their ids unchanged.
-pub(crate) fn provider_native_id(message: &Value) -> Option<NativeId> {
-    message
-        .get("method")
-        .and_then(Value::as_str)
-        .and_then(|_| message.get("id"))
-        .and_then(Value::as_u64)
-        .and_then(|id| i64::try_from(id).ok())
-        .map(NativeId::Integer)
-}
-
 /// The supervisor RPC id of an accepted Studio request: a positive integer.
 pub(crate) fn rpc_remote_id(remote: Option<&NativeId>) -> Option<u64> {
     remote
@@ -368,9 +354,14 @@ handle_request!(
     OpenRequest,
     OperationStatusRequest,
     RetireCommandRequest,
-    WriteRequest,
     NextBatchRequest,
 );
+
+impl<T: Serialize> SupervisorRequest for WriteRequest<T> {
+    fn has_handle(&self) -> bool {
+        true
+    }
+}
 
 impl SupervisorRequest for HealthRequest {
     fn has_handle(&self) -> bool {

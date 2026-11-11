@@ -388,7 +388,10 @@ done"#
                 let initial_entries = if partial_write { 3 } else { 2 };
                 assert_eq!(entry.cursor, EventCursor(index as u64 + initial_entries));
                 assert_eq!(entry.generation, Generation(1));
-                let JournalPayload::Frame(Frame::UnknownMethod(frame)) = entry.payload else {
+                let JournalPayload::Frame(
+                    Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame),
+                ) = entry.payload
+                else {
                     panic!("expected final fixture notification");
                 };
                 assert_eq!(frame.fields.get("index"), Some(&json!(index)));
@@ -498,7 +501,10 @@ printf '{{"method":"fixture/completed"}}\n'"#
             assert_eq!(entry.cursor, EventCursor(index as u64 + 1));
         }
         for (index, entry) in retained[1..=DELTAS].iter().enumerate() {
-            let JournalPayload::Frame(Frame::UnknownMethod(frame)) = &entry.payload else {
+            let JournalPayload::Frame(
+                Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame),
+            ) = &entry.payload
+            else {
                 panic!("expected a delta fixture notification");
             };
             assert_eq!(frame.fields.get("index"), Some(&json!(index)));

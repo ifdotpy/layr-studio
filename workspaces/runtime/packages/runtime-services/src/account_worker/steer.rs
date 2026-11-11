@@ -39,9 +39,11 @@ pub(super) fn claim(
 ) -> Result<Option<(TurnIntent, String)>, WorkerError> {
     let owned = AgentRepository::get(tx, &AgentId::from(agent_id))?.is_some_and(|agent| {
         agent.account_key.as_str() == account
-            && (agent.provider.value().copied()
-                != Some(studio_runtime_providers::ProviderKind::Claude)
-                || claude_steer_receipts)
+            && (!agent.provider.value().copied().is_some_and(|kind| {
+                crate::provider_adapter::adapter(kind)
+                    .descriptor()
+                    .supports(crate::provider_adapter::ProviderFeature::SteerCompletionReceipts)
+            }) || claude_steer_receipts)
     });
     if !owned {
         return Ok(None);
@@ -241,11 +243,11 @@ pub(super) fn outcome(
         SessionOutcome::Resolved {
             outcome: RequestOutcome::Reply { body, .. },
             ..
-        } => match body {
-            ResponseBody::Result(_) => {
+        } => match crate::provider_callbacks::CallbackBody::from(body) {
+            crate::provider_callbacks::CallbackBody::Result(_) => {
                 SchedulerRepository::steer_response(tx, agent, steer, "accepted")?
             }
-            ResponseBody::Error(_) => {
+            crate::provider_callbacks::CallbackBody::Error(_) => {
                 return Ok(wake(SchedulerRepository::steer_rejected(tx, agent, steer)?));
             }
         },
@@ -420,9 +422,11 @@ pub(super) async fn claim_for_wake(
             else {
                 return Ok(None);
             };
-            if record.provider.value().copied()
-                == Some(studio_runtime_providers::ProviderKind::Claude)
-                && !claude_steer_receipts
+            if record.provider.value().copied().is_some_and(|kind| {
+                crate::provider_adapter::adapter(kind)
+                    .descriptor()
+                    .supports(crate::provider_adapter::ProviderFeature::SteerCompletionReceipts)
+            }) && !claude_steer_receipts
             {
                 return Ok(Some(false));
             }

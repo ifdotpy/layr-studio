@@ -10,13 +10,15 @@ use std::{
     process::Stdio,
     sync::{Arc, Mutex, OnceLock},
 };
+#[cfg(test)]
+use studio_runtime_providers::decode_journal_entry_borrowed;
 use studio_runtime_providers::provider_diagnostics::{
     REPLY_TIMING_DIAGNOSTIC_PREFIX, ReplyTimingDiagnostic, STDIN_TIMING_DIAGNOSTIC_PREFIX,
     StdinTimingDiagnostic,
 };
 use studio_runtime_providers::{
     CodexIncomingMethod, DecodedJournalPayload, Frame, Method, ProviderKind, RequestId,
-    ResponseBody, decode_journal_entry_borrowed,
+    ResponseBody,
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -44,9 +46,8 @@ fn stdin_timing_diagnostics_enabled() -> bool {
 
 fn witnessed_method(write: &PreparedWrite) -> Option<Method> {
     write
-        .message()
-        .get("method")
-        .and_then(|value| value.as_str())
+        .frame()
+        .method()
         .and_then(Method::from_wire)
         .filter(|method| WITNESSED_METHODS.contains(method))
 }
@@ -57,11 +58,7 @@ struct PendingReplies(Arc<Mutex<HashMap<RequestId, (OperationId, Method)>>>);
 
 impl PendingReplies {
     fn register(&self, write: &PreparedWrite, method: Method) {
-        let Some(id) = write
-            .message()
-            .get("id")
-            .and_then(|id| RequestId::deserialize(id).ok())
-        else {
+        let Some(id) = write.frame().id() else {
             return;
         };
         if let Ok(mut pending) = self.0.lock() {
@@ -96,8 +93,12 @@ impl ReplyWitness {
             method: method.as_str(),
             reply_at_ns: sample_timestamp(),
             outcome: match body {
-                ResponseBody::Result(_) => "result",
-                ResponseBody::Error(_) => "error",
+                ResponseBody::Result(_)
+                | ResponseBody::CodexUnparsedResult { .. }
+                | ResponseBody::Uncorrelated(_)
+                | ResponseBody::CodexResult(_)
+                | ResponseBody::CodexServerResult(_) => "result",
+                ResponseBody::Error(_) | ResponseBody::CodexError(_) => "error",
             },
         };
         diagnostic_line(REPLY_TIMING_DIAGNOSTIC_PREFIX.as_bytes(), &diagnostic)
@@ -120,7 +121,7 @@ fn stdin_timing_diagnostic_line(
     stdin_flushed_at_ns: u128,
 ) -> Option<Vec<u8>> {
     let method = witnessed_method(write)?;
-    let request_id = RequestId::deserialize(write.message().get("id")?).ok()?;
+    let request_id = write.frame().id()?;
     let diagnostic = StdinTimingDiagnostic {
         provider_handle: handle.as_str(),
         generation: generation.0,
@@ -283,6 +284,7 @@ impl StdioProviderTaskFactory {
                         frame_limit,
                         output_limit,
                         ReaderProtocol {
+                            codec: options.launch.codec,
                             provider: options.launch.provider,
                             reply_witness,
                         },
@@ -672,9 +674,7 @@ where
         // Register before the write: the reply can arrive before the flush returns.
         timing.pending_replies.register(&write, method);
     }
-    let mut bytes =
-        studio_json::to_vec(&write.message).map_err(|_| AdapterError::InvalidConfiguration)?;
-    bytes.push(b'\n');
+    let bytes = (write.encode)(&write.message).map_err(|_| AdapterError::InvalidConfiguration)?;
     while receipt.bytes_written < bytes.len() {
         let count = stdin
             .write(&bytes[receipt.bytes_written..])
@@ -718,6 +718,7 @@ where
 
 #[derive(Default)]
 struct ReaderProtocol {
+    codec: ProviderCodec,
     provider: Option<ProviderKind>,
     reply_witness: Option<ReplyWitness>,
 }
@@ -730,12 +731,16 @@ struct UnknownMethodDiagnostic<'a> {
     #[serde(rename = "cliVersion", borrow)]
     cli_version: Option<&'a str>,
     method: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variant: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unparsed: Option<bool>,
 }
 
 #[derive(Default)]
 pub(crate) struct CodexMethodDiagnostics {
     user_agent: Option<String>,
-    unknown: HashSet<(Option<String>, String)>,
+    unknown: HashSet<(Option<String>, String, Option<String>)>,
 }
 
 impl CodexMethodDiagnostics {
@@ -746,24 +751,120 @@ impl CodexMethodDiagnostics {
     }
 
     pub(crate) fn record(&mut self, provider: Option<ProviderKind>, frame: &Frame) {
-        let line = match provider {
-            Some(ProviderKind::Codex) => self.observe(frame),
-            Some(ProviderKind::Claude) | None => None,
-        };
-        if let Some(line) = line {
-            write_provider_diagnostic_best_effort(&line);
+        match provider {
+            Some(ProviderKind::Codex) => {
+                while let Some(line) = self.observe(frame) {
+                    write_provider_diagnostic_best_effort(&line);
+                }
+            }
+            Some(ProviderKind::Claude) | None => {}
         }
     }
 
     pub(crate) fn observe(&mut self, frame: &Frame) -> Option<Vec<u8>> {
+        if let Frame::Response {
+            body:
+                ResponseBody::CodexResult(
+                    studio_runtime_providers::codex::ClientRequestResult::Initialize(result),
+                ),
+            ..
+        } = frame
+        {
+            self.initialize(Some(&result.user_agent));
+        }
         if self.user_agent.is_none()
             && let Frame::Response {
-                body: ResponseBody::Result(result),
+                body: ResponseBody::Uncorrelated(result),
                 ..
             } = frame
-            && let Some(user_agent) = result.get("userAgent").and_then(|value| value.as_str())
+            && let Ok(result) = studio_json::from_str::<
+                studio_runtime_providers::codex::InitializeResponse,
+            >(result.as_str())
         {
-            self.user_agent = Some(user_agent.to_owned());
+            self.initialize(Some(&result.user_agent));
+        }
+        let method = match frame {
+            Frame::Response {
+                body: ResponseBody::CodexResult(result),
+                ..
+            } => Some(result.method().as_str()),
+            Frame::Response {
+                body: ResponseBody::CodexUnparsedResult { method, .. },
+                ..
+            } => Some(method.as_str()),
+            Frame::Response {
+                body: ResponseBody::CodexServerResult(result),
+                ..
+            } => Some(result.method().as_str()),
+            Frame::Response {
+                body:
+                    ResponseBody::CodexError(_)
+                    | ResponseBody::Uncorrelated(_)
+                    | ResponseBody::Result(_)
+                    | ResponseBody::Error(_),
+                ..
+            }
+            | Frame::CodexClientRequest(_)
+            | Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Request(_)
+            | Frame::Notification(_)
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_) => frame.method(),
+        };
+        if matches!(
+            frame,
+            Frame::KnownMethodUnparsed(_)
+                | Frame::Response {
+                    body: ResponseBody::CodexUnparsedResult { .. },
+                    ..
+                }
+        ) {
+            let method = method?;
+            if !self
+                .unknown
+                .insert((self.user_agent.clone(), method.to_owned(), None))
+            {
+                return None;
+            }
+            return diagnostic_line(
+                b"studio_provider_unknown_method ",
+                &UnknownMethodDiagnostic {
+                    provider: ProviderKind::Codex,
+                    cli_version: self.user_agent.as_deref(),
+                    method,
+                    variant: None,
+                    unparsed: Some(true),
+                },
+            );
+        }
+        let mut nested = None;
+        frame.visit_unknown_variants(&mut |kind, variant| {
+            if nested.is_none()
+                && let Some(method) = method
+            {
+                let variant = format!("{kind}:{variant}");
+                if self.unknown.insert((
+                    self.user_agent.clone(),
+                    method.to_owned(),
+                    Some(variant.clone()),
+                )) {
+                    nested = Some(variant);
+                }
+            }
+        });
+        if let Some(variant) = nested {
+            return diagnostic_line(
+                b"studio_provider_unknown_method ",
+                &UnknownMethodDiagnostic {
+                    provider: ProviderKind::Codex,
+                    cli_version: self.user_agent.as_deref(),
+                    method: method?,
+                    variant: Some(&variant),
+                    unparsed: None,
+                },
+            );
         }
         let incoming = frame.codex_incoming_method()?;
         let _disposition = incoming.disposition();
@@ -772,7 +873,7 @@ impl CodexMethodDiagnostics {
         };
         if !self
             .unknown
-            .insert((self.user_agent.clone(), method.clone()))
+            .insert((self.user_agent.clone(), method.clone(), None))
         {
             return None;
         }
@@ -782,6 +883,8 @@ impl CodexMethodDiagnostics {
                 provider: ProviderKind::Codex,
                 cli_version: self.user_agent.as_deref(),
                 method: &method,
+                variant: None,
+                unparsed: None,
             },
         )
     }
@@ -815,7 +918,12 @@ async fn read_entries(
         }
         cursor += 1;
         let boundary_at = crate::clock::boundary_stamp();
-        let decoded = decode_journal_entry_borrowed(cursor, generation.0, &line);
+        let decoded = studio_runtime_providers::decode_journal_with(
+            cursor,
+            generation.0,
+            &line,
+            protocol.codec.decode_with_metadata,
+        );
         let payload = match decoded.payload {
             DecodedJournalPayload::Frame(frame) => {
                 diagnostics.record(protocol.provider, &frame);
@@ -902,6 +1010,91 @@ mod tests {
     use super::*;
 
     #[test]
+    fn malformed_known_notification_stays_routable_and_is_diagnosed_once() {
+        let wire = br#"{"method":"turn/completed","params":{"threadId":"t","turn":{"id":"r","status":"completed","error":null}}}"#;
+        let frame = studio_runtime_providers::decode_codex_frame(wire).unwrap();
+        assert!(matches!(frame, Frame::KnownMethodUnparsed(_)));
+        assert_eq!(frame.method(), Some("turn/completed"));
+        assert!(frame.id().is_none());
+        assert_eq!(
+            frame.method_and_params().unwrap().1["turn"]["status"],
+            "completed"
+        );
+        let mut diagnostics = CodexMethodDiagnostics::default();
+        diagnostics.initialize(Some("codex-cli/0.167.1"));
+        let line = diagnostics
+            .observe(&frame)
+            .expect("incompatible payload diagnostic");
+        let diagnostic: UnknownMethodDiagnostic<'_> = studio_json::from_slice(
+            line.strip_prefix(b"studio_provider_unknown_method ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(diagnostic.method, "turn/completed");
+        assert_eq!(diagnostic.unparsed, Some(true));
+        assert!(diagnostics.observe(&frame).is_none());
+    }
+
+    #[test]
+    fn malformed_server_request_is_unparsed_and_cannot_use_typed_egress() {
+        let wire = br#"{"id":7,"method":"item/commandExecution/requestApproval","params":{"threadId":"t","turnId":"r","itemId":7}}"#;
+        let frame = studio_runtime_providers::decode_codex_frame(wire).unwrap();
+        assert!(matches!(frame, Frame::KnownMethodUnparsed(_)));
+        assert_eq!(frame.id(), Some(RequestId::Number(7)));
+        assert!(studio_runtime_providers::encode_codex_line(&frame).is_err());
+    }
+
+    fn assert_future_payload_is_routed_and_diagnosed_once(
+        wire: &[u8],
+        method: &str,
+        variant: &str,
+    ) {
+        let entry = studio_runtime_providers::decode_journal_with(
+            1,
+            1,
+            wire,
+            studio_runtime_providers::decode_codex_frame_with_metadata,
+        );
+        let DecodedJournalPayload::Frame(frame) = entry.payload else {
+            panic!("known frame with future payload must route");
+        };
+        assert!(matches!(
+            frame,
+            Frame::CodexNotification(_) | Frame::CodexServerRequest(_)
+        ));
+        assert_eq!(frame.method(), Some(method));
+        let mut diagnostics = CodexMethodDiagnostics::default();
+        diagnostics.initialize(Some("codex-cli/0.167.1"));
+        let line = diagnostics
+            .observe(&frame)
+            .expect("first unknown payload diagnostic");
+        let diagnostic: UnknownMethodDiagnostic<'_> = studio_json::from_slice(
+            line.strip_prefix(b"studio_provider_unknown_method ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(diagnostic.method, method);
+        assert_eq!(diagnostic.variant, Some(variant));
+        assert!(diagnostics.observe(&frame).is_none());
+    }
+
+    #[test]
+    fn future_thread_item_routes_and_is_diagnosed_once() {
+        assert_future_payload_is_routed_and_diagnosed_once(
+            br#"{"method":"item/started","params":{"threadId":"t","turnId":"r","startedAtMs":0,"item":{"type":"futureItem","id":"i"}}}"#,
+            "item/started", "ThreadItem:futureItem",
+        );
+    }
+
+    #[test]
+    fn future_server_request_variant_routes_and_is_diagnosed_once() {
+        assert_future_payload_is_routed_and_diagnosed_once(
+            br#"{"id":7,"method":"mcpServer/elicitation/request","params":{"mode":"futureMode","message":"Confirm","serverName":"mcp","threadId":"t","turnId":null}}"#,
+            "mcpServer/elicitation/request", "McpServerElicitationRequestParams:futureMode",
+        );
+    }
+
+    #[test]
     fn unknown_codex_methods_log_once_per_initialize_version_and_method() {
         let decode = |value| {
             let decoded = studio_runtime_providers::decode_journal_value(1, 1, &value);
@@ -925,8 +1118,7 @@ mod tests {
         assert_eq!(parse(&before).cli_version, None);
         assert!(!String::from_utf8(before).unwrap().contains("must not log"));
         assert!(diagnostics.observe(&unknown).is_none());
-        let initialized =
-            decode(studio_json::json!({"id":1,"result":{"userAgent":"codex-cli/0.167.1"}}));
+        let initialized = studio_runtime_providers::decode_codex_frame(br#"{"id":1,"result":{"codexHome":"/codex-home","platformFamily":"unix","platformOs":"test","userAgent":"codex-cli/0.167.1"}}"#).unwrap();
         assert!(diagnostics.observe(&initialized).is_none());
         let after = diagnostics.observe(&unknown).expect("new version key");
         assert_eq!(parse(&after).cli_version, Some("codex-cli/0.167.1"));
@@ -951,6 +1143,7 @@ mod tests {
             4096,
             None,
             ReaderProtocol {
+                codec: ProviderCodec::codex(),
                 provider: Some(ProviderKind::Codex),
                 reply_witness: None,
             },
@@ -1492,7 +1685,7 @@ mod tests {
                 fields.insert("id".into(), id);
             }
             let frame = Frame::UnknownMethod(studio_runtime_providers::UnknownMethodFrame {
-                method: "future".into(),
+                method: "turn/start".into(),
                 fields,
             });
             PreparedWrite::new(OperationId("fixture".into()), &frame).unwrap()

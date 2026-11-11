@@ -45,6 +45,7 @@ pub mod browser_environment;
 pub mod browser_host;
 pub mod browser_policy;
 pub mod browser_rpc;
+pub(crate) mod callback_reply;
 pub mod callback_runtime;
 pub mod capacity_retry;
 pub mod catalog_reads;

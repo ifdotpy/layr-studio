@@ -1115,6 +1115,10 @@ fn account_key(agent: &studio_runtime_store::AgentRecord) -> &str {
     agent.account_key.as_str()
 }
 
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+)]
 pub(super) async fn submitted(
     store: &RuntimeStore,
     context: impl Into<Arc<Pending>>,
@@ -1175,7 +1179,9 @@ pub(super) async fn submitted(
         let authorized = stage("turn_submission.submitted.authorize", || {
             Ok::<_, WorkerError>(match context.method {
                 Method::TurnStart
-                    if i.provider == studio_runtime_providers::ProviderKind::Claude =>
+                    if crate::provider_adapter::adapter(i.provider)
+                        .descriptor()
+                        .supports(crate::provider_adapter::ProviderFeature::TurnCommitGuard) =>
                 {
                     preparation::commit_claude(
                         tx,
@@ -1205,149 +1211,7 @@ pub(super) async fn submitted(
                     request.ticket.generation,
                     &id_string(&request.ticket.id),
                 )?,
-                Method::Initialize
-                | Method::Initialized
-                | Method::Ack
-                | Method::AccountLoginCancel
-                | Method::AccountLoginStart
-                | Method::AccountRateLimitResetCreditConsume
-                | Method::ThreadLoadedList
-                | Method::ConfigRead
-                | Method::SkillsExtraRootsSet
-                | Method::ModelList
-                | Method::AccountRead
-                | Method::AccountRateLimitsRead
-                | Method::ThreadStart
-                | Method::ClaudeMoveImport
-                | Method::ThreadRealtimeStart
-                | Method::ThreadRealtimeStop
-                | Method::ThreadRealtimeAppendSpeech
-                | Method::ThreadRealtimeItemStarted
-                | Method::ThreadRealtimeTranscriptDelta
-                | Method::ThreadRealtimeTranscriptDone
-                | Method::ThreadRealtimeSdp
-                | Method::ThreadRealtimeError
-                | Method::ThreadRealtimeClosed
-                | Method::ThreadResume
-                | Method::ThreadRead
-                | Method::ThreadTurnsList
-                | Method::ThreadTurnsItemsList
-                | Method::TurnSteer
-                | Method::ThreadList
-                | Method::ThreadArchive
-                | Method::ThreadFork
-                | Method::ThreadNameSet
-                | Method::ThreadMetadataUpdate
-                | Method::ThreadSettingsUpdate
-                | Method::ThreadCompactStart
-                | Method::ThreadRollback
-                | Method::ThreadItemsList
-                | Method::ThreadGoalSet
-                | Method::ThreadGoalUpdated
-                | Method::ThreadUnarchive
-                | Method::ThreadUnsubscribe
-                | Method::ProcessSpawn
-                | Method::ProcessWriteStdin
-                | Method::ProcessKill
-                | Method::ProcessResizePty
-                | Method::CommandExec
-                | Method::CommandExecWrite
-                | Method::CommandExecResize
-                | Method::CommandExecTerminate
-                | Method::ThreadBackgroundTerminalsList
-                | Method::ThreadBackgroundTerminalsTerminate
-                | Method::ThreadBackgroundTerminalsClean
-                | Method::ThreadCommandExecutionBackground
-                | Method::ThreadQueueList
-                | Method::ClaudeState
-                | Method::ClaudeRepairReport
-                | Method::ClaudeFileBackups
-                | Method::ClaudeSettings
-                | Method::ClaudeActivity
-                | Method::ClaudeStopTask
-                | Method::ClaudeShellPolicy
-                | Method::ClaudeDiagnostics
-                | Method::ClaudeMoveVersions
-                | Method::McpServerReconnect
-                | Method::McpServerStatusList
-                | Method::SkillsList
-                | Method::OperationStatus
-                | Method::ReviewStart
-                | Method::BrowserAnswer
-                | Method::BrowserCallback
-                | Method::BrowserClose
-                | Method::BrowserWait
-                | Method::ClaudeCommands
-                | Method::ClaudeMoveExport
-                | Method::ClaudeMoveIdentity
-                | Method::ClaudeMovePreflight
-                | Method::ClaudeMoveProof
-                | Method::Detach
-                | Method::EventRead
-                | Method::Exec
-                | Method::Generate
-                | Method::Health
-                | Method::Info
-                | Method::LayrHealth
-                | Method::Next
-                | Method::Open
-                | Method::ProjectEnsure
-                | Method::ProjectExec
-                | Method::ProjectImport
-                | Method::ProviderList
-                | Method::Replay
-                | Method::ResponseStatus
-                | Method::RetireCommand
-                | Method::SecretsList
-                | Method::SecretsRemove
-                | Method::SecretsSet
-                | Method::ShareConfigure
-                | Method::ShareName
-                | Method::ShareStatus
-                | Method::Sign
-                | Method::Status
-                | Method::SyncMacApply
-                | Method::SyncMacHandoff
-                | Method::SyncMacHashes
-                | Method::SyncMacHead
-                | Method::SyncMacRead
-                | Method::SyncMacWorktree
-                | Method::VaultConfigure
-                | Method::VaultPush
-                | Method::VaultStatus
-                | Method::UploadBegin
-                | Method::UploadChunk
-                | Method::UploadCommit
-                | Method::Verify
-                | Method::Write
-                | Method::CurrentTimeRead
-                | Method::ItemToolCall
-                | Method::ItemCommandExecutionRequestApproval
-                | Method::ItemFileChangeRequestApproval
-                | Method::ItemPermissionsRequestApproval
-                | Method::McpServerElicitationRequest
-                | Method::ItemToolRequestUserInput
-                | Method::ItemStarted
-                | Method::ItemCompleted
-                | Method::ItemAgentMessageDelta
-                | Method::ItemReasoningTextDelta
-                | Method::ItemCommandExecutionOutputDelta
-                | Method::CommandExecOutputDelta
-                | Method::TurnStarted
-                | Method::TurnCompleted
-                | Method::TurnPlanUpdated
-                | Method::TurnDiffUpdated
-                | Method::ThreadClosed
-                | Method::ThreadStatusChanged
-                | Method::ThreadTokenUsageUpdated
-                | Method::ThreadShellPolicyUpdated
-                | Method::ThreadIdleCompactionUpdated
-                | Method::AccountLoginCompleted
-                | Method::AccountUpdated
-                | Method::AccountRateLimitsUpdated
-                | Method::ModelSafetyBufferingUpdated
-                | Method::ProviderGenerationStarted
-                | Method::ProtocolError => {
+                _ => {
                     agent.epoch == i.epoch
                         && agent.start_attempt.as_ref().and_then(|a| a.id.as_deref())
                             == Some(i.attempt_id.as_str())
@@ -1571,6 +1435,10 @@ pub(super) struct OutcomeStep {
 }
 
 /// Settle one request outcome inside a canvas transaction.
+#[expect(
+    clippy::wildcard_enum_match_arm,
+    reason = "Decision lives in codex_disposition; this narrow scope handles only its declared methods"
+)]
 fn settle_outcome(
     tx: &studio_runtime_store::Transaction<'_>,
     state_root: &std::path::Path,
@@ -1604,9 +1472,14 @@ fn settle_outcome(
             let _: studio_runtime_store::request_results::ResultEnvelope<
                 studio_runtime_store::request_results::AbandonedResult,
             > = studio_json::from_str(&abandoned).map_err(StoreError::from)?;
-            let reply = match body {
-                ResponseBody::Result(value) => LateProviderReply::Result(value),
-                ResponseBody::Error(value) => LateProviderReply::Error(value),
+            let projected = crate::provider_callbacks::CallbackBody::from(body);
+            let reply = match &projected {
+                crate::provider_callbacks::CallbackBody::Result(value) => {
+                    LateProviderReply::Result(value)
+                }
+                crate::provider_callbacks::CallbackBody::Error(value) => {
+                    LateProviderReply::Error(value)
+                }
             };
             let signature = studio_json::to_string(&reply).map_err(StoreError::from)?;
             let token =
@@ -1691,6 +1564,7 @@ fn settle_outcome(
             ticket,
             outcome: RequestOutcome::Reply { body, .. },
         } => {
+            let body = crate::provider_callbacks::CallbackBody::from(&body);
             match context.method {
                 Method::ThreadResume | Method::ThreadStart if start_settled(tx, &i.attempt_id)? => {
                     // A reply after its attempt's start outcome settled (for
@@ -1699,7 +1573,7 @@ fn settle_outcome(
                     // preparation already finished. It neither prepares nor
                     // settles the attempt a second time.
                 }
-                Method::ThreadResume | Method::ThreadStart if matches!(&body, ResponseBody::Error(error) if session_missing(error)) =>
+                Method::ThreadResume | Method::ThreadStart if matches!(&body, crate::provider_callbacks::CallbackBody::Error(error) if session_missing(error)) =>
                 {
                     // The saved session is gone, so no retry can resume it. The input
                     // was never sent: it settles as not sent, and the transcript stays.
@@ -1714,16 +1588,20 @@ fn settle_outcome(
                     // Name the provider's own error; a rejected reply names
                     // the check that failed. The input is never sent here.
                     let accepted = match &body {
-                        ResponseBody::Result(value) => preparation::accept_thread(
-                            tx, state_root, &resources, &context, &ticket, value,
-                        )?
-                        .map_err(|rejection| {
-                            format!("the reply does not match the prepared thread: {rejection}")
-                        }),
-                        ResponseBody::Error(error) => Err(error["message"]
-                            .as_str()
-                            .map(|message| message.chars().take(300).collect::<String>())
-                            .unwrap_or_else(|| "provider error".to_owned())),
+                        crate::provider_callbacks::CallbackBody::Result(value) => {
+                            preparation::accept_thread(
+                                tx, state_root, &resources, &context, &ticket, value,
+                            )?
+                            .map_err(|rejection| {
+                                format!("the reply does not match the prepared thread: {rejection}")
+                            })
+                        }
+                        crate::provider_callbacks::CallbackBody::Error(error) => {
+                            Err(error["message"]
+                                .as_str()
+                                .map(|message| message.chars().take(300).collect::<String>())
+                                .unwrap_or_else(|| "provider error".to_owned()))
+                        }
                     };
                     let rejected = match accepted {
                         Ok((next, thread)) => {
@@ -1759,7 +1637,7 @@ fn settle_outcome(
                     }
                 }
                 Method::TurnStart => match body {
-                    ResponseBody::Result(value) => {
+                    crate::provider_callbacks::CallbackBody::Result(value) => {
                         if let Some(turn) = value["turn"]["id"].as_str().filter(|s| !s.is_empty()) {
                             stage_capacity_start(
                                 tx,
@@ -1790,7 +1668,7 @@ fn settle_outcome(
                             return Ok(SettledOutcome::default());
                         }
                     }
-                    ResponseBody::Error(error) => {
+                    crate::provider_callbacks::CallbackBody::Error(error) => {
                         if crate::disk_space::is_disk_full_error(&error) {
                             // Hold new starts for the recheck interval.
                             crate::disk_space::observe_full();
@@ -1818,8 +1696,10 @@ fn settle_outcome(
                 },
                 Method::TurnInterrupt => {
                     let response = match &body {
-                        ResponseBody::Result(response) => response,
-                        ResponseBody::Error(error) => &error["data"]["interruptReceipt"],
+                        crate::provider_callbacks::CallbackBody::Result(response) => response,
+                        crate::provider_callbacks::CallbackBody::Error(error) => {
+                            &error["data"]["interruptReceipt"]
+                        }
                     };
                     SchedulerRepository::settle_interrupt_inputs(
                         tx,
@@ -1833,154 +1713,14 @@ fn settle_outcome(
                         tx,
                         &id_string(&ticket.id),
                         ticket.generation,
-                        if matches!(body, ResponseBody::Error(_)) {
+                        if matches!(body, crate::provider_callbacks::CallbackBody::Error(_)) {
                             "rejected"
                         } else {
                             "accepted"
                         },
                     )?;
                 }
-                Method::Initialize
-                | Method::Initialized
-                | Method::Ack
-                | Method::AccountLoginCancel
-                | Method::AccountLoginStart
-                | Method::AccountRateLimitResetCreditConsume
-                | Method::ThreadLoadedList
-                | Method::ConfigRead
-                | Method::SkillsExtraRootsSet
-                | Method::ModelList
-                | Method::AccountRead
-                | Method::AccountRateLimitsRead
-                | Method::ThreadRealtimeStart
-                | Method::ThreadRealtimeStop
-                | Method::ThreadRealtimeAppendSpeech
-                | Method::ThreadRealtimeItemStarted
-                | Method::ThreadRealtimeTranscriptDelta
-                | Method::ThreadRealtimeTranscriptDone
-                | Method::ThreadRealtimeSdp
-                | Method::ThreadRealtimeError
-                | Method::ThreadRealtimeClosed
-                | Method::ThreadRead
-                | Method::ThreadTurnsList
-                | Method::ThreadTurnsItemsList
-                | Method::TurnSteer
-                | Method::ThreadList
-                | Method::ThreadArchive
-                | Method::ThreadFork
-                | Method::ThreadNameSet
-                | Method::ThreadMetadataUpdate
-                | Method::ThreadSettingsUpdate
-                | Method::ThreadCompactStart
-                | Method::ThreadRollback
-                | Method::ThreadItemsList
-                | Method::ThreadGoalSet
-                | Method::ThreadGoalUpdated
-                | Method::ThreadUnarchive
-                | Method::ThreadUnsubscribe
-                | Method::ProcessSpawn
-                | Method::ProcessWriteStdin
-                | Method::ProcessKill
-                | Method::ProcessResizePty
-                | Method::CommandExec
-                | Method::CommandExecWrite
-                | Method::CommandExecResize
-                | Method::CommandExecTerminate
-                | Method::ThreadBackgroundTerminalsList
-                | Method::ThreadBackgroundTerminalsTerminate
-                | Method::ThreadBackgroundTerminalsClean
-                | Method::ThreadCommandExecutionBackground
-                | Method::ThreadQueueList
-                | Method::ClaudeState
-                | Method::ClaudeRepairReport
-                | Method::ClaudeFileBackups
-                | Method::ClaudeSettings
-                | Method::ClaudeActivity
-                | Method::ClaudeStopTask
-                | Method::ClaudeShellPolicy
-                | Method::ClaudeDiagnostics
-                | Method::ClaudeMoveVersions
-                | Method::McpServerReconnect
-                | Method::McpServerStatusList
-                | Method::SkillsList
-                | Method::OperationStatus
-                | Method::ReviewStart
-                | Method::BrowserAnswer
-                | Method::BrowserCallback
-                | Method::BrowserClose
-                | Method::BrowserWait
-                | Method::ClaudeCommands
-                | Method::ClaudeMoveExport
-                | Method::ClaudeMoveImport
-                | Method::ClaudeMoveIdentity
-                | Method::ClaudeMovePreflight
-                | Method::ClaudeMoveProof
-                | Method::Detach
-                | Method::EventRead
-                | Method::Exec
-                | Method::Generate
-                | Method::Health
-                | Method::Info
-                | Method::LayrHealth
-                | Method::Next
-                | Method::Open
-                | Method::ProjectEnsure
-                | Method::ProjectExec
-                | Method::ProjectImport
-                | Method::ProviderList
-                | Method::Replay
-                | Method::ResponseStatus
-                | Method::RetireCommand
-                | Method::SecretsList
-                | Method::SecretsRemove
-                | Method::SecretsSet
-                | Method::ShareConfigure
-                | Method::ShareName
-                | Method::ShareStatus
-                | Method::Sign
-                | Method::Status
-                | Method::SyncMacApply
-                | Method::SyncMacHandoff
-                | Method::SyncMacHashes
-                | Method::SyncMacHead
-                | Method::SyncMacRead
-                | Method::SyncMacWorktree
-                | Method::VaultConfigure
-                | Method::VaultPush
-                | Method::VaultStatus
-                | Method::UploadBegin
-                | Method::UploadChunk
-                | Method::UploadCommit
-                | Method::Verify
-                | Method::Write
-                | Method::CurrentTimeRead
-                | Method::ItemToolCall
-                | Method::ItemCommandExecutionRequestApproval
-                | Method::ItemFileChangeRequestApproval
-                | Method::ItemPermissionsRequestApproval
-                | Method::McpServerElicitationRequest
-                | Method::ItemToolRequestUserInput
-                | Method::ItemStarted
-                | Method::ItemCompleted
-                | Method::ItemAgentMessageDelta
-                | Method::ItemReasoningTextDelta
-                | Method::ItemCommandExecutionOutputDelta
-                | Method::CommandExecOutputDelta
-                | Method::TurnStarted
-                | Method::TurnCompleted
-                | Method::TurnPlanUpdated
-                | Method::TurnDiffUpdated
-                | Method::ThreadClosed
-                | Method::ThreadStatusChanged
-                | Method::ThreadTokenUsageUpdated
-                | Method::ThreadShellPolicyUpdated
-                | Method::ThreadIdleCompactionUpdated
-                | Method::AccountLoginCompleted
-                | Method::AccountUpdated
-                | Method::AccountRateLimitsUpdated
-                | Method::ModelSafetyBufferingUpdated
-                | Method::ProviderGenerationStarted
-                | Method::ProtocolError => {}
+                _ => {}
             }
             true
         }
@@ -2335,6 +2075,10 @@ pub(super) async fn journal_batch(
     outcome: Option<Box<OutcomeStep>>,
     park_unbound: bool,
 ) -> Result<JournalBatch, WorkerError> {
+    let entries = entries
+        .into_iter()
+        .map(crate::provider_adapter::project_entry)
+        .collect::<Result<Vec<_>, _>>()?;
     if entries.is_empty() && outcome.is_none() {
         return Ok(JournalBatch {
             streams: streams.clone(),
@@ -2409,13 +2153,11 @@ pub(super) async fn journal_batch(
         let settled = match outcome {
             Some(step) => {
                 if let SessionOutcome::Resolved {
-                    outcome:
-                        RequestOutcome::Reply {
-                            body: ResponseBody::Result(value),
-                            ..
-                        },
+                    outcome: RequestOutcome::Reply { body, .. },
                     ..
                 } = &step.outcome
+                    && let crate::provider_callbacks::CallbackBody::Result(value) =
+                        crate::provider_callbacks::CallbackBody::from(body)
                     && let Some(turn) = value["turn"]["id"].as_str()
                 {
                     boundary::seed(tx, &step.context, turn, step.reply_boundary_at)?;
@@ -2566,7 +2308,9 @@ fn journal_method(entry: &JournalEntry) -> Option<&str> {
     match &entry.payload {
         JournalPayload::Frame(Frame::Notification(frame)) => Some(frame.method.as_str()),
         JournalPayload::Frame(Frame::Request(frame)) => Some(frame.method.as_str()),
-        JournalPayload::Frame(Frame::UnknownMethod(frame)) => Some(frame.method.as_str()),
+        JournalPayload::Frame(Frame::UnknownMethod(frame) | Frame::KnownMethodUnparsed(frame)) => {
+            Some(frame.method.as_str())
+        }
         JournalPayload::Frame(_)
         | JournalPayload::RawStdout { .. }
         | JournalPayload::Stderr(_)
@@ -2655,7 +2399,15 @@ fn record_manual_release_closure(
         connection: source.connection.clone(),
         generation: entry.generation.0,
     };
-    if source.provider != "codex"
+    if !source
+        .provider
+        .parse::<studio_runtime_providers::ProviderKind>()
+        .ok()
+        .is_some_and(|kind| {
+            crate::provider_adapter::adapter(kind)
+                .descriptor()
+                .supports(crate::provider_adapter::ProviderFeature::NativeRelease)
+        })
         || source.account != identity.account
         || source.connection.is_empty()
         || source.generation != Some(entry.generation.0)
@@ -2756,11 +2508,22 @@ fn journal_one(
             Frame::Notification(f) => {
                 Some((f.method.as_str(), f.params.as_ref().unwrap_or(&Value::Null)))
             }
-            Frame::UnknownMethod(f) if !f.fields.contains_key("id") => Some((
-                f.method.as_str(),
-                f.fields.get("params").unwrap_or(&Value::Null),
-            )),
-            Frame::Request(_) | Frame::UnknownMethod(_) | Frame::Response { .. } => None,
+            Frame::UnknownMethod(f) | Frame::KnownMethodUnparsed(f)
+                if !f.fields.contains_key("id") =>
+            {
+                Some((
+                    f.method.as_str(),
+                    f.fields.get("params").unwrap_or(&Value::Null),
+                ))
+            }
+            Frame::CodexClientRequest(_)
+            | Frame::CodexServerRequest(_)
+            | Frame::CodexNotification(_)
+            | Frame::CodexClientNotification(_)
+            | Frame::Request(_)
+            | Frame::UnknownMethod(_)
+            | Frame::KnownMethodUnparsed(_)
+            | Frame::Response { .. } => None,
         };
         if let Some(("command/exec/outputDelta", params)) = notice
             && let Some(process_id) = params
@@ -2926,8 +2689,11 @@ fn journal_one(
                                         Some(&observation_agent),
                                         &frame,
                                         &delivery,
-                                        crate::notification_dispatch::ObservationTime::new(now())
-                                            .ok_or_else(|| invalid(&identity.agent_id))?,
+                                        crate::notification_dispatch::NotificationClock {
+                                            observed_at: crate::notification_dispatch::ObservationTime::new(now())
+                                                .ok_or_else(|| invalid(&identity.agent_id))?,
+                                            boundary_at: entry.boundary_at,
+                                        },
                                         &crate::notification_dispatch::DispatchOutcome::Written,
                                     );
                             boundary::stamp_effects(&mut boundary_effects, entry.boundary_at);
@@ -3017,8 +2783,11 @@ fn journal_one(
                                         Some(&NotificationAgent::from(&agent_after)),
                                         &frame,
                                         &delivery,
-                                        crate::notification_dispatch::ObservationTime::new(now())
-                                            .ok_or_else(|| invalid(&identity.agent_id))?,
+                                        crate::notification_dispatch::NotificationClock {
+                                            observed_at: crate::notification_dispatch::ObservationTime::new(now())
+                                                .ok_or_else(|| invalid(&identity.agent_id))?,
+                                            boundary_at: entry.boundary_at,
+                                        },
                                         &crate::notification_dispatch::DispatchOutcome::Written,
                                     );
                             boundary::stamp_effects(&mut boundary_effects, entry.boundary_at);
@@ -4570,7 +4339,9 @@ fn invalidate_auth_on_failure(agent: &AgentRecord, account_pin: &Value, turn: &V
         return;
     };
     if turn["status"] != "failed"
-        || crate::provider_adapter::adapter(provider).classify_error(&turn["error"])
+        || (crate::provider_adapter::adapter(provider)
+            .descriptor()
+            .classify_error)(&turn["error"])
             != Some(crate::usage_resume::Cause::Auth)
     {
         return;

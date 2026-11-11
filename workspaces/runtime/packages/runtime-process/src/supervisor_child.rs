@@ -1,5 +1,7 @@
 //! Owned pipes and process group. Socket disconnects never stop a child.
-use super::supervisor_daemon::{Error, Result, lock, now};
+#[cfg(test)]
+use super::supervisor_daemon::now;
+use super::supervisor_daemon::{Error, Result, lock};
 use super::supervisor_identity::{RETRY, free_space, start_time};
 use process_wrap::std::{CommandWrap, ProcessGroup};
 use std::{
@@ -325,9 +327,6 @@ impl OwnedChild {
             let name = studio_runtime_schema::provider_timing::BOUNDARY_STAMP_FIELD;
             if value.is_object() {
                 value[name] = stamp;
-            }
-            if value.get("method").is_some_and(Value::is_string) {
-                value["_studioSupervisorReceivedAt"] = json!(now()?);
             }
             self.append("stdout", value)?;
         }

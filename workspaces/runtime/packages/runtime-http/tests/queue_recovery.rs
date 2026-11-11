@@ -380,7 +380,10 @@ async fn send_now_does_not_release_owned_account_auth_holds() {
     let mut reasons = vec![studio_runtime_services::account_driver::CHANGED_ERROR];
     for provider in studio_runtime_providers::ProviderKind::ALL {
         let adapter = studio_runtime_services::provider_adapter::adapter(provider);
-        reasons.extend([adapter.sign_in_message(), adapter.account_changed_message()]);
+        reasons.extend([
+            adapter.descriptor().sign_in_message,
+            adapter.descriptor().account_changed_message,
+        ]);
     }
     for reason in reasons {
         let (_directory, store, app) = fixture().await;

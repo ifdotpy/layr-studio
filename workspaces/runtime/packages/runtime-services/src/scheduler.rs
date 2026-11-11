@@ -381,7 +381,9 @@ fn preparation_eligible(agent: &Value) -> bool {
             .and_then(|value| studio_json::from_str::<Value>(value).ok())
             .zip(studio_runtime_providers::ProviderKind::of_record(agent).ok())
             .is_some_and(|(value, kind)| {
-                crate::provider_adapter::adapter(kind).is_busy_error(&value)
+                (crate::provider_adapter::adapter(kind)
+                    .descriptor()
+                    .is_busy_error)(&value)
             });
     let allowed_error = error.is_some_and(|value| {
         busy_provider
@@ -546,8 +548,8 @@ pub(crate) fn settle_terminal_in_transaction(
     let end_closes_steer = agent.as_ref().is_some_and(|agent| {
         agent.provider.value().is_some_and(|kind| {
             crate::provider_adapter::adapter(*kind)
-                .capabilities()
-                .turn_end_closes_steer
+                .descriptor()
+                .supports(crate::provider_adapter::ProviderFeature::TurnEndClosesSteer)
         })
     });
     if end_closes_steer && let Some(ended_at) = params["turn"]["completedAt"].as_f64() {

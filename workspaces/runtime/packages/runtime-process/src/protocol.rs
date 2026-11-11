@@ -173,13 +173,13 @@ pub struct OpenRequest {
     pub extra: BTreeMap<String, Value>,
 }
 #[derive(Clone, Debug, Serialize)]
-pub struct WriteRequest {
+pub struct WriteRequest<Message = Value> {
     pub handle: SupervisorHandle,
     #[serde(rename = "operationId")]
     pub operation_id: OperationId,
     #[serde(rename = "nativeId")]
     pub native_id: Option<NativeId>,
-    pub message: Value,
+    pub message: Message,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
 }
@@ -220,10 +220,10 @@ pub struct AdminCloseHandleRequest {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OpenResult {
+pub struct OpenResult<Initialize = Value> {
     pub resumed: bool,
     #[serde(rename = "initResult")]
-    pub init_result: Option<Value>,
+    pub init_result: Option<Initialize>,
     pub acknowledged: u64,
     pub sequence: u64,
     pub generation: Generation,

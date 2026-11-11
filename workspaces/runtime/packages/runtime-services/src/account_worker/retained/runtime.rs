@@ -275,21 +275,16 @@ impl Worker {
         }
         let value = match outcome {
             SessionOutcome::Resolved {
-                outcome:
-                    RequestOutcome::Reply {
-                        body: ResponseBody::Result(value),
-                        ..
-                    },
+                outcome: RequestOutcome::Reply { body, .. },
                 ..
-            } => Some(RequestResult::Reply(value.clone())),
-            SessionOutcome::Resolved {
-                outcome:
-                    RequestOutcome::Reply {
-                        body: ResponseBody::Error(value),
-                        ..
-                    },
-                ..
-            } => Some(RequestResult::Rejected(value.clone())),
+            } => Some(match crate::provider_callbacks::CallbackBody::from(body) {
+                crate::provider_callbacks::CallbackBody::Result(value) => {
+                    RequestResult::Reply(value)
+                }
+                crate::provider_callbacks::CallbackBody::Error(value) => {
+                    RequestResult::Rejected(value)
+                }
+            }),
             SessionOutcome::Resolved {
                 outcome: RequestOutcome::Unknown,
                 ..

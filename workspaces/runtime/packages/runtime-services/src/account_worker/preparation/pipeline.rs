@@ -5,7 +5,6 @@ use crate::{submit_gates as gates, thread_prepare as thread, turn_prepare as tur
 use snapshot::*;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use studio_runtime_providers::ProviderKind;
 use studio_runtime_store::Transaction;
 use studio_runtime_store::path_identity::CanonicalPath;
 
@@ -662,8 +661,8 @@ fn daybreak_program(
     snapshot: &thread::Snapshot,
 ) -> Result<Option<String>, WorkerError> {
     if !crate::provider_adapter::adapter(snapshot.account.provider)
-        .capabilities()
-        .daybreak
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::Daybreak)
     {
         if snapshot.settings.daybreak_enabled == thread::Stored::Present(Some(true)) {
             return Err(refusal("daybreak/provider-unsupported".into()));
@@ -680,7 +679,7 @@ fn daybreak_program(
     let catalog = match resources.model_catalog.read_for_admission(
         &snapshot.account.key,
         &resources.account_home,
-        ProviderKind::Codex,
+        snapshot.account.provider,
     ) {
         crate::model_catalog::AdmissionCatalogRead::Fresh { value, .. } => value,
         crate::model_catalog::AdmissionCatalogRead::Pending => return Err(catalog_pending()),
@@ -1747,7 +1746,10 @@ pub(crate) async fn prepare_ready(
     )
     .map_err(thread_refusal)?;
     apply_native_reviewer_permissions(&mut params, native_reviewer.as_ref());
-    if snapshot.account.provider == studio_runtime_providers::ProviderKind::Claude {
+    if crate::provider_adapter::adapter(snapshot.account.provider)
+        .descriptor()
+        .supports(crate::provider_adapter::ProviderFeature::IdleSummaryReturn)
+    {
         let agent_id = intent.agent_id.clone();
         let mode = store
             .read_async(
