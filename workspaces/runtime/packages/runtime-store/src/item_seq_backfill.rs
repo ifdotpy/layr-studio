@@ -117,6 +117,117 @@ mod tests {
     }
 
     #[test]
+    fn transcript_upsert_replays_while_item_backfill_tracking_is_active() {
+        assert_transcript_upsert_replays(false);
+    }
+
+    #[test]
+    fn resumed_backfill_refreshes_legacy_tracking_without_losing_progress() {
+        assert_transcript_upsert_replays(true);
+    }
+
+    fn assert_transcript_upsert_replays(legacy: bool) {
+        let mut db = crate::fresh_state::test_canvas();
+        let tx = db.transaction().expect("transaction");
+        let original = studio_json::json!({"id":"agent:item","role":"assistant","text":"before"});
+        crate::repositories::transcript::TranscriptRepository::put_item(
+            &tx,
+            "agent:item",
+            "agent",
+            &original,
+            1.0,
+            "before",
+            false,
+        )
+        .expect("insert transcript item");
+        begin(&tx, &ItemSeqBackfill).expect("begin tracking");
+        if legacy {
+            // Leave an existing dirty key, as an interrupted old binary would.
+            crate::repositories::transcript::TranscriptRepository::put_item(
+                &tx,
+                "agent:item",
+                "agent",
+                &original,
+                1.0,
+                "before",
+                false,
+            )
+            .expect("dirty existing item");
+            tx.execute_batch(
+                "DROP TRIGGER online_runtime_items_seq_ins;
+                 DROP TRIGGER online_runtime_items_seq_upd;
+                 DROP TRIGGER online_runtime_items_seq_del;
+                 CREATE TRIGGER online_runtime_items_seq_ins AFTER INSERT ON runtime_items BEGIN
+                   INSERT OR IGNORE INTO runtime_online_migration_dirty(migration,key) VALUES('online:runtime_items_seq',NEW.rowid);
+                   UPDATE runtime_payload_migrations SET copy_source_rows=copy_source_rows+1 WHERE name='online:runtime_items_seq' AND copy_source_rows IS NOT NULL;
+                 END;
+                 CREATE TRIGGER online_runtime_items_seq_upd AFTER UPDATE ON runtime_items BEGIN
+                   INSERT OR IGNORE INTO runtime_online_migration_dirty(migration,key) VALUES('online:runtime_items_seq',OLD.rowid);
+                   INSERT OR IGNORE INTO runtime_online_migration_dirty(migration,key) VALUES('online:runtime_items_seq',NEW.rowid);
+                 END;
+                 CREATE TRIGGER online_runtime_items_seq_del AFTER DELETE ON runtime_items BEGIN
+                   INSERT OR IGNORE INTO runtime_online_migration_dirty(migration,key) VALUES('online:runtime_items_seq',OLD.rowid);
+                   UPDATE runtime_payload_migrations SET copy_source_rows=copy_source_rows-1 WHERE name='online:runtime_items_seq' AND copy_source_rows IS NOT NULL;
+                 END;"
+            ).expect("legacy binary trigger definitions");
+        }
+        let before = crate::online_migration::progress(&tx).expect("before resume");
+        let dirty_before = studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(&tx),
+            crate::settings_schema::OnlineMigrationDirty
+        )
+        .expect("dirty before resume");
+        begin(&tx, &ItemSeqBackfill).expect("resume incomplete migration");
+        assert_eq!(crate::online_migration::progress(&tx).unwrap(), before);
+        let dirty_after = studio_db_api::db_query!(
+            crate::peer_update_settings::canvas_read(&tx),
+            crate::settings_schema::OnlineMigrationDirty
+        )
+        .expect("dirty after resume");
+        assert_eq!(dirty_before.len(), dirty_after.len());
+        for row in &dirty_before {
+            assert!(
+                dirty_after
+                    .iter()
+                    .any(|after| after.migration == row.migration && after.key == row.key)
+            );
+        }
+        let updated = studio_json::json!({"id":"agent:item","role":"assistant","text":"after"});
+        crate::repositories::transcript::TranscriptRepository::put_item(
+            &tx,
+            "agent:item",
+            "agent",
+            &updated,
+            1.0,
+            "after",
+            false,
+        )
+        .expect("upsert existing transcript while tracking");
+        assert_eq!(
+            crate::online_migration::progress(&tx).expect("progress")[0].dirty,
+            1
+        );
+        while step(&tx, &ItemSeqBackfill, &SystemClock::new()).expect("replay") == Step::Progress {}
+        let progress = crate::online_migration::progress(&tx).expect("completed progress");
+        assert!(progress[0].complete);
+        assert_eq!(progress[0].dirty, 0);
+        begin(&tx, &ItemSeqBackfill).expect("completed migration remains complete");
+        assert_eq!(crate::online_migration::progress(&tx).unwrap(), progress);
+        crate::repositories::transcript::TranscriptRepository::put_item(
+            &tx,
+            "agent:item",
+            "agent",
+            &updated,
+            1.0,
+            "after",
+            false,
+        )
+        .expect("completed migration has no tracking");
+        assert_eq!(crate::online_migration::progress(&tx).unwrap()[0].dirty, 0);
+        tx.commit().expect("commit replayed transcript");
+    }
+
+    #[test]
     fn old_items_get_increasing_entries_and_numbered_ones_keep_theirs() {
         let mut db = crate::fresh_state::test_canvas();
         // Items written before the source existed have no entry.

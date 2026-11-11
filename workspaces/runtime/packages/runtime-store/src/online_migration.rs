@@ -290,7 +290,9 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>, migration: &M) -> StoreRe
         } else {
             key_sql(migration.source_keys(), row)
         };
-        format!("INSERT OR IGNORE INTO {DIRTY_TABLE}(migration,key) VALUES('{name}',{key});")
+        format!(
+            "INSERT INTO {DIRTY_TABLE}(migration,key) VALUES('{name}',{key}) ON CONFLICT(migration,key) DO NOTHING;"
+        )
     };
     let source_delta = |delta: i64| {
         format!(
@@ -298,9 +300,10 @@ pub fn begin<M: OnlineMigration>(tx: &Transaction<'_>, migration: &M) -> StoreRe
         )
     };
     tx.execute_batch(&format!(
-        "CREATE TRIGGER IF NOT EXISTS {ins} AFTER INSERT ON {table} BEGIN {} {} END;\
-         CREATE TRIGGER IF NOT EXISTS {upd} AFTER UPDATE ON {table} BEGIN {} {} END;\
-         CREATE TRIGGER IF NOT EXISTS {del} AFTER DELETE ON {table} BEGIN {} {} END;",
+        "DROP TRIGGER IF EXISTS {ins}; DROP TRIGGER IF EXISTS {upd}; DROP TRIGGER IF EXISTS {del};\
+         CREATE TRIGGER {ins} AFTER INSERT ON {table} BEGIN {} {} END;\
+         CREATE TRIGGER {upd} AFTER UPDATE ON {table} BEGIN {} {} END;\
+         CREATE TRIGGER {del} AFTER DELETE ON {table} BEGIN {} {} END;",
         record("NEW"),
         source_delta(1),
         record("OLD"),
