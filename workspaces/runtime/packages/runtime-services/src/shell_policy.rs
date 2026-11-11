@@ -65,9 +65,7 @@ fn true_only<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Erro
 /// Called by the journal's accepted turn transitions, in their transaction.
 pub(crate) fn note_activity(tx: &Transaction<'_>, id: &str, at: f64) -> Result<(), StoreError> {
     if let Some(mut agent) = AgentRepository::get(tx, &id.into())? {
-        agent
-            .extra
-            .insert("shellPolicyLastActiveAt".into(), json!(at));
+        agent.shell_policy_last_active_at = serde::Deserialize::deserialize(json!(at))?;
         AgentRepository::put(tx, &agent)?;
     }
     Ok(())
@@ -385,10 +383,10 @@ async fn sweep_monitors(
                 let settings = OrchestrationSettingsRepository::shell_policy(tx)?;
                 for id in ids {
                     let (before, mut actor) = crate::monitor_runtime::snapshot(tx, &id)?;
-                    if !actor.extra.contains_key("shellPolicyLastActiveAt") {
-                        actor
-                            .extra
-                            .insert("shellPolicyLastActiveAt".into(), json!(now));
+                    if actor.shell_policy_last_active_at.is_missing() {
+                        actor.shell_policy_last_active_at =
+                            serde::Deserialize::deserialize(json!(now))
+                                .map_err(StoreError::from)?;
                         AgentRepository::put(tx, &actor)?;
                     }
                     let mut decision = crate::monitor_policy::Decision {

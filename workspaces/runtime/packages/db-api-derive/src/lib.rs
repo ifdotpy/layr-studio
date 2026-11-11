@@ -158,7 +158,7 @@ struct Field {
     key: bool,
     private: bool,
     codec: Option<Path>,
-    check: Option<LitStr>,
+    check: Option<Expr>,
     fk: Option<Path>,
     generated: bool,
 }
@@ -514,8 +514,9 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             ddl.push(quote!(if <#stored as ::studio_db_api::DbValue>::NULLABLE { "" } else { " NOT NULL" }));
         }
         if let Some(check) = &f.check {
-            ddl.push(quote!(concat!(" CHECK(", #check, ")")));
-            constraints.push(quote!(concat!(" AND (", #check, ")")));
+            let check = constant_sql(check)?;
+            ddl.push(quote!(::studio_db_api::static_sql!(" CHECK(", #check, ")")));
+            constraints.push(quote!(::studio_db_api::static_sql!(" AND (", #check, ")")));
         }
         ddl.extend([quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " CHECK(" }), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { #column }), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { " IN (" }), quote!(<#stored as ::studio_db_api::DbValue>::CODES), quote!(if <#stored as ::studio_db_api::DbValue>::CODES.is_empty() { "" } else { "))" })]);
         let quoted_column = quoted(column);
@@ -549,7 +550,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         }
         if let Some(codec) = codec {
             let var = format_ident!("encoded_{i}");
-            reads.push(quote!(#field_name: <#codec as ::studio_db_api::Codec<#ty>>::decode(_connection, <#stored as ::studio_db_api::DbValue>::read(row, #i)?)?));
+            reads.push(quote!(#field_name: <#codec as ::studio_db_api::Codec<#ty>>::decode_row(_connection, row, #i)?));
             if !f.generated {
                 encoded.push(quote!(let #var = <#codec as ::studio_db_api::Codec<#ty>>::encode(_connection, &self.#field_name)?;));
                 binds.push(quote!(&#var as &dyn ::studio_db_api::rusqlite::types::ToSql));
@@ -609,7 +610,7 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
             fn decode(connection: &::studio_db_api::rusqlite::Connection, row: &::studio_db_api::rusqlite::Row<'_>, index: usize) -> ::studio_db_api::rusqlite::Result<Self::Value> { Self::__db_decode(connection, row, index) }
         }));
         let decode = if let Some(codec) = codec {
-            quote!(<#codec as ::studio_db_api::Codec<#ty>>::decode(connection, <#stored as ::studio_db_api::DbValue>::read(row, index)?))
+            quote!(<#codec as ::studio_db_api::Codec<#ty>>::decode_row(connection, row, index))
         } else {
             quote!(<#ty as ::studio_db_api::DbValue>::read(row, index))
         };
@@ -905,11 +906,23 @@ fn expand_table(input: &DeriveInput) -> syn::Result<Tokens> {
         #update
     })
 }
-fn predicate_sql(expr: &Expr, fields: &[Field]) -> syn::Result<Tokens> {
+fn constant_sql(expr: &Expr) -> syn::Result<Tokens> {
     if let Expr::Lit(lit) = expr
-        && let syn::Lit::Str(sql) = &lit.lit
+        && matches!(&lit.lit, syn::Lit::Str(_))
     {
-        return Ok(quote!(#sql));
+        return Ok(quote!(#expr));
+    }
+    if matches!(expr, Expr::Path(_)) {
+        return Ok(quote!(#expr));
+    }
+    Err(syn::Error::new_spanned(
+        expr,
+        "expected a string literal or const &str path",
+    ))
+}
+fn predicate_sql(expr: &Expr, fields: &[Field]) -> syn::Result<Tokens> {
+    if matches!(expr, Expr::Lit(_) | Expr::Path(_)) {
+        return constant_sql(expr);
     }
     if let Expr::MethodCall(call) = expr {
         let Expr::Path(receiver) = call.receiver.as_ref() else {
@@ -1453,6 +1466,23 @@ pub fn db_queries(_: TokenStream, input: TokenStream) -> TokenStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn check_and_index_reject_runtime_calls() {
+        for input in [
+            syn::parse_quote! {
+                #[db(table="checked_rows",database=Canvas)]
+                struct Row { #[db(key,check=make_check())] id:i64 }
+            },
+            syn::parse_quote! {
+                #[db(table="checked_rows",database=Canvas,
+                    index(name="checked_id",columns(id),predicate=make_check()))]
+                struct Row { #[db(key)] id:i64 }
+            },
+        ] {
+            assert!(expand_table(&input).is_err());
+        }
+    }
+
     #[test]
     fn identifiers_reject_all_sqlite_keywords_and_non_lowercase_names() {
         let span: LitStr = syn::parse_quote!("identifier");

@@ -331,11 +331,13 @@ pub struct StartAttemptView {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "sqlite", derive(studio_db_api::DbEnum))]
+#[repr(i64)]
 pub enum StartAttemptAction {
-    Compact,
-    Review,
-    Capacity,
-    Safety,
+    Compact = 0,
+    Review = 1,
+    Capacity = 2,
+    Safety = 3,
 }
 
 fn present_action<'de, D: serde::Deserializer<'de>>(
@@ -458,6 +460,35 @@ pub struct StartInterruptView {
 mod tests {
     use super::{NativeRequest, StartAttemptView};
     use serde::Deserialize;
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn start_attempt_action_codes_preserve_wire_and_refuse_other_storage() {
+        use super::StartAttemptAction;
+        use rusqlite::types::{FromSql, ToSql, ToSqlOutput, Value, ValueRef};
+        for (action, wire, code) in [
+            (StartAttemptAction::Compact, "compact", 0),
+            (StartAttemptAction::Review, "review", 1),
+            (StartAttemptAction::Capacity, "capacity", 2),
+            (StartAttemptAction::Safety, "safety", 3),
+        ] {
+            assert_eq!(
+                studio_json::to_string(&action).unwrap(),
+                format!("\"{wire}\"")
+            );
+            assert_eq!(
+                action.to_sql().unwrap(),
+                ToSqlOutput::Owned(Value::Integer(code))
+            );
+            assert_eq!(
+                StartAttemptAction::column_result(ValueRef::Integer(code)).unwrap(),
+                action
+            );
+            assert!(StartAttemptAction::column_result(ValueRef::Text(wire.as_bytes())).is_err());
+        }
+        assert!(StartAttemptAction::column_result(ValueRef::Integer(4)).is_err());
+        assert!(StartAttemptAction::column_result(ValueRef::Null).is_err());
+    }
 
     #[test]
     fn project_import_written_by_current_version_is_readable_by_base_version() {

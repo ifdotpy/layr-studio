@@ -665,16 +665,18 @@ impl CompletionWriter for RestartInputCompletion {
         let Some(mut agent) = AgentRepository::get(tx, &AgentId::from(agent_id))? else {
             return Err(RecoveryError::CommitFailed);
         };
-        agent.extra.remove("contextRepairWait");
+        agent.context_repair_wait = studio_runtime_schema::queue_command::Field::Missing;
         agent.clear_native_failure_hold();
         agent.start_outcome_hold = None;
         agent.auto_wake = Some(true);
         agent.error = studio_runtime_schema::queue_command::Field::Null;
         if let Some(marker) = agent.restart_recovery.as_deref_mut() {
             marker.stage = Some("finished".into());
-            marker
-                .extra
-                .insert("reconciledAt".into(), json!(unix_seconds()));
+            marker.extra.insert(
+                "reconciledAt".into(),
+                studio_json::to_raw_value(&unix_seconds())
+                    .map_err(studio_runtime_store::StoreError::from)?,
+            );
         }
         AgentRepository::put(tx, &agent)?;
         let terminal = CodexTurnStatus::observe(turn).and_then(|status| status.terminal());

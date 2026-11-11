@@ -1069,7 +1069,7 @@ async fn remote_delete_waits_for_the_remote_provider_stop() {
         tx.execute("INSERT INTO runtime_server_links(id,record) VALUES('remote-link',?1)", [json!({"side":"remote","home":"home-server","workers":[remote_id]}).to_string()])?;
         let mut agent = AgentRepository::get(tx, &AgentId::from(remote_id.as_str()))?.unwrap();
         agent.extra.insert("remoteWorker".into(), json!({"server":"home-server","link":"remote-link"}));
-        agent.extra.insert("movedTo".into(), json!("peer-server"));
+        agent.moved_to = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::raw_json::RawJson(studio_json::to_raw_value(&"peer-server").expect("server string serializes")));
         AgentRepository::put(tx, &agent)?;
         Ok(())
     }).await.unwrap();

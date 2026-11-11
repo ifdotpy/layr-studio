@@ -89,7 +89,7 @@ mod registry_hints {
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let pending = &mut *pending;
                 match change {
-                    TableChange::Full => pending.full = true,
+                    TableChange::Full | TableChange::AgentComponents(_) => pending.full = true,
                     TableChange::Rows(ids) => {
                         let rows = match table {
                             ObservedTable::Agents => &mut pending.agent_rows,

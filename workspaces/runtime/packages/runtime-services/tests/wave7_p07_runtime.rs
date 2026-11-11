@@ -1383,7 +1383,7 @@ async fn accepted_start_matches_real_python_agent_event_and_transcript_rows() {
         .remove("activeExecution")
         .expect("active execution");
     assert_eq!(
-        (active.attempt_id.as_deref(), active.run_id.as_deref()),
+        (active.attempt_id_text(), active.run_id_text()),
         (Some("attempt"), Some("run:attempt"))
     );
     assert_eq!(actual, case["after"]);

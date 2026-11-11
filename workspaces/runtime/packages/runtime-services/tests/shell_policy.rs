@@ -91,7 +91,7 @@ async fn pressure_requires_thirty_idle_minutes_and_preserves_active_turns() {
             let mut actor = AgentRepository::get(tx, &AgentId::from("agent"))?.unwrap();
             match blocker {
                 "turn" => { actor.in_flight = Some(true); }
-                "recent_input" => { actor.extra.insert("shellPolicyLastActiveAt".into(), json!(1.0)); }
+                "recent_input" => { actor.shell_policy_last_active_at = serde::Deserialize::deserialize(json!(1.0))?; }
                 "input" => { tx.execute("INSERT INTO runtime_events(id,agent,kind,text,status,created,epoch) VALUES('user','agent','user','hi','pending',0,2)", [])?; }
                 "delegate" => { let mut child = actor.clone(); child.id = "child".into(); child.status = studio_runtime_store::AgentStatus::Running; child.in_flight = Some(true); AgentRepository::put(tx, &child)?; }
                 "output" => { tx.execute("UPDATE runtime_monitors SET record=json_set(record,'$.activityAt',1) WHERE id=?1", [&selected])?; }

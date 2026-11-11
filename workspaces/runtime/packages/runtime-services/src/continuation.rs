@@ -640,7 +640,12 @@ impl ProposedAgent {
         }
     }
     pub(crate) fn capacity_count(&mut self, value: u64) {
-        self.set_extra("capacityRetryCount", json!(value));
+        self.evidence["capacityRetryCount"] = json!(value);
+        if let Some(agent) = &mut self.identity {
+            agent.capacity_retry_count = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_store::StoredTransferValue::Known(value),
+            );
+        }
     }
     pub(crate) fn clear_hold(&mut self) {
         remove(&mut self.evidence, "nativeFailureHold");
@@ -746,11 +751,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn agent_snapshot_preserves_future_status_and_nullable_evidence() {
-        let agent = json!({"compactions":0,"accountKey":"default","id":"a","rootId":"a","epoch":1,"status":"future-state","provider":"codex","titleJob":null,"nativeRelease":null,"firedEvents":[],"opaque":{"n":1}});
+    fn agent_snapshot_preserves_known_status_and_nullable_evidence() {
+        let agent = json!({"compactions":0,"accountKey":"default","id":"a","rootId":"a","epoch":1,"status":"idle","provider":"codex","titleJob":null,"nativeRelease":null,"firedEvents":[],"opaque":{"n":1}});
         let snapshot = Snapshot::from_records(json!({"agent":agent})).unwrap();
         assert_eq!(snapshot.agent, agent);
-        assert_eq!(snapshot.identity.status.as_str(), "future-state");
+        assert_eq!(snapshot.identity.status.as_str(), "idle");
         assert!(snapshot.identity.value().get("titleJob").is_none());
         assert!(snapshot.identity.value().get("nativeRelease").is_none());
         assert!(snapshot.identity.value().get("firedEvents").is_none());
@@ -761,7 +766,13 @@ mod tests {
         assert_eq!(proposal.value()["nativeRelease"], Value::Null);
         assert_eq!(proposal.value()["firedEvents"], json!([]));
         assert_eq!(proposal.checked().unwrap().auth_resume_attempt, Some(0));
-        assert_eq!(proposal.checked().unwrap().status.as_str(), "future-state");
+        assert_eq!(proposal.checked().unwrap().status.as_str(), "idle");
+    }
+
+    #[test]
+    fn agent_snapshot_refuses_unknown_status() {
+        let agent = json!({"compactions":0,"id":"a","rootId":"a","epoch":1,"status":"future-state","provider":"codex"});
+        assert!(Snapshot::from_records(json!({"agent":agent})).is_err());
     }
 
     #[test]
@@ -783,7 +794,7 @@ mod tests {
         IDENTITY_DECODES.with(|count| count.set(0));
         Snapshot::from_records_with_agent(&raw, proposal.checked()).unwrap();
         IDENTITY_DECODES.with(|count| assert_eq!(count.get(), 0));
-        original.agent["status"] = json!("future");
+        original.agent["status"] = json!("running");
         original.invalidate_agent_record();
         let proposal = ProposedAgent::new(&original);
         assert!(proposal.checked().is_none());
@@ -792,7 +803,7 @@ mod tests {
             proposal.checked(),
         )
         .unwrap();
-        assert_eq!(applied.agent_record().status.as_str(), "future");
+        assert_eq!(applied.agent_record().status.as_str(), "running");
     }
 
     #[test]

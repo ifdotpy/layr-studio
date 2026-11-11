@@ -117,6 +117,22 @@ impl rusqlite::types::FromSql for DirtyKey {
         }
     }
 }
+// A dirty key can itself be part of the (migration, key) identity.
+impl KeyPart for DirtyKey {
+    fn value(&self) -> Value {
+        match self {
+            Self::Integer(value) => Value::Integer(*value),
+            Self::Composite(bytes) => Value::Blob(bytes.clone()),
+        }
+    }
+    fn from_value(value: Value) -> rusqlite::Result<Self> {
+        match value {
+            Value::Integer(value) => Ok(Self::Integer(value)),
+            Value::Blob(bytes) => Ok(Self::Composite(bytes)),
+            Value::Null | Value::Real(_) | Value::Text(_) => Err(rusqlite::Error::InvalidQuery),
+        }
+    }
+}
 impl crate::DbValue for DirtyKey {
     const SQL_TYPE: &'static str = "INTEGER";
 }
@@ -244,6 +260,14 @@ pub fn copy_verified<E>(
         return Err(mismatch());
     }
     Ok(true)
+}
+
+/// Retire a descriptor-owned migration source. SQLite removes its attached
+/// indexes and triggers in the same transaction. Replace cross-table producer
+/// references before this call; no arbitrary DDL is accepted.
+pub fn retire_source<T: Table>(tx: &mut Tx<'_, T::Database>) -> rusqlite::Result<()> {
+    tx.connection()
+        .execute_batch(&format!("DROP TABLE {}", identifier(T::NAME)))
 }
 
 /// A dated migration is one plan declaration plus its pure transform/evidence
@@ -476,6 +500,80 @@ mod tests {
     }
 
     #[test]
+    fn f2_nullable_target_and_old_new_cursor_frames_match_sql() {
+        type TargetKey = (Option<String>, Option<i64>, Option<i64>);
+        type Cursor = (Option<String>, i64);
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE target(id,component,tie); CREATE TABLE source(id); CREATE TABLE changed(k BLOB NOT NULL)").unwrap();
+        db.execute_batch(&format!("CREATE TRIGGER target_insert AFTER INSERT ON target BEGIN INSERT INTO changed VALUES({}); END", key_sql(&["id", "component", "tie"], "NEW"))).unwrap();
+        for (key, expected) in [
+            (
+                (Some("a".into()), None, None),
+                "t000000000000000161n0000000000000000n0000000000000000",
+            ),
+            (
+                (Some("".into()), None, None),
+                "t0000000000000000n0000000000000000n0000000000000000",
+            ),
+            (
+                (None, Some(0), Some(-1)),
+                "n0000000000000000i000000000000000130i00000000000000022D31",
+            ),
+            (
+                (None, Some(0), Some(-2)),
+                "n0000000000000000i000000000000000130i00000000000000022D32",
+            ),
+            (
+                (None, Some(1), Some(-1)),
+                "n0000000000000000i000000000000000131i00000000000000022D31",
+            ),
+        ] {
+            let key: TargetKey = key;
+            db.execute(
+                "INSERT INTO target VALUES(?1,?2,?3)",
+                rusqlite::params![key.0, key.1, key.2],
+            )
+            .unwrap();
+            let actual: Vec<u8> = db
+                .query_row(
+                    "SELECT k FROM changed ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(actual, expected.as_bytes());
+            assert_eq!(actual, encode_key(&key));
+            assert_eq!(decode_key::<TargetKey>(&actual).unwrap(), key);
+        }
+        db.execute_batch("DELETE FROM changed; INSERT INTO source(rowid,id) VALUES(-1,NULL)")
+            .unwrap();
+        db.execute_batch(&format!("CREATE TRIGGER source_update AFTER UPDATE ON source BEGIN INSERT INTO changed VALUES({}); INSERT INTO changed VALUES({}); END", key_sql(&["id","rowid"], "OLD"), key_sql(&["id","rowid"], "NEW"))).unwrap();
+        for (old, new) in [
+            ((None, -1), (Some("a".into()), -1)),
+            ((Some("a".into()), -1), (Some("b".into()), -1)),
+            ((Some("b".into()), -1), (None, -2)),
+        ] {
+            let (old, new): (Cursor, Cursor) = (old, new);
+            db.execute("DELETE FROM changed", []).unwrap();
+            db.execute(
+                "UPDATE source SET id=?1,rowid=?2",
+                rusqlite::params![new.0, new.1],
+            )
+            .unwrap();
+            let frames = db
+                .prepare("SELECT k FROM changed ORDER BY rowid")
+                .unwrap()
+                .query_map([], |row| row.get::<_, Vec<u8>>(0))
+                .unwrap()
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .unwrap();
+            assert_eq!(frames, vec![encode_key(&old), encode_key(&new)]);
+            assert_eq!(decode_key::<Cursor>(&frames[0]).unwrap(), old);
+            assert_eq!(decode_key::<Cursor>(&frames[1]).unwrap(), new);
+        }
+    }
+
+    #[test]
     fn evidence_frames_storage_class_length_ordering_and_multiplicity() {
         let make = |values| Evidence {
             identity: vec![Value::Integer(1)],
@@ -503,6 +601,62 @@ mod tests {
         let mut moved = make(vec![Value::Null]);
         moved.ordering = vec![Value::Integer(0)];
         assert_ne!(one, moved.digest());
+    }
+
+    #[test]
+    fn f1_dirty_key_component_preserves_integer_blob_and_nested_cursor() {
+        let inner = encode_key(&("x".to_owned(),));
+        for key in [
+            DirtyKey::Integer(-7),
+            DirtyKey::Integer(7),
+            DirtyKey::Composite(vec![]),
+            DirtyKey::Composite(vec![0x37]),
+            DirtyKey::Composite(inner),
+        ] {
+            let original = ("m".to_owned(), key);
+            let bytes = encode_key(&original);
+            assert_eq!(decode_key::<(String, DirtyKey)>(&bytes).unwrap(), original);
+        }
+        assert_eq!(
+            encode_key(&("m".to_owned(), DirtyKey::Integer(7))),
+            b"t00000000000000016Di000000000000000137"
+        );
+        assert_eq!(
+            encode_key(&("m".to_owned(), DirtyKey::Composite(vec![0x37]))),
+            b"t00000000000000016Db000000000000000137"
+        );
+    }
+
+    #[test]
+    fn f1_dirty_key_trigger_and_adapter_component_bytes_match() {
+        let db = Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE source(migration TEXT NOT NULL,key); CREATE TABLE changed(k BLOB NOT NULL)").unwrap();
+        db.execute_batch(&format!("CREATE TRIGGER tracked AFTER INSERT ON source BEGIN INSERT INTO changed VALUES({}); END",key_sql(&["migration","key"],"NEW"))).unwrap();
+        for key in [
+            DirtyKey::Integer(i64::MIN),
+            DirtyKey::Integer(0),
+            DirtyKey::Integer(i64::MAX),
+            DirtyKey::Composite(vec![]),
+            DirtyKey::Composite(vec![0, 0xFF]),
+            DirtyKey::Composite(encode_key(&("x".to_owned(),))),
+        ] {
+            db.execute(
+                "INSERT INTO source(migration,key) VALUES(?1,?2)",
+                rusqlite::params!["m", &key],
+            )
+            .unwrap();
+            let stored: Vec<u8> = db
+                .query_row(
+                    "SELECT k FROM changed ORDER BY rowid DESC LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(stored, encode_key(&("m".to_owned(), key)));
+        }
+        for value in [Value::Null, Value::Real(7.0), Value::Text("7".into())] {
+            assert!(<DirtyKey as KeyPart>::from_value(value).is_err());
+        }
     }
 
     #[test]

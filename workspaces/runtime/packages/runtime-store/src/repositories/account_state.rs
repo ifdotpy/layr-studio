@@ -206,8 +206,8 @@ impl ProviderState {
 struct AgentScopeFields {
     provider_stream: Option<StreamFields>,
 }
-#[derive(serde::Deserialize)]
-struct StreamFields {
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct StreamFields {
     generation: Option<u64>,
     connection: Option<String>,
     ack: Option<u64>,
@@ -227,15 +227,15 @@ impl StreamFields {
 }
 
 fn agent_scope_fields(agent: &crate::AgentRecord) -> StoreResult<AgentScopeFields> {
-    use serde::Deserialize;
-    use serde::de::IntoDeserializer;
-    let fields = serde::de::value::MapDeserializer::<_, studio_json::error::Error>::new(
-        agent
-            .extra
-            .iter()
-            .map(|(key, value)| (key.as_str().into_deserializer(), value)),
-    );
-    Ok(AgentScopeFields::deserialize(fields)?)
+    use studio_runtime_schema::queue_command::Field;
+    let provider_stream = match &agent.provider_stream {
+        Field::Missing | Field::Null => None,
+        Field::Value(crate::StoredTransferObject::Known(exact)) => Some(exact.value().clone()),
+        Field::Value(crate::StoredTransferObject::Unreadable(raw)) => {
+            studio_json::from_str(raw.0.as_str())?
+        }
+    };
+    Ok(AgentScopeFields { provider_stream })
 }
 
 fn state(generation: u64, connection: Option<String>) -> ProviderState {
@@ -562,6 +562,81 @@ mod tests {
     use super::{authentication_recovery_account_keys, limits_snapshots};
     use rusqlite::Connection;
     use studio_json::{Value, json};
+
+    #[test]
+    fn agent_provider_stream_keeps_legacy_admission_and_state_guards() {
+        let database = crate::fresh_state::test_canvas();
+        for (raw, expected) in [
+            (None, Ok(None)),
+            (Some("null"), Ok(None)),
+            (Some("{}"), Ok(None)),
+            (Some("[]"), Err(())),
+            (Some("[1]"), Err(())),
+            (Some("[1,null]"), Err(())),
+            (Some("[1,null,2]"), Ok(Some((1, None, 2)))),
+            (
+                Some(r#"[1,"connected",2]"#),
+                Ok(Some((1, Some("connected"), 2))),
+            ),
+            (Some(r#"[ 1, "\u0063", 2 ]"#), Ok(Some((1, Some("c"), 2)))),
+            (Some("[null,null,null]"), Ok(None)),
+            (Some("[1,null,2,3]"), Err(())),
+            (Some("[true,null,null]"), Err(())),
+            (Some("[1,2,null]"), Err(())),
+            (Some("[1,null,false]"), Err(())),
+            (Some("true"), Err(())),
+            (Some("0"), Err(())),
+            (Some(r#""legacy""#), Err(())),
+            (
+                Some(r#"{"generation":1,"connection":""}"#),
+                Ok(Some((1, None, 0))),
+            ),
+            (
+                Some(r#"{"generation":18446744073709551615,"ack":18446744073709551615}"#),
+                Ok(Some((u64::MAX, None, u64::MAX))),
+            ),
+            (
+                Some(r#"{"generation":null,"connection":"connected"}"#),
+                Err(()),
+            ),
+            (Some(r#"{"ack":0}"#), Err(())),
+            (Some(r#"{"generation":-1}"#), Err(())),
+            (Some(r#"{"generation":1.0}"#), Err(())),
+            (Some(r#"{"ack":18446744073709551616}"#), Err(())),
+        ] {
+            let suffix = raw
+                .map(|raw| format!(r#", "providerStream":{raw}"#))
+                .unwrap_or_default();
+            let wire = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","executionMode":"vm"{suffix}}}"#
+            );
+            let agent: crate::AgentRecord = studio_json::from_str(&wire).unwrap();
+            let written = studio_json::to_string(&agent).unwrap();
+            let fields: std::collections::BTreeMap<String, studio_json::OwnedRawJson> =
+                studio_json::from_str(&written).unwrap();
+            assert_eq!(
+                fields.get("providerStream").map(|value| value.as_str()),
+                raw
+            );
+            let actual = super::provider_state(&database, super::ProviderOwner::Agent(&agent))
+                .map(|state| {
+                    state.map(|(state, ack)| match state {
+                        super::ProviderState::Held { generation } => (generation, None, ack),
+                        super::ProviderState::Connected {
+                            generation,
+                            connection,
+                        } => (generation, Some(connection), ack),
+                    })
+                })
+                .map_err(|_| ());
+            let expected = expected.map(|state| {
+                state.map(|(generation, connection, ack)| {
+                    (generation, connection.map(str::to_owned), ack)
+                })
+            });
+            assert_eq!(actual, expected, "{raw:?}");
+        }
+    }
 
     #[test]
     fn metadata_only_vm_stream_has_no_provider_state() {

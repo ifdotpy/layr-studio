@@ -119,20 +119,35 @@ fn nullable_string_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
         .transpose()
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(untagged)]
 pub enum RecoverySource {
     Text(String),
     Fields(Box<RecoveryFields>),
 }
-#[derive(Clone, Debug, Deserialize)]
+impl<'de> Deserialize<'de> for RecoverySource {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        if raw.0.as_str().trim_start().starts_with('"') {
+            studio_json::from_str(raw.0.as_str())
+                .map(Self::Text)
+                .map_err(D::Error::custom)
+        } else {
+            studio_json::from_str(raw.0.as_str())
+                .map(Self::Fields)
+                .map_err(D::Error::custom)
+        }
+    }
+}
+#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RequestState {
     Pending,
     Result,
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, Deserialize)]
+crate::raw_json_payload! { flat
+#[derive(Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoverySupervisorIdentity {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -141,11 +156,31 @@ pub struct RecoverySupervisorIdentity {
     pub handle: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state_dir: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, Deserialize)]
+crate::raw_json_payload! { flat
+/// The disconnect receipt's fixed interrupt operation and durable admission slots.
+#[derive(Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecoveryStopInterrupt {
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub operation: crate::queue_command::Field<String>,
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub generation: crate::queue_command::Field<u64>,
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub outcome: crate::queue_command::Field<crate::start_attempt::InterruptOutcome>,
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub admission: crate::queue_command::Field<crate::persistence::AdmittedRequest>,
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub terminals_admission: crate::queue_command::Field<crate::persistence::AdmittedRequest>,
+    @extensions pub extra,
+}
+}
+
+crate::raw_json_payload! { flat
+#[derive(Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RecoveryFields {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -165,7 +200,7 @@ pub struct RecoveryFields {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub epoch: Option<SafeInteger>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<Value>,
+    pub error: Option<crate::raw_json::RawJson>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub events: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -188,14 +223,16 @@ pub struct RecoveryFields {
     pub start_attempt: Option<Box<crate::start_attempt::StartAttemptView>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub submitted: Option<bool>,
+    #[serde(default, skip_serializing_if = "crate::queue_command::Field::is_missing")]
+    pub stop_interrupt: crate::queue_command::Field<RecoveryStopInterrupt>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supervisor_identity: Option<RecoverySupervisorIdentity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
 impl RecoveryFields {
@@ -204,16 +241,17 @@ impl RecoveryFields {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+crate::raw_json_payload! { flat
+#[derive(Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionRecoveryFields {
-    pub request_basis: Option<Value>,
+    pub request_basis: Option<crate::raw_json::RawJson>,
     pub request_id: Option<String>,
-    pub request_receipt: Option<Value>,
+    pub request_receipt: Option<crate::raw_json::RawJson>,
     #[serde(default, deserialize_with = "nullable_string_enum")]
     pub request_state: Option<RequestState>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -278,6 +316,35 @@ mod tests {
     use super::*;
     use sha2::{Digest, Sha256};
     use studio_json::json;
+
+    #[test]
+    fn recovery_source_streaming_preserves_strings_and_raw_object_evidence() {
+        for raw in [r#"  "plain""#, r#"  "\u0061\ntext""#] {
+            let source: RecoverySource = studio_json::from_str(raw).unwrap();
+            let expected: String = studio_json::from_str(raw).unwrap();
+            assert!(matches!(source, RecoverySource::Text(value) if value == expected));
+        }
+        let future = r#"{ "n":1.00e+3, "dup":1, "dup":2 }"#;
+        let raw = format!(r#"{{"future":{future}}}"#);
+        let source: RecoverySource = studio_json::from_str(&raw).unwrap();
+        assert!(matches!(&source, RecoverySource::Fields(_)));
+        assert_eq!(studio_json::to_string(&source).unwrap(), raw);
+        for raw in [
+            "null",
+            "true",
+            "false",
+            "1",
+            "[]",
+            "[{}]",
+            r#"{"epoch":"bad"}"#,
+            r#"{"events":7}"#,
+        ] {
+            assert!(
+                studio_json::from_str::<RecoverySource>(raw).is_err(),
+                "{raw}"
+            );
+        }
+    }
 
     #[test]
     fn recovery_attempt_rejects_invalid_action() {
@@ -403,6 +470,129 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    mod stop_interrupt_contract_tests {
+        use super::RecoveryFields;
+
+        #[test]
+        fn missing_and_null_stop_interrupt_remain_distinct() {
+            for raw in ["{}", r#"{"stopInterrupt":null}"#] {
+                let receipt: RecoveryFields = studio_json::from_str(raw).unwrap();
+                assert_eq!(studio_json::to_string(&receipt).unwrap(), raw);
+            }
+        }
+
+        #[test]
+        fn stop_interrupt_future_members_retain_exact_tokens() {
+            let raw = r#"{"stopInterrupt":{"outcome":"accepted","future":{ "n":1.00e+3, "dup":1, "dup":2 }}}"#;
+            let receipt: RecoveryFields = studio_json::from_str(raw).unwrap();
+            assert_eq!(studio_json::to_string(&receipt).unwrap(), raw);
+        }
+
+        #[test]
+        fn malformed_stop_interrupt_is_refused() {
+            for raw in [
+                r#"{"stopInterrupt":{"generation":"wrong"}}"#,
+                r#"{"stopInterrupt":{"outcome":"future"}}"#,
+                r#"{"stopInterrupt":[]} "#,
+            ] {
+                assert!(
+                    studio_json::from_str::<RecoveryFields>(raw).is_err(),
+                    "{raw}"
+                );
+            }
+        }
+    }
+
+    mod connection_recovery_evidence_tests {
+        use super::{
+            ConnectionRecoveryFields, RecoveryAgentRecord, RequestState, Value,
+            nullable_string_enum,
+        };
+        use serde::Deserialize;
+        use std::collections::BTreeMap;
+        const FUTURE: &str = r#"{ "n":1.00e+3, "dup":1, "dup":2 }"#;
+        #[test]
+        fn connection_recovery_basis_keeps_exact_tokens() {
+            let record: ConnectionRecoveryFields =
+                studio_json::from_str(&format!(r#"{{"requestBasis":{FUTURE}}}"#)).unwrap();
+            assert_eq!(
+                studio_json::to_string(record.request_basis.as_ref().unwrap()).unwrap(),
+                FUTURE
+            );
+        }
+        #[test]
+        fn connection_recovery_receipt_keeps_exact_tokens() {
+            let record: ConnectionRecoveryFields =
+                studio_json::from_str(&format!(r#"{{"requestReceipt":{FUTURE}}}"#)).unwrap();
+            assert_eq!(
+                studio_json::to_string(record.request_receipt.as_ref().unwrap()).unwrap(),
+                FUTURE
+            );
+        }
+        #[test]
+        fn connection_recovery_extensions_keep_exact_tokens() {
+            let record: ConnectionRecoveryFields =
+                studio_json::from_str(&format!(r#"{{"future":{FUTURE}}}"#)).unwrap();
+            assert_eq!(
+                studio_json::to_string(&record.extra["future"]).unwrap(),
+                FUTURE
+            );
+        }
+        #[test]
+        fn connection_recovery_record_admission_matches_previous_fields() {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct PreviousFields {
+                request_basis: Option<Value>,
+                request_id: Option<String>,
+                request_receipt: Option<Value>,
+                #[serde(default, deserialize_with = "nullable_string_enum")]
+                request_state: Option<RequestState>,
+                #[serde(flatten)]
+                extra: BTreeMap<String, Value>,
+            }
+            let mut mismatches = Vec::new();
+            for marker in [
+                "null",
+                "false",
+                "0",
+                r#""legacy""#,
+                "[]",
+                "[null]",
+                "[null,null]",
+                "[null,null,null]",
+                "[null,null,null,null]",
+                "[null,null,null,null,null]",
+                "{}",
+                r#"{"requestState":"pending"}"#,
+                r#"{"requestState":"result"}"#,
+                r#"{"requestState":"future"}"#,
+                r#"{"requestState":{"pending":null}}"#,
+                r#"{"requestId":7}"#,
+            ] {
+                let previous = studio_json::from_str::<Option<PreviousFields>>(marker);
+                let expected = previous.is_ok();
+                if let Ok(Some(previous)) = previous {
+                    let _ = (
+                        previous.request_basis,
+                        previous.request_id,
+                        previous.request_receipt,
+                        previous.request_state,
+                        previous.extra,
+                    );
+                }
+                let record = format!(
+                    r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","connectionRecovery":{marker}}}"#
+                );
+                let actual = studio_json::from_str::<RecoveryAgentRecord>(&record).is_ok();
+                if actual != expected {
+                    mismatches.push((marker, expected, actual));
+                }
+            }
+            assert!(mismatches.is_empty(), "{mismatches:?}");
         }
     }
 }

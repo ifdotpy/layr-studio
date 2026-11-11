@@ -911,9 +911,8 @@ async fn signed_remote_event_crosses_http_boundary_and_persists_once() {
         ..AgentRecord::test_defaults()
     };
     parent.auto_wake = Some(true);
-    parent
-        .extra
-        .insert("moveImportPending".into(), studio_json::json!(true));
+    parent.move_import_pending = serde::Deserialize::deserialize(studio_json::json!(true))
+        .expect("typed fixture moveImportPending");
     let link = studio_json::json!({"id":"fixture-link","side":"home","server":"peer-server","home":"local-server","parent":"event-parent","parentEpoch":3,"workers":[]});
     store
         .transaction_with(move |tx| {

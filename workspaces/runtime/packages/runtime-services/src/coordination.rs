@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use studio_json::{Value, json};
 use studio_runtime_schema::delivery::DeliveryMoment;
-use studio_runtime_schema::provider_errors::is_misalignment_policy_violation;
 use studio_runtime_store::{
     CoordinationRepository, QueueEventId, QueueEventRepository, QueueWriteRepository, StoreError,
     Transaction,
@@ -750,7 +749,7 @@ fn assert_native_thread_open(
                     _ => None,
                 };
                 turn_id == agent.turn_id.as_deref()
-                    && previous.extra.get("error").is_some_and(is_misalignment_policy_violation)
+                    && previous.extra.get("error").and_then(|raw| studio_json::from_str::<studio_runtime_schema::provider_errors::AgentError>(raw.as_str()).ok()).is_some_and(|error| error.known_kind() == Some(studio_runtime_schema::provider_errors::KnownCodexErrorKind::MisalignmentPolicyViolation))
             }));
     if blocked {
         return Err(CoordinationError::InvalidRequest(
@@ -797,7 +796,7 @@ fn capacity_reset(
         }
     }
     agent.extra.remove("capacityRetry");
-    agent.extra.remove("capacityRetryCount");
+    agent.capacity_retry_count = Default::default();
     Ok(())
 }
 

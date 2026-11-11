@@ -16,12 +16,13 @@
 
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::peer_update_settings::Canvas;
 use rusqlite::types::Value as SqlValue;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use studio_db_api::migration::{
     CopyPlan, DirtyKey, MigrationKey, decode_key, encode_key, identifier, key_sql,
 };
-use studio_db_api::{MutableTable, Table};
+use studio_db_api::{MutableTable, Table, Tx};
 use studio_runtime_schema::persistence::MigrationStatus;
 
 use crate::{RuntimeStore, StoreError, StoreResult};
@@ -101,11 +102,12 @@ pub trait OnlineMigration: Send + Sync + 'static {
     fn read_one(&self, db: &Connection, key: &Self::Key) -> StoreResult<Option<Self::Row>>;
     /// Pure conversion of one row. No I/O.
     fn transform(&self, row: Self::Row) -> StoreResult<Self::Out>;
+    /// Migration-only target write in the existing batch transaction.
     /// Write the target row of `key`. Must be idempotent (upsert): a batch can
     /// run again after a crash or when a dirty key is copied twice.
-    fn write(&self, db: &Connection, key: &Self::Key, out: Self::Out) -> StoreResult<()>;
+    fn write(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key, out: Self::Out) -> StoreResult<()>;
     /// Delete the target row of `key` after its source row was deleted.
-    fn remove(&self, db: &Connection, key: &Self::Key) -> StoreResult<()>;
+    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<()>;
     /// Verify and switch durable writer authority before this transaction commits.
     fn finish(&self, _tx: &Transaction<'_>) -> StoreResult<()> {
         Ok(())
@@ -168,40 +170,26 @@ where
     }
     fn write(
         &self,
-        db: &Connection,
+        tx: &mut Tx<'_, Canvas>,
         key: &Self::Key,
         (out, evidence): Self::Out,
     ) -> StoreResult<()> {
-        out.validate()?;
-        studio_db_api::migration::copy_verified(
-            || {
-                let inserted = out.bind(db, |params| {
-                    db.prepare_cached(T::INSERT_NEW)?.execute(params)
-                })?;
-                if inserted == 0 {
-                    out.bind(db, |params| db.prepare_cached(T::UPSERT)?.execute(params))?;
-                }
-                db.execute("UPDATE runtime_payload_migrations SET copy_target_rows=copy_target_rows+?2 WHERE name=?1",params![progress_name(self),i64::from(inserted!=0)])?;
-                Ok(true)
-            },
-            || {
-                T::bind_key(&(self.target_key)(key), |params| {
-                    db.prepare_cached(T::GET)?.query_row(params, |row| {
-                        Ok((self.target_evidence)(&T::read(db, row)?)?.digest()
-                            == evidence.digest())
-                    })
-                })
-            },
-            || rusqlite::Error::InvalidQuery,
-        )?;
+        let inserted = tx.insert_new(&out)?;
+        if !inserted {
+            tx.upsert(&out)?;
+        }
+        let actual = tx
+            .get::<T>(&(self.target_key)(key))?
+            .ok_or(rusqlite::Error::QueryReturnedNoRows)?;
+        if (self.target_evidence)(&actual)?.digest() != evidence.digest() {
+            return Err(rusqlite::Error::InvalidQuery.into());
+        }
+        adjust_copy_target_rows(tx, self, i64::from(inserted))?;
         Ok(())
     }
-    fn remove(&self, db: &Connection, key: &Self::Key) -> StoreResult<()> {
-        let removed = T::bind_key(&(self.target_key)(key), |params| {
-            db.prepare_cached(T::DELETE)?.execute(params)
-        })?;
-        db.execute("UPDATE runtime_payload_migrations SET copy_target_rows=copy_target_rows-?2 WHERE name=?1",params![progress_name(self),i64::from(removed!=0)])?;
-        Ok(())
+    fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &Self::Key) -> StoreResult<()> {
+        let removed = tx.delete::<T>(&(self.target_key)(key))?;
+        adjust_copy_target_rows(tx, self, -i64::from(removed != 0))
     }
     fn finish(&self, tx: &Transaction<'_>) -> StoreResult<()> {
         let mut typed = crate::peer_update_settings::canvas_tx(tx);
@@ -214,6 +202,22 @@ where
         (self.finish)(&mut typed)?;
         Ok(())
     }
+}
+
+fn adjust_copy_target_rows(
+    tx: &mut Tx<'_, Canvas>,
+    migration: &impl OnlineMigration,
+    delta: i64,
+) -> StoreResult<()> {
+    use crate::clock_schema::queries::AdjustCopyTargetRows;
+    tx.named(
+        &AdjustCopyTargetRows::QUERY,
+        &AdjustCopyTargetRows {
+            name: &progress_name(migration),
+            delta: Some(delta),
+        },
+    )?;
+    Ok(())
 }
 
 /// Result of one batch.
@@ -371,8 +375,12 @@ pub fn step<M: OnlineMigration>(
             break;
         }
         budget.timed(|| match migration.read_one(tx, &key)? {
-            Some(row) => migration.write(tx, &key, migration.transform(row)?),
-            None => migration.remove(tx, &key),
+            Some(row) => migration.write(
+                &mut crate::peer_update_settings::canvas_tx(tx),
+                &key,
+                migration.transform(row)?,
+            ),
+            None => migration.remove(&mut crate::peer_update_settings::canvas_tx(tx), &key),
         })?;
         tx.execute(
             &format!("DELETE FROM {DIRTY_TABLE} WHERE migration=?1 AND key=?2"),
@@ -405,7 +413,13 @@ pub fn step<M: OnlineMigration>(
             if !budget.allows_next() {
                 break;
             }
-            budget.timed(|| migration.write(tx, &key, migration.transform(row)?))?;
+            budget.timed(|| {
+                migration.write(
+                    &mut crate::peer_update_settings::canvas_tx(tx),
+                    &key,
+                    migration.transform(row)?,
+                )
+            })?;
             new_cursor = Some(encode_key(&key));
             new_mark = if M::Key::INTEGER {
                 match key.values()[0] {
@@ -605,6 +619,13 @@ mod tests {
             ],
         }
     }
+    #[derive(DbTable)]
+    #[db(table="authority",database=Canvas)]
+    struct Authority {
+        #[db(key)]
+        target: i64,
+    }
+
     fn copy_plan() -> CopyPlan<Source, Target> {
         CopyPlan {
             name: "composite_copy",
@@ -640,8 +661,8 @@ mod tests {
             },
             target_select: Target::SELECT_QUERY,
             finish: |tx| {
-                tx.connection().execute_batch("CREATE TABLE authority(target INTEGER NOT NULL); INSERT INTO authority VALUES(1);
-                    CREATE TRIGGER refuse_legacy BEFORE INSERT ON copy_source BEGIN SELECT RAISE(ABORT,'target is authoritative'); END;")
+                tx.insert(&Authority { target: 1 })?;
+                studio_db_api::migration::retire_source::<Source>(tx)
             },
         }
     }
@@ -649,6 +670,7 @@ mod tests {
         let db = database(0);
         Source::descriptor().install_if_absent(&db).unwrap();
         Target::descriptor().install_if_absent(&db).unwrap();
+        Authority::descriptor().install_if_absent(&db).unwrap();
         for ordinal in -600..600 {
             db.execute(
                 "INSERT INTO copy_source VALUES('a',?1,?1,?2,?3)",
@@ -742,7 +764,12 @@ mod tests {
                 panic!("copy did not terminate")
             })();
             assert!(outcome.is_err(), "a non-injective map must not cut over");
-            assert!(!crate::schema::table_exists(&db, "authority").unwrap());
+            assert!(
+                crate::peer_update_settings::canvas_read(&db)
+                    .get::<Authority>(&(1,))
+                    .unwrap()
+                    .is_none()
+            );
         }
     }
 
@@ -790,6 +817,13 @@ mod tests {
             (1201, 500),
             "resume keeps admission and counters"
         );
+        let mut expected = crate::peer_update_settings::canvas_read(&db)
+            .collect(&Source::SELECT_QUERY, &())
+            .unwrap()
+            .iter()
+            .map(|row| (plan.source_evidence)(row).unwrap().digest())
+            .collect::<Vec<_>>();
+        expected.sort_unstable();
         for _ in 0..20 {
             if copy_batch(&mut db, &copy_plan()).unwrap() == Step::Complete {
                 break;
@@ -797,8 +831,15 @@ mod tests {
         }
         let tx = db.transaction().unwrap();
         assert_eq!(counts(&tx), (1201, 1201));
-        plan.verify(&crate::peer_update_settings::canvas_tx(&tx))
-            .unwrap();
+        let mut actual = crate::peer_update_settings::canvas_read(&tx)
+            .collect(&Target::SELECT_QUERY, &())
+            .unwrap()
+            .iter()
+            .map(|row| (plan.target_evidence)(row).unwrap().digest())
+            .collect::<Vec<_>>();
+        actual.sort_unstable();
+        assert_eq!(actual, expected);
+        assert!(!crate::schema::table_exists(&tx, "copy_source").unwrap());
         assert!(progress(&tx).unwrap()[0].complete);
         assert_eq!(progress(&tx).unwrap()[0].dirty, 0);
         assert!(
@@ -830,7 +871,12 @@ mod tests {
                 .unwrap(),
             0
         );
-        assert!(!crate::schema::table_exists(&db, "authority").unwrap());
+        assert!(
+            crate::peer_update_settings::canvas_read(&db)
+                .get::<Authority>(&(1,))
+                .unwrap()
+                .is_none()
+        );
         db.execute_batch("DROP TRIGGER damage").unwrap();
         let tx = db.transaction().unwrap();
         copy_plan()
@@ -887,7 +933,7 @@ mod tests {
                 ))
             },
             target_select: Copied::SELECT_QUERY,
-            finish: |tx| tx.connection().execute_batch("DROP TABLE copy_source"),
+            finish: studio_db_api::migration::retire_source::<Source>,
         };
         let tx = db.transaction().unwrap();
         plan.copy_tx(&mut crate::peer_update_settings::canvas_tx(&tx))
@@ -918,6 +964,14 @@ mod tests {
     /// advances the fake clock by `cost_ms`; `CRASH_AT` makes one write fail.
     struct Plain {
         cost_ms: std::sync::atomic::AtomicU64,
+    }
+
+    #[derive(DbTable)]
+    #[db(table = "dst", database = Canvas)]
+    struct PlainTarget {
+        #[db(key)]
+        id: i64,
+        v2: i64,
     }
 
     thread_local! {
@@ -954,18 +1008,15 @@ mod tests {
             TEST_CLOCK.with(|c| c.set(c.get() + Duration::from_millis(cost)));
             Ok(row * 2)
         }
-        fn write(&self, db: &Connection, key: &i64, out: i64) -> StoreResult<()> {
+        fn write(&self, tx: &mut Tx<'_, Canvas>, key: &i64, out: i64) -> StoreResult<()> {
             if CRASH_AT.with(Cell::get) == Some(*key) {
                 return Err(StoreError::RecordContract("simulated crash"));
             }
-            db.execute(
-                "INSERT OR REPLACE INTO dst(id,v2) VALUES(?1,?2)",
-                params![key, out],
-            )?;
+            tx.upsert(&PlainTarget { id: *key, v2: out })?;
             Ok(())
         }
-        fn remove(&self, db: &Connection, key: &i64) -> StoreResult<()> {
-            db.execute("DELETE FROM dst WHERE id=?1", [key])?;
+        fn remove(&self, tx: &mut Tx<'_, Canvas>, key: &i64) -> StoreResult<()> {
+            tx.delete::<PlainTarget>(&(*key,))?;
             Ok(())
         }
     }

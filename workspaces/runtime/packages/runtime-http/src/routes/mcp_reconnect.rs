@@ -56,7 +56,10 @@ fn matches_agent(
     expected: &crate::generated::McpSessionBinding,
 ) -> bool {
     !agent.is_deleted()
-        && agent.extra.get("deleted") != Some(&json!(true))
+        && !matches!(
+            agent.deleted.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(true))
+        )
         && agent.thread_id.as_deref() == Some(expected.thread.as_str())
         && agent.epoch == expected.epoch.get()
         && agent.account_key == expected.account.as_str()
@@ -284,6 +287,26 @@ inventory::submit! {crate::routes::manifest::RouteModuleRegistration{name:"mcp_r
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reconnect_session_refuses_the_typed_deleted_flag() {
+        let expected: crate::generated::McpSessionBinding = studio_json::from_str(
+            r#"{"account":"account","thread":"thread","epoch":2,"connection":"connection","generation":1}"#
+        ).unwrap();
+        for (flag, matches) in [
+            ("true", false),
+            ("false", true),
+            ("null", true),
+            ("0", true),
+            ("{}", true),
+        ] {
+            let record = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":2,"status":"idle","accountKey":"account","threadId":"thread","deleted":{flag}}}"#
+            );
+            let agent = studio_json::from_str(&record).unwrap();
+            assert_eq!(super::matches_agent(&agent, &expected), matches, "{flag}");
+        }
+    }
 
     #[test]
     fn reconnect_non_v7_miss_is_expired() {

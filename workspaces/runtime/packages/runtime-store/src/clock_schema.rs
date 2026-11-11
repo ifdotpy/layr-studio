@@ -1,6 +1,7 @@
 //! Legacy clock and publication descriptors. Physical format and owner units are unchanged.
 use crate::json_record_codec::{ExactJson, ExactJsonCodec};
 use crate::peer_update_settings::Canvas;
+use crate::schema::{ConditionalTriggerRequirement, TableRequirement, TriggerRequirement};
 use studio_db_api::{DbTable, Table};
 
 #[derive(DbTable)]
@@ -277,6 +278,36 @@ pub(crate) mod queries {
     use studio_db_api::DbQuery;
 
     #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),
+        tables(progress=crate::settings_schema::PayloadMigrations),
+        columns(name=crate::settings_schema::PayloadMigrations::NAME,
+            count=crate::settings_schema::PayloadMigrations::COPY_TARGET_ROWS),
+        sql="UPDATE {progress} SET {count}={count}+?2 WHERE {name}=?1")]
+    pub struct AdjustCopyTargetRows<'a> {
+        #[db(column=crate::settings_schema::PayloadMigrations::NAME)]
+        pub name: &'a str,
+        #[db(column=crate::settings_schema::PayloadMigrations::COPY_TARGET_ROWS)]
+        pub delta: Option<i64>,
+    }
+
+    type ItemRowid = studio_db_api::Rowid<crate::item_monitor_terminal::ItemsRow>;
+    #[derive(DbQuery)]
+    #[db_query(database=Canvas,mode=write,cardinality=none,result=(),
+        tables(rows=DurableRows,items=crate::item_monitor_terminal::ItemsRow),
+        columns(tbl=DurableRows::TBL,id=DurableRows::ID,seq=DurableRows::SEQ,
+            deleted=DurableRows::DELETED,at=DurableRows::AT,
+            item_id=crate::item_monitor_terminal::ItemsRow::ID,rowid=ItemRowid::COLUMN),
+        sql="INSERT INTO {rows}({tbl},{id},{seq},{deleted},{at})
+            SELECT 'runtime_items',{item_id},?2+1,0,0 FROM {items} WHERE {rowid}=?1
+            ON CONFLICT({tbl},{id}) DO NOTHING")]
+    pub struct NumberItem {
+        #[db(column=ItemRowid::COLUMN)]
+        pub rowid: i64,
+        #[db(column=DurableRows::SEQ)]
+        pub high: i64,
+    }
+
+    #[derive(DbQuery)]
     #[db_query(database = Canvas, mode = read, cardinality = one, result = i64,
         decode = SyncGeneration::VALUE,
         tables(entities = SyncEntities, documents = SyncDocuments, generation = SyncGeneration, durable = DurableRows),
@@ -317,4 +348,92 @@ pub fn validate_named_queries(
     connection: &rusqlite::Connection,
 ) -> Result<(), studio_db_api::QueryValidationError> {
     queries::validate_queries(connection)
+}
+
+/// The change journal and transcript revision statements that the
+/// `runtime_agents` triggers run, for a volatile row of agent `NEW.id`.
+pub(crate) const JOURNAL_BODY: &str = "UPDATE runtime_agent_record_generation SET value=value+1 WHERE id=1; \
+     UPDATE runtime_scheduler_agent_change_state SET entries=entries+CASE WHEN EXISTS(SELECT 1 FROM runtime_scheduler_agent_changes WHERE id=NEW.id) THEN 0 ELSE 1 END,total=total-COALESCE((SELECT generation FROM runtime_scheduler_agent_changes WHERE id=NEW.id),0)+(SELECT value FROM runtime_agent_record_generation WHERE id=1) WHERE id=1; \
+     INSERT INTO runtime_scheduler_agent_changes(id,generation) SELECT NEW.id,value FROM runtime_agent_record_generation WHERE id=1 ON CONFLICT(id) DO UPDATE SET generation=excluded.generation; \
+     UPDATE runtime_scheduler_agent_change_state SET generation=(SELECT value FROM runtime_agent_record_generation WHERE id=1) WHERE id=1;";
+pub(crate) const TRANSCRIPT_BODY: &str = "INSERT INTO runtime_transcript_revisions(agent,revision) VALUES (NEW.id,1) \
+     ON CONFLICT(agent) DO UPDATE SET revision=revision+1;";
+
+pub(crate) const AGENT_GENERATION_TABLE_REQUIREMENT: TableRequirement = TableRequirement {
+    name: AgentRecordGeneration::NAME,
+    columns: &["id", "value"],
+};
+pub(crate) const SCHEDULER_STATE_TABLE_REQUIREMENT: TableRequirement = TableRequirement {
+    name: SchedulerAgentChangeState::NAME,
+    columns: &["id", "entries", "total", "generation"],
+};
+pub(crate) const SCHEDULER_CHANGES_TABLE_REQUIREMENT: TableRequirement = TableRequirement {
+    name: SchedulerAgentChanges::NAME,
+    columns: &["id", "generation"],
+};
+pub(crate) const AGENT_CLOCK_TRIGGERS: &[TriggerRequirement] = &[
+    TriggerRequirement {
+        name: "runtime_agent_record_generation_insert",
+        table: "runtime_agents",
+    },
+    TriggerRequirement {
+        name: "runtime_agent_record_generation_update",
+        table: "runtime_agents",
+    },
+    TriggerRequirement {
+        name: "runtime_agent_record_generation_delete",
+        table: "runtime_agents",
+    },
+];
+const AGENT_TRANSCRIPT_TRIGGERS: &[TriggerRequirement] = &[
+    TriggerRequirement {
+        name: "sync_transcript_revision_runtime_agents_insert",
+        table: "runtime_agents",
+    },
+    TriggerRequirement {
+        name: "sync_transcript_revision_runtime_agents_update",
+        table: "runtime_agents",
+    },
+    TriggerRequirement {
+        name: "sync_transcript_revision_runtime_agents_delete",
+        table: "runtime_agents",
+    },
+];
+
+pub(crate) const AGENT_TRANSCRIPT_TRIGGER_REQUIREMENTS: &[ConditionalTriggerRequirement] =
+    &[ConditionalTriggerRequirement {
+        table_exists: crate::context_settings::TranscriptRevisionsStorageRow::NAME,
+        triggers: AGENT_TRANSCRIPT_TRIGGERS,
+    }];
+
+pub(crate) fn agent_change_journal_exists(
+    connection: &rusqlite::Connection,
+) -> crate::StoreResult<bool> {
+    crate::schema::table_exists(connection, AgentRecordGeneration::NAME)
+}
+pub(crate) fn transcript_revisions_exist(
+    connection: &rusqlite::Connection,
+) -> crate::StoreResult<bool> {
+    crate::schema::table_exists(
+        connection,
+        crate::context_settings::TranscriptRevisionsStorageRow::NAME,
+    )
+}
+pub(crate) fn prepare_agent_change_journal(
+    transaction: &rusqlite::Transaction<'_>,
+) -> crate::StoreResult<()> {
+    if agent_change_journal_exists(transaction)?
+        && crate::schema::table_exists(transaction, SchedulerAgentChangeState::NAME)?
+    {
+        let mut typed = crate::peer_update_settings::canvas_tx(transaction);
+        typed.insert_new(&AgentRecordGeneration { id: 1, value: 0 })?;
+        typed.insert_new(&SchedulerAgentChangeState {
+            id: 1,
+            floor: 0,
+            generation: 0,
+            entries: 0,
+            total: 0,
+        })?;
+    }
+    Ok(())
 }

@@ -322,7 +322,12 @@ pub(super) fn decide(
                             thread_id: agent.thread_id.clone().map_or(Field::Null, |id| {
                                 Field::Value(StoredTransferValue::Known(id))
                             }),
-                            extra: [("error".into(), error.clone())].into(),
+                            extra: [(
+                                "error".into(),
+                                studio_json::to_raw_value(&error)
+                                    .map_err(studio_runtime_store::StoreError::from)?,
+                            )]
+                            .into(),
                         }));
                 }
                 decision.refresh_limits = matches!(
@@ -337,7 +342,12 @@ pub(super) fn decide(
                         turn_id: Field::Value(StoredTransferValue::Known(
                             turn.as_str().expect("error turn checked above").to_owned(),
                         )),
-                        extra: [("error".into(), error.clone())].into(),
+                        extra: [(
+                            "error".into(),
+                            studio_json::to_raw_value(&error)
+                                .map_err(studio_runtime_store::StoreError::from)?,
+                        )]
+                        .into(),
                     }));
                 agent.error = Field::Value(typed);
                 agent.activity = Some(AgentActivity {
@@ -646,7 +656,7 @@ pub(crate) fn account_notice(
     at: f64,
 ) -> Result<(), NotificationDispatchError> {
     use rusqlite::{OptionalExtension, params};
-    use studio_runtime_store::{StoreError, SyncDocumentsRepository};
+    use studio_runtime_store::SyncDocumentsRepository;
     let account = identity
         .provider_handle
         .strip_prefix("account:")
@@ -672,16 +682,16 @@ pub(crate) fn account_notice(
     );
     if text.is_empty() {
         tx.execute_cached("DELETE FROM runtime_native_notices WHERE id=?1", [&key])
-            .map_err(StoreError::from)?;
+            .map_err(studio_runtime_store::StoreError::from)?;
     } else {
         let record = json!({"id":key,"accountKey":account,"connectionId":connection,"message":text,"details":params["details"],"at":at});
         tx.execute_cached("INSERT INTO runtime_native_notices(id,record) VALUES(?1,?2) ON CONFLICT(id) DO UPDATE SET record=excluded.record",
-            params![key,studio_json::to_string(&record)?]).map_err(StoreError::from)?;
-        tx.execute_cached("DELETE FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 AND id NOT IN (SELECT id FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 ORDER BY json_extract(record,'$.at') DESC LIMIT ?2)", params![account, ACCOUNT_NOTICE_LIMIT]).map_err(StoreError::from)?;
+            params![key,studio_json::to_string(&record)?]).map_err(studio_runtime_store::StoreError::from)?;
+        tx.execute_cached("DELETE FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 AND id NOT IN (SELECT id FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 ORDER BY json_extract(record,'$.at') DESC LIMIT ?2)", params![account, ACCOUNT_NOTICE_LIMIT]).map_err(studio_runtime_store::StoreError::from)?;
     }
     // Preserve unrelated volatile sources and other accounts' notices. Replace
     // only this connection owner's portion of the existing renderer projection.
-    let workspace: Option<String> = tx.query_row_cached("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional().map_err(StoreError::from)?;
+    let workspace: Option<String> = tx.query_row_cached("SELECT payload FROM sync_entities WHERE collection='workspace' AND id='current' AND deleted=0", [], |row| row.get(0)).optional().map_err(studio_runtime_store::StoreError::from)?;
     if let Some(raw) = workspace {
         let workspace: Value = studio_json::from_str(&raw)
             .map_err(|_| super::stored("sync_entities", "workspace:current"))?;
@@ -700,14 +710,14 @@ pub(crate) fn account_notice(
         notices.retain(|notice| {
             notice.get("connectionId").is_some() && notice["accountKey"] != account
         });
-        let mut stmt = tx.prepare_cached("SELECT id,record FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 AND json_extract(record,'$.connectionId')=?2 ORDER BY rowid").map_err(StoreError::from)?;
+        let mut stmt = tx.prepare_cached("SELECT id,record FROM runtime_native_notices WHERE json_extract(record,'$.accountKey')=?1 AND json_extract(record,'$.connectionId')=?2 ORDER BY rowid").map_err(studio_runtime_store::StoreError::from)?;
         for row in stmt
             .query_map(params![account, connection], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })
-            .map_err(StoreError::from)?
+            .map_err(studio_runtime_store::StoreError::from)?
         {
-            let (id, raw) = row.map_err(StoreError::from)?;
+            let (id, raw) = row.map_err(studio_runtime_store::StoreError::from)?;
             let record: Value = studio_json::from_str(&raw)
                 .map_err(|_| super::stored("runtime_native_notices", &id))?;
             if record["id"] != id

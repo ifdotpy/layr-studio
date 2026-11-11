@@ -893,7 +893,7 @@ pub(super) async fn claim(
     if snapshot.as_ref().is_none_or(|record| {
         record.epoch != epoch
             || account_key(record) != account.as_str()
-            || studio_runtime_store::truthy(record.extra.get("moveImportPending"))
+            || record.move_import_pending_active()
     }) {
         return Ok(None);
     }
@@ -912,15 +912,14 @@ pub(super) async fn claim(
             }
             if record
                 .as_ref()
-                .is_some_and(|a| studio_runtime_store::truthy(a.extra.get("moveImportPending")))
+                .is_some_and(|a| a.move_import_pending_active())
             {
                 return Ok(None);
             }
-            if record.as_ref().is_some_and(|a| {
-                a.extra
-                    .get("claudePreInputRetry")
-                    .is_some_and(|v| !v.is_null())
-            }) {
+            if record
+                .as_ref()
+                .is_some_and(|a| a.claude_pre_input_retry.value().is_some())
+            {
                 hold_before_claim(
                     tx,
                     &agent,
@@ -2648,8 +2647,14 @@ fn record_manual_release_closure(
         .native_release
         .as_mut()
         .ok_or_else(|| invalid(thread))?;
-    release.extra.insert("closedAt".into(), json!(now()));
-    release.extra.insert("resetPending".into(), json!(false));
+    release.extra.insert(
+        "closedAt".into(),
+        studio_json::to_raw_value(&now()).map_err(StoreError::from)?,
+    );
+    release.extra.insert(
+        "resetPending".into(),
+        studio_json::to_raw_value(&false).map_err(StoreError::from)?,
+    );
     // Closure does not replace the exact unsubscribe receipt. In particular,
     // an unknown unsubscribe keeps its phase and cannot enable preparation.
     AgentRepository::put(tx, &agent)?;

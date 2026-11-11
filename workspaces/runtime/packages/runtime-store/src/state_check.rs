@@ -307,7 +307,7 @@ pub(crate) fn check_sync_entities(connection: &Connection) -> StoreResult<StateC
         };
         if collection.starts_with("transcript:") {
             if let Some((pointer, keyword)) =
-                crate::repositories::transcript::hash_only_sync_entity_storage_error(
+                crate::repositories::transcript::transcript_index_storage_error(
                     &collection,
                     &id,
                     sequence,
@@ -317,6 +317,17 @@ pub(crate) fn check_sync_entities(connection: &Connection) -> StoreResult<StateC
                 )
             {
                 record_failure(&mut failures, &mut report.rejected_count, pointer, keyword);
+            } else if id == "@revision"
+                && payload.as_deref().is_some_and(|raw| {
+                    studio_runtime_schema::transcript_cache::validate_revision_cache(raw).is_err()
+                })
+            {
+                record_failure(
+                    &mut failures,
+                    &mut report.rejected_count,
+                    "/payload",
+                    "transcriptCache",
+                );
             }
             continue;
         }
@@ -404,6 +415,91 @@ mod tests {
     use studio_json::json;
 
     use super::check_sync_entities;
+
+    #[test]
+    fn f1_revision_cache_is_specific_to_its_control_row_and_readonly() {
+        use crate::clock_schema::SyncEntities;
+        use crate::peer_update_settings::canvas_tx;
+        use studio_db_api::Table;
+        let mut db = Connection::open_in_memory().unwrap();
+        SyncEntities::descriptor().install_if_absent(&db).unwrap();
+        let tx = db.transaction().unwrap();
+        let mut typed = canvas_tx(&tx);
+        let page = r###"{
+  "agent": {
+    "extension1": null,
+    "extension2": 0,
+    "extension3": {
+      "at": 0,
+      "extension1": 0,
+      "extension2": 0
+    },
+    "id": "sanitized",
+    "extension4": false,
+    "status": "sanitized"
+  },
+  "historyVersion": "sanitized",
+  "items": [
+    {
+      "at": 0,
+      "id": "sanitized",
+      "role": "sanitized",
+      "text": "sanitized",
+      "extension1": "sanitized",
+      "extension2": "sanitized",
+      "truncated": false,
+      "extension3": "sanitized",
+      "extension4": "sanitized"
+    }
+  ],
+  "nextAfterCursor": null,
+  "nextCursor": "sanitized",
+  "truncated": true,
+  "unavailable": null
+}"###;
+        for (agent, id, payload) in [
+            ("live", "@revision", page),
+            ("deleted", "@revision", "{}"),
+            ("wrong-control", "@meta", page),
+            ("broken", "@revision", r#"{"items":[],"truncated":1}"#),
+        ] {
+            typed
+                .upsert(&SyncEntities {
+                    collection: format!("transcript:{agent}"),
+                    id: id.into(),
+                    seq: 1,
+                    hash: "a".repeat(64),
+                    payload: Some(payload.into()),
+                    deleted: 0,
+                })
+                .unwrap();
+        }
+        let changes = tx.total_changes();
+        let report = check_sync_entities(&tx).unwrap();
+        assert_eq!((report.row_count, report.rejected_count), (4, 2));
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.keyword == "storageRepresentation" && failure.count == 1)
+        );
+        assert!(
+            report
+                .failures
+                .iter()
+                .any(|failure| failure.keyword == "transcriptCache" && failure.count == 1)
+        );
+        assert_eq!(tx.total_changes(), changes);
+        assert_eq!(
+            typed
+                .get::<SyncEntities>(&("transcript:live".into(), "@revision".into()))
+                .unwrap()
+                .unwrap()
+                .payload
+                .as_deref(),
+            Some(page)
+        );
+    }
 
     #[test]
     fn system_count_legacy_rows_preserves_unvalidated_history_readonly() {

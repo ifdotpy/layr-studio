@@ -146,7 +146,8 @@ where
     store.add_table_row_change_observer(ObservedTable::Agents, move |change| {
         let _queued = agents.send(match change {
             studio_runtime_store::TableChange::Rows(rows) => Publication::AgentRows(rows.to_vec()),
-            studio_runtime_store::TableChange::Full => Publication::AgentRowsFull,
+            studio_runtime_store::TableChange::Full
+            | studio_runtime_store::TableChange::AgentComponents(_) => Publication::AgentRowsFull,
         });
     });
     let analytics = sender.clone();

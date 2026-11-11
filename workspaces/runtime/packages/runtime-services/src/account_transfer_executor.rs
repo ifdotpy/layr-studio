@@ -3224,8 +3224,14 @@ mod retained_executor_tests {
                         admitted_request: None,
                         scope: None,
                         extra: [
-                            ("phase".into(), json!("unknown")),
-                            ("resetPending".into(), json!(true)),
+                            (
+                                "phase".into(),
+                                studio_json::to_raw_value(&"unknown").unwrap(),
+                            ),
+                            (
+                                "resetPending".into(),
+                                studio_json::to_raw_value(&true).unwrap(),
+                            ),
                         ]
                         .into(),
                     });

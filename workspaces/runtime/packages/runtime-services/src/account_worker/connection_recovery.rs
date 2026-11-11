@@ -562,4 +562,139 @@ mod tests {
         agent["disconnectRecovery"]["at"] = json!(11.0);
         assert!(!saved_receipt_matches_current(&agent));
     }
+    #[test]
+    fn saved_receipt_requires_all_thirteen_basis_members_and_turn_exception() {
+        let mut agent = json!({"id":"agent","epoch":1,"accountKey":"default",
+            "threadId":"thread","turnId":"turn","connectionRecovery":{}});
+        let basis = crate::recovery_policy::connection_recovery_basis(&agent);
+        assert_eq!(basis.as_array().unwrap().len(), 13);
+        agent["connectionRecovery"]["requestBasis"] = basis.clone();
+        assert!(saved_receipt_matches_current(&agent));
+        for length in [0, 12, 14] {
+            let mut saved = basis.as_array().unwrap().clone();
+            saved.resize(length, json!(null));
+            agent["connectionRecovery"]["requestBasis"] = json!(saved);
+            assert!(!saved_receipt_matches_current(&agent), "length {length}");
+        }
+        for index in 0..13 {
+            let mut saved = basis.clone();
+            saved[index] = json!("different");
+            agent["connectionRecovery"]["requestBasis"] = saved;
+            assert!(!saved_receipt_matches_current(&agent), "member {index}");
+        }
+        agent["connectionRecovery"]["requestBasis"] = basis;
+        agent["turnId"] = json!(null);
+        for (turn, accepted) in [
+            (json!(null), false),
+            (json!("other"), false),
+            (json!("turn"), true),
+        ] {
+            agent["connectionRecovery"]["turnId"] = turn;
+            assert_eq!(saved_receipt_matches_current(&agent), accepted);
+        }
+        agent["connectionRecovery"]
+            .as_object_mut()
+            .unwrap()
+            .remove("turnId");
+        assert!(!saved_receipt_matches_current(&agent));
+    }
+
+    #[tokio::test]
+    async fn connection_request_begin_finish_preserve_replay_and_identity_fences() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = super::RuntimeStore::open(Some(directory.path()))
+            .await
+            .unwrap();
+        let seed = json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle",
+            "accountKey":"default","provider":"codex","compactions":0,
+            "threadId":"thread","turnId":"turn",
+            "connectionRecovery":{"requestId":"old","requestState":"result",
+                "requestReceipt":{"old":true},"future":{"keep":true}}});
+        store
+            .transaction_with_error(move |tx| super::put_agent(tx, seed))
+            .await
+            .unwrap();
+        let before = load_connection_agent(&store).await;
+        let recovery_id = crate::recovery_policy::connection_recovery_id(&before);
+        let pending = super::begin_request(&store, "agent", &before, &recovery_id)
+            .await
+            .unwrap();
+        assert_eq!(pending["connectionRecovery"]["requestState"], "pending");
+        assert_eq!(pending["connectionRecovery"]["requestReceipt"], json!(null));
+        assert_eq!(
+            pending["connectionRecovery"]["future"],
+            json!({"keep":true})
+        );
+        assert_eq!(
+            pending["connectionRecovery"]["requestBasis"],
+            crate::recovery_policy::connection_recovery_basis(&before)
+        );
+        assert_eq!(
+            super::begin_request(&store, "agent", &pending, &recovery_id)
+                .await
+                .unwrap(),
+            pending
+        );
+        super::finish_request(&store, "agent", "other", &json!({"wrong":true}))
+            .await
+            .unwrap();
+        assert_eq!(load_connection_agent(&store).await, pending);
+        let receipt = json!({"accepted":true});
+        super::finish_request(&store, "agent", &recovery_id, &receipt)
+            .await
+            .unwrap();
+        let result = load_connection_agent(&store).await;
+        assert_eq!(result["connectionRecovery"]["requestState"], "result");
+        assert_eq!(result["connectionRecovery"]["requestReceipt"], receipt);
+        assert_eq!(
+            super::begin_request(&store, "agent", &result, &recovery_id)
+                .await
+                .unwrap(),
+            result
+        );
+        let mut stale_epoch = result.clone();
+        stale_epoch["epoch"] = json!(2);
+        assert!(
+            super::begin_request(&store, "agent", &stale_epoch, &recovery_id)
+                .await
+                .is_err()
+        );
+        let mut stale_thread = result.clone();
+        stale_thread["threadId"] = json!("other");
+        assert!(
+            super::begin_request(&store, "agent", &stale_thread, &recovery_id)
+                .await
+                .is_err()
+        );
+        assert!(
+            super::begin_request(&store, "agent", &result, "other")
+                .await
+                .is_err()
+        );
+        assert_eq!(load_connection_agent(&store).await, result);
+        for marker in [json!({}), json!({"requestId":null})] {
+            let mut without_request = result.clone();
+            without_request["connectionRecovery"] = marker;
+            store
+                .transaction_with_error(move |tx| super::put_agent(tx, without_request))
+                .await
+                .unwrap();
+            let before = load_connection_agent(&store).await;
+            super::finish_request(&store, "agent", &recovery_id, &receipt)
+                .await
+                .unwrap();
+            assert_eq!(load_connection_agent(&store).await, before);
+        }
+    }
+
+    async fn load_connection_agent(store: &super::RuntimeStore) -> super::Value {
+        let raw = store
+            .read_async("connection recovery replay witness", |tx| {
+                super::AgentRepository::get_raw(tx, &super::AgentId::from("agent"))
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        studio_json::from_str(&raw).unwrap()
+    }
 }

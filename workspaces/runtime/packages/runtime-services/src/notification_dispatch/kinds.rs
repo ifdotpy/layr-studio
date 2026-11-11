@@ -126,19 +126,19 @@ pub(super) fn apply(
             // With no configured voice session, Python retains these as thread events.
             update_common_agent_fields(agent, method, p, at)?;
             persist_agent(tx, &id, agent)?;
-        } else if dependency == NotificationDependency::ThreadUnloaded
-            && agent
-                .native_release
-                .as_ref()
-                .and_then(|release| release.extra.get("threadId"))
-                == p.get("threadId")
-            && agent.native_release.is_some()
-        {
-            if let Some(release) = &mut agent.native_release {
-                release.extra.insert("closedAt".into(), json!(at));
-                release.extra.insert("resetPending".into(), json!(false));
+        } else if dependency == NotificationDependency::ThreadUnloaded {
+            let supplied = match p.get("threadId") {
+                None => studio_runtime_schema::queue_command::Field::Missing,
+                Some(value) => {
+                    studio_json::from_str(&studio_json::to_string(value).map_err(StoreError::from)?)
+                        .map_err(StoreError::from)?
+                }
+            };
+            if let Some(release) = &mut agent.native_release
+                && release.close_thread(&supplied, at, &id)?
+            {
+                persist_agent(tx, &id, agent)?;
             }
-            persist_agent(tx, &id, agent)?;
         }
         return Ok(Some(required(dependency)));
     }
@@ -294,11 +294,15 @@ pub(super) fn apply(
                     {
                         episode.extra.insert(
                             "outcome".into(),
-                            json!(
-                                studio_runtime_schema::persistence::IdleEpisodeOutcome::Compacted
-                            ),
+                            studio_json::to_raw_value(
+                                &studio_runtime_schema::persistence::IdleEpisodeOutcome::Compacted,
+                            )
+                            .map_err(StoreError::from)?,
                         );
-                        episode.extra.insert("completedAt".into(), json!(at));
+                        episode.extra.insert(
+                            "completedAt".into(),
+                            studio_json::to_raw_value(&at).map_err(StoreError::from)?,
+                        );
                     }
                     write_item(
                         tx,

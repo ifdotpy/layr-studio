@@ -7,6 +7,66 @@ use studio_runtime_schema::shared_values::{
     PROVIDER_START_UNKNOWN_ERROR as UNKNOWN_START_ERROR,
 };
 
+// Compare only the retained wait at this scheduler boundary. Upstream record
+// admission remains authoritative; this does not recreate its depth policy.
+fn context_repair_wait_matches(raw: &str, expected: &Value) -> studio_json::Result<bool> {
+    let mut pending = vec![(
+        studio_json::OwnedRawJson::from_string(raw.to_owned())?,
+        expected,
+    )];
+    while let Some((raw, expected)) = pending.pop() {
+        let text = raw.as_str();
+        let kind = text.trim_start().as_bytes()[0];
+        match expected {
+            Value::Null if kind == b'n' => {
+                studio_json::from_str::<()>(text)?;
+            }
+            Value::Bool(expected) if matches!(kind, b't' | b'f') => {
+                if studio_json::from_str::<bool>(text)? != *expected {
+                    return Ok(false);
+                }
+            }
+            Value::Number(expected) if matches!(kind, b'-' | b'0'..=b'9') => {
+                if studio_json::from_str::<studio_json::Number>(text)? != *expected {
+                    return Ok(false);
+                }
+            }
+            Value::String(expected) if kind == b'"' => {
+                if studio_json::from_str::<String>(text)? != *expected {
+                    return Ok(false);
+                }
+            }
+            Value::Array(expected) if kind == b'[' => {
+                let values: Vec<studio_json::OwnedRawJson> = studio_json::from_str(text)?;
+                if values.len() != expected.len() {
+                    return Ok(false);
+                }
+                pending.extend(values.into_iter().zip(expected));
+            }
+            Value::Object(expected) if kind == b'{' => {
+                let values: BTreeMap<String, studio_json::OwnedRawJson> =
+                    studio_json::from_str(text)?;
+                if values.len() != expected.len() {
+                    return Ok(false);
+                }
+                for (key, value) in values {
+                    let Some(expected) = expected.get(&key) else {
+                        return Ok(false);
+                    };
+                    pending.push((value, expected));
+                }
+            }
+            Value::Null
+            | Value::Bool(_)
+            | Value::Number(_)
+            | Value::String(_)
+            | Value::Array(_)
+            | Value::Object(_) => return Ok(false),
+        }
+    }
+    Ok(true)
+}
+
 impl SchedulerRepository {
     pub fn settle_unclean_start(
         transaction: &Transaction<'_>,
@@ -365,10 +425,14 @@ impl SchedulerRepository {
                 agent.auto_wake = Some(true);
                 agent.in_flight = Some(true);
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
-                agent.extra.insert("connectionRecovery".into(),json!({"source":"native_thread_read","at":at,"turnId":agent.turn_id.as_deref(),"outcome":"active","automatic":true,"previousError":previous_error}));
+                agent.connection_recovery = serde::Deserialize::deserialize(
+                    json!({"source":"native_thread_read","at":at,"turnId":agent.turn_id.as_deref(),"outcome":"active","automatic":true,"previousError":previous_error}),
+                )?;
                 if let Some(marker) = agent.restart_recovery.as_deref_mut() {
                     marker.stage = Some("continued".into());
-                    marker.extra.insert("observedAt".into(), json!(at));
+                    marker
+                        .extra
+                        .insert("observedAt".into(), studio_json::to_raw_value(&at)?);
                     marker.outcome = Some("active".into());
                 }
                 publish_agent(transaction, &agent)?;
@@ -378,14 +442,11 @@ impl SchedulerRepository {
                 agent.in_flight = Some(true);
                 agent.error = studio_runtime_schema::queue_command::Field::Null;
                 agent.status = AgentStatus::Running;
-                agent.extra.insert(
-                    "connectionRecovery".into(),
-                    json!({
-                        "source":"native_thread_read", "at":at, "turnId":agent.turn_id.as_deref(),
-                        "outcome":"active", "automatic":true, "previousError":previous_error,
-                        "supervisor":null
-                    }),
-                );
+                agent.connection_recovery = serde::Deserialize::deserialize(json!({
+                    "source":"native_thread_read", "at":at, "turnId":agent.turn_id.as_deref(),
+                    "outcome":"active", "automatic":true, "previousError":previous_error,
+                    "supervisor":null
+                }))?;
                 publish_agent(transaction, &agent)?;
             }
         }
@@ -485,7 +546,9 @@ impl SchedulerRepository {
                     == Some(id)
             {
                 marker.stage = Some("finished".into());
-                marker.extra.insert("reconciledAt".into(), json!(at));
+                marker
+                    .extra
+                    .insert("reconciledAt".into(), studio_json::to_raw_value(&at)?);
                 marker.outcome = Some("settled".into());
                 changed = true;
             }
@@ -567,7 +630,7 @@ impl SchedulerRepository {
                 .extra
                 .get("manualRecoveryDeliveryHold")
                 .is_some_and(truthy)
-            || agent.extra.get("authWait").is_some_and(truthy)
+            || crate::schema::raw_truthy(agent.auth_wait.value().map(|raw| &raw.0))
             || agent.extra.get("capacityRetry").is_some_and(truthy)
             || agent.usage_resume_truthy()
             || agent.start_outcome_hold.is_some()
@@ -575,7 +638,7 @@ impl SchedulerRepository {
                 .native_release
                 .as_ref()
                 .and_then(|release| release.extra.get("resetPending"))
-                .is_some_and(truthy)
+                .is_some_and(|raw| crate::schema::raw_truthy(Some(raw)))
             || agent.restart_recovery.as_deref().is_some_and(|marker| {
                 restart_marker_open(marker) || marker.stage.as_deref() == Some("held")
             })
@@ -730,7 +793,7 @@ impl SchedulerRepository {
             agent.extra.insert("cancelledPark".into(), park);
         }
         agent.parked_event = None;
-        agent.extra.remove("parkAfterTurn");
+        agent.park_after_turn = Default::default();
         tx.execute_cached(
             "UPDATE runtime_events SET status='cancelled' WHERE agent=?1 AND status='pending'",
             [id],
@@ -1515,7 +1578,8 @@ impl SchedulerRepository {
             .as_deref()
             .ok_or_else(|| invalid_agent(agent_id))?;
         if agent.epoch != epoch
-            || agent.extra.get("contextRepairWait") != Some(expected_wait)
+            || agent.context_repair_wait.is_missing()
+            || !context_repair_wait_matches(&studio_json::to_string(&agent.context_repair_wait)?, expected_wait)?
             || marker.stage.as_deref() != Some("held")
             || !marker.start_attempt.as_deref().is_some_and(|attempt| same_typed_attempt(attempt, expected_attempt))
             || agent.start_attempt.as_ref()
@@ -1723,8 +1787,7 @@ impl SchedulerRepository {
             | AgentStatus::Paused
             | AgentStatus::Parked
             | AgentStatus::Abandoned
-            | AgentStatus::CapacityRetry
-            | AgentStatus::Other(_) => {
+            | AgentStatus::CapacityRetry => {
                 return Err(StoreError::SchemaMismatch(
                     "invalid terminal scheduler outcome".to_owned(),
                 ));
@@ -1775,9 +1838,10 @@ impl SchedulerRepository {
             && matches!(marker.stage.as_deref(), Some("reattached" | "continued"))
         {
             marker.stage = Some("finished".into());
-            marker
-                .extra
-                .insert("reconciledAt".into(), json!(timestamp()));
+            marker.extra.insert(
+                "reconciledAt".into(),
+                studio_json::to_raw_value(&timestamp())?,
+            );
             marker.outcome = Some(native_status.into());
         }
         // A later turn of the same thread finished, so the restart turn can no
@@ -1791,11 +1855,15 @@ impl SchedulerRepository {
             && thread.is_some_and(|thread| marker.thread_id.as_deref() == Some(thread.as_str()))
         {
             marker.stage = Some("finished".into());
-            marker
-                .extra
-                .insert("reconciledAt".into(), json!(timestamp()));
+            marker.extra.insert(
+                "reconciledAt".into(),
+                studio_json::to_raw_value(&timestamp())?,
+            );
             marker.outcome = Some("replaced".into());
-            marker.extra.insert("replacedByTurn".into(), json!(turn_id));
+            marker.extra.insert(
+                "replacedByTurn".into(),
+                studio_json::to_raw_value(&turn_id)?,
+            );
         }
         let clears_unknown = agent
             .start_outcome_hold
@@ -1838,7 +1906,9 @@ impl SchedulerRepository {
                         ),
                         None => studio_runtime_schema::queue_command::Field::Null,
                     },
-                    extra: [("error".into(), error.clone())].into_iter().collect(),
+                    extra: [("error".into(), studio_json::to_raw_value(&error)?)]
+                        .into_iter()
+                        .collect(),
                 }),
             );
         }
@@ -2123,14 +2193,8 @@ pub(super) fn apply_start_error(
         ExecutionHistoryRepository::reject_attempt(tx, &identity.attempt_id, message)?;
         tx.execute_cached("UPDATE runtime_events SET status='pending',turn_id=NULL,error=CASE WHEN EXISTS(SELECT 1 FROM runtime_event_meta m WHERE m.id=runtime_events.id AND json_extract(m.record,'$.sendNow')=1) THEN ?1 ELSE NULL END WHERE agent=?2 AND epoch=?3 AND id IN(SELECT value FROM json_each(?4)) AND status IN ('reserved','dispatching','uncertain')",
             params![message, identity.agent_id, identity.epoch, events])?;
-        agent.extra.insert(
-            "steerRejectedTurnId".into(),
-            agent
-                .turn_id
-                .clone()
-                .map(Value::String)
-                .filter(|v| v.is_string())
-                .unwrap_or(json!("")),
+        agent.steer_rejected_turn_id = studio_runtime_schema::queue_command::Field::Value(
+            crate::StoredTransferValue::Known(agent.turn_id.clone().unwrap_or_default()),
         );
         agent.status = if agent.in_flight == Some(true) {
             AgentStatus::Running
@@ -2327,12 +2391,12 @@ pub(super) fn clear_hold(agent: &mut AgentRecord) -> StoreResult<()> {
     };
     if previous_native_failure_hold.present {
         agent.native_failure_hold =
-            serde::Deserialize::deserialize(previous_native_failure_hold.value)?;
+            studio_json::from_str(previous_native_failure_hold.value.0.as_str())?;
     } else {
         agent.clear_native_failure_hold();
     }
     if agent.error_text() == Some(reason.as_str()) {
-        agent.set_error_receipt(previous_error)?;
+        agent.error = studio_json::from_str(previous_error.0.as_str())?;
     }
     Ok(())
 }
@@ -2440,10 +2504,15 @@ pub(super) fn disconnect_agent(
     // `supervisor` is the attempt's supervisor identity, or null when it has
     // none. The connection generation stays in `startAttempt`, which recovery
     // scope matching reads; a generation alone identifies no supervisor.
-    let connection_id = match agent.extra.get("connectionId") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(value)) => Some(value.clone()),
-        Some(_) => return Err(invalid_agent(&agent.id.0)),
+    let connection_id = match &agent.connection_id {
+        studio_runtime_schema::queue_command::Field::Missing
+        | studio_runtime_schema::queue_command::Field::Null => None,
+        studio_runtime_schema::queue_command::Field::Value(crate::StoredTransferValue::Known(
+            value,
+        )) => Some(value.clone()),
+        studio_runtime_schema::queue_command::Field::Value(
+            crate::StoredTransferValue::Unreadable(_),
+        ) => return Err(invalid_agent(&agent.id.0)),
     };
     let mut receipt = studio_runtime_schema::recovery_record::RecoveryFields {
         epoch: Some(
@@ -2458,14 +2527,16 @@ pub(super) fn disconnect_agent(
         auto_wake: agent.auto_wake,
         ..Default::default()
     };
-    receipt.extra.insert("at".into(), json!(at));
+    receipt
+        .extra
+        .insert("at".into(), studio_json::to_raw_value(&at)?);
     receipt.extra.insert(
         "supervisor".into(),
-        crate::projection_value(
+        studio_json::to_raw_value(
             &attempt
                 .as_ref()
                 .and_then(|a| a.supervisor_identity.as_ref()),
-        ),
+        )?,
     );
     if !agent
         .disconnect_recovery
@@ -2486,7 +2557,9 @@ pub(super) fn disconnect_agent(
             marker.stage = Some("held".into());
             marker.extra.insert(
                 "reason".into(),
-                json!("Native input submission has no confirmed turn identity."),
+                studio_json::to_raw_value(
+                    &"Native input submission has no confirmed turn identity.",
+                )?,
             );
             agent.restart_recovery = Some(Box::new(marker));
             agent.disconnect_recovery = None;
@@ -2499,13 +2572,14 @@ pub(super) fn disconnect_agent(
                 .ok_or_else(|| invalid_agent(&agent.id.0))?;
             let error =
                 format!("Context repair waits for a confirmed input receipt: {first_event}");
-            agent.extra.insert("contextRepairWait".into(), json!({
+            agent.context_repair_wait = serde::Deserialize::deserialize(json!({
                 "error":error,
                 "scope":"native",
                 "source":{"id":agent.id.0,"accountKey":agent.account_key.as_str(),"epoch":agent.epoch,"threadId":agent.thread_id.as_deref(),"attemptId":null},
                 "events":event_ids,
                 "nextCheckAt":0
-            }));
+            }))?;
+            agent.set_error_receipt(json!(error))?;
         } else {
             let mut marker = agent
                 .disconnect_recovery
@@ -2526,7 +2600,9 @@ pub(super) fn disconnect_agent(
             if unknown {
                 marker.extra.insert(
                     "reason".into(),
-                    json!("Native input submission has no confirmed turn identity."),
+                    studio_json::to_raw_value(
+                        &"Native input submission has no confirmed turn identity.",
+                    )?,
                 );
             }
             agent.restart_recovery = Some(Box::new(marker));
@@ -2546,8 +2622,6 @@ pub(super) fn disconnect_agent(
     if restart_input_wait {
         agent.clear_native_failure_hold();
         agent.start_outcome_hold = None;
-        let wait_error = agent.extra["contextRepairWait"]["error"].clone();
-        agent.set_error_receipt(wait_error)?;
         agent.start_attempt = None;
     } else if !paused
         && agent
@@ -2839,7 +2913,7 @@ pub(super) fn continuation_allowed(agent: &AgentRecord) -> bool {
             .is_some_and(|value| !value.is_empty())
         && !agent.native_failure_held()
         && agent.account_transfer_id.value().is_none()
-        && !agent.extra.get("contextRepairWait").is_some_and(truthy)
+        && !agent.context_repair_wait_active()
         && !matches!(
             agent
                 .extra
@@ -3291,8 +3365,8 @@ fn parked_after_turn(agent: &mut AgentRecord) {
     if agent.parked_event.as_deref().is_none_or(str::is_empty) {
         return;
     }
-    if agent.extra.get("parkAfterTurn").is_some_and(truthy) {
-        agent.extra.remove("parkAfterTurn");
+    if crate::schema::raw_truthy(agent.park_after_turn.value().map(|raw| &raw.0)) {
+        agent.park_after_turn = Default::default();
         agent.auto_wake = Some(false);
     }
     if agent.auto_wake != Some(true) {
@@ -3305,6 +3379,202 @@ mod tests;
 
 #[cfg(test)]
 mod account_scope_tests {
+    #[test]
+    fn restart_wait_comparator_matches_admitted_value_equality() {
+        // test-only legacy Value-equality oracle for the restart-wait comparator; no production Value
+        let values = [
+            "null",
+            "false",
+            "true",
+            "0",
+            "-0",
+            "0.0",
+            "1",
+            "1.0",
+            "1e0",
+            "1.0000000000000001",
+            "9007199254740993",
+            "18446744073709551615",
+            "-9223372036854775808",
+            "1.25e2",
+            "125.0",
+            r#""a""#,
+            r#""\u0061""#,
+            "[]",
+            "{}",
+            "[1,2]",
+            "[2,1]",
+            "[1]",
+            r#"{"x":1,"x":0}"#,
+            r#"{"x":0,"\u0078":1}"#,
+            r#"{"x":1}"#,
+            r#"{"a":{"future":null},"b":[1.0]}"#,
+            r#"{ "b":[1e0], "a":{"future":null} }"#,
+            r#"{"a":{},"b":[1.0]}"#,
+        ];
+        for raw in values {
+            let old: studio_json::Value = studio_json::from_str(raw).unwrap();
+            for expected in values {
+                let expected: studio_json::Value = studio_json::from_str(expected).unwrap();
+                assert_eq!(
+                    super::context_repair_wait_matches(raw, &expected).unwrap(),
+                    old == expected,
+                    "{raw} versus {expected}"
+                );
+            }
+        }
+        for malformed in ["", "[", "{", "1 trailing", "[1,]"] {
+            assert!(
+                super::context_repair_wait_matches(malformed, &studio_json::Value::Null).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn restart_wait_comparator_traverses_deep_input_without_recursive_calls() {
+        // test-only legacy Value-equality oracle for the restart-wait comparator; no production Value
+        let depth = 1024;
+        let raw = format!("{}null{}", "[".repeat(depth), "]".repeat(depth));
+        let mut expected = studio_json::Value::Null;
+        for _ in 0..depth {
+            expected = studio_json::Value::Array(vec![expected]);
+        }
+        assert!(super::context_repair_wait_matches(&raw, &expected).unwrap());
+        // Dismantle this test-only Value iteratively too; its normal Drop recurses.
+        while let studio_json::Value::Array(mut values) = expected {
+            expected = values.pop().unwrap();
+        }
+    }
+
+    #[test]
+    fn restart_wait_equality_preserves_acceptance_and_refusal_without_writes() {
+        // test-only legacy Value-equality oracle for the restart-wait comparator; no production Value
+        for (raw, expected) in [
+            (
+                Some(r#"{ "b":["\u0061",1e0], "a":0 }"#),
+                r#"{"a":0,"b":["a",1.0]}"#,
+            ),
+            (Some(r#"{"x":0,"x":1}"#), r#"{"x":1}"#),
+            (Some(r#"{"x":1,"x":0}"#), r#"{"x":1}"#),
+            (Some(r#"{"x":{"future":1}}"#), r#"{"x":{}}"#),
+            (Some("[1,2]"), "[2,1]"),
+            (Some("[1]"), "[1,2]"),
+            (Some("1"), "1.0"),
+            (Some("-0"), "0"),
+            (Some("-0"), "0.0"),
+            (Some("9007199254740993"), "9007199254740992"),
+            (Some("18446744073709551615"), "18446744073709551615"),
+            (Some("-9223372036854775808"), "-9223372036854775808"),
+            (Some("1.25e2"), "125.0"),
+            (Some("null"), "null"),
+            (None, "null"),
+            (Some("false"), "null"),
+            (Some(r#""a""#), "[]"),
+            (Some("{}"), "[]"),
+        ] {
+            let expected: studio_json::Value = studio_json::from_str(expected).unwrap();
+            let old: Option<studio_json::Value> =
+                raw.map(|text| studio_json::from_str(text).unwrap());
+            let equal = old.as_ref() == Some(&expected);
+            let mut connection = super::super::test_fixture::database();
+            let suffix = raw
+                .map(|text| format!(r#", "contextRepairWait":{text}"#))
+                .unwrap_or_default();
+            let record = format!(
+                r#"{{"id":"agent","rootId":"agent","epoch":4,"status":"queued","provider":"codex","accountKey":"default","autoWake":true,"turnEpoch":4,"threadId":"thread","restartRecovery":{{"stage":"held","startAttempt":{{"id":"attempt","epoch":4,"submitted":true,"accountKey":"default","threadId":"thread","events":["first"]}}}}{suffix}}}"#
+            );
+            let agent: crate::AgentRecord = studio_json::from_str(&record).unwrap();
+            let attempt = agent
+                .restart_recovery
+                .as_ref()
+                .unwrap()
+                .start_attempt
+                .as_ref()
+                .unwrap()
+                .clone();
+            crate::AgentRepository::put(&connection, &agent).unwrap();
+            let event_id = crate::QueueEventId::from("first");
+            let mut event = crate::QueueEventRepository::get(&connection, &event_id)
+                .unwrap()
+                .unwrap();
+            event.status = "uncertain".into();
+            crate::QueueEventRepository::put(&connection, &event).unwrap();
+            let before = studio_json::to_string(
+                &crate::AgentRepository::get(&connection, &crate::AgentId::from("agent"))
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+            let tx = connection.transaction().unwrap();
+            let changes = tx.total_changes();
+            assert_eq!(
+                super::SchedulerRepository::settle_restart_started(
+                    &tx, "agent", 4, &attempt, &expected, "turn"
+                )
+                .unwrap(),
+                equal,
+                "{raw:?} versus {expected}"
+            );
+            let after = crate::AgentRepository::get(&tx, &crate::AgentId::from("agent"))
+                .unwrap()
+                .unwrap();
+            let after_event = crate::QueueEventRepository::get(&tx, &event_id)
+                .unwrap()
+                .unwrap();
+            if equal {
+                assert_eq!(after.turn_id.as_deref(), Some("turn"));
+                assert_eq!(after_event.turn_id.as_deref(), Some("turn"));
+            } else {
+                assert_eq!(
+                    tx.total_changes(),
+                    changes,
+                    "refusal must not write agent, event, or receipt rows"
+                );
+                assert_eq!(studio_json::to_string(&after).unwrap(), before);
+                assert_eq!(after_event, event);
+            }
+        }
+    }
+
+    #[test]
+    fn parked_after_turn_preserves_falsey_present_markers() {
+        for (marker, parks) in [
+            (None, false),
+            (Some("null"), false),
+            (Some("false"), false),
+            (Some("0"), false),
+            (Some(r#""""#), false),
+            (Some("[]"), false),
+            (Some("{}"), false),
+            (Some("true"), true),
+            (Some("1"), true),
+            (Some(r#""wait""#), true),
+            (Some("[null]"), true),
+            (Some(r#"{"future":null}"#), true),
+        ] {
+            let suffix = marker
+                .map(|raw| format!(r#", "parkAfterTurn":{raw}"#))
+                .unwrap_or_default();
+            let raw = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"running","accountKey":"default","parkedEvent":"deploy","autoWake":true{suffix}}}"#
+            );
+            let mut agent: crate::AgentRecord = studio_json::from_str(&raw).unwrap();
+            super::parked_after_turn(&mut agent);
+            assert_eq!(agent.auto_wake, Some(!parks));
+            assert_eq!(agent.status == crate::AgentStatus::Parked, parks);
+            assert_eq!(
+                !agent.park_after_turn.is_missing(),
+                marker.is_some() && !parks
+            );
+            if let Some(marker) = marker.filter(|_| !parks) {
+                assert_eq!(
+                    studio_json::to_string(&agent.park_after_turn).unwrap(),
+                    marker
+                );
+            }
+        }
+    }
+
     #[test]
     fn typed_transfer_pointer_blocks_continuation() {
         let agent: crate::AgentRecord = studio_json::from_str(r#"{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","compactions":0,"accountTransferId":"move"}"#).unwrap();

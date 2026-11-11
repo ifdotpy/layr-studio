@@ -5036,7 +5036,11 @@ async fn move_import_pending_keeps_input_queued_without_worker_writes() {
                 .transaction(move |tx| {
                     let mut agent = AgentRepository::get(tx, &AgentId::from(agent_id.as_str()))?
                         .expect("fixture agent exists");
-                    agent.extra.insert("moveImportPending".into(), json!(true));
+                    agent.move_import_pending = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_schema::raw_json::RawJson(
+                            studio_json::to_raw_value(&true).expect("boolean serializes"),
+                        ),
+                    );
                     AgentRepository::put(tx, &agent)
                 })
                 .await?;

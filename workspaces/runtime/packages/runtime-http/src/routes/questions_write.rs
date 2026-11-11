@@ -536,13 +536,10 @@ async fn complaints(
 fn complaint_response(
     record: studio_runtime_store::ComplaintRecord,
 ) -> Result<crate::generated::ComplaintRecordResponse, ApiError> {
-    use crate::generated::{
-        ComplaintRecordResponse, ComplaintRecordResponseStatus, JsonValue, JsonValueVariant,
-    };
+    use crate::generated::{ComplaintRecordResponse, ComplaintRecordResponseStatus};
     use studio_runtime_schema::complaint_record::{
         ComplaintRecipient, ComplaintSource, ComplaintStatus,
     };
-    use studio_runtime_schema::complaints::ComplaintResponseStatus;
     let status = match record.status {
         ComplaintStatus::Open => ComplaintRecordResponseStatus::Open,
         ComplaintStatus::InProgress => ComplaintRecordResponseStatus::InProgress,
@@ -553,29 +550,17 @@ fn complaint_response(
         .responses
         .into_iter()
         .map(|response| {
-            let status = match response.status {
-                ComplaintResponseStatus::InProgress => "in_progress",
-                ComplaintResponseStatus::Resolved => "resolved",
-                ComplaintResponseStatus::Declined => "declined",
-            };
-            let fields = [
-                ("id", JsonValue::String(response.id)),
-                ("author", JsonValue::String(response.author)),
-                ("text", JsonValue::String(response.text)),
-                ("status", JsonValue::String(status.to_owned())),
-                ("at", JsonValue::Number(response.at)),
-            ]
-            .into_iter()
-            .map(|(key, value)| (key.to_owned(), Some(Box::new(value))))
-            .collect();
-            Some(Box::new(JsonValue::JsonValueVariant(JsonValueVariant {
-                additional_properties: fields,
-            })))
+            let value = studio_json::to_value(response).map_err(ApiError::json)?;
+            let response: crate::generated::JsonValue = super::generated_json(value)?;
+            Ok(Some(Box::new(response)))
         })
-        .collect();
+        .collect::<Result<_, ApiError>>()?;
     let mut additional_properties = std::collections::BTreeMap::new();
     if let Some(title) = record.title {
-        additional_properties.insert("title".to_owned(), Some(Box::new(JsonValue::String(title))));
+        additional_properties.insert(
+            "title".to_owned(),
+            Some(Box::new(crate::generated::JsonValue::String(title))),
+        );
     }
     Ok(ComplaintRecordResponse {
         id: record.id,

@@ -292,27 +292,30 @@ fn project_schema_value(
 fn project_agent_legacy_field<T: serde::Serialize>(
     value: &T,
     name: &str,
-) -> Result<Value, studio_json::Error> {
+) -> Result<studio_runtime_schema::raw_json::RawJson, studio_json::Error> {
     // public shape is a schema-filtered subset of the stored owner; filtering stays with project_schema_value
     let value = serde::Serialize::serialize(value, studio_json::value::Serializer)?;
     Ok(project_agent_property(&value, name))
 }
 
 /// `SCHEMA_FILTERED_AGENT_FIELDS` is the Rust-only generator's field list.
-fn project_agent_property(value: &Value, name: &str) -> Value {
+fn project_agent_property(value: &Value, name: &str) -> studio_runtime_schema::raw_json::RawJson {
     let document = openapi_document();
     let schema = document
         .pointer("/components/schemas/AgentEntityDto")
         .expect("agent schema exists");
     let property = schema_projection_properties()[&(schema as *const Value as usize)][name];
-    project_schema_value(
-        value,
-        property,
-        name,
-        document,
-        1,
-        true,
-        AGENT_SHORT_STRING_OBJECTS.contains(&name),
+    studio_runtime_schema::raw_json::RawJson(
+        studio_json::to_raw_value(&project_schema_value(
+            value,
+            property,
+            name,
+            document,
+            1,
+            true,
+            AGENT_SHORT_STRING_OBJECTS.contains(&name),
+        ))
+        .expect("a projected JSON value serializes"),
     )
 }
 
@@ -787,13 +790,13 @@ pub(crate) fn agent_start_wait_record(
     record: &studio_runtime_store::AgentRecord,
 ) -> Result<Option<studio_runtime_schema::agent_progress::AgentStartWait>, ()> {
     use studio_runtime_store::NativeFailureHold;
-    let native_failure_hold = match record.native_failure_hold.value() {
-        None => false,
-        Some(NativeFailureHold::Boolean(value)) => *value,
-        Some(NativeFailureHold::Terminal { .. }) => true,
-        Some(NativeFailureHold::Unreadable(Value::Object(fields))) => !fields.is_empty(),
-        Some(NativeFailureHold::Unreadable(_)) => return Err(()),
-    };
+    let native_failure_hold = record
+        .native_failure_hold
+        .value()
+        .map(NativeFailureHold::projected_truthiness)
+        .transpose()
+        .map_err(|_| ())?
+        .unwrap_or(false);
     Ok(project_agent_start_wait(
         Some(&record.status),
         record.epoch,
@@ -827,7 +830,7 @@ fn bounded_field(
 fn filtered_field<T: serde::Serialize>(
     field: &studio_runtime_schema::queue_command::Field<T>,
     name: &str,
-) -> Result<Option<Option<Value>>, studio_json::Error> {
+) -> Result<Option<Option<studio_runtime_schema::raw_json::RawJson>>, studio_json::Error> {
     use studio_runtime_schema::queue_command::Field;
     match field {
         Field::Missing => Ok(None),
@@ -840,7 +843,7 @@ fn filtered_field<T: serde::Serialize>(
 fn filtered_option<T: serde::Serialize>(
     value: Option<&T>,
     name: &str,
-) -> Result<Option<Option<Value>>, studio_json::Error> {
+) -> Result<Option<Option<studio_runtime_schema::raw_json::RawJson>>, studio_json::Error> {
     value
         .map(|value| project_agent_legacy_field(value, name).map(|value| Some(Some(value))))
         .unwrap_or(Ok(None))
@@ -896,9 +899,7 @@ pub(crate) fn agent_entity_from_record(
     context: &AgentViewContext,
 ) -> Option<studio_runtime_schema::generated::AgentEntityDto> {
     use studio_runtime_schema::agent_progress::{AccountChange, AccountTransferProgress};
-    use studio_runtime_schema::generated::{
-        AgentEntityDto, AgentKind, AgentSource, AgentWorktree, JsonValue,
-    };
+    use studio_runtime_schema::generated::{AgentEntityDto, AgentKind, AgentSource, AgentWorktree};
     use studio_runtime_schema::queue_command::Field;
     use studio_runtime_store::transfer_record::AgentTransferState;
     if record.id.0.is_empty() {
@@ -913,6 +914,8 @@ pub(crate) fn agent_entity_from_record(
         .map(|snapshot| snapshot.manual_connection_check())
         .unwrap_or_default();
     let start_wait = agent_start_wait_record(&record).ok()?;
+    let can_send =
+        native_block.is_none() && !record.moved_to_active() && !record.move_import_pending_active();
     let mut extra = record.extra;
     let is_lead = record.is_lead == Some(true);
     let server_id = extra
@@ -922,9 +925,6 @@ pub(crate) fn agent_entity_from_record(
         .filter(|s| !s.is_empty())
         .or(context.project_server_id.as_deref())
         .map(|s| bound_sync_text(s, "serverId"));
-    let can_send = native_block.is_none()
-        && !truthy(extra.get("movedTo"))
-        && !truthy(extra.get("moveImportPending"));
     let native_thread_block =
         native_block.map(|v| Some(project_agent_property(&v, "nativeThreadBlock")));
     let mut transfer_progress = match &context.transfer {
@@ -1032,7 +1032,10 @@ pub(crate) fn agent_entity_from_record(
             .map(|v| project_agent_property(&v, "teamCounts"))
     };
     let empty = if is_lead {
-        Some(Some(Value::Bool(context.empty_lead)))
+        Some(Some(project_agent_property(
+            &Value::Bool(context.empty_lead),
+            "empty",
+        )))
     } else {
         extra
             .remove("empty")
@@ -1118,9 +1121,8 @@ pub(crate) fn agent_entity_from_record(
         compactions: Some(record.compactions.map(|n| n as i64)),
         concurrency: record.concurrency.map(|n| Some(n.get())),
         connection_check: filtered_field(&record.connection_check, "connectionCheck").ok()?,
-        context_repair_wait: extra
-            .remove("contextRepairWait")
-            .map(|v| Some(project_agent_property(&v, "contextRepairWait"))),
+        context_repair_wait: filtered_field(&record.context_repair_wait, "contextRepairWait")
+            .ok()?,
         context_usage: filtered_option(record.context_usage.as_ref(), "contextUsage").ok()?,
         created: nullable_field(record.created.clone()),
         cwd: record
@@ -1201,9 +1203,7 @@ pub(crate) fn agent_entity_from_record(
             .map(|s| Some(bound_sync_text(s, "layrProjectId"))),
         legacy_vm_workspace: None,
         layr_ready: record.layr_ready.map(Some),
-        layr_state_id: extra
-            .remove("layrStateId")
-            .map(|v| Some(project_agent_property(&v, "layrStateId"))),
+        layr_state_id: filtered_field(&record.layr_state_id, "layrStateId").ok()?,
         manual_connection_check: Some(
             project_agent_legacy_field(&manual_check, "manualConnectionCheck").ok()?,
         ),
@@ -1211,13 +1211,15 @@ pub(crate) fn agent_entity_from_record(
             .model
             .as_deref()
             .map(|s| Some(bound_sync_text(s, "model"))),
-        move_import_pending: extra
-            .remove("moveImportPending")
-            .map(|v| project_agent_property(&v, "moveImportPending")),
+        move_import_pending: match &record.move_import_pending {
+            Field::Missing => None,
+            Field::Null => Some(project_agent_property(&Value::Null, "moveImportPending")),
+            Field::Value(value) => {
+                Some(project_agent_legacy_field(value, "moveImportPending").ok()?)
+            }
+        },
         moved_from: filtered_field(&record.moved_from, "movedFrom").ok()?,
-        moved_to: extra
-            .remove("movedTo")
-            .map(|v| Some(project_agent_property(&v, "movedTo"))),
+        moved_to: filtered_field(&record.moved_to, "movedTo").ok()?,
         name: record
             .name
             .as_deref()
@@ -1278,9 +1280,7 @@ pub(crate) fn agent_entity_from_record(
             .permission_mode
             .map(|mode| Some(permission_mode(mode))),
         pinned: nullable_field(record.pinned.clone()),
-        project: extra
-            .remove("project")
-            .map(|v| Some(project_agent_property(&v, "project"))),
+        project: filtered_field(&record.project, "project").ok()?,
         project_folder: bounded_field(&record.project_folder, "projectFolder"),
         project_folder_revision: filtered_field(
             &record.project_folder_revision,
@@ -1306,9 +1306,11 @@ pub(crate) fn agent_entity_from_record(
         queued_settings: extra
             .remove("queuedSettings")
             .map(|v| Some(project_agent_property(&v, "queuedSettings"))),
-        quick_create: record
-            .quick_create
-            .map(|v| Some(Box::new(JsonValue::Boolean(v)))),
+        quick_create: record.quick_create.map(|value| {
+            Some(Box::new(
+                studio_runtime_schema::generated::JsonValue::Boolean(value),
+            ))
+        }),
         read_state: extra
             .remove("readState")
             .map(|v| Some(project_agent_property(&v, "readState"))),
@@ -1825,6 +1827,48 @@ pub fn retained_worktree_entity(member: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod projection_plan_tests {
+    #[test]
+    fn retained_layr_state_preserves_publication_presence_and_projection() {
+        for marker in [
+            None,
+            Some("null"),
+            Some("false"),
+            Some("0"),
+            Some("[]"),
+            Some("{}"),
+            Some(r#""state-id""#),
+            Some(r#"{"future":1}"#),
+        ] {
+            let suffix = marker
+                .map(|marker| format!(r#", "layrStateId":{marker}"#))
+                .unwrap_or_default();
+            let record = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default","provider":"codex"{suffix}}}"#
+            );
+            let owner: studio_runtime_store::AgentRecord = studio_json::from_str(&record).unwrap();
+            if marker == Some(r#""state-id""#) {
+                assert!(
+                    matches!(owner.layr_state_id.value(), Some(studio_runtime_store::StoredTransferValue::Known(actual)) if actual == "state-id")
+                );
+            }
+            let expected = super::agent_entity_view(
+                &studio_json::from_str(&record).unwrap(),
+                &Default::default(),
+            )
+            .unwrap();
+            let actual = super::agent_entity_from_record(owner, &Default::default()).unwrap();
+            assert_eq!(
+                actual
+                    .layr_state_id
+                    .map(|value| value.map(|raw| raw.0.as_str().to_owned())),
+                expected
+                    .get("layrStateId")
+                    .map(|value| (!value.is_null()).then(|| value.to_string())),
+                "{marker:?}"
+            );
+        }
+    }
+
     use super::{
         invalid_agent_view, openapi_document, project_persisted_record,
         schema_projection_properties,
@@ -1883,6 +1927,81 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn declared_project_preserves_publication_presence_and_legacy_projection() {
+        for project in [
+            None,
+            Some(json!(null)),
+            Some(json!("team")),
+            Some(json!({"future":true})),
+            Some(json!(false)),
+        ] {
+            let mut raw = json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"});
+            if let Some(project) = project {
+                raw["project"] = project;
+            }
+            let expected = super::agent_entity_view(&raw, &Default::default()).unwrap();
+            let owner = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+            let view = super::agent_entity_from_record(owner, &Default::default()).unwrap();
+            assert_eq!(
+                view.project
+                    .map(|value| value.map(|raw| raw.0.as_str().to_owned())),
+                expected
+                    .get("project")
+                    .map(|value| (!value.is_null()).then(|| value.to_string()))
+            );
+        }
+    }
+
+    #[test]
+    fn move_markers_keep_truthiness_and_publication_projection_independent() {
+        for key in ["movedTo", "moveImportPending"] {
+            for value in [
+                None,
+                Some(json!(null)),
+                Some(json!(false)),
+                Some(json!(0)),
+                Some(json!("")),
+                Some(json!([])),
+                Some(json!({})),
+                Some(json!(true)),
+                Some(json!("peer")),
+                Some(json!({"server":"peer","move":"id","future":true})),
+            ] {
+                let mut raw = json!({"id":"agent","rootId":"agent","epoch":1,"status":"idle","accountKey":"default"});
+                if let Some(value) = value {
+                    raw[key] = value;
+                }
+                let expected = super::agent_entity_view(&raw, &Default::default()).unwrap();
+                let owner = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
+                let view = super::agent_entity_from_record(owner, &Default::default()).unwrap();
+                if key == "movedTo" {
+                    let expected = expected
+                        .get(key)
+                        .map(|value| (!value.is_null()).then(|| value.to_string()));
+                    assert_eq!(
+                        view.moved_to
+                            .map(|value| value.map(|raw| raw.0.as_str().to_owned())),
+                        expected,
+                        "{key}"
+                    );
+                } else {
+                    assert_eq!(
+                        view.move_import_pending
+                            .map(|raw| raw.0.as_str().to_owned()),
+                        expected.get(key).map(ToString::to_string),
+                        "{key}"
+                    );
+                }
+                assert_eq!(
+                    view.can_send,
+                    expected.get("canSend").map(Value::as_bool),
+                    "{key}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn agent_projection_adds_only_project_path_and_token_usage() {
         let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
             "isLead":false, "status":"idle", "accountKey":"default", "cwd":"/source/project",
@@ -1897,6 +2016,14 @@ mod projection_plan_tests {
     }
 
     #[test]
+    fn agent_projection_refuses_unknown_status() {
+        let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
+            "status":"future-agent-state", "accountKey":"default"});
+        assert!(studio_runtime_store::AgentRecord::from_value(record.clone()).is_err());
+        assert!(super::agent_entity_view(&record, &Default::default()).is_none());
+    }
+
+    #[test]
     fn agent_projection_bounds_nested_legacy_values() {
         let mut deep = json!("leaf");
         for _ in 0..40 {
@@ -1905,7 +2032,7 @@ mod projection_plan_tests {
         let opaque = json!({"items": (0..300).collect::<Vec<_>>(), "deep": deep,
             "unknownNested": "preserved"});
         let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
-            "status":"future-agent-state", "turnStatus":"future-turn-state", "accountKey":"default", "isLead":true,
+            "status":"idle", "turnStatus":"future-turn-state", "accountKey":"default", "isLead":true,
             "nativeStatus":{"message":"x".repeat(2500), "unknownNested":"removed"},
             "movedTo":{"server":"peer", "move":"id", "unknownNested":"removed"},
             "voiceState":opaque, "unknownTopLevel":"removed"});
@@ -1927,11 +2054,11 @@ mod projection_plan_tests {
         for (view, expected) in [
             (
                 &full,
-                "bf2c98c63772f315aea388ba876057bbe22bba1dd75e0804363acaee9de51c00",
+                "3e93b7dfddbbf0d71bdc6f1f96d5f7006e285e85c4ab4b8f16fb95d0c374e139",
             ),
             (
                 &summary,
-                "4de158105e9b6cfe7f1198fccc912793c0b43dcbae3af01a454f82abdb73611e",
+                "52d7905f1bb65f9805f1d5354fad6c9f8ef8b147b59e54dc90088b45429cedc9",
             ),
             (
                 &detail,
@@ -1955,8 +2082,8 @@ mod projection_plan_tests {
         assert_eq!(detail["accountDestinations"].as_array().unwrap().len(), 200);
         assert_eq!(detail["voiceState"]["items"].as_array().unwrap().len(), 200);
         assert!(full.get("unknownTopLevel").is_none());
-        assert_eq!(full["status"], "future-agent-state");
-        assert_eq!(summary["status"], "future-agent-state");
+        assert_eq!(full["status"], "idle");
+        assert_eq!(summary["status"], "idle");
         assert_eq!(detail["turnStatus"], "future-turn-state");
         assert!(full["nativeStatus"].get("unknownNested").is_none());
         assert!(full["movedTo"].get("unknownNested").is_none());
@@ -2006,8 +2133,10 @@ mod projection_plan_tests {
                     stored.pending_settings.value().unwrap(),
                     "pendingSettings"
                 )
-                .unwrap(),
-                full["pendingSettings"]
+                .unwrap()
+                .0
+                .as_str(),
+                studio_json::to_string(&full["pendingSettings"]).unwrap()
             );
             let stored_full =
                 super::agent_entity_view(&stored.value(), &Default::default()).unwrap();
@@ -2090,8 +2219,10 @@ mod projection_plan_tests {
         let stored = studio_runtime_store::AgentRecord::from_value(record).unwrap();
         assert_eq!(
             super::project_agent_legacy_field(stored.activity.as_ref().unwrap(), "activity")
-                .unwrap(),
-            full["activity"]
+                .unwrap()
+                .0
+                .as_str(),
+            studio_json::to_string(&full["activity"]).unwrap()
         );
         assert_eq!(full["activity"]["tools"][0], json!({"name":"tool"}));
         assert!(full["activity"].get("dismissed").is_none());
@@ -2186,7 +2317,17 @@ mod projection_plan_tests {
         let stored = studio_runtime_store::AgentRecord::from_value(raw).unwrap();
         let legacy = super::agent_entity_view(&stored.value(), &Default::default()).unwrap();
         let mapped = super::agent_entity_from_record(stored, &Default::default()).unwrap();
-        assert_eq!(mapped.turn_status, Some(Some(json!({"future":true}))));
+        assert_eq!(
+            mapped
+                .turn_status
+                .as_ref()
+                .unwrap()
+                .as_ref()
+                .unwrap()
+                .0
+                .as_str(),
+            r#"{"future":true}"#
+        );
         let serialized = studio_json::to_string(&mapped).unwrap();
         let actual: Value = studio_json::from_str(&serialized).unwrap();
         assert_eq!(actual, legacy);
@@ -2248,7 +2389,7 @@ mod projection_plan_tests {
             nested = json!({"next":nested});
         }
         let record = json!({"id":"agent", "rootId":"agent", "epoch":1,
-            "status":"future-agent-state", "accountKey":"default", "compactions":0,
+            "status":"idle", "accountKey":"default", "compactions":0,
             "isLead":true, "cwd":"/fallback", "hostProjectPath":"x".repeat(12_001),
             "error":"e".repeat(2_500), "nativeStatus":{"phase":"safety", "message":"n".repeat(2_500)},
             "taskDefaultGate":{"command":"g".repeat(12_001), "timeout_ms":1000},
@@ -2304,11 +2445,11 @@ mod projection_plan_tests {
         for (view, expected) in [
             (
                 &full,
-                "4dd73cdcfd8f15839f31cd724775df7ebf434e5a8a8f2fba51108c8e575c2cac",
+                "2b47b6922bf7e358b0ddd9244470d7fec2380a817de5476e42e4eed3abab964b",
             ),
             (
                 &summary,
-                "202a774cc00e953857d6dae48354ca60451df85d479c5fb128a24e2ce9fc5648",
+                "eb3f9ff27da0a945956b312ffc0b285a2f874bd852f0d4398ceb01eee9eccc75",
             ),
             (
                 &detail,

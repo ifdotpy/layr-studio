@@ -118,6 +118,9 @@ pub struct SessionsStorageRow {
     pub account_key: String,
     #[db(codec = DomainTextCodec)]
     pub state: crate::domain::SessionState,
+    /// Hidden SQLite rowid, read only; physical DDL and logical key stay unchanged.
+    #[db(generated, column = "rowid")]
+    pub source_rowid: i64,
 }
 
 #[derive(DbTable)]
@@ -144,6 +147,17 @@ pub struct TurnsStorageRow {
     #[db(codec = ExactJsonCodec<TurnAttemptPayload>)]
     pub attempt: Option<ExactJson<TurnAttemptPayload>>,
     pub interrupt_ticket: Option<String>,
+    /// Frozen generated source selectors retain SQLite's original affinity.
+    #[db(generated)]
+    pub attempt_submitted: Option<i64>,
+    #[db(generated)]
+    pub attempt_connection_generation: Option<i64>,
+    #[db(generated)]
+    pub attempt_action: Option<String>,
+    #[db(generated)]
+    pub attempt_active_at_reservation: Option<i64>,
+    #[db(generated, column = "rowid")]
+    pub source_rowid: i64,
 }
 
 #[derive(DbTable)]
@@ -267,7 +281,7 @@ impl studio_db_api::Codec<crate::AgentStatus> for DomainTextCodec {
         Ok(value.as_str())
     }
     fn decode(_: &rusqlite::Connection, value: String) -> rusqlite::Result<crate::AgentStatus> {
-        Ok(crate::AgentStatus::parse(&value))
+        crate::AgentStatus::parse(&value).map_err(|_| rusqlite::Error::InvalidQuery)
     }
 }
 impl studio_db_api::Codec<Option<crate::AgentExecutionMode>> for DomainTextCodec {
@@ -546,10 +560,10 @@ mod tests {
             )
             .is_err()
         );
-        let future =
+        assert!(
             <super::DomainTextCodec as Codec<crate::AgentStatus>>::decode(&db, "future".into())
-                .unwrap();
-        assert_eq!(future.as_str(), "future");
+                .is_err()
+        );
     }
 
     #[test]

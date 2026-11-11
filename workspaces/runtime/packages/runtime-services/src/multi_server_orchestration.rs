@@ -1225,7 +1225,7 @@ impl RuntimeOrchestrationEffects {
                 let expected_remote = json!({"server":principal,"link":link_id});
                 if worker.epoch != epoch
                     || worker.extra.get("remoteWorker") != Some(&expected_remote)
-                    || !studio_runtime_store::truthy(worker.extra.get("movedTo"))
+                    || !worker.moved_to_active()
                     || worker.auto_wake != Some(true)
                     || worker.is_deleted()
                 {
@@ -1632,18 +1632,20 @@ async fn receive_remote_input(
                     )
                 })?;
                 let observed_control = worker
-                    .extra
-                    .get("remoteControlEpoch")
-                    .and_then(Value::as_i64)
+                    .remote_control_epoch
+                    .value()
+                    .and_then(|value| value.known())
+                    .copied()
                     .unwrap_or(0);
                 if observed_control < control_epoch_for_read {
                     return Ok((worker, None, Some(ExchangeOutcome::PreEffectWaiting)));
                 }
                 if observed_control != control_epoch_for_read
                     || worker
-                        .extra
-                        .get("remoteEpoch")
-                        .and_then(Value::as_i64)
+                        .remote_epoch
+                        .value()
+                        .and_then(|value| value.known())
+                        .copied()
                         .unwrap_or(0)
                         > remote_epoch_for_read
                 {
@@ -1706,9 +1708,10 @@ async fn receive_remote_input(
             })?;
             if current.epoch != worker.epoch
                 || current
-                    .extra
-                    .get("remoteControlEpoch")
-                    .and_then(Value::as_i64)
+                    .remote_control_epoch
+                    .value()
+                    .and_then(|value| value.known())
+                    .copied()
                     .unwrap_or(0)
                     != control_epoch
             {
@@ -1726,9 +1729,7 @@ async fn receive_remote_input(
                     &json!({"delivery":delivery}),
                 )?;
             }
-            if studio_runtime_store::truthy(current.extra.get("moveImportPending"))
-                || studio_runtime_store::truthy(current.extra.get("movedTo"))
-            {
+            if current.move_import_pending_active() || current.moved_to_active() {
                 crate::event_write::enqueue_recovery_event(
                     tx,
                     &current,

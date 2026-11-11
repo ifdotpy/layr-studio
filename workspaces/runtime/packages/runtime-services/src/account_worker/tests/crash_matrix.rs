@@ -239,9 +239,9 @@ async fn a_replacement_waits_for_its_own_recovery_before_the_health_turn() {
                     ..Default::default()
                 })), ..Default::default()
             }));
-            owner.extra.insert("contextRepairWait".into(), json!({"scope":"native","events":["annotation:input"],
+            owner.context_repair_wait = serde::Deserialize::deserialize(json!({"scope":"native","events":["annotation:input"],
                 "source":{"id":agent,"epoch":epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null},
-                "error":"Context repair waits for a confirmed input receipt: annotation:input","nextCheckAt":0}));
+                "error":"Context repair waits for a confirmed input receipt: annotation:input","nextCheckAt":0})).expect("typed wait fixture");
             owner.start_attempt.take();
             AgentRepository::put(tx, &owner)?;
             tx.execute("UPDATE runtime_events SET status='uncertain',error='Unknown native input outcome' WHERE id='annotation:input'", [])?;
@@ -662,9 +662,9 @@ async fn health_turn_waits_for_pending_recovery_history() {
                     "threadId":"fake-thread-0","events":[event],"submitted":true,
                     "executionOutcome":"unknown","created":1.0,"connectionGeneration":1});
                 agent.restart_recovery = Some(Box::new(studio_runtime_schema::recovery_record::RecoveryFields { stage: Some("held".into()), start_attempt: Some(Box::new(serde::Deserialize::deserialize(attempt).expect("typed fixture"))), ..Default::default() }));
-                agent.extra.insert("contextRepairWait".into(), json!({"error":"unconfirmed input",
+                agent.context_repair_wait = serde::Deserialize::deserialize(json!({"error":"unconfirmed input",
                     "scope":"native","events":[event],"nextCheckAt":0,
-                    "source":{"id":agent_id,"epoch":agent.epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}}));
+                    "source":{"id":agent_id,"epoch":agent.epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}})).expect("typed wait fixture");
                 AgentRepository::put(tx, &agent)?;
                 tx.execute("UPDATE runtime_events SET status='uncertain' WHERE id=?1", [event])?;
                 Ok::<(), WorkerError>(())

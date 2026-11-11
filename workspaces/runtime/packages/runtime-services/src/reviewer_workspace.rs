@@ -14,9 +14,10 @@ pub fn read_only_copy(record: &studio_runtime_store::AgentRecord) -> Option<&str
 
 pub fn scratch_dir(record: &studio_runtime_store::AgentRecord) -> Option<&str> {
     record
-        .extra
-        .get("layrScratch")
-        .and_then(studio_json::Value::as_str)
+        .layr_scratch
+        .value()
+        .and_then(|value| value.known())
+        .and_then(|path| path.to_str())
 }
 
 pub(crate) fn ensure_scratch(
@@ -134,9 +135,9 @@ pub async fn prepare(
                     agent.worktree = Some(true);
                     agent.worker_base_commit = Some(head.as_str().to_owned());
                     let scratch = scratch.as_ref().ok_or(ReviewerWorkspaceError::Changed)?;
-                    agent
-                        .extra
-                        .insert("layrScratch".into(), studio_json::json!(scratch));
+                    agent.layr_scratch = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferValue::Known(scratch.clone()),
+                    );
                 }
             }
             AgentRepository::put(tx, &agent)?;

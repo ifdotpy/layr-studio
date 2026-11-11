@@ -19,14 +19,17 @@
 //! read as 1 and 0, JSON null and an absent field as SQL NULL). A column
 //! declared without a type keeps the JSON value's own SQL type, for fields
 //! whose stored JSON type is not fixed. There are no CHECK constraints: the
-//! record schema owns field types and values (`AgentStatus::Other` keeps a
-//! status of a newer build), and readers refuse an invalid record by name; a
+//! record schema owns field types and values, and normal readers refuse an
+//! unknown status or invalid record by name; held evidence stays separate. A
 //! CHECK would instead make such a row unwritable. Malformed JSON is refused
 //! at write.
 
 use std::sync::LazyLock;
 
 use crate::StoreResult;
+
+/// Typed successor contracts; installed only by the reviewed family cutover.
+pub mod typed;
 
 /// The agents table.
 pub const AGENT_TABLE: &str = "runtime_agents";

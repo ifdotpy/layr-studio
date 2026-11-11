@@ -117,6 +117,7 @@ pub mod task_results;
 pub mod terminal_ingress;
 pub mod terminal_record;
 pub mod transcript_asset;
+pub mod transcript_cache;
 pub mod transcript_record;
 pub mod transcript_wire;
 pub mod usage;
@@ -699,7 +700,7 @@ fn sync_entity_envelope_matches(collection: &str, id: &str, payload: &Value) -> 
         && object.get("value").is_some_and(Value::is_object)
 }
 
-fn sync_entity_branch(collection: &str) -> SchemaResult<Option<String>> {
+pub fn sync_entity_branch(collection: &str) -> SchemaResult<Option<String>> {
     Ok(compiled_schemas()?
         .sync_entity_branches
         .get(collection)

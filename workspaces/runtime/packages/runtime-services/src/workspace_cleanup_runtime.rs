@@ -416,22 +416,20 @@ async fn complete_without_effect(
                 }
                 if current.image_workspace.value() == Some(&true)
                     && current
-                        .extra
-                        .get("imageWorkspaceReady")
-                        .cloned()
-                        .and_then(|value| bool::deserialize(value).ok())
+                        .image_workspace_ready
+                        .value()
+                        .and_then(|value| value.known())
+                        .copied()
                         != Some(true)
                     && current
-                        .extra
-                        .get("imageWorkspacePhase")
-                        .cloned()
-                        .and_then(|value| String::deserialize(value).ok())
-                        .as_deref()
+                        .image_workspace_phase
+                        .value()
+                        .and_then(|value| value.known())
+                        .map(String::as_str)
                         != Some("archived")
                 {
-                    current.extra.insert(
-                        "imageWorkspacePhase".into(),
-                        studio_runtime_store::projection_value(&"archived"),
+                    current.image_workspace_phase = Field::Value(
+                        studio_runtime_store::StoredTransferValue::Known("archived".into()),
                     );
                 }
                 if let Some(archive) = &mut current.agent_archive
@@ -944,7 +942,16 @@ impl<'a> WorktreeInput<'a> {
                 .cwd
                 .as_deref()
                 .ok_or(WorkspaceCleanupError::InvalidRecord)?,
-            common_dir: worktree_common_dir(owner.extra.get("worktreeCommonDir"))?,
+            common_dir: match &owner.worktree_common_dir {
+                studio_runtime_schema::queue_command::Field::Missing
+                | studio_runtime_schema::queue_command::Field::Null => None,
+                studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(path),
+                ) => Some(PathBuf::from(path)),
+                studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Unreadable(_),
+                ) => return Err(WorkspaceCleanupError::InvalidRecord),
+            },
             epoch: Some(owner.epoch),
             deleted_at: owner.deleted_at,
             archive: owner.agent_archive.clone(),
@@ -1240,19 +1247,10 @@ struct Lifecycle {
 }
 
 fn lifecycle_identity(agent: &AgentRecord) -> Result<Lifecycle, WorkspaceCleanupError> {
-    let deleted_archive: Option<AgentArchive> = if agent.agent_archive.is_none() {
-        agent
-            .extra
-            .get(DELETED_ARCHIVE_FIELD)
-            .cloned()
-            .map(Option::<AgentArchive>::deserialize)
-            .transpose()
-            .map_err(|_| WorkspaceCleanupError::InvalidRecord)?
-            .flatten()
-    } else {
-        None
-    };
-    let archive = agent.agent_archive.as_ref().or(deleted_archive.as_ref());
+    let archive = agent
+        .agent_archive
+        .as_ref()
+        .or_else(|| agent.deleted_archive.value().map(|archive| archive.value()));
     fn nullable<T>(value: Option<T>) -> Field<T> {
         value.map_or(Field::Null, Field::Value)
     }
@@ -1437,9 +1435,8 @@ fn apply_effect_result(
             );
         }
         CompletedEffect::SaveNativeTurn { state_id } => {
-            agent.extra.insert(
-                "layrStateId".into(),
-                studio_runtime_store::projection_value(state_id),
+            agent.layr_state_id = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_store::StoredTransferValue::Known(state_id.clone()),
             );
             if let Some(mut turns) = turn_saves(agent) {
                 for save in turns.values_mut() {
@@ -1480,9 +1477,8 @@ fn apply_effect_result(
                 "layrTurnSaves".into(),
                 studio_runtime_store::projection_value(&turns),
             );
-            agent.extra.insert(
-                "layrStateId".into(),
-                studio_runtime_store::projection_value(state_id),
+            agent.layr_state_id = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_store::StoredTransferValue::Known(state_id.clone()),
             );
         }
     }

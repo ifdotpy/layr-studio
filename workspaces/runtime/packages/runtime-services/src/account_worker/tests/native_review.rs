@@ -121,7 +121,11 @@ async fn reviewer_thread_receipt_uses_scratch_cwd() {
                     let mut row = AgentRepository::get(tx, &AgentId::from(id.as_str()))?.unwrap();
                     row.cwd = Some(copy.clone());
                     row.layr_read_cwd = Some(copy.into());
-                    row.extra.insert("layrScratch".into(), json!(scratch_text));
+                    row.layr_scratch = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferValue::Known(std::path::PathBuf::from(
+                            scratch_text,
+                        )),
+                    );
                     row.review_assignment = Some(
                         studio_runtime_schema::review::ReviewAssignment::new(
                             studio_runtime_schema::review::WorkspaceMode::Worktree,

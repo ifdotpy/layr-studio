@@ -357,7 +357,8 @@ async fn callback_remote_message_uses_the_existing_federation_outbox() {
             )?
             .expect("callback actor fixture");
             actor.auto_wake = Some(true);
-            actor.extra.insert("movedTo".into(), json!("server-two"));
+            actor.moved_to = serde::Deserialize::deserialize(json!("server-two"))
+                .expect("typed fixture movedTo");
             actor.extra.insert(
                 "remoteWorker".into(),
                 json!({"server":"peer-server","link":"callback-link"}),

@@ -86,21 +86,15 @@ impl WorkItemsRepository {
         connection: &Connection,
         agent: &AgentRecord,
     ) -> StoreResult<Option<(String, Option<String>)>> {
-        let Some(pointer) = agent
-            .extra
-            .get("activeExecution")
-            .filter(|value| !value.is_null())
-        else {
-            return Ok(None);
-        };
         let invalid = || StoreError::InvalidStoredObject {
             table: "runtime_agents",
             id: agent.id.0.clone(),
         };
-        let studio_runtime_schema::json_object::JsonObject(pointer) =
-            <studio_runtime_schema::json_object::JsonObject<crate::records::ActiveExecutionView> as serde::Deserialize>::deserialize(pointer).map_err(|_| invalid())?;
-        let id = pointer.run_id.as_deref().ok_or_else(invalid)?;
-        let attempt = pointer.attempt_id;
+        let Some(pointer) = agent.active_execution().map_err(|_| invalid())? else {
+            return Ok(None);
+        };
+        let id = pointer.run_id_text().ok_or_else(invalid)?;
+        let attempt = pointer.attempt_id_text().map(str::to_owned);
         let raw: Option<String> = connection
             .query_row(
                 "SELECT record FROM runtime_execution_runs WHERE id=?1",
@@ -847,18 +841,16 @@ mod receipt_domain_tests {
             WorkItemsRepository::submission_identity(&db, &agent).expect("no current owner"),
             None
         );
-        agent.extra.insert(
-            "activeExecution".into(),
-            json!({"runId":"old","attemptId":"old-attempt"}),
-        );
+        agent.active_execution =
+            serde::Deserialize::deserialize(json!({"runId":"old","attemptId":"old-attempt"}))
+                .expect("typed current identity");
         assert_eq!(
             WorkItemsRepository::submission_identity(&db, &agent).expect("current identity"),
             Some(("old".into(), Some("old-attempt".into())))
         );
-        agent.extra.insert(
-            "activeExecution".into(),
-            json!({"runId":"old","attemptId":null}),
-        );
+        agent.active_execution =
+            serde::Deserialize::deserialize(json!({"runId":"old","attemptId":null}))
+                .expect("typed null attempt identity");
         assert_eq!(
             WorkItemsRepository::submission_identity(&db, &agent)
                 .expect("current run without attempt"),

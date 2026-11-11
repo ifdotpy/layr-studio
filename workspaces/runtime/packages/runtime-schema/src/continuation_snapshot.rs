@@ -5,7 +5,7 @@ use crate::{
     shared_values::MAX_SAFE_INTEGER,
 };
 use serde::{Deserialize, Deserializer, Serialize, de::Error};
-use std::{borrow::Cow, collections::BTreeMap};
+use std::borrow::Cow;
 use studio_json::{Number, Value};
 
 /// A JSON string limited in Unicode code points.
@@ -137,11 +137,22 @@ fn optional_string_enum<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
     crate::string_enum::deserialize(d).map(Some)
 }
 pub type ContinuationSnapshotRecord = JsonObject<ContinuationSnapshot>;
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum ContinuationRecord {
     Usage(UsageContinuation),
     Capacity(CapacityContinuation),
+}
+impl<'de> Deserialize<'de> for ContinuationRecord {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(usage) = studio_json::from_str(raw.0.as_str()) {
+            return Ok(Self::Usage(usage));
+        }
+        studio_json::from_str(raw.0.as_str())
+            .map(Self::Capacity)
+            .map_err(D::Error::custom)
+    }
 }
 impl ContinuationRecord {
     pub fn id(&self) -> &str {
@@ -289,7 +300,8 @@ pub struct ContinuationAgent {
     pub usage_resume_enabled: Option<bool>,
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+crate::raw_json_payload! { flat
+#[derive(Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageContinuation {
     pub account_key: BoundedString<1, 4096>,
@@ -346,8 +358,8 @@ pub struct UsageContinuation {
     pub last_checked_at: Field<BoundedNumber>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub waiting_for_auth: Option<bool>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -426,6 +438,17 @@ pub(crate) fn check_capacity_schema_parity() -> Result<(), String> {
 mod tests {
     use super::*;
     use studio_json::json;
+
+    #[test]
+    fn continuation_record_variant_keeps_usage_raw_extensions() {
+        let future = r#"{ "n":1.00e+3, "dup":1, "dup":2 }"#;
+        let raw = format!(
+            r#"{{"id":"x","accountKey":"x","threadId":"x","epoch":0,"turnId":"x","status":"scheduled","failedAt":0,"future":{future}}}"#
+        );
+        let record: ContinuationRecord = studio_json::from_str(&raw).unwrap();
+        assert!(matches!(&record, ContinuationRecord::Usage(_)));
+        assert!(studio_json::to_string(&record).unwrap().contains(future));
+    }
 
     #[test]
     fn continuation_record_owners_preserve_numbers_and_refuse_capacity_extensions() {

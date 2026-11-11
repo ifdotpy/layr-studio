@@ -608,16 +608,16 @@ fn membership(
                 other: p.to_owned(),
             });
         }
-        if [
-            "movedTo",
-            "remoteWorker",
-            "remoteParent",
-            "remoteOrigin",
-            "relocation",
-            "teleportPending",
-        ]
-        .iter()
-        .any(|key| studio_runtime_store::truthy(agent.extra.get(*key)))
+        if agent.moved_to_active()
+            || [
+                "remoteWorker",
+                "remoteParent",
+                "remoteOrigin",
+                "relocation",
+                "teleportPending",
+            ]
+            .iter()
+            .any(|key| studio_runtime_store::truthy(agent.extra.get(*key)))
         {
             return Err(Error::Remote);
         }
@@ -756,6 +756,22 @@ pub(crate) fn admission_version(
 #[cfg(test)]
 mod membership_tests {
     use super::*;
+
+    #[test]
+    fn moved_project_member_is_refused_before_deletion() {
+        let agent: AgentRecord = studio_json::from_str(
+            r#"{"id":"member","rootId":"member","epoch":1,"status":"paused","accountKey":"default","projectId":"project","projectServerId":"owner","movedTo":{"server":"remote","move":"move-id"}}"#,
+        ).expect("deserialized member with only movedTo as remote evidence");
+        let result = membership(
+            &BTreeMap::from([("member".into(), agent)]),
+            "project",
+            &BTreeSet::from(["project".into()]),
+            "owner",
+            &BTreeSet::new(),
+            &BTreeMap::new(),
+        );
+        assert!(matches!(result, Err(Error::Remote)), "{result:?}");
+    }
 
     #[test]
     fn explicitly_owned_agents_in_another_project_line_are_not_members() {

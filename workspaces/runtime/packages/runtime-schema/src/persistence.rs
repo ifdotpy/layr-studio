@@ -216,15 +216,15 @@ domain!(AttemptSubmission { Unsent=>"unsent", Pending=>"pending", Accepted=>"acc
 domain!(ExecutionEffectKind { Spawn=>"spawn", ToolRequests=>"tool_requests", Requests=>"requests", Monitors=>"monitors", TaskSubmit=>"task_submit", Unrecognized=>"unrecognized" });
 domain!(ExecutionEffectStatus { Unknown=>"unknown", Idle=>"idle", Queued=>"queued", Starting=>"starting", Running=>"running", Waiting=>"waiting", WaitingOnMonitor=>"waiting_on_monitor", Approval=>"approval", Completed=>"completed", Interrupted=>"interrupted", Failed=>"failed", Blocked=>"blocked", Paused=>"paused", Parked=>"parked", Abandoned=>"abandoned", CapacityRetry=>"capacity-retry", Pending=>"pending", Cancelled=>"cancelled", Answering=>"answering", Answered=>"answered", Uncertain=>"uncertain", Resolved=>"resolved", Lost=>"lost", Expired=>"expired", Deleted=>"deleted" });
 domain!(ExecutionNodeStatus { Unknown=>"unknown", Idle=>"idle", Queued=>"queued", Starting=>"starting", Running=>"running", Waiting=>"waiting", WaitingOnMonitor=>"waiting_on_monitor", Approval=>"approval", Completed=>"completed", Interrupted=>"interrupted", Failed=>"failed", Blocked=>"blocked", Paused=>"paused", Parked=>"parked", Abandoned=>"abandoned", CapacityRetry=>"capacity-retry" });
-domain!(WorkEffectStatus { Completed=>"completed", Terminal=>"terminal", Pending=>"pending", Retryable=>"retryable", Submitted=>"submitted", Unknown=>"unknown", NotSent=>"not_sent", Complete=>"complete", Applied=>"applied", Failed=>"failed", Cancelled=>"cancelled" });
-domain!(TitleStatus { Scheduled=>"scheduled", Written=>"written", Invalid=>"invalid", Discarded=>"discarded", Pending=>"pending", Submitted=>"submitted", Unknown=>"unknown", NotSent=>"not_sent", Applied=>"applied", Failed=>"failed" });
+domain!(WorkEffectStatus { Completed = 0 => "completed", Terminal = 1 => "terminal", Pending = 2 => "pending", Retryable = 3 => "retryable", Submitted = 4 => "submitted", Unknown = 5 => "unknown", NotSent = 6 => "not_sent", Complete = 7 => "complete", Applied = 8 => "applied", Failed = 9 => "failed", Cancelled = 10 => "cancelled" });
+domain!(TitleStatus { Scheduled = 0 => "scheduled", Written = 1 => "written", Invalid = 2 => "invalid", Discarded = 3 => "discarded", Pending = 4 => "pending", Submitted = 5 => "submitted", Unknown = 6 => "unknown", NotSent = 7 => "not_sent", Applied = 8 => "applied", Failed = 9 => "failed" });
 domain!(VmLaunchStatus { Preparing=>"preparing", Submitted=>"submitted", Unknown=>"unknown", Ready=>"ready", Failed=>"failed" });
-domain!(IdleEpisodeOutcome { Compacted=>"compacted", Disabled=>"disabled", CompactionOff=>"compaction_off", IdleCompactionOff=>"idle_compaction_off", PrefixChanged=>"prefix_changed", Started=>"started", Dispatched=>"dispatched", Failed=>"failed", TtlChanged=>"ttl_changed", Lapsed=>"lapsed", Small=>"small", NewerRequest=>"newer_request", NearLimit=>"near_limit", Active=>"active", QueuedInput=>"queued_input", Stopped=>"stopped", NoHost=>"no_host", WouldCompact=>"would_compact" });
+domain!(IdleEpisodeOutcome { Compacted = 0 => "compacted", Disabled = 1 => "disabled", CompactionOff = 2 => "compaction_off", IdleCompactionOff = 3 => "idle_compaction_off", PrefixChanged = 4 => "prefix_changed", Started = 5 => "started", Dispatched = 6 => "dispatched", Failed = 7 => "failed", TtlChanged = 8 => "ttl_changed", Lapsed = 9 => "lapsed", Small = 10 => "small", NewerRequest = 11 => "newer_request", NearLimit = 12 => "near_limit", Active = 13 => "active", QueuedInput = 14 => "queued_input", Stopped = 15 => "stopped", NoHost = 16 => "no_host", WouldCompact = 17 => "would_compact" });
 domain!(ProjectRemovalReason { Delete=>"delete" });
 domain!(EventKind { User=>"user", Followup=>"followup", AgentMessage=>"agent_message", ChildResult=>"child_result", ChildStopped=>"child_stopped", Complaint=>"complaint", ComplaintResponse=>"complaint_response", ChatReview=>"chat_review", WorkReview=>"work_review", WorkDecision=>"work_decision", WorkReady=>"work_ready", MonitorExit=>"monitor_exit", MonitorStall=>"monitor_stall", Rule=>"rule", RuleMissed=>"rule_missed", RuleStall=>"rule_stall", RadioTurn=>"radio_turn", BrowserDeclined=>"browser_declined", BrowserJoined=>"browser_joined", BrowserOutcome=>"browser_outcome", BrowserUnanswered=>"browser_unanswered", EventWake=>"event_wake", MonitorCancelled=>"monitor_cancelled", MonitorOutput=>"monitor_output", PlanUpdate=>"plan_update", ShellPolicy=>"shell_policy", WorkReleased=>"work_released", WorkResultInvalid=>"work_result_invalid", ContextRepairWait=>"context_repair_wait", MonitorCorrection=>"monitor_correction", RuleHold=>"rule_hold" });
 domain!(EventStatus { StoredOnly=>"stored_only", Pending=>"pending", Reserved=>"reserved", Dispatching=>"dispatching", Delivered=>"delivered", Uncertain=>"uncertain", Cancelled=>"cancelled", Failed=>"failed" });
 domain!(DeliveryStatus { Queued=>"queued", StoredOnly=>"stored_only", Accepted=>"accepted", Sent=>"sent", Cancelled=>"cancelled", Pending=>"pending", Delivered=>"delivered", Failed=>"failed", Uncertain=>"uncertain" });
-domain!(MigrationStatus { Pending=>"pending", Running=>"running", WaitingForSpace=>"waitingForSpace", Error=>"error", Complete=>"complete" });
+domain!(MigrationStatus { Pending = 0 => "pending", Running = 1 => "running", WaitingForSpace = 2 => "waitingForSpace", Error = 3 => "error", Complete = 4 => "complete" });
 domain!(ReceiptMigrationPhase { Prepare=>"prepare", Move=>"move", Finish=>"finish" });
 domain!(
     /// Why work needs attention. The service owns classification and publication.
@@ -510,6 +510,53 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "sqlite")]
+    #[test]
+    fn f1_migration_status_uses_integer_codes_and_unchanged_wire_names() {
+        let cases = [
+            (MigrationStatus::Pending, 0, "pending"),
+            (MigrationStatus::Running, 1, "running"),
+            (MigrationStatus::WaitingForSpace, 2, "waitingForSpace"),
+            (MigrationStatus::Error, 3, "error"),
+            (MigrationStatus::Complete, 4, "complete"),
+        ];
+        for (status, code, wire) in cases {
+            assert_eq!(
+                rusqlite::types::ToSql::to_sql(&status).unwrap(),
+                rusqlite::types::ToSqlOutput::Owned(rusqlite::types::Value::Integer(code))
+            );
+            assert_eq!(status.as_str(), wire);
+            assert_eq!(wire.parse::<MigrationStatus>(), Ok(status));
+            assert_eq!(
+                studio_json::to_string(&status).unwrap(),
+                format!("\"{wire}\"")
+            );
+        }
+        assert!("other".parse::<MigrationStatus>().is_err());
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn retained_agent_enums_use_permanent_integer_codes() {
+        use studio_db_api::DbValue;
+        macro_rules! codes {
+            ($owner:ident { $($variant:ident = $code:literal => $wire:literal),+ }) => {{
+                assert_eq!($owner::SQL_TYPE, "INTEGER");
+                assert_eq!($owner::CODE_NAMES, &[$(($code, stringify!($variant))),+]);
+                $(
+                    assert_eq!($owner::$variant as i64, $code);
+                    assert_eq!($owner::$variant.as_str(), $wire);
+                    assert_eq!($wire.parse::<$owner>(), Ok($owner::$variant));
+                    assert_eq!(studio_json::to_string(&$owner::$variant).unwrap(), format!("\"{}\"", $wire));
+                )+
+                assert!("unrecognized".parse::<$owner>().is_err());
+            }};
+        }
+        codes!(TitleStatus { Scheduled = 0 => "scheduled", Written = 1 => "written", Invalid = 2 => "invalid", Discarded = 3 => "discarded", Pending = 4 => "pending", Submitted = 5 => "submitted", Unknown = 6 => "unknown", NotSent = 7 => "not_sent", Applied = 8 => "applied", Failed = 9 => "failed" });
+        codes!(WorkEffectStatus { Completed = 0 => "completed", Terminal = 1 => "terminal", Pending = 2 => "pending", Retryable = 3 => "retryable", Submitted = 4 => "submitted", Unknown = 5 => "unknown", NotSent = 6 => "not_sent", Complete = 7 => "complete", Applied = 8 => "applied", Failed = 9 => "failed", Cancelled = 10 => "cancelled" });
+        codes!(IdleEpisodeOutcome { Compacted = 0 => "compacted", Disabled = 1 => "disabled", CompactionOff = 2 => "compaction_off", IdleCompactionOff = 3 => "idle_compaction_off", PrefixChanged = 4 => "prefix_changed", Started = 5 => "started", Dispatched = 6 => "dispatched", Failed = 7 => "failed", TtlChanged = 8 => "ttl_changed", Lapsed = 9 => "lapsed", Small = 10 => "small", NewerRequest = 11 => "newer_request", NearLimit = 12 => "near_limit", Active = 13 => "active", QueuedInput = 14 => "queued_input", Stopped = 15 => "stopped", NoHost = 16 => "no_host", WouldCompact = 17 => "would_compact" });
+    }
+
+    #[cfg(feature = "sqlite")]
     domain!(IntegerCodecWitness { Pending = 7 => "pendingWire", Complete = 23 => "completeWire" });
     #[cfg(feature = "sqlite")]
     #[test]
@@ -614,15 +661,11 @@ mod tests {
                 studio_json::to_string(&parsed).expect("serde"),
                 format!("\"{wire}\"")
             );
-            db.execute("INSERT INTO witness VALUES(?1)", [&parsed])
-                .expect("enum SQL codec");
+            db.execute("INSERT INTO witness VALUES(?1)", [wire])
+                .expect("legacy wire CHECK");
             let decoded: T = db
-                .query_row(
-                    "SELECT value FROM witness ORDER BY rowid DESC LIMIT 1",
-                    [],
-                    |row| row.get(0),
-                )
-                .expect("SQL decode");
+                .query_row("SELECT ?1", [&parsed], |row| row.get(0))
+                .expect("native SQL codec roundtrip");
             assert_eq!(decoded, parsed);
         }
         assert!(

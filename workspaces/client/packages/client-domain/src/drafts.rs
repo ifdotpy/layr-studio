@@ -10,7 +10,7 @@ pub const MAX_DRAFT_TEXT_CODEPOINTS: usize = 100_000;
 /// Largest stored branch identity, measured in UTF-8 bytes.
 pub const MAX_DRAFT_ID_BYTES: usize = 300;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, JsonSchema)]
+#[derive(Clone, Debug, Serialize, PartialEq, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct DraftVersion {
     pub id: String,
@@ -31,7 +31,77 @@ pub struct DraftVersion {
     // Historical extras survive decoding, merging, and pending push retries.
     #[serde(flatten)]
     #[schemars(skip)]
-    pub extra: BTreeMap<String, Value>,
+    pub extra: studio_json::raw_json::RawExtensions,
+}
+
+impl<'de> Deserialize<'de> for DraftVersion {
+    fn deserialize<D: serde::Deserializer<'de>>(decoder: D) -> Result<Self, D::Error> {
+        use studio_json::raw_json::RawExtensions;
+        struct DraftVisitor;
+        impl<'de> serde::de::Visitor<'de> for DraftVisitor {
+            type Value = RawExtensions;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a draft object")
+            }
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut members = RawExtensions::new();
+                while let Some(key) = map.next_key::<String>()? {
+                    let raw = map.next_value()?;
+                    if members.contains_key(&key)
+                        && matches!(
+                            key.as_str(),
+                            "id" | "session"
+                                | "device"
+                                | "text"
+                                | "updated"
+                                | "alternatives"
+                                | "seen"
+                        )
+                    {
+                        return Err(serde::de::Error::custom(format!(
+                            "duplicate draft field {key}"
+                        )));
+                    }
+                    members.insert(key, raw);
+                }
+                Ok(members)
+            }
+        }
+        fn required<T: serde::de::DeserializeOwned, E: serde::de::Error>(
+            members: &mut RawExtensions,
+            name: &'static str,
+        ) -> Result<T, E> {
+            let raw = members.remove(name).ok_or_else(|| E::missing_field(name))?;
+            studio_json::from_str(raw.as_str()).map_err(E::custom)
+        }
+        let mut members = decoder.deserialize_map(DraftVisitor)?;
+        let updated = match members.remove("updated") {
+            Some(raw) => legacy_updated(&mut studio_json::Deserializer::from_str(raw.as_str()))
+                .map_err(serde::de::Error::custom)?,
+            None => 0,
+        };
+        Ok(Self {
+            id: required(&mut members, "id")?,
+            session: required(&mut members, "session")?,
+            device: required(&mut members, "device")?,
+            text: required(&mut members, "text")?,
+            updated,
+            alternatives: if members.contains_key("alternatives") {
+                required(&mut members, "alternatives")?
+            } else {
+                Vec::new()
+            },
+            seen: if members.contains_key("seen") {
+                required(&mut members, "seen")?
+            } else {
+                BTreeMap::new()
+            },
+            extra: members,
+        })
+    }
 }
 
 fn safe_integer_schema(generator: &mut SchemaGenerator) -> Schema {
@@ -356,11 +426,22 @@ mod tests {
     }
 
     #[test]
+    fn publication_payload_draft_extensions_preserve_tokens_and_duplicate_members() {
+        let raw = r#"{"id":"d:s","device":"d","session":"s","text":"","future":1,"future": { "n":1.00,"n":9007199254740993 }}"#;
+        let draft: DraftVersion = studio_json::from_str(raw).unwrap();
+        assert_eq!(
+            studio_json::to_string(&draft.extra["future"]).unwrap(),
+            r#"{ "n":1.00,"n":9007199254740993 }"#
+        );
+    }
+
+    #[test]
     fn merge_retains_unknown_payload_fields_and_unicode_order() {
         let mut master = branch("one", "master", 10);
-        master
-            .extra
-            .insert("futureField".into(), studio_json::json!({"nested":true}));
+        master.extra.insert(
+            "futureField".into(),
+            studio_json::OwnedRawJson::from_string(r#"{"nested":true}"#.into()).unwrap(),
+        );
         master.alternatives = vec!["\u{ffff}".into(), "🦀".into()];
         let merged = merge(&master, &branch("one", "fork", 9)).unwrap();
         assert_eq!(merged.extra, master.extra);

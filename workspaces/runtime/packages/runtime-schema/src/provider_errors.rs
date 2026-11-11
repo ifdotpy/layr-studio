@@ -9,8 +9,9 @@ use studio_json::{Value, json};
 // Reserved for the complete original provider value; marks the normalized wire form.
 const STUDIO_RAW_EVIDENCE: &str = "studioRawEvidence";
 
+crate::raw_json_payload! { flat
 /// The provider-owned portion of an agent error that Studio displays or classifies.
-#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NativeProviderError {
     #[serde(default)]
@@ -28,8 +29,8 @@ pub struct NativeProviderError {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schemars(with = "Option<studio_json::Value>")]
     pub additional_details: Option<studio_json::OwnedRawJson>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions #[schemars(with = "BTreeMap<String, Value>")] pub extra,
+}
 }
 
 impl PartialEq for NativeProviderError {
@@ -49,29 +50,52 @@ impl PartialEq for NativeProviderError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum CodexErrorInfo {
     Text(String),
     Structured(BTreeMap<String, CodexErrorPayload>),
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+impl<'de> Deserialize<'de> for CodexErrorInfo {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(text) = studio_json::from_str::<String>(raw.0.as_str()) {
+            return Ok(Self::Text(text));
+        }
+        studio_json::from_str(raw.0.as_str())
+            .map(Self::Structured)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(untagged)]
 pub enum CodexErrorPayload {
     Detail(CodexErrorDetail),
-    Other(Value),
+    Other(#[schemars(with = "Value")] crate::raw_json::RawJson),
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+impl<'de> Deserialize<'de> for CodexErrorPayload {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        match studio_json::from_str::<CodexErrorDetail>(raw.0.as_str()) {
+            Ok(detail) => Ok(Self::Detail(detail)),
+            Err(_) => Ok(Self::Other(raw)),
+        }
+    }
+}
+
+crate::raw_json_payload! { flat
+#[derive(Clone, Debug, Default, PartialEq, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexErrorDetail {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub http_status_code: Option<u16>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turn_kind: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions #[schemars(with = "BTreeMap<String, Value>")] pub extra,
+}
 }
 
 pub fn native_provider_error_schema() -> Value {
@@ -98,7 +122,17 @@ pub enum AgentError {
 
 impl<'de> Deserialize<'de> for AgentError {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let original = Value::deserialize(deserializer)?;
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(mut canonical) = studio_json::from_str::<NativeProviderError>(raw.0.as_str())
+            && canonical.extra.contains_key(STUDIO_RAW_EVIDENCE)
+        {
+            if let Some(failure) = &mut canonical.claude_failure {
+                failure.present();
+            }
+            return Ok(Self::Provider(Box::new(canonical)));
+        }
+        let original: Value =
+            studio_json::from_str(raw.0.as_str()).map_err(serde::de::Error::custom)?;
         if let Value::String(text) = &original
             && readable_message(&original, 0).as_deref() == Some(text.as_str())
         {
@@ -161,7 +195,11 @@ impl<'de> Deserialize<'de> for AgentError {
             claude_failure,
             data,
             additional_details,
-            extra: fields.into_iter().collect(),
+            extra: fields
+                .into_iter()
+                .map(|(name, value)| studio_json::to_raw_value(&value).map(|raw| (name, raw)))
+                .collect::<Result<_, _>>()
+                .map_err(serde::de::Error::custom)?,
         })))
     }
 }
@@ -248,7 +286,7 @@ impl AgentError {
             Self::Provider(error) => error
                 .extra
                 .get(STUDIO_RAW_EVIDENCE)
-                .and_then(Value::as_str)
+                .filter(|raw| raw.as_str().trim_start().starts_with('"'))
                 .map(|_| error.message.as_str()),
         }
     }
@@ -378,6 +416,56 @@ pub fn schemas() -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn canonical_error_marker_null_and_malformed_fallback_keep_legacy_rules() {
+        let canonical = json!({"message":"failure","studioRawEvidence":null});
+        let decoded: AgentError = studio_json::from_str(&canonical.to_string()).unwrap();
+        let AgentError::Provider(decoded) = decoded else {
+            panic!("canonical provider error")
+        };
+        assert_eq!(decoded.message, "failure");
+        assert_eq!(decoded.extra.len(), 1);
+        assert_eq!(decoded.extra[STUDIO_RAW_EVIDENCE].as_str(), "null");
+        for receipt in [
+            json!({"message":"failure"}),
+            json!({"message":7,"studioRawEvidence":null,"code":429}),
+            json!(42),
+            json!(null),
+            json!([1]),
+            json!(true),
+        ] {
+            let decoded: AgentError = studio_json::from_str(&receipt.to_string()).unwrap();
+            let AgentError::Provider(normalized) = decoded else {
+                panic!("normalized provider error")
+            };
+            assert_eq!(
+                normalized.extra[STUDIO_RAW_EVIDENCE].as_str(),
+                receipt.to_string()
+            );
+            if receipt.get("code") == Some(&json!(429)) {
+                assert_eq!(normalized.code.as_deref(), Some("429"));
+            }
+        }
+        let decoded: AgentError = studio_json::from_str(r#""plain failure""#).unwrap();
+        assert!(matches!(decoded, AgentError::Message(message) if message == "plain failure"));
+    }
+
+    #[test]
+    fn legacy_structured_codex_information_survives_raw_entry() {
+        let info = json!({"httpConnectionFailed":{"httpStatusCode":429,"future":{"n":1}}});
+        let receipt = json!({"message":"failure","codexErrorInfo":info});
+        let decoded: AgentError = studio_json::from_str(&receipt.to_string()).unwrap();
+        let AgentError::Provider(normalized) = decoded else {
+            panic!("normalized provider error")
+        };
+        let expected: CodexErrorInfo = studio_json::from_str(&info.to_string()).unwrap();
+        assert_eq!(normalized.codex_error_info, Some(expected));
+        assert_eq!(
+            normalized.extra[STUDIO_RAW_EVIDENCE].as_str(),
+            receipt.to_string()
+        );
+    }
 
     #[test]
     fn native_provider_error_contract_matches_owner() {
@@ -626,7 +714,10 @@ mod tests {
         };
         assert_eq!(error.message, r#"{"detail":"no"}"#);
         assert_eq!(error.code, None);
-        assert_eq!(error.extra.get("studioRawEvidence"), Some(&receipt));
+        assert_eq!(
+            error.extra.get("studioRawEvidence").map(|raw| raw.as_str()),
+            Some(studio_json::to_string(&receipt).unwrap().as_str())
+        );
         assert_eq!(error.data.as_ref().unwrap().as_str(), r#"{"trace":"x"}"#);
         assert!(
             studio_json::to_string(&error)

@@ -53,4 +53,13 @@ pub trait Codec<T> {
         T: 'a;
     fn encode<'a>(connection: &Connection, value: &'a T) -> rusqlite::Result<Self::Encoded<'a>>;
     fn decode(connection: &Connection, value: Self::Stored) -> rusqlite::Result<T>;
+    /// Decode a field with its declared row context. Contextual codecs must look
+    /// up other columns by name and refuse a projection that omits them.
+    fn decode_row(
+        connection: &Connection,
+        row: &crate::CodecRow<'_>,
+        index: usize,
+    ) -> rusqlite::Result<T> {
+        Self::decode(connection, Self::Stored::read(row, index)?)
+    }
 }

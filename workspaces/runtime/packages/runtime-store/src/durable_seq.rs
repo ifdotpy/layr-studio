@@ -321,22 +321,6 @@ pub fn mark(connection: &Connection, tbl: &str, id: &str) -> StoreResult<()> {
     Ok(())
 }
 
-/// Give one row of an `online_backfill` table its entry, unless it has one. Rows written
-/// after the triggers exist have an entry from them, so this only reaches old rows. Safe
-/// to repeat: a row that has an entry keeps its number.
-pub fn number_row(connection: &Connection, table: &str, rowid: i64) -> StoreResult<()> {
-    // Raw SQL: shared sequence allocation uses the aggregate NEXT expression atomically.
-    connection.execute(
-        &format!(
-            "INSERT INTO durable_rows(tbl,id,seq,deleted,at)
-               SELECT '{table}',id,{NEXT},0,0 FROM {table} WHERE rowid=?1
-             ON CONFLICT(tbl,id) DO NOTHING"
-        ),
-        [rowid],
-    )?;
-    Ok(())
-}
-
 /// A live row at or below the returned cursor.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DurableRow {

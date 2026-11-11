@@ -73,6 +73,10 @@ pub(super) async fn switch_chat_with(
                     "layrReadCwd" => current.layr_read_cwd = value.as_str().map(Into::into),
                     "layrStoreRoot" => current.layr_store_root = value.as_str().map(str::to_owned),
                     "layrReady" => current.layr_ready = value.as_bool(),
+                    "layrStateId" => {
+                        current.layr_state_id = serde::Deserialize::deserialize(value.clone())
+                            .map_err(|error| NativeLayrError::Refused(error.to_string()))?
+                    }
                     _ => {
                         current.extra.insert(key.clone(), value.clone());
                     }

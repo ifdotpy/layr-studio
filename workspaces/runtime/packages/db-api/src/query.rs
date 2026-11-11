@@ -253,7 +253,7 @@ impl<'c, D: Database> Tx<'c, D> {
         }
     }
     #[doc(hidden)]
-    pub fn connection(&self) -> &Connection {
+    pub(crate) fn connection(&self) -> &Connection {
         self.transaction
     }
     pub fn get<R: Table<Database = D>>(&self, key: &R::Key) -> rusqlite::Result<Option<R>> {

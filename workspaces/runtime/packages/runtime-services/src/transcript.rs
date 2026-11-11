@@ -471,7 +471,7 @@ fn pull_scope_cached_in(
     let payload: Value =
         studio_json::from_str(&raw).map_err(|_| invalid_stored("sync_entities", scope))?;
     if !deleted {
-        validate_cached_payload(scope, &payload)?;
+        validate_cached_payload(scope, &raw)?;
     }
     Ok(Some(TranscriptRepository::pull_payload(
         transaction,
@@ -528,21 +528,9 @@ fn pull_scope_in(
     Ok(response)
 }
 
-fn validate_cached_payload(scope: &str, payload: &Value) -> Result<(), TranscriptError> {
-    let cache_id = format!("{scope}/@revision");
-    let items = payload
-        .get("items")
-        .and_then(Value::as_array)
-        .ok_or_else(|| invalid_stored("sync_entities", &cache_id))?;
-    if payload.get("truncated").and_then(Value::as_bool).is_none() {
-        return Err(invalid_stored("sync_entities", &cache_id));
-    }
-    for item in items {
-        item["id"]
-            .as_str()
-            .ok_or_else(|| invalid_stored("sync_entities", &cache_id))?;
-    }
-    Ok(())
+fn validate_cached_payload(scope: &str, raw: &str) -> Result<(), TranscriptError> {
+    studio_runtime_schema::transcript_cache::validate_live_page(raw)
+        .map_err(|_| invalid_stored("sync_entities", &format!("{scope}/@revision")))
 }
 
 pub async fn item(
@@ -1540,6 +1528,27 @@ mod tests {
         assert_eq!(
             payload(&new_delta)["items"].as_array().map(Vec::len),
             Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn f1_transcript_pull_cache_is_admitted_by_state_check() {
+        let (root, store) = chat(false, 3).await;
+        super::pull_scope(Arc::clone(&store), "transcript:agent", "agent", 0)
+            .await
+            .expect("real transcript cache writer");
+        let report = studio_runtime_store::check_state_readonly(root.path())
+            .expect("read-only state report");
+        let entities = report
+            .tables
+            .iter()
+            .find(|table| table.table == "sync_entities")
+            .expect("publication report");
+        assert!(entities.row_count > 0);
+        assert_eq!(
+            entities.rejected_count, 0,
+            "writer-produced transcript cache must be admitted: {:?}",
+            entities.failures
         );
     }
 

@@ -14,6 +14,7 @@
 //! fields is written only when it changed. Writers provide a complete agent;
 //! each volatile field replaces its column, and a missing or null field clears it.
 
+use crate::clock_schema::{JOURNAL_BODY, TRANSCRIPT_BODY};
 use std::sync::LazyLock;
 
 use rusqlite::types::ValueRef;
@@ -99,15 +100,6 @@ static UPSERT_SQL: LazyLock<String> = LazyLock::new(|| {
     )
 });
 
-/// The change journal and transcript revision statements that the
-/// `runtime_agents` triggers run, for a volatile row of agent `NEW.id`.
-const JOURNAL_BODY: &str = "UPDATE runtime_agent_record_generation SET value=value+1 WHERE id=1; \
-     UPDATE runtime_scheduler_agent_change_state SET entries=entries+CASE WHEN EXISTS(SELECT 1 FROM runtime_scheduler_agent_changes WHERE id=NEW.id) THEN 0 ELSE 1 END,total=total-COALESCE((SELECT generation FROM runtime_scheduler_agent_changes WHERE id=NEW.id),0)+(SELECT value FROM runtime_agent_record_generation WHERE id=1) WHERE id=1; \
-     INSERT INTO runtime_scheduler_agent_changes(id,generation) SELECT NEW.id,value FROM runtime_agent_record_generation WHERE id=1 ON CONFLICT(id) DO UPDATE SET generation=excluded.generation; \
-     UPDATE runtime_scheduler_agent_change_state SET generation=(SELECT value FROM runtime_agent_record_generation WHERE id=1) WHERE id=1;";
-const TRANSCRIPT_BODY: &str = "INSERT INTO runtime_transcript_revisions(agent,revision) VALUES (NEW.id,1) \
-     ON CONFLICT(agent) DO UPDATE SET revision=revision+1;";
-
 /// A trigger of this format: name, timing and event, table, and body.
 pub(crate) struct Trigger {
     name: &'static str,
@@ -142,7 +134,7 @@ const OWNER_DELETE: Trigger = Trigger {
     body: "DELETE FROM runtime_agent_volatile WHERE id=OLD.id;",
 };
 
-/// Transcript revision triggers, present when `runtime_transcript_revisions`
+/// Transcript revision triggers, present when the transcript clock
 /// exists: the transcript view shows `activity` and `contextUsage`.
 const TRANSCRIPT_TRIGGERS: [Trigger; 2] = [
     Trigger {
@@ -193,7 +185,7 @@ pub(crate) const TABLE_REQUIREMENT: TableRequirement = TableRequirement {
 };
 
 /// The schema objects of this format, as (name, SQLite type, table); the
-/// transcript triggers exist when `runtime_transcript_revisions` does.
+/// transcript triggers exist when their clock does.
 pub fn schema_objects() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
     std::iter::once((AGENT_VOLATILE_TABLE, "table", AGENT_VOLATILE_TABLE)).chain(
         TRIGGERS
@@ -228,10 +220,10 @@ pub fn agent_volatile_table_sql() -> &'static str {
 /// database directly.
 pub fn prepare(transaction: &Transaction<'_>) -> StoreResult<()> {
     transaction.execute_batch(&TABLE_SQL)?;
-    let transcript = crate::schema::table_exists(transaction, "runtime_transcript_revisions")?;
+    let transcript = crate::clock_schema::transcript_revisions_exist(transaction)?;
     // A schema-only database without the change journal (a test fixture)
     // gets only the owner trigger; a state always has the journal.
-    let journal = crate::schema::table_exists(transaction, "runtime_agent_record_generation")?;
+    let journal = crate::clock_schema::agent_change_journal_exists(transaction)?;
     let triggers = TRIGGERS
         .iter()
         .filter(|trigger| journal || trigger.name == OWNER_DELETE.name)
@@ -636,14 +628,14 @@ mod tests {
                      CREATE TEMP TRIGGER probe_agents AFTER UPDATE ON main.runtime_agents
                      BEGIN UPDATE probe SET n=n+1; END;",
         )?;
-        let revision = |tx: &Transaction<'_>| -> rusqlite::Result<i64> {
-            tx.query_row(
-                "SELECT revision FROM runtime_transcript_revisions WHERE agent='a'",
-                [],
-                |row| row.get(0),
-            )
+        let revision = |tx: &Transaction<'_>| {
+            crate::repositories::transcript::TranscriptRepository::revision(tx, "a")
         };
         let revision_before = revision(tx)?;
+        assert!(
+            revision_before > 0,
+            "the agent write creates its transcript revision"
+        );
         agent["events"] = json!(8);
         agent["tail"] = json!("longer answer tail");
         assert!(update(tx, "a", &agent)?);

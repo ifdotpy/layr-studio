@@ -4,6 +4,30 @@
 /// Extra owner/field attributes and visibilities remain application-owned.
 #[macro_export]
 macro_rules! raw_json_payload {
+    (flat $(#[$attr:meta])* $visibility:vis struct $owner:ident {
+        $($(#[$field_attr:meta])* $field_visibility:vis $member:ident: $ty:ty,)*
+        @extensions $(#[$extra_attr:meta])* $extra_visibility:vis $extra:ident $(,)?
+    }) => {
+        #[derive(serde::Serialize)]
+        $(#[$attr])*
+        $visibility struct $owner {
+            $($(#[$field_attr])* $field_visibility $member: $ty,)*
+            #[serde(flatten)]
+            $(#[$extra_attr])*
+            $extra_visibility $extra: $crate::raw_json::RawExtensions,
+        }
+        impl<'de> serde::Deserialize<'de> for $owner {
+            fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+                #[derive(serde::Deserialize)]
+                $(#[$attr])*
+                struct KnownFields {
+                    $($(#[$field_attr])* $member: $ty,)*
+                }
+                let (known, extra) = $crate::raw_json::deserialize_with_raw_extensions::<D, KnownFields>(deserializer)?;
+                Ok(Self { $($member: known.$member,)* $extra: extra })
+            }
+        }
+    };
     (
         $(#[$owner_attr:meta])* $visibility:vis struct $owner:ident {
             $(#[$fields_attr:meta])* $fields_visibility:vis $fields_member:ident: $fields:ty,
@@ -28,32 +52,9 @@ macro_rules! raw_json_payload {
         }
     };
 }
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use studio_json::OwnedRawJson as RawValue;
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct RawJson(pub RawValue);
-impl PartialEq for RawJson {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.as_str() == other.0.as_str()
-    }
-}
-impl schemars::JsonSchema for RawJson {
-    fn inline_schema() -> bool {
-        true
-    }
-    fn schema_name() -> Cow<'static, str> {
-        "RawJson".into()
-    }
-    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        schemars::json_schema!({})
-    }
-}
-
-/// Unknown object members, retained as their original JSON tokens.
-pub type RawExtensions = std::collections::BTreeMap<String, studio_json::OwnedRawJson>;
+#[cfg(test)]
+use serde::Deserialize;
+pub use studio_json::raw_json::{RawExtensions, RawJson};
 
 /// Decode a struct's own fields and retain unknown members without Serde's flatten buffer.
 ///
@@ -212,5 +213,78 @@ mod tests {
             studio_json::to_string(&evidence.1).unwrap(),
             r#"{"a":{"x":[1, 2]},"z":2.00}"#
         );
+    }
+}
+
+#[cfg(test)]
+mod publication_owner_tests {
+    use crate::generated;
+
+    #[test]
+    fn publication_view_maps_preserve_parsed_values() {
+        fn check<T: serde::de::DeserializeOwned + serde::Serialize>() {
+            let raw = r#"{"future":1,"future": { "n":1.00,"n":9007199254740993,"s":"\u0061" }}"#;
+            let value: T = studio_json::from_str(raw).unwrap();
+            assert_eq!(
+                studio_json::to_value(value).unwrap(),
+                studio_json::from_str::<studio_json::Value>(raw).unwrap()
+            );
+        }
+        check::<generated::ProviderObject>();
+        check::<generated::AccountCostDataModelBreakdown>();
+        check::<generated::CostBreakdownModels>();
+        check::<generated::CostBreakdownProviders>();
+        let raw = r#"{ "number":1 }"#;
+        let arbitrary: generated::JsonValue = studio_json::from_str(raw).unwrap();
+        assert_eq!(
+            studio_json::to_value(arbitrary).unwrap(),
+            studio_json::json!({"number":1.0})
+        );
+    }
+
+    #[test]
+    fn publication_request_and_answer_views_decode_through_generated_unions() {
+        let request: generated::Request = studio_json::from_str(
+            r#"{"kind":"elicitation","schema":{"type":"object","future":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            studio_json::to_value(request).unwrap()["schema"]["future"],
+            true
+        );
+        let tool: generated::Request = studio_json::from_str(
+            r#"{"kind":"tool_use","tool":"example","input":{"future":[1,null]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            studio_json::to_value(tool).unwrap()["input"]["future"],
+            studio_json::json!([1, null])
+        );
+        let answer: generated::Answer = studio_json::from_str(
+            r#"{"kind":"elicitation","action":"accept","content":{"future":true}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            studio_json::to_value(answer).unwrap()["content"]["future"],
+            true
+        );
+    }
+
+    #[test]
+    fn publication_payload_provider_fields_preserve_raw_content() {
+        let request: generated::RequestVariant4 =
+            studio_json::from_str(r#"{"kind":"elicitation","schema": { "x":1.00,"x":2 }}"#)
+                .unwrap();
+        assert_eq!(request.schema.0.as_str(), r#"{ "x":1.00,"x":2 }"#);
+        let tool: generated::RequestVariant6 = studio_json::from_str(
+            r#"{"kind":"tool_use","tool":"example","input": [1.00,9007199254740993]}"#,
+        )
+        .unwrap();
+        assert_eq!(tool.input.0.as_str(), "[1.00,9007199254740993]");
+        let answer: generated::AnswerVariant3 = studio_json::from_str(
+            r#"{"kind":"elicitation","action":"accept","content": { "x":1.00,"x":2 }}"#,
+        )
+        .unwrap();
+        assert_eq!(answer.content.0.as_str(), r#"{ "x":1.00,"x":2 }"#);
     }
 }

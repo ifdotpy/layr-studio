@@ -138,7 +138,10 @@ pub(super) fn authorize(tx: &rusqlite::Transaction<'_>, call: &Call) -> Result<b
     let agent_account = agent_record.account_key.as_str();
     let common_identity = agent_account == call.scope.account
         && !agent_record.is_deleted()
-        && agent_record.extra.get("deleted") != Some(&json!(true));
+        && !matches!(
+            agent_record.deleted.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(true))
+        );
     let actor_identity = common_identity && agent_record.epoch == actor.epoch;
     if call.method == Method::ClaudeShellPolicy {
         let settings = studio_runtime_store::OrchestrationSettingsRepository::shell_policy(tx)?;
@@ -409,7 +412,10 @@ fn authorize_retained_monitor_control(
     Ok(current.epoch == actor.epoch
         && current.auto_wake == Some(true)
         && !current.is_deleted()
-        && current.extra.get("deleted") != Some(&json!(true))
+        && !matches!(
+            current.deleted.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(true))
+        )
         && record.interactive
         && record.cancel_requested != Some(true)
         && !attempt.id.is_empty()
@@ -433,7 +439,10 @@ fn authorize_recovered_monitor_cancel(
     let inactive = current.epoch != actor.epoch
         || current.auto_wake != Some(true)
         || current.is_deleted()
-        || current.extra.get("deleted") == Some(&json!(true));
+        || matches!(
+            current.deleted.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(true))
+        );
     if call.method != Method::CommandExecTerminate || !inactive {
         return Ok(false);
     }
@@ -477,7 +486,11 @@ fn authorize_deleted_voice_stop(
     let Some(thread_id) = call.params.get("threadId").and_then(Value::as_str) else {
         return Ok(false);
     };
-    let deleted = agent.is_deleted() || agent.extra.get("deleted") == Some(&json!(true));
+    let deleted = agent.is_deleted()
+        || matches!(
+            agent.deleted.value(),
+            Some(studio_runtime_store::StoredTransferValue::Known(true))
+        );
     if session_id.is_empty()
         || call.method != Method::ThreadRealtimeStop
         || call.operation != format!("voice:delete-stop:{session_id}")

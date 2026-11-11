@@ -126,7 +126,10 @@ pub fn observe(
     agent.idle_cache = Field::Value(StoredTransferObject::Known(IdleCache {
         ttl: Field::Value(StoredTransferValue::Known(cache.ttl.clone())),
         request_id: Field::Value(StoredTransferValue::Known(cache.request_id.clone())),
-        extra: cache_fields.into_iter().collect(),
+        extra: cache_fields
+            .into_iter()
+            .map(|(key, value)| studio_json::to_raw_value(&value).map(|raw| (key, raw)))
+            .collect::<Result<_, _>>()?,
     }));
     let current_identity =
         json!({"accountKey":agent.account_key,"threadId":agent.thread_id,"epoch":agent.epoch});
@@ -191,7 +194,10 @@ pub fn observe(
     agent.idle_compaction_episode =
         Field::Value(StoredTransferObject::Known(IdleCompactionEpisode {
             id: Field::Value(StoredTransferValue::Known(id)),
-            extra: fields.into_iter().collect(),
+            extra: fields
+                .into_iter()
+                .map(|(key, value)| studio_json::to_raw_value(&value).map(|raw| (key, raw)))
+                .collect::<Result<_, _>>()?,
         }));
     Ok(())
 }
@@ -202,14 +208,7 @@ fn episode_view(agent: &AgentRecord) -> Result<Option<Episode>, StoreError> {
     match &agent.idle_compaction_episode {
         Field::Missing => Ok(None),
         Field::Value(StoredTransferObject::Known(stored)) => {
-            let id = studio_runtime_store::projection_value(&stored.id);
-            let fields = std::iter::once(("id", &id)).chain(
-                stored
-                    .extra
-                    .iter()
-                    .map(|(key, value)| (key.as_str(), value)),
-            );
-            Episode::deserialize(serde::de::value::MapDeserializer::new(fields))
+            studio_json::from_str::<Episode>(&studio_json::to_string(stored)?)
                 .map(Some)
                 .map_err(|error| StoreError::SchemaMismatch(error.to_string()))
         }
@@ -371,7 +370,7 @@ fn record(
     outcome: IdleEpisodeOutcome,
     now: f64,
 ) -> Result<(), StoreError> {
-    connection.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.fired',json('true'),'$.idleCompactionEpisode.outcome',?2,'$.idleCompactionEpisode.firedAt',?3) WHERE idle_episode_type='object' AND idle_episode_id=?1 AND COALESCE(json_extract(record,'$.idleCompactionEpisode.fired'),0)=0", params![episode.id,outcome,now])?;
+    connection.execute("UPDATE runtime_agents SET record=json_set(record,'$.idleCompactionEpisode.fired',json('true'),'$.idleCompactionEpisode.outcome',?2,'$.idleCompactionEpisode.firedAt',?3) WHERE idle_episode_type='object' AND idle_episode_id=?1 AND COALESCE(json_extract(record,'$.idleCompactionEpisode.fired'),0)=0", params![episode.id,outcome.as_str(),now])?;
     Ok(())
 }
 
@@ -983,10 +982,13 @@ mod tests {
         else {
             panic!("episode")
         };
-        stored.extra.insert("fired".into(), json!(true));
         stored
             .extra
-            .insert("outcome".into(), json!(IdleEpisodeOutcome::Started));
+            .insert("fired".into(), studio_json::to_raw_value(&true).unwrap());
+        stored.extra.insert(
+            "outcome".into(),
+            studio_json::to_raw_value(&IdleEpisodeOutcome::Started).unwrap(),
+        );
         let mut disabled = settings;
         disabled.mode = Mode::Off;
         OrchestrationSettingsRepository::set_idle_compaction(&db, &disabled).expect("disable");

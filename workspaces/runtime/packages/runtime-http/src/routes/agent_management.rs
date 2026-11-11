@@ -95,14 +95,14 @@ async fn native_action(
             ));
         }
     }
-    run_native_action(
+    Box::pin(run_native_action(
         State(state),
         lifecycle,
         preparation,
         repair,
         ApiJson(body),
         None,
-    )
+    ))
     .await
 }
 
@@ -586,14 +586,14 @@ impl studio_runtime_services::idle_compaction::Host for IdleCompactionHost {
             }))
             .map_err(|error| error.to_string())?;
             let request_id = episode.id.clone();
-            let result = run_native_action(
+            let result = Box::pin(run_native_action(
                 State(self.state.clone()),
                 None,
                 Some(Extension(self.resources.clone())),
                 Some(Extension(self.repair.clone())),
                 ApiJson(body),
                 Some((episode, limits)),
-            )
+            ))
             .await;
             if let Err(error) = &result
                 && let Some(store) = &self.state.store

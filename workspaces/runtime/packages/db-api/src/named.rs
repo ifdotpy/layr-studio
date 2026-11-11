@@ -381,6 +381,17 @@ impl<T> Clone for Rowid<T> {
 impl<T: Table> Rowid<T> {
     pub const COLUMN: Self = Self(PhantomData);
 }
+impl<T: Table> crate::ColumnInput<Rowid<T>> for i64 {
+    type Parameter<'a> = &'a i64;
+    fn encode_input<'a>(
+        &'a self,
+        connection: &Connection,
+        column: Rowid<T>,
+    ) -> rusqlite::Result<Self::Parameter<'a>> {
+        let _ = column;
+        Rowid::<T>::encode(connection, self)
+    }
+}
 impl<T: Table> Column for Rowid<T> {
     type Row = T;
     type Value = i64;

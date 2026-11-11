@@ -4,65 +4,23 @@ use studio_runtime_schema::persistence::HoldStatus;
 
 use crate::StoreResult;
 use crate::records::{AgentId, AgentRecord, AgentRepository, Table};
-use crate::schema::{
-    ConditionalTriggerRequirement, SchemaRequirements, TableRequirement, TriggerRequirement,
-};
+use crate::schema::{SchemaRequirements, TableRequirement};
 
 const TABLES: &[TableRequirement] = &[
     TableRequirement {
         name: "runtime_agents",
         columns: &["id", "record"],
     },
-    TableRequirement {
-        name: "runtime_agent_record_generation",
-        columns: &["id", "value"],
-    },
-    TableRequirement {
-        name: "runtime_scheduler_agent_change_state",
-        columns: &["id", "entries", "total", "generation"],
-    },
-    TableRequirement {
-        name: "runtime_scheduler_agent_changes",
-        columns: &["id", "generation"],
-    },
-];
-const TRIGGERS: &[TriggerRequirement] = &[
-    TriggerRequirement {
-        name: "runtime_agent_record_generation_insert",
-        table: "runtime_agents",
-    },
-    TriggerRequirement {
-        name: "runtime_agent_record_generation_update",
-        table: "runtime_agents",
-    },
-    TriggerRequirement {
-        name: "runtime_agent_record_generation_delete",
-        table: "runtime_agents",
-    },
-];
-const TRANSCRIPT_TRIGGERS: &[TriggerRequirement] = &[
-    TriggerRequirement {
-        name: "sync_transcript_revision_runtime_agents_insert",
-        table: "runtime_agents",
-    },
-    TriggerRequirement {
-        name: "sync_transcript_revision_runtime_agents_update",
-        table: "runtime_agents",
-    },
-    TriggerRequirement {
-        name: "sync_transcript_revision_runtime_agents_delete",
-        table: "runtime_agents",
-    },
+    crate::clock_schema::AGENT_GENERATION_TABLE_REQUIREMENT,
+    crate::clock_schema::SCHEDULER_STATE_TABLE_REQUIREMENT,
+    crate::clock_schema::SCHEDULER_CHANGES_TABLE_REQUIREMENT,
 ];
 
 pub(crate) const REQUIREMENTS: SchemaRequirements = SchemaRequirements {
     tables: TABLES,
     conditional_tables: &[],
-    triggers: TRIGGERS,
-    conditional_triggers: &[ConditionalTriggerRequirement {
-        table_exists: "runtime_transcript_revisions",
-        triggers: TRANSCRIPT_TRIGGERS,
-    }],
+    triggers: crate::clock_schema::AGENT_CLOCK_TRIGGERS,
+    conditional_triggers: crate::clock_schema::AGENT_TRANSCRIPT_TRIGGER_REQUIREMENTS,
     connection_functions: &[],
     bootstrap_tables: &[
         crate::agent_volatile::TABLE_REQUIREMENT,
@@ -84,20 +42,7 @@ impl AgentRepository {
     pub(crate) fn prepare_change_journal(
         transaction: &rusqlite::Transaction<'_>,
     ) -> StoreResult<()> {
-        if crate::schema::table_exists(transaction, "runtime_agent_record_generation")?
-            && crate::schema::table_exists(transaction, "runtime_scheduler_agent_change_state")?
-        {
-            let mut typed = crate::peer_update_settings::canvas_tx(transaction);
-            typed.insert_new(&crate::clock_schema::AgentRecordGeneration { id: 1, value: 0 })?;
-            typed.insert_new(&crate::clock_schema::SchedulerAgentChangeState {
-                id: 1,
-                floor: 0,
-                generation: 0,
-                entries: 0,
-                total: 0,
-            })?;
-        }
-        Ok(())
+        crate::clock_schema::prepare_agent_change_journal(transaction)
     }
 
     pub fn get_raw(connection: &Connection, id: &AgentId) -> StoreResult<Option<String>> {

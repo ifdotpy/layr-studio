@@ -296,6 +296,36 @@ mod stored_shape_tests {
     use studio_json::json;
 
     #[test]
+    fn generated_json_preserves_open_answer_fields() {
+        let answer = json!({"id":"q","answers":{"scope":{"answers":["one"]}}});
+        let decoded: crate::generated::AnswerBody = super::generated_json(answer.clone()).unwrap();
+        assert_eq!(studio_json::to_value(decoded).unwrap(), answer);
+    }
+
+    #[test]
+    fn generated_json_preserves_open_model_fields() {
+        let model = json!({"future":{"count":1,"nested":[true,null]}});
+        let decoded: crate::generated::ModelCatalogResponse = super::generated_json(model).unwrap();
+        assert_eq!(
+            studio_json::to_value(decoded).unwrap(),
+            json!({"future":{"count":1.0,"nested":[true,null]}})
+        );
+    }
+
+    #[test]
+    fn generated_json_preserves_cost_breakdown_and_refresh_metadata() {
+        let input = json!({"accountKey":"a","refreshing":false,"stale":false,
+            "_refreshDue":true,"sourceFingerprint":"source",
+            "data":{"modelBreakdown":{"future":{"tokens":1}}}});
+        let decoded: crate::bounded_entities::CostSnapshot<crate::generated::AccountCostEntityDto> =
+            super::generated_json(input).unwrap();
+        let public = studio_json::to_value(decoded.public).unwrap();
+        assert_eq!(public["data"]["modelBreakdown"]["future"]["tokens"], 1);
+        assert!(public.get("_refreshDue").is_none());
+        assert!(public.get("sourceFingerprint").is_none());
+    }
+
+    #[test]
     fn account_response_includes_server_eligibility() {
         let snapshot = studio_runtime_services::account_policy::AccountsSnapshot {
             accounts: vec![studio_json::from_value(json!({"id":"a","home":"/a","label":"A","source":"test","provider":"codex","status":"ready"})).unwrap()],

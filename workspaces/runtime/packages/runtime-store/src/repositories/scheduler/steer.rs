@@ -350,9 +350,10 @@ fn steer_turn(agent: &AgentRecord) -> Option<(String, String)> {
         && agent.execution_mode != Some(crate::AgentExecutionMode::Vm)
         && continuation_allowed(agent)
         && agent
-            .extra
-            .get("steerRejectedTurnId")
-            .and_then(Value::as_str)
+            .steer_rejected_turn_id
+            .value()
+            .and_then(|value| value.known())
+            .map(String::as_str)
             != Some(turn)
         && attempt.turn_id.as_deref() == Some(turn)
         && attempt.thread_id.as_deref() == Some(thread)
@@ -804,9 +805,9 @@ impl SchedulerRepository {
             && agent.epoch == receipt.epoch
             && agent.turn_id.as_deref() == Some(receipt.turn_id.as_str())
         {
-            agent
-                .extra
-                .insert("steerRejectedTurnId".into(), json!(receipt.turn_id));
+            agent.steer_rejected_turn_id = studio_runtime_schema::queue_command::Field::Value(
+                crate::StoredTransferValue::Known(receipt.turn_id),
+            );
             publish_agent(tx, &agent)?;
         }
         Ok(requeued)

@@ -6784,6 +6784,7 @@ dependencies = [
 name = "studio-json"
 version = "0.1.0"
 dependencies = [
+ "schemars 1.2.3",
  "serde",
  "serde_json",
  "simd-json",

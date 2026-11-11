@@ -81,17 +81,6 @@ impl<'de, T: serde::Deserialize<'de>> serde::Deserialize<'de> for HistoricalFiel
     }
 }
 
-fn historical_text<T>(
-    value: &HistoricalField<T>,
-    text: impl FnOnce(&T) -> String,
-) -> Option<Value> {
-    match value {
-        HistoricalField::Missing => None,
-        HistoricalField::Null => Some(Value::Null),
-        HistoricalField::Present(value) => Some(Value::String(text(value))),
-    }
-}
-
 fn claim_result<T: serde::de::DeserializeOwned>(
     saved: &crate::ExecutionAttempt,
 ) -> StoreResult<ClaimResult<T>> {
@@ -439,7 +428,7 @@ impl SchedulerRepository {
                 .native_release
                 .as_ref()
                 .and_then(|release| release.extra.get("resetPending"))
-                .is_some_and(truthy)
+                .is_some_and(|raw| crate::schema::raw_truthy(Some(raw)))
         {
             return Ok(false);
         }
@@ -532,8 +521,22 @@ impl SchedulerRepository {
             || original.parent_id != agent.parent_id
             || !provider_matches
             || !role_matches
-            || historical_text(&original.real_cwd, Clone::clone).as_ref()
-                != agent.extra.get("realCwd")
+            || !match (&original.real_cwd, &agent.real_cwd) {
+                (
+                    HistoricalField::Missing,
+                    studio_runtime_schema::queue_command::Field::Missing,
+                )
+                | (HistoricalField::Null, studio_runtime_schema::queue_command::Field::Null) => {
+                    true
+                }
+                (
+                    HistoricalField::Present(expected),
+                    studio_runtime_schema::queue_command::Field::Value(
+                        crate::StoredTransferValue::Known(current),
+                    ),
+                ) => expected == current,
+                _ => false,
+            }
             || original
                 .start_attempt
                 .as_ref()
@@ -1150,7 +1153,9 @@ impl SchedulerRepository {
             .value()
             .is_some_and(|value| match value {
                 crate::StoredTransferObject::Known(_) => true,
-                crate::StoredTransferObject::Unreadable(value) => truthy(value),
+                crate::StoredTransferObject::Unreadable(value) => {
+                    crate::schema::raw_truthy(Some(&value.0))
+                }
             })
         {
             Some("pendingSettings are not supported by the Rust turn driver; apply settings first.")

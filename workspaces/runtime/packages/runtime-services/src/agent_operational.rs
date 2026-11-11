@@ -302,19 +302,19 @@ pub(crate) fn summary(
     let source = Source {
         status: full.status.clone().flatten(),
         auto_wake: full.auto_wake.flatten(),
-        empty: full.empty.as_ref().and_then(Option::as_ref).and_then(Value::as_bool),
+        empty: full.empty.as_ref().and_then(Option::as_ref).and_then(|raw| studio_json::from_str::<bool>(raw.0.as_str()).ok()),
         in_flight: full.in_flight.flatten(),
         thread_id: full.thread_id.clone().flatten(),
         last_completed_turn: full.last_completed_turn.clone().flatten(),
         last_completed_turn_status: full.last_completed_turn_status.clone().flatten(),
-        read_state: full.read_state.as_ref().and_then(Option::as_ref).map(Option::<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>::deserialize).transpose()?.flatten(),
+        read_state: full.read_state.as_ref().and_then(Option::as_ref).map(|raw| studio_json::from_str::<Option<studio_runtime_schema::agent_entity_nested_extra::ReadStateDto>>(raw.0.as_str())).transpose()?.flatten(),
         read_state_supported: full.read_state_supported.flatten(),
         has_question: full.has_question.flatten(),
         has_approval: full.has_approval.flatten(),
         has_background_work: full.has_background_work,
         account_key: full.account_key.clone().flatten(),
         epoch: full.epoch.flatten(),
-        capacity_retry: full.capacity_retry.as_ref().and_then(Option::as_ref).map(Option::<studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto>::deserialize).transpose()?.flatten(),
+        capacity_retry: full.capacity_retry.as_ref().and_then(Option::as_ref).map(|raw| studio_json::from_str::<Option<studio_runtime_schema::agent_entity_nested_extra::AgentEntityCapacityRetryDto>>(raw.0.as_str())).transpose()?.flatten(),
     };
     let (status, mark, eligible) = operational(&source, context);
     Ok(

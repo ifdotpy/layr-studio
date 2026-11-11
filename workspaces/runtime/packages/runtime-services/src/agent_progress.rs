@@ -61,12 +61,22 @@ pub(crate) fn derive<'a>(
     agent: &AgentRecord,
     assignments: impl IntoIterator<Item = &'a Assignment>,
 ) -> StoreResult<AgentProgress> {
-    let active_execution = agent
-        .extra
-        .get("activeExecution")
-        .filter(|value| !value.is_null())
-        .map(ActiveExecution::deserialize)
-        .transpose()?;
+    let active_execution = match agent.active_execution.value() {
+        None => None,
+        Some(studio_runtime_store::StoredTransferObject::Known(view)) => Some(ActiveExecution {
+            run_id: view
+                .run_id_text()
+                .ok_or(studio_runtime_store::StoreError::RecordContract(
+                    "active execution has no run id",
+                ))?
+                .to_owned(),
+        }),
+        Some(studio_runtime_store::StoredTransferObject::Unreadable(_)) => {
+            return Err(studio_runtime_store::StoreError::RecordContract(
+                "invalid active execution",
+            ));
+        }
+    };
     let mut commands = Vec::new();
     // The idle-unload migration owns this generated-column index; malformed
     // records have no agent and are excluded without evaluating JSON here.

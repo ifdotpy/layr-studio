@@ -198,7 +198,7 @@ mod tests {
             .expect("read agent")
             .expect("agent exists");
         assert!(matches!(stored.native_failure_hold.value(),
-            Some(crate::NativeFailureHold::Unreadable(raw)) if raw == &json!({"reason":"pending"})));
+            Some(crate::NativeFailureHold::Unreadable(raw)) if raw.0.as_str() == r#"{"reason":"pending"}"#));
         assert!(stored.native_failure_held());
         assert!(!stored.extra.contains_key("nativeFailureHold"));
     }

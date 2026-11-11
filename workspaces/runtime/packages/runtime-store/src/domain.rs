@@ -25,7 +25,7 @@ use strum::VariantNames;
 use studio_json::Value;
 
 use crate::approvals;
-use crate::records::{AgentExecutionMode, AgentId, AgentStatus};
+use crate::records::{AgentExecutionMode, AgentId};
 use crate::{StoreError, StoreResult};
 use std::time::{SystemTime, UNIX_EPOCH};
 use studio_runtime_schema::approvals::{Timestamp, TurnId as ApprovalTurnId};
@@ -48,6 +48,63 @@ pub const ACTIVE_STATUS_INDEX: &str = "chats_active_status";
 /// A chat is the agent row id.
 pub type ChatId = AgentId;
 
+/// Closed persisted agent status. Codes and wire spellings are independent contracts.
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    VariantNames,
+    strum::IntoStaticStr,
+    strum::EnumString,
+    studio_db_api::DbEnum,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+#[repr(i64)]
+pub enum AgentStatus {
+    Unknown = 0,
+    Idle = 1,
+    Queued = 2,
+    Starting = 3,
+    Running = 4,
+    Waiting = 5,
+    WaitingOnMonitor = 6,
+    Approval = 7,
+    Completed = 8,
+    Interrupted = 9,
+    Failed = 10,
+    Blocked = 11,
+    Paused = 12,
+    Parked = 13,
+    Abandoned = 14,
+    #[serde(rename = "capacity-retry")]
+    #[strum(serialize = "capacity-retry")]
+    CapacityRetry = 15,
+}
+
+impl AgentStatus {
+    pub const VALUES: &'static [&'static str] = <Self as VariantNames>::VARIANTS;
+
+    pub fn as_str(&self) -> &'static str {
+        self.clone().into()
+    }
+
+    pub fn parse(value: &str) -> Result<Self, strum::ParseError> {
+        value.parse()
+    }
+
+    /// BINARY wire order for legacy chat indexes; never integer-code order.
+    pub fn lexical_rank(&self) -> usize {
+        Self::VALUES
+            .iter()
+            .filter(|wire| **wire < self.as_str())
+            .count()
+    }
+}
+
 macro_rules! row_id {
     ($name:ident) => {
         #[derive(Clone, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -64,13 +121,54 @@ row_id!(TurnId);
 row_id!(SessionId);
 
 /// What the user sees of a conversation. Archived wins over paused.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, VariantNames)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    VariantNames,
+    strum::IntoStaticStr,
+    studio_db_api::DbEnum,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
+#[repr(i64)]
 pub enum ChatState {
-    Active,
-    Paused,
-    Archived,
+    Active = 0,
+    Paused = 1,
+    Archived = 2,
+}
+
+/// Permanent storage discriminants; Running's session remains a separate typed field.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    strum::IntoStaticStr,
+    studio_db_api::DbEnum,
+)]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
+#[repr(i64)]
+pub enum TurnStateKind {
+    Starting = 0,
+    Running = 1,
+    Completed = 2,
+    Failed = 3,
+    Interrupted = 4,
+}
+
+impl TurnStateKind {
+    pub fn as_str(self) -> &'static str {
+        self.into()
+    }
 }
 
 /// One provider run inside a chat. `Running` carries its session.
@@ -90,12 +188,16 @@ impl TurnState {
     pub const UNFINISHED: [&'static str; 2] = ["starting", "running"];
 
     pub fn kind(&self) -> &'static str {
+        self.storage_kind().as_str()
+    }
+
+    pub fn storage_kind(&self) -> TurnStateKind {
         match self {
-            Self::Starting => "starting",
-            Self::Running { .. } => "running",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Interrupted => "interrupted",
+            Self::Starting => TurnStateKind::Starting,
+            Self::Running { .. } => TurnStateKind::Running,
+            Self::Completed => TurnStateKind::Completed,
+            Self::Failed => TurnStateKind::Failed,
+            Self::Interrupted => TurnStateKind::Interrupted,
         }
     }
 
@@ -112,28 +214,47 @@ impl TurnState {
 
     /// Strict decode of the `state` and `session` columns.
     pub(crate) fn from_columns(state: &str, session: Option<String>) -> StoreResult<Self> {
-        let session = session.map(SessionId);
-        match (state, session) {
-            ("starting", None) => Ok(Self::Starting),
-            ("running", Some(session)) => Ok(Self::Running { session }),
-            ("completed", None) => Ok(Self::Completed),
-            ("failed", None) => Ok(Self::Failed),
-            ("interrupted", None) => Ok(Self::Interrupted),
+        let kind = TurnStateKind::deserialize(serde::de::value::StrDeserializer::<
+            serde::de::value::Error,
+        >::new(state))
+        .map_err(|_| StoreError::RecordContract("invalid stored turn state"))?;
+        Self::from_storage_kind(kind, session.map(SessionId))
+    }
+
+    pub fn from_storage_kind(kind: TurnStateKind, session: Option<SessionId>) -> StoreResult<Self> {
+        match (kind, session) {
+            (TurnStateKind::Starting, None) => Ok(Self::Starting),
+            (TurnStateKind::Running, Some(session)) => Ok(Self::Running { session }),
+            (TurnStateKind::Completed, None) => Ok(Self::Completed),
+            (TurnStateKind::Failed, None) => Ok(Self::Failed),
+            (TurnStateKind::Interrupted, None) => Ok(Self::Interrupted),
             _ => Err(StoreError::RecordContract("invalid stored turn state")),
         }
     }
 }
 
 /// One provider thread that runs turns.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, VariantNames)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Eq,
+    PartialEq,
+    Serialize,
+    Deserialize,
+    VariantNames,
+    strum::IntoStaticStr,
+    studio_db_api::DbEnum,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
+#[repr(i64)]
 pub enum SessionState {
-    Starting,
-    Ready,
-    Lost,
+    Starting = 0,
+    Ready = 1,
+    Lost = 2,
     /// The chat has another thread or none. Kept as history; thread lookups skip it.
-    Ended,
+    Ended = 3,
 }
 
 macro_rules! text_enum {
@@ -148,7 +269,7 @@ macro_rules! text_enum {
             }
             /// The wire value of the variant, as the check trigger lists it.
             pub(crate) fn column(self) -> &'static str {
-                <$ty as VariantNames>::VARIANTS[self as usize]
+                self.into()
             }
         }
     };
@@ -693,9 +814,6 @@ pub fn read_chat(connection: &Connection, id: &str) -> StoreResult<Option<ChatRo
     raw.map(
         |(id, state, status, auto_wake, usage_resume_enabled, mode, turn_epoch)| {
             let status = studio_json::from_value::<AgentStatus>(Value::String(status))?;
-            if matches!(status, AgentStatus::Other(_)) {
-                return Err(StoreError::RecordContract("invalid stored chat status"));
-            }
             let execution_mode = mode
                 .map(|mode| studio_json::from_value(Value::String(mode)))
                 .transpose()?;

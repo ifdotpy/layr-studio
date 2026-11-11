@@ -100,7 +100,7 @@ impl AgentWakes {
                     })
                     .collect::<Vec<_>>()
             }
-            TableChange::Full => {
+            TableChange::Full | TableChange::AgentComponents(_) => {
                 state.recent.clear();
                 state.floor = sequence;
                 std::mem::take(&mut state.waiters)

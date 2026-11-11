@@ -1,6 +1,8 @@
 //! Static SQLite row contracts. Applications own database markers and codec policy.
 pub mod catalog;
 pub use rusqlite;
+/// Context and error types for application-owned codecs.
+pub use rusqlite::{Connection as CodecContext, Error as CodecError, Row as CodecRow};
 mod codec;
 pub mod migration;
 mod named;
@@ -12,6 +14,15 @@ pub use query::*;
 pub use studio_db_api_derive::{DbEnum, DbPartition, DbProjection, DbQuery, DbTable, db_queries};
 pub use table::*;
 
+/// Checks must be compile-time strings, including const-path checks.
+/// ```compile_fail
+/// use studio_db_api::{Database, DbTable};
+/// struct Canvas; impl Database for Canvas {}
+/// fn dynamic_check(runtime: &str) {
+///     #[derive(DbTable)] #[db(table="dynamic_rows",database=Canvas)]
+///     struct Row { #[db(key,check=runtime)] id:i64 }
+/// }
+/// ```
 /// Generated SQL rejects unknown columns and parameter types.
 /// ```compile_fail
 /// use studio_db_api::{Database, DbTable, Tx, db_query};

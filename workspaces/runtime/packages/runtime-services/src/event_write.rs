@@ -450,9 +450,10 @@ fn enqueue(
                 .and_then(Value::as_i64)
                 .ok_or(EventWriteError::Conflict("Remote event link is invalid"))?;
             let remote_epoch = agent
-                .extra
-                .get("remoteEpoch")
-                .and_then(Value::as_i64)
+                .remote_epoch
+                .value()
+                .and_then(|value| value.known())
+                .copied()
                 .unwrap_or(0);
             use studio_runtime_schema::queue_command::Field;
             let payload = crate::orchestration_worker::InputPayload {
@@ -634,8 +635,7 @@ fn queue_agent(connection: &Transaction<'_>, agent: &AgentRecord) -> Result<(), 
         | AgentStatus::Paused
         | AgentStatus::Parked
         | AgentStatus::Abandoned
-        | AgentStatus::CapacityRetry
-        | AgentStatus::Other(_) => true,
+        | AgentStatus::CapacityRetry => true,
     };
     if !auto_wake || agent.native_failure_held() || !status {
         return Ok(());
@@ -683,7 +683,6 @@ pub fn assert_delegation(agent: &AgentRecord) -> Result<(), EventWriteError> {
 }
 
 pub fn recovery_pending(agent: &AgentRecord) -> bool {
-    let extra = &agent.extra;
     let matches = |recovery: &studio_runtime_schema::recovery_record::RecoveryFields| {
         recovery
             .epoch
@@ -706,7 +705,7 @@ pub fn recovery_pending(agent: &AgentRecord) -> bool {
         && agent.status != AgentStatus::Paused
         && !agent.is_deleted()
         && (root || disconnect);
-    recovery || truthy(extra.get("moveImportPending"))
+    recovery || agent.move_import_pending_active()
 }
 
 fn invalid_stored(object: &'static str, id: &str) -> EventWriteError {
@@ -1034,9 +1033,11 @@ mod tests {
         let mut agent = AgentRepository::get(&connection, &AgentId::from("a"))
             .expect("agent reads")
             .expect("agent exists");
-        agent
-            .extra
-            .insert("moveImportPending".to_owned(), json!(true));
+        agent.move_import_pending = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_schema::raw_json::RawJson(
+                studio_json::to_raw_value(&true).expect("boolean serializes"),
+            ),
+        );
         AgentRepository::put(&connection, &agent).expect("recovery state writes");
         let inserted = with_transaction(&mut connection, |transaction| {
             enqueue_recovery_event(
@@ -1298,7 +1299,9 @@ mod tests {
             "remoteWorker".into(),
             json!({"server":"remote","link":"remote-link"}),
         );
-        agent.extra.insert("remoteEpoch".into(), json!(3));
+        agent.remote_epoch = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::StoredTransferValue::Known(3),
+        );
         AgentRepository::put(&connection, &agent).expect("remote fixture writes");
         connection.execute(
             "INSERT INTO runtime_server_links(id,record) VALUES(?1,?2)",

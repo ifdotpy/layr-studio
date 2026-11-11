@@ -471,9 +471,9 @@ pub fn deletion_stop_outcome(
             return Ok(StopOutcome::Unconfirmed);
         };
         if let Some(request_id) = agent
-            .extra
-            .get("remoteStopRequest")
-            .and_then(studio_json::Value::as_str)
+            .remote_stop_request
+            .value()
+            .and_then(|value| value.known())
             && crate::server_outbox::stop_pending(conn, request_id, id)?
         {
             return Ok(StopOutcome::Unconfirmed);

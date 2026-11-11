@@ -743,7 +743,7 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
         for &field in agent_projection_fields::SCHEMA_FILTERED_AGENT_FIELDS {
             if let Some(property) = properties.get_mut(field) {
                 property.schema_type = SchemaType::Primitive {
-                    rust_type: "studio_json::Value".to_owned(),
+                    rust_type: "studio_json::raw_json::RawJson".to_owned(),
                     serde_with: None,
                 };
             }
@@ -978,6 +978,31 @@ pub fn generate() -> Result<(), Box<dyn Error>> {
         ));
         let mut body = body.replace("serde_json::", "studio_json::");
         if module == "types" {
+            for (name, field) in [
+                ("RequestVariant4", "schema"),
+                ("RequestVariant6", "input"),
+                ("AnswerVariant3", "content"),
+            ] {
+                let marker = format!("pub struct {name} {{");
+                let start = body
+                    .find(&marker)
+                    .ok_or("missing publication opaque field owner")?;
+                let end = start
+                    + body[start..]
+                        .find("\n}")
+                        .ok_or("unterminated publication field owner")?
+                    + 2;
+                let original = &body[start..end];
+                let needle = format!("pub {field}: studio_json::Value");
+                if !original.contains(&needle) {
+                    return Err("publication opaque field changed shape".into());
+                }
+                let converted = original.replace(
+                    &needle,
+                    &format!("pub {field}: studio_json::raw_json::RawJson"),
+                );
+                body.replace_range(start..end, &converted);
+            }
             body.push_str(&agent_view_conversions(&body)?);
         }
         fs::write(path, body)?;

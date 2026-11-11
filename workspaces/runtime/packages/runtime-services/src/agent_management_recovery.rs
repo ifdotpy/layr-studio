@@ -1107,8 +1107,14 @@ mod tests {
                                     AgentRepository::get(tx, &AgentId::from("worker-00000000"))?
                                         .expect("worker");
                                 let release = worker.native_release.as_mut().expect("release");
-                                release.extra.insert("closedAt".into(), json!(11.0));
-                                release.extra.insert("resetPending".into(), json!(false));
+                                release.extra.insert(
+                                    "closedAt".into(),
+                                    studio_json::to_raw_value(&11.0).unwrap(),
+                                );
+                                release.extra.insert(
+                                    "resetPending".into(),
+                                    studio_json::to_raw_value(&false).unwrap(),
+                                );
                                 AgentRepository::put(tx, &worker)
                             })
                             .await

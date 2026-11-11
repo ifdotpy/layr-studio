@@ -939,9 +939,9 @@ fn canonical_hash(value: &Value) -> String {
     crate::sha256_hex(value.to_string().as_bytes())
 }
 
-/// Validate the hash-only projection rows stored for the private transcript index.
+/// Validate metadata of the private transcript index; @revision may carry a cache.
 /// These rows are intentionally excluded from the public sync entity union.
-pub(crate) fn hash_only_sync_entity_storage_error(
+pub(crate) fn transcript_index_storage_error(
     collection: &str,
     id: &str,
     sequence: i64,
@@ -972,7 +972,7 @@ pub(crate) fn hash_only_sync_entity_storage_error(
     {
         return Some(("/hash", "format"));
     }
-    if !payload_is_null {
+    if !payload_is_null && id != "@revision" {
         return Some(("/payload", "storageRepresentation"));
     }
     if !matches!(deleted, 0 | 1) {

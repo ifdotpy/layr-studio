@@ -91,13 +91,16 @@ pub(super) fn record_submission(
                 let current = NotificationDispatchRepository::agent_record(tx, agent)?
                     .ok_or_else(|| stored("runtime_agents", agent))?;
                 // activeExecution remains an open record; preserve explicit-null refusal.
-                let attempt = match current
-                    .extra
-                    .get("activeExecution")
-                    .and_then(|execution| execution.get("attemptId"))
-                {
-                    Some(value) => value.as_str(),
-                    None => current
+                let active = current
+                    .active_execution
+                    .value()
+                    .and_then(|stored| match stored {
+                        studio_runtime_store::StoredTransferObject::Known(view) => Some(view),
+                        studio_runtime_store::StoredTransferObject::Unreadable(_) => None,
+                    });
+                let attempt = match active {
+                    Some(view) if !view.attempt_id.is_missing() => view.attempt_id_text(),
+                    _ => current
                         .start_attempt
                         .as_ref()
                         .and_then(|attempt| attempt.id.as_deref()),

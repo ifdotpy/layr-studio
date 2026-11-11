@@ -305,38 +305,26 @@ pub(crate) async fn resolve_worker_settings(
         Some(studio_runtime_store::StoredWorkerDefaults::Known(defaults)) => Some(defaults),
         _ => None,
     };
-    let unreadable = match defaults {
-        Some(studio_runtime_store::StoredWorkerDefaults::Unreadable(value)) => Some(value),
-        _ => None,
-    };
+    let legacy = defaults.and_then(studio_runtime_store::StoredWorkerDefaults::legacy_selection);
     let default_model = known
         .and_then(|value| value.model.value().map(String::as_str))
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("model"))
-                .and_then(Value::as_str)
-        });
+        .or_else(|| legacy.as_ref()?.model.as_ref()?.known().map(String::as_str));
     let default_effort = known
         .and_then(|value| value.effort.value().map(String::as_str))
         .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("effort"))
-                .and_then(Value::as_str)
+            legacy
+                .as_ref()?
+                .effort
+                .as_ref()?
+                .known()
+                .map(String::as_str)
         });
     let default_fast = known
         .and_then(|value| value.fast_mode.value().copied())
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("fastMode"))
-                .and_then(Value::as_bool)
-        });
+        .or_else(|| legacy.as_ref()?.fast_mode.as_ref()?.known().copied());
     let default_daybreak = known
         .and_then(|value| value.daybreak_enabled.value().copied())
-        .or_else(|| {
-            unreadable
-                .and_then(|value| value.get("daybreakEnabled"))
-                .and_then(Value::as_bool)
-        });
+        .or_else(|| legacy.as_ref()?.daybreak_enabled.as_ref()?.known().copied());
     let profile_model = profile.map(|profile| profile.model.as_str());
     let review = (role == "reviewer")
         .then(|| crate::native_review::execution_settings(parent, root, &spec.model, &spec.effort))
@@ -1347,9 +1335,10 @@ fn can_delegate(
                 .delegation_depth
                 .value()
                 .map(|depth| depth.get() as u64),
-            studio_runtime_store::StoredWorkerDefaults::Unreadable(value) => {
-                value.get("delegationDepth").and_then(Value::as_u64)
-            }
+            legacy @ studio_runtime_store::StoredWorkerDefaults::Unreadable(_) => legacy
+                .legacy_selection()
+                .and_then(|selection| selection.delegation_depth)
+                .and_then(|depth| depth.known().copied()),
         })
         .filter(|value| (1..=3).contains(value))
         .unwrap_or(1);

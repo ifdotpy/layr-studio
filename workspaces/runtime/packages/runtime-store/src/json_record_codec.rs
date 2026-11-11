@@ -114,6 +114,21 @@ impl<T: serde::de::DeserializeOwned + serde::Serialize> ExactJson<T> {
     }
 }
 
+impl<T> serde::Serialize for ExactJson<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let raw: studio_json::RawJson<'_> =
+            studio_json::from_str(&self.raw).map_err(serde::ser::Error::custom)?;
+        serde::Serialize::serialize(&raw, serializer)
+    }
+}
+
+impl<'de, T: serde::de::DeserializeOwned> serde::Deserialize<'de> for ExactJson<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = <studio_json::OwnedRawJson as serde::Deserialize>::deserialize(deserializer)?;
+        Self::from_stored(raw.as_str().to_owned()).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Exact JSON storage for a named serde owner, including SQL-nullable columns.
 pub struct ExactJsonCodec<T>(PhantomData<T>);
 

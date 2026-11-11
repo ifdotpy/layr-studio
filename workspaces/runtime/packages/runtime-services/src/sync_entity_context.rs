@@ -26,13 +26,14 @@ fn transfer_observation(transaction: &Connection, record: &AgentRecord) -> Trans
                 reason: summary.reason.clone(),
             };
         }
-        Some(studio_runtime_store::StoredTransferObject::Unreadable(value)) => {
+        Some(stored @ studio_runtime_store::StoredTransferObject::Unreadable(_)) => {
             return TransferObservation::Unreadable {
-                reason: value
-                    .get("reason")
-                    .and_then(Value::as_str)
-                    .unwrap_or("Transfer data is unreadable")
-                    .to_owned(),
+                reason: stored
+                    .legacy_reason()
+                    .as_ref()
+                    .and_then(studio_runtime_store::StoredTransferValue::known)
+                    .cloned()
+                    .unwrap_or_else(|| "Transfer data is unreadable".to_owned()),
             };
         }
         _ => {}
@@ -203,8 +204,7 @@ fn status_is_working(status: &studio_runtime_store::AgentStatus) -> bool {
         | AgentStatus::Paused
         | AgentStatus::Parked
         | AgentStatus::Abandoned
-        | AgentStatus::CapacityRetry
-        | AgentStatus::Other(_) => false,
+        | AgentStatus::CapacityRetry => false,
     }
 }
 
@@ -237,7 +237,9 @@ fn team_counts(
     let mut statement = transaction.prepare_cached(TEAM_COUNT_INPUTS_SQL)?;
     let rows = statement.query_map([id], |row| row.get::<_, String>(0))?;
     for row in rows {
-        let status = studio_runtime_store::AgentStatus::parse(&row?);
+        let status = studio_runtime_store::AgentStatus::parse(&row?).map_err(|_| {
+            studio_runtime_store::StoreError::RecordContract("invalid agent status in team counts")
+        })?;
         total += 1;
         if status_is_working(&status) {
             working += 1;

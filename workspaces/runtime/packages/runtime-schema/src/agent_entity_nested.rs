@@ -108,11 +108,23 @@ pub enum NativeStatusPhase {
     Auth,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum AgentNativeStatusError {
     NativeProviderError(Box<crate::provider_errors::NativeProviderError>),
     String(String),
+}
+
+impl<'de> Deserialize<'de> for AgentNativeStatusError {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = crate::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(error) = studio_json::from_str(raw.0.as_str()) {
+            return Ok(Self::NativeProviderError(error));
+        }
+        studio_json::from_str(raw.0.as_str())
+            .map(Self::String)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

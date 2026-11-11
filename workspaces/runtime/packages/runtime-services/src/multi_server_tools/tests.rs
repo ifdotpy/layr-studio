@@ -1199,6 +1199,82 @@ async fn peer_store(home: &str) -> (tempfile::TempDir, Arc<RuntimeStore>) {
 }
 
 #[tokio::test]
+async fn fetch_uses_only_valid_locally_present_declared_worker_base() {
+    let (_directory, home, seed) = seeded_store().await;
+    let destination = PathBuf::from(seed["projectId"].as_str().unwrap());
+    run_git(&destination, &["init", "-q", "-b", "main"]);
+    std::fs::write(destination.join("base.txt"), "base").unwrap();
+    run_git(&destination, &["add", "base.txt"]);
+    run_git(&destination, &["commit", "-q", "-m", "base"]);
+    let base = run_git(&destination, &["rev-parse", "HEAD"]);
+    std::fs::write(destination.join("head.txt"), "head").unwrap();
+    run_git(&destination, &["add", "head.txt"]);
+    run_git(&destination, &["commit", "-q", "-m", "head"]);
+    let head = run_git(&destination, &["rev-parse", "HEAD"]);
+    let transport = Arc::new(LostExportReply::default());
+    let driver = Arc::new(OrchestrationDriver::new(
+        home.clone(),
+        transport.clone(),
+        Arc::new(RuntimeOrchestrationEffects::new(home.clone())),
+    ));
+    let tools: Arc<dyn MultiServerToolPort> =
+        Arc::new(ServerTools::new(home.clone(), driver, false));
+    for (index, declared) in [
+        None,
+        Some("invalid".to_owned()),
+        Some("a".repeat(40)),
+        Some(base.clone()),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut worker = seed["worker"].clone();
+        worker["remoteWorker"] = json!({"server":PEER});
+        if let Some(declared) = &declared {
+            worker["workerBaseCommit"] = json!(declared);
+        }
+        let worker_id = worker["id"].as_str().unwrap().to_owned();
+        let expected_base = declared.clone();
+        home.transaction_with(move |tx| -> Result<(), StoreError> {
+            let record = studio_runtime_store::AgentRecord::from_value(worker).unwrap();
+            AgentRepository::put(tx, &record)?;
+            let decoded = AgentRepository::get(tx, &AgentId::from(worker_id))
+                .unwrap()
+                .unwrap();
+            assert_eq!(decoded.worker_base_commit, expected_base);
+            assert!(!decoded.extra.contains_key("workerBaseCommit"));
+            Ok(())
+        })
+        .await
+        .unwrap();
+        transport.sent.lock().unwrap().clear();
+        let key = format!("declared-base-{index}");
+        let args = json!({"action":"fetch","server":PEER,"agent_id":seed["worker"]["id"],"branch":"worker","destination":destination});
+        let result = call_tool(&home, &seed["lead"], &key, &key, &args, Some(tools.clone())).await;
+        assert_eq!(parsed(&result)["outcome"], "unknown", "{result}");
+        let sent = transport.sent.lock().unwrap();
+        assert!(!sent.is_empty());
+        for envelope in sent.iter() {
+            let crate::orchestration_wire::OrchestrationCommand::Export(payload) =
+                &envelope.command
+            else {
+                panic!("export");
+            };
+            let mut expected = vec![head.clone()];
+            if declared.as_ref() == Some(&base) {
+                expected.push(base.clone());
+            }
+            expected.sort();
+            assert_eq!(
+                payload.known.value(),
+                Some(&expected),
+                "declared {declared:?}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn fetch_future_stays_below_clippy_limit() {
     let (_directory, home, seed) = seeded_store().await;
     let transport = Arc::new(LostExportReply::default());

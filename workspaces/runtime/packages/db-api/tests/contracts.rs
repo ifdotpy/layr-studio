@@ -3,6 +3,157 @@ use studio_db_api::{Database, DbEnum, DbTable, DbValue, Table, Tx, db_query, db_
 struct Canvas;
 impl Database for Canvas {}
 
+mod const_contract {
+    pub const CHECK: &str = studio_db_api::static_sql!("payload>=", super::Status::DB_CODE_READY);
+    pub const PREDICATE: &str = studio_db_api::static_sql!("state<>", super::Status::DB_CODE_ENDED);
+}
+
+#[derive(DbTable)]
+#[db(table="const_checked", database=Canvas,
+    index(name="const_open_owner",columns(owner),unique,predicate=const_contract::PREDICATE))]
+struct ConstChecked {
+    #[db(key)]
+    id: i64,
+    owner: String,
+    state: Status,
+    #[db(check=const_contract::CHECK)]
+    payload: i64,
+}
+
+#[derive(DbTable)]
+#[db(table="literal_checked", database=Canvas)]
+struct LiteralChecked {
+    #[db(key)]
+    id: i64,
+    owner: String,
+    state: Status,
+    #[db(check = "payload>=3")]
+    payload: i64,
+}
+
+#[test]
+fn const_field_check_matches_literal_ddl_and_validation() {
+    assert_eq!(
+        ConstChecked::DDL,
+        LiteralChecked::DDL.replace("literal_checked", "const_checked")
+    );
+    let mut db = Connection::open_in_memory().unwrap();
+    ConstChecked::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    assert!(
+        tx.insert(&ConstChecked {
+            id: 1,
+            owner: "a".into(),
+            state: Status::Ready,
+            payload: 2
+        })
+        .is_err()
+    );
+    tx.insert(&ConstChecked {
+        id: 1,
+        owner: "a".into(),
+        state: Status::Ready,
+        payload: 3,
+    })
+    .unwrap();
+}
+
+#[test]
+fn const_partial_index_uses_the_enum_owner_codes() {
+    assert_eq!(
+        ConstChecked::INDEXES[0].sql,
+        "CREATE UNIQUE INDEX const_open_owner ON const_checked(owner) WHERE state<>19"
+    );
+    let mut db = Connection::open_in_memory().unwrap();
+    ConstChecked::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    tx.insert(&ConstChecked {
+        id: 1,
+        owner: "a".into(),
+        state: Status::Ready,
+        payload: 3,
+    })
+    .unwrap();
+    assert!(
+        tx.insert(&ConstChecked {
+            id: 2,
+            owner: "a".into(),
+            state: Status::Ready,
+            payload: 3
+        })
+        .is_err()
+    );
+    tx.insert(&ConstChecked {
+        id: 2,
+        owner: "a".into(),
+        state: Status::Ended,
+        payload: 3,
+    })
+    .unwrap();
+    tx.insert(&ConstChecked {
+        id: 3,
+        owner: "a".into(),
+        state: Status::Ended,
+        payload: 3,
+    })
+    .unwrap();
+}
+
+#[derive(DbTable)]
+#[db(table="retire_witness",database=Canvas,index(name="retire_value",columns(value)))]
+struct RetireWitness {
+    #[db(key)]
+    id: i64,
+    value: i64,
+}
+
+#[test]
+fn retirement_removes_owned_objects_atomically_and_preserves_other_tables() {
+    let mut db = Connection::open_in_memory().unwrap();
+    RetireWitness::descriptor().install_if_absent(&db).unwrap();
+    TextKey::descriptor().install_if_absent(&db).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER retire_insert AFTER INSERT ON retire_witness BEGIN SELECT 1; END",
+    )
+    .unwrap();
+    {
+        let transaction = db.transaction().unwrap();
+        let mut tx = Tx::from_adapter(&transaction, &Canvas);
+        studio_db_api::migration::retire_source::<RetireWitness>(&mut tx).unwrap();
+        assert!(
+            !studio_db_api::catalog::export(&transaction)
+                .unwrap()
+                .iter()
+                .any(|object| object.table == RetireWitness::NAME)
+        );
+        // Dropping the outer transaction restores the table, its index and trigger.
+    }
+    assert_eq!(
+        studio_db_api::catalog::export(&db)
+            .unwrap()
+            .iter()
+            .filter(|object| object.table == RetireWitness::NAME)
+            .count(),
+        3
+    );
+    let transaction = db.transaction().unwrap();
+    studio_db_api::migration::retire_source::<RetireWitness>(&mut Tx::from_adapter(
+        &transaction,
+        &Canvas,
+    ))
+    .unwrap();
+    transaction.commit().unwrap();
+    let objects = studio_db_api::catalog::export(&db).unwrap();
+    assert!(
+        !objects
+            .iter()
+            .any(|object| object.table == RetireWitness::NAME)
+    );
+    assert!(objects.iter().any(|object| object.name == TextKey::NAME));
+}
+
 #[derive(studio_db_api::DbQuery)]
 #[db_query(database=Canvas,mode=read,cardinality=many,result=TextKey,row=TextKey,
     tables(rows=TextKey),columns(id=TextKey::ID),sql="DELETE FROM {rows} RETURNING {id} AS {id}")]
@@ -1247,4 +1398,286 @@ fn named_query_projection_mapping_uses_descriptor_names_for_renamed_fields() {
             .as_deref(),
         Some("exact")
     );
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct ContextValue {
+    owner_key: String,
+    namespace: String,
+    text: String,
+}
+struct ContextValueCodec;
+impl studio_db_api::Codec<ContextValue> for ContextValueCodec {
+    type Stored = String;
+    type Encoded<'a> = &'a str;
+    fn encode<'a>(
+        _: &Connection,
+        value: &'a ContextValue,
+    ) -> studio_db_api::rusqlite::Result<&'a str> {
+        Ok(&value.text)
+    }
+    fn decode(_: &Connection, _: String) -> studio_db_api::rusqlite::Result<ContextValue> {
+        Err(studio_db_api::rusqlite::Error::InvalidQuery)
+    }
+    fn decode_row(
+        _: &Connection,
+        row: &studio_db_api::CodecRow<'_>,
+        index: usize,
+    ) -> studio_db_api::rusqlite::Result<ContextValue> {
+        Self::context_value(row, index)
+    }
+}
+impl ContextValueCodec {
+    fn context_value(
+        row: &studio_db_api::CodecRow<'_>,
+        index: usize,
+    ) -> studio_db_api::rusqlite::Result<ContextValue> {
+        Ok(ContextValue {
+            owner_key: row.get(ContextRow::__DB_COLUMN_OWNER_KEY)?,
+            namespace: row.get(ContextRow::__DB_COLUMN_NAMESPACE)?,
+            text: row.get(index)?,
+        })
+    }
+}
+#[derive(DbTable)]
+#[db(table="context_codec_contract",database=Canvas,check=check_context_value)]
+struct ContextRow {
+    #[db(key)]
+    owner_key: String,
+    namespace: String,
+    #[db(codec=ContextValueCodec)]
+    payload: ContextValue,
+    #[db(codec=CountCodec)]
+    scalar_count: Count,
+}
+fn check_context_value(row: &ContextRow) -> std::io::Result<()> {
+    if row.owner_key != row.payload.owner_key || row.namespace != row.payload.namespace {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "context identity mismatch",
+        ));
+    }
+    Ok(())
+}
+#[derive(studio_db_api::DbProjection)]
+#[db(of=ContextRow)]
+struct ReorderedContext {
+    payload: ContextValue,
+    namespace: String,
+    owner_key: String,
+}
+#[test]
+fn contextual_codec_derived_roundtrip_and_projection_require_named_context() {
+    let mut db = Connection::open_in_memory().unwrap();
+    ContextRow::descriptor().install_if_absent(&db).unwrap();
+    let transaction = db.transaction().unwrap();
+    let mut tx = Tx::from_adapter(&transaction, &Canvas);
+    let mut row = ContextRow {
+        owner_key: "row1".into(),
+        namespace: "scope".into(),
+        payload: ContextValue {
+            owner_key: "row1".into(),
+            namespace: "scope".into(),
+            text: "body".into(),
+        },
+        scalar_count: Count(23),
+    };
+    tx.insert(&row).unwrap();
+    let decoded = tx.get::<ContextRow>(&("row1".into(),)).unwrap().unwrap();
+    assert_eq!(decoded.payload, row.payload);
+    assert_eq!(
+        decoded.scalar_count.0, 23,
+        "ordinary scalar codec uses the default row decoder"
+    );
+    let reordered = db_query!(tx, ContextRow, project(ReorderedContext))
+        .unwrap()
+        .remove(0);
+    assert_eq!(reordered.payload, row.payload);
+    assert_eq!(reordered.namespace, "scope");
+    assert_eq!(reordered.owner_key, "row1");
+    assert!(
+        db_query!(tx, ContextRow, scalar(ContextRow::PAYLOAD)).is_err(),
+        "absent context refuses scalar projection"
+    );
+    row.namespace = "different".into();
+    assert!(tx.upsert(&row).is_err());
+    row.namespace = "scope".into();
+    row.payload.owner_key = "other".into();
+    assert!(tx.upsert(&row).is_err());
+}
+
+mod f1_nullable_cursor {
+    use super::*;
+    use studio_db_api::migration::{CopyPlan, Evidence, encode_key};
+    use studio_db_api::rusqlite::{self, types::Value};
+    use studio_db_api::{Database, DbTable};
+    struct CursorDb;
+    impl Database for CursorDb {}
+    #[derive(DbTable)]
+    #[db(table="f1_nullable_source",database=CursorDb,legacy_ddl="CREATE TABLE f1_nullable_source(id TEXT PRIMARY KEY,payload TEXT NOT NULL)")]
+    struct Snapshot {
+        #[db(key, column = "rowid")]
+        source_rowid: i64,
+        id: Option<String>,
+        payload: String,
+    }
+    // This legacy view keeps the full ordering cursor. It exposes
+    // no fresh nullable key and no InsertTable/MutableTable capability.
+    struct CursorRow(Snapshot);
+    impl Table for CursorRow {
+        type Database = CursorDb;
+        type Key = (Option<String>, i64);
+        const NAME: &'static str = Snapshot::NAME;
+        const DDL: &'static str = Snapshot::DDL;
+        const INDEXES: &'static [studio_db_api::IndexDescriptor] = Snapshot::INDEXES;
+        const SELECT: &'static str = Snapshot::SELECT;
+        const STATE_CHECK: &'static str = Snapshot::STATE_CHECK;
+        const VALID_ROWS: &'static str = Snapshot::VALID_ROWS;
+        const GET: &'static str = "SELECT rowid,id,payload FROM f1_nullable_source WHERE id IS ?1 AND (?1 IS NOT NULL OR rowid=?2)";
+        const INSERT: &'static str = Snapshot::INSERT;
+        const DELETE: &'static str =
+            "DELETE FROM f1_nullable_source WHERE id IS ?1 AND (?1 IS NOT NULL OR rowid=?2)";
+        const COLUMNS: &'static [studio_db_api::ColumnDescriptor] = Snapshot::COLUMNS;
+        fn read(db: &Connection, row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+            Snapshot::read(db, row).map(Self)
+        }
+        fn bind<R>(
+            &self,
+            db: &Connection,
+            f: impl FnOnce(&[&dyn rusqlite::types::ToSql]) -> rusqlite::Result<R>,
+        ) -> rusqlite::Result<R> {
+            self.0.bind(db, f)
+        }
+        fn bind_key<R>(
+            key: &Self::Key,
+            f: impl FnOnce(&[&dyn rusqlite::types::ToSql]) -> rusqlite::Result<R>,
+        ) -> rusqlite::Result<R> {
+            f(&[&key.0, &key.1])
+        }
+    }
+    #[derive(DbTable)]
+    #[db(table="f1_nullable_target",database=CursorDb)]
+    struct Target {
+        #[db(key)]
+        identity: Vec<u8>,
+        original_id: Option<String>,
+        source_rowid: i64,
+        payload: String,
+    }
+    fn identity(key: &(Option<String>, i64)) -> (Vec<u8>,) {
+        (encode_key(&(
+            key.0.clone(),
+            key.0.is_none().then_some(key.1),
+        )),)
+    }
+    fn evidence(id: &Option<String>, source_rowid: i64, payload: &str) -> Evidence {
+        Evidence {
+            identity: vec![Value::Blob(identity(&(id.clone(), source_rowid)).0)],
+            ordering: vec![Value::Integer(source_rowid)],
+            values: vec![
+                id.clone().map_or(Value::Null, Value::Text),
+                Value::Text(payload.into()),
+            ],
+        }
+    }
+    fn plan() -> CopyPlan<CursorRow, Target> {
+        CopyPlan {
+            name: "f1_nullable_cursor",
+            source_keys: &["id", "rowid"],
+            source_key: |row| (row.0.id.clone(), row.0.source_rowid),
+            target_key: identity,
+            transform: |row| {
+                Ok(Target {
+                    identity: identity(&(row.0.id.clone(), row.0.source_rowid)).0,
+                    original_id: row.0.id,
+                    source_rowid: row.0.source_rowid,
+                    payload: row.0.payload,
+                })
+            },
+            source_evidence: |row| Ok(evidence(&row.0.id, row.0.source_rowid, &row.0.payload)),
+            target_evidence: |row| Ok(evidence(&row.original_id, row.source_rowid, &row.payload)),
+            target_select: Target::SELECT_QUERY,
+            finish: |_| Ok(()),
+        }
+    }
+    #[test]
+    fn f1_nullable_keyset_and_old_new_identity_preserve_nulls_signed_ties_and_bytes() {
+        let mut db = Connection::open_in_memory().unwrap();
+        Snapshot::descriptor().install_if_absent(&db).unwrap();
+        let input = [
+            (None, -7),
+            (None, 3),
+            (Some(""), 1),
+            (Some("\0z"), 9),
+            (Some("a"), -5),
+            (Some("b"), 8),
+            (Some("é"), 2),
+        ];
+        for (id, rowid) in input {
+            db.execute(
+                "INSERT INTO f1_nullable_source(id,rowid,payload) VALUES(?1,?2,?3)",
+                rusqlite::params![id, rowid, format!("exact {rowid}")],
+            )
+            .unwrap();
+        }
+        let plan = plan();
+        let mut after = None;
+        let mut observed = Vec::new();
+        loop {
+            let page = plan.read_after(&db, after.as_ref(), 2).unwrap();
+            if page.is_empty() {
+                break;
+            }
+            for (key, row) in page {
+                assert_eq!(row.0.payload, format!("exact {}", key.1));
+                observed.push(key.clone());
+                after = Some(key);
+            }
+        }
+        assert_eq!(
+            observed,
+            input.map(|(id, rowid)| (id.map(str::to_owned), rowid))
+        );
+        let transaction = db.transaction().unwrap();
+        let mut tx = Tx::from_adapter(&transaction, &CursorDb);
+        plan.copy_tx(&mut tx).unwrap();
+        transaction
+            .execute("UPDATE f1_nullable_source SET rowid=17 WHERE id='a'", [])
+            .unwrap();
+        let old = (Some("a".to_owned()), -5);
+        let current = plan.read_one(&transaction, &old).unwrap().unwrap();
+        assert_eq!(current.0.source_rowid, 17);
+        assert_eq!(
+            identity(&old),
+            identity(&(current.0.id.clone(), current.0.source_rowid))
+        );
+        tx.upsert(&(plan.transform)(current).unwrap()).unwrap();
+        plan.verify(&tx).unwrap();
+        for (sql, old, new) in [
+            (
+                "UPDATE f1_nullable_source SET id='c' WHERE rowid=-7",
+                (None, -7),
+                (Some("c".to_owned()), -7),
+            ),
+            (
+                "UPDATE f1_nullable_source SET id=NULL WHERE id='b'",
+                (Some("b".to_owned()), 8),
+                (None, 8),
+            ),
+            (
+                "UPDATE f1_nullable_source SET rowid=-11 WHERE rowid=3",
+                (None, 3),
+                (None, -11),
+            ),
+        ] {
+            transaction.execute(sql, []).unwrap();
+            assert!(plan.read_one(&transaction, &old).unwrap().is_none());
+            tx.delete::<Target>(&identity(&old)).unwrap();
+            let current = plan.read_one(&transaction, &new).unwrap().unwrap();
+            tx.upsert(&(plan.transform)(current).unwrap()).unwrap();
+            plan.verify(&tx).unwrap();
+        }
+        transaction.execute("INSERT INTO f1_nullable_source(rowid,id,payload) VALUES(99,CAST(X'FF' AS TEXT),'bad UTF8')",[]).unwrap();
+        assert!(plan.read_after(&transaction, None, 100).is_err());
+    }
 }

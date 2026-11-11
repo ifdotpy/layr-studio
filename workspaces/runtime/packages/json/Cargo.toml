@@ -14,6 +14,7 @@ sonic-backend = ["dep:sonic-rs"]
 simd-backend = ["dep:simd-json"]
 
 [dependencies]
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sonic-rs = { version = "=0.5.10", optional = true }

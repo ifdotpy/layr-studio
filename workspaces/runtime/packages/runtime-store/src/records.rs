@@ -19,15 +19,7 @@ pub(crate) mod validation_counts {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentDraft {
-    pub text: String,
-    pub prefix_text: String,
-    pub assets: Vec<studio_runtime_schema::transcript_asset::TranscriptAssetView>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::AgentDraft;
 
 macro_rules! string_id {
     ($name:ident) => {
@@ -76,77 +68,7 @@ impl UnknownAgentStatus {
     }
 }
 
-macro_rules! stored_string_enum {
-    ($name:ident { $($variant:ident => $value:literal),+ $(,)? }) => {
-        #[derive(Clone, Debug, Eq, PartialEq)]
-        pub enum $name {
-            $($variant,)+
-            Other(UnknownAgentStatus),
-        }
-
-        impl $name {
-            /// Wire values owned by this enum; generated contracts and parity witnesses consume these.
-            pub const VALUES: &'static [&'static str] = &[$($value,)+];
-
-            pub fn as_str(&self) -> &str {
-                match self {
-                    $(Self::$variant => $value,)+
-                    Self::Other(value) => value.as_str(),
-                }
-            }
-        }
-
-        impl Serialize for $name {
-            fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-            where
-                S: serde::Serializer,
-            {
-                match self {
-                    $(Self::$variant => serializer.serialize_str($value),)+
-                    Self::Other(value) => serializer.serialize_str(value.as_str()),
-                }
-            }
-        }
-
-        impl<'de> Deserialize<'de> for $name {
-            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-            where
-                D: serde::Deserializer<'de>,
-            {
-                let value = String::deserialize(deserializer)?;
-                Ok(Self::parse(&value))
-            }
-        }
-
-        impl $name {
-            pub fn parse(value: &str) -> Self {
-                match value {
-                    $($value => Self::$variant,)+
-                    _ => Self::Other(UnknownAgentStatus(value.to_owned())),
-                }
-            }
-        }
-    };
-}
-
-stored_string_enum!(AgentStatus {
-    Unknown => "unknown",
-    Idle => "idle",
-    Queued => "queued",
-    Starting => "starting",
-    Running => "running",
-    Waiting => "waiting",
-    WaitingOnMonitor => "waiting_on_monitor",
-    Approval => "approval",
-    Completed => "completed",
-    Interrupted => "interrupted",
-    Failed => "failed",
-    Blocked => "blocked",
-    Paused => "paused",
-    Parked => "parked",
-    Abandoned => "abandoned",
-    CapacityRetry => "capacity-retry",
-});
+pub use crate::domain::AgentStatus;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -341,554 +263,17 @@ pub use studio_runtime_schema::agent_entity_nested::AgentNaming;
 
 pub use studio_runtime_schema::agent_limits::AgentCapacity;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentRecord {
-    pub id: AgentId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub draft: Option<Box<AgentDraft>>,
-    pub root_id: AgentId,
-    #[serde(deserialize_with = "deserialize_agent_epoch")]
-    pub epoch: i64,
-    pub status: AgentStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deleted_at: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_archive: Option<AgentArchive>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sandbox: Option<AgentSandbox>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cleaned_worktree: Option<CleanedWorktree>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub native_safety_buffering: Option<NativeSafetyBuffering>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub native_status: Option<NativeStatus>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub is_lead: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub workspace_mode: Option<studio_runtime_schema::records::WorkspaceMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_assignment: Option<studio_runtime_schema::review::ReviewAssignment>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub concurrency: Option<studio_runtime_schema::agent_limits::SubagentConcurrency>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_mode: Option<studio_runtime_schema::agent_entity_nested::AgentMode>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_safe_counter"
-    )]
-    pub agent_mode_revision: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub subagent_concurrency_version: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_store_root: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_project_id: Option<Box<str>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub layr_line: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_read_cwd: Option<Box<str>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_subpath: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_base_state: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_server_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worktree: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_base_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_mode_explicit: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_in_git: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quick_create: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub review_defaults: Option<Box<studio_runtime_schema::agent_entity_remote::ReviewDefaultsDto>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worktree_warning: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_base_commit: Option<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_safe_counter"
-    )]
-    pub worker_base_behind_main: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_base_main_ref: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub quick_create_request: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub permission_mode: Option<studio_runtime_schema::claude_permissions::PermissionMode>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub name: Option<String>,
-    #[serde(default, deserialize_with = "deserialize_optional_safe_counter")]
-    pub compactions: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub fast_mode: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub daybreak_enabled: Option<bool>,
-    #[serde(default)]
-    pub naming: AgentNaming,
-    #[serde(default)]
-    pub capacity: AgentCapacity,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_mode_supported: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub layr_ready: Option<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub image_workspace: studio_runtime_schema::queue_command::Field<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub archived: studio_runtime_schema::queue_command::Field<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub pinned: studio_runtime_schema::queue_command::Field<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub prompt: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub profile_id: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub profile_instructions: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub effort: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub native_effort: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub project_folder: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub checkpoint_history_head: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub workspace_reservation_id: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub workspace_operation: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub worker_excluded_account_keys: studio_runtime_schema::queue_command::Field<
-        Vec<studio_runtime_schema::account_key::AccountKey>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub reviewer_excluded_account_keys: studio_runtime_schema::queue_command::Field<
-        Vec<studio_runtime_schema::account_key::AccountKey>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub role: studio_runtime_schema::queue_command::Field<
-        studio_runtime_schema::creation_intent::AgentRole,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub provider: studio_runtime_schema::queue_command::Field<studio_runtime_schema::ProviderKind>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub created:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::NonnegativeNumber>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_safe_counter"
-    )]
-    pub queue_mutation_revision: Option<u64>,
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_optional_safe_counter"
-    )]
-    pub auth_resume_attempt: Option<u64>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub last_completed_turn: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub host_project_path: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub execution_settings_account_key: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub last_completed_turn_status: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub error: studio_runtime_schema::queue_command::Field<
-        studio_runtime_schema::provider_errors::AgentError,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub last_completed_turn_error: studio_runtime_schema::queue_command::Field<
-        studio_runtime_schema::provider_errors::AgentError,
-    >,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worktree_ready: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub approval_policy: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub native_response_turn: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub parked_event: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_wait: Option<studio_runtime_schema::agent_progress::AgentStartWait>,
-    #[serde(
-        default,
-        deserialize_with = "deserialize_optional_safe_counter",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub events: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_event: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub activity: Option<AgentActivity>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_tools: Option<Vec<AgentActiveTool>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tail: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub last_answer: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_usage: Option<AgentContextUsage>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tokens_used: Option<u64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token_usage_accounting: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub in_flight: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auto_wake: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub usage_resume_enabled: Option<bool>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub environment: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<studio_runtime_schema::project_ingress::WorkerEnvironment>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub usage_resume: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<Box<studio_runtime_schema::continuation_snapshot::UsageContinuation>>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub native_failure_hold: studio_runtime_schema::queue_command::Field<NativeFailureHold>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub prepare_attempt: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub worker_defaults: studio_runtime_schema::queue_command::Field<StoredWorkerDefaults>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub pending_settings: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<Box<crate::transfer_record::TransferSettings>>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub pending_settings_account_key: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<studio_runtime_schema::account_key::AccountKey>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub updated_at: studio_runtime_schema::queue_command::Field<StoredTransferValue<f64>>,
+pub use crate::agent_columns::typed::record::AgentRecord;
 
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub portable_history: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<crate::transfer_record::PortableHistory>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub account_history: studio_runtime_schema::queue_command::Field<
-        StoredTransferValue<
-            Vec<StoredTransferObject<crate::transfer_record::TransferAccountHistoryEntry>>,
-        >,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub cyber_access_program:
-        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub yolo_mode: studio_runtime_schema::queue_command::Field<StoredTransferValue<bool>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub claude_options: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<crate::transfer_record::TransferClaudeOptions>,
-    >,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub execution_mode: Option<AgentExecutionMode>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_epoch: Option<i64>,
-    pub account_key: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub turn_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title_job: Option<StoredTitleJob>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_attempt: Option<Box<StartAttemptView>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub disconnect_recovery: Option<Box<studio_runtime_schema::recovery_record::RecoveryFields>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub restart_recovery: Option<Box<studio_runtime_schema::recovery_record::RecoveryFields>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub start_outcome_hold: Option<StoredStartOutcomeHold>,
-    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
-    pub fired_events: BTreeSet<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_review_thread: Option<Box<NativeReviewThread>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vm_launch: Option<VmLaunch>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub credential_copy: Option<CredentialCopy>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub vm_auth_bootstrap: Option<VmAuthBootstrap>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_release: Option<NativeRelease>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub creation_intent: Option<studio_runtime_schema::creation_intent::CreationIntent>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub account_transfer: studio_runtime_schema::queue_command::Field<
-        StoredTransferObject<crate::transfer_record::AgentTransferState>,
-    >,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing",
-        deserialize_with = "deserialize_transfer_id"
-    )]
-    pub account_transfer_id:
-        studio_runtime_schema::queue_command::Field<crate::transfer_record::TransferId>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub lazy_account_transfer:
-        studio_runtime_schema::queue_command::Field<crate::transfer_record::LazyTransferState>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub shared_room_id: studio_runtime_schema::queue_command::Field<String>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub project_folder_revision:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub task_default_gate:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::task_gate::Gate>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub moved_from:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub connection_check:
-        studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub idle_summary_prepared:
-        studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub idle_compaction_episode:
-        studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCompactionEpisode>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub idle_cache: studio_runtime_schema::queue_command::Field<StoredTransferObject<IdleCache>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub native_thread_block:
-        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeThreadBlock>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub native_turn_error:
-        studio_runtime_schema::queue_command::Field<StoredTransferObject<NativeTurnError>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::IdleCompactionEpisode;
 
-/// The episode identity is read by the runtime; other fields retain their wire representation.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdleCompactionEpisode {
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::IdleCache;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct IdleCache {
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub ttl: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub request_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::NativeThreadBlock;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeThreadBlock {
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub thread_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::NativeTurnError;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeTurnError {
-    #[serde(
-        default,
-        skip_serializing_if = "studio_runtime_schema::queue_command::Field::is_missing"
-    )]
-    pub turn_id: studio_runtime_schema::queue_command::Field<StoredTransferValue<String>>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
-
-/// Historical non-boolean holds retain their original JSON and truthiness.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum NativeFailureHold {
-    Boolean(bool),
-    Terminal {
-        #[serde(rename = "terminalFault")]
-        terminal_fault: TerminalFault,
-    },
-    Unreadable(Value),
-}
+pub use crate::agent_columns::typed::record::NativeFailureHold;
 
 /// Terminal data faults preserve their evidence and cannot be resumed by a message.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -898,13 +283,7 @@ pub enum TerminalFault {
     PendingReceipt,
 }
 
-/// Normalize transfer values on decode while retaining historical JSON on disk.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StoredTransferValue<T> {
-    Known(T),
-    Unreadable(Value),
-}
+pub use crate::agent_columns::typed::record::StoredTransferValue;
 
 pub(crate) fn deserialize_object<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
@@ -918,39 +297,9 @@ where
     serde::Deserialize::deserialize(value).map_err(serde::de::Error::custom)
 }
 
-/// An object-shaped typed value or its unchanged legacy representation.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged, bound(deserialize = "T: serde::de::DeserializeOwned"))]
-pub enum StoredTransferObject<T> {
-    Known(#[serde(deserialize_with = "deserialize_object")] T),
-    Unreadable(Value),
-}
+pub use crate::agent_columns::typed::record::StoredTransferObject;
 
-fn deserialize_transfer_id<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<studio_runtime_schema::queue_command::Field<crate::transfer_record::TransferId>, D::Error>
-{
-    use studio_runtime_schema::queue_command::Field;
-    match Option::<String>::deserialize(deserializer)? {
-        None => Ok(Field::Null),
-        Some(value) if value.is_empty() => Ok(Field::Missing),
-        Some(value) => value
-            .try_into()
-            .map(Field::Value)
-            .map_err(serde::de::Error::custom),
-    }
-}
-
-/// Typed defaults or an unreadable legacy value.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StoredWorkerDefaults {
-    Known(
-        #[serde(deserialize_with = "deserialize_object")]
-        crate::transfer_record::TransferWorkerDefaults,
-    ),
-    Unreadable(Value),
-}
+pub use crate::agent_columns::typed::record::StoredWorkerDefaults;
 
 impl From<crate::transfer_record::TransferWorkerDefaults> for StoredWorkerDefaults {
     fn from(value: crate::transfer_record::TransferWorkerDefaults) -> Self {
@@ -986,13 +335,16 @@ impl AgentRecord {
         if value.is_null() {
             self.usage_resume = Field::Null;
         } else {
+            let raw = studio_json::to_raw_value(&value).expect("existing JSON receipt serializes");
             let known = value
                 .is_object()
-                .then(|| serde::Deserialize::deserialize(value.clone()))
+                .then(|| serde::Deserialize::deserialize(value))
                 .transpose();
             self.usage_resume = Field::Value(match known {
                 Ok(Some(known)) => StoredTransferObject::Known(known),
-                _ => StoredTransferObject::Unreadable(value),
+                _ => {
+                    StoredTransferObject::Unreadable(studio_runtime_schema::raw_json::RawJson(raw))
+                }
             });
         }
     }
@@ -1008,7 +360,9 @@ impl AgentRecord {
     pub fn usage_resume_truthy(&self) -> bool {
         match self.usage_resume.value() {
             Some(StoredTransferObject::Known(_)) => true,
-            Some(StoredTransferObject::Unreadable(value)) => crate::truthy(Some(value)),
+            Some(StoredTransferObject::Unreadable(value)) => {
+                crate::schema::raw_truthy(Some(&value.0))
+            }
             None => false,
         }
     }
@@ -1032,20 +386,9 @@ impl AgentRecord {
         match self.native_failure_hold.value() {
             Some(NativeFailureHold::Boolean(value)) => *value,
             Some(NativeFailureHold::Terminal { .. }) => true,
-            Some(NativeFailureHold::Unreadable(value)) => crate::truthy(Some(value)),
+            Some(NativeFailureHold::Unreadable(value)) => crate::schema::raw_truthy(Some(&value.0)),
             None => false,
         }
-    }
-}
-
-fn deserialize_agent_epoch<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<i64, D::Error> {
-    let epoch = i64::deserialize(deserializer)?;
-    if (0..=studio_runtime_schema::shared_values::MAX_SAFE_INTEGER).contains(&epoch) {
-        Ok(epoch)
-    } else {
-        Err(serde::de::Error::custom("agent epoch outside safe range"))
     }
 }
 
@@ -1080,25 +423,7 @@ fn deserialize_nonnegative_time<'de, D: serde::Deserializer<'de>>(
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeReviewThread {
-    pub sequence: u64,
-    pub attempt: String,
-    pub operation: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub root_request_id: Option<String>,
-    #[serde(default)]
-    pub admitted_request: Option<crate::request_results::AdmittedRequest>,
-    pub generation: u64,
-    pub connection: String,
-    pub request_digest: String,
-    pub status: studio_runtime_schema::persistence::NativeReviewThreadStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub thread_id: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::NativeReviewThread;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1110,15 +435,7 @@ pub struct StartIdentity {
     pub launch_fingerprint: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct VmLaunch {
-    pub identity: StartIdentity,
-    pub signature: String,
-    pub status: studio_runtime_schema::persistence::WorkEffectStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub info: Option<Value>,
-}
+pub use crate::agent_columns::typed::record::VmLaunch;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1154,92 +471,17 @@ pub struct NativeReleaseScope {
     pub provider: studio_runtime_schema::persistence::ProviderScope,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct NativeRelease {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub admitted_request: Option<crate::request_results::AdmittedRequest>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<NativeReleaseScope>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::NativeRelease;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TitleJob {
-    pub request_id: String,
-    pub agent_id: String,
-    pub root_request_id: String,
-    pub admitted_request: crate::request_results::AdmittedRequest,
-    pub status: studio_runtime_schema::persistence::TitleStatus,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fingerprint: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub epoch: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub original_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
-}
+pub use crate::agent_columns::typed::record::TitleJob;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StoredTitleJob {
-    Job(Box<TitleJob>),
-    Unrecognized(Value),
-}
+pub use crate::agent_columns::typed::record::StoredTitleJob;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "stage", rename_all = "snake_case")]
-pub enum StartOutcomeHold {
-    Held {
-        #[serde(rename = "operationId", skip_serializing_if = "Option::is_none")]
-        operation_id: Option<String>,
-        #[serde(
-            rename = "connectionGeneration",
-            skip_serializing_if = "Option::is_none"
-        )]
-        connection_generation: Option<u64>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        reason: Option<String>,
-        #[serde(rename = "attemptId", skip_serializing_if = "Option::is_none")]
-        attempt_id: Option<String>,
-        #[serde(flatten)]
-        extra: BTreeMap<String, Value>,
-    },
-    Recovery {
-        epoch: i64,
-        reason: String,
-        #[serde(flatten)]
-        extra: BTreeMap<String, Value>,
-    },
-    AccountSettlement {
-        cursor: Option<u64>,
-        reason: String,
-        #[serde(rename = "previousError")]
-        previous_error: Value,
-        #[serde(rename = "previousNativeFailureHold")]
-        previous_native_failure_hold: PreviousNativeFailureHold,
-        #[serde(flatten)]
-        extra: BTreeMap<String, Value>,
-    },
-}
+pub use crate::agent_columns::typed::record::StartOutcomeHold;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PreviousNativeFailureHold {
-    pub present: bool,
-    pub value: Value,
-}
+pub use crate::agent_columns::typed::record::PreviousNativeFailureHold;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum StoredStartOutcomeHold {
-    Known(StartOutcomeHold),
-    Unrecognized(Value),
-}
+pub use crate::agent_columns::typed::record::StoredStartOutcomeHold;
 
 impl StoredStartOutcomeHold {
     pub fn operation_id(&self) -> Option<&str> {
@@ -1274,12 +516,7 @@ pub use studio_runtime_schema::start_attempt::{
     InterruptOutcome, StartAttemptAction, StartAttemptView, StartInterruptView,
 };
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActiveExecutionView {
-    pub run_id: Option<String>,
-    pub attempt_id: Option<String>,
-}
+pub use crate::agent_columns::typed::record::ActiveExecutionView;
 
 macro_rules! start_attempt_setters {
     ($($name:ident: $ty:ty => $field:ident = $convert:expr;)+) => {
@@ -1331,12 +568,38 @@ impl AgentRecord {
         Self {
             id,
             draft: None,
+            active_execution: Default::default(),
             root_id,
             epoch,
             status,
             parent_id: None,
             deleted_at: None,
             agent_archive: None,
+            deleted_archive: Default::default(),
+            capacity_retry_count: Default::default(),
+            shell_policy_last_active_at: Default::default(),
+            claude_pre_input_retry: Default::default(),
+            provider_stream: Default::default(),
+            auth_wait: Default::default(),
+            moved_to: Default::default(),
+            move_import_pending: Default::default(),
+            park_after_turn: Default::default(),
+            connection_recovery: Default::default(),
+            layr_state_id: Default::default(),
+            empty_transfer_recovery: Default::default(),
+            context_repair_wait: Default::default(),
+            connection_id: Default::default(),
+            project: Default::default(),
+            image_workspace_ready: Default::default(),
+            image_workspace_phase: Default::default(),
+            layr_scratch: Default::default(),
+            steer_rejected_turn_id: Default::default(),
+            deleted: Default::default(),
+            real_cwd: Default::default(),
+            worktree_common_dir: Default::default(),
+            remote_epoch: Default::default(),
+            remote_control_epoch: Default::default(),
+            remote_stop_request: Default::default(),
             sandbox: None,
             cleaned_worktree: None,
             native_safety_buffering: None,
@@ -1478,13 +741,25 @@ impl AgentRecord {
         )
     }
 
-    pub fn active_execution(&self) -> Result<Option<ActiveExecutionView>, studio_json::Error> {
-        self.extra
-            .get("activeExecution")
-            .filter(|value| !value.is_null())
-            .map(ActiveExecutionView::deserialize)
-            .transpose()
-            .map_err(Into::into)
+    pub fn active_execution(&self) -> StoreResult<Option<ActiveExecutionView>> {
+        use studio_runtime_schema::queue_command::Field;
+        match &self.active_execution {
+            Field::Missing | Field::Null => Ok(None),
+            Field::Value(StoredTransferObject::Known(view)) => {
+                if [&view.run_id, &view.attempt_id]
+                    .into_iter()
+                    .any(|field| matches!(field.value(), Some(StoredTransferValue::Unreadable(_))))
+                {
+                    return Err(crate::StoreError::RecordContract(
+                        "invalid active execution identity",
+                    ));
+                }
+                Ok(Some(view.clone()))
+            }
+            Field::Value(StoredTransferObject::Unreadable(_)) => Err(
+                crate::StoreError::RecordContract("invalid active execution"),
+            ),
+        }
     }
 
     fn set_active_execution_field<T: Serialize>(
@@ -1492,19 +767,31 @@ impl AgentRecord {
         field: &str,
         value: &T,
     ) -> StoreResult<()> {
-        let pointer = self
-            .extra
-            .entry("activeExecution".into())
-            .or_insert_with(|| studio_json::Map::new().into());
-        if pointer.is_null() {
-            *pointer = studio_json::Map::new().into();
+        use studio_runtime_schema::queue_command::Field;
+        let view = match &mut self.active_execution {
+            Field::Value(StoredTransferObject::Known(view)) => view,
+            Field::Missing | Field::Null => {
+                self.active_execution =
+                    Field::Value(StoredTransferObject::Known(Default::default()));
+                let Field::Value(StoredTransferObject::Known(view)) = &mut self.active_execution
+                else {
+                    unreachable!()
+                };
+                view
+            }
+            Field::Value(StoredTransferObject::Unreadable(_)) => {
+                return Err(crate::StoreError::RecordContract(
+                    "invalid active execution",
+                ));
+            }
+        };
+        let encoded = studio_json::to_string(value)?;
+        let typed = studio_json::from_str(&encoded)?;
+        if field == "runId" {
+            view.run_id = typed;
+        } else {
+            view.attempt_id = typed;
         }
-        let pointer = pointer
-            .as_object_mut()
-            .ok_or(crate::StoreError::RecordContract(
-                "invalid active execution",
-            ))?;
-        pointer.insert(field.into(), crate::projection_value(value));
         Ok(())
     }
     pub fn set_active_execution_run_id(&mut self, value: &str) -> StoreResult<()> {
@@ -3968,20 +3255,20 @@ mod tests {
             .active_execution()
             .expect("pointer")
             .expect("present");
-        assert_eq!(view.run_id.as_deref(), Some("run"));
-        assert_eq!(view.attempt_id, None);
+        assert_eq!(view.run_id_text(), Some("run"));
+        assert_eq!(view.attempt_id_text(), None);
         record
             .set_active_execution_attempt_id(Some("attempt-0"))
             .expect("set attempt");
         assert_eq!(
-            record.extra["activeExecution"],
+            record.value()["activeExecution"],
             json!({"runId":"run","attemptId":"attempt-0","futureField":{"keep":true}})
         );
         record
             .set_active_execution_attempt_id(None)
             .expect("restore null");
         assert_eq!(
-            record.extra["activeExecution"],
+            record.value()["activeExecution"],
             json!({"runId":"run","attemptId":null,"futureField":{"keep":true}})
         );
     }
@@ -4533,7 +3820,7 @@ mod tests {
         let record = agent(json!({"compactions":0, "id":"agent", "rootId":"agent",
             "epoch":2, "status":"idle", "accountKey":"default", "prepareAttempt":{"old":true}}));
         assert!(matches!(record.prepare_attempt.value(),
-            Some(super::StoredTransferValue::Unreadable(value)) if value == &json!({"old":true})));
+            Some(super::StoredTransferValue::Unreadable(value)) if value.0.as_str() == r#"{"old":true}"#));
         assert_eq!(
             record.value().get("prepareAttempt"),
             Some(&json!({"old":true}))
@@ -4593,7 +3880,7 @@ mod tests {
                     assert_eq!(expected, actual)
                 }
                 (_, Some(super::NativeFailureHold::Unreadable(actual))) => {
-                    assert_eq!(&value, actual)
+                    assert_eq!(studio_json::to_string(&value).unwrap(), actual.0.as_str())
                 }
                 _ => panic!("unexpected native failure hold variant"),
             }
@@ -4749,14 +4036,16 @@ mod tests {
     }
 
     #[test]
-    fn unknown_agent_status_and_fields_survive_carrier_rewrite() {
+    fn unknown_agent_status_is_refused_and_known_extensions_survive() {
         let value = json!({"compactions":0,"id":"agent-1","provider":"codex","rootId":"agent-1","epoch":4,"accountKey":"default","capacity":{"kind":"automatic","max":64},"naming":"automatic",
             "status":"future-agent-state","future":{"enabled":true,"count":9007199254740993_i64}});
-        let record = agent(value.clone());
-        assert_eq!(
-            record.status,
-            AgentStatus::Other(UnknownAgentStatus::new("future-agent-state".into()).unwrap())
+        assert!(
+            super::parse_agent_record("agent-1", &studio_json::to_string(&value).unwrap()).is_err()
         );
+        let mut value = value;
+        value["status"] = json!("running");
+        let record = agent(value.clone());
+        assert_eq!(record.status, AgentStatus::Running);
         assert_eq!(record.into_value(), value);
     }
 

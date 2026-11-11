@@ -1667,7 +1667,7 @@ async fn seed_restart_input(state: &State, fail_terminal_settlement: bool) {
                 agent.in_flight = Some(false);
                 agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(("Context repair waits for a confirmed input receipt: annotation:input").to_string()));
                 agent.restart_recovery = Some(Box::new(studio_runtime_schema::recovery_record::RecoveryFields { stage: Some("held".into()), start_attempt: Some(Box::new(serde::Deserialize::deserialize(attempt).expect("typed fixture"))), ..Default::default() }));
-                agent.extra.insert("contextRepairWait".into(), json!({"error":"Context repair waits for a confirmed input receipt: annotation:input","scope":"native","events":[event],"nextCheckAt":0,"source":{"id":agent_id,"epoch":epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}}));
+                agent.context_repair_wait = serde::Deserialize::deserialize(json!({"error":"Context repair waits for a confirmed input receipt: annotation:input","scope":"native","events":[event],"nextCheckAt":0,"source":{"id":agent_id,"epoch":epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}})).expect("typed wait fixture");
                 agent.start_attempt.take();
                 agent.disconnect_recovery.take();
                 AgentRepository::put(tx, &agent)?;
@@ -1998,8 +1998,16 @@ async fn restart_isolation_case(refusal: RestartRefusal) {
             later.root_id = later.id.clone();
             later.restart_recovery.as_mut().unwrap().start_attempt.as_mut().unwrap().id = Some("later-attempt".into());
             later.restart_recovery.as_mut().unwrap().start_attempt.as_mut().unwrap().events = Some(vec!["annotation:later".into()]);
-            later.extra.get_mut("contextRepairWait").unwrap()["events"] = json!(["annotation:later"]);
-            later.extra.get_mut("contextRepairWait").unwrap()["source"]["id"] = json!("z-later");
+            let Some(studio_runtime_store::StoredTransferObject::Known(wait)) = later.context_repair_wait.value() else { panic!("typed wait fixture") };
+            let mut wait = wait.value().clone();
+            wait.events = Some(vec!["annotation:later".into()]);
+            let Some(studio_runtime_schema::recovery_record::RecoverySource::Fields(source)) = wait.source.as_mut() else { panic!("typed source fixture") };
+            source.id = Some("z-later".into());
+            later.context_repair_wait = studio_runtime_schema::queue_command::Field::Value(
+                studio_runtime_store::StoredTransferObject::Known(
+                    studio_runtime_store::json_record_codec::ExactJson::from_value(&wait).expect("typed wait fixture")
+                )
+            );
             AgentRepository::put(tx, &later)?;
             if invalid_scan {
                 tx.execute("UPDATE runtime_agents SET record=json_set(record,'$.restartRecovery.startAttempt.submitted','invalid') WHERE id=?1", [&agent_id])?;
@@ -2194,7 +2202,7 @@ async fn seed_transport_turn(state: &State) {
             agent.turn_epoch = Some(agent.epoch);
             agent.in_flight = Some(true);
             agent.auto_wake = Some(true);
-            agent.extra.remove("contextRepairWait");
+            agent.context_repair_wait = studio_runtime_schema::queue_command::Field::Missing;
             agent.restart_recovery.take();
             agent.start_attempt = Some(Box::new(studio_runtime_store::StartAttemptView { id: Some("old-attempt".into()), account_key: Some("default".into()), epoch: Some(agent.epoch), thread_id: Some("fake-thread-0".into()), turn_id: Some("old-turn".into()), submitted: Some(true), connection_generation: Some(1), events: Some(vec!["annotation:input".into()]), active_at_reservation: Some(false), settings_fixed: Some(true), ..Default::default() }));
             AgentRepository::put(tx, &agent)?;
@@ -2656,10 +2664,10 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
                 agent.in_flight = Some(false);
                 agent.error = studio_runtime_schema::queue_command::Field::Value(studio_runtime_schema::provider_errors::AgentError::Message(("held").to_string()));
                 agent.restart_recovery = Some(Box::new(studio_runtime_schema::recovery_record::RecoveryFields { stage: Some("held".into()), start_attempt: Some(Box::new(serde::Deserialize::deserialize(attempt).expect("typed fixture"))), ..Default::default() }));
-                agent.extra.insert("contextRepairWait".into(), json!({
+                agent.context_repair_wait = serde::Deserialize::deserialize(json!({
                     "error":"held","scope":"native","events":["annotation:input"],"nextCheckAt":0,
                     "source":{"id":agent_id,"epoch":epoch,"accountKey":"default","threadId":"fake-thread-0","attemptId":null}
-                }));
+                })).expect("typed wait fixture");
                 agent.start_attempt.take();
                 AgentRepository::put(tx, &agent)?;
                 tx.execute("UPDATE runtime_events SET status='uncertain',error='Server restarted before delivery acknowledgement' WHERE id='annotation:input'", [])?;
@@ -2699,10 +2707,12 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
                     "UPDATE runtime_agents SET record=json_set(record,'$.contextRepairWait.nextCheckAt',1) WHERE id=?1",
                     [&agent],
                 )?;
+                let changes = tx.total_changes();
                 let stale_wait = completion
                     .complete(tx, &snapshot, &scope, &action)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
                 assert!(matches!(stale_wait.outcome, RecoveryOutcome::Superseded));
+                assert_eq!(tx.total_changes(), changes, "changed wait must not write completion state");
                 tx.execute(
                     "UPDATE runtime_agents SET record=json_set(record,'$.contextRepairWait.nextCheckAt',0) WHERE id=?1",
                     [&agent],
@@ -2711,14 +2721,21 @@ async fn restart_terminal_commit_before_wake_converges_on_next_worker_start() {
                     "UPDATE runtime_events SET status='pending' WHERE id='annotation:input'",
                     [],
                 )?;
+                let changes = tx.total_changes();
                 let stale_event = completion
                     .complete(tx, &snapshot, &scope, &action)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))?;
                 assert!(matches!(stale_event.outcome, RecoveryOutcome::Superseded));
+                assert_eq!(tx.total_changes(), changes, "changed event must not write completion state");
                 tx.execute(
                     "UPDATE runtime_events SET status='uncertain' WHERE id='annotation:input'",
                     [],
                 )?;
+                let mut current = AgentRepository::get(tx, &AgentId::from(agent.as_str()))?.unwrap();
+                let wait = studio_json::to_string(&snapshot.record()["contextRepairWait"])?;
+                let raw_wait = format!(r#"{{ "nextCheckAt":1, {} }}"#, &wait[1..wait.len()-1]);
+                current.context_repair_wait = studio_json::from_str(&raw_wait)?;
+                AgentRepository::put(tx, &current)?;
                 completion
                     .complete(tx, &snapshot, &scope, &action)
                     .map_err(|error| StoreError::SchemaMismatch(error.to_string()))

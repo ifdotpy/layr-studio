@@ -313,8 +313,8 @@ fn compare(db: &rusqlite::Connection, expected: &Value, label: &str) {
                     .expect("active execution")
                     .expect("pointer");
                 record.remove("activeExecution");
-                assert_eq!(pointer.run_id.as_deref(), Some("run:attempt"));
-                assert_eq!(pointer.attempt_id.as_deref(), Some("attempt"));
+                assert_eq!(pointer.run_id_text(), Some("run:attempt"));
+                assert_eq!(pointer.attempt_id_text(), Some("attempt"));
             }
         }
     }

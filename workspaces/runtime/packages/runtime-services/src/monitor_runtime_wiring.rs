@@ -53,7 +53,7 @@ impl AgentHints {
             {
                 self.rows.extend(ids.iter().copied());
             }
-            TableChange::Rows(_) | TableChange::Full => {
+            TableChange::Rows(_) | TableChange::Full | TableChange::AgentComponents(_) => {
                 self.full = true;
                 self.rows.clear();
             }
@@ -2278,15 +2278,12 @@ mod tests {
     async fn insert_active_owner(store: &RuntimeStore) {
         store
             .transaction_with(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
-                    [
-                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
-                            "id":"owner","rootId":"owner","epoch":0,"status":"ready",
+                studio_runtime_store::AgentRepository::put(
+                    tx,
+                    &studio_runtime_store::AgentRecord::from_value(studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                            "id":"owner","rootId":"owner","epoch":0,"status":"idle",
                             "autoWake":true,"accountKey":"default","threadId":"thread"
-                        })
-                        .to_string(),
-                    ],
+                        }))?,
                 )?;
                 Ok::<_, studio_runtime_store::StoreError>(())
             })
@@ -2298,10 +2295,12 @@ mod tests {
         let (_root, store, _) = fixture().await;
         store.transaction_with(|tx| {
             for id in ["parent", "owner"] {
-                tx.execute("INSERT INTO runtime_agents(id,record) VALUES(?1,?2)", (id,
-                    studio_json::json!({"id":id,"rootId":"parent","parentId":(id == "owner").then_some("parent"),
-                        "compactions":0,"provider":"codex","epoch":0,"turnEpoch":0,"status":"ready",
-                        "autoWake":true,"accountKey":"default","threadId":id}).to_string()))?;
+                studio_runtime_store::AgentRepository::put(
+                    tx,
+                    &studio_runtime_store::AgentRecord::from_value(studio_json::json!({"id":id,"rootId":"parent","parentId":(id == "owner").then_some("parent"),
+                        "compactions":0,"provider":"codex","epoch":0,"turnEpoch":0,"status":"idle",
+                        "autoWake":true,"accountKey":"default","threadId":id}))?,
+                )?;
             }
             Ok::<_, studio_runtime_store::StoreError>(())
         }).await.expect("parent and monitor owner");
@@ -3458,18 +3457,15 @@ mod tests {
         let (_root, store, port) = fixture().await;
         store
             .transaction_with(|tx| {
-                tx.execute(
-                    "INSERT INTO runtime_agents(id,record) VALUES ('owner',?1)",
-                    [
-                        studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
-                            "id":"owner","rootId":"owner","epoch":1,"status":"ready",
+                studio_runtime_store::AgentRepository::put(
+                    tx,
+                    &studio_runtime_store::AgentRecord::from_value(studio_json::json!({"compactions":0,"provider":studio_runtime_schema::ProviderKind::Codex,
+                            "id":"owner","rootId":"owner","epoch":1,"status":"idle",
                             "autoWake":true,"accountKey":"default","threadId":"thread",
                             "nativeFailureHold":{},
                             "disconnectRecovery":{"epoch":1,"autoWake":true,
                                 "accountKey":"default","threadId":"thread"}
-                        })
-                        .to_string(),
-                    ],
+                        }))?,
                 )?;
                 tx.execute(
                     "INSERT INTO runtime_rules(id,record) VALUES ('rule',?1)",

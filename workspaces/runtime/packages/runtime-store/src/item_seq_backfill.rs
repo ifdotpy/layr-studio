@@ -5,7 +5,6 @@
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::StoreResult;
-use crate::durable_seq::number_row;
 use crate::online_migration::OnlineMigration;
 
 pub struct ItemSeqBackfill;
@@ -51,11 +50,23 @@ impl OnlineMigration for ItemSeqBackfill {
 
     /// A row that already has a number is left alone, so a re-copy of a changed key does
     /// not touch the source table again.
-    fn write(&self, db: &Connection, key: &i64, _: ()) -> StoreResult<()> {
-        number_row(db, Self::SOURCE_TABLE, *key)
+    fn write(
+        &self,
+        tx: &mut studio_db_api::Tx<'_, crate::peer_update_settings::Canvas>,
+        key: &i64,
+        _: (),
+    ) -> StoreResult<()> {
+        use crate::clock_schema::queries::{High, NumberItem};
+        let high = tx.read().named(&High::QUERY, &High)?;
+        tx.named(&NumberItem::QUERY, &NumberItem { rowid: *key, high })?;
+        Ok(())
     }
 
-    fn remove(&self, _: &Connection, _: &i64) -> StoreResult<()> {
+    fn remove(
+        &self,
+        _: &mut studio_db_api::Tx<'_, crate::peer_update_settings::Canvas>,
+        _: &i64,
+    ) -> StoreResult<()> {
         Ok(())
     }
 }
@@ -133,7 +144,11 @@ mod tests {
             "{numbered:?}"
         );
         // A repeat changes nothing.
-        number_row(&db, "runtime_items", 1).expect("repeat");
+        let tx = db.transaction().unwrap();
+        ItemSeqBackfill
+            .write(&mut crate::peer_update_settings::canvas_tx(&tx), &1, ())
+            .expect("repeat");
+        tx.commit().unwrap();
         assert_eq!(seqs(&db), numbered);
     }
 }

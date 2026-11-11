@@ -1189,7 +1189,7 @@ async fn repair_idle_with_broker_inner(
         archive_previous_repair(&mut agent)?;
         let start_snapshot=if let Some(attempt)=agent.get("startAttempt").filter(|value|value.is_object()) {Some(studio_json::to_raw_value(attempt).map_err(|_| RepairError::Invalid("agent.startAttempt"))?)} else {
             let pointer = AgentRecord::deserialize(&agent).map_err(|_| RepairError::Invalid("agent"))?.active_execution().map_err(|_| RepairError::Invalid("agent.activeExecution"))?;
-            if let Some(id)=pointer.and_then(|pointer| pointer.attempt_id) {studio_runtime_store::ExecutionHistoryRepository::attempt(tx,&id)?.and_then(|attempt|attempt.snapshot)} else {None}
+            if let Some(id)=pointer.and_then(|pointer| pointer.attempt_id_text().map(str::to_owned)) {studio_runtime_store::ExecutionHistoryRepository::attempt(tx,&id)?.and_then(|attempt|attempt.snapshot)} else {None}
         };
         let repair = json!({
             "id":operation_id,

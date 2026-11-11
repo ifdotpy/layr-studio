@@ -113,7 +113,7 @@ impl HistoryWake {
                     }
                 }
             }
-            TableChange::Full => pending.roster_dirty = true,
+            TableChange::Full | TableChange::AgentComponents(_) => pending.roster_dirty = true,
         });
     }
 

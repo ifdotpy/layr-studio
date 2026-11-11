@@ -380,7 +380,9 @@ fn claim_refuses_every_ineligible_agent_state() {
     let cases: [(&str, Change); 7] = [
         ("queued", |a| a.status = AgentStatus::Queued),
         ("rejected-this-turn", |a| {
-            a.extra.insert("steerRejectedTurnId".into(), json!(TURN));
+            a.steer_rejected_turn_id = studio_runtime_schema::queue_command::Field::Value(
+                crate::StoredTransferValue::Known(TURN.to_owned()),
+            );
         }),
         ("vm", |a| {
             a.execution_mode = Some(crate::AgentExecutionMode::Vm);
@@ -537,7 +539,7 @@ fn acknowledgement_before_the_response_is_final() {
         statuses(&connection),
         ["delivered", "delivered", "pending", "delivered"]
     );
-    assert!(!agent(&connection).extra.contains_key("steerRejectedTurnId"));
+    assert!(agent(&connection).steer_rejected_turn_id.is_missing());
 }
 
 #[test]
@@ -567,7 +569,14 @@ fn rejection_requeues_once_and_blocks_this_turn() {
         assert!(!requeued, "the running turn keeps the agent busy");
         assert_eq!(statuses(&connection), QUEUED);
     }
-    assert_eq!(agent(&connection).extra["steerRejectedTurnId"], TURN);
+    assert_eq!(
+        agent(&connection)
+            .steer_rejected_turn_id
+            .value()
+            .and_then(|value| value.known())
+            .map(String::as_str),
+        Some(TURN)
+    );
     assert!(
         claim(&mut connection, "s2").is_none(),
         "the same turn is not steered again"
@@ -795,9 +804,9 @@ fn wake_page_selects_running_turns_of_every_provider_with_queued_user_input() {
     let connection = database();
     assert_eq!(page(&connection)["acct"][0].agent_id, AGENT);
     let mut rejected = running();
-    rejected
-        .extra
-        .insert("steerRejectedTurnId".into(), json!(TURN));
+    rejected.steer_rejected_turn_id = studio_runtime_schema::queue_command::Field::Value(
+        crate::StoredTransferValue::Known(TURN.to_owned()),
+    );
     put_agent(&connection, rejected);
     assert!(page(&connection).is_empty());
     let mut codex = running();

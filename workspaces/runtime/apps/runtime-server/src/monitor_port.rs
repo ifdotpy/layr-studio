@@ -466,7 +466,7 @@ impl RetainedMonitorPort {
         };
         let id = id.to_owned();
         tokio::spawn(async move {
-            let retry = match port.dispatch_monitor_start(&id, now).await {
+            let retry = match Box::pin(port.dispatch_monitor_start(&id, now)).await {
                 Ok(()) => false,
                 // Python finishes a managed monitor whose preparation is refused.
                 Err(MonitorError::Refused(reason)) => {
@@ -1423,7 +1423,7 @@ impl RuleMonitor for RetainedMonitorPort {
     ) -> futures_util::future::BoxFuture<'a, CheckSubmission> {
         Box::pin(async move {
             self.detach_rule_check(check, |port, check| async move {
-                match port.launch_rule_check(&check).await {
+                match Box::pin(port.launch_rule_check(&check)).await {
                     Ok(submission) => submission,
                     Err(error) => match port.fail_unsubmitted_rule_check(&check, &error).await {
                         Some(true) | None => CheckSubmission::NotSubmitted { error },
@@ -3124,8 +3124,7 @@ mod tests {
         ))
         .expect("install resources");
         if replay_config {
-            let error = port
-                .dispatch_monitor_start("watch", now)
+            let error = Box::pin(port.dispatch_monitor_start("watch", now))
                 .await
                 .expect_err("temporary config refusal");
             assert!(
@@ -4059,8 +4058,7 @@ mod tests {
             .await
             .expect("seed watch");
         let port = RetainedMonitorPort::new(store, Arc::new(NoSession));
-        let error = port
-            .dispatch_monitor_start("watch", 62.0)
+        let error = Box::pin(port.dispatch_monitor_start("watch", 62.0))
             .await
             .expect_err("expired start");
         assert!(

@@ -507,7 +507,8 @@ async fn received_remote_event_replays_cached_receipt_after_restart_without_dupl
     parent.auto_wake = Some(true);
     parent.cwd = Some(std::env::current_dir().unwrap().display().to_string());
     parent.concurrency = Some(32.try_into().unwrap());
-    parent.extra.insert("moveImportPending".into(), json!(true));
+    parent.move_import_pending =
+        serde::Deserialize::deserialize(json!(true)).expect("typed fixture moveImportPending");
     let link = json!({"id":"test-link","side":"home","server":"peer-server","home":"local-server","parent":"test-parent","parentEpoch":3,"workers":[]});
     store
         .transaction_with(move |tx| {
@@ -782,7 +783,8 @@ async fn moved_worker_send_reaches_a_local_descendant_once() {
     };
     worker.auto_wake = Some(true);
     worker.cwd = Some(std::env::current_dir().unwrap().display().to_string());
-    worker.extra.insert("movedTo".into(), json!("server-two"));
+    worker.moved_to =
+        serde::Deserialize::deserialize(json!("server-two")).expect("typed fixture movedTo");
     worker.extra.insert(
         "remoteWorker".into(),
         json!({"server":"peer-server","link":"move-link"}),
@@ -934,7 +936,8 @@ async fn remote_worker_call_refuses_stopped_parent_without_writes() {
         ..AgentRecord::test_defaults()
     };
     worker.auto_wake = Some(true);
-    worker.extra.insert("movedTo".into(), json!("server-two"));
+    worker.moved_to =
+        serde::Deserialize::deserialize(json!("server-two")).expect("typed fixture movedTo");
     worker.extra.insert(
         "remoteWorker".into(),
         json!({"server":"peer-server","link":"stopped-link"}),
@@ -1042,7 +1045,8 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         ..AgentRecord::test_defaults()
     };
     worker.auto_wake = Some(true);
-    worker.extra.insert("movedTo".into(), json!("server-two"));
+    worker.moved_to =
+        serde::Deserialize::deserialize(json!("server-two")).expect("typed fixture movedTo");
     worker.parent_id = Some(("remote-parent").to_string());
     worker.cwd = Some("/fixture".into());
     worker.extra.insert(
@@ -1053,7 +1057,7 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
     descendant.id = AgentId::from("remote-descendant");
     descendant.parent_id = Some("remote-worker".into());
     descendant.extra.remove("remoteWorker");
-    descendant.extra.remove("movedTo");
+    descendant.moved_to = studio_runtime_schema::queue_command::Field::Missing;
     descendant.start_attempt = Some(Box::new(
         studio_json::from_str(
             &json!({
@@ -1111,8 +1115,14 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         .expect("worker");
     assert_eq!(current.epoch, 5, "replay does not stop twice");
     assert_eq!(
-        current.extra.get("remoteStopRequest"),
-        Some(&json!("remote-stop-request-1"))
+        current
+            .remote_stop_request
+            .value()
+            .and_then(|value| match value {
+                studio_runtime_store::StoredTransferValue::Known(value) => Some(value.as_str()),
+                studio_runtime_store::StoredTransferValue::Unreadable(_) => None,
+            }),
+        Some("remote-stop-request-1")
     );
     drop(reader);
 
@@ -1144,10 +1154,10 @@ async fn remote_stop_receiver_replays_exact_request_and_rejects_superseded_contr
         .transaction(|tx| {
             let mut current =
                 AgentRepository::get(tx, &AgentId::from("remote-worker"))?.expect("worker");
-            current
-                .extra
-                .insert("remoteStopRequest".into(), json!("newer"));
-            current.extra.insert("remoteControlEpoch".into(), json!(10));
+            current.remote_stop_request = serde::Deserialize::deserialize(json!("newer"))
+                .expect("typed fixture remoteStopRequest");
+            current.remote_control_epoch = serde::Deserialize::deserialize(json!(10))
+                .expect("typed fixture remoteControlEpoch");
             AgentRepository::put(tx, &current)?;
             Ok::<_, studio_runtime_store::StoreError>(())
         })

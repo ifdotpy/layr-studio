@@ -52,7 +52,9 @@ async fn set_retry_count(state: &State, count: u64) {
         .run(move |s| async move {
             scheduler::lifecycle_transaction_with(s.as_ref(), move |tx| {
                 let mut row = AgentRepository::get(tx, &AgentId::from(child.as_str()))?.unwrap();
-                row.extra.insert("capacityRetryCount".into(), json!(count));
+                row.capacity_retry_count = studio_runtime_schema::queue_command::Field::Value(
+                    studio_runtime_store::StoredTransferValue::Known(count),
+                );
                 AgentRepository::put(tx, &row)?;
                 Ok(())
             })

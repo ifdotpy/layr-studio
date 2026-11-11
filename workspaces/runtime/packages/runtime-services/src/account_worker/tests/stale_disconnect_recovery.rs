@@ -49,8 +49,8 @@ async fn leave_stale_receipt(state: &State, shape: Shape, thread: &str, stale: V
                     serde::Deserialize::deserialize(stale.clone()).expect("typed fixture"),
                 )),
                 extra: [
-                    ("at".into(), json!(1.0)),
-                    ("supervisor".into(), Value::Null),
+                    ("at".into(), studio_json::to_raw_value(&1.0).unwrap()),
+                    ("supervisor".into(), studio_json::to_raw_value(&()).unwrap()),
                 ]
                 .into(),
                 ..Default::default()

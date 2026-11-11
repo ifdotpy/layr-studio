@@ -16,6 +16,7 @@ use crate::recovery_history::ConnectionScope;
 use std::sync::Arc;
 use studio_json::{Value, json};
 use studio_runtime_providers::Method;
+use studio_runtime_schema::{queue_command::Field, start_attempt::InterruptOutcome};
 use studio_runtime_store::{
     AgentId, AgentRecord, AgentRepository, RuntimeStore, SchedulerRepository,
 };
@@ -396,11 +397,13 @@ async fn reserve_request(
                         .ok_or(super::WorkerError::CallbackUnknown)?;
                     (
                         execution_root,
-                        receipt
-                            .extra
-                            .get("stopInterrupt")
-                            .and_then(|v| v.get(field))
-                            .is_some(),
+                        receipt.stop_interrupt.value().is_some_and(|interrupt| {
+                            if field == "admission" {
+                                !interrupt.admission.is_missing()
+                            } else {
+                                !interrupt.terminals_admission.is_missing()
+                            }
+                        }),
                     )
                 }
                 Owner::Stop { .. } => {
@@ -462,11 +465,14 @@ async fn reserve_request(
                             .disconnect_recovery
                             .as_deref_mut()
                             .ok_or(super::WorkerError::CallbackUnknown)?;
-                        let pointer = receipt
-                            .extra
-                            .entry("stopInterrupt".into())
-                            .or_insert_with(|| json!({}));
-                        pointer[field] = studio_runtime_store::projection_value(&admitted);
+                        let mut pointer =
+                            receipt.stop_interrupt.value().cloned().unwrap_or_default();
+                        if field == "admission" {
+                            pointer.admission = Field::Value(admitted.clone());
+                        } else {
+                            pointer.terminals_admission = Field::Value(admitted.clone());
+                        }
+                        receipt.stop_interrupt = Field::Value(pointer);
                     }
                     Owner::Stop { .. } => {
                         let interrupt = agent
@@ -554,12 +560,14 @@ fn stopped_turn_with_late(agent: &AgentRecord, generation: u64, late: bool) -> O
         })
     };
     let outcome = receipt
-        .extra
-        .get("stopInterrupt")
-        .and_then(|v| v.get("outcome"))
-        .and_then(Value::as_str);
-    let ended = matches!(outcome, Some("accepted" | "rejected"))
-        || (outcome == Some("unknown") && !late)
+        .stop_interrupt
+        .value()
+        .and_then(|interrupt| interrupt.outcome.value())
+        .copied();
+    let ended = matches!(
+        outcome,
+        Some(InterruptOutcome::Accepted | InterruptOutcome::Rejected)
+    ) || (outcome == Some(InterruptOutcome::Unknown) && !late)
         || receipt.start_attempt.as_deref().is_some_and(staged)
         || agent.start_attempt.as_deref().is_some_and(staged);
     let stopped = agent.auto_wake == Some(false)
@@ -602,11 +610,14 @@ pub(crate) fn disconnected_stop_unconfirmed(agent: &AgentRecord) -> bool {
         return false;
     };
     let outcome = receipt
-        .extra
-        .get("stopInterrupt")
-        .and_then(|v| v.get("outcome"))
-        .and_then(Value::as_str);
-    if matches!(outcome, Some("unknown" | "rejected")) {
+        .stop_interrupt
+        .value()
+        .and_then(|interrupt| interrupt.outcome.value())
+        .copied();
+    if matches!(
+        outcome,
+        Some(InterruptOutcome::Unknown | InterruptOutcome::Rejected)
+    ) {
         return true;
     }
     receipt
@@ -640,10 +651,9 @@ fn unsettled_stop(agent: &AgentRecord, generation: u64) -> Option<StoppedTurn> {
     let ended_by_receipt = agent.disconnect_recovery.as_deref().is_some_and(|receipt| {
         receipt.turn_id.as_deref() == Some(turn)
             && receipt
-                .extra
-                .get("stopInterrupt")
-                .and_then(|v| v.get("outcome"))
-                .is_some()
+                .stop_interrupt
+                .value()
+                .is_some_and(|interrupt| !interrupt.outcome.is_missing())
     });
     if ended_by_receipt
         || !matches!(interrupt.outcome, Some(studio_runtime_store::InterruptOutcome::Unknown | studio_runtime_store::InterruptOutcome::Unsent))
@@ -739,16 +749,18 @@ fn record(
     let Some(receipt) = agent.disconnect_recovery.as_deref_mut() else {
         return Ok(false);
     };
-    let interrupt = receipt
-        .extra
-        .entry("stopInterrupt".into())
-        .or_insert_with(|| json!({}));
-    if interrupt.is_null() {
-        *interrupt = json!({});
-    }
-    interrupt["operation"] = json!(turn.interrupt_operation());
-    interrupt["generation"] = json!(generation);
-    interrupt["outcome"] = json!(outcome);
+    let mut interrupt = receipt.stop_interrupt.value().cloned().unwrap_or_default();
+    interrupt.operation = Field::Value(turn.interrupt_operation());
+    interrupt.generation = Field::Value(generation);
+    interrupt.outcome = Field::Value(
+        <InterruptOutcome as serde::Deserialize>::deserialize(serde::de::value::StrDeserializer::<
+            serde::de::value::Error,
+        >::new(outcome))
+        .map_err(|_| {
+            studio_runtime_store::StoreError::RecordContract("invalid interrupt outcome")
+        })?,
+    );
+    receipt.stop_interrupt = Field::Value(interrupt);
     AgentRepository::put(tx, &agent)?;
     Ok(true)
 }

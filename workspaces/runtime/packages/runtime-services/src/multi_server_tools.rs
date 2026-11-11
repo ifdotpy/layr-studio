@@ -1007,11 +1007,7 @@ impl ServerTools {
             .unwrap_or_default()
             .to_owned();
         let branch_for_checks = branch.clone();
-        let base = worker
-            .extra
-            .get("workerBaseCommit")
-            .and_then(Value::as_str)
-            .map(str::to_owned);
+        let base = worker.worker_base_commit.clone();
         let (destination, known) = blocking(move || -> Result<(String, Vec<String>), Step> {
             let destination = resolve(&destination);
             let path = Path::new(&destination);

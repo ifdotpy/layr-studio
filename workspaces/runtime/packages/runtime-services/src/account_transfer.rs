@@ -796,11 +796,11 @@ impl Snapshot {
                         }
                         if unreadable {
                             m.error = Field::Value("The saved transfer source is incomplete; its original state was retained".into());
-                            let original = serde::Serialize::serialize(
-                                &(&lazy),
-                                studio_json::value::Serializer,
-                            )
-                            .map_err(|_| invalid("transfer agent", "/lazyAccountTransfer"))?;
+                            let original = studio_runtime_schema::raw_json::RawJson(
+                                studio_json::to_raw_value(&lazy).map_err(|_| {
+                                    invalid("transfer agent", "/lazyAccountTransfer")
+                                })?,
+                            );
                             append_history(
                                 a,
                                 studio_runtime_store::StoredTransferObject::Unreadable(original),
@@ -1673,7 +1673,10 @@ impl Snapshot {
             .copied()
             .map_or(Field::Null, Field::Value);
         history.target_thread_id = Field::Value(target_thread.to_owned());
-        history.result = Field::Value(result);
+        history.result = Field::Value(studio_runtime_schema::raw_json::RawJson(
+            studio_json::to_raw_value(&result)
+                .map_err(|_| invalid("transfer history result", "/"))?,
+        ));
         append_history(a, StoredTransferObject::Known(history));
         let mut op = self.operation.clone();
         let member = op
@@ -2179,6 +2182,27 @@ pub fn typed_enroll(
     Ok(member)
 }
 
+fn empty_transfer_recovery_holds(
+    marker: &studio_runtime_schema::queue_command::Field<studio_runtime_schema::raw_json::RawJson>,
+) -> bool {
+    let Some(raw) = marker.value() else {
+        return false;
+    };
+    if raw.0.as_str().trim() == "null" {
+        return false;
+    }
+    let Ok(fields) =
+        studio_json::from_str::<studio_runtime_schema::raw_json::RawExtensions>(raw.0.as_str())
+    else {
+        return true;
+    };
+    let phase = fields.get("phase").and_then(|raw| {
+        studio_json::from_str::<studio_runtime_store::StoredTransferValue<String>>(raw.as_str())
+            .ok()
+    });
+    !matches!(phase, Some(studio_runtime_store::StoredTransferValue::Known(phase)) if phase == "completed")
+}
+
 pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), TransferError> {
     use studio_runtime_store::transfer_record::{AgentTransferState, TransferScope};
     let summary_holds = match agent.account_transfer.value() {
@@ -2201,9 +2225,7 @@ pub fn before_start(agent: &studio_runtime_store::AgentRecord) -> Result<(), Tra
     if summary_holds
         || agent.account_transfer_id.value().is_some()
         || agent.lazy_account_transfer.value().is_some()
-        || agent.extra.get("emptyTransferRecovery").is_some_and(|r| {
-            !r.is_null() && r.get("phase").and_then(Value::as_str) != Some("completed")
-        })
+        || empty_transfer_recovery_holds(&agent.empty_transfer_recovery)
     {
         return Err(TransferError::Requires(RECEIPT_HOLD));
     }
@@ -2735,6 +2757,34 @@ fn validate_source_for_submission(
 
 #[cfg(test)]
 mod provider_receipt_tests {
+    #[test]
+    fn empty_transfer_recovery_preserves_before_start_decisions() {
+        for (marker, allows) in [
+            (None, true),
+            (Some("null"), true),
+            (Some("false"), false),
+            (Some("0"), false),
+            (Some(r#""""#), false),
+            (Some("[]"), false),
+            (Some("{}"), false),
+            (Some(r#"{"phase":null}"#), false),
+            (Some(r#"{"phase":1}"#), false),
+            (Some(r#"{"phase":"pending"}"#), false),
+            (Some(r#"{"phase":"completed","future":{"n":1}}"#), true),
+            (Some(r#"{"phase":"pending","phase":"completed"}"#), true),
+            (Some(r#"{"phase":"completed","phase":"pending"}"#), false),
+        ] {
+            let suffix = marker
+                .map(|marker| format!(r#", "emptyTransferRecovery":{marker}"#))
+                .unwrap_or_default();
+            let record = format!(
+                r#"{{"id":"a","rootId":"a","epoch":1,"status":"idle","accountKey":"default"{suffix}}}"#
+            );
+            let agent: studio_runtime_store::AgentRecord = studio_json::from_str(&record).unwrap();
+            assert_eq!(super::before_start(&agent).is_ok(), allows, "{marker:?}");
+        }
+    }
+
     #[test]
     fn environment_is_owned_by_the_typed_agent() {
         for environment in [json!("linux"), json!("future"), json!({"legacy":true})] {
@@ -3576,7 +3626,11 @@ mod provider_receipt_tests {
             };
             varied.agents.get_mut("agent").unwrap().account_history =
                 studio_runtime_schema::queue_command::Field::Value(
-                    studio_runtime_store::StoredTransferValue::Unreadable(original.clone()),
+                    studio_runtime_store::StoredTransferValue::Unreadable(
+                        studio_runtime_schema::raw_json::RawJson(
+                            studio_json::to_raw_value(&original).unwrap(),
+                        ),
+                    ),
                 );
             let adopted = varied
                 .adopt_receipt("agent")

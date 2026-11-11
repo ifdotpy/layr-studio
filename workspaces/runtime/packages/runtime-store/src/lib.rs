@@ -17,6 +17,9 @@ pub mod item_seq_backfill;
 pub mod migrations;
 pub mod online_migration;
 pub mod project_grants;
+mod publication_collection;
+pub mod publication_payload;
+mod publication_schema;
 pub use cached_sql::{CachedSql, STATEMENT_CACHE_CAPACITY};
 pub use entity_publication::{EntityPublisher, PendingEntities, StudioErrorSources};
 mod feature_schema;
@@ -58,9 +61,14 @@ mod agent_tables;
 pub mod analytics_payloads;
 pub mod analytics_schema;
 mod canvas_schema;
+mod change_schema;
 pub mod clock_schema;
+mod consolidation_codec;
+pub mod consolidation_kinds;
 pub mod context_settings;
 pub mod json_record_codec;
+mod metadata_schema;
+pub mod metadata_values;
 pub mod peer_update_settings;
 pub mod planning_work;
 pub mod queue_payloads;
@@ -296,11 +304,13 @@ pub enum ObservedTable {
 pub const CHANGED_ROW_HINT_LIMIT: usize = 1024;
 
 /// What one known commit changed in an observed table.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum TableChange<'a> {
     /// Physical rowids written by the commit, in write order. A row written more
     /// than once appears more than once; a deleted row is reported by its rowid.
     Rows(&'a [i64]),
+    /// Logical OLD/NEW owners captured by the typed agent mutation owner.
+    AgentComponents(&'a [agent_columns::typed::AgentComponentChange]),
     /// Row identity is unknown; readers must reread the whole table.
     Full,
 }
@@ -339,6 +349,8 @@ struct ChangedRowHints {
     complete: u32,
     rows: [Vec<i64>; u32::BITS as usize],
     outbox_kinds: Vec<studio_runtime_schema::persistence::OutboxKind>,
+    agent_components: Vec<agent_columns::typed::AgentComponentChange>,
+    agent_components_recorded: bool,
 }
 
 thread_local! {
@@ -360,6 +372,46 @@ impl ChangedRowHints {
             rows.clear();
         }
     }
+}
+
+/// Record OLD/NEW owners captured by the typed agent writer in this transaction.
+/// Pass None when a held selector cannot be represented: precision becomes Full.
+/// Migration copy/reconciliation must not call this business-write journal.
+pub fn record_agent_component_change(change: Option<agent_columns::typed::AgentComponentChange>) {
+    if let Some(change) = &change {
+        for owner in [&change.before, &change.after].into_iter().flatten() {
+            if let Some(id) = &owner.agent_id {
+                entity_publication::mark_agent_team_owners(
+                    id.as_ref(),
+                    &[],
+                    owner.root_id.as_ref().map(AsRef::as_ref),
+                    owner.parent_id.as_ref().map(AsRef::as_ref),
+                );
+            }
+        }
+    }
+    CHANGED_ROWS.with_borrow_mut(|rows| {
+        rows.agent_components_recorded = true;
+        let bit = ObservedTable::Agents.change_bit();
+        if rows.complete & bit == 0 {
+            return;
+        }
+        let valid = change.filter(|change| {
+            (change.before.is_some() || change.after.is_some())
+                && [&change.before, &change.after]
+                    .into_iter()
+                    .flatten()
+                    .all(|owner| owner.agent_id.is_some())
+        });
+        if let Some(change) = valid
+            && rows.agent_components.len() < CHANGED_ROW_HINT_LIMIT
+        {
+            rows.agent_components.push(change);
+        } else {
+            rows.complete &= !bit;
+            rows.agent_components.clear();
+        }
+    });
 }
 
 // A typed put classifies only the single update-hook occurrence it caused.
@@ -597,6 +649,19 @@ fn fire_table_change_observers(
             continue;
         }
         let change = match changed_rows {
+            Some(rows) if table == ObservedTable::Agents && rows.agent_components_recorded => {
+                let raw = &rows.rows[bit.trailing_zeros() as usize];
+                let captured = rows
+                    .agent_components
+                    .iter()
+                    .filter_map(|change| change.physical_rowid)
+                    .collect::<Vec<_>>();
+                if rows.complete & bit != 0 && (raw.is_empty() || *raw == captured) {
+                    TableChange::AgentComponents(&rows.agent_components)
+                } else {
+                    TableChange::Full
+                }
+            }
             Some(rows) if rows.complete & bit != 0 => {
                 TableChange::Rows(rows.rows[bit.trailing_zeros() as usize].as_slice())
             }
@@ -2173,6 +2238,10 @@ impl RuntimeStore {
                             resource_entity_update_count.load(Ordering::Acquire),
                         );
                         let transaction_rows = CHANGED_ROWS.with_borrow_mut(std::mem::take);
+                        if transaction_rows.agent_components_recorded {
+                            table_change_flags
+                                .fetch_or(ObservedTable::Agents.change_bit(), Ordering::Release);
+                        }
                         let commit_started = diagnostics_enabled.then(Instant::now);
                         if let Err(error) = transaction.commit() {
                             return Ok(WriterTransactionOutcome::CommitOutcomeUnknown {
@@ -2609,8 +2678,194 @@ fn open_database(path: &Path, flags: OpenFlags) -> StoreResult<Connection> {
 mod read_pool_tests {
     use super::*;
     use std::sync::mpsc;
+    use studio_db_api::Table;
 
     const READ_POOL_TEST_WATCHDOG: Duration = Duration::from_secs(5);
+
+    #[tokio::test]
+    async fn f1_agent_component_journal_preserves_reuse_rollback_and_full() {
+        use crate::agent_columns::typed::{
+            AgentComponent, AgentComponentChange, AgentIdentity, AgentOwnerSnapshot,
+        };
+        #[derive(studio_db_api::DbTable)]
+        #[db(table="f1_journal_witness",database=crate::peer_update_settings::Canvas)]
+        struct JournalWitness {
+            #[db(key)]
+            n: i64,
+        }
+        let snapshot = |id: &str| {
+            let id = AgentId::from(id);
+            AgentOwnerSnapshot {
+                identity: AgentIdentity::for_agent(&id),
+                agent_id: Some(id),
+                components: None,
+                live_present: true,
+                account_key: None,
+                parent_id: None,
+                parent_account_key: None,
+                root_id: None,
+                hold: None,
+                deleted_at: None,
+            }
+        };
+        let change = AgentComponentChange {
+            component: AgentComponent::Live,
+            physical_rowid: Some(7),
+            before: Some(snapshot("old")),
+            after: Some(snapshot("new")),
+        };
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                JournalWitness::descriptor().install_if_absent(tx)?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let (sender, receiver) = mpsc::channel();
+        store.add_table_row_change_observer(ObservedTable::Agents, move |change| {
+            sender
+                .send(match change {
+                    TableChange::AgentComponents(changes) => Some(changes.to_vec()),
+                    TableChange::Full | TableChange::Rows(_) => None,
+                })
+                .unwrap();
+        });
+        let expected = change.clone();
+        let committed = change.clone();
+        store
+            .transaction(move |tx| {
+                crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 1 })?;
+                record_agent_component_change(Some(committed));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), Some(vec![expected]));
+        let rolled_back = change.clone();
+        assert!(
+            store
+                .transaction(move |tx| {
+                    crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 2 })?;
+                    record_agent_component_change(Some(rolled_back));
+                    Err::<(), _>(StoreError::RecordContract("rollback witness"))
+                })
+                .await
+                .is_err()
+        );
+        assert!(matches!(
+            receiver.try_recv(),
+            Err(mpsc::TryRecvError::Empty)
+        ));
+        store
+            .transaction(|tx| {
+                crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 3 })?;
+                record_agent_component_change(None);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), None);
+        let mut invalid = change.clone();
+        invalid.before.as_mut().unwrap().agent_id = None;
+        store
+            .transaction(move |tx| {
+                crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 5 })?;
+                record_agent_component_change(Some(invalid));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), None);
+        let uncertain = change.clone();
+        store
+            .transaction(move |tx| {
+                crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 4 })?;
+                for _ in 0..=CHANGED_ROW_HINT_LIMIT {
+                    record_agent_component_change(Some(change.clone()));
+                }
+                Ok(())
+            })
+            .await
+            .unwrap();
+        assert_eq!(receiver.try_recv().unwrap(), None);
+        store
+            .simulate_unknown_commit_after_success
+            .store(true, Ordering::Release);
+        assert!(
+            store
+                .transaction(move |tx| {
+                    crate::peer_update_settings::canvas_tx(tx).insert(&JournalWitness { n: 6 })?;
+                    record_agent_component_change(Some(uncertain));
+                    Ok(())
+                })
+                .await
+                .is_err()
+        );
+        assert_eq!(receiver.try_recv().unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn f1_same_name_swap_reprepares_writer_every_reader_and_version_cache() {
+        #[derive(studio_db_api::DbTable)]
+        #[db(table="f1_cache_swap",database=crate::peer_update_settings::Canvas)]
+        struct CacheMarker {
+            #[db(key)]
+            marker: i64,
+        }
+        #[derive(studio_db_api::DbQuery)]
+        #[db_query(database=crate::peer_update_settings::Canvas,mode=read,cardinality=one,
+            result=i64,decode=CacheMarker::MARKER,tables(cache=CacheMarker),
+            columns(marker=CacheMarker::MARKER),sql="SELECT {marker} AS {marker} FROM {cache}")]
+        struct ReadMarker;
+        fn marker(db: &Connection) -> rusqlite::Result<i64> {
+            crate::peer_update_settings::canvas_read(db).named(&ReadMarker::QUERY, &ReadMarker)
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let store = RuntimeStore::open(Some(directory.path())).await.unwrap();
+        store
+            .transaction(|tx| {
+                CacheMarker::descriptor().install_if_absent(tx)?;
+                crate::peer_update_settings::canvas_tx(tx).insert(&CacheMarker { marker: 1 })?;
+                assert_eq!(marker(tx)?, 1);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let mut readers = Vec::new();
+        for _ in 0..READ_CONNECTION_POOL_CAPACITY {
+            let (permit, waited) = store.read_pool.admit().await.unwrap();
+            let reader = store
+                .read_pool
+                .checkout_admitted(permit, Instant::now(), waited)
+                .unwrap();
+            assert_eq!(marker(reader.connection.as_ref().unwrap()).unwrap(), 1);
+            readers.push(reader);
+        }
+        assert_eq!(marker(&store.version_reader.lock().unwrap()).unwrap(), 1);
+        // Cached statements must follow the schema cookie, including a changed
+        // physical column position. No connection-specific cutover flag is needed.
+        store.transaction(|tx| {
+            tx.execute_batch("CREATE TABLE f1_cache_swap_next(unused TEXT,marker INTEGER); INSERT INTO f1_cache_swap_next VALUES('new',2); DROP TABLE f1_cache_swap; ALTER TABLE f1_cache_swap_next RENAME TO f1_cache_swap")?;
+            assert_eq!(marker(tx)?, 2);
+            Ok(())
+        }).await.unwrap();
+        for reader in &readers {
+            assert_eq!(marker(reader.connection.as_ref().unwrap()).unwrap(), 2);
+        }
+        assert_eq!(marker(&store.version_reader.lock().unwrap()).unwrap(), 2);
+        drop(readers);
+        assert_eq!(
+            store
+                .read_async("test/f1-cache-swap", |tx| -> StoreResult<_> {
+                    Ok(marker(tx)?)
+                })
+                .await
+                .unwrap(),
+            2
+        );
+    }
 
     #[cfg(feature = "perf-reporting")]
     #[tokio::test]
@@ -4713,7 +4968,7 @@ mod commit_notification_tests {
                 .expect("recorded table changes")
                 .push(match change {
                     TableChange::Rows(row_ids) => Some(row_ids.to_vec()),
-                    TableChange::Full => None,
+                    TableChange::Full | TableChange::AgentComponents(_) => None,
                 });
         }
     }
@@ -5402,3 +5657,6 @@ impl From<studio_json::error::Error> for StoreError {
 }
 
 pub mod work_intent;
+
+#[cfg(test)]
+mod f1_layout_tests;

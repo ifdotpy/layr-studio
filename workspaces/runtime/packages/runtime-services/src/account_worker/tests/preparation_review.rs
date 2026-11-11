@@ -118,6 +118,8 @@ async fn compiler_dependencies_and_late_holds_are_checked_before_commit() {
                             row.account_transfer_id = serde::Deserialize::deserialize(value).expect("typed transfer id");
                         } else if key == "nativeThreadBlock" {
                             row.native_thread_block = serde::Deserialize::deserialize(value).expect("typed native thread block");
+                        } else if key == "contextRepairWait" {
+                            row.context_repair_wait = serde::Deserialize::deserialize(value).expect("typed context repair wait");
                         } else {
                             row.extra.insert(key.into(),value);
                         }

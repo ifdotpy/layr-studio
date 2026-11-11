@@ -2,7 +2,7 @@
 pub use crate::records::{AgentArchive, CleanedWorktree};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use studio_json::{Number, OwnedRawJson, Value};
+use studio_json::{Number, OwnedRawJson};
 use studio_runtime_schema::queue_command::Field;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -101,8 +101,9 @@ impl<'de, I: serde::de::DeserializeOwned> Deserialize<'de> for CleanupEffect<I> 
     }
 }
 
+studio_runtime_schema::raw_json_payload! { flat
 /// Older retained intents can contain only the path available at the failure.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PartialWorktreeIdentity {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -118,8 +119,8 @@ pub struct PartialWorktreeIdentity {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub lifecycle_identity: Field<(Option<i64>, Option<String>, Option<f64>)>,
     // Preserve unknown fields in retained identities from newer versions.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
 impl From<WorktreeIdentity> for PartialWorktreeIdentity {
@@ -139,7 +140,8 @@ impl From<WorktreeIdentity> for PartialWorktreeIdentity {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+studio_runtime_schema::raw_json_payload! { flat
+#[derive(Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LifecycleIdentity {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
@@ -155,11 +157,12 @@ pub struct LifecycleIdentity {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub archive_epoch: Field<u64>,
     // Preserve identity extensions while forwarding a stored intent.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+studio_runtime_schema::raw_json_payload! { flat
+#[derive(Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredCleanupIntent {
     pub action: CleanupAction,
@@ -181,8 +184,8 @@ pub struct StoredCleanupIntent {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub receipt: Field<OwnedRawJson>,
     // Preserve unknown fields from newer stored intent versions.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, Value>,
+    @extensions pub extra,
+}
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]

@@ -8,6 +8,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use studio_runtime_store::online_migration::{self, OnlineMigration, Step};
 use studio_runtime_store::{RuntimeStore, StoreError, StoreResult};
 
+#[derive(studio_db_api::DbTable)]
+#[db(table="online_test_dst",database=studio_runtime_store::peer_update_settings::Canvas)]
+struct Target {
+    #[db(key)]
+    id: i64,
+    v: i64,
+}
+
 struct Copy;
 
 impl OnlineMigration for Copy {
@@ -41,15 +49,21 @@ impl OnlineMigration for Copy {
     fn transform(&self, row: i64) -> StoreResult<i64> {
         Ok(row + 1)
     }
-    fn write(&self, db: &Connection, key: &i64, out: i64) -> StoreResult<()> {
-        db.execute(
-            "INSERT OR REPLACE INTO online_test_dst VALUES(?1,?2)",
-            params![key, out],
-        )?;
+    fn write(
+        &self,
+        tx: &mut studio_db_api::Tx<'_, studio_runtime_store::peer_update_settings::Canvas>,
+        key: &i64,
+        out: i64,
+    ) -> StoreResult<()> {
+        tx.upsert(&Target { id: *key, v: out })?;
         Ok(())
     }
-    fn remove(&self, db: &Connection, key: &i64) -> StoreResult<()> {
-        db.execute("DELETE FROM online_test_dst WHERE id=?1", [key])?;
+    fn remove(
+        &self,
+        tx: &mut studio_db_api::Tx<'_, studio_runtime_store::peer_update_settings::Canvas>,
+        key: &i64,
+    ) -> StoreResult<()> {
+        tx.delete::<Target>(&(*key,))?;
         Ok(())
     }
 }

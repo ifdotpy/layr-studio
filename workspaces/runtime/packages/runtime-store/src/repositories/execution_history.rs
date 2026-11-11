@@ -40,6 +40,14 @@ pub struct ExecutionRun<T = String, E = studio_json::Number> {
     pub root_attempt_id: Field<T>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub latest_attempt_id: Field<String>,
+    #[serde(default, skip_serializing_if = "Field::is_missing")]
+    pub connection_recovery: Field<
+        crate::StoredTransferObject<
+            crate::json_record_codec::ExactJson<
+                studio_runtime_schema::recovery_record::ConnectionRecoveryFields,
+            >,
+        >,
+    >,
     #[serde(flatten)]
     pub extra: studio_json::Map<String, Value>,
 }
@@ -207,7 +215,7 @@ impl ExecutionHistoryRepository {
             agent.set_active_execution_run_id(&run)?;
             agent.set_active_execution_attempt_id(attempt.as_deref())?;
         } else {
-            agent.extra.remove("activeExecution");
+            agent.active_execution = studio_runtime_schema::queue_command::Field::Missing;
         }
         Ok(())
     }
@@ -349,7 +357,7 @@ impl ExecutionHistoryRepository {
         let Ok(Some(pointer)) = agent.active_execution() else {
             return Ok(None);
         };
-        let Some(id) = pointer.run_id.as_deref() else {
+        let Some(id) = pointer.run_id_text() else {
             return Ok(None);
         };
         db_query!(
@@ -382,7 +390,12 @@ impl ExecutionHistoryRepository {
             agent
                 .active_execution()
                 .map_err(|_| Self::invalid("runtime_agents", &agent.id.0))?
-                .map(|pointer| (pointer.run_id, pointer.attempt_id))
+                .map(|pointer| {
+                    (
+                        pointer.run_id_text().map(str::to_owned),
+                        pointer.attempt_id_text().map(str::to_owned),
+                    )
+                })
                 .map(|(run, attempt)| {
                     run.map(|run| (run, attempt))
                         .ok_or_else(|| Self::invalid("runtime_agents", &agent.id.0))
@@ -502,6 +515,7 @@ impl ExecutionHistoryRepository {
                 first_attempt_id: Field::Null,
                 root_attempt_id: Field::Null,
                 latest_attempt_id: Field::Null,
+                connection_recovery: Field::Missing,
                 extra: studio_json::Map::new(),
             },
         };
@@ -559,7 +573,7 @@ impl ExecutionHistoryRepository {
                 }
             };
         }
-        merge_recovery(&mut run, agent);
+        merge_recovery(&mut run, agent)?;
         let mut saved = std::collections::BTreeMap::<String, RawValue>::new();
         if let Some(previous) = Self::attempt(tx, id)? {
             let previous: std::collections::BTreeMap<String, RawValue> = studio_json::from_str(
@@ -646,16 +660,19 @@ impl ExecutionHistoryRepository {
             .optional()?
             .flatten();
         let run_id = agent
-            .extra
-            .get("activeExecution")
-            .and_then(|pointer| pointer["runId"].as_str());
+            .active_execution
+            .value()
+            .and_then(|stored| match stored {
+                crate::StoredTransferObject::Known(pointer) => pointer.run_id_text(),
+                crate::StoredTransferObject::Unreadable(_) => None,
+            });
         let row:Option<(String,String)> = tx.query_row("SELECT id,record FROM runtime_execution_runs WHERE id=coalesce(?1,(SELECT run FROM runtime_execution_attempts WHERE id=?2))",params![run_id,previous],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
         let Some((id, raw)) = row else {
             return Ok(());
         };
         let mut run = decode("runtime_execution_runs", &id, &raw)?;
         let before = run.clone();
-        merge_recovery(&mut run, agent);
+        merge_recovery(&mut run, agent)?;
         if run != before {
             save_run(tx, &run)?;
         }
@@ -728,7 +745,7 @@ struct AttemptWrite<'a> {
     receipt_fields: &'a std::collections::BTreeMap<String, RawValue>,
 }
 
-fn merge_recovery(run: &mut ExecutionRun, agent: &AgentRecord) {
+fn merge_recovery(run: &mut ExecutionRun, agent: &AgentRecord) -> StoreResult<()> {
     for (key, marker) in [
         ("disconnectRecovery", agent.disconnect_recovery.as_deref()),
         ("restartRecovery", agent.restart_recovery.as_deref()),
@@ -751,28 +768,42 @@ fn merge_recovery(run: &mut ExecutionRun, agent: &AgentRecord) {
                 .insert(key.into(), crate::projection_value(marker));
         }
     }
-    {
-        let key = "connectionRecovery";
-        if let Some(marker) = agent.extra.get("connectionRecovery")
-            && marker.get("turnId").is_none_or(|v| {
-                v.is_null()
-                    || v.as_str()
-                        .is_some_and(|turn| Some(turn) == run.turn_id.value().map(String::as_str))
-            })
-            && marker
-                .get("accountKey")
-                .is_none_or(|v| v.as_str() == Some(run.account_key.as_str()))
-            && marker
-                .get("threadId")
-                .is_none_or(|v| match run.thread_id.value() {
-                    Some(thread) => v.as_str() == Some(thread),
-                    None => v.is_null(),
-                })
-        {
-            run.extra.insert(key.into(), marker.clone());
+    let selected = match &agent.connection_recovery {
+        Field::Missing => false,
+        Field::Null => true,
+        Field::Value(marker) => {
+            let selectors = marker.connection_recovery_selectors()?;
+            let turn_matches = match selectors.turn_id {
+                Field::Missing | Field::Null => true,
+                Field::Value(crate::StoredTransferValue::Known(turn)) => {
+                    Some(&turn) == run.turn_id.value()
+                }
+                Field::Value(crate::StoredTransferValue::Unreadable(_)) => false,
+            };
+            let account_matches = match selectors.account_key {
+                Field::Missing => true,
+                Field::Value(crate::StoredTransferValue::Known(account)) => {
+                    account == run.account_key
+                }
+                Field::Null | Field::Value(crate::StoredTransferValue::Unreadable(_)) => false,
+            };
+            let thread_matches = match selectors.thread_id {
+                Field::Missing => true,
+                Field::Null => run.thread_id.value().is_none(),
+                Field::Value(crate::StoredTransferValue::Known(thread)) => {
+                    Some(&thread) == run.thread_id.value()
+                }
+                Field::Value(crate::StoredTransferValue::Unreadable(_)) => false,
+            };
+            turn_matches && account_matches && thread_matches
         }
+    };
+    if selected {
+        run.connection_recovery = agent.connection_recovery.clone();
     }
+    Ok(())
 }
+
 fn execution_terminal(status: ExecutionStatus) -> bool {
     matches!(
         status,
@@ -863,8 +894,128 @@ mod tests {
         ] {
             run.extra.clear();
             let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"agent","rootId":"agent","provider":"codex","epoch":1,"status":"idle","disconnectRecovery":marker})).unwrap();
-            merge_recovery(&mut run, &agent);
+            merge_recovery(&mut run, &agent).unwrap();
             assert_eq!(run.extra.contains_key("disconnectRecovery"), accepted);
+        }
+    }
+
+    #[test]
+    fn connection_recovery_destination_retains_exact_marker_members_and_tokens() {
+        for marker in [
+            "{}",
+            r#"{"requestBasis":null}"#,
+            r#"{"requestReceipt":null,"requestId":null,"requestState":null}"#,
+            "null",
+            "false",
+            "0",
+            r#""legacy""#,
+            "[]",
+            r#"{"requestBasis":[1.00e+3,{"dup":1,"dup":2}],"future":{"n":1e+2}}"#,
+        ] {
+            let raw = format!(
+                r#"{{"id":"run","agent":"agent","accountKey":"default","epoch":1,"created":1,"status":"running","connectionRecovery":{marker}}}"#
+            );
+            let run = decode("runtime_execution_runs", "run", &raw).unwrap();
+            let written = studio_json::to_string(&run).unwrap();
+            let fields: std::collections::BTreeMap<String, RawValue> =
+                studio_json::from_str(&written).unwrap();
+            assert_eq!(fields["connectionRecovery"].as_str(), marker);
+            let readback = decode("runtime_execution_runs", "run", &written).unwrap();
+            assert_eq!(studio_json::to_string(&readback).unwrap(), written);
+        }
+    }
+
+    #[test]
+    fn connection_recovery_copy_retains_previous_marker_when_absent_or_mismatched() {
+        let raw = r#"{"id":"run","agent":"agent","accountKey":"default","epoch":1,"created":1,"status":"running","connectionRecovery":{"previous":true}}"#;
+        for source in [
+            None,
+            Some(json!({"accountKey":null})),
+            Some(json!({"threadId":"other"})),
+            Some(json!({"turnId":false})),
+        ] {
+            let mut run = decode("runtime_execution_runs", "run", raw).unwrap();
+            let mut wire = json!({"id":"agent","rootId":"agent","accountKey":"default","epoch":1,"status":"idle"});
+            if let Some(source) = source {
+                wire["connectionRecovery"] = source;
+            }
+            let agent = AgentRecord::from_value(wire).unwrap();
+            merge_recovery(&mut run, &agent).unwrap();
+            let written = studio_json::to_string(&run).unwrap();
+            assert!(
+                written.contains(r#""connectionRecovery":{"previous":true}"#),
+                "{written}"
+            );
+        }
+    }
+
+    #[test]
+    fn connection_recovery_copy_preserves_scalar_markers_and_child_match_boundaries() {
+        let raw = r#"{"id":"run","agent":"agent","accountKey":"default","epoch":1,"created":1,"status":"running","turnId":null}"#;
+        let mut run = decode("runtime_execution_runs", "run", raw).unwrap();
+        for (marker, accepted) in [
+            (json!(null), true),
+            (json!(false), true),
+            (json!(0), true),
+            (json!("legacy"), true),
+            (json!([]), true),
+            (json!({}), true),
+            (json!({"future":7}), true),
+            (json!({"turnId":null}), true),
+            (json!({"turnId":"other"}), false),
+            (json!({"turnId":3}), false),
+            (json!({"accountKey":"default"}), true),
+            (json!({"accountKey":null}), false),
+            (json!({"accountKey":7}), false),
+            (json!({"accountKey":"other"}), false),
+            (json!({"threadId":null}), true),
+            (json!({"threadId":"other"}), false),
+            (json!({"threadId":[]}), false),
+            (json!({"turnId":{}}), false),
+            (json!({"requestId":7}), true),
+            (json!({"requestState":"future"}), true),
+        ] {
+            run.extra.clear();
+            run.connection_recovery = Field::Missing;
+            let agent = AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"agent","rootId":"agent","provider":"codex","epoch":1,"status":"idle","connectionRecovery":marker})).unwrap();
+            merge_recovery(&mut run, &agent).unwrap();
+            assert_eq!(!run.connection_recovery.is_missing(), accepted, "{marker}");
+            if accepted {
+                assert_eq!(
+                    studio_json::to_string(&run.connection_recovery).unwrap(),
+                    studio_json::to_string(&marker).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn connection_recovery_copy_matches_present_run_identity_and_last_selector_member() {
+        let raw = r#"{"id":"run","agent":"agent","accountKey":"default","epoch":1,"created":1,"status":"running","threadId":"thread","turnId":"turn"}"#;
+        for (marker, selected) in [
+            (
+                r#"{"threadId":"thread","turnId":"turn","accountKey":"default"}"#,
+                true,
+            ),
+            (r#"{"threadId":null}"#, false),
+            (r#"{"turnId":null}"#, true),
+            (r#"{"turnId":"other"}"#, false),
+            (r#"{"accountKey":"other","accountKey":"default"}"#, true),
+            (r#"{"accountKey":"default","accountKey":false}"#, false),
+        ] {
+            let mut run = decode("runtime_execution_runs", "run", raw).unwrap();
+            let source = format!(
+                r#"{{"id":"agent","rootId":"agent","accountKey":"default","epoch":1,"status":"idle","connectionRecovery":{marker}}}"#
+            );
+            let agent: AgentRecord = studio_json::from_str(&source).unwrap();
+            merge_recovery(&mut run, &agent).unwrap();
+            assert_eq!(!run.connection_recovery.is_missing(), selected, "{marker}");
+            if selected {
+                assert_eq!(
+                    studio_json::to_string(&run.connection_recovery).unwrap(),
+                    marker
+                );
+            }
         }
     }
 
@@ -1068,17 +1219,19 @@ mod tests {
         let mut agent=AgentRecord::from_value(json!({"compactions":0,"accountKey":"default","id":"agent","rootId":"agent","provider":"codex","epoch":1,"status":"idle","threadId":"destination","activeExecution":pointer})).expect("current owner");
         ExecutionHistoryRepository::record_current(&tx, &mut agent).expect("same account/epoch");
         assert_eq!(
-            agent.extra["activeExecution"], pointer,
+            agent.value()["activeExecution"],
+            pointer,
             "a repaired thread retains its source execution identity"
         );
         agent.epoch = 2;
         ExecutionHistoryRepository::record_current(&tx, &mut agent).expect("epoch advances");
-        assert!(!agent.extra.contains_key("activeExecution"));
+        assert!(agent.active_execution.is_missing());
         agent.epoch = 1;
-        agent.extra.insert("activeExecution".into(), pointer);
+        agent.active_execution =
+            serde::Deserialize::deserialize(pointer).expect("typed active pointer");
         agent.account_key = "another-account".to_string();
         ExecutionHistoryRepository::record_current(&tx, &mut agent).expect("account advances");
-        assert!(!agent.extra.contains_key("activeExecution"));
+        assert!(agent.active_execution.is_missing());
         assert_eq!(
             tx.query_row("SELECT COUNT(*) FROM runtime_execution_runs", [], |row| row
                 .get::<_, i64>(0))

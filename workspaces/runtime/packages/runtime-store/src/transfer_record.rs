@@ -444,7 +444,7 @@ pub struct TransferAccountHistoryEntry {
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub tool_refresh_id: Field<String>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
-    pub result: Field<studio_json::Value>,
+    pub result: Field<studio_runtime_schema::raw_json::RawJson>,
 }
 
 impl TransferAccountHistoryEntry {
@@ -844,11 +844,22 @@ impl TransferRecord {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum AgentTransferState {
     Unreadable(UnreadableTransferSummary),
     Summary(Box<AgentTransferSummary>),
+}
+impl<'de> Deserialize<'de> for AgentTransferState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = studio_runtime_schema::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(unreadable) = studio_json::from_str(raw.0.as_str()) {
+            return Ok(Self::Unreadable(unreadable));
+        }
+        studio_json::from_str(raw.0.as_str())
+            .map(Self::Summary)
+            .map_err(serde::de::Error::custom)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -857,7 +868,7 @@ pub struct UnreadableTransferSummary {
     pub kind: UnreadableTransferKind,
     pub reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub original: Option<studio_json::Value>,
+    pub original: Option<studio_runtime_schema::raw_json::RawJson>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
@@ -960,7 +971,8 @@ impl From<AgentTransferSummary>
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
+studio_runtime_schema::raw_json_payload! { flat
+#[derive(Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferWorkerDefaults {
     /// Consume the retired account pin without restoring it from old transfers.
@@ -978,8 +990,8 @@ pub struct TransferWorkerDefaults {
     pub delegation_depth: Field<studio_runtime_schema::agent_entity_nested::WorkerDelegationDepth>,
     #[serde(default, skip_serializing_if = "Field::is_missing")]
     pub cyber_access_program: Field<String>,
-    #[serde(flatten)]
-    pub extra: std::collections::BTreeMap<String, studio_json::Value>,
+    @extensions pub extra,
+}
 }
 
 /// Stable identity of an account transfer, shared with its lazy hold.
@@ -1007,11 +1019,22 @@ impl TryFrom<String> for TransferId {
 }
 
 /// The pending lazy hold, or a migrated record that could not be decoded.
-#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(untagged)]
 pub enum LazyTransferState {
     Unreadable(UnreadableTransferSummary),
     Pending(Box<LazyTransfer>),
+}
+impl<'de> Deserialize<'de> for LazyTransferState {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = studio_runtime_schema::raw_json::RawJson::deserialize(deserializer)?;
+        if let Ok(unreadable) = studio_json::from_str(raw.0.as_str()) {
+            return Ok(Self::Unreadable(unreadable));
+        }
+        studio_json::from_str(raw.0.as_str())
+            .map(Self::Pending)
+            .map_err(serde::de::Error::custom)
+    }
 }
 impl LazyTransferState {
     pub fn pending(&self) -> Option<&LazyTransfer> {

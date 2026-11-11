@@ -177,7 +177,9 @@ pub fn apply(tx: &Transaction<'_>, body: &OrganizationRequest) -> Result<Value, 
         if value.chars().count() > 100 {
             return Err(EventWriteError::InvalidRequest("Supply a project name"));
         }
-        agent.extra.insert("project".into(), json!(value.trim()));
+        agent.project = studio_runtime_schema::queue_command::Field::Value(
+            studio_runtime_store::StoredTransferValue::Known(value.trim().to_owned()),
+        );
     }
     AgentRepository::put(tx, &agent)?;
     publish(tx, agent)

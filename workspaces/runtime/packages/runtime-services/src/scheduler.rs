@@ -604,8 +604,7 @@ pub(crate) fn settle_terminal_in_transaction(
                     | AgentStatus::Paused
                     | AgentStatus::Parked
                     | AgentStatus::Abandoned
-                    | AgentStatus::CapacityRetry
-                    | AgentStatus::Other(_) => "completed",
+                    | AgentStatus::CapacityRetry => "completed",
                 },
                 error.as_ref(),
                 now,
@@ -1543,7 +1542,9 @@ mod child_turn_parent_tests {
             store
                 .transaction(|tx| {
                     let mut agent = child_record(tx)?;
-                    agent.extra.insert("capacityRetryCount".into(), json!(99));
+                    agent.capacity_retry_count = studio_runtime_schema::queue_command::Field::Value(
+                        studio_runtime_store::StoredTransferValue::Known(99),
+                    );
                     AgentRepository::put(tx, &agent)
                 })
                 .await
